@@ -276,7 +276,7 @@
       ],
       "catallax_revision": "e139919ae1d6b3718e49ff4519f956cc429c36ac",
       "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL",
-      "supported_limits": "One terminal cubic lattice in the part frame; S1 uses cell size 5 mm, radius 1 to 1.5 mm, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Drawings remain deferred; graded radii and field mass are in the graded-fields scenario.",
+      "supported_limits": "One terminal cubic lattice in the part frame; S1 uses cell size 5 mm, radius 1 to 1.5 mm, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Drawings remain deferred; graded radii and field mass are in the graded-fields scenario. Each export is one whole request within the 20M application limit, with fixed output hashes; a zero allowance or one above the limit refuses and leaves the destination unchanged.",
       "evidence": "result.json and commands/NNNN/{command.json,kernel.json,viewport.png,part.stl,export-stl-oracle.stdout}"
     },
     {
@@ -354,8 +354,8 @@
       ],
       "catallax_revision": "e139919ae1d6b3718e49ff4519f956cc429c36ac",
       "route": "MCP revolve, four-point hole, fillet and edit_fillet -> real document rebuild -> pinned Catallax fitted and analytic junctions",
-      "supported_limits": "Radii 2 and 2.5 on the canonical P5 housing, the ball resting on all four countersink mouths, and radius 0.999, whose one torus clears them; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; radius 1 is a later change; mass properties of a fitted body have no inertia; fitted face and edge values are display estimates",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; steps 1-16 edit, undo, redo, reopen and refusal; p5-flanged-housing.dwprt and commands/0013/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout}; steps 17-41 radius 0.999 edit, undo, redo, fresh-process reopen, refusal and return to radius 2.5; p5-clearance.dwprt and commands-1/0001/{part.step,step-oracle.json,step-oracle.stdout}"
+      "supported_limits": "Radii 2 and 2.5 on the canonical P5 housing, the ball resting on all four countersink mouths, radius 0.999 and 0.5, whose one torus clears them, and radius 1, whose rail touches all four mouths at isolated points; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; mass properties of a fitted body have no inertia; fitted face and edge values are display estimates",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; steps 1-16 edit, undo, redo, reopen and refusal; p5-flanged-housing.dwprt and commands/0013/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout}; steps 17-41 radius 0.999 edit, undo, redo, fresh-process reopen, refusal and return to radius 2.5; p5-clearance.dwprt and commands-1/0001/{part.step,step-oracle.json,step-oracle.stdout}; steps 42-72 tracked mouth area, radius 1 and 0.5 edits, undo, redo, return to radius 1, fresh-process reopen and refusal; p5-separated.dwprt and commands-1/0022/{part.step,step-oracle.json,step-oracle.stdout}; p5-tangent.dwprt and commands-2/0005/{part.step,step-oracle.json,step-oracle.stdout}"
     },
     {
       "id": "p5-placed-housing",

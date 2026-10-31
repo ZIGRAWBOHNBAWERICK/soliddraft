@@ -91,3 +91,21 @@ fn obj_from_recipe_and_saved_part_records_the_mesh_and_export_tolerance() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_allowance_above_the_application_limit_is_refused_before_the_part_opens() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-cli-limit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("never-opened.dwprt");
+    let output = dir.join("part.stl");
+    let out = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args(["export", part.to_str().unwrap(), "--out", output.to_str().unwrap(), "--max-work", "20000001"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("20M application limit"), "{error}");
+    assert!(!error.contains("never-opened"), "{error}");
+    assert!(!output.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}

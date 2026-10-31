@@ -409,7 +409,7 @@ fn mcp(args: &[String]) -> ExitCode {
     use soliddraft_assistant::mcp::{HttpServer, McpSession, serve_stdio};
 
     let mut bundle = None;
-    let mut max_work = 100_000_000;
+    let mut max_work = soliddraft_kernel_catallax::APP_REQUEST_WORK;
     let mut demo = false;
     let mut open = None;
     let mut drawing_path = None;

@@ -35,6 +35,8 @@ TREND_NOISE_MS = 25
 # The one hang guard for every MCP request and CLI command: generous, never a speed limit.
 HANG_TIMEOUT_S = 600
 KNOWN_OVER_BUDGET = pathlib.Path(__file__).with_name("known-over-budget.json")
+# One application request's deterministic work limit. Kernel replay keeps its own.
+APP_REQUEST_WORK = 20_000_000
 
 
 def budget(tool):
@@ -418,7 +420,7 @@ def check(value, spec, previous=None):
                 return {"check": spec, "pass": spec["absent"]}
             return {"check": spec, "actual": actual, "pass": not spec["absent"]}
         actual = at(value, spec["pointer"])
-        comparisons = [key for key in ("equals", "approx", "minimum", "maximum", "length", "tally", "contains", "same_as_step", "same_as", "differs_from") if key in spec]
+        comparisons = [key for key in ("equals", "approx", "minimum", "maximum", "length", "tally", "covers", "contains", "same_as_step", "same_as", "differs_from") if key in spec]
         if len(comparisons) != 1:
             raise ValueError("a check needs exactly one comparison")
         kind = comparisons[0]
@@ -443,6 +445,9 @@ def check(value, spec, previous=None):
         elif kind == "tally":
             passed = all(dict(collections.Counter(item[key] for item in actual)) == counts
                          for key, counts in expected.items())
+        elif kind == "covers":
+            # The groups a list must hold, however a kernel partitions them.
+            passed = all({item[key] for item in actual} == set(groups) for key, groups in expected.items())
         else:
             passed = expected in actual
         return {"check": spec, "actual": actual, "pass": passed}
@@ -593,14 +598,21 @@ def export_check(args, directory, spec, previous):
     stand_in = spec.get("stand_in", False)
     path = directory / ("stand-in.step" if stand_in else f"part.{extension}")
     label = "export-stand-in" if stand_in else f"export-{extension}"
-    # A ceiling runs the fresh process's whole request, opening and rebuilding the part
-    # included, on one allowance, and the CLI reports what it used.
-    ceiling = ["--max-work", spec["max_work"]] if "max_work" in spec else []
+    # The fresh process runs its whole request, opening and rebuilding the part included, on
+    # one allowance and reports what it used. A step may only lower the application's limit.
+    ceiling = spec.get("max_work", APP_REQUEST_WORK)
+    lowered = ["--max-work", spec["max_work"]] if "max_work" in spec else []
+    # A refused export must leave an existing destination as it found it.
+    sentinel = spec["sentinel"].encode() if "sentinel" in spec else None
+    if sentinel is not None:
+        path.write_bytes(sentinel)
     exported = cli(args.soliddraft, ["export", directory / "part.dwprt", "--json",
-                                     "--stand-in" if stand_in else "--out", path, *ceiling],
+                                     "--stand-in" if stand_in else "--out", path, *lowered],
                    directory, label, args.timeout)
     if "refused" in spec:
-        exported["pass"] = (exported["exit"] != 0 and not path.exists() and
+        untouched = path.read_bytes() == sentinel if path.is_file() and sentinel is not None else (
+            sentinel is None and not path.exists())
+        exported["pass"] = (exported["exit"] != 0 and untouched and
                             spec["refused"] in (directory / f"{label}.stderr").read_text())
         return exported
     if not exported["pass"]:
@@ -610,13 +622,12 @@ def export_check(args, directory, spec, previous):
         exported["report"] = value["report"]
         exported["checks"] = [check(value, rule) for rule in spec.get("checks", [])]
         exported["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-        if "max_work" in spec:
-            # A B-rep report states no work of its own; its request's allowance is the evidence.
-            if value["report"].get("kind") not in ("step", "mesh"):
-                exported["checks"].append({"check": "export work within the application allowance",
-                                           "work": value["report"].get("work"), "ceiling": spec["max_work"],
-                                           "pass": 0 < value["report"].get("work", 0) <= spec["max_work"]})
-            exported["checks"].append(request_work_check(value, spec["max_work"]))
+        # A B-rep report states no work of its own; its request's allowance is the evidence.
+        if value["report"].get("kind") not in ("step", "mesh"):
+            exported["checks"].append({"check": "export work within the application allowance",
+                                       "work": value["report"].get("work"), "ceiling": ceiling,
+                                       "pass": 0 < value["report"].get("work", 0) <= ceiling})
+        exported["checks"].append(request_work_check(value, ceiling))
         if stand_in:
             exported["checks"].append({"check": "stand-in report describes the written bytes",
                                        "pass": value["report"].get("sha256") == exported["sha256"]})
@@ -690,16 +701,15 @@ def request_work_check(value, ceiling):
 
 
 def checked_step_export(binary, part, directory, evidence, timeout, max_work=None, oracle=None):
-    ceiling = [] if max_work is None else ["--max-work", max_work]
-    exported = cli(binary, ["export", part, "--json", "--out", directory / "part.step", *ceiling],
+    lowered = [] if max_work is None else ["--max-work", max_work]
+    exported = cli(binary, ["export", part, "--json", "--out", directory / "part.step", *lowered],
                    directory, "checked-step-export", timeout)
     checks = [exported]
     if not exported["pass"]:
         return checks
     value = json.loads((directory / "checked-step-export.stdout").read_text())
     report = value["report"]
-    if max_work is not None:
-        checks.append(request_work_check(value, max_work))
+    checks.append(request_work_check(value, APP_REQUEST_WORK if max_work is None else max_work))
     checks.append({"check": "one within-tolerance STEP solid", "report": report,
                    "pass": report.get("kind") == "step" and report.get("within_tolerance") is True
                            and report.get("solids") == 1})
@@ -853,7 +863,7 @@ def summary(reports, machine):
 
 def start_client(args, scenario, folder):
     """A new application process, initialized and prepared outside every click."""
-    client = Client(args.soliddraft, folder, scenario.get("max_work", 100_000_000), args.timeout)
+    client = Client(args.soliddraft, folder, scenario.get("max_work", APP_REQUEST_WORK), args.timeout)
     initialized = client.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
         "clientInfo": {"name": "soliddraft-scenario", "version": "1"}})
     if initialized["protocolVersion"] != "2025-06-18":

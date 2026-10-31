@@ -994,6 +994,939 @@
           }
         }
       ]
+    },
+    {
+      "tool": "track",
+      "arguments": {
+        "name": "mouth_area",
+        "entity": "Hole1 · Hole 1 countersink"
+      },
+      "same_geometry_as_step": 41,
+      "checks": [
+        {
+          "pointer": "/summary/values/0/name",
+          "equals": "mouth_area"
+        },
+        {
+          "pointer": "/summary/values/0/unit",
+          "equals": "mm2"
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 1
+      },
+      "label": "P5 tangent fillet edit",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12511.642963712862,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6803.819326679968,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 122.02167190698208,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0.5
+      },
+      "label": "P5 separated from the rail",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12499.243978392138,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6819.666304129347,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 15
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 0.5
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 60.11423118001359,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/p5-separated.dwprt"
+      },
+      "files": [
+        "{bundle}/p5-separated.dwprt"
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12499.243978392138,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6819.666304129347,
+          "tolerance": 0.005
+        }
+      ],
+      "checked_step_export": "{bundle}/p5-separated.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "plane": 3,
+          "cylinder": 7,
+          "cone": 4,
+          "torus": 1
+        },
+        "volume": 12499.243978392138,
+        "floor": 1e-06,
+        "inside": [
+          [
+            10,
+            15,
+            0
+          ],
+          [
+            0,
+            2,
+            20
+          ]
+        ],
+        "outside": [
+          [
+            0,
+            15,
+            0
+          ],
+          [
+            17,
+            2,
+            0
+          ],
+          [
+            7.5,
+            5.1,
+            10
+          ],
+          [
+            7.5,
+            5.2,
+            10
+          ]
+        ]
+      }
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "same_geometry_as_step": 43,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12511.642963712862,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6803.819326679968,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 122.02167190698208,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 47,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12499.243978392138,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6819.666304129347,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 0.5
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 60.11423118001359,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 1
+      },
+      "label": "P5 return to contact",
+      "same_geometry_as_step": 43,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12511.642963712862,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6803.819326679968,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 122.02167190698208,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/p5-tangent.dwprt"
+      },
+      "files": [
+        "{bundle}/p5-tangent.dwprt"
+      ],
+      "checks": [
+        {
+          "pointer": "/summary/features/3/radius",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/p5-tangent.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 60,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12511.642963712862,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6803.819326679968,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 122.02167190698208,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 3.5
+      },
+      "refusal": "shapes.rolling-envelope",
+      "same_geometry_as_step": 65,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12511.642963712862,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 6803.819326679968,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/values/0/value",
+          "approx": 53.3145952579004,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/features/3/radius",
+          "equals": 1
+        }
+      ],
+      "checked_step_export": "{bundle}/p5-tangent.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "plane": 7,
+          "cylinder": 7,
+          "cone": 4,
+          "torus": 1
+        },
+        "volume": 12511.642963712862,
+        "floor": 1e-06,
+        "contacts": [
+          [
+            13,
+            5,
+            0
+          ],
+          [
+            0,
+            5,
+            13
+          ],
+          [
+            -13,
+            5,
+            0
+          ],
+          [
+            0,
+            5,
+            -13
+          ]
+        ],
+        "contact_edges": 4,
+        "inside": [
+          [
+            10,
+            15,
+            0
+          ],
+          [
+            0,
+            2,
+            20
+          ],
+          [
+            7.5,
+            5.1,
+            10
+          ],
+          [
+            12.99,
+            5,
+            0
+          ],
+          [
+            13,
+            4.99,
+            0
+          ]
+        ],
+        "outside": [
+          [
+            0,
+            15,
+            0
+          ],
+          [
+            17,
+            2,
+            0
+          ],
+          [
+            7.5,
+            5.2,
+            10
+          ],
+          [
+            13.01,
+            5,
+            0
+          ],
+          [
+            13,
+            5.01,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "torus"
+            ],
+            "name": [
+              "Fillet1 · Blend of edge 1"
+            ]
+          }
+        },
+        {
+          "pointer": "/result/faces/0/area_mm2",
+          "approx": 122.02167190698208,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Revolve1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "plane",
+              "cylinder"
+            ],
+            "name": [
+              "Revolve1 · Side of line 1",
+              "Revolve1 · Side of line 2",
+              "Revolve1 · Side of line 3",
+              "Revolve1 · Side of line 4",
+              "Revolve1 · Side of line 5",
+              "Revolve1 · Side of line 6"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Hole1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "covers": {
+            "surface": [
+              "cylinder",
+              "cone"
+            ],
+            "name": [
+              "Hole1 · Hole 1 countersink",
+              "Hole1 · Hole 1 wall",
+              "Hole1 · Hole 2 countersink",
+              "Hole1 · Hole 2 wall",
+              "Hole1 · Hole 3 countersink",
+              "Hole1 · Hole 3 wall",
+              "Hole1 · Hole 4 countersink",
+              "Hole1 · Hole 4 wall"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

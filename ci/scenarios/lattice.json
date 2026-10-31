@@ -153,10 +153,32 @@
       "exports": [
         {
           "format": "stl",
+          "max_work": 0,
+          "refused": "numbers.operation-budget"
+        },
+        {
+          "format": "stl",
+          "max_work": 0,
+          "sentinel": "existing export sentinel\n",
+          "refused": "numbers.operation-budget"
+        },
+        {
+          "format": "stl",
+          "max_work": 20000001,
+          "sentinel": "existing export sentinel\n",
+          "refused": "20M application limit"
+        },
+        {
+          "format": "stl",
+          "max_work": 20000000,
           "checks": [
             {
               "pointer": "/report/kind",
               "equals": "field_mesh"
+            },
+            {
+              "pointer": "/report/label",
+              "equals": "catallax-print-stl/1"
             },
             {
               "pointer": "/report/approximate",
@@ -171,11 +193,23 @@
               "equals": "1/10"
             },
             {
+              "pointer": "/report/minimum_detail_mm",
+              "equals": "1/2"
+            },
+            {
               "pointer": "/report/deviation_bound_mm",
               "maximum": 0.1
             },
             {
+              "pointer": "/report/deviation_bound_mm",
+              "equals": 0.09999999999999999
+            },
+            {
               "pointer": "/report/closed",
+              "equals": true
+            },
+            {
+              "pointer": "/report/non_self_intersecting",
               "equals": true
             },
             {
@@ -185,6 +219,30 @@
             {
               "pointer": "/report/components",
               "equals": 1
+            },
+            {
+              "pointer": "/report/max_cells",
+              "equals": 2000000
+            },
+            {
+              "pointer": "/report/max_vertices",
+              "equals": 1000000
+            },
+            {
+              "pointer": "/report/vertices",
+              "equals": 149522
+            },
+            {
+              "pointer": "/report/triangles",
+              "equals": 299160
+            },
+            {
+              "pointer": "/bytes",
+              "equals": 14958084
+            },
+            {
+              "pointer": "/report/sha256",
+              "equals": "79790ed211669b811cd3b0086f24dab3a333ea779bdecf9000441ca138de3fd0"
             }
           ],
           "oracle": {
@@ -205,6 +263,19 @@
               1000000
             ]
           }
+        },
+        {
+          "format": "stl",
+          "checks": [
+            {
+              "pointer": "/request_work/limit",
+              "equals": 20000000
+            },
+            {
+              "pointer": "/report/sha256",
+              "equals": "79790ed211669b811cd3b0086f24dab3a333ea779bdecf9000441ca138de3fd0"
+            }
+          ]
         },
         {
           "format": "step",
@@ -328,10 +399,15 @@
       "exports": [
         {
           "format": "stl",
+          "max_work": 20000000,
           "checks": [
             {
               "pointer": "/report/kind",
               "equals": "field_mesh"
+            },
+            {
+              "pointer": "/report/label",
+              "equals": "catallax-print-stl/1"
             },
             {
               "pointer": "/report/approximate",
@@ -346,11 +422,23 @@
               "equals": "1/10"
             },
             {
+              "pointer": "/report/minimum_detail_mm",
+              "equals": "1/2"
+            },
+            {
               "pointer": "/report/deviation_bound_mm",
               "maximum": 0.1
             },
             {
+              "pointer": "/report/deviation_bound_mm",
+              "equals": 0.09999999999999999
+            },
+            {
               "pointer": "/report/closed",
+              "equals": true
+            },
+            {
+              "pointer": "/report/non_self_intersecting",
               "equals": true
             },
             {
@@ -360,6 +448,30 @@
             {
               "pointer": "/report/components",
               "equals": 1
+            },
+            {
+              "pointer": "/report/max_cells",
+              "equals": 2000000
+            },
+            {
+              "pointer": "/report/max_vertices",
+              "equals": 1000000
+            },
+            {
+              "pointer": "/report/vertices",
+              "equals": 217518
+            },
+            {
+              "pointer": "/report/triangles",
+              "equals": 435240
+            },
+            {
+              "pointer": "/bytes",
+              "equals": 21762084
+            },
+            {
+              "pointer": "/report/sha256",
+              "equals": "a6cc0e31ed490b193a0cb45ea3e5f6e149003c8ba71fd5e49fdf1d09d742a386"
             }
           ],
           "oracle": {
@@ -466,10 +578,15 @@
       "exports": [
         {
           "format": "stl",
+          "max_work": 20000000,
           "checks": [
             {
               "pointer": "/report/kind",
               "equals": "field_mesh"
+            },
+            {
+              "pointer": "/report/label",
+              "equals": "catallax-print-stl/1"
             },
             {
               "pointer": "/report/approximate",
@@ -484,11 +601,23 @@
               "equals": "1/10"
             },
             {
+              "pointer": "/report/minimum_detail_mm",
+              "equals": "1/2"
+            },
+            {
               "pointer": "/report/deviation_bound_mm",
               "maximum": 0.1
             },
             {
+              "pointer": "/report/deviation_bound_mm",
+              "equals": 0.09999999999999999
+            },
+            {
               "pointer": "/report/closed",
+              "equals": true
+            },
+            {
+              "pointer": "/report/non_self_intersecting",
               "equals": true
             },
             {
@@ -498,6 +627,30 @@
             {
               "pointer": "/report/components",
               "equals": 1
+            },
+            {
+              "pointer": "/report/max_cells",
+              "equals": 2000000
+            },
+            {
+              "pointer": "/report/max_vertices",
+              "equals": 1000000
+            },
+            {
+              "pointer": "/report/vertices",
+              "equals": 263346
+            },
+            {
+              "pointer": "/report/triangles",
+              "equals": 526896
+            },
+            {
+              "pointer": "/bytes",
+              "equals": 26344884
+            },
+            {
+              "pointer": "/report/sha256",
+              "equals": "dedc73ca8eb8d1288b2658f1406296badbe06d202526b9b61985c968170cfe30"
             }
           ],
           "oracle": {
@@ -707,7 +860,14 @@
       "exports": [
         {
           "format": "stl",
-          "same_export_as": "density edit"
+          "same_export_as": "density edit",
+          "max_work": 20000000,
+          "checks": [
+            {
+              "pointer": "/report/sha256",
+              "equals": "dedc73ca8eb8d1288b2658f1406296badbe06d202526b9b61985c968170cfe30"
+            }
+          ]
         }
       ]
     }

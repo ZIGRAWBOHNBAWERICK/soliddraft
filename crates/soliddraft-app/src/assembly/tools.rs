@@ -221,6 +221,21 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             })
             .map_err(|report| match report.mate_refusal {
                 Some(r) => refused(r),
+                None if report.missing() > 0 => {
+                    // A missing source is typed, naming the files it could not find.
+                    let truth = state.assembly.session.as_ref().map(|s| s.doc.assembly());
+                    let missing: Vec<String> = report
+                        .sources
+                        .iter()
+                        .filter(|s| s.status == soliddraft_assembly::RefChange::Missing)
+                        .map(|s| {
+                            let source = truth.and_then(|t| t.source(s.source));
+                            source.map_or_else(|| s.label.clone(), |x| x.document.path.clone())
+                        })
+                        .collect();
+                    json!({ "refused": "missing_reference", "message": report.refusal, "cause": missing.join(", ") })
+                        .to_string()
+                }
                 None => report.refusal.unwrap_or_default(),
             }),
         "assembly_save" => {

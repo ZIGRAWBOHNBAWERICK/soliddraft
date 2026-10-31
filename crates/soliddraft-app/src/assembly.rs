@@ -56,6 +56,8 @@ pub enum AssemblyAction {
     /// Asks where to save.
     SaveAs,
     Select(Option<OccurrencePath>),
+    /// Adds an occurrence to the parts chosen in the tree, or takes it out again.
+    Choose(OccurrencePath),
     /// Moves an occurrence to a placement relative to the assembly that contains it.
     Place(OccurrencePath, Placement),
     Show,
@@ -65,6 +67,7 @@ pub enum AssemblyAction {
     Redo,
     ZoomFit,
     Mate(crate::mates::MateAction),
+    Form(crate::subassembly::FormAction),
 }
 
 /// The open assembly, one being opened, and whether the assembly is the active document.
@@ -77,6 +80,8 @@ pub struct AssemblyState {
     last_part: Option<soliddraft_document::OpenDocument>,
     /// The Mate panel's fields.
     pub mate: crate::mates::Draft,
+    /// The Form subassembly panel's fields.
+    pub form: crate::subassembly::Draft,
 }
 
 impl AssemblyState {
@@ -95,6 +100,12 @@ pub struct AssemblySession {
     pub viewport: ViewportState,
     /// The selected occurrence, by path so it outlives a restructure.
     pub selected: Option<OccurrencePath>,
+    /// The occurrences chosen in the tree, in the order they were chosen: a click chooses
+    /// one, a Ctrl-click adds or takes away one more.
+    pub chosen: Vec<OccurrencePath>,
+    /// What the last click in the viewport named: the occurrence and the face's persistent
+    /// name, whatever it selected.
+    pub picked: Option<soliddraft_assembly::Selection>,
     /// The placement fields of the selection as typed.
     pub draft: Option<PlacementDraft>,
     /// Sub-assemblies open in the tree.
@@ -166,6 +177,8 @@ impl AssemblySession {
             scene,
             viewport,
             selected: None,
+            chosen: Vec::new(),
+            picked: None,
             draft: None,
             expanded: HashSet::new(),
             shown: (None, None),
@@ -471,6 +484,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
             Err(report) => state.note(report.refusal.unwrap_or_default(), NoteKind::Error),
         },
         AssemblyAction::Mate(action) => crate::mates::apply(state, action),
+        AssemblyAction::Form(action) => crate::subassembly::apply(state, action),
         AssemblyAction::Open(path) => {
             state.note(format!("Opening {}…", path.display()), NoteKind::Info);
             let opening = AssemblyDocument::open_in_background(&path, options(state));
@@ -500,7 +514,19 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         }
         AssemblyAction::Select(path) => {
             if let Some(s) = state.assembly.session.as_mut() {
+                s.chosen = path.iter().cloned().collect();
                 s.selected = path;
+            }
+        }
+        AssemblyAction::Choose(path) => {
+            if let Some(s) = state.assembly.session.as_mut() {
+                match s.chosen.iter().position(|p| *p == path) {
+                    Some(i) => {
+                        s.chosen.remove(i);
+                    }
+                    None => s.chosen.push(path.clone()),
+                }
+                s.selected = Some(path);
             }
         }
         AssemblyAction::Place(path, placement) => {
@@ -662,9 +688,10 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
     let mut actions = Vec::new();
     if let Some(texel) = events.clicked_texel {
         let row = picked(s, texel);
-        // With the Mate panel open a click also names the face under it.
-        let face = texel.filter(|_| mate_open).and_then(|t| s.scene.lock().expect("the scene lock").decode(t));
-        if let Some(selection) = face.map(|f| s.doc.selection(&f))
+        // A click names the face under it; with the Mate panel open it also picks it.
+        let face = texel.and_then(|t| s.scene.lock().expect("the scene lock").decode(t));
+        s.picked = face.map(|f| s.doc.selection(&f));
+        if let Some(selection) = s.picked.clone().filter(|_| mate_open)
             && let Some(name) = selection.face
         {
             actions
@@ -765,6 +792,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
             };
             let warn = warning(def);
             let sub_text = if flags.has(Flags::HIDDEN_SELF) { "hidden" } else { "" };
+            let chosen = s.chosen.contains(&path);
             let resp = row(
                 ui,
                 RowSpec {
@@ -773,7 +801,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
                     icon: if sub { Icon::Tree } else { Icon::Extrude },
                     name: &name,
                     sub: sub_text,
-                    selected: Some(r) == selected,
+                    selected: Some(r) == selected || chosen,
                     dim: flags.has(Flags::HIDDEN) || flags.has(Flags::SUPPRESSED),
                     error: problem.as_deref(),
                     warn: warn.as_deref(),
@@ -792,10 +820,13 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
                     if !s.expanded.remove(&path) {
                         s.expanded.insert(path.clone());
                     }
+                } else if ui.input(|i| i.modifiers.command) {
+                    actions.push(AppAction::Assembly(AssemblyAction::Choose(path.clone())));
                 } else {
                     actions.push(AppAction::Assembly(AssemblyAction::Select(Some(path.clone()))));
                 }
             }
+            resp.context_menu(|ui| crate::subassembly::panel::context_menu(ui, &mut actions));
             if open {
                 let children: Vec<OccurrenceIndex> =
                     table.children(r).filter(|c| !table.flags(*c).has(Flags::REMOVED)).collect();
@@ -812,6 +843,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
 /// placement, typed; or the assembly's summary.
 pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let mating = state.assembly.mate.open;
+    let forming = state.assembly.form.open;
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let title = match s.selected_row() {
@@ -832,8 +864,14 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
         theme::ink(),
     );
     ui.painter().hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
-    // The Mate panel takes the whole area while it is open: its form does not fit under the
-    // placement fields.
+    // The Form subassembly panel and the Mate panel take the whole area while open: their
+    // fields do not fit under the placement fields.
+    if forming {
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(12, 0))
+            .show(ui, |ui| crate::subassembly::panel::show(ui, state));
+        return;
+    }
     if mating {
         egui::ScrollArea::vertical().id_salt("assembly_mate").auto_shrink([false, true]).show(ui, |ui| {
             egui::Frame::new()
@@ -872,6 +910,9 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             for (label, value, unit) in rows.chain(turns.map(|(a, v)| (a, v, "°"))) {
                 ui.label(label);
                 let resp = ui.add(egui::DragValue::new(value).speed(1.0).max_decimals(4).suffix(format!(" {unit}")));
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("Placement {label}"))
+                });
                 busy |= resp.dragged() || resp.has_focus();
                 ui.end_row();
             }

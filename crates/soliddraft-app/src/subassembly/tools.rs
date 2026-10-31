@@ -1,4 +1,4 @@
-//! The Form subassembly command over MCP.
+//! The Form subassembly command, for the panel and over MCP.
 
 use crate::assembly::{AssemblySession, tools::summary};
 use crate::state::AppState;
@@ -44,20 +44,40 @@ fn request(input: &Value) -> Result<FormRequest, String> {
 /// The selection follows the parts into the new file, and the tree opens on it.
 fn follow(s: &mut AssemblySession, formed: &Formed) {
     s.selected = s.selected.take().map(|p| formed.migration.map(&p));
+    s.chosen = s.chosen.iter().map(|p| formed.migration.map(p)).collect();
     s.expanded.insert(OccurrencePath::root().child(Step::component(formed.migration.component)));
 }
 
-fn form(state: &mut AppState, input: &Value) -> Result<Value, String> {
-    let request = request(input)?;
-    let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
-    let formed = s.doc.form_subassembly(&request).map_err(|r| refused(&r))?;
+/// Forms the open assembly's parts as `request` says, for the panel and the tool alike:
+/// the selection follows the parts, and the session keeps the new file's bytes so it can
+/// show and prove its pinned revision whatever happens to the file.
+pub(crate) fn form(state: &mut AppState, request: &FormRequest) -> Result<Formed, FormRefusal> {
+    let Some(s) = state.assembly.session.as_mut() else {
+        return Err(FormRefusal {
+            code: FormCode::Invalid,
+            message: "no assembly is open".into(),
+            cause: None,
+            expected: None,
+            actual: None,
+        });
+    };
+    let formed = s.doc.form_subassembly(request)?;
     follow(s, &formed);
-    // The new file's bytes, so this session can show and prove its pinned revision later
-    // whatever happens to the file.
+    if let Ok(bytes) = std::fs::read(&formed.path) {
+        state.revisions.record(formed.migration.child, &formed.migration.child_revision, &bytes);
+    }
+    Ok(formed)
+}
+
+fn form_tool(state: &mut AppState, input: &Value) -> Result<Value, String> {
+    let request = request(input)?;
+    if state.assembly.session.is_none() {
+        return Err("no assembly is open".into());
+    }
+    let formed = form(state, &request).map_err(|r| refused(&r))?;
     let bytes = std::fs::read(&formed.path).map_err(|e| e.to_string())?;
-    state.revisions.record(formed.migration.child, &formed.migration.child_revision, &bytes);
     let child = AssemblyPackage::from_bytes(bytes).map_err(|e| e.to_string())?;
-    let selected = s.selected.clone();
+    let selected = state.assembly.session.as_ref().and_then(|s| s.selected.clone());
     Ok(json!({
         "formed": formed,
         "child": {
@@ -71,5 +91,5 @@ fn form(state: &mut AppState, input: &Value) -> Result<Value, String> {
 
 /// Runs the subassembly tools. `None` hands the call on.
 pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
-    (name == "assembly_form_subassembly").then(|| form(state, input))
+    (name == "assembly_form_subassembly").then(|| form_tool(state, input))
 }

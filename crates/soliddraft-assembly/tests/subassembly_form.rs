@@ -668,3 +668,92 @@ fn a_part_moved_after_preparing_makes_the_plan_stale() {
     let child = AssemblyPackage::open(&fx.pack).unwrap();
     assert_eq!(child.assembly().sources[0].document.path, "../parts/renamed.dwprt");
 }
+
+/// The world pose and box of B, C and F at h = 8 and gap = 8 (the design's P8 row).
+fn p8(doc: &AssemblyDocument, s: ComponentId, fx: &Fixture) {
+    let n = |c: ComponentId| path(&[s.0, c.0]);
+    leaf(doc, &n(fx.b), [10.0, 10.0, 18.0], [0.0, 5.0, 18.0], [20.0, 15.0, 26.0]);
+    leaf(doc, &n(fx.c), [10.0, 10.0, 29.0], [0.0, 5.0, 29.0], [20.0, 15.0, 37.0]);
+    leaf(doc, &n(fx.f), [60.0, -20.0, 7.0], [50.0, -25.0, 7.0], [70.0, -15.0, 15.0]);
+}
+
+/// N1: the saved T3 opens cold, from its own copies, with its sub-assembly's file parked
+/// outside its folder. It shows exactly what it accepted and proves nothing from the
+/// display; Update refuses naming the missing file and changes nothing. With the same file
+/// back, resolution and editing work again with no id consumed and no history blocked.
+#[test]
+fn cold_missing_child_keeps_the_accepted_assembly() {
+    let mut fx = flat("n1");
+    let formed = fx.doc.form_subassembly(&fx.request()).unwrap();
+    let s = formed.migration.component;
+    fx.doc.save(None).unwrap();
+    set_height(&fx.pin, 8.0);
+    let mut child = AssemblyDocument::open(&fx.pack, options()).unwrap();
+    child.finish_loading();
+    assert!(child.rebuild().refusal.is_none());
+    child.save(None).unwrap();
+    drop(child);
+    fx.doc.refresh_references(Vec::new());
+    assert!(fx.doc.rebuild().refusal.is_none());
+    fx.doc.set_value("gap", "8 mm").unwrap();
+    fx.doc.save(None).unwrap();
+    let t3 = (fx.doc.assembly().clone(), fx.doc.revision());
+    p8(&fx.doc, s, &fx);
+
+    // Close every session and park the sub-assembly outside the root's folder.
+    let mut closed = std::mem::replace(&mut fx.doc, AssemblyDocument::new("Closed"));
+    closed.finish_loading();
+    drop(closed);
+    let parked = fx.dir.join("holding/pack.dwasm");
+    std::fs::create_dir_all(parked.parent().unwrap()).unwrap();
+    std::fs::rename(&fx.pack, &parked).unwrap();
+    let pack_bytes = sha(&parked);
+    let files = (sha(&fx.root), sha(&fx.base), sha(&fx.pin));
+
+    let cold = OpenOptions { check_freshness: true, ..OpenOptions::default() };
+    let mut doc = AssemblyDocument::open(&fx.root, cold).unwrap();
+    doc.finish_loading();
+    assert_eq!((doc.assembly(), doc.revision()), (&t3.0, t3.1.clone()));
+    assert!(!doc.is_dirty() && doc.undo_depth() == 0 && doc.redo_depth() == 0);
+    p8(&doc, s, &fx);
+    let holder = doc.table().find(&path(&[s.0])).unwrap();
+    assert_eq!(doc.store().get(doc.table().definition(holder)).freshness, soliddraft_assembly::Freshness::Missing);
+    let b = doc.table().find(&path(&[s.0, fx.b.0])).unwrap();
+    assert_eq!(doc.store().get(doc.table().definition(b)).state, soliddraft_assembly::LoadState::DisplayReady);
+    let measured = doc.mate_measurements();
+    assert!(
+        measured
+            .iter()
+            .all(|(_, m)| m.as_ref().is_err_and(|r| r.code == soliddraft_assembly::RefusalCode::ProofUnavailable)),
+        "a display copy proves nothing: {measured:?}"
+    );
+
+    let before = snapshot(&mut doc);
+    let report = doc.rebuild();
+    let refusal = report.refusal.clone().expect("Update is refused");
+    assert!(refusal.contains("modules/pack.dwasm"), "{refusal}");
+    assert_eq!(report.missing(), 1);
+    let missing = report.sources.iter().find(|r| r.status == soliddraft_assembly::RefChange::Missing).unwrap();
+    assert_eq!(missing.source, formed.migration.source);
+    assert_eq!(snapshot(&mut doc), before);
+    assert_eq!((sha(&fx.root), sha(&fx.base), sha(&fx.pin)), files);
+    assert!(!fx.pack.exists());
+    assert_eq!(sha(&parked), pack_bytes);
+
+    // The same file back: current again, and Update accepts nothing new.
+    std::fs::rename(&parked, &fx.pack).unwrap();
+    doc.refresh_references(Vec::new());
+    assert_eq!(doc.store().get(doc.table().definition(holder)).freshness, soliddraft_assembly::Freshness::Current);
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none() && report.updated() == 0, "{:?}", report.refusal);
+    assert_eq!(snapshot(&mut doc), before, "no id consumed, no step recorded");
+    drop(doc);
+
+    // With a kernel again the reopened root drives its mates as before.
+    let mut doc = AssemblyDocument::open(&fx.root, options()).unwrap();
+    doc.finish_loading();
+    doc.set_value("gap", "12 mm").unwrap();
+    assert_eq!(doc.undo_label(), Some("Set value"));
+    let c = doc.table().find(&path(&[s.0, fx.c.0])).unwrap();
+    close(doc.table().world(c).translation, [10.0, 10.0, 33.0]);
+}

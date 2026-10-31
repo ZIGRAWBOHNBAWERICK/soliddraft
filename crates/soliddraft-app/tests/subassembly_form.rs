@@ -255,3 +255,26 @@ fn a_kept_session_sees_a_nested_part_move_on() {
     assert_eq!(update["assembly"]["accepted_state"], before["accepted_state"], "nothing accepted, solved or recorded");
     assert_eq!(at(&update["assembly"], "16/5"), json!([10.0, 10.0, 31.0]));
 }
+
+/// N1 over MCP: with the sub-assembly's file gone, the root opens from its copies and its
+/// Update is a typed refusal naming the file, changing nothing.
+#[test]
+fn a_missing_sub_assembly_refuses_update_by_name() {
+    let mut r = flat("missing");
+    let (root, pack) = (r.file("root.dwasm"), r.file("modules/pack.dwasm"));
+    r.ok("assembly_form_subassembly", r.form());
+    r.ok("assembly_save", json!({ "path": root }));
+    let parked = r.dir.join("holding/pack.dwasm");
+    std::fs::create_dir_all(parked.parent().unwrap()).unwrap();
+    std::fs::rename(&pack, &parked).unwrap();
+    let opened = r.ok("open", json!({ "path": root }))["assembly"].clone();
+    assert_eq!(opened["occurrences"]["16"]["status"], "missing");
+    assert_eq!(at(&opened, "16/5"), json!([10.0, 10.0, 31.0]), "shown from the root's copies");
+    let refusal = r.call("assembly_update", json!({})).expect_err("the sub-assembly is missing");
+    assert_eq!(
+        (refusal["refused"].as_str(), refusal["cause"].as_str()),
+        (Some("missing_reference"), Some("modules/pack.dwasm"))
+    );
+    assert_eq!(r.assembly()["accepted_state"], opened["accepted_state"]);
+    assert!(!pack.exists());
+}

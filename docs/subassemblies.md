@@ -71,7 +71,9 @@ accepting what it places with its own Update, the way assemblies always work
 4. The root's Update then accepts the sub-assembly's new revision with its parts' new pins,
    proving the mates that cross into it on them, in one step.
 
-No Update writes a file; each file is written by its own Save.
+No Update writes a file; each file is written by its own Save. A session that keeps the root
+open sees the part move on too: the status of every reference, inside sub-assemblies as well,
+is refreshed from the file that holds it, which changes no pin, pose or history.
 
 ## Publication and history
 

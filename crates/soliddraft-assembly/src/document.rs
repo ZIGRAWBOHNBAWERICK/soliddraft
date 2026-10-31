@@ -1315,42 +1315,79 @@ impl AssemblyDocument {
             .with_open(self.options.open.iter().cloned())
     }
 
-    /// Refreshes root source status without changing pins, truth or undo history.
-    /// Before the first save, only matching open documents can be checked.
+    /// Refreshes every reference's status, the root's sources and those inside its
+    /// sub-assemblies, without changing pins, truth, display or undo history. Each
+    /// reference is resolved from the file that holds it. Before the first save, only
+    /// matching open documents can be checked; a reference whose holding file cannot be
+    /// found keeps the status it had.
     pub fn refresh_references(&mut self, open: Vec<OpenDocument>) {
         self.options.open = open;
-        let resolver = self.resolver();
-        let freshness: HashMap<_, _> = self
-            .assembly
-            .sources
-            .iter()
-            .filter_map(|source| {
-                let r = &source.document;
-                let key = key_of(r)?;
-                let state = if self.path.is_none()
-                    && !self.options.open.iter().any(|d| Some(d.id) == r.id && d.kind == r.kind)
-                {
-                    crate::Freshness::Unchecked
-                } else {
-                    match resolver.resolve(r) {
-                        Resolution::Found(t) => match t.revision() {
-                            Some(now) if *now != r.pinned => crate::Freshness::NewerAvailable { now: now.clone() },
-                            _ => crate::Freshness::Current,
-                        },
-                        Resolution::Missing(_) => crate::Freshness::Missing,
-                    }
+        let resolver_from = |holder: Option<&Path>| {
+            Resolver::new(holder)
+                .with_search_folders(self.options.search.iter())
+                .with_open(self.options.open.iter().cloned())
+        };
+        let found = |resolution: Resolution| match resolution {
+            Resolution::Found(t) => {
+                let file = match &t.location {
+                    soliddraft_document::resolve::Location::File(p) => Some(p.clone()),
+                    soliddraft_document::resolve::Location::Open(d) => d.path.clone(),
                 };
-                Some((key, state))
-            })
-            .collect();
-        let definitions: Vec<_> = self
-            .store
-            .iter()
-            .filter_map(|(i, d)| freshness.get(&d.key.at(None)).map(|state| (i, state.clone())))
-            .collect();
-        for (i, state) in definitions {
+                (Some(t.revision().cloned()), file)
+            }
+            Resolution::Missing(_) => (None, None),
+        };
+        // The file each assembly definition is held in, outermost first.
+        let mut files: HashMap<DefinitionIndex, Option<PathBuf>> = HashMap::from([(self.root, self.path.clone())]);
+        let mut pending: Vec<DefinitionIndex> = self.refs.keys().copied().filter(|i| *i != self.root).collect();
+        pending.sort_by_key(|i| self.depth(*i));
+        let mut freshness = Vec::new();
+        // One resolver per holding file, so a folder is indexed once however many
+        // references it holds.
+        let mut resolvers: HashMap<Option<PathBuf>, Resolver> = HashMap::new();
+        for i in pending {
+            let r = &self.refs[&i];
+            let parent = self.parents.get(&i).copied().unwrap_or(self.root);
+            let held_by_root = parent == self.root;
+            if held_by_root
+                && self.path.is_none()
+                && !self.options.open.iter().any(|d| Some(d.id) == r.id && d.kind == r.kind)
+            {
+                freshness.push((i, crate::Freshness::Unchecked));
+                continue;
+            }
+            let Some(holder) = files.get(&parent).cloned() else { continue };
+            if holder.is_none() && !held_by_root {
+                continue;
+            }
+            let resolver = resolvers.entry(holder.clone()).or_insert_with(|| resolver_from(holder.as_deref()));
+            let (now, file) = found(resolver.resolve(r));
+            if self.store.get(i).kind == DocKind::Assembly {
+                files.insert(i, file);
+            }
+            let state = match now {
+                None => crate::Freshness::Missing,
+                Some(Some(now)) if now != r.pinned => crate::Freshness::NewerAvailable { now },
+                Some(_) => crate::Freshness::Current,
+            };
+            freshness.push((i, state));
+        }
+        for (i, state) in freshness {
             self.store.get_mut(i).freshness = state;
         }
+    }
+
+    /// How many assemblies hold a definition's reference, the root's own sources being 1.
+    fn depth(&self, mut i: DefinitionIndex) -> usize {
+        let mut depth = 0;
+        while let Some(p) = self.parents.get(&i).filter(|p| **p != i) {
+            depth += 1;
+            if *p == self.root {
+                break;
+            }
+            i = *p;
+        }
+        depth
     }
 
     /// A candidate of this document with `truth` in its place, at `path` under `id`, its

@@ -224,3 +224,34 @@ fn a_part_edit_reaches_the_root_through_its_sub_assembly() {
     assert_ne!(sha(&root), t1);
     assert_eq!(sha(&pack), s1, "saving the root leaves the sub-assembly's file alone");
 }
+
+/// The same edit seen from the session that keeps the root open: the root is not reopened,
+/// so its nested parts' status must be refreshed in place, without accepting, solving or
+/// recording anything.
+#[test]
+fn a_kept_session_sees_a_nested_part_move_on() {
+    let mut r = flat("kept");
+    let (root, pin) = (r.file("root.dwasm"), r.file("parts/pin.dwprt"));
+    r.ok("assembly_form_subassembly", r.form());
+    r.ok("assembly_save", json!({ "path": root }));
+    let before = r.assembly();
+    assert_eq!(before["occurrences"]["16/4"]["status"], "current");
+
+    r.ok("open", json!({ "path": pin }));
+    r.ok("edit_extrude", json!({ "feature": "Boss-Extrude1", "depth": 8, "flip": false }));
+    r.ok("save", json!({ "path": pin }));
+    let shown = r.ok("show_assembly", json!({}))["assembly"].clone();
+    for path in ["16/4", "16/5", "16/6"] {
+        assert_eq!(shown["occurrences"][path]["status"], "newer_available", "{path}");
+    }
+    assert_eq!(shown["occurrences"]["16"]["status"], "current");
+    assert_eq!(shown["accepted_state"], before["accepted_state"], "a status refresh accepts nothing");
+
+    let update = r.ok("assembly_update", json!({}));
+    assert_eq!(update["updated"], 0);
+    let holders: Vec<&str> =
+        update["nested_newer"].as_array().unwrap().iter().map(|n| n["holder"].as_str().unwrap()).collect();
+    assert_eq!(holders, ["16", "16", "16"]);
+    assert_eq!(update["assembly"]["accepted_state"], before["accepted_state"], "nothing accepted, solved or recorded");
+    assert_eq!(at(&update["assembly"], "16/5"), json!([10.0, 10.0, 31.0]));
+}

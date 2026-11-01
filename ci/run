@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+cd "$root"
+
+case "${1:-}" in
+  lint)
+    export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    python3 -m unittest discover -s ci -p 'test_*.py'
+    ;;
+  *)
+    echo "Usage: ci/run lint" >&2
+    exit 2
+    ;;
+esac

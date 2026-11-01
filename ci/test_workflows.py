@@ -1,7 +1,12 @@
 """Every workflow cancels its branch's superseded runs and never cancels a run on main."""
 
+import json
+import os
 import pathlib
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 
 WORKFLOWS = sorted(pathlib.Path(__file__).resolve().parent.parent.joinpath(".github", "workflows").glob("*.yml"))
@@ -16,11 +21,14 @@ def top_level(text, key):
 
 def evaluate(expr, **github):
     """Evaluates the subset of the expression language the concurrency settings use."""
+    inputs = github.pop("inputs", {})
     python = re.sub(r"github\.(\w+)", r"g['\1']", expr).replace("&&", " and ").replace("||", " or ")
+    python = re.sub(r"inputs\.(\w+)", r"i.get('\1', False)", python)
     python = re.sub(r"!(?!=)", " not ", python)
     context = {"workflow": "Hosted CI", "head_ref": "", "run_id": "1", **github}
     return eval(python, {"__builtins__": {}}, {
         "g": context,
+        "i": inputs,
         "startsWith": lambda value, prefix: value.lower().startswith(prefix.lower()),
     })
 
@@ -106,6 +114,66 @@ class Concurrency(unittest.TestCase):
         for path in WORKFLOWS:
             text = settings(path)[2]
             self.assertEqual(len(re.findall(r"^\s*concurrency:", text, re.MULTILINE)), 1, path.name)
+
+
+class BaselineRefresh(unittest.TestCase):
+    def test_only_an_explicit_refresh_dispatch_changes_the_gate(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        refresh = re.search(r"REFRESH_CATALLAX_VIEWS: (.*)", text)[1]
+        kernel = text.split("\n  kernel:\n", 1)[1].split("\n  step-opencascade:", 1)[0]
+        condition = re.search(r"^        if: (github.event_name.*)$", kernel, re.M)[1]
+        gate = text.split("\n  gate:\n", 1)[1]
+        name = re.search(r"^    name: (.*)$", gate, re.M)[1]
+        for event, requested in [('pull_request', False), ('pull_request', True),
+                                 ('push', True), ('workflow_dispatch', False),
+                                 ('workflow_dispatch', True)]:
+            with self.subTest(event=event, requested=requested):
+                values = dict(event_name=event, inputs={'refresh_catallax_views': requested})
+                refreshing = event == 'workflow_dispatch' and requested
+                self.assertEqual(render(refresh, **values), str(refreshing).lower())
+                self.assertEqual(evaluate(condition, **values), not refreshing)
+                self.assertEqual(render(name, **values),
+                                 'Baseline refresh gate' if refreshing else 'Merge gate')
+
+    def test_selection_step_runs_only_generators_for_refresh(self):
+        root = pathlib.Path(__file__).resolve().parent.parent
+        text = (root / '.github/workflows/hosted.yml').read_text()
+        block = text.split('      - id: select\n', 1)[1].split('      - uses:', 1)[0]
+        script = textwrap.dedent(block.split('        run: |\n', 1)[1])
+        registry = json.loads((root / 'ci/check-registry.json').read_text())['jobs']
+        full = set(registry) - {'select', 'test-windows', 'package-windows'}
+        for refresh in ('true', 'false'):
+            with self.subTest(refresh=refresh), tempfile.TemporaryDirectory() as directory:
+                temporary = pathlib.Path(directory)
+                env = dict(os.environ, RUNNER_TEMP=directory, BASE_SHA='HEAD',
+                           EVENT='workflow_dispatch', REF='', WINDOWS='',
+                           REFRESH_CATALLAX_VIEWS=refresh,
+                           GITHUB_OUTPUT=str(temporary / 'output'),
+                           GITHUB_STEP_SUMMARY=str(temporary / 'summary'))
+                subprocess.run(['bash', '-e', '-c', script], cwd=root, env=env,
+                               check=True, capture_output=True, text=True)
+                result = json.loads((temporary / 'check-selection/selection.json').read_text())
+                self.assertEqual(set(result['selected']), {'kernel'} if refresh == 'true' else full)
+                self.assertIn('packaging=' + ('false' if refresh == 'true' else 'true'),
+                              (temporary / 'output').read_text())
+
+
+class RustCache(unittest.TestCase):
+    def test_compatible_jobs_share_caches_and_only_main_saves(self):
+        keys = set()
+        count = 0
+        for path in WORKFLOWS:
+            for block in re.findall(r"      - uses: Swatinem/rust-cache@v2\n(.*?)(?=      - |\Z)",
+                                    path.read_text(), re.DOTALL):
+                count += 1
+                self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", block, path.name)
+                key = re.search(r"shared-key: ([\w-]+)", block)
+                self.assertIsNotNone(key, path.name)
+                keys.add(key[1])
+                self.assertNotRegex(block, r"(?m)^          key:")
+        self.assertEqual(count, 13)
+        self.assertEqual(keys, {'native-dev', 'native-test-opt2', 'wasm-dev',
+                                'native-release', 'wasm-release'})
 
 
 if __name__ == "__main__":

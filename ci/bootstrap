@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+git -C "$root" config --local core.hooksPath ci/hooks
+echo "Installed the pre-push lint hook. Run ci/run lint to check now."

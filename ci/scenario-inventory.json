@@ -318,7 +318,7 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "75bc8b56dbf3d2222301c2e8edcf9a4594e9f9e4",
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
       "route": "MCP assembly and mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "Origin and distance mates between axis-aligned planar faces of the root's own part components, default configuration; identity and exact half-turn placements carry the exact claim; partial M2/M3/M4/M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
@@ -334,7 +334,7 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "e139919ae1d6b3718e49ff4519f956cc429c36ac",
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
       "route": "MCP assembly and Coincident mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "V6 batch 2: Coincident mates between two proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; partial and strict solves, an over-constrained distance refused, distance edits and drivers refused, explicit Update, delete and replacement by a distance; saved as its own kind with no distance; partial M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
@@ -562,7 +562,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
       "route": "MCP configuration grid tools -> CSV codec -> document transaction -> Catallax adapter -> pinned kernel",
       "supported_limits": "Text properties and named values of one part with rows Default, Narrow and a quoted row; the complete row set must be present; no row rename or deletion; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; app work cap 20M",
       "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; csv-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -576,7 +576,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
       "route": "MCP configuration grid tools -> OOXML codec -> document transaction -> Catallax adapter -> pinned kernel",
       "supported_limits": "One Configurations sheet of string and numeric cells mapped by header name; formula cells are refused; other limits as configuration-grid-csv",
       "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; xlsx-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -591,7 +591,7 @@
         "soliddraft-drawing",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
       "route": "MCP grid and drawing tools -> document transaction -> drawing source snapshot -> SVG writer; Catallax adapter -> pinned kernel",
       "supported_limits": "One title field bound to a text property of the part the drawing pins; automatic update off; no component configuration selector; app work cap 20M",
       "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,helper-*.stdout}; out/{family,revised}.svg; title-wide.dwprt; title-wide.dwdrw; commands-1/0003/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -606,7 +606,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
       "route": "MCP assembly, mate and Form subassembly commands -> formation plan -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "V6 batch 1, all four increments: root part occurrences in their default state formed into a new separate file with internal and crossing distance mates, one-step undo and redo, a typed cycle refusal, a part edit accepted by the sub-assembly's Update then the root's, and the reopened root's value driving nested parts through root-owned overrides; default configuration, no patterns; partial M4/M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,inspect-*.stdout}; work/parts/base.dwprt, work/parts/pin.dwprt, work/root.dwasm and work/modules/pack.dwasm"
@@ -623,6 +623,48 @@
       "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
       "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
       "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
+    },
+    {
+      "id": "rod-cut-28deg",
+      "file": "ci/scenarios/rod-cut-28deg.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R1 rod, height 10 mm, through cut at 28 degrees about z=5 mm; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "sphere-revolve",
+      "file": "ci/scenarios/sphere-revolve.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "torus-revolve",
+      "file": "ci/scenarios/torus-revolve.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "ae73f90dfe00e154a397d78a8c105cabd8773662",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
     }
   ]
 }

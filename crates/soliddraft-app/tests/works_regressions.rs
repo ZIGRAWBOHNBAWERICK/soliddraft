@@ -106,6 +106,46 @@ fn replay(app: &mut App, fixture: &str, count: usize, dir: &std::path::Path) {
 }
 
 #[test]
+fn basic_curved_shapes_make_visible_drawings_and_survive_file_roundtrips() {
+    let _native = native_lock();
+    for (shape, count) in [("sphere-revolve", 2), ("torus-revolve", 2), ("rod-cut-28deg", 4)] {
+        let dir = directory(shape);
+        let mut app = app();
+        replay(&mut app, shape, count, &dir);
+        let mut calls = Vec::new();
+        for (name, arguments) in [
+            ("save", json!({"path":dir.join("part.dwprt")})),
+            ("open", json!({"path":dir.join("part.dwprt")})),
+            ("export_step", json!({"path":dir.join("part.step")})),
+            ("make_drawing", json!({"template":"iso-a3"})),
+            ("save", json!({"path":dir.join("drawing.dwdrw")})),
+            ("open", json!({"path":dir.join("drawing.dwdrw")})),
+        ] {
+            let started = Instant::now();
+            let (reply, longest) = request(&mut app, name, arguments);
+            let elapsed = started.elapsed();
+            calls.push(json!({"tool":name,"elapsed_ms":elapsed.as_secs_f64()*1000.0,
+                "longest_update_ms":longest.as_secs_f64()*1000.0,"reply":reply}));
+            std::fs::write(dir.join("calls.json"), serde_json::to_vec_pretty(&calls).unwrap()).unwrap();
+            assert_eq!(reply["isError"], false, "{shape} {name}: {reply}");
+            if name == "make_drawing" {
+                assert!(elapsed < Duration::from_secs(15), "{shape} drawing exceeded 15 seconds: {elapsed:?}");
+            }
+        }
+        let session = app.state().state.drawing.session.as_ref().unwrap();
+        assert!(app.state().state.drawing.is_active(), "{shape} drawing is not active");
+        assert!(!session.sheet().views.is_empty(), "{shape} drawing has no views");
+        for view in &session.sheet().views {
+            let projected = session.doc.projected_of(view.id).expect("drawing view has a projection");
+            assert!(!projected.geometry.curves.is_empty(), "{shape} drawing view has no curves");
+        }
+        assert!(std::fs::metadata(dir.join("part.step")).unwrap().len() > 0);
+        app.run_steps(3);
+        app.render().unwrap().save(dir.join("drawing.png")).unwrap();
+    }
+}
+
+#[test]
 fn native_drawing_switches_keep_the_tab_and_undo_target() {
     let _native = native_lock();
     let dir = directory("tabs");

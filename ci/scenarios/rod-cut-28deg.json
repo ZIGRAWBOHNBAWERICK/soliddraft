@@ -1,0 +1,344 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "rod-cut-28deg",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "front",
+        "operations": [
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -4,
+                "v": 7.126837726645915
+              },
+              "b": {
+                "u": 4,
+                "v": 2.873162273354085
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 4,
+                "v": 2.873162273354085
+              },
+              "b": {
+                "u": 4,
+                "v": 12
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 4,
+                "v": 12
+              },
+              "b": {
+                "u": -4,
+                "v": 12
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -4,
+                "v": 12
+              },
+              "b": {
+                "u": -4,
+                "v": 7.126837726645915
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 15.707963267948966,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/2",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 5.531709431661479,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 38.11559294040823,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/0",
+          "approx": -0.02658547158307394,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/1",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/2",
+          "approx": 2.5070678729929443,
+          "tolerance": 0.001
+        }
+      ],
+      "drawing": true
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/rod-cut-28deg.dwprt"
+      },
+      "files": [
+        "{bundle}/rod-cut-28deg.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/rod-cut-28deg.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 15.707963267948966,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/2",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 5.531709431661479,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 38.11559294040823,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/0",
+          "approx": -0.02658547158307394,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/1",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/2",
+          "approx": 2.5070678729929443,
+          "tolerance": 0.001
+        }
+      ],
+      "drawing": true,
+      "checked_step_export": "{bundle}/rod-cut-28deg.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "cylinder": 1,
+          "plane": 2
+        },
+        "volume": 15.707963267948966,
+        "floor": 1e-06,
+        "inside": [
+          [
+            0,
+            0,
+            2
+          ],
+          [
+            0.8,
+            0,
+            4
+          ]
+        ],
+        "outside": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            1.1,
+            0,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "tool": "edit_cut",
+      "arguments": {
+        "feature": "Cut-Extrude1",
+        "through_all": false,
+        "depth": 0,
+        "flip": true
+      },
+      "refused": "depth must be positive",
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 15.707963267948966,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/2",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 5.531709431661479,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 38.11559294040823,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/0",
+          "approx": -0.02658547158307394,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/1",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/2",
+          "approx": 2.5070678729929443,
+          "tolerance": 0.001
+        }
+      ]
+    }
+  ]
+}

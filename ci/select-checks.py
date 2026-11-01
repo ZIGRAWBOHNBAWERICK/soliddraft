@@ -359,9 +359,59 @@ def route(changes, event, ref, packages, read_sources):
     return reasons
 
 
+
+def ci_only_selection(changes, event, ref, read_sources):
+    if not changes or event == 'workflow_dispatch' or ref.startswith('refs/heads/release/'):
+        return None
+    paths = {path for change in changes for path in change[1:]}
+    if not all(path.startswith(('ci/', '.github/workflows/')) or path == 'docs/ci.md' for path in paths):
+        return None
+    # Inventory validation still runs before selection in main().
+    parse_consumers(read_sources(POLICY)[1])
+    reasons = {'lint': ['CI-only change: formatting, lint and CI tooling tests']}
+    registries = [json.loads(text)['jobs'] for text in read_sources('ci/check-registry.json') if text]
+    for path in sorted(paths):
+        if not path.startswith('.github/workflows/'):
+            continue
+        sources = read_sources(path)
+        if any(shared_yaml_node(text) for text in sources):
+            return None
+        parsed = [workflow_jobs(text) if text else ('', {}) for text in sources]
+        if any(part is None for part in parsed):
+            # Unreadable workflow structure cannot prove which definitions changed.
+            return None
+        (old_settings, old), (new_settings, new) = parsed
+        changed = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+        settings = lambda text: re.findall(r'^(?:env|defaults):[^\n]*\n(?:[ \t]+.*\n|\n)*', text, re.M)
+        if settings(old_settings) != settings(new_settings):
+            changed |= old.keys() | new.keys()
+        if path == '.github/workflows/hosted.yml':
+            units = set()
+            for registry in registries:
+                for unit, jobs in registry.items():
+                    if changed.intersection([jobs] if isinstance(jobs, str) else jobs):
+                        units.add(unit)
+            units -= {'select'}
+        elif path == '.github/workflows/packages.yml':
+            units = set()
+            if changed & {'plan', 'assemble'}:
+                units |= PACKAGES
+            if 'desktop' in changed:
+                units |= PACKAGES - {'package-web'}
+            if 'web' in changed:
+                units.add('package-web')
+        else:
+            units = set()
+        for unit in units:
+            reasons.setdefault(unit, []).append(f'own job definition changed: {path}')
+    return reasons
+
+
 def select(changes, event, ref, packages, read_sources, windows=False):
     # The accepted selector runs through this too, with no windows argument, so the deferral covers both policies.
-    reasons = route(changes, event, ref, packages, read_sources)
+    reasons = ci_only_selection(changes, event, ref, read_sources)
+    if reasons is None:
+        reasons = route(changes, event, ref, packages, read_sources)
     return reasons if windows else {unit: why for unit, why in reasons.items() if unit not in WINDOWS}
 
 

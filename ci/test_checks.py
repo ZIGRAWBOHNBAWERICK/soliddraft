@@ -52,6 +52,13 @@ def qualified():
     return everything() - WINDOWS
 
 
+
+def normal_selection(changes, event, ref, packages, sources, windows=False):
+    """The frozen fixtures cover normal routing when a diff also contains non-CI files."""
+    result = selector.route(changes, event, ref, packages, sources)
+    return result if windows else {unit: why for unit, why in result.items() if unit not in WINDOWS}
+
+
 def jobs(text):
     starts = list(re.finditer(r'^  ([\w-]+):\n', text[text.index('jobs:\n') + 6:], re.M))
     body = text[text.index('jobs:\n') + 6:]
@@ -122,7 +129,7 @@ class Routing(unittest.TestCase):
         fixture = read('routing-cases.json')
         for case in fixture['cases']:
             with self.subTest(case['id']):
-                selected = selector.select(case['changes'], case['event'], case.get('ref', ''), self.packages,
+                selected = normal_selection(case['changes'], case['event'], case.get('ref', ''), self.packages,
                                            self.case_sources(case), windows=True)
                 must = case['must']
                 if isinstance(must, str):
@@ -149,7 +156,7 @@ class Routing(unittest.TestCase):
     def test_consumer_table(self):
         for path, units in read('routing-cases.json')['consumers'].items():
             with self.subTest(path):
-                selected = selector.select([['M', path]], 'pull_request', '', self.packages, self.sources, windows=True)
+                selected = normal_selection([['M', path]], 'pull_request', '', self.packages, self.sources, windows=True)
                 self.assertEqual(set(selected), everything() if units == 'all' else {'lint', *units})
 
     def test_map_covers_every_ci_file(self):
@@ -168,7 +175,7 @@ class Routing(unittest.TestCase):
                 if 'policy' in case:
                     sources = lambda path, text=text: ['', text] if path == POLICY else self.sources(path)
                 with self.assertRaisesRegex(selector.PolicyError, re.escape(case['diagnostic'])):
-                    selector.select(case['changes'], case['event'], case.get('ref', ''), self.packages, sources)
+                    normal_selection(case['changes'], case['event'], case.get('ref', ''), self.packages, sources)
 
     def test_round2_replays(self):
         script = FROZEN_BASE.read_text()
@@ -177,7 +184,7 @@ class Routing(unittest.TestCase):
                 packages = ({name: set(deps) for name, deps in case['packages'].items()}
                             if 'packages' in case else self.packages)
                 sources = self.case_sources(case)
-                selected = selector.select(case['changes'], case['event'], '', packages, sources, windows=True)
+                selected = normal_selection(case['changes'], case['event'], '', packages, sources, windows=True)
                 self.assertEqual(set(selected), set(case['must']))
                 union = selector.with_base_rules(selected, script, case['changes'], case['event'], '',
                                                  packages, sources)
@@ -204,7 +211,7 @@ class Routing(unittest.TestCase):
     def test_accepted_map_keeps_its_own_consumer(self):
         base, head = (self.round2_map(('ci/linux-helper.py', [unit])) for unit in ('test-macos', 'application-loop'))
         sources = lambda path: [base, head] if path == POLICY else ['', '']
-        changes = [['M', 'ci/linux-helper.py']]
+        changes = [['M', 'ci/linux-helper.py'], ['M', 'README.md']]
         candidate = selector.select(changes, 'pull_request', '', self.packages, sources)
         self.assertEqual(set(candidate), {'lint', 'application-loop'})
         union = selector.with_base_rules(candidate, (ROOT / 'ci/select-checks.py').read_text(), changes,
@@ -218,7 +225,7 @@ class Routing(unittest.TestCase):
         for base, words in ((self.round2_map(), 'ci/new.py'), ('{', 'JSON')):
             with self.subTest(base):
                 sources = lambda path: [base, head] if path == POLICY else ['', '']
-                changes = [['A', 'ci/new.py']]
+                changes = [['A', 'ci/new.py'], ['M', 'README.md']]
                 candidate = selector.select(changes, 'pull_request', '', self.packages, sources)
                 self.assertEqual(set(candidate), {'lint'})
                 union = selector.with_base_rules(candidate, script, changes, 'pull_request', '', self.packages, sources)
@@ -239,7 +246,7 @@ class Routing(unittest.TestCase):
         self.assertEqual(selector.with_base_rules(candidate.copy(), '', case['changes'], case['event'], '',
                                                   self.packages, sources), candidate)
 
-    def test_multiline_runner_changes_keep_full_checks(self):
+    def test_multiline_runner_edits_select_the_changed_job(self):
         for runner in ('\n      - ubuntu-latest', ' |\n      ubuntu-latest',
                        ' [self-hosted,\n      ubuntu-latest]', ' "runner\n      ubuntu-latest"',
                        ' runner\n      ubuntu-latest'):
@@ -251,7 +258,7 @@ class Routing(unittest.TestCase):
             with self.subTest(runner=runner):
                 selected = selector.select(case['changes'], 'pull_request', '', self.packages,
                                            self.case_sources(case), windows=True)
-                self.assertEqual(set(selected), selector.UNITS | selector.PACKAGES)
+                self.assertEqual(set(selected), {'lint', 'test-linux'})
 
     def test_every_platform_file_selects_platform_checks(self):
         tracked = selector.git(ROOT, 'ls-files', '-z').decode().split('\0')
@@ -263,8 +270,94 @@ class Routing(unittest.TestCase):
         self.assertLessEqual(set(required), set(platform))
         for path in platform:
             with self.subTest(path):
-                selected = selector.select([['M', path]], 'pull_request', '', self.packages, self.sources, windows=True)
+                selected = normal_selection([['M', path]], 'pull_request', '', self.packages, self.sources, windows=True)
                 self.assertLessEqual(selector.PLATFORM, set(selected))
+
+
+class CiOnly(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.packages = selector.graph(ROOT)
+        cls.workflow = (ROOT / '.github/workflows/hosted.yml').read_text()
+
+    def select(self, changes, overrides=None, **options):
+        sources = lambda path: (overrides or {}).get(path, [selector.content(ROOT, path)] * 2)
+        return selector.select(changes, options.get('event', 'pull_request'), options.get('ref', ''),
+                               self.packages, sources)
+
+    def test_ci_files_and_both_sides_of_renames(self):
+        for changes in ([['M', 'ci/select-checks.py']], [['M', POLICY]],
+                        [['A', 'ci/tools']], [['D', 'ci/old-tool']],
+                        [['M', 'docs/ci.md'], ['M', 'ci/run']],
+                        [['R100', 'ci/old-tool', 'ci/new-tool']]):
+            with self.subTest(changes=changes):
+                for options in ({}, {'event': 'push', 'ref': 'refs/heads/main'}):
+                    self.assertEqual(set(self.select(changes, **options)), {'lint'})
+        for changes in ([['M', 'ci/run'], ['M', CAMERA]],
+                        [['R100', 'ci/run', CAMERA]]):
+            self.assertEqual(set(self.select(changes)), APP)
+        self.assertEqual(set(self.select([['M', 'ci/run'], ['M', 'Cargo.lock']])),
+                         selector.UNITS - WINDOWS)
+
+    def test_only_changed_hosted_jobs_run(self):
+        old = self.workflow
+        replacements = {
+            'kernel': ('cargo test -p soliddraft-kernel-catallax', 'cargo test --verbose -p soliddraft-kernel-catallax'),
+            'test-macos': ('    runs-on: macos-latest', '    runs-on: macos-15'),
+            'gate': ('    if: always()', '    if: ${{ always() }}'),
+        }
+        for changed, expected in ((['kernel'], {'lint', 'kernel'}),
+                                  (['test-macos'], {'lint', 'test-macos'}),
+                                  (['kernel', 'test-macos', 'gate'], {'lint', 'kernel', 'test-macos'}),
+                                  (['gate'], {'lint'})):
+            new = old
+            for job in changed:
+                start = new.index('\n  ' + job + ':\n')
+                end = re.search(r'\n  [\w-]+:\n', new[start + 1:])
+                stop = start + 1 + end.start() if end else len(new)
+                body = new[start:stop].replace(*replacements[job])
+                new = new[:start] + body + new[stop:]
+            overrides = {'.github/workflows/hosted.yml': [old, new]}
+            self.assertEqual(set(self.select([['M', '.github/workflows/hosted.yml'],
+                                              ['M', 'ci/select-checks.py']], overrides)), expected)
+
+    def test_shared_settings_and_unreadable_workflows_keep_coverage(self):
+        path = '.github/workflows/hosted.yml'
+        for new in (self.workflow.replace('CARGO_INCREMENTAL: 0', 'CARGO_INCREMENTAL: 1'),
+                    self.workflow.replace('env:\n', 'env: &shared\n', 1),
+                    'jobs:\n  broken workflow\n'):
+            self.assertEqual(set(self.select([['M', path]], {path: [self.workflow, new]})), qualified())
+        renamed = self.workflow.replace('name: Hosted CI', 'name: CI')
+        self.assertEqual(set(self.select([['M', path]], {path: [self.workflow, renamed]})), {'lint'})
+
+    def test_new_build_job_uses_its_registered_unit(self):
+        registry = json.loads((ROOT / 'ci/check-registry.json').read_text())
+        old_registry = json.dumps(registry)
+        registry['jobs']['test-linux'] = ['test-linux-build', 'test-linux']
+        new = self.workflow + '\n  test-linux-build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: cargo nextest archive\n'
+        overrides = {'.github/workflows/hosted.yml': [self.workflow, new],
+                     'ci/check-registry.json': [old_registry, json.dumps(registry)]}
+        self.assertEqual(set(self.select([['M', '.github/workflows/hosted.yml'],
+                                          ['M', 'ci/check-registry.json']], overrides)), {'lint', 'test-linux'})
+
+    def test_packages_only_run_the_changed_package_definitions(self):
+        path = '.github/workflows/packages.yml'
+        old = (ROOT / path).read_text()
+        for before, after, expected in (
+                ('cargo-packager@0.11.8', 'cargo-packager@0.11.9', {'lint', 'package-linux', 'package-macos'}),
+                ('trunk@0.21.14', 'trunk@0.21.15', {'lint', 'package-web'})):
+            self.assertEqual(set(self.select([['M', path]], {path: [old, old.replace(before, after)]})), expected)
+
+    def test_base_policy_keeps_this_transition_full_once(self):
+        changes = [['M', 'ci/select-checks.py']]
+        sources = lambda path: [selector.content(ROOT, path)] * 2
+        candidate = self.select(changes)
+        base = FROZEN_BASE.read_text()
+        self.assertEqual(set(selector.with_base_rules(candidate, base, changes, 'pull_request', '',
+                                                      self.packages, sources)), everything())
+        current = (ROOT / 'ci/select-checks.py').read_text()
+        self.assertEqual(set(selector.with_base_rules(self.select(changes), current, changes,
+                                                      'pull_request', '', self.packages, sources)), {'lint'})
 
 
 class SharedViewport(unittest.TestCase):
@@ -349,7 +442,7 @@ class SharedViewport(unittest.TestCase):
             with self.subTest(event):
                 self.assertSelects([['M', CAMERA]], qualified(), event=event, ref=ref)
         self.assertSelects(None, qualified())
-        self.assertSelects([['M', 'ci/select-checks.py']], qualified())
+        self.assertSelects([['M', 'ci/select-checks.py']], {'lint'})
 
     def test_accepted_main_selector_keeps_the_desktop(self):
         script = ROUND3_BASE.read_text()
@@ -458,9 +551,9 @@ class Cli(unittest.TestCase):
         for name, files, options, expected in (
                 ('ownership', ownership, {}, ['lint']),
                 ('lock', {'Cargo.lock': bumped}, {}, linux),
-                ('map', {POLICY: policy.replace('"ci/cargo-cache.sh": []', '"ci/cargo-cache.sh": ["lint"]')}, {}, full),
-                ('selector', {'ci/select-checks.py': (self.root / 'ci/select-checks.py').read_text() + '\n'}, {}, full),
-                ('main', ownership, {'event': 'push', 'ref': 'refs/heads/main'}, linux),
+                ('map', {POLICY: policy.replace('"ci/cargo-cache.sh": []', '"ci/cargo-cache.sh": ["lint"]')}, {}, ['lint']),
+                ('selector', {'ci/select-checks.py': (self.root / 'ci/select-checks.py').read_text() + '\n'}, {}, ['lint']),
+                ('main', ownership, {'event': 'push', 'ref': 'refs/heads/main'}, ['lint']),
                 ('release', ownership, {'event': 'push', 'ref': 'refs/heads/release/0.1.0'}, full)):
             with self.subTest(name):
                 self.commit(files)
@@ -486,18 +579,25 @@ class Cli(unittest.TestCase):
         helper = '"ci/cargo-cache.sh": [],\n    "ci/linux-helper.py": '
         base = self.commit({'ci/linux-helper.py': 'one\n', POLICY: policy.replace(
             '"ci/cargo-cache.sh": [],\n    ', helper + '["test-macos"],\n    ')})
-        self.commit({'ci/linux-helper.py': 'two\n', POLICY: policy.replace(
+        self.commit({'ci/linux-helper.py': 'two\n', 'README.md': 'ordinary documentation edit\n', POLICY: policy.replace(
             '"ci/cargo-cache.sh": [],\n    ', helper + '["application-loop"],\n    ')})
         selection = self.selection(base)
         self.assertEqual(set(selection['selected']), qualified())
         self.assertIn('base: CI consumers: ci/linux-helper.py', selection['reasons']['test-macos'])
 
-    def test_new_file_with_its_map_entry_runs_everything_once(self):
+    def test_new_ci_file_with_its_map_entry_runs_only_lint(self):
         entry = self.edited(POLICY, '"ci/cargo-cache.sh": []', '"ci/cargo-cache.sh": [],\n    "ci/new.py": ["lint"]')
         self.commit({'ci/new.py': 'new\n', **entry})
         selection = self.selection(self.base)
-        self.assertEqual(set(selection['selected']), qualified())
-        self.assertTrue(any('accepted map cannot judge' in reason for reason in selection['reasons']['test-macos']))
+        self.assertEqual(set(selection['selected']), {'lint'})
+        self.assertTrue(all('CI-only' in reason for reason in selection['reasons']['lint']))
+
+    def test_ci_only_real_diff_runs_just_the_changed_job_and_lint(self):
+        workflow = (self.root / '.github/workflows/hosted.yml').read_text()
+        workflow = workflow.replace('cargo test -p soliddraft-kernel-catallax',
+                                    'cargo test --verbose -p soliddraft-kernel-catallax')
+        self.commit({'.github/workflows/hosted.yml': workflow, 'docs/ci.md': 'CI documentation edit\n'})
+        self.assertEqual(set(self.selection(self.base)['selected']), {'lint', 'kernel'})
 
     def test_only_a_manual_input_selects_windows(self):
         for name, options, expected in (
@@ -548,10 +648,10 @@ class WindowsDeferred(unittest.TestCase):
                 ('crates/soliddraft-app/build.rs', None, self.COMPILER),
                 ('packaging/release.py', None, self.FULL),
                 ('packaging/windows/package.ps1', None, self.FULL),
-                ('.github/workflows/packages.yml', None, self.FULL),
-                ('.github/workflows/release.yml', None, self.FULL),
+                ('.github/workflows/packages.yml', None, {'lint'}),
+                ('.github/workflows/release.yml', None, {'lint'}),
                 ('docs/RELEASING.md', None, {'lint', 'package-linux', 'package-macos', 'package-web'}),
-                ('ci/select-checks.py', None, self.FULL),
+                ('ci/select-checks.py', None, {'lint'}),
                 ('somewhere/unknown', None, self.FULL)):
             with self.subTest(path):
                 self.assertEqual(self.select([['M', path]], sources=sources), expected)

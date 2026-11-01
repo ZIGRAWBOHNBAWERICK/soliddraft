@@ -2,15 +2,15 @@
 //! conversation with the model, the proposals, and the MCP endpoint, all driven once per frame on the interface thread,
 //! where the document lives.
 
-use crate::app_tools::AppTools;
 use crate::command_tools::{CommandTools, ProposalBook, ProposalStatus, Surface};
 use crate::document::Preview;
 use crate::state::{AppState, NoteKind};
 use soliddraft_assistant::key::{self, ApiKey, KeySource};
-use soliddraft_assistant::mcp::{HttpCall, HttpServer, McpSession};
 use soliddraft_assistant::{AssistantSettings, ChatEvent, Conversation, ConversationConfig, Provider, ProviderKind};
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
+
+mod mcp;
+pub use mcp::McpEndpoint;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -61,13 +61,6 @@ pub enum Link {
     Connected(Box<Conversation>),
     /// No model; the reason says how to connect one.
     Offline(String),
-}
-
-/// The MCP endpoint of the running app.
-pub struct McpEndpoint {
-    pub server: HttpServer,
-    calls: Receiver<HttpCall>,
-    session: McpSession,
 }
 
 pub struct ChatState {
@@ -553,30 +546,22 @@ impl AppState {
 
     /// Serves MCP on `127.0.0.1:port` (0 picks a port) for this session.
     pub fn start_mcp(&mut self, port: u16, waker: Option<Arc<dyn Fn() + Send + Sync>>) -> Result<String, String> {
-        let (server, calls) = HttpServer::start(port, waker).map_err(|e| format!("MCP server: {e}"))?;
-        let url = server.url();
-        self.chat.mcp = Some(McpEndpoint {
-            server,
-            calls,
-            session: McpSession::new("soliddraft", env!("CARGO_PKG_VERSION"), crate::command_tools::MCP_INSTRUCTIONS),
-        });
+        let endpoint = McpEndpoint::start(port, waker)?;
+        let url = endpoint.server.url();
+        self.chat.mcp = Some(endpoint);
         Ok(url)
     }
 
-    /// Answers waiting MCP calls against the open part and drawing.
-    pub fn service_mcp(&mut self) {
-        let Some(mut mcp) = self.chat.mcp.take() else { return };
-        let mut changed = false;
-        while let Ok(call) = mcp.calls.try_recv() {
-            let before = self.doc.mesh_version;
-            let reply = mcp.session.handle(&mut AppTools { state: self }, call.message.clone());
-            call.respond(reply);
-            changed |= self.doc.mesh_version != before;
-        }
+    /// Answers waiting MCP calls. Returns whether a drawing reply still needs frames.
+    pub fn service_mcp(&mut self) -> bool {
+        let Some(mut mcp) = self.chat.mcp.take() else { return false };
+        let before = (self.doc.instance(), self.doc.mesh_version);
+        let waiting = mcp.service(self);
         self.chat.mcp = Some(mcp);
-        if changed {
+        if (self.doc.instance(), self.doc.mesh_version) != before {
             self.after_change();
         }
+        waiting
     }
 
     /// Whether a proposal can be undone right now.

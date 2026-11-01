@@ -434,7 +434,7 @@ fn install(state: &mut AppState, session: AssemblySession) {
 }
 
 /// Opens the assembly tab beside the part and makes it the active document.
-fn show_tab(dock: &mut DockState<Tab>) {
+pub(crate) fn show_tab(dock: &mut DockState<Tab>) {
     if let Some(path) = dock.find_tab(&Tab::Assembly) {
         let _ = dock.set_active_tab(path);
         dock.set_focused_node_and_surface(egui_dock::NodePath { surface: path.surface, node: path.node });

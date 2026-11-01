@@ -414,6 +414,12 @@ impl AppTools<'_> {
 
     /// Makes a drawing as the New drawing PropertyManager does with its defaults.
     fn make_drawing(&mut self, input: &Value) -> Result<Value, String> {
+        let new = self.drawing_request(input)?;
+        let session = drawing::create_drawing(self.state, &new)?;
+        Ok(self.install_drawing(session))
+    }
+
+    pub(crate) fn drawing_request(&self, input: &Value) -> Result<NewDrawing, String> {
         let id = input["template"].as_str().unwrap_or_default().trim();
         let templates = &soliddraft_drawing::library::library().templates;
         if !templates.iter().any(|t| t.id == id) {
@@ -423,14 +429,23 @@ impl AppTools<'_> {
         if self.state.doc.display_body().is_none() {
             return Err("Make drawing needs a body; extrude something first".into());
         }
+        if !self.state.doc.proof_state().current_proved_model() {
+            return Err("Wait for the part edit to finish before making a drawing".into());
+        }
         let mut new = NewDrawing::new();
         new.set_template(id);
-        let session = drawing::create_drawing(self.state, &new)?;
+        Ok(new)
+    }
+
+    pub(crate) fn install_drawing(&mut self, mut session: DrawingSession) -> Value {
+        session.seen_version = self.state.doc.mesh_version;
+        session.doc.log_mark = self.state.doc.command_log().len();
         self.state.assembly.active = false;
         self.state.drawing.session = Some(session);
         self.state.drawing.new = None;
         self.state.drawing.active = true;
-        Ok(self.drawing_now())
+        self.state.tool_document = Some(crate::app::Tab::Drawing);
+        self.drawing_now()
     }
 
     /// The view `input` names, with the sheet's name for it.
@@ -668,6 +683,27 @@ impl ToolHost for AppTools<'_> {
         if opening_part && !out.is_error {
             self.state.assembly.active = false;
             self.state.drawing.active = false;
+        }
+        if !out.is_error
+            && matches!(
+                name,
+                "make_drawing"
+                    | "show_drawing"
+                    | "make_assembly"
+                    | "show_assembly"
+                    | "drawing_show_part"
+                    | "assembly_show_part"
+                    | "new_part"
+                    | "open"
+            )
+        {
+            self.state.tool_document = Some(if self.state.assembly.is_active() {
+                crate::app::Tab::Assembly
+            } else if self.state.drawing.is_active() {
+                crate::app::Tab::Drawing
+            } else {
+                crate::app::Tab::Viewport
+            });
         }
         // What the window's frame does after a change: the drawing follows its part.
         drawing::follow_part(self.state);

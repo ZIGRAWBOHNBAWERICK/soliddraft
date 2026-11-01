@@ -97,27 +97,27 @@ impl Namer for PartContext<'_> {
     /// gone.
     fn edge_ref(&self, id: EdgeId) -> Option<EntityRef> {
         let e = self.topology.edges.iter().find(|e| e.id == id)?;
-        let model = self.doc.model().edge_ref(id).ok();
+        // Without a persistent name, let the drawing index use its fingerprint name.
+        let model = self.doc.model().edge_ref(id).ok()?;
         let named = self.doc.named_edge(id);
-        let feature =
-            named.map(|n| n.feature).or_else(|| model.as_ref().map(|m| u64::from(m.faces[0].feature.0))).unwrap_or(0);
+        let feature = named.map(|n| n.feature).unwrap_or(u64::from(model.faces[0].feature.0));
         let label = named.map(|n| n.label.clone()).unwrap_or_else(|| "Edge".into());
         let role = format!("{} · {label}", self.feature_name(feature));
         let mut r = EntityRef::new(EntityKind::Edge, &format!("f{feature}"), &role, 0, e.midpoint, e.length);
-        r.model = model.map(ModelEntity::Edge);
+        r.model = Some(ModelEntity::Edge(model));
         Some(r)
     }
 
     fn face_ref(&self, id: FaceId) -> Option<EntityRef> {
         let f = self.topology.faces.iter().find(|f| f.id == id)?;
-        let model = self.doc.model().face_ref(id).ok();
+        let model = self.doc.model().face_ref(id).ok()?;
         let named = self.doc.named_face(id);
-        let feature = named.map(|n| n.feature).or_else(|| model.as_ref().map(|m| u64::from(m.feature.0))).unwrap_or(0);
+        let feature = named.map(|n| n.feature).unwrap_or(u64::from(model.feature.0));
         let label = named.map(|n| n.label.clone()).unwrap_or_else(|| "Face".into());
         let role = format!("{} · {label}", self.feature_name(feature));
-        let ordinal = model.as_ref().map(|m| m.ordinal).unwrap_or(0);
+        let ordinal = model.ordinal;
         let mut r = EntityRef::new(EntityKind::Face, &format!("f{feature}"), &role, ordinal, f.centroid, f.area);
-        r.model = model.map(ModelEntity::Face);
+        r.model = Some(ModelEntity::Face(model));
         Some(r)
     }
 

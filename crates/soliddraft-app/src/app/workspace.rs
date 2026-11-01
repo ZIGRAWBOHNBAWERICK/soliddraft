@@ -65,6 +65,15 @@ pub struct SolidDraftApp {
 }
 
 impl SolidDraftApp {
+    fn focus_tool_document(&mut self) {
+        match self.state.tool_document.take() {
+            Some(Tab::Drawing) => crate::drawing::show_drawing_tab(&mut self.dock),
+            Some(Tab::Assembly) => crate::assembly::show_tab(&mut self.dock),
+            Some(Tab::Viewport) => crate::drawing::show_part_tab(&mut self.dock),
+            _ => {}
+        }
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
         theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
@@ -358,6 +367,7 @@ impl eframe::App for SolidDraftApp {
         let ctx = &root.ctx().clone();
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
+        self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
         self.state.frame_ms = if self.state.frame_ms == 0.0 { dt } else { self.state.frame_ms * 0.9 + dt * 0.1 };
         self.shortcuts(ctx);
@@ -374,7 +384,10 @@ impl eframe::App for SolidDraftApp {
         }
         self.request_assembly_levels();
         self.state.poll_assistant();
-        self.state.service_mcp();
+        if self.state.service_mcp() {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        self.focus_tool_document();
         // In the browser an opened file arrives as an upload, frames after the request.
         if let Some((name, bytes)) = crate::platform::take_upload() {
             let opened = file::open_bytes(&name, &bytes, self.state.doc.kernel().clone(), Some(self.state.doc.model()));

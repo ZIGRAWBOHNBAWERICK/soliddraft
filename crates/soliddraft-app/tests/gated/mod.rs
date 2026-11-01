@@ -24,6 +24,8 @@ pub struct Rules {
     pub refuse_display_above: Option<f64>,
     /// Pair proofs fail, as an incomplete bound would.
     pub refuse_pairs: bool,
+    /// Delays the next drawing view to exercise native request handling.
+    pub drawing_delay: std::time::Duration,
 }
 
 impl Gated {
@@ -43,6 +45,14 @@ impl Gated {
     }
 }
 impl Kernel for Gated {
+    fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
+        self.inner.edge_curve(body, edge)
+    }
+    fn view_curves(&self, body: BodyId, spec: &drawing::ViewSpec) -> KernelResult<drawing::ViewCurves> {
+        let delay = std::mem::take(&mut self.rules.lock().unwrap().drawing_delay);
+        std::thread::sleep(delay);
+        drawing::mesh_hlr::view_curves(self, body, spec)
+    }
     fn backend(&self) -> BackendInfo {
         self.inner.backend()
     }

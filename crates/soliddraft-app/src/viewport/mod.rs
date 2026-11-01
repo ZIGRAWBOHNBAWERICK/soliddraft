@@ -395,10 +395,13 @@ impl ViewportState {
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, theme::ink())
     }
 
-    /// What every frame hands the renderer from the camera and the look, with nothing in
-    /// the scene yet. The grid lies on the ground until a sketch moves it.
+    /// A copy of the latest id-buffer sample.
+    pub fn pick_sample(&self) -> PickSample {
+        self.pick.lock().unwrap().clone()
+    }
+
     /// The camera and render size of a frame of `rect` drawn now.
-    fn pick_view(&self, rect: Rect, ppp: f32) -> PickView {
+    pub fn pick_view(&self, rect: Rect, ppp: f32) -> PickView {
         let aspect = rect.width() / rect.height().max(1.0);
         PickView {
             view: self.camera.view(),
@@ -407,6 +410,8 @@ impl ViewportState {
         }
     }
 
+    /// What every frame hands the renderer from the camera and the look, with nothing in
+    /// the scene yet. The grid lies on the ground until a sketch moves it.
     fn frame_input(&self, rect: Rect, ppp: f32, cursor_px: Option<[u32; 2]>) -> FrameInput {
         let PickView { view, proj, size: size_px } = self.pick_view(rect, ppp);
         FrameInput {

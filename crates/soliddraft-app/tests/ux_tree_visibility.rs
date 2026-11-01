@@ -28,11 +28,14 @@ use soliddraft_sketch::P2;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Instant;
+
+#[path = "support/render_steps.rs"]
+mod render_steps;
+
+use render_steps::HANG_GUARD;
 
 type App = Harness<'static, SolidDraftApp>;
-
-const HANG_GUARD: Duration = Duration::from_secs(600);
 
 fn manifest() -> Value {
     serde_json::from_str(include_str!("fixtures/ux_tools/tree_visibility.json")).expect("the manifest is JSON")
@@ -205,9 +208,8 @@ fn launch(case: &mut Case, doc: Document, window: &str) -> App {
     let mut app = Harness::builder()
         .with_size(size)
         .with_pixels_per_point(ppp)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     settle(&mut app);
     app
@@ -226,6 +228,11 @@ fn viewport(app: &App) -> Rect {
 fn click_at(app: &mut App, point: Pos2) {
     app.hover_at(point);
     app.run_steps(4);
+    press_and_release(app, point);
+    settle(app);
+}
+
+fn press_and_release(app: &mut App, point: Pos2) {
     for pressed in [true, false] {
         app.event(egui::Event::PointerButton {
             pos: point,
@@ -235,6 +242,15 @@ fn click_at(app: &mut App, point: Pos2) {
         });
         app.step();
     }
+}
+
+/// A click in the viewport on what the id buffer shows at `point`, once it is current.
+fn pick_at(app: &mut App, point: Pos2) {
+    render_steps::rendered(app, |app| {
+        let steps = render_steps::await_pick(app, point);
+        app.run_steps(4_usize.saturating_sub(steps));
+        press_and_release(app, point);
+    });
     settle(app);
 }
 
@@ -723,8 +739,10 @@ fn frame_fixture(case: &mut Case, app: &mut App) {
         points.iter().all(|p| app.state().state.viewport.camera.project(*p, rect).is_some_and(|q| inner.contains(q)))
     };
     let centre = viewport(app).center();
-    app.hover_at(centre);
-    app.run_steps(2);
+    render_steps::rendered(app, |app| {
+        app.hover_at(centre);
+        app.run_steps(2);
+    });
     let mut sign = 1.0;
     let start = Instant::now();
     while !fits(app) {
@@ -736,7 +754,8 @@ fn frame_fixture(case: &mut Case, app: &mut App) {
             phase: egui::TouchPhase::Move,
             modifiers: Modifiers::NONE,
         });
-        app.run_steps(8);
+        render_steps::gpu_step(app);
+        app.run_steps(7);
         if app.state().state.viewport.camera.distance < before {
             sign = -sign;
         }
@@ -780,18 +799,20 @@ fn empty_point(app: &App) -> Pos2 {
 fn click_empty(case: &mut Case, app: &mut App) {
     let p = empty_point(app);
     case.note(format!("click empty viewport at {p:?}"));
-    click_at(app, p);
+    pick_at(app, p);
 }
 
 /// Rests the pointer on `world` until the current readback names what is under it, or
 /// nothing; the readback lags a frame behind every camera, document or display change.
 fn rest_on(app: &mut App, world: Vec3, expect_hit: bool) {
     let p = project(app, world);
-    app.hover_at(p);
+    let steps = render_steps::await_pick(app, p);
     if expect_hit {
-        until(app, "the pick readback names the face", |app| app.state().state.viewport.hover.is_some());
+        render_steps::rendered(app, |app| {
+            until(app, "the pick readback names the face", |app| app.state().state.viewport.hover.is_some());
+        });
     } else {
-        app.run_steps(20);
+        app.run_steps(20_usize.saturating_sub(steps));
     }
 }
 
@@ -848,7 +869,7 @@ fn one_click(window: &str) {
         let top = Vec3::new(0.0, 0.0, f(&manifest()["expected"]["B20"]["bounds_mm"]["max"][2]) as f32);
         rest_on(app, top, false);
         assert_eq!(app.state().state.viewport.hover, None, "no pick of a hidden face, edge or vertex");
-        click_at(app, project(app, top));
+        pick_at(app, project(app, top));
         assert_eq!(app.state().state.doc.selection, None, "a click there picks nothing");
         assert_eq!(geometry(app), before);
 
@@ -864,7 +885,7 @@ fn one_click(window: &str) {
             "the body is painted again: {covered}"
         );
         rest_on(app, top, true);
-        click_at(app, project(app, top));
+        pick_at(app, project(app, top));
         let picked = match app.state().state.doc.selection {
             Some(Selection::Face(face)) => face,
             other => panic!("the top face is picked, not {other:?}"),
@@ -1123,17 +1144,20 @@ fn hiding_a_solid_hides_its_pending_replacement_body() {
         // A real scalar edit: drag the Depth field, with the exact proof held back.
         kernel.rules.lock().unwrap().hold_next = true;
         let start = app.get_by_label("Depth value").rect().center();
-        app.hover_at(start);
-        app.run_steps(2);
-        app.drag_at(start);
-        app.run_steps(2);
-        let mut end = start;
-        for step in 1..=20 {
-            end = pos2(start.x + 4.0 * step as f32, start.y);
-            app.hover_at(end);
-            app.run_steps(1);
-        }
-        app.drop_at(end);
+        render_steps::rendered(app, |app| {
+            app.hover_at(start);
+            app.run_steps(2);
+            app.drag_at(start);
+            app.run_steps(2);
+            let mut end = start;
+            for step in 1..=20 {
+                end = pos2(start.x + 4.0 * step as f32, start.y);
+                app.hover_at(end);
+                app.run_steps(1);
+            }
+            app.drop_at(end);
+            app.step();
+        });
         until(app, "the edit shows its replacement body with its proof pending", |app| {
             let s = &app.state().state;
             s.drag_preview.is_none() && s.doc.proof_pending() && s.doc.provisional_mesh().is_some()
@@ -1163,7 +1187,7 @@ fn hiding_a_solid_hides_its_pending_replacement_body() {
         let top = Vec3::new(0.0, 0.0, f(&manifest()["expected"]["B20"]["bounds_mm"]["max"][2]) as f32);
         rest_on(app, top, false);
         assert_eq!(app.state().state.viewport.hover, None, "no pick of the hidden replacement");
-        click_at(app, project(app, top));
+        pick_at(app, project(app, top));
         assert!(
             !matches!(app.state().state.doc.selection, Some(Selection::Face(_) | Selection::Edge(_))),
             "a click there picks nothing of the hidden replacement: {:?}",
@@ -1179,7 +1203,7 @@ fn hiding_a_solid_hides_its_pending_replacement_body() {
         let covered = body_samples().iter().filter(|p| changed(&back, &hidden, app, project(app, **p), 1.0)).count();
         assert!(covered as f64 / body_samples().len() as f64 >= detection("covered_sample_fraction"), "{covered}");
         rest_on(app, top, true);
-        click_at(app, project(app, top));
+        pick_at(app, project(app, top));
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "the replacement is pickable");
 
         kernel.rules.lock().unwrap().hold = None;

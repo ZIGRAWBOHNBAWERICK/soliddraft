@@ -216,7 +216,7 @@ fn picks(app: &mut App, points: &[Vec3]) -> Vec<Option<Selection>> {
         .iter()
         .map(|world| {
             let point = projected(app, *world).expect("the point is in view");
-            click(app, point);
+            pick(app, point);
             let selection = app.state().state.doc.selection;
             click_empty(app);
             selection
@@ -314,7 +314,7 @@ fn reference_overlays_leave_opaque_model_and_picks_readable() {
         (wire.get_pixel(beside.x as u32, beside.y as u32).0, wire_off.get_pixel(beside.x as u32, beside.y as u32).0);
     assert!((0..3).any(|c| p[c].abs_diff(q[c]) >= 4), "a plane shows in wireframe");
     let edge = projected(&app, points[1]).expect("in view");
-    click(&mut app, edge);
+    pick(&mut app, edge);
     assert!(matches!(app.state().state.doc.selection, Some(Selection::Edge(_))), "wireframe edges pick");
     click_empty(&mut app);
 
@@ -390,7 +390,7 @@ fn picking_origin_plane_and_axis_shows_the_triad() {
 
     // The origin.
     let origin = projected(&app, Vec3::ZERO).expect("in view");
-    click(&mut app, origin);
+    pick(&mut app, origin);
     assert_eq!(reference(&app), Some(Reference::Origin), "a click on the origin");
     pointer_to_chrome(&mut app);
     let image = case.frame(&mut app, "origin-picked");
@@ -402,7 +402,7 @@ fn picking_origin_plane_and_axis_shows_the_triad() {
     for plane in PlaneKind::ALL {
         let world = lone_point(&app, plane, half);
         let point = projected(&app, world).expect("in view");
-        click(&mut app, point);
+        pick(&mut app, point);
         assert_eq!(reference(&app), Some(Reference::Plane(plane)), "a click on {world}");
         assert!(app.state().state.sketch.is_none() && app.state().state.editor.is_none(), "no sketch and no editor");
         pointer_to_chrome(&mut app);
@@ -422,7 +422,7 @@ fn picking_origin_plane_and_axis_shows_the_triad() {
         let reach = app.state().state.viewport.camera.distance * 0.25;
         let on_axis = projected(&app, axis.direction() * reach * 0.8).expect("in view");
         // On the fainter half for a change, away from where the planes meet the view.
-        click(&mut app, on_axis);
+        pick(&mut app, on_axis);
         assert_eq!(reference(&app), Some(Reference::Axis(axis)), "a click on the {} axis", axis.label());
         pointer_to_chrome(&mut app);
         let image = case.frame(&mut app, &format!("{}-picked", axis.label()));
@@ -435,8 +435,10 @@ fn picking_origin_plane_and_axis_shows_the_triad() {
 
     // Hover alone latches nothing, and the grid is not a thing to select.
     let lone = projected(&app, lone_point(&app, PlaneKind::Top, half)).expect("in view");
-    app.hover_at(lone);
-    app.run_steps(8);
+    render_steps::rendered(&mut app, |app| {
+        app.hover_at(lone);
+        app.run_steps(8);
+    });
     let hovered = case.frame(&mut app, "hovering");
     assert_axes_hidden(&hovered, &app, "hovering a plane");
     assert_eq!(reference(&app), None);
@@ -491,7 +493,7 @@ fn click_before_the_sample_arrives(case: &mut Case, app: &mut App, at: egui::Pos
 #[test]
 fn a_projection_toggle_retires_the_pick_sample() {
     let mut case = Case::gpu("sample_after_projection");
-    let mut app = launch(box_part());
+    let mut app = launch_eager(box_part());
     // What every projection control sends, so that the pointer can stay where it rests.
     let toggle = |app: &mut App| app.state_mut().state.push(AppAction::ToggleProjection);
     toggle(&mut app);
@@ -510,7 +512,7 @@ fn a_projection_toggle_retires_the_pick_sample() {
 #[test]
 fn a_resize_retires_the_pick_sample() {
     let mut case = Case::gpu("sample_after_resize");
-    let mut app = launch(box_part());
+    let mut app = launch_eager(box_part());
     let narrower = SIZE - vec2(60.0, 0.0);
     app.set_size(narrower);
     settle(&mut app);
@@ -536,7 +538,7 @@ fn plane_pick_starts_a_sketch_only_when_the_command_requests_one() {
     let features = app.state().state.doc.features.len();
     click_button(&mut app, "Sketch");
     assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickPlane)));
-    click(&mut app, point);
+    pick(&mut app, point);
     assert_eq!(app.state().state.doc.features.len(), features + 1, "exactly one sketch");
     let session = app.state().state.sketch.as_ref().expect("the sketch opened");
     let normal = session.plane.normal;
@@ -551,7 +553,7 @@ fn plane_pick_starts_a_sketch_only_when_the_command_requests_one() {
     let view = camera(&app);
     let features = app.state().state.doc.features.len();
     let point = projected(&app, world).expect("in view");
-    click(&mut app, point);
+    pick(&mut app, point);
     assert_eq!(reference(&app), Some(Reference::Plane(PlaneKind::Front)));
     assert_eq!(app.state().state.doc.features.len(), features, "no sketch at rest");
     assert!(app.state().state.editor.is_none() && app.state().state.sketch.is_none(), "no editor");
@@ -580,7 +582,7 @@ fn plane_pick_starts_a_sketch_only_when_the_command_requests_one() {
     assert_axes_shown(&image, &app, "while the pattern asks for an axis");
     let reach = 30.0 * 1.15 + 5.0;
     let on_axis = projected(&app, Vec3::Y * reach * -1.0).expect("in view");
-    click(&mut app, on_axis);
+    pick(&mut app, on_axis);
     let editor = app.state().state.editor.as_ref().expect("the editor stays open");
     let EditorParams::Pattern(pattern) = &editor.params else { panic!("the pattern editor") };
     let along = format!("{:?}", pattern.layout);
@@ -608,7 +610,7 @@ fn a_tree_choice_wins_over_the_selection_and_the_tools() {
     click_label(&mut app, "Hide Front plane");
     assert!(!plane_named(&app, front), "the eye takes its name away");
     assert!(plane_named(&app, PlaneKind::Top), "and leaves the others");
-    click(&mut app, point);
+    pick(&mut app, point);
     assert_eq!(reference(&app), None, "nothing is there to find");
     click_label(&mut app, "Front plane");
     assert_eq!(reference(&app), Some(Reference::Plane(front)), "the row still selects");
@@ -616,7 +618,7 @@ fn a_tree_choice_wins_over_the_selection_and_the_tools() {
     click_empty(&mut app);
     click_label(&mut app, "Show Front plane");
     assert!(plane_named(&app, front), "the eye brings it back");
-    click(&mut app, point);
+    pick(&mut app, point);
     assert_eq!(reference(&app), Some(Reference::Plane(front)), "with its hit target");
     click_empty(&mut app);
 

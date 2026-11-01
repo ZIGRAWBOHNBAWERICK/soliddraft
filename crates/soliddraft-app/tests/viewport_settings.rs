@@ -159,6 +159,7 @@ fn look_and_display_writes_preserve_each_other() {
     set_preference(&mut app, ALWAYS_SHOW_AXES, false);
     expected["view"]["always_show_origin_axes"] = json!(false);
     assert_eq!(case.settings_json(), expected, "a toggle in Preferences keeps everything else");
+    app.render().expect("the last frame renders");
 }
 
 #[test]

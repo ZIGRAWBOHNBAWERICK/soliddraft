@@ -18,7 +18,12 @@ use soliddraft_app::document::{
 use soliddraft_app::state::{EditorParams, Tool};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Instant;
+
+#[path = "render_steps.rs"]
+pub mod render_steps;
+
+use render_steps::HANG_GUARD;
 
 pub type App = Harness<'static, SolidDraftApp>;
 
@@ -26,8 +31,6 @@ pub type App = Harness<'static, SolidDraftApp>;
 pub const TOLERANCE: f32 = 1.0;
 
 pub const WINDOW: Vec2 = vec2(1440.0, 900.0);
-
-const HANG_GUARD: Duration = Duration::from_secs(600);
 
 /// The rendered harnesses share one adapter and the process-wide config; one at a time.
 static GPU: Mutex<()> = Mutex::new(());
@@ -81,7 +84,7 @@ impl Drop for Case {
     }
 }
 
-/// The real app on a document, one window of 1440 by 900 at 1.0, rendering every step.
+/// The real app on a document, one window of 1440 by 900 at 1.0, drawing on demand.
 pub fn app(doc: Document) -> App {
     app_at(doc, WINDOW, 1.0)
 }
@@ -90,9 +93,8 @@ pub fn app_at(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
     let mut app = Harness::builder()
         .with_size(size)
         .with_pixels_per_point(pixels_per_point)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     app.run_steps(10);
     app
@@ -104,14 +106,7 @@ pub fn app_at(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
 /// The real app without a GPU pass per step, for walks of thousands of frames that read
 /// the shapes and never the pixels. [`Case::frame`] still renders on request.
 pub fn app_unrendered(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
-    let mut app = Harness::builder()
-        .with_size(size)
-        .with_pixels_per_point(pixels_per_point)
-        .with_step_dt(1.0 / 60.0)
-        .wgpu()
-        .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
-    app.run_steps(10);
-    app
+    app_at(doc, size, pixels_per_point)
 }
 
 /// No features, body, selection, editor or sketch session.
@@ -154,6 +149,11 @@ pub fn until(app: &mut App, what: &str, done: impl Fn(&App) -> bool) {
     }
 }
 
+/// Like [`until`], for a condition that takes the GPU to come true.
+pub fn until_rendered(app: &mut App, what: &str, done: impl Fn(&App) -> bool) {
+    render_steps::rendered(app, |app| until(app, what, done));
+}
+
 // ---------------------------------------------------------------------------
 // Input.
 
@@ -162,6 +162,11 @@ pub fn until(app: &mut App, what: &str, done: impl Fn(&App) -> bool) {
 pub fn click_at(app: &mut App, point: Pos2) {
     app.hover_at(point);
     app.run_steps(3);
+    press_and_release(app, point);
+    app.run_steps(3);
+}
+
+fn press_and_release(app: &mut App, point: Pos2) {
     for pressed in [true, false] {
         app.event(egui::Event::PointerButton {
             pos: point,
@@ -171,6 +176,17 @@ pub fn click_at(app: &mut App, point: Pos2) {
         });
         app.step();
     }
+}
+
+/// A click on what the viewport's id buffer shows at a point, once it is current. Menus,
+/// rows and the widgets over the viewport are [`click_at`]: nothing tells them apart by
+/// where they are on screen.
+pub fn pick_at(app: &mut App, point: Pos2) {
+    render_steps::rendered(app, |app| {
+        let steps = render_steps::await_pick(app, point);
+        app.run_steps(3_usize.saturating_sub(steps));
+        press_and_release(app, point);
+    });
     app.run_steps(3);
 }
 
@@ -331,7 +347,7 @@ pub fn click_world(app: &mut App, world: glam::Vec3) {
         let state = &app.state().state;
         state.viewport.camera.project(world, state.viewport.rect).expect("the point is on screen")
     };
-    click_at(app, point);
+    pick_at(app, point);
 }
 
 /// Types a value into a numeric field: click, select all, type, Enter.

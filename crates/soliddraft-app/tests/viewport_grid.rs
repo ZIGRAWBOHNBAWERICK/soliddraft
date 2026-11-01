@@ -347,7 +347,7 @@ fn face_sketch_grid_is_on_the_face_not_world_zero() {
         let state = &app.state().state;
         state.viewport.camera.project(Vec3::new(0.0, 0.0, 20.0), state.viewport.rect).expect("the top is on screen")
     };
-    click(&mut app, top);
+    pick(&mut app, top);
     let selection = app.state().state.doc.selection;
     assert!(matches!(selection, Some(Selection::Face(_))), "the top face is selected: {selection:?}");
     click_button(&mut app, "Sketch");

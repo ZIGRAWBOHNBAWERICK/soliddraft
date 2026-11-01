@@ -88,6 +88,7 @@ fn observed() -> Value {
     fn settled(mut app: App) -> App {
         app.run_steps(30);
         ribbon::until(&mut app, "the proof", |a| !a.state().state.doc.proof_pending());
+        app.render().expect("the fixture renders");
         app
     }
     let blank = settled(ribbon::app(ribbon::blank()));
@@ -97,6 +98,7 @@ fn observed() -> Value {
     ribbon::menu(&mut assembly, "File", "New assembly");
     assembly.run_steps(30);
     assert!(assembly.state().state.assembly.is_active(), "the assembly is the active document");
+    assembly.render().expect("the assembly renders");
     contract(&[
         ("blank", &blank.state().state),
         ("sketch", &sketch.state().state),

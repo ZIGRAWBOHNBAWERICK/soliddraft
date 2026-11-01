@@ -35,15 +35,17 @@ fn out_dir() -> PathBuf {
     dir
 }
 
+#[path = "support/render_steps.rs"]
+mod render_steps;
+
 type App<'a> = Harness<'a, SolidDraftApp>;
 
 fn harness() -> App<'static> {
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(|cc| {
             SolidDraftApp::new(
                 cc,
@@ -79,7 +81,7 @@ fn look_from(harness: &mut App<'_>, yaw: f32, pitch: f32) {
     settle(harness);
 }
 
-/// Lets camera moves and the one-frame pick lag settle.
+/// Lets camera moves and the proof settle.
 fn settle(harness: &mut App<'_>) {
     harness.run_steps(30);
     let deadline = std::time::Instant::now() + HANG;
@@ -95,22 +97,35 @@ fn settle(harness: &mut App<'_>) {
 }
 
 fn click_at(harness: &mut App<'_>, pos: Pos2) {
-    harness.hover_at(pos);
-    harness.run_steps(3);
-    harness.event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: Default::default(),
+    render_steps::rendered(harness, |harness| {
+        harness.hover_at(pos);
+        harness.run_steps(3);
+        press_and_release(harness, pos);
     });
-    harness.step();
-    harness.event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: Default::default(),
+    harness.run_steps(2);
+}
+
+/// A press and a release, drawn, ending on the release's own step.
+fn press_and_release(harness: &mut App<'_>, pos: Pos2) {
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+        harness.step();
+    }
+}
+
+/// A click on what the id buffer shows at `pos`, once it is current.
+fn pick_at(harness: &mut App<'_>, pos: Pos2) {
+    render_steps::rendered(harness, |harness| {
+        let steps = render_steps::await_pick(harness, pos);
+        harness.run_steps(3_usize.saturating_sub(steps));
+        press_and_release(harness, pos);
     });
-    harness.run_steps(3);
+    harness.run_steps(2);
 }
 
 /// Screen position of a world point through the current camera.
@@ -133,8 +148,10 @@ fn sketch_click(harness: &mut App<'_>, p: P2) {
 
 fn hover_sketch(harness: &mut App<'_>, p: P2) {
     let pos = sketch_screen(harness, p);
-    harness.hover_at(pos);
-    harness.run_steps(2);
+    render_steps::rendered(harness, |harness| {
+        harness.hover_at(pos);
+        harness.run_steps(2);
+    });
 }
 
 /// Types a value into the dimension popup the smart dimension tool opened.
@@ -187,7 +204,7 @@ fn open_sketch_on_plane(harness: &mut App<'_>, plane: &str) {
 /// Clicks a planar face of the body at a world point and starts a sketch on it.
 fn open_sketch_on_face(harness: &mut App<'_>, on_face: Vec3) {
     let pos = screen_of(harness, on_face);
-    click_at(harness, pos);
+    pick_at(harness, pos);
     let sel = harness.state().state.doc.selection;
     assert!(matches!(sel, Some(Selection::Face(_))), "expected a face under {on_face:?}, got {sel:?}");
     click_button(harness, "Sketch");
@@ -293,17 +310,19 @@ fn open_extrude_orbit_click_face() {
         pressed,
         modifiers: shift,
     };
-    harness.hover_at(start);
-    harness.event(egui::Event::ModifiersChanged(shift));
-    harness.event(middle(start, true));
-    harness.step();
-    for i in 1..=8 {
-        harness.hover_at(start + vec2(20.0 * i as f32, -6.0 * i as f32));
+    render_steps::rendered(&mut harness, |harness| {
+        harness.hover_at(start);
+        harness.event(egui::Event::ModifiersChanged(shift));
+        harness.event(middle(start, true));
         harness.step();
-    }
-    harness.event(middle(start + vec2(160.0, -48.0), false));
-    harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
-    harness.run_steps(3);
+        for i in 1..=8 {
+            harness.hover_at(start + vec2(20.0 * i as f32, -6.0 * i as f32));
+            harness.step();
+        }
+        harness.event(middle(start + vec2(160.0, -48.0), false));
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        harness.run_steps(3);
+    });
     let yaw_after = harness.state().state.viewport.camera.yaw;
     assert!((yaw_after - yaw_before).abs() > 0.1, "orbit should change the camera yaw");
     harness.key_press(Key::I);
@@ -311,20 +330,22 @@ fn open_extrude_orbit_click_face() {
 
     // Hover and click the face under the viewport centre; it must be named.
     let centre = rect.center();
-    harness.hover_at(centre);
     // The pick under the pointer reads back from the GPU a frame or two behind; a readback
     // still in flight for the pointer's last place can add one.
-    harness.run_steps(4);
-    for _ in 0..8 {
-        if harness.state().state.hover_info.is_some() {
-            break;
+    let steps = render_steps::await_pick(&mut harness, centre);
+    harness.run_steps(4_usize.saturating_sub(steps));
+    render_steps::rendered(&mut harness, |harness| {
+        for _ in 0..8 {
+            if harness.state().state.hover_info.is_some() {
+                break;
+            }
+            harness.step();
         }
-        harness.step();
-    }
+    });
     let hover = harness.state().state.hover_info.clone().expect("hovering the body should name a face");
     assert!(hover.title.starts_with("Boss-Extrude1 · "), "hover title: {}", hover.title);
     save(&mut harness, "04-hover");
-    click_at(&mut harness, centre);
+    pick_at(&mut harness, centre);
     let sel = harness.state().state.doc.selection;
     assert!(matches!(sel, Some(Selection::Face(_))), "selection: {sel:?}");
     let info = harness.state().state.doc.describe(sel.unwrap()).unwrap();
@@ -356,9 +377,8 @@ fn demo_part_renders() {
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(|cc| {
             let mut app = SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default());
             let provider = std::sync::Arc::new(MockProvider::new(vec![

@@ -104,15 +104,14 @@ impl Drop for Case {
     }
 }
 
-/// The real app on a document, rendering every step, settled.
+/// The real app on a document, drawing on demand, settled.
 pub fn launch(doc: Document, look: Look) -> App {
     let automation = Automation { theme: look.theme, ..Automation::default() };
     let mut app = Harness::builder()
         .with_size(look.size)
         .with_pixels_per_point(look.pixels_per_point)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(ribbon::render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, automation));
     settle(&mut app);
     app
@@ -144,10 +143,10 @@ pub fn screen(app: &App, world: glam::Vec3) -> Pos2 {
 pub fn double_click_part(app: &mut App, world: glam::Vec3) {
     settle(app);
     let point = screen(app, world);
-    app.hover_at(point);
-    ribbon::until(app, "the part under the pointer", |a| a.state().state.viewport.hover.is_some());
+    ribbon::render_steps::await_pick(app, point);
+    ribbon::until_rendered(app, "the part under the pointer", |a| a.state().state.viewport.hover.is_some());
     settle(app);
-    ribbon::double_click_at(app, point);
+    ribbon::render_steps::rendered(app, |app| ribbon::double_click_at(app, point));
 }
 
 /// Waits until the display answers the latest edit, or the edit has failed.

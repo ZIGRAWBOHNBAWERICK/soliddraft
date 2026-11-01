@@ -30,15 +30,17 @@ fn out_dir() -> PathBuf {
     dir
 }
 
+#[path = "support/render_steps.rs"]
+mod render_steps;
+
 type App<'a> = Harness<'a, SolidDraftApp>;
 
 fn harness() -> App<'static> {
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default()))
 }
 
@@ -69,16 +71,19 @@ fn drag_edge(harness: &mut App<'_>, side: Side, dx: f32) {
     };
     // Well above the tree/properties split, so the panel edge is the only handle there.
     let y = viewport_rect(harness).top() + 80.0;
-    harness.hover_at(pos2(edge_x, y));
-    harness.run_steps(2);
-    harness.drag_at(pos2(edge_x, y));
-    harness.run_steps(2);
-    for step in 1..=4 {
-        harness.hover_at(pos2(edge_x + dx * step as f32 / 4.0, y));
+    render_steps::rendered(harness, |harness| {
+        harness.hover_at(pos2(edge_x, y));
         harness.run_steps(2);
-    }
-    harness.drop_at(pos2(edge_x + dx, y));
-    settle(harness);
+        harness.drag_at(pos2(edge_x, y));
+        harness.run_steps(2);
+        for step in 1..=4 {
+            harness.hover_at(pos2(edge_x + dx * step as f32 / 4.0, y));
+            harness.run_steps(2);
+        }
+        harness.drop_at(pos2(edge_x + dx, y));
+        harness.step();
+    });
+    harness.run_steps(29);
 }
 
 /// The GPU harnesses share one adapter; one test at a time.

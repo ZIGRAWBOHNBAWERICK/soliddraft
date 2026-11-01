@@ -20,6 +20,11 @@ use soliddraft_app::theme::Mode;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
+#[path = "support/render_steps.rs"]
+mod render_steps;
+
+use render_steps::rendered;
+
 /// Held for the length of a test: the config directory is global and harnesses take turns
 /// on the GPU.
 static CONFIG_LOCK: Mutex<()> = Mutex::new(());
@@ -123,14 +128,13 @@ fn navigation_save_does_not_touch_document_or_undo() {
 
 type App = Harness<'static, SolidDraftApp>;
 
-/// The app on `doc`, drawing every step so picks read back, with the camera fitted.
+/// The app on `doc`, with the camera fitted. It draws its gestures, so picks read back.
 fn gesture_app(doc: Document, preset: &str) -> App {
     let mut app = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     app.run_steps(6);
     use_preset(&mut app, preset);
@@ -179,23 +183,35 @@ fn modifiers(app: &App, m: Modifiers) {
 }
 
 fn press(app: &mut App, button: PointerButton, pos: Pos2, m: Modifiers) {
-    app.hover_at(pos);
-    app.step();
-    modifiers(app, m);
-    app.event(egui::Event::PointerButton { pos, button, pressed: true, modifiers: m });
-    app.step();
+    rendered(app, |app| {
+        app.hover_at(pos);
+        app.step();
+        modifiers(app, m);
+        app.event(egui::Event::PointerButton { pos, button, pressed: true, modifiers: m });
+        app.step();
+    });
 }
 
 fn move_to(app: &mut App, pos: Pos2) {
-    app.event(egui::Event::PointerMoved(pos));
-    app.step();
+    rendered(app, |app| {
+        app.event(egui::Event::PointerMoved(pos));
+        app.step();
+    });
 }
 
 fn release(app: &mut App, button: PointerButton, pos: Pos2, m: Modifiers) {
-    app.event(egui::Event::PointerButton { pos, button, pressed: false, modifiers: m });
-    app.step();
-    modifiers(app, Modifiers::NONE);
-    app.run_steps(2);
+    rendered(app, |app| {
+        app.event(egui::Event::PointerButton { pos, button, pressed: false, modifiers: m });
+        app.step();
+        modifiers(app, Modifiers::NONE);
+        app.run_steps(2);
+    });
+}
+
+/// Rests the pointer until the id buffer answers for it, as long as a click's approach takes.
+fn rest_for_pick(app: &mut App, pos: Pos2) {
+    let steps = render_steps::await_pick(app, pos);
+    app.run_steps(4_usize.saturating_sub(steps));
 }
 
 /// Drags from `from` to `to` in a few moves and lets go.
@@ -264,20 +280,24 @@ fn held_ordinary_keys_are_modifiers_and_taps_still_run_their_command() {
     app.run_steps(2);
     let c = viewport(&app).center();
     let effect_of = effect(&mut app, "inventor-f2-left-drag", |app| {
-        app.key_down(Key::F2);
-        app.step();
-        drag(app, PointerButton::Primary, c, c + vec2(80.0, 30.0), Modifiers::NONE);
-        app.key_up(Key::F2);
-        app.run_steps(3);
+        rendered(app, |app| {
+            app.key_down(Key::F2);
+            app.step();
+            drag(app, PointerButton::Primary, c, c + vec2(80.0, 30.0), Modifiers::NONE);
+            app.key_up(Key::F2);
+            app.run_steps(3);
+        });
     });
     assert_eq!(effect_of, PAN, "held F2 and a left drag pans");
     let s = &app.state().state;
     assert!(s.rename.is_none(), "the held F2 did not rename");
     assert_eq!(s.doc.selection, Some(Selection::Feature(feature)), "the drag selected nothing");
-    app.key_down(Key::F2);
-    app.step();
-    app.key_up(Key::F2);
-    app.run_steps(3);
+    rendered(&mut app, |app| {
+        app.key_down(Key::F2);
+        app.step();
+        app.key_up(Key::F2);
+        app.run_steps(3);
+    });
     assert!(app.state().state.rename.is_some(), "a tap of F2 still renames");
     record("held-keys", &dir);
 }
@@ -365,8 +385,7 @@ fn navigation_drag_does_not_select_or_open_a_secondary_click_path() {
         let s = &app.state().state;
         s.viewport.camera.project(Vec3::new(0.0, 0.0, 20.0), s.viewport.rect).unwrap()
     };
-    app.hover_at(top);
-    app.run_steps(4);
+    rest_for_pick(&mut app, top);
     press(&mut app, PointerButton::Primary, top, Modifiers::NONE);
     release(&mut app, PointerButton::Primary, top, Modifiers::NONE);
     assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "the click picked the top face");
@@ -384,18 +403,24 @@ fn one_physical_zoom_gesture_produces_one_zoom() {
     }
     let mut app = gesture_app(soliddraft_app::demo_document(), "fusion");
     let c = viewport(&app).center();
-    app.hover_at(c);
-    app.run_steps(2);
-    let d0 = cam(&app).3;
-    app.event(wheel_event(egui::MouseWheelUnit::Line, 1.0, Modifiers::NONE));
-    app.run_steps(3);
-    let d1 = cam(&app).3;
+    let d0 = rendered(&mut app, |app| {
+        app.hover_at(c);
+        app.run_steps(2);
+        cam(app).3
+    });
+    let d1 = rendered(&mut app, |app| {
+        app.event(wheel_event(egui::MouseWheelUnit::Line, 1.0, Modifiers::NONE));
+        app.run_steps(3);
+        cam(app).3
+    });
     assert!((d0 / d1 - 0.1f32.exp()).abs() < 1e-3, "one line, one zoom: {d0} to {d1}");
     // Both in one frame, as the browser delivers them.
-    app.input_mut().events.push(egui::Event::Zoom(1.25));
-    app.input_mut().events.push(wheel_event(egui::MouseWheelUnit::Point, 30.0, Modifiers::CTRL));
-    app.run_steps(3);
-    let d2 = cam(&app).3;
+    let d2 = rendered(&mut app, |app| {
+        app.input_mut().events.push(egui::Event::Zoom(1.25));
+        app.input_mut().events.push(wheel_event(egui::MouseWheelUnit::Point, 30.0, Modifiers::CTRL));
+        app.run_steps(3);
+        cam(app).3
+    });
     assert!((d1 / d2 - 1.25).abs() < 1e-3, "a pinch and its Ctrl-wheel copy zoom once: {d1} to {d2}");
     trace(&mut app, "fusion-wheel-and-pinch", (0.0, 0.0, Vec3::ZERO, d0), (0.0, 0.0, Vec3::ZERO, d2));
 }
@@ -430,8 +455,10 @@ fn navigation_works_with_active_sketch_and_collector() {
     let lines = |app: &App| app.state().state.sketch.as_ref().map_or(0, |s| s.sketch.entities.len());
     let before = lines(&app);
     for p in [c + vec2(-80.0, -40.0), c + vec2(90.0, 50.0)] {
-        app.hover_at(p);
-        app.run_steps(2);
+        rendered(&mut app, |app| {
+            app.hover_at(p);
+            app.run_steps(2);
+        });
         press(&mut app, PointerButton::Primary, p, Modifiers::NONE);
         release(&mut app, PointerButton::Primary, p, Modifiers::NONE);
     }
@@ -480,8 +507,7 @@ fn navigation_works_with_active_sketch_and_collector() {
         let m = Vec3::new(other.x as f32, other.y as f32, other.z as f32);
         s.viewport.camera.project(m, s.viewport.rect).unwrap()
     };
-    app.hover_at(p);
-    app.run_steps(4);
+    rest_for_pick(&mut app, p);
     press(&mut app, PointerButton::Primary, p, Modifiers::NONE);
     release(&mut app, PointerButton::Primary, p, Modifiers::NONE);
     app.run_steps(10);
@@ -534,11 +560,15 @@ fn legacy_preset_reproduces_current_navigation() {
     });
     assert_eq!(ctrl, NOTHING, "no other gesture moves the camera");
     unchanged(&app, "and it selects nothing");
-    app.hover_at(viewport(&app).center());
-    app.run_steps(2);
+    rendered(&mut app, |app| {
+        app.hover_at(viewport(app).center());
+        app.run_steps(2);
+    });
     let wheel = effect(&mut app, "legacy-wheel", |app| {
-        app.event(wheel_event(egui::MouseWheelUnit::Line, -2.0, Modifiers::NONE));
-        app.run_steps(3);
+        rendered(app, |app| {
+            app.event(wheel_event(egui::MouseWheelUnit::Line, -2.0, Modifiers::NONE));
+            app.run_steps(3);
+        });
     });
     assert!(wheel.2, "the wheel zooms");
     let fit = effect(&mut app, "legacy-z-fit", |app| {
@@ -576,8 +606,7 @@ fn legacy_preset_reproduces_current_navigation() {
         let s = &app.state().state;
         s.viewport.camera.project(Vec3::new(5.0, 5.0, 20.0), s.viewport.rect).unwrap()
     };
-    app.hover_at(top);
-    app.run_steps(4);
+    rest_for_pick(&mut app, top);
     press(&mut app, PointerButton::Primary, top, Modifiers::NONE);
     release(&mut app, PointerButton::Primary, top, Modifiers::NONE);
     assert!(app.state().state.doc.selection.is_some(), "a click without a drag selects");
@@ -612,19 +641,23 @@ fn fusion_solidworks_onshape_end_to_end() {
         unchanged(&app, &name);
     }
     // Onshape: a middle double click fits, and N turns normal to a face through normal_to.
-    app.event(wheel_event(egui::MouseWheelUnit::Line, -5.0, Modifiers::NONE));
-    app.run_steps(3);
+    rendered(&mut app, |app| {
+        app.event(wheel_event(egui::MouseWheelUnit::Line, -5.0, Modifiers::NONE));
+        app.run_steps(3);
+    });
     let fit = effect(&mut app, "onshape-middle-double-click", |app| {
-        for _ in 0..2 {
-            press(app, PointerButton::Middle, c, Modifiers::NONE);
-            app.event(egui::Event::PointerButton {
-                pos: c,
-                button: PointerButton::Middle,
-                pressed: false,
-                modifiers: Modifiers::NONE,
-            });
-            app.step();
-        }
+        rendered(app, |app| {
+            for _ in 0..2 {
+                press(app, PointerButton::Middle, c, Modifiers::NONE);
+                app.event(egui::Event::PointerButton {
+                    pos: c,
+                    button: PointerButton::Middle,
+                    pressed: false,
+                    modifiers: Modifiers::NONE,
+                });
+                app.step();
+            }
+        });
         app.run_steps(40);
     });
     assert!(fit.2 || fit.1, "the double click fitted the view");
@@ -651,12 +684,14 @@ fn wheel_direction_is_global_and_independent() {
     for preset in ["fusion", "solidworks", "onshape", "fusion"] {
         use_preset(&mut app, preset);
         assert!(app.state().state.navigation.wheel.invert, "{preset}: still inverted");
-        app.hover_at(viewport(&app).center());
-        app.run_steps(2);
-        let d0 = cam(&app).3;
-        app.event(wheel_event(egui::MouseWheelUnit::Line, 1.0, Modifiers::NONE));
-        app.run_steps(3);
-        assert!(cam(&app).3 > d0, "{preset}: inverted, a forward turn zooms out");
+        rendered(&mut app, |app| {
+            app.hover_at(viewport(app).center());
+            app.run_steps(2);
+            let d0 = cam(app).3;
+            app.event(wheel_event(egui::MouseWheelUnit::Line, 1.0, Modifiers::NONE));
+            app.run_steps(3);
+            assert!(cam(app).3 > d0, "{preset}: inverted, a forward turn zooms out");
+        });
     }
 }
 
@@ -714,31 +749,37 @@ fn inventor_held_keys_and_wheel_direction() {
         (Key::F3, "inventor-f3-left", (false, false, true)),
     ] {
         let got = effect(&mut app, name, |app| {
-            app.key_down(key);
-            app.step();
-            drag(app, PointerButton::Primary, c, c + vec2(30.0, -40.0), none);
-            app.key_up(key);
-            app.run_steps(2);
+            rendered(app, |app| {
+                app.key_down(key);
+                app.step();
+                drag(app, PointerButton::Primary, c, c + vec2(30.0, -40.0), none);
+                app.key_up(key);
+                app.run_steps(2);
+            });
         });
         let got = if want.2 { (false, false, got.2) } else { got };
         assert_eq!(got, want, "{name}");
     }
-    app.hover_at(viewport(&app).center());
-    app.run_steps(2);
-    let d0 = cam(&app).3;
-    app.event(wheel_event(egui::MouseWheelUnit::Line, 1.0, none));
-    app.run_steps(3);
-    let d1 = cam(&app).3;
-    assert!(d1 > d0, "the wheel forward zooms out: {d0} to {d1}");
-    app.event(wheel_event(egui::MouseWheelUnit::Line, -1.0, none));
-    app.run_steps(3);
-    assert!(cam(&app).3 < d1, "backward zooms in");
+    rendered(&mut app, |app| {
+        app.hover_at(viewport(app).center());
+        app.run_steps(2);
+        let d0 = cam(app).3;
+        app.event(wheel_event(egui::MouseWheelUnit::Line, 1.0, none));
+        app.run_steps(3);
+        let d1 = cam(app).3;
+        assert!(d1 > d0, "the wheel forward zooms out: {d0} to {d1}");
+        app.event(wheel_event(egui::MouseWheelUnit::Line, -1.0, none));
+        app.run_steps(3);
+        assert!(cam(app).3 < d1, "backward zooms in");
+    });
     let feature = app.state().state.doc.features[0].id;
     app.state_mut().state.doc.selection = Some(Selection::Feature(feature));
-    app.key_down(Key::F2);
-    app.step();
-    app.key_up(Key::F2);
-    app.run_steps(3);
+    rendered(&mut app, |app| {
+        app.key_down(Key::F2);
+        app.step();
+        app.key_up(Key::F2);
+        app.run_steps(3);
+    });
     assert!(app.state().state.rename.is_some(), "an F2 tap renames");
 }
 
@@ -752,11 +793,13 @@ fn f_conflict_does_not_steal_front_or_fillet() {
     use_view_keys(&mut app, "solidworks");
     app.state_mut().state.push(AppAction::SetView(soliddraft_app::viewport::camera::StandardView::Isometric));
     app.run_steps(40);
-    app.hover_at(viewport(&app).center());
-    app.run_steps(2);
-    app.event(wheel_event(egui::MouseWheelUnit::Line, -6.0, Modifiers::NONE));
-    app.run_steps(3);
-    let far = cam(&app).3;
+    let far = rendered(&mut app, |app| {
+        app.hover_at(viewport(app).center());
+        app.run_steps(2);
+        app.event(wheel_event(egui::MouseWheelUnit::Line, -6.0, Modifiers::NONE));
+        app.run_steps(3);
+        cam(app).3
+    });
     app.key_press(Key::F);
     app.run_steps(40);
     assert_eq!(view_name(&app), "Front", "F with nothing selected is Front");
@@ -859,11 +902,13 @@ fn view_keys_fit_normal_reverse_and_principal_views() {
     app.state_mut().state.doc.selection = None;
 
     let zoomed_out = |app: &mut App| {
-        app.hover_at(viewport(app).center());
-        app.run_steps(2);
-        app.event(wheel_event(egui::MouseWheelUnit::Line, -8.0, Modifiers::NONE));
-        app.run_steps(3);
-        cam(app).3
+        rendered(app, |app| {
+            app.hover_at(viewport(app).center());
+            app.run_steps(2);
+            app.event(wheel_event(egui::MouseWheelUnit::Line, -8.0, Modifiers::NONE));
+            app.run_steps(3);
+            cam(app).3
+        })
     };
     for (profile, key, m) in [
         ("fusion", Key::F6, Modifiers::NONE),
@@ -880,16 +925,18 @@ fn view_keys_fit_normal_reverse_and_principal_views() {
     use_preset(&mut app, "solid_edge");
     let far = zoomed_out(&mut app);
     let c = viewport(&app).left_bottom() + vec2(150.0, -150.0);
-    for _ in 0..2 {
-        press(&mut app, PointerButton::Middle, c, Modifiers::NONE);
-        app.event(egui::Event::PointerButton {
-            pos: c,
-            button: PointerButton::Middle,
-            pressed: false,
-            modifiers: Modifiers::NONE,
-        });
-        app.step();
-    }
+    rendered(&mut app, |app| {
+        for _ in 0..2 {
+            press(app, PointerButton::Middle, c, Modifiers::NONE);
+            app.event(egui::Event::PointerButton {
+                pos: c,
+                button: PointerButton::Middle,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            });
+            app.step();
+        }
+    });
     app.run_steps(60);
     assert!(cam(&app).3 < far * 0.8, "Solid Edge's middle double click fits");
     // Creo Ctrl+D and NX End: the default and isometric views.
@@ -1011,10 +1058,12 @@ fn practice_viewport_reports_the_gesture_without_moving_the_camera() {
     assert_eq!(app.state().preferences.as_ref().unwrap().practice_label, "Orbit");
     drag(&mut app, PointerButton::Middle, area.center(), area.center() + vec2(40.0, 20.0), Modifiers::CTRL);
     assert_eq!(app.state().preferences.as_ref().unwrap().practice_label, "Pan");
-    app.hover_at(area.center());
-    app.step();
-    app.event(wheel_event(egui::MouseWheelUnit::Line, 2.0, Modifiers::NONE));
-    app.run_steps(3);
+    rendered(&mut app, |app| {
+        app.hover_at(area.center());
+        app.step();
+        app.event(wheel_event(egui::MouseWheelUnit::Line, 2.0, Modifiers::NONE));
+        app.run_steps(3);
+    });
     assert_eq!(app.state().preferences.as_ref().unwrap().practice_label, "Zoom");
     assert_eq!(cam(&app), before, "the part's camera did not move");
 }
@@ -1094,4 +1143,5 @@ fn preferences_does_not_disturb_existing_settings() {
     app.run_steps(4);
     assert!(app.state().state.provider_dialog.is_some(), "the Assistant settings open");
     assert!(app.query_by_label("Assistant settings").is_some());
+    app.render().expect("the last frame renders");
 }

@@ -272,7 +272,7 @@ fn pick(case: &Case, app: &mut App, what: &str, world: Vec3) {
     let at = project(app, world);
     assert!(viewport(app).contains(at), "{what} at {world} is on screen at {at:?}");
     case.note(format!("click {what} at world {world} screen {at:?}"));
-    ribbon::click_at(app, at);
+    ribbon::pick_at(app, at);
     app.run_steps(2);
 }
 

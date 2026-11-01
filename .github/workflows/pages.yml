@@ -22,6 +22,12 @@ on:
 permissions:
   contents: read
 
+# Same rule as the other workflows: a run on main, a release branch or a tag keeps its own group
+# and is never cancelled; a pull request or feature branch run is replaced by a newer one.
+concurrency:
+  group: pages-site-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')) && github.run_id || github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build:
     runs-on: ubuntu-24.04

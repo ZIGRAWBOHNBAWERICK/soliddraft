@@ -12,6 +12,7 @@ are in `crates/soliddraft-app/src/mates/`.
 |---|---|
 | Origin | A component's origin on the assembly's. With `align_axes` its axes match too |
 | Distance | The relation between two planar faces' normals, and one translation |
+| Coincident | The same as a distance of zero: two planar faces on one supporting plane |
 
 Faces must be axis-aligned planes with rational offsets, on parts in the default
 configuration. The commands below name the root's own part components; a mate read from a
@@ -40,6 +41,12 @@ centroid.
       "b": { "path": "4", "document": "91ab...", "face": { "feature": 3, "generator": { "kind": "start_cap" } } },
       "alignment": "opposed",
       "distance": { "text": "gap", "tree": { "Ref": 9 } }
+    },
+    {
+      "kind": "coincident", "id": 10, "name": "Cx",
+      "a": { "path": "2", "document": "3f0c...", "face": { "feature": 3, "generator": { "kind": "side", "entity": 2 } } },
+      "b": { "path": "4", "document": "91ab...", "face": { "feature": 3, "generator": { "kind": "side", "entity": 2 } } },
+      "alignment": "aligned"
     }
   ],
   "values": [
@@ -58,6 +65,12 @@ centroid.
 - **Distance** is signed, measured from `a`'s plane toward `b`'s along `a`'s outward normal.
   These are supporting planes: the faces need not overlap, so this is not the minimum
   distance between two trimmed faces unless their projections overlap.
+- **Coincident** puts `b`'s plane on `a`'s, with the normals as `alignment` says. It removes
+  the two turns and the one translation a zero distance removes; it does not line up origins,
+  hold the faces' in-plane positions or their spin about the normal. It stores no distance
+  and has no expression, so it cannot be driven, and a distance edit on it is refused as
+  `invalid`. The solver takes it as a distance of zero. A distance of zero stays a distance:
+  nothing rewrites one family as the other.
 - **Values** use the part's expression grammar, units, decimal conversion and cycle checks
   (`soliddraft_model::ValueTable`). There is one evaluator. A value keeps its text as typed.
 - **A driver** is a distance whose expression reads a value. It reads by stable id, so
@@ -103,6 +116,7 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 | `assembly_measure_planes` | Reads the proven signed distance between two faces' planes |
 | `assembly_mate_origin` | Adds an Origin mate |
 | `assembly_mate_distance` | Adds a distance mate |
+| `assembly_mate_coincident` | Puts two planar faces on one plane, `aligned` or `opposed` |
 | `assembly_edit_mate` | Changes a literal distance, an alignment or `align_axes` |
 | `assembly_delete_mate` | Removes a mate; components stay where they are |
 | `assembly_set_value` | Adds or changes a value |
@@ -142,7 +156,8 @@ A proof belongs to a document, a revision and a face. It comes from the part reb
 revision's bytes on the kernel, through `Kernel::face_support_plane`, which reads the native
 plane definition exactly and costs no numerical work. Gaps are computed in rationals from
 those offsets and the stored placements. `measurement.rational` holds the exact value;
-`lo` and `hi` are rounded outward.
+`lo` and `hi` are rounded outward. A Coincident is measured the same way, and reads `"0"` while
+it holds.
 
 Editing or saving a part moves nothing. The accepted pin, pose and proof stand, and a
 measurement whose source moved on says `retained`. Update is the only way forward: it loads
@@ -156,5 +171,6 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Other mate families, picking a face inside a sub-assembly for a new mate, mates on pattern
-members, configurations, dragging, general rotations and curved faces. See M6 in the plan.
+Parallel, Perpendicular, Concentric, Angle, Tangent, Lock and the other mate families,
+picking a face inside a sub-assembly for a new mate, mates on pattern members,
+configurations, dragging, general rotations and curved faces. See M6 in the plan.

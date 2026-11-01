@@ -1,5 +1,5 @@
-//! The Mate panel: two picked faces and a distance, the assembly's values, and what the
-//! solver says. Everything goes through the same commands as the MCP tools.
+//! The Mate panel: two picked faces on one plane or at a distance, the assembly's values,
+//! and what the solver says. Everything goes through the same commands as the MCP tools.
 
 use crate::assembly::AssemblyState;
 use crate::mates::tools::rows;
@@ -15,11 +15,19 @@ pub struct PickedFace {
     pub face: FaceRef,
 }
 
+/// Which mate the panel adds between its two faces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Family {
+    Coincident,
+    Distance,
+}
+
 /// The Mate panel's fields.
 pub struct Draft {
     pub open: bool,
     pub a: Option<PickedFace>,
     pub b: Option<PickedFace>,
+    pub family: Family,
     pub alignment: Alignment,
     pub name: String,
     pub distance: String,
@@ -35,6 +43,7 @@ impl Default for Draft {
             open: false,
             a: None,
             b: None,
+            family: Family::Distance,
             alignment: Alignment::Opposed,
             name: String::new(),
             distance: "0 mm".into(),
@@ -52,7 +61,8 @@ pub enum MateAction {
     /// A face was clicked: fills the first free slot.
     Pick(OccurrencePath, String),
     Clear,
-    AddDistance,
+    /// Adds the drafted mate between the two picked faces.
+    Add,
     AddOrigin(ComponentId),
     SetValue,
     Drive(String, String),
@@ -103,9 +113,10 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             state.assembly.mate.a = None;
             state.assembly.mate.b = None;
         }
-        MateAction::AddDistance => {
+        MateAction::Add => {
+            let family = state.assembly.mate.family;
             let name = match state.assembly.mate.name.trim() {
-                "" => next_name(&state.assembly, "Distance"),
+                "" => next_name(&state.assembly, if family == Family::Coincident { "Coincident" } else { "Distance" }),
                 n => n.to_owned(),
             };
             let d = &state.assembly.mate;
@@ -116,8 +127,12 @@ pub fn apply(state: &mut AppState, action: MateAction) {
             let (distance, alignment) = (d.distance.clone(), d.alignment);
             let end = |p: PickedFace| EndpointSelector { component: p.component, face: FaceSelector::Picked(p.face) };
             let Some(s) = state.assembly.session.as_mut() else { return };
-            let done = s.doc.mate_distance(&name, &end(a), &end(b), &distance, alignment, false).map(|_| ());
-            report(state, done, "Mate added");
+            let (a, b) = (end(a), end(b));
+            let done = match family {
+                Family::Coincident => s.doc.mate_coincident(&name, &a, &b, alignment, false),
+                Family::Distance => s.doc.mate_distance(&name, &a, &b, &distance, alignment, false),
+            };
+            report(state, done.map(|_| ()), "Mate added");
         }
         MateAction::AddOrigin(component) => {
             let name = next_name(&state.assembly, "Origin");
@@ -174,14 +189,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     ui.label(format!("First face  {}", face(&d.a)));
     ui.label(format!("Second face  {}", face(&d.b)));
     ui.horizontal(|ui| {
+        ui.selectable_value(&mut d.family, Family::Coincident, "Coincident");
+        ui.selectable_value(&mut d.family, Family::Distance, "Distance");
+    });
+    ui.horizontal(|ui| {
         ui.selectable_value(&mut d.alignment, Alignment::Opposed, "Opposed");
         ui.selectable_value(&mut d.alignment, Alignment::Aligned, "Aligned");
     });
     labelled(ui, &mut d.name, "Name", "Mate name");
-    labelled(ui, &mut d.distance, "Distance, such as 5 mm", "Mate distance");
+    if d.family == Family::Distance {
+        labelled(ui, &mut d.distance, "Distance, such as 5 mm", "Mate distance");
+    }
     ui.horizontal(|ui| {
         if ui.button("Add mate").clicked() {
-            actions.push(MateAction::AddDistance);
+            actions.push(MateAction::Add);
         }
         if ui.button("Clear faces").clicked() {
             actions.push(MateAction::Clear);
@@ -226,6 +247,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         }
                     }
                 });
+            }
+            Some("coincident") => {
+                let gap = m["measurement"]["value"].as_f64();
+                let shown = gap.map_or("unproved".to_owned(), |v| format!("{} mm apart", crate::document::fmt_mm(v)));
+                ui.label(format!("{name}: coincident, {}, {shown}", m["alignment"].as_str().unwrap_or("?")));
             }
             Some("origin") => {
                 ui.label(format!("{name}: on the origin"));

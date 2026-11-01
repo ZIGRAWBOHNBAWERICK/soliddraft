@@ -1,6 +1,6 @@
 //! Mates on real parts through the commands the panel and the MCP tools call: what stays
 //! free, how alignment and Origin work, what a failed Update leaves behind, and what old
-//! and future files keep.
+//! and future files keep. Each holds for Coincident mates as for distances.
 //!
 //! Expected positions are hand-worked from the plane equations of a 40 x 30 x D block A
 //! and a 20 x 10 x 6 block B, both centred on the origin in plan and rising along +Z.
@@ -12,8 +12,8 @@ use glam::{DQuat, DVec3};
 use serde_json::{Value, json};
 use soliddraft_assembly::{
     Alignment, Assembly, AssemblyDocument, AssemblyPackage, ComponentId, EndpointSelector, FaceSelector, FileError,
-    GeneratorChoice, KernelSource, Mate, MateEdit, MateEntry, OccurrencePath, OpenOptions, Placement, RefusalCode,
-    SolverState, Step,
+    GeneratorChoice, KernelSource, Mate, MateEdit, MateEntry, MateId, MateRefusal, OccurrencePath, OpenOptions,
+    Placement, RefusalCode, SolverState, Step,
 };
 use soliddraft_document::{CacheOnlyStore, ConfigurationId, DocRef, identify_file};
 use soliddraft_kernel_api::Kernel;
@@ -145,12 +145,35 @@ fn rig(name: &str, depth: f64) -> Rig {
 }
 
 impl Rig {
+    /// The sides along `n` on one plane: a zero distance, or a Coincident.
+    fn sides(&mut self, name: &str, n: [f64; 3], alignment: Alignment, coincident: bool) {
+        let (a, b) = (side(self.a, n), side(self.b, n));
+        let made = match coincident {
+            true => self.doc.mate_coincident(name, &a, &b, alignment, false),
+            false => self.doc.mate_distance(name, &a, &b, "0 mm", alignment, false),
+        };
+        made.unwrap();
+    }
+
     fn x(&mut self, alignment: Alignment) {
-        self.doc.mate_distance("X", &side(self.a, X), &side(self.b, X), "0 mm", alignment, false).unwrap();
+        self.sides("X", X, alignment, false);
     }
 
     fn y(&mut self, alignment: Alignment) {
-        self.doc.mate_distance("Y", &side(self.a, Y), &side(self.b, Y), "0 mm", alignment, false).unwrap();
+        self.sides("Y", Y, alignment, false);
+    }
+
+    /// A's top and B's underside on one plane.
+    fn cz(&mut self, alignment: Alignment, strict: bool) -> Result<MateId, MateRefusal> {
+        self.doc.mate_coincident("Cz", &top(self.a), &bottom(self.b), alignment, strict)
+    }
+
+    /// O, then Cx, Cy and Cz: B's underside on A's top, its sides on A's.
+    fn contact(&mut self) {
+        self.doc.mate_origin("O", self.a, true, false).unwrap();
+        self.sides("Cx", X, Alignment::Aligned, true);
+        self.sides("Cy", Y, Alignment::Aligned, true);
+        self.cz(Alignment::Opposed, false).unwrap();
     }
 
     fn z(&mut self, distance: &str, alignment: Alignment) {
@@ -159,9 +182,14 @@ impl Rig {
 
     /// O, X, Y and Z of the main graph, Z at 5 mm.
     fn graph(&mut self) {
+        self.graph_with(false);
+    }
+
+    /// The main graph, with X and Y Coincident mates when `coincident` says so.
+    fn graph_with(&mut self, coincident: bool) {
         self.doc.mate_origin("O", self.a, true, false).unwrap();
-        self.x(Alignment::Aligned);
-        self.y(Alignment::Aligned);
+        self.sides("X", X, Alignment::Aligned, coincident);
+        self.sides("Y", Y, Alignment::Aligned, coincident);
         self.z("5 mm", Alignment::Opposed);
     }
 
@@ -251,6 +279,41 @@ fn partial_freedom_and_strict_failure_are_distinct() {
     assert_eq!(r.doc.solver().state, SolverState::Underconstrained);
     let refused = r.doc.mate_distance("Again", &top(r.a), &bottom(r.b), "5 mm", Alignment::Opposed, true).unwrap_err();
     assert_eq!((refused.code, refused.remaining_dof), (RefusalCode::UnderConstrained, Some(6)));
+
+    // A strict Coincident leaves what a strict distance leaves, and commits nothing.
+    let mut r = rig("s1-coincident", 10.0);
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    let (before, a_bytes) = (r.state(), std::fs::read(&r.a_file).unwrap());
+    let refused = r.cz(Alignment::Opposed, true).unwrap_err();
+    assert_eq!((refused.code, refused.remaining_dof), (RefusalCode::UnderConstrained, Some(3)));
+    let motions: Vec<_> = refused.free.iter().map(|f| (f.component, f.motion.as_str())).collect();
+    assert_eq!(motions, [(r.b, "translate_x"), (r.b, "translate_y"), (r.b, "spin_z")]);
+    assert_eq!(r.state(), before);
+    assert_eq!(std::fs::read(&r.a_file).unwrap(), a_bytes);
+
+    // Three Coincidents and no O hold nothing to the assembly: six motions stay and A is
+    // not fixed.
+    let mut r = rig("s1-coincident-float", 10.0);
+    r.sides("Cx", X, Alignment::Aligned, true);
+    r.sides("Cy", Y, Alignment::Aligned, true);
+    let before = r.state();
+    let refused = r.cz(Alignment::Opposed, true).unwrap_err();
+    assert_eq!((refused.code, refused.remaining_dof), (RefusalCode::UnderConstrained, Some(6)));
+    assert_eq!(r.state(), before);
+    r.cz(Alignment::Opposed, false).unwrap();
+    let status = r.doc.solver();
+    assert_eq!((status.state, status.remaining_dof), (SolverState::Underconstrained, 6));
+    assert!(status.free.is_empty(), "no one component moves alone: {status:?}");
+    assert!(r.placement(r.a).is_identity());
+    close(r.placement(r.b).translation, [10.0, 10.0, 10.0]);
+
+    // An Origin on A's position only leaves A's three turns.
+    let mut r = rig("s1-coincident-position", 10.0);
+    r.doc.mate_origin("O", r.a, false, false).unwrap();
+    r.sides("Cx", X, Alignment::Aligned, true);
+    r.sides("Cy", Y, Alignment::Aligned, true);
+    r.cz(Alignment::Opposed, false).unwrap();
+    assert_eq!(r.doc.solver().remaining_dof, 3);
 }
 
 /// S2: alignment is a vector relation, and every family goes through one solver.
@@ -293,6 +356,89 @@ fn alignment_and_origin_use_the_same_solver() {
     let row = reopened.table().find(&OccurrencePath::root().child(Step::component(r.b))).unwrap();
     close(reopened.table().bounds(row).min, [0.0, 15.0, 16.0]);
     close(reopened.table().bounds(row).max, [20.0, 25.0, 22.0]);
+
+    // The same flips on Coincident mates: B turns over and stays on A's planes.
+    let mut r = rig("s2-coincident", 14.0);
+    r.contact();
+    close(r.placement(r.b).translation, [10.0, 10.0, 14.0]);
+    let zero = |r: &mut Rig| {
+        let measured = r.doc.mate_measurements();
+        assert_eq!(measured.len(), 3, "each Coincident is measured");
+        for (_, m) in measured {
+            let m = m.unwrap();
+            assert_eq!((m.value, m.rational.as_str()), (0.0, "0"));
+        }
+    };
+    zero(&mut r);
+    let before = r.state();
+    let refused = r.doc.edit_mates(&[("Cz".into(), MateEdit::Alignment(Alignment::Aligned))]).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::OverConstrained, "{refused}");
+    assert_eq!(r.state(), before);
+    let refused = r.doc.edit_mates(&[("Cz".into(), MateEdit::Distance("1 mm".into()))]).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::Invalid, "a Coincident has no distance: {refused}");
+    assert_eq!(r.state(), before);
+
+    let depth = r.doc.undo_depth();
+    r.doc
+        .edit_mates(&[
+            ("Cy".into(), MateEdit::Alignment(Alignment::Opposed)),
+            ("Cz".into(), MateEdit::Alignment(Alignment::Aligned)),
+        ])
+        .unwrap();
+    assert_eq!(r.doc.undo_depth(), depth + 1);
+    let flipped = |r: &Rig| {
+        let p = r.placement(r.b);
+        turned(p.rotation, [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]);
+        close(p.translation, [10.0, 20.0, 14.0]);
+        let bounds = r.doc.table().bounds(r.row(r.b));
+        close(bounds.min, [0.0, 15.0, 8.0]);
+        close(bounds.max, [20.0, 25.0, 14.0]);
+    };
+    flipped(&r);
+    assert_eq!(r.doc.solver().remaining_dof, 0);
+    zero(&mut r);
+    let mates = r.doc.assembly().mates.clone();
+    let kinds: Vec<_> = r
+        .doc
+        .assembly()
+        .known_mates()
+        .filter_map(|m| match m {
+            Mate::Coincident { id, name, alignment, .. } => Some((*id, name.clone(), *alignment)),
+            _ => None,
+        })
+        .collect();
+    let ids: Vec<_> = before["truth"]["mates"].as_array().unwrap().iter().map(|m| m["id"].as_u64().unwrap()).collect();
+    assert_eq!(kinds.iter().map(|k| u64::from(k.0.0)).collect::<Vec<_>>(), ids[1..]);
+    assert_eq!(
+        kinds.iter().map(|k| (k.1.as_str(), k.2)).collect::<Vec<_>>(),
+        [("Cx", Alignment::Aligned), ("Cy", Alignment::Opposed), ("Cz", Alignment::Aligned)]
+    );
+    assert!(r.doc.undo());
+    assert_eq!(r.state()["truth"], before["truth"]);
+    close(r.placement(r.b).translation, [10.0, 10.0, 14.0]);
+    assert!(r.doc.redo());
+    flipped(&r);
+    assert_eq!(r.doc.assembly().mates, mates);
+    let parts = (std::fs::read(&r.a_file).unwrap(), std::fs::read(&r.b_file).unwrap());
+    r.doc.save(None).unwrap();
+    let saved: Value =
+        serde_json::from_slice(&AssemblyPackage::open(&r.root).unwrap().assembly().truth_entries().json).unwrap();
+    for m in &saved["mates"].as_array().unwrap()[1..] {
+        let mut keys: Vec<_> = m.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["a", "alignment", "b", "id", "kind", "name"], "a Coincident saves no distance: {m}");
+        assert_eq!(m["kind"], "coincident");
+    }
+    let mut reopened = AssemblyDocument::open(&r.root, options()).unwrap();
+    reopened.finish_loading();
+    assert_eq!(reopened.assembly().mates, mates, "the same ids, kinds and alignments");
+    assert_eq!(reopened.assembly(), r.doc.assembly());
+    assert_eq!(reopened.solver().remaining_dof, 0);
+    assert_eq!(
+        (std::fs::read(&r.a_file).unwrap(), std::fs::read(&r.b_file).unwrap()),
+        parts,
+        "parts are never written"
+    );
 }
 
 /// S3: an Origin mate anchors what it says it anchors.
@@ -331,40 +477,47 @@ fn origin_axis_alignment_is_authored() {
     assert_eq!(r.doc.solver().state, SolverState::Underconstrained);
 }
 
-/// S4: a failed Update rolls back every candidate resource, whichever step failed.
+/// S4: a failed Update rolls back every candidate resource, whichever step failed, with
+/// X and Y as zero distances or as Coincidents.
 #[test]
 fn failed_update_rolls_back_every_candidate_resource() {
-    let mut r = rig("s4", 14.0);
-    r.graph();
-    r.doc.set_value("gap", "12 mm").unwrap();
-    r.doc.drive_mate("Z", "gap", false).unwrap();
-    close(r.placement(r.b).translation, [10.0, 10.0, 26.0]);
-    r.doc.save(None).unwrap();
-    let saved_a = std::fs::read(&r.a_file).unwrap();
+    for coincident in [false, true] {
+        let mut r = rig(&format!("s4-{coincident}"), 14.0);
+        r.graph_with(coincident);
+        r.doc.set_value("gap", "12 mm").unwrap();
+        r.doc.drive_mate("Z", "gap", false).unwrap();
+        close(r.placement(r.b).translation, [10.0, 10.0, 26.0]);
+        r.doc.save(None).unwrap();
+        let saved_a = std::fs::read(&r.a_file).unwrap();
+        let old = Document::open(&r.a_file, kernel()).unwrap().features()[1].id;
 
-    // B has a valid new depth; A's new revision has lost the faces the mates name.
-    set_height(&r.b_file, 8.0);
-    regenerate(&r.a_file);
-    let before = r.state();
-    let top_before = r.b_top();
-    let report = r.doc.rebuild();
-    let refusal = report.mate_refusal.clone().unwrap();
-    assert_eq!(refusal.code, RefusalCode::DanglingReference);
-    assert_eq!(refusal.mates, ["X", "Y", "Z"]);
-    assert!(refusal.message.contains("a.dwprt"), "{refusal}");
-    assert!(report.refusal.as_ref().unwrap().contains("dangling_reference"));
-    r.doc.finish_loading();
-    assert_eq!(r.state(), before);
-    assert_eq!(r.b_top(), top_before, "B's six-mm display stays");
+        // B has a valid new depth; A's new revision has lost the faces the mates name.
+        set_height(&r.b_file, 8.0);
+        regenerate(&r.a_file);
+        let before = r.state();
+        let top_before = r.b_top();
+        let report = r.doc.rebuild();
+        let refusal = report.mate_refusal.clone().unwrap();
+        assert_eq!(refusal.code, RefusalCode::DanglingReference);
+        assert_eq!(refusal.mates, ["X", "Y", "Z"]);
+        assert!(refusal.message.contains("a.dwprt"), "{refusal}");
+        assert!(refusal.message.contains(&format!("of feature {old}")), "{refusal}");
+        assert!(report.refusal.as_ref().unwrap().contains("dangling_reference"));
+        r.doc.finish_loading();
+        assert_eq!(r.state(), before);
+        assert_eq!(r.b_top(), top_before, "B's six-mm display stays");
 
-    // Restoring the file repairs it, and the good B comes in: 26 + 8.
-    std::fs::write(&r.a_file, &saved_a).unwrap();
-    let report = r.doc.rebuild();
-    assert!(report.refusal.is_none(), "{report:?}");
-    r.doc.finish_loading();
-    close(r.placement(r.b).translation, [10.0, 10.0, 26.0]);
-    assert!((r.b_top() - 34.0).abs() <= 1e-9, "{}", r.b_top());
-    assert_eq!(r.doc.undo_label(), Some("Update"));
+        // Restoring the file repairs it, and the good B comes in: 26 + 8.
+        std::fs::write(&r.a_file, &saved_a).unwrap();
+        let report = r.doc.rebuild();
+        assert!(report.refusal.is_none(), "{report:?}");
+        r.doc.finish_loading();
+        close(r.placement(r.b).translation, [10.0, 10.0, 26.0]);
+        assert!((r.b_top() - 34.0).abs() <= 1e-9, "{}", r.b_top());
+        assert_eq!(r.doc.undo_label(), Some("Update"));
+        let kinds = r.doc.assembly().known_mates().filter(|m| matches!(m, Mate::Coincident { .. })).count();
+        assert_eq!(kinds, if coincident { 2 } else { 0 });
+    }
 
     // A refusal from the solve itself, after the candidate has loaded: B is anchored too,
     // so A's new height leaves the distance mate nothing to move.
@@ -452,17 +605,36 @@ fn a_configuration_is_refused_not_ignored() {
         Some(ConfigurationId("nondefault".into()))
     }
     type Change = fn(&mut Assembly);
-    let cases: [(&str, Change); 2] = [
-        ("endpoint", |truth| {
-            for entry in &mut truth.mates {
-                if let MateEntry::Known(Mate::Distance { a, name, .. }) = entry
-                    && name == "Z"
-                {
-                    a.configuration = nondefault();
+    // Each change, and whether X and Y are Coincidents.
+    let cases: [(&str, Change, bool); 4] = [
+        (
+            "endpoint",
+            |truth| {
+                for entry in &mut truth.mates {
+                    if let MateEntry::Known(Mate::Distance { a, name, .. }) = entry
+                        && name == "Z"
+                    {
+                        a.configuration = nondefault();
+                    }
                 }
-            }
-        }),
-        ("source", |truth| truth.sources[0].document.configuration = nondefault()),
+            },
+            false,
+        ),
+        ("source", |truth| truth.sources[0].document.configuration = nondefault(), false),
+        (
+            "coincident-endpoint",
+            |truth| {
+                for entry in &mut truth.mates {
+                    if let MateEntry::Known(Mate::Coincident { b, name, .. }) = entry
+                        && name == "X"
+                    {
+                        b.configuration = nondefault();
+                    }
+                }
+            },
+            true,
+        ),
+        ("coincident-source", |truth| truth.sources[1].document.configuration = nondefault(), true),
     ];
     let reload = |r: &mut Rig, change: Change| {
         r.doc.save(None).unwrap();
@@ -475,9 +647,9 @@ fn a_configuration_is_refused_not_ignored() {
         assert_eq!(r.doc.assembly(), &truth, "a save and a load keep it");
     };
     let code = RefusalCode::UnsupportedConfiguration;
-    for (name, change) in cases {
+    for (name, change, coincident) in cases {
         let mut r = rig(&format!("configuration-{name}"), 10.0);
-        r.graph();
+        r.graph_with(coincident);
         reload(&mut r, change);
         let before = r.state();
         let refused = r.doc.set_value("gap", "5 mm").unwrap_err();

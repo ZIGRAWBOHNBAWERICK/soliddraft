@@ -14,9 +14,10 @@ path, and which of the parts gives the new file its frame. This version forms:
 - part components of the root, not sub-assemblies or pattern members;
 - in their default state: not hidden or suppressed, without an assembly colour, a display
   quality of their own, overrides, configurations or a pattern seeded on them;
-- with mates the new file can hold whole: a distance between two chosen parts moves only
-  when its distance is a literal. One that reads a root value, an Origin mate on a chosen
-  part, or a mate of a later version is refused, never dropped.
+- with mates the new file can hold whole: a Coincident between two chosen parts moves, and
+  a distance between them moves only when its distance is a literal. One that reads a root
+  value, an Origin mate on a chosen part, or a mate of a later version is refused, never
+  dropped.
 
 Anything else is refused by name before anything is made.
 

@@ -188,7 +188,7 @@ impl AssemblyDocument {
             };
             let ends: Vec<OccurrencePath> = match mate {
                 Mate::Origin { component, .. } => vec![OccurrencePath::root().child(Step::component(*component))],
-                Mate::Distance { a, b, .. } => vec![a.path.clone(), b.path.clone()],
+                Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } => vec![a.path.clone(), b.path.clone()],
             };
             let inside =
                 ends.iter().filter(|p| p.steps().first().is_some_and(|s| chosen.contains(&s.component))).count();
@@ -211,27 +211,28 @@ impl AssemblyDocument {
                     ))
                     .caused_by(name.clone()));
                 }
-                (Mate::Distance { name, distance, .. }, 2) => {
-                    if !distance.references().is_empty() {
+                (_, 2) => {
+                    if let Some(distance) = mate.expression().filter(|d| !d.references().is_empty()) {
+                        let name = mate.name();
                         return Err(unsupported(format!(
                             "{name} reads {}, a value of the root; the new file could not read it",
                             distance.text()
                         ))
-                        .caused_by(name.clone()));
+                        .caused_by(name.to_owned()));
                     }
                     record.owner_after = child_id;
                     record.endpoints_after = ends.clone();
                     child.mates.push(entry.clone());
                 }
-                (Mate::Distance { .. }, _) => {
+                (_, _) => {
                     let mut crossing = mate.clone();
-                    if let Mate::Distance { a, b, .. } = &mut crossing {
-                        for end in [&mut *a, &mut *b] {
+                    if let Some(ends) = crossing.faces_mut() {
+                        for end in ends {
                             if end.path.steps().first().is_some_and(|s| chosen.contains(&s.component)) {
                                 end.path = OccurrencePath([holder.steps(), end.path.steps()].concat());
                             }
+                            record.endpoints_after.push(end.path.clone());
                         }
-                        record.endpoints_after = vec![a.path.clone(), b.path.clone()];
                     }
                     kept_mates.push(MateEntry::Known(crossing));
                 }

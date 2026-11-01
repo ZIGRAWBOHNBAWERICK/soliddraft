@@ -49,6 +49,16 @@ fn distance_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+fn coincident_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("The first planar face")),
+        ("b", face("The planar face put on the first one's plane")),
+        ("alignment", one_of(&["aligned", "opposed"], ALIGNMENT)),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
 fn value_params() -> Vec<(&'static str, Value)> {
     vec![("name", string("The value's name")), ("expression", string("An expression such as 5 mm or gap * 2"))]
 }
@@ -82,7 +92,7 @@ fn rename_params() -> Vec<(&'static str, Value)> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     let row = |id, label, doc| CommandSpec::new(id, label, Icon::Tree, doc).assembly();
     vec![
-        row("assembly_mate", "Mate", "Tie two components by a distance between faces")
+        row("assembly_mate", "Mate", "Tie two components by faces on one plane or at a distance")
             .on(Tab::Assembly, "Component", Size::Large)
             .run(|_| AppAction::Assembly(AssemblyAction::Mate(crate::mates::MateAction::Toggle)))
             .app_only("It opens the Mate panel; the assembly_mate tools add mates without it"),
@@ -103,6 +113,13 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
                 Agents::Mcp,
                 "Proves, solves and commits together, or refuses and changes nothing.",
                 distance_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_coincident", "Coincident mate", "Put two planar faces on one plane")
+            .agents(
+                Agents::Mcp,
+                "No distance of its own; proves, solves and commits together, or refuses and changes nothing.",
+                coincident_params,
             )
             .undo(Undo::Step),
         row("assembly_set_value", "Set value", "Add or change an assembly value")

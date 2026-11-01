@@ -607,12 +607,13 @@ fn mated_state() -> AppState {
     state
 }
 
-const MATE_TOOLS: [&str; 10] = [
+const MATE_TOOLS: [&str; 11] = [
     "insert_component",
     "assembly_form_subassembly",
     "assembly_measure_planes",
     "assembly_mate_origin",
     "assembly_mate_distance",
+    "assembly_mate_coincident",
     "assembly_set_value",
     "assembly_rename_value",
     "assembly_drive_mate",

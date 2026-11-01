@@ -502,8 +502,7 @@ the property panel and the status bar are the assembly's.
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.
 
-Mates and constraints between components are the next slice; placements stay fixed until
-then. The browser build leaves these commands off, because the loader needs threads.
+The browser build leaves these commands off, because the loader needs threads.
 
 ## For the interface
 

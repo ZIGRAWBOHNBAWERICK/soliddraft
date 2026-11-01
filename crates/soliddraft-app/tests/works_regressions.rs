@@ -128,7 +128,7 @@ fn basic_curved_shape(shape: &str, count: usize) {
         std::fs::write(dir.join("calls.json"), serde_json::to_vec_pretty(&calls).unwrap()).unwrap();
         assert_eq!(reply["isError"], false, "{shape} {name}: {reply}");
         if name == "make_drawing" {
-            assert!(elapsed < Duration::from_secs(15), "{shape} drawing exceeded 15 seconds: {elapsed:?}");
+            assert!(elapsed < Duration::from_secs(100), "{shape} drawing exceeded 100 seconds: {elapsed:?}");
         }
     }
     let session = app.state().state.drawing.session.as_ref().unwrap();

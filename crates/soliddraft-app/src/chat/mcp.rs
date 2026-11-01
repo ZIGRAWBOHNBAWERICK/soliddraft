@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-const DRAWING_LIMIT: Duration = Duration::from_secs(15);
+const DRAWING_LIMIT: Duration = Duration::from_secs(100);
 const DRAWING_TIMEOUT: &str =
-    "Making the drawing exceeded its 15-second time limit. This request did not replace the drawing.";
+    "Making the drawing exceeded its 100-second time limit. This request did not replace the drawing.";
 
 /// The MCP endpoint of the running app.
 pub struct McpEndpoint {

@@ -595,8 +595,8 @@ impl Assembly {
                     return bad(format!("mate {} ties component {c}, which does not exist", mate.name()));
                 }
             }
-            if let Mate::Distance { a, b, distance, .. } = mate {
-                for end in [a, b] {
+            if let Some((ends, _)) = mate.faces() {
+                for end in ends {
                     let placed = end.holder().and_then(|c| self.component(c)).and_then(|c| self.source(c.source));
                     // A face inside a sub-assembly is checked against the sub-assembly when it
                     // is solved; this file holds only its first step.
@@ -610,6 +610,8 @@ impl Assembly {
                         return bad(format!("mate {} names a face of another document", mate.name()));
                     }
                 }
+            }
+            if let Some(distance) = mate.expression() {
                 self.values.length(distance).map_err(|e| Invalid(format!("mate {}: {e}", mate.name())))?;
             }
         }

@@ -58,6 +58,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
         "assembly_measure_planes"
             | "assembly_mate_origin"
             | "assembly_mate_distance"
+            | "assembly_mate_coincident"
             | "assembly_set_value"
             | "assembly_rename_value"
             | "assembly_drive_mate"
@@ -93,6 +94,11 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             let side = alignment(&input["alignment"])?;
             doc.mate_distance(text(input, "name")?, &a, &b, text(input, "distance")?, side, strict)
                 .map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_coincident" => {
+            let (a, b) = (selector(&input["a"])?, selector(&input["b"])?);
+            let side = alignment(&input["alignment"])?;
+            doc.mate_coincident(text(input, "name")?, &a, &b, side, strict).map(|id| json!({ "mate": id }))
         }
         "assembly_set_value" => doc.set_value(text(input, "name")?, text(input, "expression")?).map(|()| json!({})),
         "assembly_rename_value" => doc.rename_value(text(input, "name")?, text(input, "to")?).map(|()| json!({})),
@@ -146,12 +152,10 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                     row["component"] = json!(component);
                     row["align_axes"] = json!(align_axes);
                     row["status"] = json!("ok");
+                    return row;
                 }
-                Mate::Distance { a, b, alignment, distance, .. } => {
+                Mate::Distance { distance, .. } => {
                     row["kind"] = json!("distance");
-                    row["a"] = json!({ "root": root, "path": a.path, "document": a.document, "configuration": a.configuration, "face": a.face });
-                    row["b"] = json!({ "root": root, "path": b.path, "document": b.document, "configuration": b.configuration, "face": b.face });
-                    row["alignment"] = json!(alignment);
                     row["distance"] = json!({
                         "expression": distance.text(),
                         "driven": !distance.references().is_empty(),
@@ -159,18 +163,24 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                         "value": truth.values.length(distance).ok(),
                         "unit": "mm",
                     });
-                    match found {
-                        Some(Ok(measurement)) => {
-                            row["measurement"] = json!(measurement);
-                            row["status"] = json!("ok");
-                        }
-                        Some(Err(r)) => {
-                            row["status"] = json!(r.code.as_str());
-                            row["problem"] = json!(r.message);
-                        }
-                        None => row["status"] = json!("unmeasured"),
-                    }
                 }
+                Mate::Coincident { .. } => row["kind"] = json!("coincident"),
+            }
+            if let Some(([a, b], alignment)) = m.faces() {
+                row["a"] = json!({ "root": root, "path": a.path, "document": a.document, "configuration": a.configuration, "face": a.face });
+                row["b"] = json!({ "root": root, "path": b.path, "document": b.document, "configuration": b.configuration, "face": b.face });
+                row["alignment"] = json!(alignment);
+            }
+            match found {
+                Some(Ok(measurement)) => {
+                    row["measurement"] = json!(measurement);
+                    row["status"] = json!("ok");
+                }
+                Some(Err(r)) => {
+                    row["status"] = json!(r.code.as_str());
+                    row["problem"] = json!(r.message);
+                }
+                None => row["status"] = json!("unmeasured"),
             }
             row
         })

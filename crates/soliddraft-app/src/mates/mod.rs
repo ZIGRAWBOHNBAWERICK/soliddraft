@@ -6,4 +6,4 @@ pub(crate) mod panel;
 pub(crate) mod registry;
 pub(crate) mod tools;
 
-pub use panel::{Draft, MateAction, PickedFace, apply};
+pub use panel::{Draft, Family, MateAction, PickedFace, apply};

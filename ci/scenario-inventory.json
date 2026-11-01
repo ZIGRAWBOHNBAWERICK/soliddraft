@@ -310,6 +310,22 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
+      "id": "mate-coincident",
+      "file": "ci/scenarios/mate-coincident.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "e139919ae1d6b3718e49ff4519f956cc429c36ac",
+      "route": "MCP assembly and Coincident mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "V6 batch 2: Coincident mates between two proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; partial and strict solves, an over-constrained distance refused, distance edits and drivers refused, explicit Update, delete and replacement by a distance; saved as its own kind with no distance; partial M6 evidence.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
+    },
+    {
       "id": "measure",
       "file": "ci/scenarios/measure.json",
       "acceptance": true,

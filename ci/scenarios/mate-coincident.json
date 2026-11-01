@@ -1,0 +1,5796 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-coincident",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/b.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 12
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 3,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 7,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": -7,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 2,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 13,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 12,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 36,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Cx",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "under_constrained"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 12,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        },
+        {
+          "pointer": "/result/remaining_dof",
+          "equals": 3
+        }
+      ],
+      "refused": "under_constrained"
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Cx",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "alignment": "aligned",
+        "require_fully_constrained": false
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 3
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 7,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 2,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 12,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 36,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Cy",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            0,
+            1,
+            0
+          ]
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            0,
+            1,
+            0
+          ]
+        },
+        "alignment": "aligned",
+        "require_fully_constrained": false
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 36,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Cz",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "alignment": "opposed",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 36,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/redo/depth",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Conflict",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side",
+          "normal": [
+            1,
+            0,
+            0
+          ]
+        },
+        "alignment": "aligned",
+        "distance": "1 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "over_constrained"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 17,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "over_constrained"
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "Cz",
+        "distance": "1 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 19,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "invalid"
+    },
+    {
+      "tool": "assembly_drive_mate",
+      "arguments": {
+        "mate": "Cz",
+        "parameter": "distance",
+        "expression": "1 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 20,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "invalid"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 22,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 22,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 22,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 22,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 22,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/dirty",
+          "equals": false
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/undo/depth",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/redo/depth",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "name": "Plate"
+      },
+      "checks": []
+    },
+    {
+      "tool": "edit_extrude",
+      "arguments": {
+        "feature": "Plate",
+        "depth": 14,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 23,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 23,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 23,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 23,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 23,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/components/0/status",
+          "equals": "newer_available"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/pinned",
+          "same_as": {
+            "step": 3,
+            "pointer": "/inspect/info/revision"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_update",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/components/0/pinned",
+          "same_as": {
+            "step": 27,
+            "pointer": "/inspect/info/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/components/0/shown",
+          "same_as": {
+            "step": 27,
+            "pointer": "/inspect/info/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/components/1/pinned",
+          "same_as": {
+            "step": 9,
+            "pointer": "/inspect/info/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/undo/depth",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 28,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 28,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 28,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 28,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 28,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/dirty",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 29,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 29,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 29,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 29,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 29,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/dirty",
+          "equals": false
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/undo/depth",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/redo/depth",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "Cz"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Lift",
+        "a": {
+          "component": 2,
+          "feature": "Plate",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "alignment": "opposed",
+        "distance": "2 mm",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 22,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/dirty",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 35,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 35,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 35,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 35,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 35,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 22,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig-lift.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 16,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 22,
+          "tolerance": 1e-09
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig-lift.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig-lift.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/geometry",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/geometry"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/rows",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/rows"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/next_id",
+          "same_as": {
+            "step": 32,
+            "pointer": "/summary/assembly/accepted_state/next_id"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/0",
+          "approx": -20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/1",
+          "approx": -15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/min/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/bounds/max/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/min/2",
+          "approx": 14,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/0",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/1",
+          "approx": 15,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/bounds/max/2",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/values",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/name",
+          "equals": "Cx"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/name",
+          "equals": "Cy"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/kind",
+          "equals": "coincident"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/name",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/alignment",
+          "equals": "opposed"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/a/path",
+          "equals": "2"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/b/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/rational",
+          "equals": "0"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/unit",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/distance",
+          "absent": true
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/value",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "maximum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "minimum": 0
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/hi",
+          "maximum": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/lo",
+          "minimum": -1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/a/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/0/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/3/measurement/b/revision",
+          "same_as": {
+            "pointer": "/summary/assembly/components/1/pinned"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/dirty",
+          "equals": false
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/undo/depth",
+          "equals": 0
+        }
+      ]
+    }
+  ]
+}

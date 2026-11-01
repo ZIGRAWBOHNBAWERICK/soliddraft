@@ -40,7 +40,8 @@ pub(crate) struct End {
     pub face: FaceRef,
 }
 
-/// A mate, read from the assembly that holds it and placed in the root.
+/// A mate, read from the assembly that holds it and placed in the root. A Coincident
+/// reads as a distance of zero.
 #[allow(clippy::large_enum_variant, reason = "a mate list is short and read one by one")]
 pub(crate) enum Gathered {
     Origin { mate: String, body: Body, axes: bool, at: Placement },
@@ -283,8 +284,11 @@ impl AssemblyDocument {
                         let at = scope.frame(&body).ok_or_else(|| invalid(format!("{name}: no frame for {body}")))?;
                         mates.push(Gathered::Origin { mate: name, body, axes: *align_axes, at });
                     }
-                    Mate::Distance { a, b, alignment, distance, .. } => {
-                        let d = holder.values.length(distance).map_err(|e| super::command::value_refusal(&name, e))?;
+                    Mate::Distance { a, b, alignment, .. } | Mate::Coincident { a, b, alignment, .. } => {
+                        let d = match mate.expression() {
+                            Some(e) => holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e))?,
+                            None => 0.0,
+                        };
                         let (ba, bb) = (under(&prefix, &a.path), under(&prefix, &b.path));
                         place(&ba)?;
                         place(&bb)?;

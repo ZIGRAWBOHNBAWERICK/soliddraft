@@ -15,7 +15,7 @@ use soliddraft_kernel_api::{ExactAxisPlane, FaceId, KernelError};
 use soliddraft_model::{Document as PartDocument, FaceRef, FeatureId, Generator, RepairReason};
 
 use crate::document::AssemblyDocument;
-use crate::mates::{FaceEndpoint, Mate, MateRefusal, RefusalCode};
+use crate::mates::{FaceEndpoint, MateRefusal, RefusalCode};
 use crate::path::ComponentId;
 use crate::schema::Assembly;
 
@@ -112,11 +112,7 @@ fn configuration_refusal(what: fmt::Arguments, configuration: &ConfigurationId) 
 /// read, so this runs before anything is proved or changed.
 pub(crate) fn check_configurations(truth: &Assembly) -> Result<(), MateRefusal> {
     for mate in truth.known_mates() {
-        let ends = match mate {
-            Mate::Distance { a, b, .. } => vec![a, b],
-            Mate::Origin { .. } => Vec::new(),
-        };
-        for end in ends {
+        for end in mate.faces().into_iter().flat_map(|(ends, _)| ends) {
             check_endpoint(end).map_err(|r| MateRefusal { mates: vec![mate.name().to_owned()], ..r })?;
         }
         for c in mate.components() {

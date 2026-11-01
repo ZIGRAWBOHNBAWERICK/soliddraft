@@ -423,6 +423,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(driven["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 22.0]));
     s.call("assembly_edit_mate", json!({ "mate": "O", "align_axes": false }));
     s.call("assembly_delete_mate", json!({ "mate": "Z" }));
+    let c = json!({ "name": "C", "a": top, "b": bottom, "alignment": "opposed" });
+    let touching = s.call("assembly_mate_coincident", c);
+    assert_eq!(touching["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 10.0]));
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();
     let module = s.path("module.dwasm");

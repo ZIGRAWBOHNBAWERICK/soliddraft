@@ -11,8 +11,9 @@
 //! - [`bodies`] reads the mates of the root and of every sub-assembly in it, and the
 //!   part occurrences they move, by path.
 //!
-//! This batch has two families: an Origin mate and a distance between planar faces. It
-//! covers axis-aligned planes with exact offsets; see `docs/mates.md`.
+//! There are three families: an Origin mate, a distance between planar faces, and two
+//! planar faces on one plane. They cover axis-aligned planes with exact offsets; see
+//! `docs/mates.md`.
 
 pub(crate) mod bodies;
 pub(crate) mod command;
@@ -111,20 +112,35 @@ pub enum Mate {
         /// The distance. An expression that reads values is driven by them.
         distance: Expression,
     },
+    /// `a`'s plane and `b`'s are one plane. It fixes what a zero distance fixes, the
+    /// normals' relation and one translation, and has no distance of its own; the faces
+    /// need not overlap.
+    Coincident {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first face.
+        a: FaceEndpoint,
+        /// The second face.
+        b: FaceEndpoint,
+        /// How their outward normals relate.
+        alignment: Alignment,
+    },
 }
 
 impl Mate {
     /// The mate's id.
     pub fn id(&self) -> MateId {
         match self {
-            Mate::Origin { id, .. } | Mate::Distance { id, .. } => *id,
+            Mate::Origin { id, .. } | Mate::Distance { id, .. } | Mate::Coincident { id, .. } => *id,
         }
     }
 
     /// The mate's label.
     pub fn name(&self) -> &str {
         match self {
-            Mate::Origin { name, .. } | Mate::Distance { name, .. } => name,
+            Mate::Origin { name, .. } | Mate::Distance { name, .. } | Mate::Coincident { name, .. } => name,
         }
     }
 
@@ -133,7 +149,9 @@ impl Mate {
     pub fn components(&self) -> Vec<ComponentId> {
         match self {
             Mate::Origin { component, .. } => vec![*component],
-            Mate::Distance { a, b, .. } => [a, b].iter().filter_map(|e| e.holder()).collect(),
+            Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } => {
+                [a, b].iter().filter_map(|e| e.holder()).collect()
+            }
         }
     }
 
@@ -141,6 +159,24 @@ impl Mate {
     pub fn expression(&self) -> Option<&Expression> {
         match self {
             Mate::Distance { distance, .. } => Some(distance),
+            Mate::Origin { .. } | Mate::Coincident { .. } => None,
+        }
+    }
+
+    /// The two faces a mate between faces names, and how their normals relate.
+    pub fn faces(&self) -> Option<([&FaceEndpoint; 2], Alignment)> {
+        match self {
+            Mate::Distance { a, b, alignment, .. } | Mate::Coincident { a, b, alignment, .. } => {
+                Some(([a, b], *alignment))
+            }
+            Mate::Origin { .. } => None,
+        }
+    }
+
+    /// The two faces, to change their paths.
+    pub(crate) fn faces_mut(&mut self) -> Option<[&mut FaceEndpoint; 2]> {
+        match self {
+            Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } => Some([a, b]),
             Mate::Origin { .. } => None,
         }
     }

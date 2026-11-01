@@ -187,4 +187,53 @@ fn faces_are_found_or_refused_by_what_they_are() {
     r.refused("assembly_measure_planes", none, "no_such_face");
     let across = json!({ "a": side(2, [1.0, 0.0, 0.0]), "b": side(4, [0.0, 1.0, 0.0]) });
     r.refused("assembly_measure_planes", across, "not_parallel");
+
+    // A Coincident finds its faces the same way, and refuses what it cannot use whole.
+    let x = [1.0, 0.0, 0.0];
+    let coincident = |name: &str, a: Value, b: Value, alignment: &str| json!({ "name": name, "a": a, "b": b, "alignment": alignment });
+    let tool = "assembly_mate_coincident";
+    r.refused(tool, coincident("C", read(2, "side"), side(4, x), "aligned"), "ambiguous_reference");
+    let none = json!({ "component": 2, "face": "No such face" });
+    r.refused(tool, coincident("C", none, side(4, x), "aligned"), "no_such_face");
+    r.refused(tool, coincident("C", side(99, x), side(4, x), "aligned"), "invalid");
+    r.refused(tool, coincident("", side(2, x), side(4, x), "aligned"), "invalid");
+    r.refused(tool, coincident("Z", side(2, x), side(4, x), "aligned"), "invalid");
+    r.refused(tool, coincident("C", side(2, x), side(2, [-1.0, 0.0, 0.0]), "opposed"), "invalid");
+    let before = r.accepted();
+    let malformed =
+        r.call(tool, coincident("C", side(2, x), side(4, x), "sideways")).expect_err("a malformed alignment");
+    assert!(malformed.to_string().contains("alignment"), "{malformed}");
+    assert_eq!(r.accepted(), before);
+
+    // A curved face has no plane, and a face placed off the world axes is not proved.
+    let (round, turned) = (r.dir.join("round.dwprt"), r.dir.join("b.dwprt"));
+    r.ok("new_part", json!({}));
+    let circle = json!({ "shape": "circle", "center": [0, 0, 0], "diameter": 10 });
+    r.ok("sketch", json!({ "plane": "top", "shapes": [circle] }));
+    r.ok("extrude", json!({ "sketch": "Sketch1", "depth": 6, "flip": false }));
+    r.ok("save", json!({ "path": round }));
+    r.ok("show_assembly", json!({}));
+    let at = |t: [f64; 3], q: [f64; 4]| json!({ "translation": t, "rotation": q });
+    let s = std::f64::consts::FRAC_PI_8.sin();
+    let c = std::f64::consts::FRAC_PI_8.cos();
+    for (file, placement) in [
+        (&round, at([0.0, 80.0, 0.0], [0.0, 0.0, 0.0, 1.0])),
+        (&turned, at([80.0, 0.0, 0.0], [0.0, 0.0, s, c])),
+        (&turned, at([80.0, 40.0, 0.0], [0.0, 0.0, 0.0, 1.0])),
+    ] {
+        r.ok("insert_component", json!({ "paths": [file], "placement": placement }));
+    }
+    let paths: Vec<u64> = r.assembly()["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["path"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let [_, _, round, turned, upright] = paths[..] else { panic!("{paths:?}") };
+    let curved = coincident("C", read(round, "side"), side(2, x), "aligned");
+    let said = r.refused(tool, curved, "unsupported_plane");
+    assert_eq!(said["mates"], json!(["C"]), "{said}");
+    let off = coincident("C", side(turned, x), side(upright, x), "aligned");
+    let said = r.refused(tool, off, "unsupported_placement");
+    assert_eq!(said["mates"], json!(["C"]), "{said}");
 }

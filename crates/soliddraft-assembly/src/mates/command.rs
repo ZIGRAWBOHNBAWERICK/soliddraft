@@ -403,15 +403,15 @@ impl AssemblyDocument {
         self.measure(&a, &b)
     }
 
-    /// What each distance mate measures on the accepted placements, by proof. A mate
-    /// whose proof cannot be had says why; the accepted pose stands.
+    /// What each mate between faces measures on the accepted placements, by proof. A
+    /// mate whose proof cannot be had says why; the accepted pose stands.
     pub fn mate_measurements(&mut self) -> Vec<(MateId, Result<PlaneMeasurement, MateRefusal>)> {
         let mates: Vec<Mate> = self.assembly.known_mates().cloned().collect();
         mates
             .iter()
-            .filter_map(|m| match m {
-                Mate::Distance { id, a, b, .. } => Some((*id, self.measure(a, b))),
-                Mate::Origin { .. } => None,
+            .filter_map(|m| {
+                let ([a, b], _) = m.faces()?;
+                Some((m.id(), self.measure(a, b)))
             })
             .collect()
     }
@@ -446,15 +446,44 @@ impl AssemblyDocument {
         alignment: Alignment,
         strict: bool,
     ) -> Result<MateId, MateRefusal> {
-        self.transact("Distance mate", strict, |doc, truth| {
+        self.mate_faces(name, [a, b], alignment, Some(distance), strict)
+    }
+
+    /// Puts two faces on one plane. One undo step. Partial mates are accepted unless
+    /// `strict` asks for a fully constrained result.
+    pub fn mate_coincident(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        alignment: Alignment,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_faces(name, [a, b], alignment, None, strict)
+    }
+
+    /// Adds a mate between two faces: a distance when one is given, else a Coincident.
+    fn mate_faces(
+        &mut self,
+        name: &str,
+        [a, b]: [&EndpointSelector; 2],
+        alignment: Alignment,
+        distance: Option<&str>,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        let label = if distance.is_some() { "Distance mate" } else { "Coincident mate" };
+        self.transact(label, strict, |doc, truth| {
             check_new_name(truth, name)?;
             if a.component == b.component {
                 return Err(MateRefusal::invalid("a mate ties two different components"));
             }
-            let distance = literal(distance)?;
+            let distance = distance.map(literal).transpose()?;
             let (a, b) = (doc.endpoint(truth, a)?, doc.endpoint(truth, b)?);
-            let id = MateId(truth.take_id());
-            truth.mates.push(MateEntry::Known(Mate::Distance { id, name: name.into(), a, b, alignment, distance }));
+            let (id, name) = (MateId(truth.take_id()), name.into());
+            truth.mates.push(MateEntry::Known(match distance {
+                Some(distance) => Mate::Distance { id, name, a, b, alignment, distance },
+                None => Mate::Coincident { id, name, a, b, alignment },
+            }));
             Ok(id)
         })
     }
@@ -475,8 +504,13 @@ impl AssemblyDocument {
                         });
                     }
                     (Mate::Distance { distance, .. }, MateEdit::Distance(text)) => *distance = literal(text)?,
-                    (Mate::Distance { alignment, .. }, MateEdit::Alignment(a)) => *alignment = *a,
+                    (Mate::Distance { alignment, .. } | Mate::Coincident { alignment, .. }, MateEdit::Alignment(a)) => {
+                        *alignment = *a
+                    }
                     (Mate::Origin { align_axes, .. }, MateEdit::AlignAxes(on)) => *align_axes = *on,
+                    (Mate::Coincident { .. }, MateEdit::Distance(_)) => {
+                        return Err(MateRefusal::invalid(format!("{name} is a Coincident mate; it has no distance")));
+                    }
                     (_, _) => return Err(MateRefusal::invalid(format!("{name} has no such setting"))),
                 }
             }
@@ -529,15 +563,15 @@ impl AssemblyDocument {
     pub fn drive_mate(&mut self, mate: &str, expression: &str, replace: bool) -> Result<(), MateRefusal> {
         self.transact("Drive mate", false, |_, truth| {
             let driver = truth.values.parse(expression).map_err(|e| value_refusal(mate, e))?;
+            let Mate::Distance { distance, .. } = mate_named(truth, mate)? else {
+                return Err(MateRefusal::invalid(format!("{mate} has no distance to drive")));
+            };
             if driver.references().is_empty() {
                 return Err(MateRefusal::new(
                     RefusalCode::InvalidValue,
                     format!("{mate}: a driver names a value; a literal distance is an edit"),
                 ));
             }
-            let Mate::Distance { distance, .. } = mate_named(truth, mate)? else {
-                return Err(MateRefusal::invalid(format!("{mate} has no distance to drive")));
-            };
             if !distance.references().is_empty() && !replace {
                 return Err(MateRefusal {
                     mates: vec![mate.to_owned()],

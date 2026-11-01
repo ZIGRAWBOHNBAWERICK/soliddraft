@@ -4,7 +4,8 @@
 //! C and F of one 20 x 10 x h pin, all centred in plan and rising along +Z. A is on the
 //! root's origin, B on A by three plane distances (Z driven by the root value `gap`), C on
 //! B by three literal ones, and F free with a half turn about Z. Every expected pose and
-//! box below is hand-derived in the design report; none is read from a solver.
+//! box below is hand-derived in the design report; none is read from a solver. The same
+//! formation holds with the zero X and Y distances as Coincident mates.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -116,11 +117,16 @@ impl Drop for Fixture {
 
 /// The flat accepted state T0, saved: the design's steps 1 to 23.
 fn flat(name: &str) -> Fixture {
-    flat_in(std::env::temp_dir().join(format!("soliddraft-subassembly-{}-{name}", std::process::id())))
+    flat_with(name, false)
+}
+
+/// The same, with Xab, Yab, Xbc and Ybc as Coincident mates when `coincident` says so.
+fn flat_with(name: &str, coincident: bool) -> Fixture {
+    flat_in(std::env::temp_dir().join(format!("soliddraft-subassembly-{}-{name}", std::process::id())), coincident)
 }
 
 /// The same, in `dir`.
-fn flat_in(dir: PathBuf) -> Fixture {
+fn flat_in(dir: PathBuf, coincident: bool) -> Fixture {
     let _ = std::fs::remove_dir_all(&dir);
     let work = dir.join("work");
     let (base, pin) = (work.join("parts/base.dwprt"), work.join("parts/pin.dwprt"));
@@ -137,12 +143,19 @@ fn flat_in(dir: PathBuf) -> Fixture {
     doc.finish_loading();
     let top = |c| face(c, GeneratorChoice::EndCap, None);
     let bottom = |c| face(c, GeneratorChoice::StartCap, None);
+    let zero = |doc: &mut AssemblyDocument, name, a, b| {
+        let made = match coincident {
+            true => doc.mate_coincident(name, &a, &b, Alignment::Aligned, false),
+            false => doc.mate_distance(name, &a, &b, "0 mm", Alignment::Aligned, false),
+        };
+        made.unwrap();
+    };
     doc.mate_origin("O", a, true, false).unwrap();
-    doc.mate_distance("Xab", &side(a, X), &side(b, X), "0 mm", Alignment::Aligned, false).unwrap();
-    doc.mate_distance("Yab", &side(a, Y), &side(b, Y), "0 mm", Alignment::Aligned, false).unwrap();
+    zero(&mut doc, "Xab", side(a, X), side(b, X));
+    zero(&mut doc, "Yab", side(a, Y), side(b, Y));
     doc.mate_distance("Zab", &top(a), &bottom(b), "12 mm", Alignment::Opposed, false).unwrap();
-    doc.mate_distance("Xbc", &side(b, X), &side(c, X), "0 mm", Alignment::Aligned, false).unwrap();
-    doc.mate_distance("Ybc", &side(b, Y), &side(c, Y), "0 mm", Alignment::Aligned, false).unwrap();
+    zero(&mut doc, "Xbc", side(b, X), side(c, X));
+    zero(&mut doc, "Ybc", side(b, Y), side(c, Y));
     doc.mate_distance("Zbc", &top(b), &bottom(c), "3 mm", Alignment::Opposed, false).unwrap();
     doc.set_value("gap", "12 mm").unwrap();
     doc.drive_mate("Zab", "gap", false).unwrap();
@@ -191,10 +204,18 @@ fn p0(doc: &AssemblyDocument, a: &OccurrencePath, b: &OccurrencePath, c: &Occurr
 }
 
 /// Steps 23 to 29: the flat root forms B, C and F into pack.dwasm with nothing moving,
-/// every reference migrated, and both files reopening functional.
+/// every reference migrated, and both files reopening functional; then the root's value
+/// drives the nested parts, and Undo and Redo leave the new file as written. With the
+/// zero X and Y mates as distances and as Coincidents.
 #[test]
 fn forming_keeps_references_poses_and_freedoms() {
-    let mut fx = flat("form");
+    for coincident in [false, true] {
+        forming_keeps_references_poses_and_freedoms_with(coincident);
+    }
+}
+
+fn forming_keeps_references_poses_and_freedoms_with(coincident: bool) {
+    let mut fx = flat_with(&format!("form-{coincident}"), coincident);
     let (a, b, c, f) = (path(&[fx.a.0]), path(&[fx.b.0]), path(&[fx.c.0]), path(&[fx.f.0]));
     p0(&fx.doc, &a, &b, &c, &f);
     let flat_status = fx.doc.solver();
@@ -252,14 +273,15 @@ fn forming_keeps_references_poses_and_freedoms() {
             truth.known_mates().find(|x| x.name() == name).unwrap(),
             t0.known_mates().find(|x| x.name() == name).unwrap(),
         );
-        match (now, then) {
-            (Mate::Distance { a: na, b: nb, distance: nd, .. }, Mate::Distance { a: ta, b: tb, distance: td, .. }) => {
+        match (now.faces(), then.faces()) {
+            (Some(([na, nb], nl)), Some(([ta, tb], tl))) => {
+                assert_eq!(std::mem::discriminant(now), std::mem::discriminant(then), "{name}: the same kind");
                 assert_eq!((&na.path, &na.document, &na.face), (&ta.path, &ta.document, &ta.face));
                 assert_eq!(nb.path, nested(fx.b), "{name}: B's endpoint is nested");
                 assert_eq!((&nb.document, &nb.face, &nb.configuration), (&tb.document, &tb.face, &tb.configuration));
-                assert_eq!(nd, td, "{name}: the same expression and binding");
+                assert_eq!((now.expression(), nl), (then.expression(), tl), "{name}: the same expression and binding");
             }
-            (now, then) => assert_eq!(now, then),
+            _ => assert_eq!(now, then),
         }
     }
     assert!(truth.known_mates().all(|x| !x.name().ends_with("bc")));
@@ -286,11 +308,11 @@ fn forming_keeps_references_poses_and_freedoms() {
         t0.known_mates().filter(|x| x.name().ends_with("bc")).map(|x| (x.id(), x.name().to_owned())).collect();
     assert_eq!(names, expected);
     for x in child.known_mates() {
-        let Mate::Distance { a, b, distance, .. } = x else { panic!("{x:?}") };
         let then = t0.known_mates().find(|t| t.id() == x.id()).unwrap();
-        let Mate::Distance { a: ta, b: tb, .. } = then else { panic!() };
-        assert_eq!((a, b), (ta, tb), "endpoints keep their paths, documents and faces");
-        assert!(distance.references().is_empty());
+        assert_eq!(x, then, "the same kind, endpoints, faces and expression");
+        assert!(x.expression().is_none_or(|d| d.references().is_empty()), "no copied driver");
+        let coincidents = matches!(x, Mate::Coincident { .. });
+        assert_eq!(coincidents, coincident && x.name() != "Zbc", "{x:?}");
     }
     assert!(child.values.is_empty(), "no value is copied or imported");
     let most = child.components.iter().map(|c| c.id.0).chain(child.known_mates().map(|x| x.id().0)).max().unwrap();
@@ -327,7 +349,31 @@ fn forming_keeps_references_poses_and_freedoms() {
     close(all.min, [-10.0, -35.0, -15.0]);
     close(all.max, [60.0, 5.0, 15.0]);
     assert!(alone.mate_measurements().iter().all(|(_, r)| r.is_ok()));
-    assert_eq!((sha(&fx.base), sha(&fx.pin)), (base_sha, pin_sha), "parts are never written");
+    assert_eq!((sha(&fx.base), sha(&fx.pin)), (base_sha.clone(), pin_sha.clone()), "parts are never written");
+
+    // The root's gap drives B and C inside the new file, as overrides the root owns.
+    let pack_sha = sha(&fx.pack);
+    fx.doc.set_value("gap", "8 mm").unwrap();
+    leaf(&fx.doc, &nested(fx.b), [10.0, 10.0, 18.0], [0.0, 5.0, 18.0], [20.0, 15.0, 24.0]);
+    leaf(&fx.doc, &nested(fx.c), [10.0, 10.0, 27.0], [0.0, 5.0, 27.0], [20.0, 15.0, 33.0]);
+    leaf(&fx.doc, &nested(fx.f), [60.0, -20.0, 7.0], [50.0, -25.0, 7.0], [70.0, -15.0, 13.0]);
+    let overrides: Vec<_> = fx.doc.assembly().overrides.iter().map(|o| o.path.clone()).collect();
+    assert_eq!(overrides, [nested(fx.b), nested(fx.c)]);
+    assert_eq!((sha(&fx.pack), sha(&fx.base), sha(&fx.pin)), (pack_sha.clone(), base_sha.clone(), pin_sha.clone()));
+
+    // Undo Form leaves the new file; Redo brings back the same ids and pin, writing nothing.
+    let formed_truth = fx.doc.assembly().clone();
+    assert!(fx.doc.undo() && fx.doc.undo());
+    assert_eq!(fx.doc.assembly(), &t0);
+    assert_eq!(sha(&fx.pack), pack_sha, "undo deletes no file");
+    assert!(fx.doc.redo());
+    let truth = fx.doc.assembly();
+    assert_eq!(truth.component(s).map(|c| c.source), Some(m.source));
+    assert_eq!(truth.source(m.source).unwrap().document.pinned, m.child_revision);
+    assert!(fx.doc.redo());
+    assert_eq!(fx.doc.assembly(), &formed_truth);
+    leaf(&fx.doc, &nested(fx.b), [10.0, 10.0, 18.0], [0.0, 5.0, 18.0], [20.0, 15.0, 24.0]);
+    assert_eq!((sha(&fx.pack), sha(&fx.base), sha(&fx.pin)), (pack_sha, base_sha, pin_sha), "redo writes no file");
 }
 
 /// What the selection may not be: refused before anything is made.
@@ -589,7 +635,7 @@ const CRASH: &str = "SOLIDDRAFT_FORM_CRASH_DIR";
 #[test]
 fn form_crash_child() {
     let Some(dir) = std::env::var_os(CRASH) else { return };
-    let mut fx = flat_in(PathBuf::from(dir));
+    let mut fx = flat_in(PathBuf::from(dir), false);
     let plan = fx.doc.prepare_form(&fx.request()).unwrap();
     let _ = fx.doc.commit_form_with(plan, Fault::Exit);
     unreachable!("the commit ends the process");

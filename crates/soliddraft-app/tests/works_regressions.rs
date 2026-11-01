@@ -377,10 +377,10 @@ fn drawing_over_budget_returns_a_plain_refusal_and_keeps_the_part() {
     kernel.rules.lock().unwrap().drawing_delay = Duration::from_secs(121);
     let started = Instant::now();
     let (reply, longest_frame) = request(&mut app, "make_drawing", json!({"template":"iso-a3"}));
-    assert!(started.elapsed() < Duration::from_secs(30), "the caller waited for the HTTP timeout");
+    assert!(started.elapsed() < Duration::from_secs(120), "the caller waited for the HTTP timeout");
     assert!(longest_frame < Duration::from_secs(2), "drawing blocked a native frame for {longest_frame:?}");
     assert_eq!(reply["isError"], true, "{reply}");
-    assert!(reply["content"][0]["text"].as_str().unwrap().contains("time limit"), "{reply}");
+    assert!(reply["content"][0]["text"].as_str().unwrap().contains("100-second time limit"), "{reply}");
     assert!(app.state().state.drawing.session.is_none());
     assert_eq!((app.state().state.doc.model().id(), app.state().state.doc.undo_depth()), before);
     let started = Instant::now();

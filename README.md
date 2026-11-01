@@ -30,7 +30,7 @@ Check out my other products at [ZigrawBohnBawerick](https://zigrawbohnbawerick.o
 
 ## Sponsorship
 
-Help fund SolidDraft and Catallax through [GitHub Sponsors](https://github.com/sponsors/BohnBawerick). This supports the project started by Zigrawbohnbawerick Pty Ltd.
+Help fund SolidDraft and Catallax through [GitHub Sponsors](https://github.com/sponsors/BohnBawerick) or [Ko-fi](https://ko-fi.com/pedropaiva56920). Both support the same project, started by Zigrawbohnbawerick Pty Ltd.
 
 ## What it is
 

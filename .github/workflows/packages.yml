@@ -69,7 +69,8 @@ jobs:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.platform }}
+          shared-key: native-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-packager@0.11.8
@@ -167,7 +168,8 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-web
+          shared-key: wasm-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: trunk@0.21.14

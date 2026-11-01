@@ -3,6 +3,9 @@
   "files": {
     "ci/browser-journal.js": ["web"],
     "ci/cargo-cache.sh": [],
+    "ci/bootstrap": ["lint"],
+    "ci/hooks/pre-push": ["lint"],
+    "ci/run": ["lint"],
     "ci/check-consumers.json": "all",
     "ci/check-configuration-grid.py": ["lint", "application-loop"],
     "ci/check-field-moments.py": ["application-loop"],
@@ -40,6 +43,7 @@
     "ci/scenarios/p5-flanged-housing.md": [],
     "ci/select-checks.py": "all",
     "ci/test_checks.py": ["lint"],
+    "ci/test_run.py": ["lint"],
     "ci/test_icons.py": ["lint"],
     "ci/test_ownership.py": ["lint"],
     "ci/test_scenario_bundles.py": ["lint"],

@@ -79,18 +79,20 @@
             "center": [
               70,
               45,
-              10
+              8
             ],
             "diameter": 24
           }
-        ]
-      }
+        ],
+        "offset": -2
+      },
+      "label": "face offset -2 mm"
     },
     {
       "tool": "extrude",
       "arguments": {
         "sketch": "Sketch3",
-        "depth": 20,
+        "depth": 22,
         "flip": false
       },
       "checks": [
@@ -111,12 +113,14 @@
             "center": [
               70,
               45,
-              30
+              33
             ],
             "diameter": 12
           }
-        ]
-      }
+        ],
+        "offset": 3
+      },
+      "label": "face offset 3 mm"
     },
     {
       "tool": "cut",
@@ -144,20 +148,22 @@
             "center": [
               100,
               45,
-              10
+              12
             ],
             "width": 6,
             "height": 100
           }
-        ]
-      }
+        ],
+        "offset": 2
+      },
+      "label": "face offset 2 mm"
     },
     {
       "tool": "cut",
       "arguments": {
         "sketch": "Sketch5",
         "through_all": false,
-        "depth": 3,
+        "depth": 5,
         "flip": false
       },
       "checks": [
@@ -178,25 +184,27 @@
             "center": [
               112,
               45,
-              10
+              12
             ],
             "diameter": 6
           }
-        ]
+        ],
+        "offset": 2
       },
       "checks": [
         {
           "pointer": "/references/5/carrier_counts/0",
           "equals": 2
         }
-      ]
+      ],
+      "label": "face offset 2 mm on split face"
     },
     {
       "tool": "cut",
       "arguments": {
         "sketch": "Sketch6",
         "through_all": false,
-        "depth": 5,
+        "depth": 7,
         "flip": false
       },
       "checks": [
@@ -250,25 +258,27 @@
             "center": [
               130,
               45,
-              10
+              12
             ],
             "diameter": 5
           }
-        ]
+        ],
+        "offset": 2
       },
       "checks": [
         {
           "pointer": "/references/7/carrier_origin_counts/0",
           "contains": 2
         }
-      ]
+      ],
+      "label": "face offset 2 mm"
     },
     {
       "tool": "cut",
       "arguments": {
         "sketch": "Sketch8",
         "through_all": false,
-        "depth": 4,
+        "depth": 6,
         "flip": false
       },
       "checks": [
@@ -286,7 +296,21 @@
         "feature": "Boss-Extrude1",
         "depth": 12,
         "flip": false
-      }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features/4/offset",
+          "equals": -2
+        },
+        {
+          "pointer": "/summary/features/6/offset",
+          "equals": 3
+        },
+        {
+          "pointer": "/summary/features/10/offset",
+          "equals": 2
+        }
+      ]
     },
     {
       "tool": "edit_dimension",
@@ -412,6 +436,18 @@
         {
           "pointer": "/summary/features/0/plane",
           "equals": "Mounting plane"
+        },
+        {
+          "pointer": "/summary/features/4/offset",
+          "equals": -2
+        },
+        {
+          "pointer": "/summary/features/6/offset",
+          "equals": 3
+        },
+        {
+          "pointer": "/summary/features/10/offset",
+          "equals": 2
         }
       ]
     },

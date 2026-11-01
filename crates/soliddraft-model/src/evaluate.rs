@@ -254,7 +254,8 @@ impl Document {
                 let p = datum.plane();
                 (p.with_origin(p.origin + p.normal * *offset), false)
             }
-            SketchPlane::Face { face } => {
+            SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
+                let offset = s.plane.offset();
                 let repair = |reason, message: String, candidates| {
                     let r = RepairNeeded { slot: ReferenceSlot::SketchPlane, reason, message, candidates };
                     Built::pass(FeatureStatus::RepairNeeded(vec![r]), current)
@@ -280,7 +281,11 @@ impl Document {
                     let detail = "the face is not planar".to_string();
                     return repair(RepairReason::Mismatch { detail: detail.clone() }, detail, vec![]);
                 };
-                (plane_on_face(normal, info.centroid), true)
+                if !offset.is_finite() {
+                    return Built::failed(current, "sketch plane offset must be finite".into());
+                }
+                let p = plane_on_face(normal, info.centroid);
+                (p.with_origin(p.origin + p.normal * offset), offset == 0.0)
             }
         };
         let regions = s.sketch.regions().map_err(|e| e.to_string());

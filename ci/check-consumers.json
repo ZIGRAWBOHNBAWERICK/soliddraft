@@ -3,9 +3,11 @@
   "files": {
     "ci/browser-journal.js": ["web"],
     "ci/cargo-cache.sh": [],
-    "ci/bootstrap": ["lint"],
+    "ci/bootstrap": ["lint", "test-linux", "test-macos"],
     "ci/hooks/pre-push": ["lint"],
-    "ci/run": ["lint"],
+    "ci/run": ["lint", "test-linux", "test-macos"],
+    "ci/tools": ["lint", "test-linux", "test-macos"],
+    "ci/nextest.toml": ["lint", "test-linux", "test-macos"],
     "ci/check-consumers.json": "all",
     "ci/check-configuration-grid.py": ["lint", "application-loop"],
     "ci/check-field-moments.py": ["application-loop"],

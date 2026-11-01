@@ -3,15 +3,31 @@ set -euo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 
+export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+
 case "${1:-}" in
   lint)
-    export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     python3 -m unittest discover -s ci -p 'test_*.py'
     ;;
+  test-build)
+    [[ $# -eq 2 ]]
+    export CARGO_PROFILE_TEST_OPT_LEVEL=2
+    cargo nextest archive --workspace --all-features --locked --archive-file "$2"
+    ;;
+  test-doc)
+    export CARGO_PROFILE_TEST_OPT_LEVEL=2
+    cargo test --workspace --all-features --locked --doc --no-fail-fast
+    ;;
+  test-shard)
+    [[ $# -eq 3 ]]
+    cargo nextest run --config-file "$root/ci/nextest.toml" --profile ci \
+      --archive-file "$2" --workspace-remap "$root" --extract-to "$root" --extract-overwrite \
+      --partition "slice:$3" --no-fail-fast
+    ;;
   *)
-    echo "Usage: ci/run lint" >&2
+    echo "Usage: ci/run lint | test-build ARCHIVE | test-doc | test-shard ARCHIVE K/N" >&2
     exit 2
     ;;
 esac

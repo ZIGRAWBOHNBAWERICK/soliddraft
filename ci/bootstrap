@@ -1,5 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-git -C "$root" config --local core.hooksPath ci/hooks
-echo "Installed the pre-push lint hook. Run ci/run lint to check now."
+if [[ $# -eq 0 ]]; then
+  git -C "$root" config --local core.hooksPath ci/hooks
+  echo "Installed the pre-push lint hook. Run ci/run lint to check now."
+  exit 0
+fi
+if [[ $# -ne 2 || "$1" != --tools ]]; then
+  echo "Usage: ci/bootstrap [--tools PREFIX]" >&2
+  exit 2
+fi
+python3 - "$root" "$2" <<'PYTHON'
+import hashlib
+import io
+import json
+import pathlib
+import platform
+import tarfile
+import urllib.request
+import sys
+
+root, prefix = map(pathlib.Path, sys.argv[1:])
+tool = json.loads((root / "ci/tools").read_text())["cargo-nextest"]
+system = platform.system()
+key = "Darwin" if system == "Darwin" else f"{system}-{platform.machine()}"
+if key not in tool["platforms"]:
+    sys.exit(f"No pinned cargo-nextest binary for {key}")
+asset = tool["platforms"][key]
+name = f"cargo-nextest-{tool['version']}-{asset['target']}.tar.gz"
+url = f"https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-{tool['version']}/{name}"
+with urllib.request.urlopen(url, timeout=120) as response:
+    payload = response.read()
+if hashlib.sha256(payload).hexdigest() != asset["sha256"]:
+    sys.exit("cargo-nextest checksum mismatch")
+with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+    members = [m for m in archive.getmembers() if m.isfile() and pathlib.PurePosixPath(m.name).name == "cargo-nextest"]
+    if len(members) != 1:
+        sys.exit("cargo-nextest archive must contain exactly one executable")
+    binary = archive.extractfile(members[0]).read()
+bindir = prefix / "bin"
+bindir.mkdir(parents=True, exist_ok=True)
+temporary = bindir / ".cargo-nextest.tmp"
+temporary.write_bytes(binary)
+temporary.chmod(0o755)
+temporary.replace(bindir / "cargo-nextest")
+print(f"Installed cargo-nextest {tool['version']} in {bindir}")
+PYTHON

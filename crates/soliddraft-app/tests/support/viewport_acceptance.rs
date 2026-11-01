@@ -24,6 +24,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
+#[path = "render_steps.rs"]
+pub mod render_steps;
+
 pub type App = Harness<'static, SolidDraftApp>;
 
 /// The config override is global to the process and the harnesses share one adapter.
@@ -181,33 +184,63 @@ pub fn launch(doc: Document) -> App {
 }
 
 pub fn launch_at(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
-    start(doc, size, pixels_per_point, true)
-}
-
-/// For a case that reads frames and never picks: it draws only the frames it asks for.
-pub fn launch_for_frames(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
     start(doc, size, pixels_per_point, false)
 }
 
-fn start(doc: Document, size: Vec2, pixels_per_point: f32, render_every_step: bool) -> App {
+/// For a case that reads frames and never picks: it draws only the frames it asks for, not
+/// even its gestures.
+pub fn launch_for_frames(doc: Document, size: Vec2, pixels_per_point: f32) -> App {
+    let app = start(doc, size, pixels_per_point, false);
+    app.ctx.data_mut(|d| d.insert_temp(frames_only(), true));
+    app
+}
+
+/// For a case about what the id buffer says between frames: every step draws, so a click
+/// can land before the sample of the frame it hits.
+pub fn launch_eager(doc: Document) -> App {
+    start(doc, vec2(1440.0, 900.0), 1.0, true)
+}
+
+fn start(doc: Document, size: Vec2, pixels_per_point: f32, eager: bool) -> App {
     let mut app = Harness::builder()
         .with_size(size)
         .with_pixels_per_point(pixels_per_point)
-        .with_render_every_step(render_every_step)
+        .with_render_every_step(eager)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    render_steps::set_eager(&mut app, eager);
     settle(&mut app);
     app
+}
+
+fn frames_only() -> egui::Id {
+    egui::Id::new("viewport_acceptance frames only")
+}
+
+/// Input in the viewport, drawn as it goes unless the case only reads frames.
+fn gesture(app: &mut App, scope: impl FnOnce(&mut App)) {
+    if app.ctx.data(|d| d.get_temp(frames_only())).unwrap_or(false) {
+        scope(app);
+    } else {
+        render_steps::rendered(app, scope);
+    }
 }
 
 /// Half a second of virtual time, so a later click is not a double click, and then until a
 /// view transition has come to rest.
 pub fn settle(app: &mut App) {
-    app.run_steps(30);
+    settle_from(app, 30);
+}
+
+/// [`settle`] for a caller that has already drawn the first steps of that time.
+fn settle_from(app: &mut App, steps: usize) {
+    app.run_steps(steps);
     let mut resting = 0;
     let mut last = app.state().state.viewport.camera.eye();
+    let start = Instant::now();
     while resting < 4 {
+        assert!(start.elapsed() < render_steps::HANG_GUARD, "the view never came to rest");
         app.step();
         let eye = app.state().state.viewport.camera.eye();
         resting = if eye == last { resting + 1 } else { 0 };
@@ -228,12 +261,30 @@ pub fn right_click(app: &mut App, point: Pos2) {
 }
 
 fn press(app: &mut App, point: Pos2, button: egui::PointerButton) {
-    app.hover_at(point);
-    app.run_steps(4);
+    gesture(app, |app| {
+        app.hover_at(point);
+        app.run_steps(4);
+        press_and_release(app, point, button);
+    });
+    settle(app);
+}
+
+fn press_and_release(app: &mut App, point: Pos2, button: egui::PointerButton) {
     for pressed in [true, false] {
         app.event(egui::Event::PointerButton { pos: point, button, pressed, modifiers: Modifiers::default() });
         app.step();
     }
+}
+
+/// A click on what the id buffer shows at a point, once it is current. A sketch's clicks
+/// are [`click`]: a sketch issues no id sample to wait for, and neither do the controls
+/// over the view.
+pub fn pick(app: &mut App, point: Pos2) {
+    render_steps::rendered(app, |app| {
+        let steps = render_steps::await_pick(app, point);
+        app.run_steps(4_usize.saturating_sub(steps));
+        press_and_release(app, point, egui::PointerButton::Primary);
+    });
     settle(app);
 }
 
@@ -285,22 +336,26 @@ pub fn double_click_label(app: &mut App, label: &str) {
 /// Scrolls the wheel over the view's centre and waits for the smooth scroll to end. A
 /// positive amount zooms in.
 pub fn wheel(app: &mut App, points: f32) {
-    app.hover_at(viewport(app).center());
-    app.run_steps(2);
-    app.event(egui::Event::MouseWheel {
-        unit: egui::MouseWheelUnit::Point,
-        delta: vec2(0.0, points),
-        phase: egui::TouchPhase::Move,
-        modifiers: Modifiers::default(),
+    gesture(app, |app| {
+        app.hover_at(viewport(app).center());
+        app.run_steps(2);
+        app.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, points),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::default(),
+        });
+        let mut resting = 0;
+        let mut last = app.state().state.viewport.camera.distance;
+        let start = Instant::now();
+        while resting < 4 {
+            assert!(start.elapsed() < render_steps::HANG_GUARD, "the wheel's zoom never came to rest");
+            app.step();
+            let distance = app.state().state.viewport.camera.distance;
+            resting = if distance == last { resting + 1 } else { 0 };
+            last = distance;
+        }
     });
-    let mut resting = 0;
-    let mut last = app.state().state.viewport.camera.distance;
-    while resting < 4 {
-        app.step();
-        let distance = app.state().state.viewport.camera.distance;
-        resting = if distance == last { resting + 1 } else { 0 };
-        last = distance;
-    }
 }
 
 /// A drag across the view with one button.
@@ -330,17 +385,20 @@ pub fn orbit(app: &mut App, by: Vec2) {
 
 /// A drag across the view with one button and modifiers held.
 pub fn drag_held(app: &mut App, button: egui::PointerButton, modifiers: Modifiers, from: Pos2, to: Pos2) {
-    app.hover_at(from);
-    app.run_steps(2);
-    let press = |pos, pressed| egui::Event::PointerButton { pos, button, pressed, modifiers };
-    app.event(press(from, true));
-    app.step();
-    for k in 1..=8 {
-        app.hover_at(from + (to - from) * (k as f32 / 8.0));
+    gesture(app, |app| {
+        app.hover_at(from);
+        app.run_steps(2);
+        let press = |pos, pressed| egui::Event::PointerButton { pos, button, pressed, modifiers };
+        app.event(press(from, true));
         app.step();
-    }
-    app.event(press(to, false));
-    settle(app);
+        for k in 1..=8 {
+            app.hover_at(from + (to - from) * (k as f32 / 8.0));
+            app.step();
+        }
+        app.event(press(to, false));
+        app.step();
+    });
+    settle_from(app, 29);
 }
 
 pub const SHOW_GRID: &str = "Show grid";
@@ -467,7 +525,7 @@ pub fn clear_point(app: &App) -> Pos2 {
 /// An empty click in the viewport, as a user clears the selection.
 pub fn click_empty(app: &mut App) {
     let point = clear_point(app);
-    click(app, point);
+    pick(app, point);
 }
 
 // ---------------------------------------------------------------------------

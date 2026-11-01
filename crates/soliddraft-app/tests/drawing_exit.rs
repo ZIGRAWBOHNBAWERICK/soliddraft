@@ -35,15 +35,17 @@ fn out_dir() -> PathBuf {
     dir
 }
 
+#[path = "support/render_steps.rs"]
+mod render_steps;
+
 type App<'a> = Harness<'a, SolidDraftApp>;
 
 fn harness(doc: Document) -> App<'static> {
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(|cc| SolidDraftApp::new(cc, doc, Automation::default()))
 }
 
@@ -69,22 +71,20 @@ fn settle(harness: &mut App<'_>) {
 }
 
 fn click_at(harness: &mut App<'_>, pos: Pos2) {
-    harness.hover_at(pos);
+    render_steps::rendered(harness, |harness| {
+        harness.hover_at(pos);
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            });
+            harness.step();
+        }
+    });
     harness.run_steps(3);
-    harness.event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: Default::default(),
-    });
-    harness.step();
-    harness.event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: Default::default(),
-    });
-    harness.run_steps(4);
 }
 
 /// Clicks the first button with this label; ribbon items come before panel buttons.

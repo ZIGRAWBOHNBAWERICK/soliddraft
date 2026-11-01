@@ -173,6 +173,7 @@ fn command_and_status_share_one_bottom_band() {
         assert!(!app.state().state.command_line.session_open, "Shift+F9 closes it");
         assert!(same_rect(viewport(app), collapsed), "the viewport comes back: {:?}", viewport(app));
         band_is_one_low_row(app);
+        app.render().expect("the last frame renders");
     });
 }
 
@@ -255,5 +256,6 @@ fn compact_status_tracks_the_active_document_without_moving_properties() {
         cancel_the_editor(app);
         assert!(same_rect(viewport(app), before), "cancelled: {:?} from {before:?}", viewport(app));
         properties_under_the_tree(app);
+        app.render().expect("the last frame renders");
     });
 }

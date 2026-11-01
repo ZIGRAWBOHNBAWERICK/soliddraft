@@ -286,6 +286,7 @@ fn the_status_never_calls_a_part_with_no_mesh_rebuilt() {
         assert!(app.state().state.doc.triangle_count() > 0);
         let lines = ribbon::status_lines(app);
         assert!(lines.iter().any(|line| line == "Rebuild OK"), "{lines:?}");
+        app.render().expect("the last frame renders");
     });
 }
 
@@ -302,5 +303,6 @@ fn a_rolled_back_feature_stays_on_the_status_bar() {
         app.run_steps(5);
         assert_eq!(app.state().state.doc.triangle_count(), triangles, "the part stays on screen");
         assert_failed(&ribbon::status_lines(app), false);
+        app.render().expect("the last frame renders");
     });
 }

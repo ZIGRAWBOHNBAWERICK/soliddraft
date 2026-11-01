@@ -27,6 +27,8 @@ use soliddraft_sketch::P2;
 #[path = "support/ribbon.rs"]
 mod ribbon;
 
+use ribbon::render_steps;
+
 type App = Harness<'static, SolidDraftApp>;
 
 /// The rendered harnesses share one adapter; one test at a time.
@@ -99,9 +101,8 @@ fn harness(doc: Document) -> App {
     let mut app = Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     app.run_steps(10);
     app.key_press(Key::Z);
@@ -118,17 +119,19 @@ fn button(app: &mut App, label: &str) {
 }
 
 fn click(app: &mut App, point: Pos2) {
-    app.hover_at(point);
-    app.run_steps(4);
-    for pressed in [true, false] {
-        app.event(egui::Event::PointerButton {
-            pos: point,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Modifiers::default(),
-        });
-        app.step();
-    }
+    render_steps::rendered(app, |app| {
+        let steps = render_steps::await_pick(app, point);
+        app.run_steps(4_usize.saturating_sub(steps));
+        for pressed in [true, false] {
+            app.event(egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::default(),
+            });
+            app.step();
+        }
+    });
     app.run_steps(4);
 }
 

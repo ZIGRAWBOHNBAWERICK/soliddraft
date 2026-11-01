@@ -31,15 +31,17 @@ fn out_dir() -> PathBuf {
     std::fs::canonicalize(&dir).unwrap()
 }
 
+#[path = "support/render_steps.rs"]
+mod render_steps;
+
 type App<'a> = Harness<'a, SolidDraftApp>;
 
 fn harness() -> App<'static> {
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
-        .wgpu()
+        .renderer(render_steps::renderer())
         .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::demo_document(), Automation::default()))
 }
 

@@ -162,6 +162,15 @@ class Checks(unittest.TestCase):
         self.assertFalse(scenarios.check({"body": {}}, rule)["pass"])
         self.assertFalse(scenarios.check({"body": {"volume": None}}, rule)["pass"])
 
+    def test_covers_needs_every_group_and_no_other(self):
+        evidence = {"faces": [{"surface": "plane", "name": "Side"}, {"surface": "plane", "name": "Side"},
+                              {"surface": "torus", "name": "Blend"}]}
+        check = lambda groups: scenarios.check(evidence, {"pointer": "/faces", "covers": groups})["pass"]
+        self.assertTrue(check({"surface": ["plane", "torus"], "name": ["Blend", "Side"]}))
+        self.assertFalse(check({"surface": ["plane"]}))
+        self.assertFalse(check({"surface": ["plane", "torus", "spline"]}))
+        self.assertFalse(check({"kind": ["plane"]}))
+
     def test_a_tally_counts_a_list_by_field(self):
         faces = [{"name": "Blend", "surface": "torus"}, {"name": "Blend", "surface": "spline"}]
         evidence = {"faces": faces}
@@ -322,7 +331,9 @@ class SavedGeometry(unittest.TestCase):
             (directory / "part.step").write_bytes(b"STEP bytes")
             for code, error in ((0, ""), (1, "ModuleNotFoundError: No module named 'OCP'"),
                                 (1, "raw_valid: false")):
-                replies = [scenarios.subprocess.CompletedProcess([], 0, json.dumps({"report": report}), ""),
+                request = {"used": 7, "limit": scenarios.APP_REQUEST_WORK, "exhausted": False}
+                replies = [scenarios.subprocess.CompletedProcess(
+                               [], 0, json.dumps({"report": report, "request_work": request}), ""),
                            scenarios.subprocess.CompletedProcess([], 0, "standard reader valid", ""),
                            scenarios.subprocess.CompletedProcess([], code, "", error)]
                 with mock.patch.object(scenarios.subprocess, "run", side_effect=replies) as run:
@@ -356,18 +367,37 @@ class SavedGeometry(unittest.TestCase):
                 self.assertEqual(all(c["pass"] for c in checks), passed)
                 self.assertEqual(run.call_args_list[0].args[0][-2:], ["--max-work", "20"])
 
+    def test_checked_step_without_a_ceiling_is_held_to_the_application_limit(self):
+        evidence = {"summary": {"body": {"faces": 6, "edges": 12}},
+                    "measurement": {"volume_mm3": 1000, "area_mm2": 600}}
+        report = {"kind": "step", "solids": 1, "faces": 6, "within_tolerance": True}
+        for request, passed in (({"used": 7, "limit": scenarios.APP_REQUEST_WORK, "exhausted": False}, True),
+                                ({"used": 7, "limit": 100_000_000, "exhausted": False}, False), (None, False)):
+            with tempfile.TemporaryDirectory() as temp:
+                directory = pathlib.Path(temp)
+                (directory / "part.step").write_bytes(b"STEP bytes")
+                done = scenarios.subprocess.CompletedProcess([], 0, "", "")
+                replies = [scenarios.subprocess.CompletedProcess(
+                    [], 0, json.dumps({"report": report, "request_work": request}), ""), done, done]
+                with mock.patch.object(scenarios.subprocess, "run", side_effect=replies) as run:
+                    checks = scenarios.checked_step_export("soliddraft", "saved.dwprt", directory, evidence, 5)
+                self.assertEqual(all(c["pass"] for c in checks), passed)
+                self.assertNotIn("--max-work", run.call_args_list[0].args[0])
+
     def test_checked_step_oracle_runs_after_the_raw_check_and_fails_closed(self):
         evidence = {"summary": {"body": {"faces": 6, "edges": 12}},
                     "measurement": {"volume_mm3": 1000, "area_mm2": 600}}
         report = {"kind": "step", "solids": 1, "faces": 6, "within_tolerance": True}
+        request = {"used": 7, "limit": scenarios.APP_REQUEST_WORK, "exhausted": False}
         oracle = {"surfaces": {"plane": 6}, "volume": 1000, "inside": [[0, 0, 0]], "outside": [[9, 9, 9]]}
         for code in (0, 1):
             with tempfile.TemporaryDirectory() as temp:
                 directory = pathlib.Path(temp)
                 (directory / "part.step").write_bytes(b"STEP bytes")
                 done = scenarios.subprocess.CompletedProcess([], 0, "", "")
-                replies = [scenarios.subprocess.CompletedProcess([], 0, json.dumps({"report": report}), ""), done, done,
-                           scenarios.subprocess.CompletedProcess([], code, "", "FAIL: raw: volume")]
+                replies = [scenarios.subprocess.CompletedProcess(
+                    [], 0, json.dumps({"report": report, "request_work": request}), ""), done, done,
+                    scenarios.subprocess.CompletedProcess([], code, "", "FAIL: raw: volume")]
                 with mock.patch.object(scenarios.subprocess, "run", side_effect=replies) as run:
                     checks = scenarios.checked_step_export(
                         "soliddraft", "saved.dwprt", directory, evidence, 5, oracle=oracle)
@@ -390,7 +420,8 @@ def step_oracle():
 class CheckStepOracle(unittest.TestCase):
     SPEC = {"surfaces": {"plane": 6}, "volume": 1000.0, "fixed": 0.01, "inside": [[0, 0, 0]], "outside": [[9, 9, 9]]}
 
-    def failures(self, *, kinds=None, values=(1000.002, 1000.0005, 1000.0005), valid=True, states=None, spec=None):
+    def failures(self, *, kinds=None, values=(1000.002, 1000.0005, 1000.0005), valid=True, states=None, spec=None,
+                 edges=()):
         oracle = step_oracle()
         states = states or {(0, 0, 0): "inside", (9, 9, 9): "outside"}
         names = {"OCP": mock.MagicMock(), "OCP.BRepCheck": mock.MagicMock()}
@@ -400,6 +431,7 @@ class CheckStepOracle(unittest.TestCase):
                 mock.patch.object(oracle, "volumes", return_value=list(values)), \
                 mock.patch.object(oracle, "area", return_value=600.0), \
                 mock.patch.object(oracle, "state", side_effect=lambda _, point: states[tuple(point)]), \
+                mock.patch.object(oracle, "vertex_edges", return_value=list(edges)), \
                 contextlib.redirect_stdout(io.StringIO()):
             return oracle.failures("raw", object(), spec or self.SPEC)
 
@@ -416,6 +448,13 @@ class CheckStepOracle(unittest.TestCase):
         self.assertEqual(self.failures(values=(1000.01, 1000.0105, 1000.0105)), [])
         self.assertIn("volume", self.failures(values=(1000.0101, 1000.0101, 1000.0101))[0])
         self.assertEqual(self.failures(values=(1000.0, 1000.0, 1000.0), spec={**self.SPEC, "floor": 1.0}), [])
+
+    def test_a_contact_must_be_one_shared_vertex(self):
+        spec = {**self.SPEC, "contacts": [[1, 2, 3]], "contact_edges": 4}
+        for edges, passed in (([5], True), ([4], True), ([3], False), ([], False), ([4, 4], False)):
+            found = self.failures(spec=spec, edges=edges)
+            self.assertEqual(found == [], passed, edges)
+            self.assertTrue(passed or "contact" in found[0])
 
     def test_an_unconverged_volume_fails(self):
         self.assertIn("converge", self.failures(values=(1000.0, 1000.0, 1000.001))[0])
@@ -881,6 +920,13 @@ class RunnerEndToEnd(unittest.TestCase):
         for mode, expected in [("export-refused", True), ("export-refused-written", False),
                                ("export-refused-wrong", False), ("ok", False)]:
             report, _ = self.run_step(mode, extra={"exports": [{"format": "step", "refused": "field parts export as meshes"}]})
+            self.assertEqual(report["pass"], expected, mode)
+
+    def test_a_refused_export_leaves_an_existing_destination_unchanged(self):
+        spec = {"format": "step", "refused": "field parts export as meshes", "sentinel": "existing export sentinel\n"}
+        for mode, expected in [("export-refused", True), ("export-refused-written", False),
+                               ("export-refused-removed", False), ("export-refused-wrong", False), ("ok", False)]:
+            report, _ = self.run_step(mode, extra={"exports": [spec]})
             self.assertEqual(report["pass"], expected, mode)
 
     def test_a_visible_selectable_edit_ends_the_click(self):

@@ -114,7 +114,7 @@ A scenario is `soliddraft-scenario/1` with a name and ordered `steps`. Each step
 has `tool` and `arguments`, using the schemas printed by `soliddraft mcp --help`.
 Optional `checks` use JSON pointers into `command.json`, or `/measurement/...` for an
 explicit live-body measurement requested after the edit and display have been timed.
-Each check has exactly one of `equals`, `approx`, `minimum`, `tally` or `contains`. `approx`
+Each check has exactly one of `equals`, `approx`, `minimum`, `tally`, `covers` or `contains`. `covers` maps a field to the exact set of values it must take in a list, however many items hold each. `approx`
 accepts an absolute `tolerance`, default 0.001. `tally` maps a field to the counts its values must
 have across a list, so a check does not depend on the list's order. Missing values fail. A step can request `drawing: true`
 for drawing output, `export` with a list of extensions (`step`, `stl`, `3mf`) for
@@ -215,9 +215,10 @@ To collect the same evidence from another agent, start
 `soliddraft mcp --bundle /tmp/new-agent-run`. A command's files appear after its
 reply: the bundle writes them on `scenario_evidence`, before the next request other
 than `scenario_display`, or when the session ends. `--max-work N` sets its per-call
-kernel allowance. View, drawing and screenshot logging impose no work allowance.
-Normal MCP sessions without `--bundle` keep their existing
-kernel behavior and do not collect kernel diagnostic data.
+kernel allowance, 20,000,000 units by default. View, drawing and screenshot logging
+impose no work allowance. Normal MCP sessions without `--bundle` keep their existing
+kernel behavior and do not collect kernel diagnostic data, though a STEP or field
+export still stops at the application limit.
 
 ## Command journals
 

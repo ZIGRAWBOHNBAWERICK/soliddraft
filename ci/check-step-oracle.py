@@ -9,6 +9,8 @@ integrated at Gauss-Kronrod epsilons 1e-6, 1e-7 and 1e-8. The last two must agre
 1e-10 relative; a failed or nonfinite integration fails. The allowance on the reference is
 the oracle's `fixed` plus the file's area times its 1e-7 mm bound plus the observed spread,
 and at least its `floor`. `inside` and `outside` are points strictly away from the boundary.
+Each of the optional `contacts` must be one shared vertex with at least `contact_edges` edges:
+equal coordinates on separate vertices fail.
 
 Runs under the kernel gate's OCP 8 binding, with the pinned checkout's reader.
 """
@@ -78,6 +80,41 @@ def area(solid):
     return properties.Mass()
 
 
+def vertex_edges(solid, point):
+    """The edge count of each distinct vertex within the file's bound of `point`."""
+    from OCP.BRep import BRep_Tool
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    target = gp_Pnt(*point)
+    edges, vertices = [], []
+    walk = TopExp_Explorer(solid, TopAbs_EDGE)
+    while walk.More():
+        edge = walk.Current()
+        walk.Next()
+        if any(edge.IsSame(seen) for seen in edges):
+            continue
+        edges.append(edge)
+        ends = TopExp_Explorer(edge, TopAbs_VERTEX)
+        here = []
+        while ends.More():
+            vertex = ends.Current()
+            ends.Next()
+            near = BRep_Tool.Pnt_s(TopoDS.Vertex(vertex)).Distance(target) <= FILE_BOUND
+            if near and not any(vertex.IsSame(end) for end in here):
+                here.append(vertex)
+        for vertex in here:
+            for entry in vertices:
+                if vertex.IsSame(entry[0]):
+                    entry[1] += 1
+                    break
+            else:
+                vertices.append([vertex, 1])
+    return [count for _, count in vertices]
+
+
 def state(solid, point):
     from OCP.BRepClass3d import BRepClass3d_SolidClassifier
     from OCP.gp import gp_Pnt
@@ -109,7 +146,12 @@ def failures(label, solid, oracle):
             actual = state(solid, point)
             if actual != expected:
                 found.append(f"{label}: {point} is {actual}, expected {expected}")
-    print(json.dumps({"read": label, "surfaces": kinds, "volumes": values, "allowance": allowance}))
+    contacts = {str(point): vertex_edges(solid, point) for point in oracle.get("contacts", [])}
+    for point, edges in contacts.items():
+        if len(edges) != 1 or edges[0] < oracle["contact_edges"]:
+            found.append(f"{label}: contact {point} has vertices with edge counts {edges}")
+    print(json.dumps({"read": label, "surfaces": kinds, "volumes": values, "allowance": allowance,
+                      "contacts": contacts}))
     return found
 
 

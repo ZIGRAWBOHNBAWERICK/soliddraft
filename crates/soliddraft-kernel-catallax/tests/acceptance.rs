@@ -127,6 +127,17 @@ fn supported_queries_keep_the_existing_contract() {
 }
 
 #[test]
+fn step_export_spends_its_callers_allowance_and_gets_no_fresh_one() {
+    let k = CatallaxKernel::new();
+    let body = contract::cylinder(&k, Vec3::ZERO, 10.0, 20.0);
+    let (refused, work) =
+        soliddraft_kernel_catallax::with_request_allowance(0, || k.export_step(body, &StepOptions::default()));
+    assert!(work.exhausted);
+    assert!(refused.unwrap_err().to_string().contains("numbers.operation-budget"));
+    assert!(k.export_step(body, &StepOptions::default()).unwrap().report.within_tolerance);
+}
+
+#[test]
 fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
     let k = CatallaxKernel::new();
     let p = k

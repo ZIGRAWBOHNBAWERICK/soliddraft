@@ -26,13 +26,17 @@ if len(sys.argv) > 1 and sys.argv[1] == "export":
     if mode.startswith("export-refused"):
         if mode == "export-refused-written":
             path.write_bytes(b"bad partial file")
+        if mode == "export-refused-removed":
+            path.unlink()
         print("field parts export as meshes" if mode != "export-refused-wrong" else "other error", file=sys.stderr)
         sys.exit(1)
     data = bytearray(84)
     struct.pack_into("<d", data, 68, 0.1)
     path.write_bytes(data)
-    print(json.dumps({"report": {"kind": "field_mesh", "deviation_bound_mm": 0.1,
-                               "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}))
+    limit = int(sys.argv[sys.argv.index("--max-work") + 1]) if "--max-work" in sys.argv else 20_000_000
+    print(json.dumps({"report": {"kind": "field_mesh", "deviation_bound_mm": 0.1, "work": 1,
+                               "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+                      "request_work": {"used": 1, "limit": limit, "exhausted": False}}))
     sys.exit(0)
 bundle = pathlib.Path(sys.argv[sys.argv.index("--bundle") + 1])
 bundle.mkdir(parents=True)

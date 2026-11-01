@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 
 use crate::*;
 
-/// The deterministic work an explicit field moment or stand-in request may use when its
-/// caller has set no allowance: just under the application's 20,000,000-unit limit.
+/// The deterministic work an explicit field moment, stand-in or export request may use
+/// when its caller has set no allowance: just under the application's 20,000,000-unit limit.
 pub(crate) const FIELD_ACTION_WORK: u64 = 19_999_999;
 
 /// The label format Catallax writes into a certified field STL's header.
@@ -58,10 +58,14 @@ fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusa
     result.map_err(|e| query_error(operation, e))
 }
 
-/// Runs one field action on its caller's allowance, or on `limit` when the caller has
-/// none, and returns the work it used. A nested action never gets a fresh allowance, and
-/// a value computed after the allowance ran out is discarded.
-fn allowance<T>(operation: &str, limit: u64, action: impl FnOnce() -> KernelResult<T>) -> KernelResult<(T, u64)> {
+/// Runs one action on its caller's allowance, or on `limit` when the caller has none,
+/// and returns the work it used. A nested action never gets a fresh allowance, and a
+/// value computed after the allowance ran out is discarded.
+pub(crate) fn allowance<T>(
+    operation: &str,
+    limit: u64,
+    action: impl FnOnce() -> KernelResult<T>,
+) -> KernelResult<(T, u64)> {
     let exhausted =
         || query_error(operation, Refusal::new("numbers.operation-budget", "operation work allowance exhausted"));
     if operation_budget_active() {
@@ -283,10 +287,8 @@ impl Field {
     }
     pub(super) fn export(&self) -> KernelResult<FieldExport> {
         let operation = "export_field_stl";
-        // Without a caller allowance the export keeps the unbounded run it always had; the
-        // allowance only counts its work.
         let ((bytes, output), work) =
-            allowance(operation, u64::MAX, || run(operation, |dec| self.stage.export(dec)?.labelled_stl()))?;
+            allowance(operation, FIELD_ACTION_WORK, || run(operation, |dec| self.stage.export(dec)?.labelled_stl()))?;
         // Read the encoded bound so the JSON report describes the file exactly.
         let bound = f64::from_le_bytes(bytes[68..76].try_into().expect("labelled header"));
         let settings = self.stage.settings();

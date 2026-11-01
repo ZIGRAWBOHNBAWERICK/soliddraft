@@ -29,7 +29,7 @@ use catallax_recipe::StepId;
 use serde_json::{Value, json};
 use soliddraft_kernel_api::*;
 
-pub use diagnostics::{RequestWork, with_request_allowance};
+pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
 pub const CATALLAX_REVISION: &str = "e139919ae1d6b3718e49ff4519f956cc429c36ac";
@@ -1116,7 +1116,10 @@ impl Kernel for CatallaxKernel {
     }
 
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
-        self.observe("export_step", || step::export(&self.solid(body)?.app, options))
+        self.observe("export_step", || {
+            let write = || step::export(&self.solid(body)?.app, options);
+            lattice::allowance("export_step", APP_REQUEST_WORK, write).map(|(export, _)| export)
+        })
     }
 }
 

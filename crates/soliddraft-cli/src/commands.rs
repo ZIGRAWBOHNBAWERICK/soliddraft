@@ -34,7 +34,7 @@ pub fn mcp_usage() -> String {
          stdout (the default) or at http://127.0.0.1:PORT/mcp. The part starts empty unless\n\
          --demo or --open says otherwise.\n  \
            --bundle  save each tool call, part, recipe and kernel log in a new directory\n  \
-           --max-work deterministic work allowance per kernel call in a bundle (default 100000000)\n  \
+           --max-work deterministic work allowance per kernel call in a bundle (default 20000000)\n  \
            --demo    start from the sample part\n  \
            --open    start from a saved part file\n  \
            --drawing open a drawing for drawing_command, beside the part\n  \

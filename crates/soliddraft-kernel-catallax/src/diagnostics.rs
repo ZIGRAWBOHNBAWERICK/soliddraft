@@ -104,6 +104,10 @@ fn entry(sequence: usize, e: &OperationEntry) -> Value {
         "work":{"before":e.work_before,"after":e.work_after,"used":e.work_after-e.work_before},"wall_ms":e.wall_ms})
 }
 
+/// The deterministic work one application request may use. Kernel replay and the
+/// scoreboard keep their own limits.
+pub const APP_REQUEST_WORK: u64 = 20_000_000;
+
 /// The deterministic work one whole request used: opening, rebuilding and writing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RequestWork {

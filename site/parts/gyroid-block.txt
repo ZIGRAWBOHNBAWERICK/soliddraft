@@ -1,0 +1,5 @@
+sketch {"plane":"top","offset":-5,"shapes":[{"shape":"rectangle","center":[0,0,-5],"width":20,"height":20}]}
+extrude {"sketch":"Sketch1","depth":10,"flip":false}
+gyroid {"kind":"network","period":10,"level":0,"accuracy":0.1,"min_detail":0.5}
+save {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/gyroid-block.dwprt"}
+export_stl {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/gyroid-block.stl"}

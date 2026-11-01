@@ -1,0 +1,13 @@
+sketch {"plane":"top","shapes":[{"shape":"rectangle","center":[60,45,0],"width":120,"height":90}]}
+extrude {"sketch":"Sketch1","depth":10,"flip":false}
+sketch {"plane":"top","shapes":[{"shape":"rectangle","center":[5,45,0],"width":10,"height":90}]}
+extrude {"sketch":"Sketch2","depth":60,"flip":false}
+sketch {"plane":"top","shapes":[{"shape":"circle","center":[70,45,0],"diameter":24}]}
+extrude {"sketch":"Sketch3","depth":30,"flip":false}
+sketch {"plane":"top","shapes":[{"shape":"circle","center":[70,45,0],"diameter":12}]}
+cut {"sketch":"Sketch4","through_all":true,"depth":1,"flip":true}
+hole {"face":"Boss-Extrude1 · End cap","points":[[25,23,10],[25,67,10],[115,23,10],[115,67,10]],"diameter":9}
+sketch {"plane":"right","shapes":[{"shape":"rectangle","center":[0,45,31],"width":40,"height":12}]}
+cut {"sketch":"Sketch5","through_all":false,"depth":12,"flip":true}
+save {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/bracket-plain.dwprt"}
+export_obj {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/bracket-plain.obj"}

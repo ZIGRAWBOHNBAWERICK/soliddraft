@@ -1,0 +1,6 @@
+sketch {"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":60,"height":40}]}
+extrude {"sketch":"Sketch1","depth":20,"flip":false}
+feature {"name":"Boss-Extrude1"}
+shell {"open_faces":["Boss-Extrude1 · End cap"],"thickness":2}
+save {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/tray.dwprt"}
+export_obj {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/tray.obj"}

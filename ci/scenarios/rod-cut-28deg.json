@@ -107,7 +107,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 15.707963267948966,
+          "approx": 23.561944901923447,
           "tolerance": 0.005
         },
         {
@@ -137,27 +137,27 @@
         },
         {
           "pointer": "/summary/body/bounding_box/max/2",
-          "approx": 5.531709431661479,
+          "approx": 10,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/area_mm2",
-          "approx": 38.11559294040823,
+          "approx": 63.61531565969184,
           "tolerance": 0.005
         },
         {
           "pointer": "/measurement/centre_of_mass/0",
-          "approx": -0.02658547158307394,
+          "approx": -0.008861823861024647,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/centre_of_mass/1",
-          "approx": 0,
+          "approx": 0.1414710605261292,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/centre_of_mass/2",
-          "approx": 2.5070678729929443,
+          "approx": 4.169022624330982,
           "tolerance": 0.001
         }
       ],
@@ -182,7 +182,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 15.707963267948966,
+          "approx": 23.561944901923447,
           "tolerance": 0.005
         },
         {
@@ -212,27 +212,27 @@
         },
         {
           "pointer": "/summary/body/bounding_box/max/2",
-          "approx": 5.531709431661479,
+          "approx": 10,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/area_mm2",
-          "approx": 38.11559294040823,
+          "approx": 63.61531565969184,
           "tolerance": 0.005
         },
         {
           "pointer": "/measurement/centre_of_mass/0",
-          "approx": -0.02658547158307394,
+          "approx": -0.008861823861024647,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/centre_of_mass/1",
-          "approx": 0,
+          "approx": 0.1414710605261292,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/centre_of_mass/2",
-          "approx": 2.5070678729929443,
+          "approx": 4.169022624330982,
           "tolerance": 0.001
         }
       ],
@@ -242,9 +242,9 @@
       "step_oracle": {
         "surfaces": {
           "cylinder": 1,
-          "plane": 2
+          "plane": 4
         },
-        "volume": 15.707963267948966,
+        "volume": 23.561944901923447,
         "floor": 1e-06,
         "inside": [
           [
@@ -256,12 +256,17 @@
             0.8,
             0,
             4
+          ],
+          [
+            0,
+            0.5,
+            9
           ]
         ],
         "outside": [
           [
             0,
-            0,
+            -0.5,
             6
           ],
           [
@@ -285,7 +290,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 15.707963267948966,
+          "approx": 23.561944901923447,
           "tolerance": 0.005
         },
         {
@@ -315,27 +320,27 @@
         },
         {
           "pointer": "/summary/body/bounding_box/max/2",
-          "approx": 5.531709431661479,
+          "approx": 10,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/area_mm2",
-          "approx": 38.11559294040823,
+          "approx": 63.61531565969184,
           "tolerance": 0.005
         },
         {
           "pointer": "/measurement/centre_of_mass/0",
-          "approx": -0.02658547158307394,
+          "approx": -0.008861823861024647,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/centre_of_mass/1",
-          "approx": 0,
+          "approx": 0.1414710605261292,
           "tolerance": 0.001
         },
         {
           "pointer": "/measurement/centre_of_mass/2",
-          "approx": 2.5070678729929443,
+          "approx": 4.169022624330982,
           "tolerance": 0.001
         }
       ]

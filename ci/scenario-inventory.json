@@ -635,7 +635,7 @@
       ],
       "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
-      "supported_limits": "R1 rod, height 10 mm, through cut at 28 degrees about z=5 mm; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "supported_limits": "R1 rod, height 10 mm, one-sided Front-plane through cut at 28 degrees through z=5 mm; y<0 is cut and y>0 retains its height-10 cap, matching the supplied native input; volume 7.5*pi, area 16.5*pi + pi/(2*cos(28 deg)) + 10; volume and area tolerance 0.005, box and centroid tolerance 0.001 mm; save, fresh-process reopen and a refused zero-depth edit preserve the body; 20M work per request",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
     },
     {

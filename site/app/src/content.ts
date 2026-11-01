@@ -24,8 +24,8 @@ export const site = {
   links: {
     /** The browser app: the released WebAssembly build, served beside this page. One setting. */
     app: `${publicUrl}app/`,
-    releases: "https://github.com/BohnBawerick/soliddraft/releases",
-    repo: "https://github.com/BohnBawerick/soliddraft",
+    releases: "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/releases",
+    repo: "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft",
     catallax: "https://github.com/BohnBawerick/catallax",
     kernelSite: "https://kernel.zigrawbohnbawerick.org/",
     sponsors: "https://github.com/sponsors/BohnBawerick",

@@ -53,7 +53,5 @@ Headless frame rates are a floor: the browser renders to an offscreen buffer and
 
 - No deploy. `pages.yml` uploads the payload on every run and deploys only when the repository
   variable `SOLIDDRAFT_PAGES_ENABLED` is `true`; the variable is not set and Pages is not enabled.
-- The public address `https://zigrawbohnbawerick.github.io/soliddraft/` resolves only once the
-  repository lives in the ZIGRAWBOHNBAWERICK organisation; today it is under BohnBawerick.
 - No run in a real desktop browser with a mouse; pointer parallax was driven from code.
 - No Lighthouse run. Sound was checked for errors and state, not listened to.

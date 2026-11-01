@@ -324,9 +324,7 @@ fn from_part(state: &mut AppState) -> Result<(), String> {
     let mut session = new_session(state, format!("{} assembly", state.doc.name));
     session.selected = Some(place(&mut session, &*state.revisions, &part, None)?);
     session.doc.finish_loading();
-    state.assembly.session = Some(session);
-    state.assembly.active = true;
-    state.drawing.active = false;
+    install(state, session);
     refresh(state);
     Ok(())
 }
@@ -415,11 +413,24 @@ pub fn dropped(state: &mut AppState, files: Vec<PathBuf>) {
 
 /// Puts a session in place of the open assembly and shows its tab.
 fn show(state: &mut AppState, dock: &mut DockState<Tab>, session: AssemblySession) {
+    install(state, session);
+    show_tab(dock);
+}
+
+/// Puts an opened assembly in place of the open one and makes it the active document, as
+/// File > Open does once the assembly is read.
+pub fn replace(state: &mut AppState, doc: AssemblyDocument, scene: Scene) {
+    install(state, AssemblySession::new(doc, scene));
+}
+
+/// Puts a session in place of the open assembly. A Form subassembly panel belongs to the
+/// assembly it was opened on, so it closes.
+fn install(state: &mut AppState, session: AssemblySession) {
+    state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
     state.assembly.session = Some(session);
     state.assembly.active = true;
     state.drawing.active = false;
-    show_tab(dock);
 }
 
 /// Opens the assembly tab beside the part and makes it the active document.

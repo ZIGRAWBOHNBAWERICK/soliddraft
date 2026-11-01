@@ -173,9 +173,7 @@ pub(crate) fn open(state: &mut AppState, path: PathBuf) -> Result<Value, String>
     let mut doc = AssemblyDocument::open(&path, options(state)).map_err(|e| e.to_string())?;
     doc.finish_loading();
     let scene = Scene::new(&mut doc);
-    state.assembly.session = Some(AssemblySession::new(doc, scene));
-    state.assembly.active = true;
-    state.drawing.active = false;
+    replace(state, doc, scene);
     Ok(json!({ "opened": path, "assembly": summary(state) }))
 }
 

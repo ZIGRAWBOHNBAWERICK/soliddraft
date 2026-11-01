@@ -5,12 +5,15 @@ use crate::assembly::AssemblyAction;
 use crate::state::{AppAction, AppState, NoteKind};
 use crate::theme;
 use soliddraft_assembly::{FormRequest, OccurrencePath};
+use soliddraft_document::DocumentId;
 use std::path::PathBuf;
 
 /// The panel's fields.
 #[derive(Default)]
 pub struct Draft {
     pub open: bool,
+    /// The assembly the panel was opened on: Apply forms nothing in another.
+    pub document: Option<DocumentId>,
     /// The parts to form, in order; the first gives the new file its frame.
     pub paths: Vec<OccurrencePath>,
     /// The new file, relative to the open assembly's folder unless absolute.
@@ -42,13 +45,18 @@ pub fn apply(state: &mut AppState, action: FormAction) {
         FormAction::Open => {
             let Some(s) = state.assembly.session.as_ref() else { return };
             let chosen = if s.chosen.is_empty() { s.selected.iter().cloned().collect() } else { s.chosen.clone() };
-            state.assembly.form = Draft { open: true, paths: chosen, ..Draft::default() };
+            state.assembly.form = Draft { open: true, document: Some(s.doc.id()), paths: chosen, ..Draft::default() };
             state.assembly.mate.open = false;
         }
         FormAction::Cancel => state.assembly.form.open = false,
         FormAction::Apply => {
             let d = &state.assembly.form;
             let (Some(origin), Some(s)) = (d.paths.first(), state.assembly.session.as_ref()) else { return };
+            if d.document != Some(s.doc.id()) {
+                state.assembly.form = Draft::default();
+                state.note("The assembly changed; choose the parts again", NoteKind::Info);
+                return;
+            }
             let named = PathBuf::from(d.file.trim());
             let path = match s.doc.path().and_then(|p| p.parent()) {
                 Some(folder) if named.is_relative() => folder.join(named),

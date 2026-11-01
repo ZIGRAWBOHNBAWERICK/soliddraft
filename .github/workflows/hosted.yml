@@ -31,8 +31,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
 
-# Eight heavy Linux executions can use boat. USE_BOAT=false returns them to GitHub.
-# Other Linux jobs retain USE_LOCAL_RUNNERS; Windows and macOS stay on GitHub.
+# Heavy Linux jobs can use boat. USE_BOAT=false returns them to GitHub.
+# Selection and the gate retain USE_LOCAL_RUNNERS; Windows and macOS stay on GitHub.
 jobs:
   select:
     name: Select affected checks
@@ -84,7 +84,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'lint')
     name: Lint (fmt, clippy)
-    runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -100,7 +100,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'kernel')
     name: Catallax adapter and recipes
-    runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -131,7 +131,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'step-opencascade')
     name: Bracket STEP in OpenCASCADE
-    runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -374,7 +374,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'msrv')
     name: Minimum Rust version (Rust-only crates)
-    runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88

@@ -168,9 +168,10 @@ class BoatRunners(unittest.TestCase):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)",
                                text, re.M | re.S))
-        moved = {'build-linux', 'test-linux', 'web', 'interactive-linux', 'application-loop'}
+        moved = {'lint', 'kernel', 'step-opencascade', 'build-linux', 'test-linux',
+                 'web', 'msrv', 'interactive-linux', 'application-loop'}
         self.assertEqual({job for job, block in jobs.items() if 'vars.USE_BOAT' in block}, moved)
-        self.assertEqual(len(moved) - 1 + 4, 8)
+        self.assertEqual(len(moved) - 1 + 4, 12)
         self.assertIn('shard: [1, 2, 3, 4]', jobs['test-linux'])
         owner = 'BohnBawerick'
         repo = 'ZIGRAWBOHNBAWERICK/soliddraft'

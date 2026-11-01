@@ -334,6 +334,62 @@ fn a_planar_draft_keeps_holes_and_a_boss_on_their_supports() {
     }
 }
 
+/// A countersink cut before the draft keeps its cylinder, its cone and the circle they
+/// share, and both caps keep their openings, which the application's summaries do not report.
+#[test]
+fn a_planar_draft_keeps_a_countersunk_hole_on_its_supports() {
+    let k = CatallaxKernel::new();
+    let stock = block(&k, "block", 40.0, 30.0, 0.0, 20.0);
+    let hole = Hole {
+        placements: vec![down(Vec3::new(6.0, 2.0, 20.0))],
+        diameter: 4.0,
+        depth: HoleDepth::Through,
+        tip: HoleTip::Flat,
+        head: Some(HoleHead::Countersink { diameter: 8.0, angle_deg: 90.0 }),
+    };
+    let body = k.hole(&OpTag::new("hole"), stock, &hole).unwrap().body;
+    let source = k.topology(body).unwrap();
+    let side = |x: f64| source.faces.iter().find(|f| f.normal.is_some_and(|n| n.distance(Vec3::X * x) < 1e-12));
+    let sides = [side(1.0).unwrap().id, side(-1.0).unwrap().id];
+    for angle_deg in [3.0f64, 5.0] {
+        let params = Draft { pull: Vec3::Z, neutral_origin: Vec3::ZERO, neutral_normal: Vec3::Z, angle_deg };
+        let drafted = k.draft(&OpTag::new(format!("draft-{angle_deg}")), body, &sides, &params).unwrap().body;
+        assert!(k.validate(drafted).unwrap().valid);
+        let topology = k.topology(drafted).unwrap();
+        let one = |surface: SurfaceKind| {
+            let mut found = topology.faces.iter().filter(|f| f.surface == surface);
+            let face = found.next().expect("the hole's face");
+            assert!(found.next().is_none(), "one {surface:?} at {angle_deg}");
+            face
+        };
+        let (wall, cone) = (one(SurfaceKind::Cylinder), one(SurfaceKind::Cone));
+        let ring = |z: f64, radius: f64| {
+            let on = |e: &&EdgeInfo| {
+                let off_axis = (e.midpoint.x - 6.0).hypot(e.midpoint.y - 2.0);
+                e.curve == CurveKind::Circle
+                    && (e.midpoint.z - z).abs() < 1e-9
+                    && (off_axis - radius).abs() < 1e-9
+                    // A length comes from the display polyline, within its 0.01 mm chord bound.
+                    && (e.length - 2.0 * PI * radius).abs() < 0.01
+            };
+            let mut found = topology.edges.iter().filter(on);
+            let edge = found.next().unwrap_or_else(|| panic!("no ring at z {z}: {:?}", topology.edges));
+            assert!(found.next().is_none(), "one ring at z {z}");
+            edge.id
+        };
+        let (entry, shared, exit) = (ring(20.0, 4.0), ring(18.0, 2.0), ring(0.0, 2.0));
+        assert!(wall.edges.contains(&shared) && wall.edges.contains(&exit));
+        assert!(cone.edges.contains(&shared) && cone.edges.contains(&entry));
+        let cap = |z: f64| {
+            let flat = |f: &&FaceInfo| {
+                f.normal.is_some_and(|n| n.cross(Vec3::Z).length() < 1e-12) && (f.centroid.z - z).abs() < 1e-9
+            };
+            topology.faces.iter().find(flat).expect("the cap")
+        };
+        assert!(cap(20.0).edges.contains(&entry) && cap(0.0).edges.contains(&exit));
+    }
+}
+
 #[test]
 fn unchanged_drafted_entities_keep_their_ids_after_their_roots_are_refined() {
     let k = CatallaxKernel::new();

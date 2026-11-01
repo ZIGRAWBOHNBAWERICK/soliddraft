@@ -568,6 +568,14 @@ impl Document {
                 FaceRole::Blend { edge } => ids.iter().position(|x| *x == edge).map(|i| {
                     (Origin { tag: result.record.tag.clone(), role: o.role }, Generator::Blend { edge: i as u32 }, 0)
                 }),
+                // Ranked by where its edges sit in the feature's list, which survives a
+                // rebuild where a vertex id may not.
+                FaceRole::Corner { vertex } => {
+                    let meets = |edge: &EdgeId| t.edge(*edge).is_some_and(|e| e.vertices.contains(&vertex));
+                    let rank = ids.iter().enumerate().filter(|(_, edge)| meets(edge));
+                    let rank = rank.fold(0, |rank, (i, _)| rank * (ids.len() + 1) + i + 1);
+                    Some((Origin { tag: result.record.tag.clone(), role: o.role }, Generator::Other, rank))
+                }
                 _ => None,
             })
             .collect();

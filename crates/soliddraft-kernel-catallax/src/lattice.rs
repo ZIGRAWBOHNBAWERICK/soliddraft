@@ -84,6 +84,24 @@ pub(crate) fn allowance<T>(
     result.map(|value| (value, work.used))
 }
 
+/// Runs one application export like [`allowance`]. A caller's allowance above the
+/// application's limit does not lift it: once the whole request has used more, the output
+/// is refused and the work stays spent.
+pub(crate) fn export_allowance<T>(
+    operation: &str,
+    limit: u64,
+    action: impl FnOnce() -> KernelResult<T>,
+) -> KernelResult<(T, u64)> {
+    let answer = allowance(operation, limit, action)?;
+    if current_operation_work().used > APP_REQUEST_WORK {
+        return Err(query_error(
+            operation,
+            Refusal::new("numbers.operation-budget", "the request used more than the application's work limit"),
+        ));
+    }
+    Ok(answer)
+}
+
 /// The output settings of one field, at the default caps.
 fn settings(name: &str, accuracy_mm: f64, min_detail_mm: f64) -> KernelResult<Settings> {
     let defaults = printing::Options::default();
@@ -287,8 +305,9 @@ impl Field {
     }
     pub(super) fn export(&self) -> KernelResult<FieldExport> {
         let operation = "export_field_stl";
-        let ((bytes, output), work) =
-            allowance(operation, FIELD_ACTION_WORK, || run(operation, |dec| self.stage.export(dec)?.labelled_stl()))?;
+        let ((bytes, output), work) = export_allowance(operation, FIELD_ACTION_WORK, || {
+            run(operation, |dec| self.stage.export(dec)?.labelled_stl())
+        })?;
         // Read the encoded bound so the JSON report describes the file exactly.
         let bound = f64::from_le_bytes(bytes[68..76].try_into().expect("labelled header"));
         let settings = self.stage.settings();
@@ -332,7 +351,7 @@ impl Field {
         let requested = requested(accuracy)?;
         let operation = "export_field_stand_in";
         let recipe = self.stage.recipe();
-        let (proof, work) = allowance(operation, FIELD_ACTION_WORK, || {
+        let (proof, work) = export_allowance(operation, FIELD_ACTION_WORK, || {
             run(operation, |dec| {
                 let mut built = catallax_features::evaluate(recipe, dec).map_err(|e| match e {
                     catallax_features::BuildError::Geometry { refusal, .. } => refusal,

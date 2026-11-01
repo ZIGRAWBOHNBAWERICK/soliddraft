@@ -34,6 +34,21 @@ impl Diagnostics {
     }
 
     pub(crate) fn observe<T>(&self, operation: &str, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
+        self.scoped(operation, self.max_work, run)
+    }
+
+    /// Observes one application export. A diagnostic allowance above the application's
+    /// limit does not reach it.
+    pub(crate) fn observe_export<T>(&self, operation: &str, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
+        self.scoped(operation, self.max_work.map(|limit| limit.min(APP_REQUEST_WORK)), run)
+    }
+
+    fn scoped<T>(
+        &self,
+        operation: &str,
+        max_work: Option<u64>,
+        run: impl FnOnce() -> KernelResult<T>,
+    ) -> KernelResult<T> {
         let start = Instant::now();
         let on_capture_thread = std::thread::current().id() == self.capture_thread;
         if let Some(parent) = ACTIVE.with(|active| active.borrow().clone()) {
@@ -50,7 +65,7 @@ impl Diagnostics {
         }
         ACTIVE.with(|active| *active.borrow_mut() = Some(operation.to_owned()));
         let _scope = Scope;
-        let ((mut result, work), entries) = with_operation_log(|| match self.max_work {
+        let ((mut result, work), entries) = with_operation_log(|| match max_work {
             Some(limit) => {
                 let (result, work) = with_operation_budget(limit, run);
                 (result, Some(work))
@@ -65,7 +80,7 @@ impl Diagnostics {
             "operation":operation, "log_scope":operation,"nested":false, "status":if result.is_ok() {"answered"} else {"refused"},
             "on_capture_thread":on_capture_thread,
             "error":result.as_ref().err().map(ToString::to_string),
-            "max_work":self.max_work, "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted})),
+            "max_work":max_work, "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted})),
             "wall_ms":start.elapsed().as_secs_f64()*1000.0,
             "operation_log":{"format":"catallax-operation-log/1", "operations":entries.iter().enumerate()
                 .map(|(sequence, e)| entry(sequence, e)).collect::<Vec<_>>()}
@@ -129,7 +144,7 @@ pub fn with_request_allowance<T>(limit: u64, run: impl FnOnce() -> T) -> (T, Req
 #[cfg(test)]
 mod tests {
     use super::*;
-    use catallax_numbers::{Decider, OperationSpan};
+    use catallax_numbers::{Decider, OperationAllowance, OperationSpan};
 
     #[test]
     fn nested_queries_share_one_log_and_work_scope() {
@@ -151,6 +166,23 @@ mod tests {
         assert_eq!(calls[1]["operation_log"]["operations"][0]["operation"], "mesh");
         diagnostics.observe("next_request", || Ok(())).unwrap();
         assert_eq!(diagnostics.take()[0]["nested"], false);
+    }
+
+    #[test]
+    fn an_export_stops_at_the_application_limit_under_a_larger_diagnostic_allowance() {
+        let diagnostics = Diagnostics::new(Some(5 * APP_REQUEST_WORK));
+        let spend = || {
+            OperationAllowance::reserve(APP_REQUEST_WORK + 1)
+                .map(|_| ())
+                .map_err(|e| KernelError::Unavailable(e.to_string()))
+        };
+        diagnostics.observe("extrude", spend).unwrap();
+        let refused = diagnostics.observe_export("export_step", spend).unwrap_err();
+        assert!(refused.to_string().contains("numbers.operation-budget"), "{refused}");
+        let calls = diagnostics.take();
+        assert_eq!(calls[0]["max_work"], 5 * APP_REQUEST_WORK);
+        assert_eq!(calls[1]["max_work"], APP_REQUEST_WORK);
+        assert_eq!(calls[1]["work"]["exhausted"], true);
     }
 
     #[test]

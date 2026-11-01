@@ -188,6 +188,11 @@ pub enum FaceRole {
         /// the nearest of them.
         edge: EdgeId,
     },
+    /// A patch where fillets or chamfers meet at a vertex.
+    Corner {
+        /// The input vertex it replaces.
+        vertex: VertexId,
+    },
     /// The inner wall of a shell, offset from an input face.
     Offset {
         /// The input face it is offset from.

@@ -623,6 +623,22 @@
       "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
       "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
       "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
+    },
+    {
+      "id": "edit-display-reuse",
+      "file": "ci/scenarios/edit-display-reuse.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-cli",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "route": "MCP edits -> document rebuild and immutable display meshes -> retained offscreen viewport -> development rebuild report",
+      "supported_limits": "One part at a time; rounded boss dimension and fillet edits, rename, undo/redo, suppress/restore and fresh reopen; unchanged meshes keep their GPU buffers; sphere and torus drawing views await the curved-preview fix.",
+      "evidence": "commands/NNNN and commands-1/NNNN/{command.json,display.json,kernel.json,viewport.png,view.svg}; rounded.dwprt; foreground mesh requests and GPU body placements checked separately from background display refinement"
     }
   ]
 }

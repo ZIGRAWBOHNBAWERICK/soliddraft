@@ -37,6 +37,8 @@ struct Pending {
     input: Value,
     output: ToolOutput,
     work: Vec<Work>,
+    background_work: Vec<Work>,
+    bodies_placed: usize,
     /// The command's kernel calls, without the evidence's own queries.
     diagnostics: Value,
 }
@@ -68,12 +70,19 @@ impl<'a> Evidence<'a> {
         output: &ToolOutput,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (Some(root), Some(kernel)) = (&self.directory, &self.kernel) else { return Ok(()) };
-        let work = self.work.as_ref().map(|w| w.take()).unwrap_or_default();
+        let (work, background_work) = self.work.as_ref().map(|w| w.take_scoped()).unwrap_or_default();
         self.sequence += 1;
         std::fs::create_dir(root.join(format!("{:04}", self.sequence)))?;
         let diagnostics = kernel.take_diagnostics()?;
-        self.pending =
-            Some(Pending { name: name.to_owned(), input: input.clone(), output: output.clone(), work, diagnostics });
+        self.pending = Some(Pending {
+            name: name.to_owned(),
+            input: input.clone(),
+            output: output.clone(),
+            work,
+            background_work,
+            bodies_placed: 0,
+            diagnostics,
+        });
         Ok(())
     }
 
@@ -90,7 +99,7 @@ impl<'a> Evidence<'a> {
 
     fn snapshot(&mut self, pending: Pending) -> Result<(), Box<dyn std::error::Error>> {
         let (Some(root), Some(kernel)) = (&self.directory, &self.kernel) else { return Ok(()) };
-        let Pending { name, input, output, work, diagnostics: command } = pending;
+        let Pending { name, input, output, work, background_work, bodies_placed, diagnostics: command } = pending;
         let dir = root.join(format!("{:04}", self.sequence));
         let summary = self.host.summary();
         let doc = &self.host.state.doc;
@@ -117,7 +126,7 @@ impl<'a> Evidence<'a> {
                 "tool":name,"arguments":input,"is_error":output.is_error,"output":output.content,
                 "backend":doc.kernel().backend(),"summary":summary,"references":references,
                 "request":self.sequence,"revision":doc.revision(),
-                "rebuild":rebuild_report(doc.model(), &work),
+                "rebuild":rebuild_report(doc.model(), &work, &background_work, bodies_placed),
             }),
         )?;
         Ok(())
@@ -135,15 +144,20 @@ impl<'a> Evidence<'a> {
             // Nothing to show: the click ended at the command's reply.
             return Ok(json!({"solid":false,"request":self.sequence,"revision":doc.revision()}));
         }
-        self.renderer
+        let bodies_placed = self
+            .renderer
             .as_mut()
             .ok_or("call scenario_prepare before capture")?
             .capture(doc, &dir.join("viewport.png"))?;
+        if let Some(pending) = &mut self.pending {
+            pending.bodies_placed += bodies_placed;
+        }
         // The viewport and drawing views show preview meshes, which claim no bounds.
         // The request and revision let the runner tell this capture from an older one.
         let result = json!({
             "backend":doc.kernel().backend(),"method":"viewport","mesh":"unproved preview","live_document":true,
             "request":self.sequence,"revision":doc.revision(),"selectable":selectable(doc),
+            "bodies_placed":bodies_placed,
         });
         write_json(dir.join("display.json"), &result)?;
         Ok(result)
@@ -206,8 +220,8 @@ fn pickable(face_picks: &[u32]) -> bool {
 
 /// What a command rebuilt: the features whose kernel operations ran, in tree order
 /// (with the ids of features of scratch parts, such as a rejected proposal's, after
-/// them), how many operations ran and how many meshes were made.
-fn rebuild_report(doc: &Document, work: &[Work]) -> Value {
+/// them), foreground mesh requests, background refinement requests and GPU uploads.
+fn rebuild_report(doc: &Document, work: &[Work], background: &[Work], bodies_placed: usize) -> Value {
     let mut ids = BTreeSet::new();
     let mut operations = 0;
     let mut meshes = 0;
@@ -223,7 +237,9 @@ fn rebuild_report(doc: &Document, work: &[Work]) -> Value {
     let mut features: Vec<String> =
         doc.features().iter().filter(|f| ids.remove(&f.id)).map(|f| f.name.clone()).collect();
     features.extend(ids.into_iter().map(|id| id.to_string()));
-    json!({"features_recomputed":features,"operations":operations,"meshes_rebuilt":meshes})
+    let background_meshes = background.iter().filter(|w| matches!(w, Work::Mesh(_))).count();
+    json!({"features_recomputed":features,"operations":operations,"meshes_rebuilt":meshes,
+        "background_meshes_rebuilt":background_meshes,"bodies_placed":bodies_placed})
 }
 
 /// Reference evidence is collected only for an explicitly requested command bundle,

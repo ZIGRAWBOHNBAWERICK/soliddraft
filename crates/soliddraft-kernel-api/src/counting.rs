@@ -19,15 +19,14 @@ use crate::{
 pub enum Work {
     /// An operation that makes a body, by its tag.
     Operation(String),
-    /// A triangulation of a body: `tessellate`, `tessellate_levels` or
-    /// `tessellate_edges`.
+    /// A mesh request for a body, including display levels and edge polylines.
     Mesh(BodyId),
 }
 
 /// `inner`, with the work asked of it written down.
 pub struct Counting {
     inner: Arc<dyn Kernel>,
-    work: Mutex<Vec<Work>>,
+    work: Mutex<Vec<(std::thread::ThreadId, Work)>>,
 }
 
 impl Counting {
@@ -38,11 +37,22 @@ impl Counting {
 
     /// The work asked for since the last call, oldest first.
     pub fn take(&self) -> Vec<Work> {
+        self.drain().into_iter().map(|(_, work)| work).collect()
+    }
+
+    /// Drains work, separating this thread's calls from background calls.
+    pub fn take_scoped(&self) -> (Vec<Work>, Vec<Work>) {
+        let thread = std::thread::current().id();
+        let (foreground, background): (Vec<_>, Vec<_>) = self.drain().into_iter().partition(|(id, _)| *id == thread);
+        (foreground.into_iter().map(|(_, work)| work).collect(), background.into_iter().map(|(_, work)| work).collect())
+    }
+
+    fn drain(&self) -> Vec<(std::thread::ThreadId, Work)> {
         std::mem::take(&mut *self.work.lock().expect("work log lock"))
     }
 
     fn note(&self, work: Work) {
-        self.work.lock().expect("work log lock").push(work);
+        self.work.lock().expect("work log lock").push((std::thread::current().id(), work));
     }
 
     fn op(&self, tag: &OpTag) {

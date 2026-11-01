@@ -69,13 +69,15 @@ impl Renderer {
         Ok(Self { device, queue, offscreen, metadata })
     }
 
-    pub(crate) fn capture(&mut self, doc: &Document, png: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) fn capture(&mut self, doc: &Document, png: &Path) -> Result<usize, Box<dyn std::error::Error>> {
         if doc.display_body().is_none() || doc.meshes.is_empty() {
             return Err("part has no displayed solid".into());
         }
+        let before = self.offscreen.mesh_version();
         let picture = self.offscreen.capture(&self.device, &self.queue, doc, [960, 720])?;
+        let bodies_placed = if before == self.offscreen.mesh_version() { 0 } else { doc.meshes.len() };
         image::save_buffer(png, &picture.pixels, 960, 720, image::ColorType::Rgba8)?;
         std::fs::write(png.with_extension("json"), serde_json::to_vec_pretty(&self.metadata)?)?;
-        Ok(())
+        Ok(bodies_placed)
     }
 }

@@ -1,15 +1,17 @@
 //! The viewport drawn into a texture instead of a window, with the same renderer,
 //! shaders and camera: the part thumbnail a save stores, and `soliddraft screenshot`.
 
+use std::collections::HashMap;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use egui_wgpu::wgpu;
 
 use super::camera::Camera;
 use super::look::Tier;
 use super::render::{FrameInput, ViewportRenderer};
-use crate::document::Document;
+use crate::document::{DisplayMesh, Document};
+use soliddraft_kernel_api::BodyId;
 
 /// The size of the thumbnail stored in a part file, in pixels.
 pub const THUMBNAIL: [u32; 2] = [512, 384];
@@ -21,9 +23,9 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// compiles the shaders, so the app keeps it between saves.
 pub struct Offscreen {
     renderer: ViewportRenderer,
-    /// Bumped on every picture, so the renderer uploads the meshes of whichever
-    /// document it is given: two documents can have the same mesh version.
+    /// Identifies the meshes sent to the renderer across document instances.
     uploads: u64,
+    meshes: HashMap<BodyId, Weak<DisplayMesh>>,
 }
 
 /// An RGBA picture, row by row from the top.
@@ -45,7 +47,12 @@ impl Picture {
 
 impl Offscreen {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, tier: Tier) -> Offscreen {
-        Offscreen { renderer: ViewportRenderer::new(device, queue, FORMAT, tier), uploads: 0 }
+        Offscreen { renderer: ViewportRenderer::new(device, queue, FORMAT, tier), uploads: 0, meshes: HashMap::new() }
+    }
+
+    /// The version of the meshes sent to the renderer, independent of document versions.
+    pub fn mesh_version(&self) -> u64 {
+        self.uploads
     }
 
     /// Draws `doc` as a new viewport first shows it, fitted to its bounds from the
@@ -61,7 +68,15 @@ impl Offscreen {
         let mut camera = Camera::default();
         camera.fit(doc.bounds());
         camera.tick(10.0);
-        self.uploads += 1;
+        if self.meshes.len() != doc.meshes.len()
+            || doc
+                .meshes
+                .iter()
+                .any(|(body, mesh)| !self.meshes.get(body).is_some_and(|old| old.ptr_eq(&Arc::downgrade(mesh))))
+        {
+            self.uploads += 1;
+            self.meshes = doc.meshes.iter().map(|(body, mesh)| (*body, Arc::downgrade(mesh))).collect();
+        }
         let input = FrameInput {
             view: camera.view(),
             proj: camera.projection(width as f32 / height as f32),

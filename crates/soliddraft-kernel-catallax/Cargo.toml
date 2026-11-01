@@ -13,22 +13,22 @@ soliddraft-kernel-api.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 sha2.workspace = true
-catallax-import = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-app = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-mesh = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-numbers = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-topology = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-recipe = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-shapes = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-measure = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-iges = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-step = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
+catallax-import = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-app = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-mesh = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-numbers = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-topology = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-recipe = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-shapes = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-measure = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-iges = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-step = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
 
-catallax-field = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
-catallax-features = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
+catallax-field = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
+catallax-features = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
 
 [dev-dependencies]
-catallax-boolean = { git = "https://github.com/BohnBawerick/catallax", rev = "ae73f90dfe00e154a397d78a8c105cabd8773662" }
+catallax-boolean = { git = "https://github.com/BohnBawerick/catallax", rev = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1" }
 soliddraft-model.workspace = true
 soliddraft-recipe.workspace = true
 soliddraft-kernel-api = { workspace = true, features = ["contract"] }

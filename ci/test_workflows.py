@@ -20,15 +20,20 @@ def top_level(text, key):
 
 
 def evaluate(expr, **github):
-    """Evaluates the subset of the expression language the concurrency settings use."""
+    """Evaluates the expression subset used by the workflow settings under test."""
     inputs = github.pop("inputs", {})
-    python = re.sub(r"github\.(\w+)", r"g['\1']", expr).replace("&&", " and ").replace("||", " or ")
+    variables = github.pop("variables", {})
+    python = re.sub(r"github((?:\.\w+)+)",
+                    lambda m: "g" + "".join(f"[{key!r}]" for key in m[1][1:].split('.')),
+                    expr).replace("&&", " and ").replace("||", " or ")
+    python = re.sub(r"vars\.(\w+)", r"v.get('\1', '')", python)
     python = re.sub(r"inputs\.(\w+)", r"i.get('\1', False)", python)
     python = re.sub(r"!(?!=)", " not ", python)
     context = {"workflow": "Hosted CI", "head_ref": "", "run_id": "1", **github}
     return eval(python, {"__builtins__": {}}, {
         "g": context,
         "i": inputs,
+        "v": variables,
         "startsWith": lambda value, prefix: value.lower().startswith(prefix.lower()),
     })
 
@@ -156,6 +161,43 @@ class BaselineRefresh(unittest.TestCase):
                 self.assertEqual(set(result['selected']), {'kernel'} if refresh == 'true' else full)
                 self.assertIn('packaging=' + ('false' if refresh == 'true' else 'true'),
                               (temporary / 'output').read_text())
+
+
+class BoatRunners(unittest.TestCase):
+    def test_only_owner_runs_from_this_repository_use_boat(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)",
+                               text, re.M | re.S))
+        moved = {'build-linux', 'test-linux', 'web', 'interactive-linux', 'application-loop'}
+        self.assertEqual({job for job, block in jobs.items() if 'vars.USE_BOAT' in block}, moved)
+        self.assertEqual(len(moved) - 1 + 4, 8)
+        self.assertIn('shard: [1, 2, 3, 4]', jobs['test-linux'])
+        owner = 'BohnBawerick'
+        repo = 'ZIGRAWBOHNBAWERICK/soliddraft'
+        for job in moved:
+            expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
+            size = re.search(r"&& '(boat(?:-large)?)' \|\| 'ubuntu-latest'$", expression)[1]
+            self.assertNotIn('USE_LOCAL_RUNNERS', expression)
+            for event in ('push', 'workflow_dispatch', 'pull_request'):
+                for enabled in ('true', 'false', ''):
+                    for repository in (repo, 'elsewhere/soliddraft'):
+                        for actor in (owner, 'dependabot[bot]'):
+                            for starter in (owner, 'another-user'):
+                                for author in (owner, 'another-user'):
+                                    for source in (repo, 'fork/soliddraft'):
+                                        values = dict(variables={'USE_BOAT': enabled},
+                                                      repository=repository, actor=actor,
+                                                      triggering_actor=starter, event_name=event,
+                                                      event={'pull_request': {
+                                                          'user': {'login': author},
+                                                          'head': {'repo': {'full_name': source}}}})
+                                        allowed = (enabled == 'true' and repository == repo
+                                                   and actor == owner and starter == owner
+                                                   and (event != 'pull_request'
+                                                        or (author == owner and source == repo)))
+                                        with self.subTest(job=job, **values):
+                                            self.assertEqual(evaluate(expression, **values),
+                                                             size if allowed else 'ubuntu-latest')
 
 
 class RustCache(unittest.TestCase):

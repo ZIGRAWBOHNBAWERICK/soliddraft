@@ -282,7 +282,7 @@ impl Document {
                     return repair(RepairReason::Mismatch { detail: detail.clone() }, detail, vec![]);
                 };
                 if !offset.is_finite() {
-                    return Built::failed(current, "sketch plane offset must be finite".into());
+                    return Built::failed(current, "sketch plane offset must be finite");
                 }
                 let p = plane_on_face(normal, info.centroid);
                 (p.with_origin(p.origin + p.normal * offset), offset == 0.0)

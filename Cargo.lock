@@ -809,6 +809,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "catallax-iges"
+version = "0.1.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=634e8031048d7e33321d3507029bd83cf4c945d0#634e8031048d7e33321d3507029bd83cf4c945d0"
+dependencies = [
+ "catallax-numbers",
+ "catallax-shapes",
+ "catallax-topology",
+]
+
+[[package]]
 name = "catallax-import"
 version = "0.1.0"
 source = "git+https://github.com/BohnBawerick/catallax?rev=634e8031048d7e33321d3507029bd83cf4c945d0#634e8031048d7e33321d3507029bd83cf4c945d0"
@@ -5233,6 +5243,7 @@ dependencies = [
  "catallax-boolean",
  "catallax-features",
  "catallax-field",
+ "catallax-iges",
  "catallax-import",
  "catallax-measure",
  "catallax-mesh",

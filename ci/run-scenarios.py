@@ -731,6 +731,33 @@ def checked_step_export(binary, part, directory, evidence, timeout, max_work=Non
     return checks
 
 
+def checked_iges_export(binary, part, directory, evidence, timeout, surface_kinds, mcp_path):
+    """Reopen the saved part, export, compare the MCP file and read exact IGES in OCCT."""
+    exported = cli(binary, ["export", part, "--json", "--out", directory / "part.iges"],
+                   directory, "checked-iges-export", timeout)
+    checks = [exported]
+    if not exported["pass"]:
+        return checks
+    value = json.loads((directory / "checked-iges-export.stdout").read_text())
+    report = value["report"]
+    checks.append(request_work_check(value, APP_REQUEST_WORK))
+    checks.append({"check": "one certified IGES solid", "report": report,
+                   "pass": report.get("kind") == "iges" and report.get("within_tolerance") is True
+                           and report.get("solids") == 1})
+    checks.append({"check": "MCP and reopened CLI IGES bytes agree",
+                   "pass": pathlib.Path(mcp_path).is_file()
+                           and pathlib.Path(mcp_path).read_bytes() == (directory / "part.iges").read_bytes()})
+    write(directory / "iges-report.json", {"report": report, "body": {
+        "faces": evidence["summary"]["body"]["faces"],
+        "edges": evidence["summary"]["body"]["edges"],
+        "volume": evidence["measurement"]["volume_mm3"],
+    }, "surface_kinds": surface_kinds})
+    root = pathlib.Path(__file__).resolve().parent.parent
+    checks.append(cli(str(root / ".ci-ocp8/bin/python"), [root / "ci/check-iges.py",
+        directory / "part.iges", directory / "iges-report.json"], directory, "check-iges", timeout))
+    return checks
+
+
 def raw_step_check(step, directory, label, timeout):
     """The kernel gate's direct no-healing validity check of every solid in a STEP file."""
     root = pathlib.Path(__file__).resolve().parent.parent
@@ -1134,6 +1161,11 @@ def run(args):
                 checks.extend(checked_step_export(args.soliddraft,
                     substitute(step["checked_step_export"], args.out), directory, evidence, args.timeout,
                     step.get("checked_step_max_work"), step.get("step_oracle")))
+            if "checked_iges_export" in step:
+                spec = step["checked_iges_export"]
+                checks.extend(checked_iges_export(args.soliddraft,
+                    substitute(spec["part"], args.out), directory, evidence, args.timeout,
+                    spec["surface_kinds"], substitute(spec["mcp_path"], args.out)))
             for index, arguments in enumerate(step.get("helpers", [])):
                 checks.append(helper(arguments, args.out, directory, f"helper-{index}", args.timeout))
             specifications = [{"format": f} for f in step.get("export", [])] + step.get("exports", [])

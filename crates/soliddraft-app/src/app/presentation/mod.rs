@@ -151,6 +151,7 @@ impl SolidDraftApp {
                 }
                 ui.menu_button("Export", |ui| {
                     menu_command(ui, st, "export_step", "STEP AP242…");
+                    menu_command(ui, st, "export_iges", "IGES 5.3…");
                     menu_command(ui, st, "export_stl", "STL…");
                     menu_command(ui, st, "export_3mf", "3MF…");
                     menu_command(ui, st, "export_obj", "OBJ…");

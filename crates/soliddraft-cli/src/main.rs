@@ -36,7 +36,7 @@
 //! layer to an MCP client, on stdin and stdout or on a loopback HTTP port.
 //!
 //! `soliddraft export <part.dwprt | recipe.json> --out bracket.step` writes a part or a
-//! recipe's result as STEP, STL, 3MF or OBJ with each file's deviation; see [`export::USAGE`].
+//! recipe's result as STEP, IGES, STL, 3MF or OBJ with each file's deviation; see [`export::USAGE`].
 //!
 //! `soliddraft screenshot <part.dwprt> --png out.png` captures the viewport without a window.
 //!
@@ -126,7 +126,7 @@ key     The assistant's API keys in the OS keychain, one per provider: OpenRoute
 
 draw    `soliddraft draw --help` describes the draw command.
 
-export  Writes a part or a recipe's result as STEP AP242, STL, 3MF or OBJ, with how far
+export  Writes a part or a recipe's result as STEP AP242, IGES, STL, 3MF or OBJ, with how far
         each file may lie from the exact part. `soliddraft export --help`
         describes it.
 

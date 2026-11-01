@@ -1515,6 +1515,10 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::Export { format: ExportFormat::Step, path: None })
             .when(can_export)
 .agents(Agents::Mcp, "The result carries the deviation report.", app::step_path_params),
+        cmd("export_iges", "IGES", Icon::Save, "Export supported exact surfaces as IGES 5.3, with its proven deviation")
+            .run(|_| AppAction::Export { format: ExportFormat::Iges, path: None })
+            .when(can_export)
+            .agents(Agents::Mcp, "The result carries the deviation report. Unsupported definitions are refused.", app::iges_path_params),
         cmd("export_stl", "STL", Icon::Save, "Export the part's mesh as binary STL at the export tolerance")
             .run(|_| AppAction::Export { format: ExportFormat::Stl, path: None })
             .when(can_export)

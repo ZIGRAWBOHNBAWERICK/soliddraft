@@ -41,8 +41,14 @@ fn a_refused_export_leaves_its_destination_alone() {
     run(&mut state, "sketch", json!({ "plane": "top", "offset": 20, "shapes": rectangle }));
     run(&mut state, "extrude", json!({ "sketch": "Sketch1", "depth": 10, "flip": false }));
     assert_refused_then_written(&mut state, "export_step", &dir.join("part.step"));
+    assert_refused_then_written(&mut state, "export_iges", &dir.join("part.iges"));
     let lattice = json!({ "cell": "cubic", "cell_size": 100, "radius": 1, "accuracy": 0.5, "min_detail": 0.1 });
     run(&mut state, "lattice", lattice);
     assert_refused_then_written(&mut state, "export_stl", &dir.join("field.stl"));
+    let path = dir.join("field.iges");
+    std::fs::write(&path, b"previous IGES").unwrap();
+    let refusal = call(&mut state, "export_iges", json!({ "path": path }));
+    assert!(refusal.is_error && refusal.content.contains("field parts export as meshes"), "{}", refusal.content);
+    assert_eq!(std::fs::read(path).unwrap(), b"previous IGES");
     std::fs::remove_dir_all(&dir).unwrap();
 }

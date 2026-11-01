@@ -67,7 +67,7 @@ Waiting commands stay visible and disabled with a tooltip naming their Catallax 
 | Sweep and loft; spline, ellipse and text profiles | 5 |
 | STEP import | 6 |
 
-Parts export as STEP AP242 with Catallax's proven deviation, and as STL and 3MF from Catallax's meshes, from File > Export or `soliddraft export`; see [part export](docs/exchange.md). IGES import and export, surfacing and sheet metal are not available. In the desktop app an assembly opens in a tab beside the part: File > New assembly or Make assembly from part, insert parts from a file dialog or by dropping their files on the window, place each by typing its position and rotation, then save and reopen it; see [assemblies](docs/assemblies.md#in-the-app). Mates come next. The [roadmap](docs/roadmap.md) orders the remaining work.
+Parts export as STEP AP242 and supported exact-surface IGES 5.3 with Catallax's proven deviation, and as STL, 3MF and OBJ from Catallax's meshes, from File > Export or `soliddraft export`; see [part export](docs/exchange.md). IGES import, surfacing and sheet metal are not available. In the desktop app an assembly opens in a tab beside the part: File > New assembly or Make assembly from part, insert parts from a file dialog or by dropping their files on the window, place each by typing its position and rotation, then save and reopen it; see [assemblies](docs/assemblies.md#in-the-app). Mates come next. The [roadmap](docs/roadmap.md) orders the remaining work.
 
 ## Building
 
@@ -111,7 +111,7 @@ cargo run --release -p soliddraft-cli -- export recipes/bracket.json --out brack
 cargo run --release -p soliddraft-cli -- draw recipes/bracket.json --template iso-a3
 ```
 
-Replay prints each step's face, edge and vertex counts, volume, area, validity and a geometric digest. Export writes STEP, STL or 3MF, chosen by each `--out` file's extension, with each file's deviation. View writes hidden-line views. Part rebuilds a saved part and prints every feature's state. Draw makes a full drawing of a recipe's result. Each subcommand has `--help`.
+Replay prints each step's face, edge and vertex counts, volume, area, validity and a geometric digest. Export writes STEP, IGES, STL, 3MF or OBJ, chosen by each `--out` file's extension, with each file's deviation. View writes hidden-line views. Part rebuilds a saved part and prints every feature's state. Draw makes a full drawing of a recipe's result. Each subcommand has `--help`.
 
 ## Tests
 

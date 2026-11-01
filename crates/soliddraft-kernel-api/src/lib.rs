@@ -36,6 +36,7 @@ mod field;
 mod geometry;
 mod history;
 mod ids;
+mod iges;
 mod import;
 mod profile;
 
@@ -47,6 +48,7 @@ pub use field::{
 pub use geometry::{Aabb, Plane, Point2, Vec3};
 pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, OpKind, Origin, Split};
 pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
+pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
     Approval, DecimalBounds, Decision, Disposition, ImportOptions, ImportStepRequest, ImportStepResult, ImportedBody,
     PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange, RepairDerivative, RepairRecord, RepairSource,
@@ -1058,6 +1060,13 @@ pub trait Kernel: Send + Sync {
     fn import_step(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
         let _ = (tag, request);
         Err(KernelError::Unsupported("import_step".into()))
+    }
+
+    /// Writes exact supported surfaces as IGES 5.3, refusing unsupported definitions
+    /// and bounds above the requested tolerance before returning any file.
+    fn export_iges(&self, body: BodyId, options: &IgesOptions) -> KernelResult<IgesExport> {
+        let _ = (body, options);
+        Err(KernelError::Unsupported("export_iges".into()))
     }
 
     /// Writes a solid as a STEP AP242 file, with a proven bound on the distance between

@@ -1,4 +1,4 @@
-//! The bracket exported to STEP, STL, 3MF and OBJ on Catallax, through the same entry the
+//! The bracket exported to STEP, IGES, STL, 3MF and OBJ on Catallax, through the same entry the
 //! application and the command line use.
 
 use std::f64::consts::PI;
@@ -57,6 +57,38 @@ fn step_carries_the_proven_deviation_and_the_body_faces() {
         });
         std::fs::write(directory.join("bracket.step"), &out.bytes).unwrap();
         std::fs::write(directory.join("step-report.json"), serde_json::to_vec(&report).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn iges_carries_the_proven_deviation_and_the_body_faces() {
+    let k = CatallaxKernel::new();
+    let body = bracket(&k);
+    let out = export(&k, body, "bracket", Format::Iges, &ExportTolerance::default()).unwrap();
+    let Report::Iges(r) = &out.report else { panic!("an IGES report") };
+    assert_eq!(r.faces, k.topology(body).unwrap().faces.len());
+    assert!(r.within_tolerance && r.max_deviation_mm <= 1e-7, "{r:?}");
+    let text = std::str::from_utf8(&out.bytes).unwrap();
+    assert!(text.lines().all(|line| line.len() == 80));
+    assert_eq!(r.units, "mm");
+    assert_eq!(out.bytes, export(&k, body, "bracket", Format::Iges, &ExportTolerance::default()).unwrap().bytes);
+    if let Some(directory) = std::env::var_os("SOLIDDRAFT_IGES_PROOF_DIR") {
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mass = k.mass_properties(body).unwrap();
+        let topology = k.topology(body).unwrap();
+        let report = serde_json::json!({
+            "report": out.report,
+            "surface_kinds": { "Plane": 13, "Cylinder": 6 },
+            "body": {
+                "faces": topology.faces.len(),
+                "edges": topology.edges.len(),
+                "volume": mass.volume,
+                "area": mass.area,
+            },
+        });
+        std::fs::write(directory.join("bracket.iges"), &out.bytes).unwrap();
+        std::fs::write(directory.join("iges-report.json"), serde_json::to_vec(&report).unwrap()).unwrap();
     }
 }
 
@@ -172,8 +204,32 @@ fn formats_follow_extensions() {
     assert_eq!(Format::of_path(Path::new("b.stl")), Some(Format::Stl));
     assert_eq!(Format::of_path(Path::new("b.3mf")), Some(Format::ThreeMf));
     assert_eq!(Format::of_path(Path::new("b.OBJ")), Some(Format::Obj));
-    assert_eq!(Format::of_path(Path::new("b.iges")), None);
+    assert_eq!(Format::of_path(Path::new("b.iges")), Some(Format::Iges));
+    assert_eq!(Format::of_path(Path::new("b.IGS")), Some(Format::Iges));
     for f in Format::ALL {
         assert_eq!(Format::of_path(Path::new(&format!("x.{}", f.extension()))), Some(f));
     }
+}
+
+#[test]
+fn iges_refuses_unsupported_definitions_and_unmet_accuracy_without_changing_the_body() {
+    use soliddraft_kernel_api::{IgesOptions, StepOptions};
+    let k = CatallaxKernel::new();
+    let recipe = soliddraft_recipe::parse(include_str!("../../../recipes/turned-collar.json")).unwrap();
+    let body = soliddraft_recipe::build(&k, &recipe).unwrap().1;
+    let original = k.export_step(body, &StepOptions::default()).unwrap();
+    let report = k.export_iges(body, &IgesOptions::default()).unwrap().report;
+    assert!(report.max_deviation_mm > 0.0 && report.within_tolerance, "{report:?}");
+    let refusal = k.export_iges(body, &IgesOptions { tolerance: 0.0 }).unwrap_err().to_string();
+    assert!(refusal.contains("iges.tolerance-exceeded"), "{refusal}");
+    for tolerance in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(k.export_iges(body, &IgesOptions { tolerance }).is_err());
+    }
+    assert_eq!(original, k.export_step(body, &StepOptions::default()).unwrap());
+    let recipe = soliddraft_recipe::parse(include_str!("../../../recipes/fillet.json")).unwrap();
+    let rounded = soliddraft_recipe::build(&k, &recipe).unwrap().1;
+    let refusal = k.export_iges(rounded, &IgesOptions::default()).unwrap_err().to_string();
+    assert!(refusal.contains("iges."), "{refusal}");
+    k.release(body).unwrap();
+    assert!(k.export_iges(body, &IgesOptions::default()).is_err());
 }

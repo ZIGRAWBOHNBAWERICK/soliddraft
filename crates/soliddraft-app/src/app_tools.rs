@@ -63,6 +63,11 @@ pub fn open_params() -> Vec<(&'static str, Value)> {
     path_param("A part, drawing or assembly file path, ending in .dwprt, .dwdrw or .dwasm")
 }
 
+/// The `export_iges` tool's parameters.
+pub fn iges_path_params() -> Vec<(&'static str, Value)> {
+    path_param("The file to write, ending in .iges or .igs")
+}
+
 /// The `export_step` tool's parameters.
 pub fn step_path_params() -> Vec<(&'static str, Value)> {
     path_param("The file to write, ending in .step or .stp")
@@ -268,6 +273,7 @@ impl AppTools<'_> {
             "redo" if drawing_active => self.step_drawing(false),
             "open" => self.open(input)?,
             "new_part" => self.new_part(),
+            "export_iges" => self.export_part(ExportFormat::Iges, input),
             "export_step" => self.export_part(ExportFormat::Step, input),
             "export_stl" => self.export_part(ExportFormat::Stl, input),
             "export_3mf" => self.export_part(ExportFormat::ThreeMf, input),

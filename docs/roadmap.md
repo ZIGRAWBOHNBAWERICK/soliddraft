@@ -74,7 +74,7 @@ Application work for a feature, such as its PropertyManager page, ribbon command
 | Mass properties | 1 | Works, computed on request |
 | STEP AP242, STL and 3MF export | 1 | Done |
 | OBJ export | 1 | Done with this change |
-| IGES export | After STEP export, before STEP and IGES import | Planned; needs Catallax's exact-surface IGES writer |
+| IGES export | After STEP export, before STEP and IGES import | First slice: app, CLI and MCP export through Catallax; bracket read-back in the application loop |
 | One-sided through all, up to face, up to next | 3 | Works for planar limits on targets without curved walls; curved limits wait for general targets |
 | Hole and countersink | 3 | Works |
 | Chamfer | 3 | Works between planes and cylinders, one distance |
@@ -89,7 +89,7 @@ Application work for a feature, such as its PropertyManager page, ribbon command
 
 Reference geometry (planes, axes, points) is application-side work and can come at any time.
 
-The export set is STEP, IGES, STL, 3MF and OBJ. STEP AP242, STL and 3MF are complete; OBJ is complete with this change. IGES export comes next in the exchange work, once Catallax provides an exact-surface writer like its STEP writer. It does not depend on STEP import or IGES import.
+The export set is STEP, IGES, STL, 3MF and OBJ. STEP AP242, STL and 3MF are complete; OBJ is complete with this change. IGES export now uses Catallax's strict exact-surface writer through the app, CLI and MCP; coverage follows the writer's explicit refusals. It does not depend on STEP import or IGES import.
 
 ## 7. Drawings on Catallax
 
@@ -136,7 +136,7 @@ Some of these items were informed by public work on other open-source CAD projec
 | 1, shell and viewport | Stays | Kernel-independent. |
 | 2, modelling | Stays | Fillets and chamfers between planes and cylinders work on Catallax stage 3; other fillets wait for stage 4. References simplify. Sketch coordinates and the solver remain floating-point; point joining feeds Catallax's rational-profile converter. |
 | 3, assistant | Stays | Kernel-independent. MCP and the command line drive the application loop. |
-| 4, second kernel and exchange | Changes | Becomes the Catallax backend and the SMLib removal. STEP comes from Catallax, not from an OpenCASCADE bridge, which also avoids its LGPL dependency. STL, 3MF and OBJ come from Catallax's meshes. IGES export waits for Catallax's exact-surface writer, not for import. The recipe runner and Catallax drawing baselines remain. |
+| 4, second kernel and exchange | Changes | Becomes the Catallax backend and the SMLib removal. STEP comes from Catallax, not from an OpenCASCADE bridge, which also avoids its LGPL dependency. STL, 3MF and OBJ come from Catallax's meshes. IGES export uses Catallax's exact-surface writer independently of import. The recipe runner and Catallax drawing baselines remain. |
 
 ### 9.3 Queued work
 
@@ -167,7 +167,7 @@ Numbered in priority order.
 5. **One recipe format.** Build. Deliverable: section 4's write and read paths. Exit: every recipe in `recipes/` converts and replays on Catallax, and existing part files open. Depends on Catallax milestone M3.
 6. **STEP and mesh export.** Done for STEP AP242, STL, 3MF and, with this change, OBJ. STEP carries Catallax's deviation report; meshes carry their chord tolerance, and OBJ retains the object name, face groups and normals. Exit: the bracket's STEP opens in OpenCASCADE with the same face count and a volume within the reported deviation; its mesh exports retain the triangles within their recorded chord tolerance. Depends on Catallax milestone M3.
 
-   **Next exchange work: IGES export.** Planned after STEP export and before STEP and IGES import. Deliverable: exact surfaces through a Catallax IGES writer, like the STEP writer. Depends on that Catallax writer, not on an importer. Exit: the exported bracket opens in an independent IGES reader with its exact surfaces and reported deviation preserved.
+   **Next exchange work: IGES export.** Exit: the exported bracket opens in an independent IGES reader with its exact surfaces and reported deviation preserved. First slice adds app, CLI and MCP exports of the exact definitions Catallax supports, carrying its whole-boundary deviation certificate. The `iges-export` application scenario checks the bracket in OpenCASCADE without healing, including analytic surface kinds, topology and the report. Unsupported definitions remain refused. Next: broaden application scenarios for conical bands and finite axial sectors, then add same-byte replay through `catallax-verify`'s `iges` source.
 7. **References on Catallax origins.** Build. Deliverable: section 4's simplified references, with the face-role heuristic deleted, and section 4's survival scenario in the application loop. Exit: plate-thickness and boss-radius edits on the bracket keep every reference; the survival scenario keeps every reference across rename, split, merge, suppress and restore, undo and redo, and save and reopen; a genuinely lost reference still raises the repair prompt. Depends on Catallax milestone M3.
 8. **Rebuild from the first changed feature.** Build. Deliverable: section 3's rebuild, and a rebuild report, written by the development build into each application-loop command's bundle, that counts features recomputed, meshes rebuilt and bodies placed; the counting stays out of the rebuild path. Exit: editing the last feature of the bracket rebuilds only that feature and rebuilds no unrelated mesh or placement; renaming a feature recomputes nothing; restoring the previous value reuses the earlier bodies; in each case the result is identical to a full replay in bodies, face names and refusals. Depends on Catallax milestone M4.
 9. **Feature plumbing in the kernel's order.** Build, recurring. Deliverable: each feature in section 6 switched on when its Catallax operation lands. Exit, per feature: the application loop builds and edits the matching target part. Switched on so far: holes and countersinks, patterns, mirrors, fillets and chamfers between planes and cylinders, drafts, and planar up-to limits. Next: curved limits, shell, other fillets.

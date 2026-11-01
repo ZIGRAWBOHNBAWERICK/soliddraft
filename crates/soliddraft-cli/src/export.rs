@@ -1,4 +1,4 @@
-//! `soliddraft export`: a part or a recipe's result as STEP, STL, 3MF or OBJ, without a window.
+//! `soliddraft export`: a part or a recipe's result as STEP, IGES, STL, 3MF or OBJ, without a window.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -20,6 +20,7 @@ extension of each --out file picks its format:
 
   .step, .stp  STEP AP242, exact geometry, with Catallax's proven bound on the
                distance between the written and the exact geometry
+  .iges, .igs  IGES 5.3, supported exact surfaces with a proven deviation bound
   .stl         binary STL from Catallax's mesh
   .3mf         3MF from Catallax's mesh, which must be closed
   .obj         Wavefront OBJ from Catallax's mesh, with face groups and normals
@@ -27,7 +28,8 @@ extension of each --out file picks its format:
 Meshes use the part's export tolerance (`soliddraft quality --export`); a recipe
 uses the default, 0.01 mm. Each report gives what was written and how far it may
 lie from the exact part. A part with a feature that did not build is refused.
-STEP output over its requested tolerance is refused before any file is written.
+STEP and IGES output over the requested tolerance is refused before any file is written.
+IGES also refuses unsupported definitions; it never substitutes a mesh or fitted surface.
 
 A part whose last feature is a lattice or gyroid exports its certified, labelled
 STL. Its mass stand-in is written only when asked for with --stand-in: the
@@ -69,8 +71,9 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--out" => {
                 let path = PathBuf::from(it.next().ok_or("--out needs a file")?);
-                let format = Format::of_path(&path)
-                    .ok_or_else(|| format!("{}: give a .step, .stp, .stl, .3mf or .obj file", path.display()))?;
+                let format = Format::of_path(&path).ok_or_else(|| {
+                    format!("{}: give a .step, .stp, .iges, .igs, .stl, .3mf or .obj file", path.display())
+                })?;
                 outputs.push((path, format));
             }
             "--stand-in" => {
@@ -197,10 +200,11 @@ mod tests {
 
     #[test]
     fn outputs_pick_their_formats() {
-        let a = parse(&args("bracket.json --out a.step --out b.STL --out c.3mf --out d.OBJ --json")).unwrap();
+        let a =
+            parse(&args("bracket.json --out a.step --out a.IGS --out b.STL --out c.3mf --out d.OBJ --json")).unwrap();
         assert_eq!(a.outputs.iter().map(|(_, f)| *f).collect::<Vec<_>>(), Format::ALL);
         assert!(a.json);
-        assert!(parse(&args("bracket.json --out a.iges")).is_err());
+        assert!(parse(&args("bracket.json --out a.iges")).is_ok());
         assert!(parse(&args("bracket.json")).unwrap_err().contains("--out"));
         assert!(parse(&args("--out a.step")).unwrap_err().contains("no part"));
         assert!(parse(&args("a.json b.json --out a.step")).unwrap_err().contains("one part"));

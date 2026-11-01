@@ -1,4 +1,4 @@
-//! Part export: STEP AP242 from the kernel's exact body, STL, 3MF and OBJ from its meshes.
+//! Part export: STEP AP242 and IGES from exact geometry, STL, 3MF and OBJ from meshes.
 //!
 //! Every export returns the file and a report of how far the file may lie from the exact
 //! body. A STEP report carries the kernel's proven deviation. A mesh report carries the
@@ -26,6 +26,8 @@ pub use mesh::Welded;
 pub enum Format {
     /// STEP AP242, exact geometry.
     Step,
+    /// IGES 5.3, supported exact surfaces with a whole-boundary certificate.
+    Iges,
     /// Binary STL, triangles.
     Stl,
     /// 3MF core, one closed mesh in millimetres.
@@ -41,12 +43,13 @@ pub enum Format {
 impl Format {
     /// Every format a file extension picks, in menu order. A mass stand-in is asked for
     /// by name, never by extension.
-    pub const ALL: [Format; 4] = [Format::Step, Format::Stl, Format::ThreeMf, Format::Obj];
+    pub const ALL: [Format; 5] = [Format::Step, Format::Iges, Format::Stl, Format::ThreeMf, Format::Obj];
 
     /// The file extension written, without the dot.
     pub fn extension(self) -> &'static str {
         match self {
             Format::Step | Format::StandIn => "step",
+            Format::Iges => "iges",
             Format::Stl => "stl",
             Format::ThreeMf => "3mf",
             Format::Obj => "obj",
@@ -57,6 +60,7 @@ impl Format {
     pub fn name(self) -> &'static str {
         match self {
             Format::Step => "STEP AP242",
+            Format::Iges => "IGES 5.3",
             Format::Stl => "STL",
             Format::ThreeMf => "3MF",
             Format::Obj => "OBJ",
@@ -74,6 +78,7 @@ impl Format {
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
         match ext.as_str() {
             "step" | "stp" => Some(Format::Step),
+            "iges" | "igs" => Some(Format::Iges),
             "stl" => Some(Format::Stl),
             "3mf" => Some(Format::ThreeMf),
             "obj" => Some(Format::Obj),
@@ -106,6 +111,8 @@ pub struct MeshReport {
 pub enum Report {
     /// Exact geometry, with the kernel's proven deviation.
     Step(StepReport),
+    /// Supported exact surfaces with a proven whole-boundary deviation.
+    Iges(soliddraft_kernel_api::IgesReport),
     /// A mesh, with its chord height.
     Mesh(MeshReport),
     /// A certified field approximation with a labelled file.
@@ -128,6 +135,10 @@ impl Report {
                 }
                 s
             }
+            Report::Iges(r) => format!(
+                "{} faces, {} edges; within {} mm of the exact part (proven)",
+                r.faces, r.edges, r.max_deviation_mm
+            ),
             Report::FieldMesh(r) => {
                 format!("{} triangles; approximate field mesh, proven within {} mm", r.triangles, r.deviation_bound_mm)
             }
@@ -172,7 +183,7 @@ pub enum ExportError {
     Package(String),
 }
 
-/// Exports `body` as `format`. `name` is the part's name, written into the file; meshes use
+/// Exports `body` as `format`. `name` is written where the format supports it; meshes use
 /// `tolerance`, the document's export setting.
 pub fn export(
     kernel: &dyn Kernel,
@@ -187,6 +198,10 @@ pub fn export(
             let step = kernel.export_step(body, &options)?;
             Ok(Export { bytes: step.text.into_bytes(), report: Report::Step(step.report) })
         }
+        Format::Iges => {
+            let iges = kernel.export_iges(body, &soliddraft_kernel_api::IgesOptions::default())?;
+            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report) })
+        }
         Format::StandIn => {
             Err(ExportError::Invalid("a mass stand-in comes from a part's active lattice or gyroid".into()))
         }
@@ -200,7 +215,7 @@ pub fn export(
                 Format::Stl => stl::write(&welded, name),
                 Format::ThreeMf if closed => three_mf::write(&welded, name)?,
                 Format::ThreeMf => return Err(ExportError::NotClosed),
-                Format::Step | Format::StandIn => unreachable!(),
+                Format::Step | Format::Iges | Format::StandIn => unreachable!(),
             };
             let report = MeshReport {
                 triangles: welded.triangles.len(),

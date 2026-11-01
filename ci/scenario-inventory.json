@@ -610,6 +610,19 @@
       "route": "MCP assembly, mate and Form subassembly commands -> formation plan -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "V6 batch 1, all four increments: root part occurrences in their default state formed into a new separate file with internal and crossing distance mates, one-step undo and redo, a typed cycle refusal, a part edit accepted by the sub-assembly's Update then the root's, and the reopened root's value driving nested parts through root-owned overrides; default configuration, no patterns; partial M4/M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,inspect-*.stdout}; work/parts/base.dwprt, work/parts/pin.dwprt, work/root.dwasm and work/modules/pack.dwasm"
+    },
+    {
+      "id": "iges-export",
+      "file": "ci/scenarios/iges-export.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-exchange",
+        "soliddraft-kernel-catallax"
+      ],
+      "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
+      "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
+      "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
     }
   ]
 }

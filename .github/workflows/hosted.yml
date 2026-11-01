@@ -84,7 +84,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'lint')
     name: Lint (fmt, clippy)
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -100,7 +100,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'kernel')
     name: Catallax adapter and recipes
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -131,7 +131,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'step-opencascade')
     name: Bracket STEP in OpenCASCADE
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -168,7 +168,7 @@ jobs:
     name: Build workspace tests (Linux)
     env:
       CARGO_PROFILE_TEST_OPT_LEVEL: 2
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -204,7 +204,7 @@ jobs:
       SOLIDDRAFT_REQUIRE_GPU: "1"
       LP_NUM_THREADS: "1"
       WGPU_BACKEND: vulkan
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -329,7 +329,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'web')
     name: Web build (wasm32)
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -374,7 +374,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'msrv')
     name: Minimum Rust version (Rust-only crates)
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
@@ -388,7 +388,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'interactive-linux')
     name: Catallax bracket (Linux)
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     env:
       WGPU_BACKEND: vulkan
       SOLIDDRAFT_REQUIRE_GPU: "1"
@@ -470,7 +470,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'application-loop')
     name: Application scenarios (MCP, viewport, kernel replay)
-    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_BOAT == 'true' && github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && 'boat-large' || 'ubuntu-latest' }}
     timeout-minutes: 90
     env:
       WGPU_BACKEND: vulkan

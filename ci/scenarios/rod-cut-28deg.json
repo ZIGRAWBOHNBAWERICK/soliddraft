@@ -285,7 +285,7 @@
         "depth": 0,
         "flip": true
       },
-      "refused": "depth must be positive",
+      "refused": "depth must be greater than 0, got 0",
       "same_geometry_as_step": 4,
       "checks": [
         {

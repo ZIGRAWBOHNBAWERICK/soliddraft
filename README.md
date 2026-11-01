@@ -24,13 +24,13 @@ An honest objection: an open-source licence is itself a copyright instrument. Yo
 
 Licensed under MIT. The licence is used for one purpose only: to keep the credit line below attached to copies of this work.
 
-Credit: SolidDraft was started by Pedro De Paiva. Keep that line if you copy it.
+Credit: SolidDraft was started by Zigrawbohnbawerick Pty Ltd. Keep that line if you copy it.
 
 Check out my other products at [ZigrawBohnBawerick](https://zigrawbohnbawerick.org/).
 
 ## Sponsorship
 
-Help fund SolidDraft and Catallax through [GitHub Sponsors](https://github.com/sponsors/BohnBawerick) or [Ko-fi](https://ko-fi.com/pedropaiva56920). Both support the same project, started by Pedro De Paiva.
+Help fund SolidDraft and Catallax through [GitHub Sponsors](https://github.com/sponsors/BohnBawerick). This supports the project started by Zigrawbohnbawerick Pty Ltd.
 
 ## What it is
 
@@ -135,4 +135,4 @@ The bundled Inter font is under the SIL Open Font License 1.1.
 
 SolidDraft is not affiliated with, sponsored by or endorsed by Dassault Systèmes, Autodesk, Siemens or NVIDIA. SolidWorks, DraftSight, Parasolid and the other names above are their owners' marks.
 
-Started by Pedro De Paiva. Written with AI coding agents.
+Started by Zigrawbohnbawerick Pty Ltd. Written with AI coding agents.

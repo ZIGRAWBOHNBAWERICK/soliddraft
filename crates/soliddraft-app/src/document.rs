@@ -11,6 +11,7 @@ use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
+use soliddraft_document::DocumentId;
 use soliddraft_kernel_api::{
     BodyId, BooleanOp, EdgeId, EdgePolyline, Extrude, FaceId, Kernel, KernelError, Mesh, OpTag, Plane, Point2, Profile,
     SurfaceKind, TessellationParams, Topology,
@@ -1194,6 +1195,7 @@ struct PendingBuild {
 }
 
 pub struct Document {
+    instance: DocumentId,
     pub name: String,
     pub path: Option<std::path::PathBuf>,
     /// The feature tree as the last rebuild left it. A mirror of the model:
@@ -1268,6 +1270,7 @@ impl Document {
     /// A document over a part the model already holds, such as one opened from a file.
     pub fn from_model(model: model::Document) -> Self {
         let mut doc = Self {
+            instance: DocumentId::new(),
             name: model.name().to_owned(),
             path: None,
             features: Vec::new(),
@@ -1316,6 +1319,7 @@ impl Document {
     /// A proposal copy shares display buffers as well as immutable kernel builds.
     pub(crate) fn fork(&self) -> Self {
         Self {
+            instance: self.instance,
             name: self.name.clone(),
             path: None,
             features: self.features.clone(),
@@ -1378,6 +1382,11 @@ impl Document {
     /// started at one revision, such as a drag preview, is obsolete at the next.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Identifies this open copy, including when the same file is opened again.
+    pub(crate) fn instance(&self) -> DocumentId {
+        self.instance
     }
 
     /// The revision whose geometry is displayed. Failed input keeps its own

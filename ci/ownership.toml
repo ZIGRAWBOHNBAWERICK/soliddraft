@@ -18,7 +18,7 @@ module = ["assembly"]
 name = "app.chat"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/chat.rs"]
+paths = ["crates/soliddraft-app/src/chat.rs", "crates/soliddraft-app/src/chat/"]
 module = ["chat"]
 
 [[areas]]

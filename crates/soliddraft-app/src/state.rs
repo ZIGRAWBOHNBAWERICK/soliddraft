@@ -566,6 +566,8 @@ pub struct AppState {
     pub drawing: crate::drawing::DrawingState,
     /// The open assembly and whether it is the active document.
     pub assembly: crate::assembly::AssemblyState,
+    /// A document a tool requested, consumed before the dock sets the active flags.
+    pub(crate) tool_document: Option<crate::app::Tab>,
     /// The configuration grid window and its preview.
     pub grid: crate::grid::preview::GridState,
     /// Whether the side area is shown and how wide it is.
@@ -619,6 +621,7 @@ impl AppState {
             drawing: Default::default(),
             grid: Default::default(),
             assembly: Default::default(),
+            tool_document: None,
             layout: crate::panels::Layout::load(),
             command_line: crate::command_line::CommandLine::load(),
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),

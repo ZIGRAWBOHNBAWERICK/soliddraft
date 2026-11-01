@@ -29,6 +29,7 @@ use soliddraft_drawing::project::{self, Projected};
 
 use crate::app::Tab;
 use crate::command_line::{Status, StatusNote};
+use crate::document::Document;
 use crate::state::{AppState, NoteKind};
 use egui_dock::DockState;
 use soliddraft_document::DocumentId;
@@ -570,6 +571,8 @@ impl Camera2 {
 
 /// The open drawing with everything the interface keeps beside the document.
 pub struct DrawingSession {
+    /// Distinguishes a reopened file from the previous session with the same file id.
+    pub(crate) instance: DocumentId,
     pub doc: DrawingDoc,
     pub tab: DrawingTab,
     pub tool: DrawingTool,
@@ -618,6 +621,7 @@ pub struct DrawingSession {
 impl DrawingSession {
     pub fn new(doc: DrawingDoc) -> DrawingSession {
         DrawingSession {
+            instance: DocumentId::new(),
             doc,
             tab: DrawingTab::Views,
             tool: DrawingTool::Select,
@@ -869,20 +873,23 @@ pub fn today() -> String {
 
 /// Makes the drawing the New drawing PropertyManager describes.
 pub fn create_drawing(state: &AppState, new: &NewDrawing) -> Result<DrawingSession, String> {
-    let ctx = part_context(state).ok_or("The part has no body yet; extrude something first")?;
+    create_drawing_for_part(&state.doc, new)
+}
+
+pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> Result<DrawingSession, String> {
+    let ctx = PartContext::new(part_doc).ok_or("The part has no body yet; extrude something first")?;
     let template = library::template(&new.template);
     let model_template = template.template();
     // The drawing is not saved yet, so the path is the part's file name; saving the
     // drawing makes it relative to where the drawing goes.
-    let path = state
-        .doc
+    let path = part_doc
         .path
         .as_ref()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| format!("{}.{}", state.doc.name, crate::file::EXTENSION));
+        .unwrap_or_else(|| format!("{}.{}", part_doc.name, crate::file::EXTENSION));
     let model = DocRef::new(ctx.id, DocKind::Part, path, ctx.digest.clone());
     let mut drawing = Drawing::new(model, &model_template);
-    let mut title: Vec<char> = state.doc.name.chars().collect();
+    let mut title: Vec<char> = part_doc.name.chars().collect();
     if let Some(c) = title.first_mut() {
         *c = c.to_ascii_uppercase();
     }
@@ -951,15 +958,15 @@ pub fn create_drawing(state: &AppState, new: &NewDrawing) -> Result<DrawingSessi
     }
     doc.touch();
     let mut session = DrawingSession::new(doc);
-    session.seen_version = state.doc.mesh_version;
-    session.part_seen = Some(state.doc.model().id());
+    session.seen_version = part_doc.mesh_version;
+    session.part_seen = Some(part_doc.model().id());
     session.doc.seen_digest = ctx.digest.clone();
-    session.doc.log_mark = state.doc.command_log().len();
+    session.doc.log_mark = part_doc.command_log().len();
     Ok(session)
 }
 
 /// Opens the drawing tab beside the part and makes it the active document.
-fn show_drawing_tab(dock: &mut DockState<Tab>) {
+pub(crate) fn show_drawing_tab(dock: &mut DockState<Tab>) {
     if let Some(path) = dock.find_tab(&Tab::Drawing) {
         let _ = dock.set_active_tab(path);
         dock.set_focused_node_and_surface(egui_dock::NodePath { surface: path.surface, node: path.node });
@@ -971,7 +978,7 @@ fn show_drawing_tab(dock: &mut DockState<Tab>) {
     dock.push_to_focused_leaf(Tab::Drawing);
 }
 
-fn show_part_tab(dock: &mut DockState<Tab>) {
+pub(crate) fn show_part_tab(dock: &mut DockState<Tab>) {
     if let Some(path) = dock.find_tab(&Tab::Viewport) {
         let _ = dock.set_active_tab(path);
         dock.set_focused_node_and_surface(egui_dock::NodePath { surface: path.surface, node: path.node });

@@ -43,8 +43,17 @@ def main():
     selected = json.loads(args.selection.read_text()).get('selected') if args.selection.exists() else None
     jobs = json.loads(args.needs.read_text())
     mappings = registry['jobs']
-    results = {unit: jobs[job]['result'] for unit, job in mappings.items() if job in jobs}
-    for job in set(jobs) - set(mappings.values()):
+    results = {}
+    registered = set()
+    for unit, definition in mappings.items():
+        required = [definition] if isinstance(definition, str) else definition
+        registered.update(required)
+        if not any(job in jobs for job in required):
+            continue
+        statuses = [jobs.get(job, {}).get('result', 'absent') for job in required]
+        results[unit] = ('success' if statuses and all(s == 'success' for s in statuses)
+                         else next((s for s in statuses if s not in {'success', 'skipped'}), 'skipped'))
+    for job in set(jobs) - registered:
         results[job] = jobs[job]['result']
     result = verdict(mappings, base['jobs'], registry['retired'], selected, results)
     print(json.dumps(result, indent=2))

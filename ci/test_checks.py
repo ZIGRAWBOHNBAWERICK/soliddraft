@@ -295,9 +295,14 @@ class CiOnly(unittest.TestCase):
                     self.assertEqual(set(self.select(changes, **options)), {'lint'})
         for changes in ([['M', 'ci/run'], ['M', CAMERA]],
                         [['R100', 'ci/run', CAMERA]]):
-            self.assertEqual(set(self.select(changes)), APP)
+            self.assertEqual(set(self.select(changes)), APP | {'test-macos'})
         self.assertEqual(set(self.select([['M', 'ci/run'], ['M', 'Cargo.lock']])),
                          selector.UNITS - WINDOWS)
+
+    def test_tool_installer_keeps_consumers_in_mixed_changes(self):
+        self.assertEqual(set(self.select([['M', 'ci/bootstrap']])), {'lint'})
+        self.assertEqual(set(self.select([['M', 'ci/bootstrap'], ['M', 'README.md']])),
+                         {'lint', 'test-linux', 'test-macos'})
 
     def test_only_changed_hosted_jobs_run(self):
         old = self.workflow
@@ -716,6 +721,22 @@ class Gate(unittest.TestCase):
                 self.assertEqual(self.gate_exit(selected, needs), code)
         self.assertEqual(self.gate_exit(tests, {'select': 'success', 'lint': 'success', 'packaging': 'skipped'}), 1)
 
+    def test_workspace_unit_requires_both_build_and_shards(self):
+        for platform in ('linux', 'macos'):
+            build, shard = f'build-{platform}', f'test-{platform}'
+            for build_result, shard_result, expected in (
+                    ('success', 'success', 0), ('failure', 'success', 1),
+                    ('cancelled', 'success', 1), ('skipped', 'success', 1),
+                    ('success', 'failure', 1), ('success', 'cancelled', 1),
+                    ('success', 'skipped', 1), (None, 'success', 1), ('success', None, 1)):
+                with self.subTest(platform=platform, build=build_result, shards=shard_result):
+                    needs = {'select': 'success', 'lint': 'success'}
+                    if build_result is not None:
+                        needs[build] = build_result
+                    if shard_result is not None:
+                        needs[shard] = shard_result
+                    self.assertEqual(self.gate_exit(['lint', shard], needs), expected)
+
     def test_gate_fixture(self):
         fixture = read('gate-cases.json')
         for case in fixture['cases']:
@@ -734,7 +755,27 @@ class Wiring(unittest.TestCase):
         self.assertRegex(parsed['gate'], r'(?m)^    if: (?:\$\{\{ )?always\(\)')
         needs = re.search(r'^    needs: \[(.*?)\]', parsed['gate'], re.M)[1]
         self.assertEqual({n.strip() for n in needs.split(',')}, set(parsed) - {'gate'})
-        self.assertEqual(set(read('check-registry.json')['jobs'].values()), set(parsed) - {'gate'})
+        registered = {job for definition in read('check-registry.json')['jobs'].values()
+                      for job in ([definition] if isinstance(definition, str) else definition)}
+        self.assertEqual(registered, set(parsed) - {'gate'})
+
+    def test_workspace_shards_reuse_archives_and_keep_documentation_tests(self):
+        parsed = jobs((ROOT / '.github/workflows/hosted.yml').read_text())
+        for platform, count in (('linux', 4), ('macos', 2)):
+            with self.subTest(platform=platform):
+                build, shards = parsed[f'build-{platform}'], parsed[f'test-{platform}']
+                self.assertIn('ci/run test-build', build)
+                self.assertIn('ci/run test-doc', build)
+                self.assertIn(f'needs: [select, build-{platform}]', shards)
+                self.assertIn('fail-fast: false', shards)
+                matrix = re.search(r'shard: \[(.*?)\]', shards)[1]
+                self.assertEqual([int(n) for n in matrix.split(',')], list(range(1, count + 1)))
+                self.assertIn('ci/run test-shard', shards)
+                self.assertIn('SOLIDDRAFT_REQUIRE_GPU: "1"', shards)
+                self.assertIn('LP_NUM_THREADS: "1"', shards)
+                self.assertNotIn('ci/run test-build', shards)
+                self.assertNotIn('cargo test', shards)
+                self.assertNotIn('Swatinem/rust-cache', shards)
 
     def test_windows_jobs_stay_defined_behind_one_manual_input(self):
         hosted = (ROOT / '.github/workflows/hosted.yml').read_text()

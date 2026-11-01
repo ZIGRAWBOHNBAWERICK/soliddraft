@@ -5,8 +5,14 @@
     "lint": "lint",
     "kernel": "kernel",
     "step-opencascade": "step-opencascade",
-    "test-linux": "test-linux",
-    "test-macos": "test-macos",
+    "test-linux": [
+      "build-linux",
+      "test-linux"
+    ],
+    "test-macos": [
+      "build-macos",
+      "test-macos"
+    ],
     "test-windows": "test-windows",
     "web": "web",
     "msrv": "msrv",

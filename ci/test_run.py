@@ -1,11 +1,17 @@
 """The installed pre-push hook runs the hosted lint commands and rejects failures."""
 
+import hashlib
+import io
+import json
 import os
 import pathlib
 import shutil
 import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -44,3 +50,39 @@ class LintHook(unittest.TestCase):
                     result = subprocess.run([root / 'ci/hooks/pre-push'], cwd=root / 'ci', env=env)
                     self.assertEqual(result.returncode, 7 if failure else 0)
                     self.assertEqual(log.read_text().splitlines(), expected)
+
+
+class PinnedTools(unittest.TestCase):
+    def test_installer_checks_hash_and_writes_only_the_given_prefix(self):
+        bootstrap = (ROOT / 'ci/bootstrap').read_text()
+        script = bootstrap.split("<<'PYTHON'\n", 1)[1].rsplit('\nPYTHON', 1)[0]
+        binary = b'#!/bin/sh\necho pinned-nextest\n'
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode='w:gz') as archive:
+            entry = tarfile.TarInfo('cargo-nextest')
+            entry.size = len(binary)
+            archive.addfile(entry, io.BytesIO(binary))
+        payload = stream.getvalue()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / 'repo'
+            (root / 'ci').mkdir(parents=True)
+            prefix = pathlib.Path(directory) / 'tools'
+            asset = {'target': 'x86_64-unknown-linux-gnu',
+                     'sha256': hashlib.sha256(payload).hexdigest()}
+            tools = {'cargo-nextest': {'version': '0.9.148', 'platforms': {'Linux-x86_64': asset}}}
+            for valid in (True, False):
+                if not valid:
+                    asset['sha256'] = '0' * 64
+                (root / 'ci/tools').write_text(json.dumps(tools))
+                with mock.patch.object(sys, 'argv', ['bootstrap', str(root), str(prefix)]), \
+                     mock.patch('platform.system', return_value='Linux'), \
+                     mock.patch('platform.machine', return_value='x86_64'), \
+                     mock.patch('urllib.request.urlopen', return_value=io.BytesIO(payload)):
+                    if valid:
+                        exec(compile(script, 'bootstrap', 'exec'), {'__name__': '__main__'})
+                    else:
+                        with self.assertRaisesRegex(SystemExit, 'checksum mismatch'):
+                            exec(compile(script, 'bootstrap', 'exec'), {'__name__': '__main__'})
+                self.assertEqual((prefix / 'bin/cargo-nextest').read_bytes(), binary)
+            self.assertEqual({str(p.relative_to(prefix)) for p in prefix.rglob('*')},
+                             {'bin', 'bin/cargo-nextest'})

@@ -163,12 +163,11 @@ jobs:
           path: ${{ runner.temp }}/bracket-export
 
   # Every platform builds and tests the Catallax-only workspace from a fresh checkout.
-  test-linux:
+  build-linux:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'test-linux')
-    name: Workspace (ubuntu-latest)
+    name: Build workspace tests (ubuntu-latest)
     env:
-      # Workspace numeric code must share the dependency optimization level.
       CARGO_PROFILE_TEST_OPT_LEVEL: 2
     runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
     steps:
@@ -178,23 +177,68 @@ jobs:
         with:
           shared-key: native-test-opt2
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install pinned test tools
+        run: |
+          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
+          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+      - name: Build the workspace test archive once
+        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst"
+      - name: Run workspace documentation tests
+        run: ci/run test-doc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-tests-linux
+          path: ${{ runner.temp }}/workspace-tests.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  test-linux:
+    needs: [select, build-linux]
+    if: contains(fromJSON(needs.select.outputs.selected), 'test-linux')
+    name: Workspace (ubuntu-latest, shard ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      SOLIDDRAFT_REQUIRE_GPU: "1"
+      LP_NUM_THREADS: "1"
+      WGPU_BACKEND: vulkan
+    runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned test tools
+        run: |
+          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
+          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-tests-linux
+          path: ${{ runner.temp }}
       - name: Install the software Vulkan adapter for rendered workspace tests
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends mesa-vulkan-drivers
           mkdir -p "$RUNNER_TEMP/soliddraft-runtime"
           chmod 700 "$RUNNER_TEMP/soliddraft-runtime"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/soliddraft-runtime" >> "$GITHUB_ENV"
-          echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
-      - run: cargo test --workspace --all-features --locked --no-fail-fast
+      - name: Run the workspace archive partition
+        run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/4"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-results-linux-${{ matrix.shard }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: error
+          retention-days: 1
 
-  test-macos:
+  build-macos:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'test-macos')
-    name: Workspace (macos-latest)
+    name: Build workspace tests (macos-latest)
     env:
-      # Workspace numeric code must share the dependency optimization level.
       CARGO_PROFILE_TEST_OPT_LEVEL: 2
     runs-on: macos-latest
     steps:
@@ -204,16 +248,55 @@ jobs:
         with:
           shared-key: native-test-opt2
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install the software Vulkan adapter for rendered workspace tests
-        if: runner.os == 'Linux'
+      - name: Install pinned test tools
         run: |
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends mesa-vulkan-drivers
-          mkdir -p "$RUNNER_TEMP/soliddraft-runtime"
-          chmod 700 "$RUNNER_TEMP/soliddraft-runtime"
-          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/soliddraft-runtime" >> "$GITHUB_ENV"
-          echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
-      - run: cargo test --workspace --all-features --locked --no-fail-fast
+          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
+          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+      - name: Build the workspace test archive once
+        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst"
+      - name: Run workspace documentation tests
+        run: ci/run test-doc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-tests-macos
+          path: ${{ runner.temp }}/workspace-tests.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  test-macos:
+    needs: [select, build-macos]
+    if: contains(fromJSON(needs.select.outputs.selected), 'test-macos')
+    name: Workspace (macos-latest, shard ${{ matrix.shard }}/2)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      SOLIDDRAFT_REQUIRE_GPU: "1"
+      LP_NUM_THREADS: "1"
+      WGPU_BACKEND: metal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned test tools
+        run: |
+          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
+          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-tests-macos
+          path: ${{ runner.temp }}
+      - name: Run the workspace archive partition
+        run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/2"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-results-macos-${{ matrix.shard }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: error
+          retention-days: 1
 
   # Deferred until a later catch-up: only a manual run with windows_catch_up selects this job.
   test-windows:
@@ -542,7 +625,7 @@ jobs:
   gate:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_catallax_views && 'Baseline refresh gate' || 'Merge gate' }}
     if: always()
-    needs: [select, lint, kernel, step-opencascade, test-linux, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
+    needs: [select, lint, kernel, step-opencascade, build-linux, test-linux, build-macos, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
     runs-on: ${{ fromJSON(vars.USE_LOCAL_RUNNERS == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","linux","x64","ci-linux-local"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4

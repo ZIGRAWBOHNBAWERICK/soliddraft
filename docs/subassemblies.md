@@ -109,6 +109,21 @@ A crash after the new file is written and before the root changes leaves a compl
 that nothing references, beside the root's file as last saved. Both open; forming again
 needs a new name.
 
+## In the window
+
+In the assembly tree a click chooses one part and a Ctrl-click (Cmd on a Mac) adds another
+or takes it away, in order. Form subassembly… in a row's context menu opens a panel with
+the chosen parts, the first giving the frame, and a field for the new file, relative to the
+assembly's folder unless absolute. Apply runs the same command as the tool; a refusal stays
+in the panel. The panel belongs to the assembly it was opened on: opening or making another
+assembly in its place closes it, and Apply forms nothing in an assembly it was not opened on. The selection and the chosen parts follow into the new file, and the tree
+opens on it. A click in the viewport names the occurrence and the part's persistent face
+under it at any depth, such as `16/4` and B's underside. A part inside a sub-assembly moves
+through the placement fields like any other; the root keeps the move as an override.
+
+A root whose sub-assembly file cannot be found opens from its own copies and says so; its
+Update is refused as `missing_reference`, naming the file, and changes nothing.
+
 ## Command
 
 `assembly_form_subassembly {paths, path, origin}` forms the open assembly's parts named by

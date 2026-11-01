@@ -113,9 +113,11 @@ The `subassembly-form` scenario runs the V6 batch 1 design's manifest: a base an
 placements of one pin, mated and driven, formed into `modules/pack.dwasm` with every pose,
 reference, mate id and freedom checked against hand-derived values, then saved and both
 files reopened, with Form's undo and redo and the typed `cycle` refusal of placing the root
-in its own sub-assembly, and the two-file Update: a part edit, the root's Update that
-leaves it to the sub-assembly, the sub-assembly's Update and save, then the root's. Its last
-increment adds the reopened driver.
+in its own sub-assembly, the two-file Update (a part edit, the root's Update that leaves it
+to the sub-assembly, the sub-assembly's Update and save, then the root's), and the reopened
+root's value driving the nested parts through overrides the root keeps. `subassembly_panel`
+forms, picks, updates, drives and moves the free nested part through the real window in each
+interactive job.
 `crates/soliddraft-assembly/tests/subassembly_form.rs` and
 `crates/soliddraft-app/tests/subassembly_form.rs` compare file bytes and package contents
 the runner cannot.

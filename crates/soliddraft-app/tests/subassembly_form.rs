@@ -72,7 +72,15 @@ fn flat(name: &str) -> Rig {
     std::fs::create_dir_all(dir.join("work/parts")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let mut r = Rig { state: AppState::new(soliddraft_app::new_document()), dir };
-    let (base, pin, root) = (r.file("parts/base.dwprt"), r.file("parts/pin.dwprt"), r.file("root.dwasm"));
+    let work = r.dir.join("work");
+    build(&mut r, &work);
+    r
+}
+
+/// Builds and saves the flat root T0 and its parts in `work`.
+fn build(r: &mut Rig, work: &Path) {
+    let (base, pin, root) = (work.join("parts/base.dwprt"), work.join("parts/pin.dwprt"), work.join("root.dwasm"));
+    r.ok("new_part", json!({}));
     r.part(&base, 40.0, 30.0, 10.0);
     r.ok("make_assembly", json!({}));
     r.ok("assembly_save", json!({ "path": root }));
@@ -99,7 +107,6 @@ fn flat(name: &str) -> Rig {
     r.ok("assembly_set_value", json!({ "name": "gap", "expression": "12 mm" }));
     r.ok("assembly_drive_mate", json!({ "mate": "Zab", "parameter": "distance", "expression": "gap" }));
     r.ok("assembly_save", json!({ "path": root }));
-    r
 }
 
 /// The world translation of the occurrence at `path`.
@@ -254,4 +261,67 @@ fn a_kept_session_sees_a_nested_part_move_on() {
     assert_eq!(holders, ["16", "16", "16"]);
     assert_eq!(update["assembly"]["accepted_state"], before["accepted_state"], "nothing accepted, solved or recorded");
     assert_eq!(at(&update["assembly"], "16/5"), json!([10.0, 10.0, 31.0]));
+}
+
+/// N1 over MCP: with the sub-assembly's file gone, the root opens from its copies and its
+/// Update is a typed refusal naming the file, changing nothing.
+#[test]
+fn a_missing_sub_assembly_refuses_update_by_name() {
+    let mut r = flat("missing");
+    let (root, pack) = (r.file("root.dwasm"), r.file("modules/pack.dwasm"));
+    r.ok("assembly_form_subassembly", r.form());
+    r.ok("assembly_save", json!({ "path": root }));
+    let parked = r.dir.join("holding/pack.dwasm");
+    std::fs::create_dir_all(parked.parent().unwrap()).unwrap();
+    std::fs::rename(&pack, &parked).unwrap();
+    let opened = r.ok("open", json!({ "path": root }))["assembly"].clone();
+    assert_eq!(opened["occurrences"]["16"]["status"], "missing");
+    assert_eq!(at(&opened, "16/5"), json!([10.0, 10.0, 31.0]), "shown from the root's copies");
+    let refusal = r.call("assembly_update", json!({})).expect_err("the sub-assembly is missing");
+    assert_eq!(
+        (refusal["refused"].as_str(), refusal["cause"].as_str()),
+        (Some("missing_reference"), Some("modules/pack.dwasm"))
+    );
+    assert_eq!(r.assembly()["accepted_state"], opened["accepted_state"]);
+    assert!(!pack.exists());
+}
+
+/// A Form panel opened on one assembly does not apply to another opened in its place, even
+/// one with the same occurrence paths: replacing the open assembly closes the panel, and
+/// neither document, its history nor any file changes.
+#[test]
+fn a_pending_form_does_not_follow_a_different_assembly() {
+    use soliddraft_app::subassembly::{FormAction, apply};
+    let mut r = flat("switch");
+    let other = r.dir.join("other");
+    build(&mut r, &other);
+    let (a, b) = (r.file("root.dwasm"), other.join("root.dwasm"));
+    let (a_bytes, b_bytes) = (sha(&a), sha(&b));
+    for route in ["open", "window"] {
+        r.ok("open", json!({ "path": a }));
+        let s = r.state.assembly.session.as_mut().unwrap();
+        s.chosen = ["4", "5", "6"].iter().map(|p| p.parse().unwrap()).collect();
+        apply(&mut r.state, FormAction::Open);
+        r.state.assembly.form.file = "modules/pack.dwasm".into();
+        assert!(r.state.assembly.form.open);
+
+        // B replaces A, by the tool or as File > Open does once it has read B.
+        match route {
+            "open" => drop(r.ok("open", json!({ "path": b }))),
+            _ => {
+                let mut doc = soliddraft_assembly::AssemblyDocument::open(&b, Default::default()).unwrap();
+                doc.finish_loading();
+                let scene = soliddraft_assembly::Scene::new(&mut doc);
+                soliddraft_app::assembly::replace(&mut r.state, doc, scene);
+            }
+        }
+        let before = r.assembly()["accepted_state"].clone();
+        assert!(!r.state.assembly.form.open, "{route}: replacing the assembly closes the panel");
+        apply(&mut r.state, FormAction::Apply);
+        assert_eq!(r.assembly()["accepted_state"], before, "{route}: B is untouched");
+        for root in [&a, &b] {
+            assert!(!root.with_file_name("modules").exists(), "{route}: no file was formed beside {}", root.display());
+        }
+        assert_eq!((sha(&a), sha(&b)), (a_bytes.clone(), b_bytes.clone()), "{route}");
+    }
 }

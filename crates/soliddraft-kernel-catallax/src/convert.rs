@@ -29,6 +29,7 @@ pub(super) struct Ids {
     /// edge is gone once the fillet has built, but its faces keep the name.
     named: Vec<(Origin, soliddraft_kernel_api::Origin)>,
     edge_names: BTreeMap<EdgeId, String>,
+    vertex_names: BTreeMap<VertexId, String>,
 }
 
 fn assign<I: Copy + Ord, K>(
@@ -64,6 +65,7 @@ impl Ids {
             face_origins: BTreeMap::new(),
             named: Vec::new(),
             edge_names: BTreeMap::new(),
+            vertex_names: BTreeMap::new(),
         };
         for face in app.names.faces.keys() {
             let origins = app.names.faces[face].clone();
@@ -98,12 +100,15 @@ impl Ids {
                 ids.edge_names.insert(id, serde_json::to_string(name).expect("edge name serializes"));
             }
         }
-        for vertex in app.names.vertices.keys() {
+        for (vertex, name) in &app.names.vertices {
             let key = keys.vertices.remove(vertex).expect("every named vertex has a key");
             let parent_keys = parents.iter().map(|p| &p.vertex_keys).collect::<Vec<_>>();
             let id = assign(&key, VertexKey::same, &parent_keys, next, VertexId::from_raw);
             ids.vertices.insert(*vertex, id);
             ids.vertex_keys.insert(id, key);
+            if let Some(name) = name {
+                ids.vertex_names.insert(id, serde_json::to_string(name).expect("vertex name serializes"));
+            }
         }
         ids
     }
@@ -216,6 +221,13 @@ fn face_role(role: &Role, parents: &[&Ids]) -> Option<FaceRole> {
                 .iter()
                 .find_map(|p| p.edge_names.iter().find_map(|(id, n)| (*n == name).then_some(*id)))
                 .map(|edge| FaceRole::Blend { edge })
+        }
+        Role::Corner { vertex } => {
+            let name = serde_json::to_string(vertex).expect("vertex name serializes");
+            parents
+                .iter()
+                .find_map(|p| p.vertex_names.iter().find_map(|(id, n)| (*n == name).then_some(*id)))
+                .map(|vertex| FaceRole::Corner { vertex })
         }
         Role::Inner { of } => parents
             .iter()

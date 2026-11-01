@@ -138,6 +138,23 @@ fn step_export_spends_its_callers_allowance_and_gets_no_fresh_one() {
 }
 
 #[test]
+fn step_export_holds_the_application_limit_inside_a_larger_allowance() {
+    use catallax_numbers::OperationAllowance;
+    use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+
+    let k = CatallaxKernel::new();
+    let body = contract::cylinder(&k, Vec3::ZERO, 10.0, 20.0);
+    let (refused, work) = with_request_allowance(5 * APP_REQUEST_WORK, || {
+        OperationAllowance::reserve(APP_REQUEST_WORK).unwrap();
+        k.export_step(body, &StepOptions::default())
+    });
+    assert!(refused.unwrap_err().to_string().contains("numbers.operation-budget"));
+    assert!(work.used > APP_REQUEST_WORK && !work.exhausted, "the spent work stays: {work:?}");
+    let (answered, _) = with_request_allowance(5 * APP_REQUEST_WORK, || k.export_step(body, &StepOptions::default()));
+    assert!(answered.unwrap().report.within_tolerance);
+}
+
+#[test]
 fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
     let k = CatallaxKernel::new();
     let p = k

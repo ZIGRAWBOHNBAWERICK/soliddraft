@@ -32,7 +32,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "e139919ae1d6b3718e49ff4519f956cc429c36ac";
+pub const CATALLAX_REVISION: &str = "bbabeef49f811a3781103000f240731aa3b159fc";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -261,6 +261,13 @@ impl CatallaxKernel {
     fn observe<T>(&self, operation: &str, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
         match &self.diagnostics {
             Some(d) => d.observe(operation, run),
+            None => run(),
+        }
+    }
+
+    fn observe_export<T>(&self, operation: &str, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
+        match &self.diagnostics {
+            Some(d) => d.observe_export(operation, run),
             None => run(),
         }
     }
@@ -815,7 +822,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn export_field_stl(&self, body: BodyId) -> KernelResult<FieldExport> {
-        self.observe("export_field_stl", || self.field(body)?.ok_or(KernelError::UnknownBody(body))?.export())
+        self.observe_export("export_field_stl", || self.field(body)?.ok_or(KernelError::UnknownBody(body))?.export())
     }
 
     fn field_mass(&self, body: BodyId, accuracy: &FieldMassAccuracy) -> KernelResult<FieldMass> {
@@ -823,7 +830,7 @@ impl Kernel for CatallaxKernel {
     }
 
     fn export_field_stand_in(&self, body: BodyId, accuracy: &FieldMassAccuracy) -> KernelResult<StandInExport> {
-        self.observe("export_field_stand_in", || {
+        self.observe_export("export_field_stand_in", || {
             self.field(body)?.ok_or(KernelError::UnknownBody(body))?.stand_in(accuracy)
         })
     }
@@ -1116,9 +1123,9 @@ impl Kernel for CatallaxKernel {
     }
 
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
-        self.observe("export_step", || {
+        self.observe_export("export_step", || {
             let write = || step::export(&self.solid(body)?.app, options);
-            lattice::allowance("export_step", APP_REQUEST_WORK, write).map(|(export, _)| export)
+            lattice::export_allowance("export_step", APP_REQUEST_WORK, write).map(|(export, _)| export)
         })
     }
 }

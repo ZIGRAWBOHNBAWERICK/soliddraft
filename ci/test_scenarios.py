@@ -421,7 +421,7 @@ class CheckStepOracle(unittest.TestCase):
     SPEC = {"surfaces": {"plane": 6}, "volume": 1000.0, "fixed": 0.01, "inside": [[0, 0, 0]], "outside": [[9, 9, 9]]}
 
     def failures(self, *, kinds=None, values=(1000.002, 1000.0005, 1000.0005), valid=True, states=None, spec=None,
-                 edges=()):
+                 edges=(), ring=0.0, holed=0):
         oracle = step_oracle()
         states = states or {(0, 0, 0): "inside", (9, 9, 9): "outside"}
         names = {"OCP": mock.MagicMock(), "OCP.BRepCheck": mock.MagicMock()}
@@ -432,6 +432,8 @@ class CheckStepOracle(unittest.TestCase):
                 mock.patch.object(oracle, "area", return_value=600.0), \
                 mock.patch.object(oracle, "state", side_effect=lambda _, point: states[tuple(point)]), \
                 mock.patch.object(oracle, "vertex_edges", return_value=list(edges)), \
+                mock.patch.object(oracle, "ring_length", return_value=ring), \
+                mock.patch.object(oracle, "holed_planes", return_value=holed), \
                 contextlib.redirect_stdout(io.StringIO()):
             return oracle.failures("raw", object(), spec or self.SPEC)
 
@@ -448,6 +450,12 @@ class CheckStepOracle(unittest.TestCase):
         self.assertEqual(self.failures(values=(1000.01, 1000.0105, 1000.0105)), [])
         self.assertIn("volume", self.failures(values=(1000.0101, 1000.0101, 1000.0101))[0])
         self.assertEqual(self.failures(values=(1000.0, 1000.0, 1000.0), spec={**self.SPEC, "floor": 1.0}), [])
+
+    def test_a_ring_and_the_holed_planes_must_match(self):
+        spec = {**self.SPEC, "rings": [{"between": ["cone", "cylinder"], "length": 12.5}], "holed_planes": 2}
+        self.assertEqual(self.failures(spec=spec, ring=12.5, holed=2), [])
+        self.assertIn("share", self.failures(spec=spec, ring=0.0, holed=2)[0])
+        self.assertIn("planes with holes", self.failures(spec=spec, ring=12.5, holed=1)[0])
 
     def test_a_contact_must_be_one_shared_vertex(self):
         spec = {**self.SPEC, "contacts": [[1, 2, 3]], "contact_edges": 4}

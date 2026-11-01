@@ -10,7 +10,9 @@ integrated at Gauss-Kronrod epsilons 1e-6, 1e-7 and 1e-8. The last two must agre
 the oracle's `fixed` plus the file's area times its 1e-7 mm bound plus the observed spread,
 and at least its `floor`. `inside` and `outside` are points strictly away from the boundary.
 Each of the optional `contacts` must be one shared vertex with at least `contact_edges` edges:
-equal coordinates on separate vertices fail.
+equal coordinates on separate vertices fail. Each of the optional `rings` names two surface
+kinds and the length of the edges their faces share, within 1e-6 mm, and the optional
+`holed_planes` counts the planar faces with more than one wire.
 
 Runs under the kernel gate's OCP 8 binding, with the pinned checkout's reader.
 """
@@ -115,6 +117,57 @@ def vertex_edges(solid, point):
     return [count for _, count in vertices]
 
 
+def faces_of(solid, kind):
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    found = []
+    explorer = TopExp_Explorer(solid, TopAbs_FACE)
+    while explorer.More():
+        face = TopoDS.Face(explorer.Current())
+        explorer.Next()
+        if SURFACE.get(BRepAdaptor_Surface(face).GetType().name) == kind:
+            found.append(face)
+    return found
+
+
+def subshapes(shape, kind):
+    from OCP.TopExp import TopExp_Explorer
+
+    found = []
+    explorer = TopExp_Explorer(shape, kind)
+    while explorer.More():
+        found.append(explorer.Current())
+        explorer.Next()
+    return found
+
+
+def ring_length(solid, kinds):
+    """The length of the edges faces of both kinds use, once per physical edge."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_EDGE
+
+    first, second = ([edge for face in faces_of(solid, kind) for edge in subshapes(face, TopAbs_EDGE)]
+                     for kind in kinds)
+    shared = []
+    for edge in first:
+        if any(edge.IsSame(other) for other in second) and not any(edge.IsSame(seen) for seen in shared):
+            shared.append(edge)
+    properties = GProp_GProps()
+    for edge in shared:
+        BRepGProp.LinearProperties_s(edge, properties)
+    return properties.Mass()
+
+
+def holed_planes(solid):
+    from OCP.TopAbs import TopAbs_WIRE
+
+    return sum(len(subshapes(face, TopAbs_WIRE)) > 1 for face in faces_of(solid, "plane"))
+
+
 def state(solid, point):
     from OCP.BRepClass3d import BRepClass3d_SolidClassifier
     from OCP.gp import gp_Pnt
@@ -150,8 +203,15 @@ def failures(label, solid, oracle):
     for point, edges in contacts.items():
         if len(edges) != 1 or edges[0] < oracle["contact_edges"]:
             found.append(f"{label}: contact {point} has vertices with edge counts {edges}")
+    rings = []
+    for ring in oracle.get("rings", []):
+        rings.append(ring_length(solid, ring["between"]))
+        if abs(rings[-1] - ring["length"]) > 1e-6:
+            found.append(f"{label}: {ring['between']} share {rings[-1]} mm, expected {ring['length']}")
+    if "holed_planes" in oracle and holed_planes(solid) != oracle["holed_planes"]:
+        found.append(f"{label}: {holed_planes(solid)} planes with holes, expected {oracle['holed_planes']}")
     print(json.dumps({"read": label, "surfaces": kinds, "volumes": values, "allowance": allowance,
-                      "contacts": contacts}))
+                      "contacts": contacts, "rings": rings}))
     return found
 
 

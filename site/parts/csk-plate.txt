@@ -1,0 +1,7 @@
+sketch {"plane":"top","shapes":[{"shape":"rectangle","center":[30,20,0],"width":60,"height":40}]}
+extrude {"sketch":"Sketch1","depth":5,"flip":false}
+hole {"face":"Boss-Extrude1 · End cap","points":[[15,20,5],[45,20,5]],"diameter":5,"countersink":{"diameter":9,"angle":90}}
+sketch {"plane":"Boss-Extrude1 · End cap","shapes":[{"shape":"circle","center":[30,20,5],"diameter":16}]}
+extrude {"sketch":"Sketch2","depth":10,"flip":false}
+save {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/csk-plate.dwprt"}
+export_obj {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/csk-plate.obj"}

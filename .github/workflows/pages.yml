@@ -1,0 +1,94 @@
+name: Pages site
+
+# Builds the SolidDraft website (site/) under the repository path and puts the released browser
+# application beside it under app/. release.yml calls this after a version tag publishes; a manual
+# run takes any published tag. Nothing deploys unless the repository variable
+# SOLIDDRAFT_PAGES_ENABLED is 'true'; until then the payload is only uploaded as an artifact.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The published release tag whose browser zip goes under app/
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The published release tag whose browser zip goes under app/ (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: release
+        name: Read the release and download its browser zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${TAG#v}"
+          prerelease=$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/web"
+          gh release download "$TAG" --pattern "soliddraft-${version}-web.zip" --dir "$RUNNER_TEMP"
+          unzip -q "$RUNNER_TEMP/soliddraft-${version}-web.zip" -d "$RUNNER_TEMP/web"
+          test -f "$RUNNER_TEMP/web/index.html"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Install site dependencies
+        working-directory: site/app
+        run: bun install --frozen-lockfile
+      - name: Build the site under the repository path with the released version
+        working-directory: site/app
+        env:
+          SITE_BASE: /${{ github.event.repository.name }}/
+          VITE_SOLIDDRAFT_VERSION: ${{ steps.release.outputs.version }}
+          VITE_SOLIDDRAFT_PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          bun run lint
+          bun run test
+          bun run build:pages
+      - name: Put the released browser application under app/
+        run: |
+          set -euo pipefail
+          mkdir -p site/app/dist/pages/app
+          cp -R "$RUNNER_TEMP/web/." site/app/dist/pages/app/
+          test -f site/app/dist/pages/index.html
+          test -f site/app/dist/pages/app/index.html
+          # The browser build runs the kernel locally. It has no assistant relay and no API key.
+          ! grep -rl "sk-ant-" site/app/dist/pages/app >/dev/null
+      # The payload is produced on every run, so a dry run can be inspected without a deploy.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/app/dist/pages
+
+  deploy:
+    if: vars.SOLIDDRAFT_PAGES_ENABLED == 'true'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy the site and the released browser application
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,8 @@
+sketch {"plane":"top","shapes":[{"shape":"rectangle","center":[20,15,0],"width":40,"height":30}]}
+extrude {"sketch":"Sketch1","depth":10,"flip":false}
+sketch {"plane":"Boss-Extrude1 · End cap","shapes":[{"shape":"circle","center":[20,15,10],"diameter":16}]}
+extrude {"sketch":"Sketch2","depth":12,"flip":false}
+fillet {"edges":["Boss-Extrude2 · Edge 1"],"radius":2}
+fillet {"edges":["Boss-Extrude1 · Edge 5","Boss-Extrude1 · Edge 6","Boss-Extrude1 · Edge 7","Boss-Extrude1 · Edge 8"],"radius":2.5}
+save {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/rounded-boss.dwprt"}
+export_obj {"path":"/tmp/claude-1000/-home-bohn--treehouse-soliddraft-bf8ba8-5-soliddraft/184c9fd6-1d40-41e3-a21e-915d38c4ab5b/scratchpad/parts/rounded-boss.obj"}

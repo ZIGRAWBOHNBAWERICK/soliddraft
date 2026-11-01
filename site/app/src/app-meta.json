@@ -1,0 +1,8 @@
+{
+  "og_title": "SolidDraft",
+  "og_description": "SolidDraft is a free, open-source parametric CAD app for mechanical parts. It runs on the desktop and in the browser, on Catallax, an exact geometry kernel written in Rust.",
+  "og_image_url": "/assets/brand/social-card.jpg",
+  "favicon_url": "/favicon.svg",
+  "og_video_url": null,
+  "marketplace_cover_url": "/assets/brand/launch-cover.jpg"
+}

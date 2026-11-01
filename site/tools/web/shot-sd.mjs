@@ -1,0 +1,12 @@
+import { createRequire } from "node:module";
+const require = createRequire("/home/bohn/.local/share/mise/installs/npm-playwright/latest/node_modules/");
+const { chromium } = require("playwright");
+const [url, out, w, h, wait] = process.argv.slice(2);
+const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", args: ["--headless=new", "--use-angle=gl-egl", "--enable-gpu", "--ignore-gpu-blocklist", "--enable-webgl", "--no-sandbox"] });
+const page = await browser.newPage({ viewport: { width: Number(w), height: Number(h) }, deviceScaleFactor: 1 });
+page.on("console", (m) => { if (m.type() === "error") console.log("console:", m.text().slice(0, 200)); });
+await page.goto(url, { waitUntil: "load", timeout: 120000 });
+await page.waitForTimeout(Number(wait));
+await page.screenshot({ path: out });
+await browser.close();
+console.log("saved", out);

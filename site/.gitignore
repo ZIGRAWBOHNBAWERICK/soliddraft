@@ -1,0 +1,7 @@
+node_modules
+.chrome-profile/
+.chrome-reduced-profile/
+.chrome-preview-profile/
+.cloudflare-oauth-profile/
+.hf-source/
+.wrangler/

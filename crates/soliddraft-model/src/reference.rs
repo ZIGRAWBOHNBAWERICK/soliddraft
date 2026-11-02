@@ -438,7 +438,7 @@ fn ranked_edges(fp: &EdgeFingerprint, edges: impl Iterator<Item = EdgeId>, view:
 
 /// The one edge a reference names: the edge between a face carrying the first name's
 /// origin and a face carrying the second's. Faces may have been split or merged, as long
-/// as one edge remains.
+/// as one edge remains, or one edge and both support faces retain their fingerprints.
 pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<EdgeId, Unresolved> {
     let all_edges = || view.topology.edges.iter().map(|e| e.id);
     let sides = [face_set(&r.faces[0], view, names), face_set(&r.faces[1], view, names)];
@@ -489,11 +489,31 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
             })
         }
         [e] => Ok(e.id),
-        many => Err(Unresolved {
-            reason: RepairReason::Ambiguous,
-            message: format!("{} edges lie between the {label}", many.len()),
-            candidates: ranked_edges(&r.fingerprint, many.iter().map(|e| e.id), view),
-        }),
+        many => {
+            // Only unchanged geometry may disambiguate a shared face pair.
+            let same_face = |id: FaceId, side: usize| {
+                sets[side].contains(&id)
+                    && FaceFingerprint::of(view.topology.face(id).unwrap()) == r.faces[side].fingerprint
+            };
+            let unchanged: Vec<_> = many
+                .iter()
+                .filter(|edge| {
+                    EdgeFingerprint::of(edge) == r.fingerprint
+                        && match edge.faces.as_slice() {
+                            [p, q] => (same_face(*p, 0) && same_face(*q, 1)) || (same_face(*q, 0) && same_face(*p, 1)),
+                            _ => false,
+                        }
+                })
+                .collect();
+            if let [edge] = unchanged.as_slice() {
+                return Ok(edge.id);
+            }
+            Err(Unresolved {
+                reason: RepairReason::Ambiguous,
+                message: format!("{} edges lie between the {label}", many.len()),
+                candidates: ranked_edges(&r.fingerprint, many.iter().map(|e| e.id), view),
+            })
+        }
     }
 }
 
@@ -628,5 +648,59 @@ mod tests {
         let gone = topology(vec![face(5, 10.0, vec![])]);
         let view = View { topology: &gone };
         assert!(matches!(resolve_plane(&r, &view, &names).unwrap_err().reason, RepairReason::Missing));
+    }
+
+    #[test]
+    fn shared_face_pair_names_an_unchanged_generator_but_never_guesses_after_a_move() {
+        let a = origin("F2", FaceRole::Other);
+        let b = origin("F4", FaceRole::Other);
+        let a_names = [NamedFace { origin: a.clone(), generator: Generator::Other, ordinal: 0 }];
+        let b_names = [NamedFace { origin: b.clone(), generator: Generator::Other, ordinal: 0 }];
+        let names: NameMap = [(FeatureId(2), &a_names[..]), (FeatureId(4), &b_names[..])].into();
+        let mut sides = vec![face(1, 6.0, vec![a]), face(2, 6.0, vec![b])];
+        sides[0].surface = SurfaceKind::Cylinder;
+        sides[0].normal = None;
+        sides[1].normal = Some(Vec3::Y);
+        let mut body = topology(sides);
+        body.edges = [-4.0, 4.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, x)| EdgeInfo {
+                id: EdgeId::from_raw(index as u64 + 1),
+                curve: CurveKind::Line,
+                length: 12.0,
+                midpoint: Vec3::new(x, 3.0, 6.0),
+                bbox: Aabb { min: Vec3::new(x, 3.0, 0.0), max: Vec3::new(x, 3.0, 12.0) },
+                faces: vec![FaceId::from_raw(1), FaceId::from_raw(2)],
+                vertices: vec![],
+            })
+            .collect();
+        let selected = EdgeId::from_raw(2);
+        let reference = name_edge(selected, &View { topology: &body }, &names).unwrap();
+        let saved = serde_json::to_string(&reference).unwrap();
+        let reference: EdgeRef = serde_json::from_str(&saved).unwrap();
+        assert_eq!(resolve_edge(&reference, &View { topology: &body }, &names).unwrap(), selected);
+        let mut moved = body.clone();
+        for edge in &mut moved.edges {
+            edge.midpoint.x += 8.0;
+        }
+        for face in &mut moved.faces {
+            face.centroid.x += 8.0;
+        }
+        assert!(
+            matches!(
+                resolve_edge(&reference, &View { topology: &moved }, &names).unwrap_err().reason,
+                RepairReason::Ambiguous
+            ),
+            "a different branch at the old point must not steal the reference"
+        );
+        body.edges[0].midpoint = body.edges[1].midpoint;
+        assert!(
+            matches!(
+                resolve_edge(&reference, &View { topology: &body }, &names).unwrap_err().reason,
+                RepairReason::Ambiguous
+            ),
+            "equal fingerprints stay ambiguous"
+        );
     }
 }

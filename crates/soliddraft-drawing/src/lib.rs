@@ -161,11 +161,23 @@ impl Drawing {
     /// The drawing's revision: BLAKE3 over the canonical `drawing.json`, without the
     /// views' cached line work.
     pub fn semantic_hash(&self) -> Result<ContentHash, DrawingError> {
+        Ok(soliddraft_document::manifest::semantic_hash(DocKind::Drawing, &self.truth_json()?))
+    }
+
+    /// Drawing data with cached geometry cleared, keeping the historical hash representation.
+    pub(crate) fn truth_json(&self) -> Result<serde_json::Value, DrawingError> {
         let mut bare = self.clone();
         for v in bare.sheets.iter_mut().flat_map(|s| s.views.iter_mut()) {
             v.geometry = ViewGeometry::default();
         }
-        Ok(soliddraft_document::manifest::semantic_hash(DocKind::Drawing, &serde_json::to_value(&bare)?))
+        let mut truth = serde_json::to_value(&bare)?;
+        // Quality belongs to the cache; old drawing hashes omitted this field.
+        for sheet in truth["sheets"].as_array_mut().expect("serialized sheets") {
+            for view in sheet["views"].as_array_mut().expect("serialized views") {
+                view["geometry"].as_object_mut().expect("serialized geometry").remove("coarse");
+            }
+        }
+        Ok(truth)
     }
 
     /// Pins the drawing at the part's revision, configuration and properties, together.

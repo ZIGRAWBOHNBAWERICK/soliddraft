@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | `manifest.json` | | id, kind, format, writer, kernel, hashes, the model reference |
 //! | `drawing.json` | required | the [`Drawing`] without its views' line work |
-//! | `cache/views/<id>.json` | optional | each view's [`ViewGeometry`] |
+//! | `cache/views/<id>.json` | optional | each view's [`ViewGeometry`](crate::ViewGeometry) |
 //! | `thumbnail.png` | optional | the first sheet's line work, 512 pixels wide |
 //!
 //! The line work is a cache, and also what shows the part at the revision the drawing
@@ -28,7 +28,6 @@ use serde_json::Value;
 use soliddraft_document::manifest::{self, Entry, Manifest, Package, Section};
 use soliddraft_document::{DocKind, DocRef, DocumentId, EnvelopeError, kind::format_major};
 
-use crate::view::ViewGeometry;
 use crate::{Drawing, DrawingError, Units, display, export};
 
 /// The format of `drawing.json` this version writes.
@@ -118,11 +117,8 @@ pub fn to_bytes(drawing: &Drawing, meta: &FileMeta) -> Result<Vec<u8>, DrawingEr
 /// The file's bytes, with the thumbnail or without it. Autosave's recovery copies leave
 /// it out: it is the slowest part of the file to make.
 pub fn to_bytes_with(drawing: &Drawing, meta: &FileMeta, thumbnail: bool) -> Result<Vec<u8>, DrawingError> {
-    let mut bare = drawing.clone();
-    for v in bare.sheets.iter_mut().flat_map(|s| s.views.iter_mut()) {
-        v.geometry = ViewGeometry::default();
-    }
-    let mut entries = vec![Entry::new(DRAWING, (bare.to_json()? + "\n").into_bytes())];
+    let bare = drawing.truth_json()?;
+    let mut entries = vec![Entry::new(DRAWING, (serde_json::to_string_pretty(&bare)? + "\n").into_bytes())];
     for v in drawing.sheets.iter().flat_map(|s| &s.views) {
         entries.push(Entry::new(format!("{VIEWS}{}.json", v.id.0), serde_json::to_vec(&v.geometry)?));
     }
@@ -200,6 +196,7 @@ pub fn read(path: &Path) -> Result<(Drawing, FileMeta), DrawingError> {
 mod tests {
     use super::*;
     use crate::fixture::bracket_a3;
+    use crate::view::ViewGeometry;
     use std::io::Write;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -217,10 +214,13 @@ mod tests {
         let manifest = p.manifest().unwrap().clone();
         assert_eq!((manifest.id, manifest.kind, manifest.format.as_str()), (meta.id, DocKind::Drawing, FORMAT));
         assert_eq!(manifest.semantic_hash, d.semantic_hash().unwrap());
+        let truth: Value = serde_json::from_slice(&p.read(DRAWING).unwrap().unwrap()).unwrap();
+        assert_eq!(manifest.semantic_hash, manifest::semantic_hash(DocKind::Drawing, &truth));
         assert_eq!(manifest.references, std::slice::from_ref(&d.model), "the index sees what the drawing references");
         let png = p.read(THUMBNAIL).unwrap().unwrap();
         assert_eq!(&png[1..4], b"PNG");
-        assert!(p.read("cache/views/4.json").unwrap().is_some());
+        let cached: Value = serde_json::from_slice(&p.read("cache/views/4.json").unwrap().unwrap()).unwrap();
+        assert_eq!(cached["coarse"], false, "fine quality must be explicit in the saved cache");
         assert!(p.read("meta.json").unwrap().is_none());
         // The line work is not part of the revision.
         let mut moved = d.clone();

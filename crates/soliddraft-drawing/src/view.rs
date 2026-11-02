@@ -439,10 +439,14 @@ pub struct ViewGeometry {
     /// it and are made from certified line work instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
-    /// Sampled at screen quality, independently of whether the mesh was proved.
-    /// Exports regenerate this line work at fine quality.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// Screen or unknown quality, independently of whether the mesh was proved.
+    /// Older caches have unknown quality and must be regenerated for export.
+    #[serde(default = "unknown_quality")]
     pub coarse: bool,
+}
+
+fn unknown_quality() -> bool {
+    true
 }
 
 /// One curve of a view.

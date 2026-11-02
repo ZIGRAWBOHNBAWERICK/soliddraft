@@ -108,6 +108,23 @@ fn observed() -> Value {
 }
 
 /// The contract main had before the merge, frozen from a run on its sources.
+/// Shell gained one optional input, in its tool and in its proposal line. Takes it out after
+/// checking it, so the rest of the frozen contract still has to match.
+fn before_all_faces(id: &str, current: &mut Value) {
+    let properties = match id {
+        "shell" => current.pointer_mut("/tool/input/properties"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "shell"))
+            .map(|line| &mut line["properties"]),
+        _ => return,
+    };
+    let properties = properties.and_then(Value::as_object_mut).expect("the shell inputs");
+    let added = properties.remove("all_faces").expect("shell takes all_faces");
+    assert_eq!(added["type"], "boolean", "all_faces is one optional flag");
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -222,6 +239,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         }
         let current = now["commands"].get(id).unwrap_or_else(|| panic!("{id} is gone"));
         let mut current = configuration_registry::before_configurations(id, current, plain);
+        before_all_faces(id, &mut current);
         if id == "sweep" {
             assert_eq!(current["agents"], "verb");
             assert_eq!(current["undo"], "step");

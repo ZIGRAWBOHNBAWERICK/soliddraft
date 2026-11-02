@@ -33,6 +33,47 @@ def step_checker():
     return checker
 
 
+class CheckIgesCertificate(unittest.TestCase):
+    def checker(self):
+        spec = importlib.util.spec_from_file_location("check_iges", pathlib.Path(__file__).with_name("check-iges.py"))
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        return checker
+
+    def test_certificate_keeps_the_rational_bound_and_rejects_understatement(self):
+        # A nonzero common scale exercises both terms, independent of writer fixtures.
+        report = {"scale": "10000000000000001/10000000000000000", "trim_deviation_mm": "0",
+                  "coordinate_bound_mm": "100", "boundary_bound_mm": "1/100000000000000",
+                  "tolerance_mm": "1/10000000", "within_tolerance": True, "units": "mm",
+                  "max_deviation": "0.00000000000001", "max_deviation_mm": 1.0000000000000002e-14}
+        self.checker().certificate(report)
+        for key, value in (("boundary_bound_mm", "0"), ("max_deviation", "0"),
+                           ("max_deviation_mm", 0), ("within_tolerance", False), ("units", "in"),
+                           ("trim_deviation_mm", "-1"), ("scale", "0")):
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                self.checker().certificate({**report, key: value})
+
+    def test_iges_reader_failures_and_different_mcp_bytes_fail_the_scenario(self):
+        evidence = {"summary": {"body": {"faces": 6, "edges": 12, "vertices": 8}},
+                    "measurement": {"volume_mm3": 1000}}
+        report = {"kind": "iges", "solids": 1, "within_tolerance": True}
+        request = {"used": 7, "limit": scenarios.APP_REQUEST_WORK, "exhausted": False}
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            (directory / "part.iges").write_bytes(b"IGES")
+            mcp = directory / "mcp.igs"
+            for reader_exit, mcp_bytes, expected in ((0, b"IGES", True), (1, b"IGES", False),
+                                                     (0, b"different", False)):
+                mcp.write_bytes(mcp_bytes)
+                replies = [scenarios.subprocess.CompletedProcess(
+                    [], 0, json.dumps({"report": report, "request_work": request}), ""),
+                    scenarios.subprocess.CompletedProcess([], reader_exit, "", "reader result")]
+                with mock.patch.object(scenarios.subprocess, "run", side_effect=replies):
+                    checks = scenarios.checked_iges_export("soliddraft", "saved.dwprt", directory,
+                                                           evidence, 5, {"Plane": 6}, mcp)
+                self.assertEqual(all(c["pass"] for c in checks), expected)
+
+
 class CheckStepFit(unittest.TestCase):
     AREA = 600.0
     GAP = 1e-3

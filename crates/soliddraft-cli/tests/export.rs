@@ -109,3 +109,30 @@ fn an_allowance_above_the_application_limit_is_refused_before_the_part_opens() {
     assert!(!output.exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_iges_refusal_leaves_the_whole_batch_untouched() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-cli-iges-refusal-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let recipe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes/fillet.json");
+    let step = dir.join("previous.step");
+    let iges = dir.join("previous.iges");
+    let sentinel = b"previous export";
+    std::fs::write(&step, sentinel).unwrap();
+    std::fs::write(&iges, sentinel).unwrap();
+    let out = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .arg("export")
+        .arg(recipe)
+        .arg("--out")
+        .arg(&step)
+        .arg("--out")
+        .arg(&iges)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("iges."), "{error}");
+    assert_eq!(std::fs::read(step).unwrap(), sentinel);
+    assert_eq!(std::fs::read(iges).unwrap(), sentinel);
+    std::fs::remove_dir_all(dir).unwrap();
+}

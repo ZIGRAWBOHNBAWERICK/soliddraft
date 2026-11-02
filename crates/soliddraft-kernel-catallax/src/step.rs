@@ -65,7 +65,7 @@ pub(super) fn export(app: &EvaluatedApplicationBody, options: &StepOptions) -> K
 }
 
 /// The smallest `f64` not below `value`.
-fn f64_up(value: &Rational) -> f64 {
+pub(super) fn f64_up(value: &Rational) -> f64 {
     let nearest = value.to_f64_nearest();
     match Rational::from_f64_exact(nearest) {
         Some(exact) if &exact < value => nearest.next_up(),

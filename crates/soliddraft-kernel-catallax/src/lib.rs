@@ -12,6 +12,7 @@ mod drawing_queries;
 mod edge_control;
 mod frames;
 mod identity;
+mod iges;
 mod import;
 mod lattice;
 mod measure;
@@ -1119,6 +1120,13 @@ impl Kernel for CatallaxKernel {
     fn lines_and_arcs(&self, _: &drawing::Curve3, _: f64) -> KernelResult<Vec<drawing::Curve3>> {
         self.observe("lines_and_arcs", || {
             Err(gap("curve approximation for drawings", "1, drawing queries (roadmap section 7)"))
+        })
+    }
+
+    fn export_iges(&self, body: BodyId, options: &IgesOptions) -> KernelResult<IgesExport> {
+        self.observe_export("export_iges", || {
+            let write = || iges::export(&self.solid(body)?.app, options);
+            lattice::export_allowance("export_iges", APP_REQUEST_WORK, write).map(|(export, _)| export)
         })
     }
 

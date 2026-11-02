@@ -262,6 +262,10 @@ impl Kernel for Counting {
         self.inner.retained_bytes(body)
     }
 
+    fn export_iges(&self, body: BodyId, options: &crate::IgesOptions) -> KernelResult<crate::IgesExport> {
+        self.inner.export_iges(body, options)
+    }
+
     fn export_step(&self, body: BodyId, options: &crate::StepOptions) -> KernelResult<crate::StepExport> {
         self.inner.export_step(body, options)
     }

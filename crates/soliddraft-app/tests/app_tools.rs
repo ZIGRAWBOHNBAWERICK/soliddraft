@@ -123,6 +123,11 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let mass = s.call("mass_properties", json!({ "name": "Boss-Extrude1" }));
     assert!((mass["volume_mm3"].as_f64().unwrap() - 120.0 * 90.0 * 10.0).abs() < 1.0, "{mass}");
 
+    // Export before the session adds fillets outside IGES coverage.
+    let path = s.path("bracket.iges");
+    s.call("export_iges", json!({ "path": path }));
+    assert!(dir.join("bracket.iges").is_file());
+
     // The verbs, each as one undo step.
     let circle = json!({ "shape": "circle", "center": [20, 70, 10], "diameter": 8 });
     s.call("sketch", json!({ "plane": "Boss-Extrude1 · End cap", "shapes": [circle] }));

@@ -57,3 +57,5 @@ The recipe format also stays unchanged. Faces carry Catallax's origins as `FaceI
 ## Checks
 
 Catallax acceptance tests exercise repeated recipe replay, input preservation, display labels, selection and edits. Waiting-feature tests check stage messages and unchanged bodies after failure and reopening. Catallax view, SVG and DXF goldens remain in `recipes/golden/`; SMLib-only goldens have been removed. Hosted CI builds and tests the full workspace on Linux, macOS and Windows, builds the browser module and drives the interactive Catallax bracket.
+
+`Kernel::export_iges` writes supported exact surfaces as IGES 5.3 through `catallax-iges` on the caller's existing work allowance. Its separate `IgesReport` retains the whole-boundary rational similarity certificate and upward-rounded displacement bounds. Unlike STEP's over-tolerance warning, IGES refuses bounds above tolerance and unsupported definitions before returning any bytes. See [part export](exchange.md).

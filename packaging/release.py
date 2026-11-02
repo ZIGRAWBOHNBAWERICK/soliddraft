@@ -130,19 +130,29 @@ def formats(ref):
 
 
 def previous_release(releases):
+    current = tuple(map(int, version().split(".")))
     candidates = []
     for tag in json.loads(releases.read_text()):
-        if not re.fullmatch(r"v\d+\.\d+\.\d+", tag) or tag == f"v{version()}":
+        if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
             continue
-        if subprocess.run(["git", "merge-base", "--is-ancestor", tag, "HEAD"], cwd=ROOT).returncode == 0:
-            distance = int(subprocess.check_output(["git", "rev-list", "--count", f"{tag}..HEAD"], cwd=ROOT))
-            candidates.append((distance, tag))
-    return min(candidates)[1] if candidates else ""
+        released = tuple(map(int, tag[1:].split(".")))
+        if released < current:
+            candidates.append((released, tag))
+    return max(candidates)[1] if candidates else ""
+
+
+def release_commits(ref):
+    history = subprocess.check_output(["git", "log", "--format=%H%n%B", ref], cwd=ROOT, text=True)
+    commits = set(re.findall(r"^[0-9a-f]{40}$", history, re.MULTILINE))
+    # Release branches retain the original merge SHA in git cherry-pick -x trailers.
+    commits.update(re.findall(r"^\(cherry picked from commit ([0-9a-f]{40})\)$", history, re.MULTILINE))
+    return commits
 
 
 def pull_request_notes(pulls, previous):
-    revision = f"{previous}..HEAD" if previous else "HEAD"
-    commits = set(subprocess.check_output(["git", "rev-list", revision], cwd=ROOT, text=True).splitlines())
+    commits = release_commits("HEAD")
+    if previous:
+        commits -= release_commits(previous)
     merged = [pr for page in json.loads(pulls.read_text()) for pr in page
               if pr.get("merged_at") and pr.get("merge_commit_sha") in commits]
     merged.sort(key=lambda pr: pr["number"])
@@ -192,6 +202,7 @@ def notes(pulls, previous, windows):
     revision, kernel = source_revisions()
     lines = [f"# SolidDraft {version()}{' alpha' if version().startswith('0.') else ''}", "",
              "Alpha software. Keep backups of your documents before opening or saving them in a newer release.", "",
+             "[SolidDraft website](https://zigrawbohnbawerick.github.io/soliddraft/)", "",
              "## Source revisions", "",
              f"- SolidDraft: `{revision}`.",
              f"- Catallax dependency and lockfile: `{kernel}`.", "",
@@ -209,7 +220,7 @@ def notes(pulls, previous, windows):
               f"Unsigned downloads trigger {'Windows SmartScreen and ' if windows else ''}macOS Gatekeeper warnings. "
               "Signing is enabled only when the release credentials are configured. "
               "Check SHA256SUMS and verify GitHub build attestations before installing.", "",
-              "The browser zip runs the kernel locally. GitHub Pages has no assistant relay or API keys.", "",
+              "The browser zip runs locally. GitHub Pages has no assistant relay or API keys.", "",
               pull_request_notes(pulls, previous)]
     (ROOT / "dist").mkdir(exist_ok=True)
     (ROOT / "dist/release-notes.md").write_text("\n".join(lines) + "\n")

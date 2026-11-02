@@ -54,7 +54,8 @@ arc traversed against its own direction, such as a concave bite out of an edge, 
 
 | Feature | Parameters |
 |---|---|
-| Sketch | a plane (Top, Front or Right, or a planar face by persistent name), optionally offset along its normal and a sketch |
+| Reference plane | an origin plane, earlier reference plane or persistently named planar face, plus a signed offset in millimetres |
+| Sketch | an origin plane, reference plane feature or planar face by persistent name, optionally offset along its normal, and a sketch |
 | Extrude | a profile (a sketch, or a built-in rectangle or circle on a reference plane), boss or cut, blind depth or through all, reversed or not |
 | Extrude end | blind, through all, up to the next boundary, or up to a face by persistent name |
 | Fillet, Chamfer | edges by persistent name, radius or distance |
@@ -72,6 +73,14 @@ the material. Its X axis is horizontal when the face is not, and the world X axi
 projected onto the face when it is; its origin is the world origin projected onto the
 face. Both datum and face sketches can store a signed offset along that normal.
 Face offsets follow the named origin through edits and coplanar splits and merges.
+
+The Solid ribbon's Plane button creates a reusable plane. Select its source in the
+tree or click a planar face, then set the signed Offset. Each plane has its own name
+and visibility eye. Hiding a plane keeps the part visible. Select the plane and start
+Sketch, or choose it in the Mirror editor. References store the plane's identity,
+so renaming it keeps its sketches and mirrors attached. An unavailable source raises
+a repair prompt. Plane definitions, names and visibility survive save and reopen.
+
 Without an offset, a boss or cut starts exactly on the face, forwards or
 reversed; the tool is never moved off the face, and the kernel's coplanar Boolean rules
 decide the face the tool and the part share.

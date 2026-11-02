@@ -96,6 +96,15 @@ pieces after splits and merges. For example, `front` has normal -Y, so
 `offset: -6` places the sketch at y=6. World-coordinate shapes must lie on that displaced plane;
 `sketch_geometry` operations still use its local u/v coordinates.
 
+`reference_plane` creates a named reusable offset plane from an origin plane,
+an earlier plane feature or a persistent planar face. `edit_reference_plane`
+changes its source and offset. Both sketch tools and `mirror` accept its feature
+name. `reference-planes.json` exercises chained planes, upstream depth edits,
+renames, offset edits, coplanar splits and merges, undo/redo, native reopening,
+suppression/restoration and
+deleted sources. The attached cut and mirrored body retain material-volume and
+world-bound checks. This scenario is separate from the release acceptance set.
+
 `datum-offset.json` exercises this control at the normal 20M allowance. It
 extrudes from the displaced plane, saves and reopens the part, then edits the
 extrusion and sketch dimension. Volume and world-space bounds must survive;

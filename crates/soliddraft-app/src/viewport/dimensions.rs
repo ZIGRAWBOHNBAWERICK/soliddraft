@@ -238,7 +238,8 @@ fn values(kind: &FeatureKind) -> Vec<String> {
                 vec![format!("{count} ×"), format!("{}°", fmt_mm(angle))]
             }
         },
-        FeatureKind::Sketch(_)
+        FeatureKind::ReferencePlane(_)
+        | FeatureKind::Sketch(_)
         | FeatureKind::Extrude(_)
         | FeatureKind::Cut(_)
         | FeatureKind::Mirror(_)

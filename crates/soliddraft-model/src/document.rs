@@ -176,6 +176,11 @@ impl Document {
         &self.name
     }
 
+    /// The evaluated reusable plane, when its source is available.
+    pub fn reference_plane(&self, id: FeatureId) -> Option<Plane> {
+        self.built.get(self.built_index(id)?)?.plane
+    }
+
     /// The reference plane's display name. References store the datum, not this label.
     pub fn datum_name(&self, datum: DatumPlane) -> &str {
         self.datum_names.get(&datum).map(String::as_str).unwrap_or_else(|| datum.label())

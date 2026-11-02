@@ -30,6 +30,7 @@ pub(crate) struct Built {
     /// The names of the faces this feature generated, with the origins they stand for.
     pub names: Vec<NamedFace>,
     pub sketch: Option<BuiltSketch>,
+    pub plane: Option<Plane>,
     /// Which kept build this is, so a feature that reads it can key on it. Zero for a
     /// result the cache does not keep.
     pub version: u64,
@@ -38,7 +39,16 @@ pub(crate) struct Built {
 
 impl Built {
     fn pass(status: FeatureStatus, current: Option<BodyId>) -> Built {
-        Built { status, output: current, owned: None, names: Vec::new(), sketch: None, version: 0, import_record: None }
+        Built {
+            status,
+            output: current,
+            owned: None,
+            names: Vec::new(),
+            sketch: None,
+            plane: None,
+            version: 0,
+            import_record: None,
+        }
     }
 
     fn failed(current: Option<BodyId>, message: impl Into<String>) -> Built {
@@ -202,6 +212,22 @@ impl Document {
     /// one, kept. Checks whose messages name another feature run every time and are not
     /// kept, so a rename shows in them without building anything.
     fn build(&self, f: &Feature, current: Option<BodyId>, cache: &mut BuildCache) -> Built {
+        let named_plane = match &f.kind {
+            FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Feature { feature, .. }, .. }) => {
+                Some((*feature, ReferenceSlot::SketchPlane))
+            }
+            FeatureKind::ReferencePlane(SketchPlane::Feature { feature, .. })
+            | FeatureKind::Mirror(MirrorFeature { plane: PlaneRef::Feature { feature }, .. })
+            | FeatureKind::Draft(DraftFeature { neutral: PlaneRef::Feature { feature }, .. }) => {
+                Some((*feature, ReferenceSlot::Plane))
+            }
+            _ => None,
+        };
+        if let Some((id, slot)) = named_plane
+            && self.reference_plane(id).is_none()
+        {
+            return Built::pass(FeatureStatus::RepairNeeded(vec![self.missing_plane(id, slot)]), current);
+        }
         let profile = match &f.kind {
             FeatureKind::Revolve(RevolveFeature { sketch: feature, .. })
             | FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature }, .. }) => {
@@ -210,13 +236,28 @@ impl Document {
                     Err(refused) => return *refused,
                 }
             }
-            _ => None,
+            _ => named_plane.and_then(|(id, _)| self.built_index(id).map(|i| self.built[i].version)),
         };
         let key = cache.key(f, current, profile);
         if let Some(built) = cache.get(&key) {
             return built;
         }
         let built = match &f.kind {
+            FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
+                Ok((plane, _)) => {
+                    let mut built = Built::pass(FeatureStatus::Ok, current);
+                    built.plane = Some(plane);
+                    built
+                }
+                Err(mut built) => {
+                    if let FeatureStatus::RepairNeeded(items) = &mut built.status {
+                        for item in items {
+                            item.slot = ReferenceSlot::Plane;
+                        }
+                    }
+                    *built
+                }
+            },
             FeatureKind::Sketch(s) => self.build_sketch(s, current),
             FeatureKind::Extrude(e) => self.build_extrude(f, e, current),
             FeatureKind::Revolve(r) => self.build_revolve(f, r, current),
@@ -255,32 +296,44 @@ impl Document {
         }
     }
 
-    fn build_sketch(&self, s: &SketchFeature, current: Option<BodyId>) -> Built {
-        let (plane, on_face) = match &s.plane {
+    fn sketch_plane_of(&self, source: &SketchPlane, current: Option<BodyId>) -> Result<(Plane, bool), Box<Built>> {
+        if !source.offset().is_finite() {
+            return Err(Box::new(Built::failed(current, "plane offset must be finite")));
+        }
+        let plane = match source {
+            SketchPlane::Feature { feature, offset } => {
+                let plane = self.reference_plane(*feature).ok_or_else(|| {
+                    Box::new(Built::pass(
+                        FeatureStatus::RepairNeeded(vec![self.missing_plane(*feature, ReferenceSlot::SketchPlane)]),
+                        current,
+                    ))
+                })?;
+                (plane.with_origin(plane.origin + plane.normal * *offset), false)
+            }
             SketchPlane::Datum { datum, offset } => {
                 let p = datum.plane();
                 (p.with_origin(p.origin + p.normal * *offset), false)
             }
             SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
-                let offset = s.plane.offset();
+                let offset = source.offset();
                 let repair = |reason, message: String, candidates| {
                     let r = RepairNeeded { slot: ReferenceSlot::SketchPlane, reason, message, candidates };
-                    Built::pass(FeatureStatus::RepairNeeded(vec![r]), current)
+                    Err(Box::new(Built::pass(FeatureStatus::RepairNeeded(vec![r]), current)))
                 };
                 let Some(body) = current else {
                     return repair(RepairReason::Missing, "there is no part body to sketch on".into(), vec![]);
                 };
                 let t = match self.view_of(body) {
                     Ok(v) => v,
-                    Err(e) => return Built::failed(current, e.to_string()),
+                    Err(e) => return Err(Box::new(Built::failed(current, e.to_string()))),
                 };
                 let id = match reference::resolve_plane(face, &View { topology: &t }, &self.name_map()) {
                     Ok(id) => id,
                     Err(u) => {
-                        return Built::pass(
+                        return Err(Box::new(Built::pass(
                             FeatureStatus::RepairNeeded(vec![u.into_repair(ReferenceSlot::SketchPlane)]),
                             current,
-                        );
+                        )));
                     }
                 };
                 let info = t.face(id).expect("resolved faces are in the topology");
@@ -288,12 +341,27 @@ impl Document {
                     let detail = "the face is not planar".to_string();
                     return repair(RepairReason::Mismatch { detail: detail.clone() }, detail, vec![]);
                 };
-                if !offset.is_finite() {
-                    return Built::failed(current, "sketch plane offset must be finite");
-                }
                 let p = plane_on_face(normal, info.centroid);
                 (p.with_origin(p.origin + p.normal * offset), offset == 0.0)
             }
+        };
+        Ok(plane)
+    }
+
+    fn missing_plane(&self, feature: FeatureId, slot: ReferenceSlot) -> RepairNeeded {
+        let name = self.feature(feature).map(|f| f.name.as_str()).unwrap_or("the selected plane");
+        RepairNeeded {
+            slot,
+            reason: RepairReason::Missing,
+            message: format!("{name} is missing or unavailable; choose a reference plane"),
+            candidates: vec![],
+        }
+    }
+
+    fn build_sketch(&self, s: &SketchFeature, current: Option<BodyId>) -> Built {
+        let (plane, on_face) = match self.sketch_plane_of(&s.plane, current) {
+            Ok(plane) => plane,
+            Err(built) => return *built,
         };
         let regions = s.sketch.regions().map_err(|e| e.to_string());
         Built {
@@ -302,6 +370,7 @@ impl Document {
             owned: None,
             names: Vec::new(),
             sketch: Some(BuiltSketch { plane, on_face, regions }),
+            plane: None,
             version: 0,
             import_record: None,
         }
@@ -378,6 +447,7 @@ impl Document {
                 owned: mine,
                 names: number(faces),
                 sketch: None,
+                plane: None,
                 version: 0,
                 import_record: None,
             },
@@ -520,6 +590,7 @@ impl Document {
                 owned: mine,
                 names: number(faces),
                 sketch: None,
+                plane: None,
                 version: 0,
                 import_record: None,
             },
@@ -597,6 +668,7 @@ impl Document {
             owned: Some(result.body),
             names: number(faces),
             sketch: None,
+            plane: None,
             version: 0,
             import_record: None,
         }
@@ -606,6 +678,9 @@ impl Document {
     /// its outward normal.
     fn plane_of(&self, r: &PlaneRef, body: BodyId) -> Result<Plane, Box<RepairNeeded>> {
         match r {
+            PlaneRef::Feature { feature } => self
+                .reference_plane(*feature)
+                .ok_or_else(|| Box::new(self.missing_plane(*feature, ReferenceSlot::Plane))),
             PlaneRef::Datum { datum, offset } => {
                 let p = datum.plane();
                 Ok(p.with_origin(p.origin + p.normal * *offset))
@@ -646,6 +721,7 @@ impl Document {
                 owned: Some(r.body),
                 names: name(&r),
                 sketch: None,
+                plane: None,
                 version: 0,
                 import_record: None,
             },
@@ -907,6 +983,7 @@ impl Document {
                     owned: Some(body),
                     names: Vec::new(),
                     sketch: None,
+                    plane: None,
                     version: 0,
                     import_record: Some(r.record),
                 }

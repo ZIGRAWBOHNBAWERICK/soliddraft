@@ -1292,7 +1292,16 @@ fn registry() -> Vec<CommandSpec> {
             .agents(Agents::Verb, "", tools::mirror_params)
             .undo(Undo::Step),
         // Reference geometry.
-        cmd("reference_plane", "Plane", Icon::Cad("plane"), "Add a reference plane").on(Solid, "Reference", Small),
+        cmd("reference_plane", "Plane", Icon::Cad("plane"), "Add a reference plane")
+            .on(Solid, "Reference", Small)
+            .run(|_| AppAction::StartReferencePlane)
+            .when(field_open)
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::ReferencePlane(_))))
+            .agents(Agents::Verb, "Create a reusable plane offset from a reference plane or planar face.", tools::reference_plane_params)
+            .undo(Undo::Step),
+        cmd("edit_reference_plane", "Edit reference plane", Icon::Plane, "Change a reference plane's source and offset")
+            .agents(Agents::Verb, "", tools::edit_reference_plane_params)
+            .undo(Undo::Step),
         cmd("reference_axis", "Axis", Icon::Cad("axis"), "Add a reference axis").on(Solid, "Reference", Small),
         cmd("reference_point", "Point", Icon::Cad("refpoint"), "Add a reference point").on(Solid, "Reference", Small),
         // Drawing.

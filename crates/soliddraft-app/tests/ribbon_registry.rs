@@ -213,6 +213,13 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     let (frozen, now) = (baseline(), observed());
     let rows = frozen["commands"].as_object().expect("the frozen commands");
     for (id, row) in rows {
+        if id == "reference_plane" {
+            let plane = commands::get(id).unwrap();
+            assert!(matches!(plane.agents, Agents::Verb));
+            assert_eq!(plane.undo, commands::Undo::Step);
+            assert!(plane.is_enabled(&AppState::new(ribbon::blank())));
+            continue;
+        }
         let current = now["commands"].get(id).unwrap_or_else(|| panic!("{id} is gone"));
         let current = configuration_registry::before_configurations(id, current, plain);
         assert_eq!(&current, row, "{id} changed");

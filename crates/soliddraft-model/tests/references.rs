@@ -165,10 +165,12 @@ fn an_edit_places_sketches_on_faces_without_meshing_the_bodies_under_them() {
     doc.execute(Command::EditFeature { id: plate, kind: edit }).unwrap();
     let log = kernel.take_diagnostics().unwrap();
     let calls = log["calls"].as_array().unwrap();
-    let asked = |name: &str| calls.iter().filter(|c| c["operation"] == name && c["nested"] == false);
-    assert!(asked("face_carriers").count() >= 2, "both sketches read carriers: {calls:?}");
-    let built = asked("topology").filter(|c| c["work"]["used"].as_u64().is_some_and(|used| used > 0));
-    assert!(built.count() <= 1, "only the final body may build a topology: {calls:?}");
+    let count = |name: &str, more: fn(&serde_json::Value) -> bool| {
+        calls.iter().filter(|c| c["operation"] == name && c["nested"] == false && more(c)).count()
+    };
+    assert!(count("face_carriers", |_| true) >= 2, "both sketches read carriers: {calls:?}");
+    let built = count("topology", |c| c["work"]["used"].as_u64().is_some_and(|used| used > 0));
+    assert!(built <= 1, "only the final body may build a topology: {calls:?}");
 
     assert!(report(&doc).lines().all(|line| line.ends_with("Ok")), "{}", report(&doc));
     for id in [groove_sketch, pin_sketch] {

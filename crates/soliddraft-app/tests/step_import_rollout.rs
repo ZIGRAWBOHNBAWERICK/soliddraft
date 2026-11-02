@@ -116,7 +116,8 @@ fn clean_block_and_cylinder_import_render_save_reopen_and_checked_export() {
         assert!(record.derivative.is_none());
         assert_eq!(record.source.sha256, hash);
         let chord = doc.display_quality().levels().params(Level::Standard).chord_height;
-        for (level, ratio) in [(Level::Coarse, 0.02), (Level::Standard, 0.6), (Level::Fine, 2.0)] {
+        // Leave face pixels between the renderer's seven-pixel vertex pick targets at coarse zoom.
+        for (level, ratio) in [(Level::Coarse, 0.08), (Level::Standard, 0.6), (Level::Fine, 2.0)] {
             let pixels_per_point = app.ctx.pixels_per_point();
             let state = &mut app.state_mut().state;
             let bounds = state.doc.meshes[&body].bounds().unwrap();

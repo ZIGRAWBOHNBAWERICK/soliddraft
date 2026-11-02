@@ -423,6 +423,8 @@ fn demo_part_renders() {
     harness.state_mut().state.command_line.input = "Add a Ø20 boss, 24 mm tall from the Top plane, on the base.".into();
     harness.run_steps(1);
     harness.key_press(Key::Enter);
+    // Dispatch Enter before checking whether the assistant has started its turn.
+    harness.step();
     let deadline = std::time::Instant::now() + HANG;
     while harness.state().state.chat.busy() && std::time::Instant::now() < deadline {
         harness.step();

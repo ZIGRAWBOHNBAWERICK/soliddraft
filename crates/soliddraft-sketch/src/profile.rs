@@ -254,6 +254,10 @@ fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
 /// entity order. Pieces that do not close are skipped and the first one is
 /// remembered.
 fn loops(sketch: &Sketch) -> Loops {
+    // Reopened sketches retain references even when their saved coordinates have residuals.
+    let mut resolved = sketch.clone();
+    crate::references::resolve(&mut resolved);
+    let sketch = &resolved;
     let mut drawn: Vec<&Entity> = sketch.drawn().filter(|e| !e.construction).collect();
     drawn.sort_by_key(|e| e.id);
     let mut first_error: Option<ProfileError> = None;

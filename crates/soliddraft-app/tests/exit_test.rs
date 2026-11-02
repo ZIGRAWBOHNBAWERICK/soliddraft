@@ -30,7 +30,9 @@ fn gpu_available() -> bool {
 }
 
 fn out_dir() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test");
+    let dir = std::env::var_os("SOLIDDRAFT_EXIT_PROOF_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -139,6 +141,26 @@ fn sketch_screen(harness: &App<'_>, p: P2) -> Pos2 {
     let st = &harness.state().state;
     let s = st.sketch.as_ref().expect("a sketch is open");
     Frame { plane: s.plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(p).expect("point on screen")
+}
+
+fn assert_exact_axis_references(sketch: &soliddraft_app::sketch::Sketch) {
+    for c in &sketch.constraints {
+        use soliddraft_app::sketch::{Align, ConstraintKind, EntityKind};
+        match c.kind {
+            ConstraintKind::Horizontal { target: Align::Line(id) } => {
+                let EntityKind::Line { a, b } = sketch.entity(id).unwrap().kind else { panic!() };
+                assert_eq!(a.v, b.v, "a horizontal plate edge must stay exactly horizontal");
+            }
+            ConstraintKind::Vertical { target: Align::Line(id) } => {
+                let EntityKind::Line { a, b } = sketch.entity(id).unwrap().kind else { panic!() };
+                assert_eq!(a.u, b.u, "a vertical plate edge must stay exactly vertical");
+            }
+            ConstraintKind::Coincident { a, b } => {
+                assert_eq!(sketch.point(a), sketch.point(b), "snapped corners share one value");
+            }
+            _ => {}
+        }
+    }
 }
 
 fn sketch_click(harness: &mut App<'_>, p: P2) {
@@ -487,13 +509,14 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     }
     dimension_line(&mut harness, P2::new(40.0, 0.0), P2::new(60.0, -14.0), "120");
     dimension_line(&mut harness, P2::new(120.0, 30.0), P2::new(136.0, 45.0), "90");
+    save(&mut harness, "11-base-sketch-fully-defined");
     {
         let s = harness.state().state.sketch.as_ref().unwrap();
         assert_eq!(s.sketch.status, SolveStatus::FullyDefined, "free: {:?}", s.sketch.free);
         let (lo, hi) = s.sketch.bounds().unwrap();
         assert!((hi.u - lo.u - 120.0).abs() < 1e-6 && (hi.v - lo.v - 90.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert_exact_axis_references(&s.sketch);
     }
-    save(&mut harness, "11-base-sketch-fully-defined");
     click_button(&mut harness, "Extrude");
     assert!(!harness.state().state.in_sketch());
     assert!(matches!(
@@ -513,7 +536,8 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     open_sketch_on_face(&mut harness, Vec3::new(60.0, 0.0, 5.0));
     {
         let s = harness.state().state.sketch.as_ref().unwrap();
-        assert!((s.plane.normal.y + 1.0).abs() < 1e-6, "front face normal: {:?}", s.plane.normal);
+        assert_eq!(s.plane.normal, soliddraft_kernel_api::Vec3::new(0.0, -1.0, 0.0));
+        assert_eq!(s.plane.origin, soliddraft_kernel_api::Vec3::ZERO, "the plate front is on the frame");
     }
     harness.key_press(Key::R);
     harness.run_steps(2);
@@ -589,6 +613,11 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     harness.key_press(Key::I);
     settle(&mut harness);
     open_sketch_on_face(&mut harness, Vec3::new(30.0, 0.0, 40.0));
+    {
+        let plane = harness.state().state.sketch.as_ref().unwrap().plane;
+        assert_eq!(plane.normal, soliddraft_kernel_api::Vec3::new(0.0, -1.0, 0.0));
+        assert_eq!(plane.origin, soliddraft_kernel_api::Vec3::ZERO, "slot starts coplanar with the flange");
+    }
     harness.key_press(Key::S);
     harness.run_steps(2);
     sketch_click(&mut harness, P2::new(26.0, 38.0));
@@ -609,6 +638,8 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         "{:?}",
         feature_status(&harness, "Cut-Extrude2")
     );
+
+    save(&mut harness, "17-coplanar-slot-cut");
 
     // The finishing commands are on the ribbon and switched on for the part.
     for id in ["fillet", "chamfer"] {
@@ -638,6 +669,8 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     settle(&mut harness);
     assert_eq!(harness.state().state.doc.features.len(), 10, "{:?}", feature_names(&harness));
     assert_eq!(harness.state().state.doc.name, "bracket");
+    let base = harness.state().state.doc.features.iter().find(|f| f.name == "Sketch1").unwrap();
+    assert_exact_axis_references(&base.sketch().unwrap().sketch);
     let v_reopened = volume(&harness);
     assert!((v_reopened - v_done).abs() < 1e-3, "reopened volume {v_reopened} vs {v_done}");
     harness.key_press(Key::Z);

@@ -1183,6 +1183,16 @@ class RunnerEndToEnd(unittest.TestCase):
 
 
 class FieldExportChecks(unittest.TestCase):
+    def test_step_raw_reader_failure_fails_the_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = pathlib.Path(tmp)
+            args = argparse.Namespace(soliddraft=str(FAKE), timeout=scenarios.HANG_TIMEOUT_S)
+            for valid in (True, False):
+                with mock.patch.object(scenarios, "raw_step_check", return_value={"check": "raw STEP", "pass": valid}) as reader:
+                    result = scenarios.export_check(args, directory, {"format": "step", "raw_valid": True}, {})
+                    self.assertEqual(result["pass"], valid)
+                    reader.assert_called_once()
+
     def test_same_export_requires_a_known_matching_digest(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = pathlib.Path(tmp)

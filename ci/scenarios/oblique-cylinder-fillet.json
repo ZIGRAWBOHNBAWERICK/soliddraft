@@ -167,11 +167,10 @@
           "format": "stl"
         },
         {
-          "format": "step"
+          "format": "step",
+          "raw_valid": true
         }
-      ],
-      "checked_step_export": "{bundle}/oblique-cylinder-fillet.dwprt",
-      "checked_step_max_work": 20000000
+      ]
     },
     {
       "tool": "feature",

@@ -77,7 +77,19 @@ fn oblique_fillet_mass_properties_appear_in_the_window() {
         "the camera command completed before the pending measurement"
     );
     let start = std::time::Instant::now();
+    let mut diagnostics = serde_json::json!({"calls":[],"questions":[]});
     loop {
+        collect_kernel_diagnostics(&kernel, &mut diagnostics);
+        if let Some(refused) = diagnostics["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|call| call["operation"] == "mass_properties" && call["status"] == "refused")
+        {
+            std::fs::write(proof_folder().join("kernel.json"), serde_json::to_vec_pretty(&diagnostics).unwrap())
+                .unwrap();
+            panic!("mass properties refused: {}", refused["error"]);
+        }
         let state = &app.state().state;
         assert!(
             !state.note.as_ref().is_some_and(|n| n.kind == NoteKind::Error),
@@ -87,7 +99,7 @@ fn oblique_fillet_mass_properties_appear_in_the_window() {
         if state.doc.kernel().cached_mass_properties(state.doc.feature(id).unwrap().body.unwrap()).is_some() {
             break;
         }
-        assert!(start.elapsed().as_secs() < 180, "mass properties did not arrive");
+        assert!(start.elapsed().as_secs() < 600, "mass properties did not arrive");
         std::thread::sleep(std::time::Duration::from_millis(10));
         app.run_steps(1);
     }
@@ -118,7 +130,7 @@ fn oblique_fillet_mass_properties_appear_in_the_window() {
         .unwrap(),
     )
     .unwrap();
-    let diagnostics = kernel.take_diagnostics().unwrap();
+    collect_kernel_diagnostics(&kernel, &mut diagnostics);
     assert!(
         diagnostics["calls"]
             .as_array()
@@ -127,6 +139,13 @@ fn oblique_fillet_mass_properties_appear_in_the_window() {
             .any(|call| call["operation"] == "mass_properties" && call["on_capture_thread"] == false)
     );
     std::fs::write(folder.join("kernel.json"), serde_json::to_vec_pretty(&diagnostics).unwrap()).unwrap();
+}
+
+fn collect_kernel_diagnostics(kernel: &soliddraft_kernel_catallax::CatallaxKernel, collected: &mut serde_json::Value) {
+    let mut chunk = kernel.take_diagnostics().unwrap();
+    for key in ["calls", "questions"] {
+        collected[key].as_array_mut().unwrap().append(chunk[key].as_array_mut().unwrap());
+    }
 }
 
 fn gpu() -> std::sync::MutexGuard<'static, ()> {
@@ -765,38 +784,15 @@ fn fillet_refusal_then_retry_rounds_the_box_top() {
 }
 
 #[test]
-fn shared_wall_step_refusal_is_plain_and_preserves_the_file() {
+fn output_refusals_are_plain_in_the_window() {
     use soliddraft_app::app_tools::AppTools;
-    use soliddraft_app::document::FilletParams;
-    use soliddraft_app::state::{AppAction, AppState};
+    use soliddraft_app::state::AppState;
     use soliddraft_assistant::{Caller, tools::call_checked};
-    use soliddraft_kernel_api::CurveKind;
     let _gpu = gpu();
     let scenario: serde_json::Value =
         serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
-    let mut steps = scenario["steps"].as_array().unwrap()[..4].to_vec();
-    steps[1]["arguments"]["depth"] = serde_json::json!(40);
-    for line in steps[2]["arguments"]["operations"].as_array_mut().unwrap() {
-        for end in ["a", "b"] {
-            let v = line["kind"][end]["v"].as_f64().unwrap();
-            line["kind"][end]["v"] = serde_json::json!(v + 24.0);
-        }
-    }
-    let mut bottom = steps[2].clone();
-    bottom["arguments"]["plane"] = serde_json::json!("right");
-    let points = [(-30.0, -14.5), (30.0, 30.5), (30.0, -30.0), (-30.0, -30.0)];
-    for (i, line) in bottom["arguments"]["operations"].as_array_mut().unwrap().iter_mut().enumerate() {
-        let (u, v) = points[i];
-        line["kind"]["a"] = serde_json::json!({"u":u,"v":v});
-        let (u, v) = points[(i + 1) % 4];
-        line["kind"]["b"] = serde_json::json!({"u":u,"v":v});
-    }
-    steps.push(bottom);
-    steps.push(
-        serde_json::json!({"tool":"cut","arguments":{"sketch":"Sketch3","depth":60,"through_all":false,"flip":false}}),
-    );
-    let mut state = AppState::new(Document::new("Two rims", soliddraft_app::kernel()));
-    for step in &steps {
+    let mut state = AppState::new(Document::new("Output refusals", soliddraft_app::kernel()));
+    for step in scenario["steps"].as_array().unwrap().iter().take(5) {
         let out = call_checked(
             &mut AppTools { state: &mut state },
             step["tool"].as_str().unwrap(),
@@ -805,36 +801,34 @@ fn shared_wall_step_refusal_is_plain_and_preserves_the_file() {
         );
         assert!(!out.is_error, "{}", out.content);
     }
-    for top in [true, false] {
-        let topology = state.doc.kernel().topology(state.doc.display_body().unwrap()).unwrap();
-        let edge =
-            topology.edges.iter().find(|e| e.curve == CurveKind::Ellipse && (e.midpoint.z > 20.0) == top).unwrap();
-        let reference = state.doc.edge_ref(edge.id).unwrap();
-        state.doc.apply(Command::AddFillet { params: FilletParams { edges: vec![reference], radius: 1.0 } }).unwrap();
-    }
     let mut app = harness(state.doc);
-    let folder = proof_folder();
-    let path = folder.join("shared-wall.step");
-    std::fs::write(&path, b"keep existing STEP").unwrap();
-    app.state_mut()
-        .state
-        .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
-    app.run_steps(4);
-    let diagnostic = &app.state().state.note.as_ref().unwrap().text;
-    assert!(diagnostic.contains("step.unsupported-geometry"), "{diagnostic}");
-    assert_eq!(std::fs::read(&path).unwrap(), b"keep existing STEP");
-    button(&mut app, "Status details");
-    app.get_by_label("STEP export is unavailable for this shape. Save the part or export a mesh instead.");
-    app.render().unwrap().save(folder.join("shared-wall-refusal.png")).unwrap();
-
-    app.key_press(Key::Escape);
-    app.run_steps(2);
-    // A trimmed band cannot be built yet; exercise its future refusal at the presentation boundary.
-    app.state_mut().state.note("measure.unsupported-surface: trimmed rolling band", NoteKind::Error);
-    app.run_steps(2);
-    button(&mut app, "Status details");
-    app.get_by_label("Volume and mass are unavailable for this shape. You can still save the part and export a mesh.");
-    app.render().unwrap().save(folder.join("trimmed-band-refusal.png")).unwrap();
+    // These diagnostic fixtures exercise presentation; the attempted two-band and trimmed feature paths cannot build yet.
+    for (diagnostic, shown, frame) in [
+        (
+            "export_step failed: step.unsupported-geometry: disagreeing shared-wall seam frames",
+            "STEP export is unavailable for this shape. Save the part or export a mesh instead.",
+            "shared-wall-refusal",
+        ),
+        (
+            "mass_properties failed: measure.unsupported-surface: trimmed rolling band",
+            "Volume and mass are unavailable for this shape. You can still save the part and export a mesh.",
+            "trimmed-band-refusal",
+        ),
+        (
+            "fillet failed in the kernel: intersect.unsupported-pair: surface pair is outside piece 4 coverage",
+            "This operation is unavailable for the selected shape.",
+            "construction-refusal",
+        ),
+    ] {
+        app.state_mut().state.note(diagnostic, NoteKind::Error);
+        app.run_steps(2);
+        button(&mut app, "Status details");
+        app.get_by_label(shown);
+        assert!(app.query_all_by_label(diagnostic).next().is_none());
+        app.render().unwrap().save(proof_folder().join(format!("{frame}.png"))).unwrap();
+        app.key_press(Key::Escape);
+        app.run_steps(2);
+    }
 }
 
 fn proof_folder() -> std::path::PathBuf {

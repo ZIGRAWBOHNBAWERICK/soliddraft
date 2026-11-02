@@ -4,6 +4,10 @@ use crate::document::{Document, FeatureId};
 use soliddraft_kernel_api::BodyId;
 use std::sync::mpsc;
 
+// The oblique rim uses up to 97.4M work at f335a6c; keep roughly twice that allowance.
+#[cfg(not(target_arch = "wasm32"))]
+const MASS_WORK_LIMIT: u64 = 200_000_000;
+
 #[derive(Clone, Copy, PartialEq)]
 struct Request {
     document: soliddraft_document::DocumentId,
@@ -55,7 +59,16 @@ impl State {
             std::thread::Builder::new()
                 .name("mass-properties".into())
                 .spawn(move || {
-                    let result = model.kernel().mass_properties(request.body).map(|_| ()).map_err(|e| e.to_string());
+                    let started = std::time::Instant::now();
+                    let (result, work) = soliddraft_kernel_catallax::with_request_allowance(MASS_WORK_LIMIT, || {
+                        model.kernel().mass_properties(request.body)
+                    });
+                    log::debug!("mass properties: {} work units in {} ms", work.used, started.elapsed().as_millis());
+                    let result = if work.exhausted {
+                        Err(format!("mass_properties: numbers.operation-budget: {} work units exhausted", work.limit))
+                    } else {
+                        result.map(|_| ()).map_err(|e| e.to_string())
+                    };
                     let _ = sender.send(result);
                     ctx.request_repaint();
                 })
@@ -71,18 +84,20 @@ impl State {
     }
 
     /// Accepts an answer only for the document revision that requested it.
-    pub(crate) fn poll(&mut self, doc: &Document) {
-        let Some(pending) = &self.pending else { return };
+    pub(crate) fn poll(&mut self, doc: &Document) -> Option<String> {
+        let pending = self.pending.as_ref()?;
         let result = match pending.answer.try_recv() {
             Ok(result) => result,
-            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Empty) => return None,
             Err(mpsc::TryRecvError::Disconnected) => Err("The measurement stopped. Try again.".into()),
         };
         let request = pending.request;
         self.pending = None;
         if request.current(doc) {
             self.failure = result.err().map(|error| (request, error));
+            return self.failure.as_ref().map(|(_, error)| error.clone());
         }
+        None
     }
 
     /// Pending or refused properties for this feature, without querying geometry.
@@ -109,10 +124,10 @@ mod tests {
         let (sender, answer) = mpsc::channel();
         let mut state = State { pending: Some(Pending { request, answer }), failure: None };
         assert_eq!(state.message(&doc, feature), Some("Calculating mass properties..."));
-        state.poll(&doc);
+        assert!(state.poll(&doc).is_none());
         assert!(state.pending.is_some());
         sender.send(Err("measure.unsupported-surface".into())).unwrap();
-        state.poll(&doc);
+        assert_eq!(state.poll(&doc).as_deref(), Some("measure.unsupported-surface"));
         assert_eq!(state.message(&doc, feature), Some("measure.unsupported-surface"));
 
         let (sender, answer) = mpsc::channel();
@@ -120,7 +135,7 @@ mod tests {
         state.failure = None;
         doc.apply(Command::Rename { id: feature, name: "Changed".into() }).unwrap();
         sender.send(Err("obsolete refusal".into())).unwrap();
-        state.poll(&doc);
+        assert!(state.poll(&doc).is_none());
         assert!(state.pending.is_none());
         assert!(state.message(&doc, feature).is_none());
         assert!(state.failure.is_none());

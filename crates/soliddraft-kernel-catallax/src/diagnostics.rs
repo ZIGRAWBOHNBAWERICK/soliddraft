@@ -2,7 +2,10 @@
 
 use std::{cell::RefCell, sync::Mutex, time::Instant};
 
-use catallax_numbers::{BoundKind, MarkLog, OperationEntry, with_operation_budget, with_operation_log};
+use catallax_numbers::{
+    BoundKind, MarkLog, OperationEntry, OperationWork, current_operation_work, operation_budget_active,
+    with_operation_budget, with_operation_log,
+};
 use serde_json::{Value, json};
 use soliddraft_kernel_api::{KernelError, KernelResult};
 
@@ -65,12 +68,20 @@ impl Diagnostics {
         }
         ACTIVE.with(|active| *active.borrow_mut() = Some(operation.to_owned()));
         let _scope = Scope;
-        let ((mut result, work), entries) = with_operation_log(|| match max_work {
-            Some(limit) => {
+        // Background mass requests carry their own allowance, separate from edit and export limits.
+        let caller_mass_allowance = operation == "mass_properties" && operation_budget_active();
+        let before = current_operation_work();
+        let ((mut result, work), entries) = with_operation_log(|| match (max_work, caller_mass_allowance) {
+            (_, true) => {
+                let result = run();
+                let after = current_operation_work();
+                (result, Some(OperationWork { used: after.used - before.used, exhausted: after.exhausted }))
+            }
+            (Some(limit), false) => {
                 let (result, work) = with_operation_budget(limit, run);
                 (result, Some(work))
             }
-            None => (run(), None),
+            (None, false) => (run(), None),
         });
         if work.is_some_and(|w| w.exhausted) {
             result =
@@ -80,7 +91,8 @@ impl Diagnostics {
             "operation":operation, "log_scope":operation,"nested":false, "status":if result.is_ok() {"answered"} else {"refused"},
             "on_capture_thread":on_capture_thread,
             "error":result.as_ref().err().map(ToString::to_string),
-            "max_work":max_work, "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted})),
+            "max_work":if caller_mass_allowance {None} else {max_work},
+            "work":work.map(|w| json!({"used":w.used,"exhausted":w.exhausted})),
             "wall_ms":start.elapsed().as_secs_f64()*1000.0,
             "operation_log":{"format":"catallax-operation-log/1", "operations":entries.iter().enumerate()
                 .map(|(sequence, e)| entry(sequence, e)).collect::<Vec<_>>()}
@@ -195,5 +207,21 @@ mod tests {
         let calls = diagnostics.take();
         assert_eq!(calls[0]["on_capture_thread"], false);
         assert_eq!(calls[1]["on_capture_thread"], true);
+    }
+
+    #[test]
+    fn an_explicit_mass_allowance_governs_the_observed_query() {
+        let diagnostics = Diagnostics::new(Some(1));
+        let spend = || OperationAllowance::reserve(4).map(|_| ()).map_err(|e| KernelError::Unavailable(e.to_string()));
+        let (answer, work) = with_request_allowance(10, || diagnostics.observe("mass_properties", spend));
+        answer.unwrap();
+        assert_eq!(work.used, 4);
+        assert!(!work.exhausted);
+        let (answer, work) = with_request_allowance(3, || diagnostics.observe("mass_properties", spend));
+        assert!(answer.is_err());
+        assert!(work.exhausted);
+        let calls = diagnostics.take();
+        assert_eq!(calls[0]["work"]["used"], 4);
+        assert_eq!(calls[1]["work"]["exhausted"], true);
     }
 }

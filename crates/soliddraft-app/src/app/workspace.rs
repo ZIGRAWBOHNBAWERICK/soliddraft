@@ -402,7 +402,9 @@ impl eframe::App for SolidDraftApp {
         if self.state.poll_drag() && cfg!(target_arch = "wasm32") {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
-        self.state.mass.poll(&self.state.doc);
+        if let Some(error) = self.state.mass.poll(&self.state.doc) {
+            self.state.note(error, NoteKind::Error);
+        }
         // Hover info is derived from the viewport's last pick so every panel sees the same name.
         let viewport = &self.state.viewport;
         self.state.hover_info = viewport

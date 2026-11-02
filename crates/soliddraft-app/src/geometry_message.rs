@@ -21,7 +21,11 @@ pub(crate) fn for_user(message: &str) -> &str {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
     } else if message.contains("mass_properties") {
         "These properties could not be calculated. Try again or choose another feature."
-    } else if message.contains("Catallax") || message.contains("kernel unavailable") || message.contains("numbers.") {
+    } else if message.contains("Catallax")
+        || message.contains("kernel")
+        || message.contains("intersect.")
+        || message.contains("numbers.")
+    {
         "This operation is unavailable for the selected shape."
     } else {
         message
@@ -46,6 +50,8 @@ mod tests {
             "mass_properties failed",
             "numbers.operation-budget",
             "kernel unavailable",
+            "intersect.unsupported-pair",
+            "fillet failed in the kernel: unsupported surface",
         ] {
             assert!(!for_user(code).contains(code));
             let diagnostic = format!("{code}: refused (Catallax stage 3)");

@@ -8,7 +8,16 @@ The adapter pins its Catallax revision in `Cargo.toml` and `CATALLAX_REVISION`. 
 
 Profiles are deferred definitions rather than sheet geometry. Recipe replay reports their loop count, closure and tags without asking for sheet topology, mass or validity. Extrusion and revolution consume those definitions to build solids. Each solid owns an immutable Catallax application build. Bodies have arena handles; operations leave their inputs unchanged and callers release handles they no longer need.
 
-Extrudes, cuts, booleans and rational-frame revolves use Catallax stage 1. Holes, patterns, mirrors, fillets and chamfers between planes and cylinders, and extrusions up to the next boundary or a planar face use Catallax stage 3 operations; drafts of planar faces and pull-parallel cylinders use the stage 4 operation. `soliddraft-recipe/1` cannot spell these, so the adapter stores them as native Catallax steps and names their faces and edges by Catallax origins. A refused construction remains an error with Catallax's stable refusal code. Shell waits for stage 3, other fillets for stage 4. Waiting ribbon commands are disabled and name their stages. Existing saved features rebuild with an error and pass the preceding body through unchanged.
+Extrudes, cuts, booleans and rational-frame revolves use Catallax stage 1. Holes, patterns, mirrors, fillets and chamfers between planes and cylinders, and extrusions up to the next boundary or a planar face use Catallax stage 3 operations; drafts of planar faces and pull-parallel cylinders use the stage 4 operation. `soliddraft-recipe/1` cannot spell these, so the adapter stores them as native Catallax steps and names their faces and edges by Catallax origins. A refused construction remains an error with Catallax's stable refusal code. Shell accepts convex planar trays with separated through bores. Closed oblique plane/cylinder fillets support measurement and STEP export for whole bands. Unfinished ribbon commands are disabled and show Coming soon. Existing saved features rebuild with an error and pass the preceding body through unchanged.
+
+Native Mass props requests run on a worker with a 200 million work allowance. An explicit mass-request allowance governs the query instead of the diagnostic default. Measurement keeps `Accuracy::default()`. At Catallax `f335a6c`, the radius-5 rim cut by `z = 8 - 0.75x` gave these local dev-profile measurements on a shared machine:
+
+| Fillet radius, mm | Work units | Query time, seconds |
+|---|---:|---:|
+| 1 | 96,504,859 | 109.734 |
+| 0.5 | 97,333,170 | 103.307 |
+
+The rendered R1 test used the same 96,504,859 units in 214.918 seconds while processing a camera command before the result arrived. The 200 million allowance leaves roughly twice the measured peak. Worker refusals reach the status bar and property panel; an obsolete revision cannot publish them.
 
 ## Display and drawings
 

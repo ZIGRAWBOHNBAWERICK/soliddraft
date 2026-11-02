@@ -49,9 +49,13 @@ fn settings_command_opens_preferences_and_saves_navigation() {
     ribbon::menu(&mut app, "Tools", "Preferences…");
     app.run_steps(3);
     assert!(app.state().preferences.is_some());
-    app.set_size(vec2(1024.0, 768.0));
+    app.set_size(vec2(800.0, 640.0));
     app.run_steps(5);
     assert!(app.query_by_label("Search settings").is_some());
+    let practice = app.get_by_label("Practice area").rect();
+    let gestures = app.get_by_label("Mouse gestures").rect();
+    assert!(practice.top() > gestures.bottom(), "the practice area stacks below the gestures");
+    assert!(practice.right() <= 800.0, "the practice area fits the compact window");
     if let Some(proof) = std::env::var_os("SDC_SETTINGS_PROOF_DIR") {
         app.render().unwrap().save(std::path::Path::new(&proof).join("settings-compact.png")).unwrap();
     }

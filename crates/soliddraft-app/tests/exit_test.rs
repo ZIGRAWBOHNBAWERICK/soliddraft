@@ -248,6 +248,13 @@ fn click_button(harness: &mut App<'_>, label: &str) {
     harness.run_steps(3);
 }
 
+fn click_proposal_button(harness: &mut App<'_>, label: &str) {
+    harness.get_by_label(label).scroll_to_me();
+    harness.run_steps(3);
+    harness.get_by_label(label).click();
+    harness.run_steps(3);
+}
+
 fn feature_names(harness: &App<'_>) -> Vec<String> {
     harness.state().state.doc.features.iter().map(|f| f.name.clone()).collect()
 }
@@ -402,6 +409,8 @@ fn demo_part_renders() {
             app.state.chat = ChatState::connected(provider, "mock provider");
             app
         });
+    // A pointer click must follow the scroll, rather than target an animating card.
+    harness.ctx.all_styles_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
     harness.run_steps(14);
     assert_eq!(harness.state().state.doc.features.len(), 3);
     assert_eq!(harness.state().state.doc.meshes.len(), 1, "the demo part is one merged body");
@@ -425,17 +434,14 @@ fn demo_part_renders() {
         "no proposal: {:#?}",
         harness.state().state.chat.messages
     );
-    harness.get_by_label("Preview").click();
-    harness.run_steps(3);
+    click_proposal_button(&mut harness, "Preview");
     assert!(harness.state().state.preview_body().is_some(), "Preview shows the part after the proposal");
     save(&mut harness, "08-proposal-preview");
-    harness.get_by_label("Apply").click();
-    harness.run_steps(3);
+    click_proposal_button(&mut harness, "Apply");
     assert_eq!(harness.state().state.doc.features.len(), 5, "a sketch and an extrude");
     assert!(harness.state().state.doc.features[4].via_assistant);
     save(&mut harness, "08-proposal-applied");
-    harness.get_by_label("Undo P1").click();
-    harness.run_steps(3);
+    click_proposal_button(&mut harness, "Undo P1");
     assert_eq!(harness.state().state.doc.features.len(), 3);
     harness.state_mut().state.viewport.display = soliddraft_app::viewport::render::DisplayMode::Wireframe;
     harness.run_steps(3);

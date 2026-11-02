@@ -38,6 +38,19 @@ points read the same default certified mesh as before. A topology query can stil
 require that mesh during an edit. The selectable viewport uses the separate
 unproved preview. Memory accounting does not request a display.
 
+`edit-display-reuse.json` checks foreground mesh calls and GPU body placements on a
+rounded boss. It edits the boss diameter and the last fillet, undoes and redoes,
+renames, suppresses and restores, saves, and reopens in a fresh process. Rename and
+its undo and redo must make no kernel operations, mesh requests or GPU placements.
+Changed shapes must upload their new meshes. The scenario also replaces the document
+and checks that a refused zero-depth edit preserves the displayed result.
+
+`sphere-revolve.json` and `torus-revolve.json` retain their construction, drawing
+and independent STEP checks, then edit the sphere's angle or the torus's tube
+diameter. They check undo, redo, rename, suppress and restore, reuse of the exact
+prior parameter value, and another fresh-process reopen. Rename must make no
+kernel operations, foreground mesh requests or GPU body placements.
+
 `references.json` is the reference survival scenario. It builds the bracket with
 sketches on the plate's and the boss's top faces, splits the plate's top with a groove,
 sketches on one piece, and merges the top with a flush tab. It then changes the plate
@@ -164,9 +177,15 @@ MCP tool call has a numbered directory under `commands/` containing:
   execution when `--bundle` was requested; the scenario runner makes the assertions.
   The `rebuild` report's `features_recomputed` lists the features whose kernel
   operations the command ran, in tree order. `operations` counts those operations and
-  `meshes_rebuilt` the meshes made. The bundle counts by wrapping the kernel, and the
-  application does no counting. `meshes_rebuilt` includes display levels the background
-  worker finished during the command, so scenarios do not check it.
+  `meshes_rebuilt` counts foreground mesh requests, including edge polylines;
+  an adapter may answer a request from its own cache. Background refinement requests
+  are recorded separately as `background_meshes_rebuilt`, whose count can depend on
+  scheduling. `bodies_placed` counts the bodies uploaded by the retained offscreen
+  viewport for this command's capture. An unchanged immutable display mesh keeps its
+  GPU buffers across rename, undo and redo. Different body ids or mesh instances
+  require a new upload, including a changed appearance or a newly opened document.
+  The development harness derives placements from the renderer's mesh generation;
+  the application's rebuild path has no counters.
 - `part.json` and `part.dwprt`: the application's complete feature recipe and
   saved part after the command, including undo, rejected proposals and rollback.
   The archive omits optional display caches and thumbnails, as recovery snapshots do.

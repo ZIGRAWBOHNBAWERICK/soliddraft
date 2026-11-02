@@ -1,0 +1,565 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "edit-display-reuse",
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              20,
+              15,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12000,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "Boss-Extrude1 \u00b7 End cap",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              20,
+              15,
+              10
+            ],
+            "diameter": 16
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 12,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14412.743158,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude2 \u00b7 Edge 1"
+        ],
+        "radius": 2
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14458.300902,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "junction fillet build"
+    },
+    {
+      "tool": "edit_dimension",
+      "arguments": {
+        "sketch": "Sketch2",
+        "dimension": 1,
+        "value": 18
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": [
+            "Boss-Extrude2",
+            "Fillet1"
+          ]
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 2
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        }
+      ],
+      "label": "boss diameter edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Fillet1",
+        "name": "Round"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6,
+      "label": "rename keeps uploaded body"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Round",
+        "suppressed": true
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "label": "suppress round"
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Round",
+        "suppressed": false
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/rounded.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6,
+      "files": [
+        "{bundle}/rounded.dwprt"
+      ]
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Round",
+        "name": "Temporary"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/rounded.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        }
+      ],
+      "same_geometry_as_step": 6,
+      "fresh_process": true,
+      "label": "fresh reopen rounded part"
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Round",
+        "name": "Restored round"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Restored round",
+        "radius": 2.5
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": [
+            "Restored round"
+          ]
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 2
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        }
+      ],
+      "label": "last feature edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 18
+    },
+    {
+      "tool": "edit_extrude",
+      "arguments": {
+        "feature": "Boss-Extrude2",
+        "depth": 0,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        },
+        {
+          "pointer": "/revision",
+          "same_as_step": 20
+        },
+        {
+          "pointer": "/summary/features",
+          "same_as_step": 20
+        },
+        {
+          "pointer": "/summary/undo",
+          "same_as_step": 20
+        }
+      ],
+      "same_geometry_as_step": 18,
+      "refused": "depth must be greater than 0"
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 8,
+            "height": 6
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 5,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": [
+            "Boss-Extrude1"
+          ]
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 2
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 240,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "name": "New block"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 24
+    }
+  ]
+}

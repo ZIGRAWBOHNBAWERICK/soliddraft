@@ -659,7 +659,7 @@
       ],
       "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
-      "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
     },
     {
@@ -673,8 +673,24 @@
       ],
       "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
-      "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "edit-display-reuse",
+      "file": "ci/scenarios/edit-display-reuse.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-cli",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
+      "route": "MCP edits -> document rebuild and immutable display meshes -> retained offscreen viewport -> development rebuild report",
+      "supported_limits": "One part at a time; rounded boss dimension and fillet edits, rename, undo/redo, suppress/restore and fresh reopen; unchanged meshes keep their GPU buffers.",
+      "evidence": "commands/NNNN and commands-1/NNNN/{command.json,display.json,kernel.json,viewport.png,view.svg}; rounded.dwprt; foreground mesh requests and GPU body placements checked separately from background display refinement"
     }
   ]
 }

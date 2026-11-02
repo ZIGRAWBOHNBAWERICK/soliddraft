@@ -127,6 +127,12 @@
       },
       "files": [
         "{bundle}/sphere-revolve.dwprt"
+      ],
+      "checks": [
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        }
       ]
     },
     {
@@ -191,6 +197,10 @@
           "pointer": "/measurement/centre_of_mass/2",
           "approx": 0,
           "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
         }
       ],
       "drawing": true,
@@ -286,8 +296,270 @@
           "pointer": "/measurement/centre_of_mass/2",
           "approx": 0,
           "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
         }
       ]
+    },
+    {
+      "tool": "edit_revolve",
+      "arguments": {
+        "feature": "Revolve1",
+        "angle_deg": 180
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": [
+            "Revolve1"
+          ]
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 2
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 2.0943951023931953,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "sphere angle edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 2
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Revolve1",
+        "name": "Round part"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6,
+      "label": "rename round part"
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Round part",
+        "suppressed": true
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Round part",
+        "suppressed": false
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 6
+    },
+    {
+      "tool": "edit_revolve",
+      "arguments": {
+        "feature": "Round part",
+        "angle_deg": 360
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 2,
+      "label": "restore exact prior value"
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/sphere-revolve-edited.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "files": [
+        "{bundle}/sphere-revolve-edited.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/sphere-revolve-edited.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": [
+            "Round part"
+          ]
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 2
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 1
+        }
+      ],
+      "same_geometry_as_step": 2,
+      "fresh_process": true,
+      "label": "fresh reopen edited round part"
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Round part",
+        "name": "Reopened round part"
+      },
+      "checks": [
+        {
+          "pointer": "/rebuild/features_recomputed",
+          "equals": []
+        },
+        {
+          "pointer": "/rebuild/meshes_rebuilt",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/bodies_placed",
+          "equals": 0
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 2
     }
   ]
 }

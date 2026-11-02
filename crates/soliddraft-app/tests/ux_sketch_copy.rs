@@ -29,11 +29,12 @@ fn click(app: &mut App, p: P2, modifiers: Modifiers) {
         app.hover_at(pos);
         app.run_steps(3);
         for pressed in [true, false] {
-            app.input_mut().modifiers = modifiers;
-            app.event(egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers });
+            app.event_modifiers(
+                egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers },
+                modifiers,
+            );
             app.step();
         }
-        app.input_mut().modifiers = Modifiers::default();
         settle(app);
     });
 }

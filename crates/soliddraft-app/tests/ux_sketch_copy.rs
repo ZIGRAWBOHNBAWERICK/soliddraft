@@ -1,6 +1,7 @@
 //! Copy placement through the rendered app, using pointer and keyboard input.
 
 use egui::{Key, Modifiers, PointerButton, Pos2};
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::document::{Command, Document, PlaneKind, SketchPlane};
 use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::sketcher::Frame;
@@ -77,8 +78,22 @@ fn drag(app: &mut App, a: P2, b: P2) {
 }
 
 fn button(app: &mut App, label: &str) {
-    let window = ribbon::window(app);
-    ribbon::click_button(app, label, window);
+    let view = app.state().state.viewport.rect;
+    let pane = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
+    for _ in 0..6 {
+        if app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| pane.contains_rect(n.rect())) {
+            break;
+        }
+        app.hover_at(egui::pos2(pane.right() - 18.0, pane.bottom() - 60.0));
+        app.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -120.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        settle(app);
+    }
+    ribbon::click_button(app, label, pane);
     settle(app);
 }
 
@@ -158,6 +173,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     frame(&mut app, "02-offset-right-preview");
     button(&mut app, "Apply");
     assert_eq!(count(&app), 6);
+    frame(&mut app, "02b-offset-applied");
     for (e, kind) in session(&app).sketch.drawn().skip(4).zip(preview) {
         assert_eq!(e.kind, kind);
     }
@@ -167,13 +183,21 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     assert_eq!(count(&app), 6, "redo restores both copies");
     undo(&mut app, 4);
 
-    // A circle's offset is inward positive. A collapsed circle refuses without editing.
+    // A circle's offset is inward positive. An excessive numeric distance refuses without editing.
     select(&mut app, P2::new(25.0, 10.0));
     ribbon::click_ribbon(&mut app, "Offset");
     drag(&mut app, P2::new(25.0, 10.0), P2::new(27.0, 10.0));
     let preview = session(&app).preview.as_ref().unwrap();
     assert!(matches!(preview.added[0], EntityKind::Circle { radius, .. } if (radius - 7.0).abs() < 0.08));
     drag(&mut app, P2::new(25.0, 10.0), P2::new(20.0, 10.0));
+    assert!((session(&app).modify.distance - 5.0).abs() < 0.08);
+    let distance = app.get_by_role(egui::accesskit::Role::SpinButton).rect();
+    ribbon::double_click_at(&mut app, distance.center());
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.event(egui::Event::Text("6".into()));
+    app.key_press(Key::Enter);
+    settle(&mut app);
+    assert_eq!(session(&app).modify.distance, 6.0);
     assert!(session(&app).preview.as_ref().unwrap().operation.is_none());
     button(&mut app, "Apply");
     assert_eq!(session(&app).sketch, source);

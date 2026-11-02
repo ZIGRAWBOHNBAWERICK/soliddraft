@@ -501,6 +501,25 @@ pub struct FaceInfo {
     pub origins: Vec<Origin>,
 }
 
+/// What a reference reads of a face, taken from the exact model with no display mesh.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceCarrier {
+    /// As [`FaceInfo::id`].
+    pub id: FaceId,
+    /// As [`FaceInfo::surface`].
+    pub surface: SurfaceKind,
+    /// As [`FaceInfo::normal`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal: Option<Vec3>,
+    /// A point of a planar face's supporting plane, not necessarily on the trimmed face.
+    /// `None` for curved faces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_plane: Option<Vec3>,
+    /// As [`FaceInfo::origins`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub origins: Vec<Origin>,
+}
+
 /// One edge of a body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EdgeInfo {
@@ -961,6 +980,14 @@ pub trait Kernel: Send + Sync {
     /// Faces and edges with their ids and basic geometry. Rebuilds and displays read it,
     /// so a backend may estimate centroids, boxes, lengths and midpoints from its display.
     fn topology(&self, body: BodyId) -> KernelResult<Topology>;
+
+    /// The faces of a body in no promised order, without building its display mesh. A
+    /// rebuild follows a reference through an intermediate body with this, and reads
+    /// [`topology`](Self::topology) for whatever these facts cannot answer. A backend
+    /// with no cheaper answer refuses, and callers read `topology`.
+    fn face_carriers(&self, _body: BodyId) -> KernelResult<Vec<FaceCarrier>> {
+        Err(KernelError::Unsupported("exact face carriers".into()))
+    }
 
     /// [`topology`](Self::topology) with the backend's proven centroids, boxes, edge
     /// lengths and midpoints, where it has them. Only an explicit measurement asks for

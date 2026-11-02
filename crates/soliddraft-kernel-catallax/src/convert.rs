@@ -301,6 +301,13 @@ fn plane_vectors(plane: &catallax_shapes::Plane) -> Result<(Vec3, Vec3), catalla
     ))
 }
 
+/// A planar face's supporting point and outward unit normal.
+fn outward_plane(surface: &Surface, sense: Sense) -> Result<(Option<Vec3>, Option<Vec3>), catallax_numbers::Refusal> {
+    let Surface::Plane(plane) = surface else { return Ok((None, None)) };
+    let (origin, normal) = plane_vectors(plane)?;
+    Ok((Some(origin), normal.normalized().map(|n| if sense == Sense::Same { n } else { -n })))
+}
+
 fn surface_kind(surface: &Surface) -> SurfaceKind {
     match surface.kind() {
         CatSurface::Plane => SurfaceKind::Plane,
@@ -421,17 +428,12 @@ pub(super) fn topology(
             }
         }
         let surface = model.geom().surface(face.surface);
-        let plane = match surface {
-            Surface::Plane(p) => Some(plane_vectors(p).map_err(|e| query("face_plane", e))?),
-            _ => None,
-        };
-        let normal =
-            plane.and_then(|(_, normal)| normal.normalized()).map(|n| if face.sense == Sense::Same { n } else { -n });
+        let (on_plane, normal) = outward_plane(surface, face.sense).map_err(|e| query("face_plane", e))?;
         // A sketch on a planar face takes its plane's offset from the centroid, so an
         // estimate is moved onto the face's exact plane: an offset of a hair would make
         // the sketch miss faces it should meet.
-        let centroid = match (normal, plane) {
-            (Some(n), Some((origin, _))) if !proven => centroid + n * (origin.dot(n) - centroid.dot(n)),
+        let centroid = match (normal, on_plane) {
+            (Some(n), Some(origin)) if !proven => centroid + n * (origin.dot(n) - centroid.dot(n)),
             _ => centroid,
         };
         faces.push(FaceInfo {
@@ -523,6 +525,20 @@ pub(super) fn topology(
         bbox,
         display_chord_height,
     })
+}
+
+/// The exact facts of [`topology`]'s faces, read from the model with no mesh.
+pub(super) fn face_carriers(app: &EvaluatedApplicationBody, ids: &Ids) -> KernelResult<Vec<FaceCarrier>> {
+    let built = app.checkpoint.built();
+    let model = &built.model;
+    let carrier = |cat: CatFace| {
+        let face = model.face(cat);
+        let surface = model.geom().surface(face.surface);
+        let (on_plane, normal) = outward_plane(surface, face.sense).map_err(|e| query_error("face_plane", e))?;
+        let id = ids.faces[&cat];
+        Ok(FaceCarrier { id, surface: surface_kind(surface), normal, on_plane, origins: ids.face_origins[&id].clone() })
+    };
+    model.faces_of_body(built.result).into_iter().map(carrier).collect()
 }
 
 pub(super) fn mesh(mesh: &catallax_mesh::Mesh, ids: &Ids, params: &TessellationParams) -> Mesh {

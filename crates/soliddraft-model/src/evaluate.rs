@@ -327,6 +327,13 @@ impl Document {
                 let Some(body) = current else {
                     return repair(RepairReason::Missing, "there is no part body to sketch on".into(), vec![]);
                 };
+                // A sketch plane needs no mesh of the body before it unless this cannot answer.
+                if let Ok(carriers) = self.kernel.face_carriers(body)
+                    && let Some((normal, point)) = reference::carrier_plane(face, &carriers, &self.name_map())
+                {
+                    let p = plane_on_face(normal, point);
+                    return Ok((p.with_origin(p.origin + p.normal * offset), offset == 0.0));
+                }
                 let t = match self.view_of(body) {
                     Ok(v) => v,
                     Err(e) => return Err(Box::new(Built::failed(current, e.to_string()))),

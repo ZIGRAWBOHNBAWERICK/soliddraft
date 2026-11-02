@@ -220,5 +220,23 @@ class RustCache(unittest.TestCase):
                                 'native-release', 'wasm-release'})
 
 
+class PagesPayload(unittest.TestCase):
+    def test_package_preview_leaves_the_tag_deployment_artifact_to_pages(self):
+        text = next(p for p in WORKFLOWS if p.name == "packages.yml").read_text()
+        preview = text.split("\n  pages-preview:\n", 1)[1].split("\n  assemble:\n", 1)[0]
+        condition = re.search(r"^    if: (.*)$", preview, re.M)[1]
+        for event, ref, expected in [
+            ("push", "refs/tags/v0.2.0", False),
+            ("push", "refs/heads/release/0.2.0", True),
+            ("workflow_dispatch", "refs/tags/v0.2.0", True),
+            ("workflow_dispatch", "refs/heads/release/0.2.0", True),
+            ("pull_request", "refs/pull/7/merge", True),
+        ]:
+            with self.subTest(event=event, ref=ref):
+                self.assertEqual(evaluate(condition, event_name=event, ref=ref), expected)
+        self.assertEqual(text.count("actions/upload-pages-artifact@"), 1)
+        self.assertIn("path: site/app/dist/pages", preview)
+
+
 if __name__ == "__main__":
     unittest.main()

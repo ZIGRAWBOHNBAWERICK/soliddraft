@@ -198,10 +198,34 @@ jobs:
           name: browser-smoke
           path: ${{ runner.temp }}/web-smoke/browser.png
           if-no-files-found: error
-      # This produces the deploy payload in dry runs too, without enabling Pages.
+
+  pages-preview:
+    # The tag's publishing workflow uploads the deployment artifact after publishing.
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
+    needs: [plan, web]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-web
+          path: ${{ runner.temp }}/web-package
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Build the deploy payload from the candidate browser zip
+        env:
+          SITE_BASE: /${{ github.event.repository.name }}/
+          VITE_SOLIDDRAFT_VERSION: ${{ needs.plan.outputs.version }}
+          VITE_SOLIDDRAFT_PRERELEASE: ${{ startsWith(needs.plan.outputs.version, '0.') }}
+        run: |
+          unzip -q "$RUNNER_TEMP/web-package/soliddraft-${VITE_SOLIDDRAFT_VERSION}-web.zip" -d "$RUNNER_TEMP/web"
+          bash packaging/pages-payload.sh "$RUNNER_TEMP/web"
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: target/web-dist
+          path: site/app/dist/pages
 
   assemble:
     needs: [plan, desktop, web]

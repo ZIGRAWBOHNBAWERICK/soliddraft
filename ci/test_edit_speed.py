@@ -5,11 +5,13 @@ import pathlib
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("edit_speed", ROOT / "edit_speed.py")
 edit_speed = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(edit_speed)
+CALIBRATION_ANSWER = 160301056
 
 
 def row(pair, revision, click, warmup=False, scenario="references", step=17):
@@ -40,6 +42,27 @@ class Medians(unittest.TestCase):
         text = edit_speed.table(edit_speed.medians(rows_for_every_edit()))
         self.assertEqual(len(text.splitlines()), 2 + len(edit_speed.LABELS))
         self.assertIn("| Reference extrusion | 100.000 | 85.000 | 15.00% | 2/3 |", text)
+
+
+class Host(unittest.TestCase):
+    def test_the_calibration_workload_has_not_changed(self):
+        self.assertEqual(edit_speed.calibration_workload(), CALIBRATION_ANSWER)
+
+    def test_calibration_keeps_the_fastest_round(self):
+        ticks = iter([0, 3, 3, 4, 4, 9] + [9, 11] * (edit_speed.CALIBRATION_ROUNDS - 3))
+        with mock.patch.object(edit_speed.time, "perf_counter", lambda: next(ticks)):
+            fastest, rounds = edit_speed.calibrate(lambda: None)
+        self.assertEqual(fastest, 1000)
+        self.assertEqual(len(rounds), edit_speed.CALIBRATION_ROUNDS)
+
+    def test_the_cpu_model_comes_from_its_own_line(self):
+        lscpu = "Vendor ID:   AuthenticAMD\nModel name:   AMD EPYC 7763 64-Core Processor\nModel:   1\n"
+        self.assertEqual(edit_speed.cpu_model(lscpu), "AMD EPYC 7763 64-Core Processor")
+
+    def test_the_host_line_names_the_cpu_and_the_figure(self):
+        line = edit_speed.host_line(dict(cpu="Test CPU", python="3.12.3", calibration_ms=412.34,
+                                         calibration_rounds_ms=[412.34] * 7))
+        self.assertEqual(line, "CPU `Test CPU`, calibration 412.3 ms (fastest of 7 rounds, Python 3.12.3).\n")
 
 
 class Truncation(unittest.TestCase):

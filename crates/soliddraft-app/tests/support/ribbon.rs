@@ -276,21 +276,21 @@ pub fn click_ribbon(app: &mut App, label: &str) {
 
 /// Rests the pointer on a control and reads only that control's tooltip node.
 pub fn tooltip(app: &mut App, rect: Rect) -> String {
-    let control = app
+    let (control, tree) = app
         .get_all(By::new().role(egui::accesskit::Role::Button))
         .find(|n| n.rect() == rect)
         .expect("the control has an accessibility node")
         .accesskit_node()
-        .id();
+        .locate();
     app.hover_at(rect.center());
     app.run_steps(36);
     let hovered = app.ctx.interaction_snapshot(|s| s.contains_pointer.iter().copied().collect::<Vec<_>>());
     let widget = hovered.into_iter().find(|id| id.accesskit_id() == control).expect("the control is hovered");
     let tooltip_id = egui::Tooltip::tooltip_id(widget, 0).accesskit_id();
-    let tooltip = app.get(By::new().predicate(move |n| n.id() == tooltip_id));
+    let tooltip = app.get(By::new().predicate(move |n| n.locate() == (tooltip_id, tree)));
     let said: Vec<String> = tooltip
         .query_all(By::new().role(egui::accesskit::Role::Label))
-        .filter_map(|n| n.accesskit_node().value().map(str::to_owned))
+        .filter_map(|n| n.accesskit_node().value())
         .collect();
     let rest = window(app).center();
     app.hover_at(rest);

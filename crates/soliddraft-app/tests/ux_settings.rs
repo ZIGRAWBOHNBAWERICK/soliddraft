@@ -4,7 +4,7 @@
 mod ribbon;
 
 use egui::vec2;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::{command_line, commands, preferences, settings};
 
 #[test]

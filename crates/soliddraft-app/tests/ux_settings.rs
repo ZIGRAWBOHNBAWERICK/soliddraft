@@ -4,7 +4,7 @@
 mod ribbon;
 
 use egui::vec2;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use soliddraft_app::{command_line, commands, preferences, settings};
 
 #[test]
@@ -37,6 +37,10 @@ fn settings_command_opens_preferences_and_saves_navigation() {
     assert_eq!(app.state().preferences.as_ref().unwrap().page, "interface");
     assert!(app.query_by_label("Coming soon").is_some());
     assert!(app.query_by_label("Navigation preset").is_none());
+    assert!(
+        !app.get_by_label("Search settings").accesskit_node().is_disabled(),
+        "search remains usable on unfinished pages"
+    );
 
     app.get_by_label("Close window").click();
     app.run_steps(3);

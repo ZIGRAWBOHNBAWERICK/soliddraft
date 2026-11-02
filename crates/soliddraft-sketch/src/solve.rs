@@ -389,7 +389,6 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
     } else {
         SolveStatus::UnderDefined
     };
-    crate::references::resolve(sketch);
 }
 
 /// Tangency between a line and a curve, or two curves. At a shared end the

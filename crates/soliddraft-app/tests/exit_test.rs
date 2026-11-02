@@ -143,24 +143,11 @@ fn sketch_screen(harness: &App<'_>, p: P2) -> Pos2 {
     Frame { plane: s.plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(p).expect("point on screen")
 }
 
-fn assert_exact_axis_references(sketch: &soliddraft_app::sketch::Sketch) {
-    for c in &sketch.constraints {
-        use soliddraft_app::sketch::{Align, ConstraintKind, EntityKind};
-        match c.kind {
-            ConstraintKind::Horizontal { target: Align::Line(id) } => {
-                let EntityKind::Line { a, b } = sketch.entity(id).unwrap().kind else { panic!() };
-                assert_eq!(a.v, b.v, "a horizontal plate edge must stay exactly horizontal");
-            }
-            ConstraintKind::Vertical { target: Align::Line(id) } => {
-                let EntityKind::Line { a, b } = sketch.entity(id).unwrap().kind else { panic!() };
-                assert_eq!(a.u, b.u, "a vertical plate edge must stay exactly vertical");
-            }
-            ConstraintKind::Coincident { a, b } => {
-                assert_eq!(sketch.point(a), sketch.point(b), "snapped corners share one value");
-            }
-            _ => {}
-        }
-    }
+fn assert_exact_plate_profile(sketch: &soliddraft_app::sketch::Sketch) {
+    use soliddraft_kernel_api::{Plane, Point2, Profile};
+    let actual = soliddraft_app::sketch::profile::profiles(sketch, Plane::XY).unwrap();
+    let expected = Profile::rectangle(Plane::XY, Point2::new(60.0, 45.0), 120.0, 90.0);
+    assert_eq!(actual, [expected], "snapped references determine the exact plate profile");
 }
 
 fn sketch_click(harness: &mut App<'_>, p: P2) {
@@ -515,7 +502,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         assert_eq!(s.sketch.status, SolveStatus::FullyDefined, "free: {:?}", s.sketch.free);
         let (lo, hi) = s.sketch.bounds().unwrap();
         assert!((hi.u - lo.u - 120.0).abs() < 1e-6 && (hi.v - lo.v - 90.0).abs() < 1e-6, "{lo:?} {hi:?}");
-        assert_exact_axis_references(&s.sketch);
+        assert_exact_plate_profile(&s.sketch);
     }
     click_button(&mut harness, "Extrude");
     assert!(!harness.state().state.in_sketch());
@@ -684,7 +671,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     assert_eq!(harness.state().state.doc.features.len(), 10, "{:?}", feature_names(&harness));
     assert_eq!(harness.state().state.doc.name, "bracket");
     let base = harness.state().state.doc.features.iter().find(|f| f.name == "Sketch1").unwrap();
-    assert_exact_axis_references(&base.sketch().unwrap().sketch);
+    assert_exact_plate_profile(&base.sketch().unwrap().sketch);
     let v_reopened = volume(&harness);
     assert!((v_reopened - v_done).abs() < 1e-3, "reopened volume {v_reopened} vs {v_done}");
     harness.key_press(Key::Z);

@@ -156,6 +156,7 @@ mod tests {
         let mut reopened: Sketch = serde_json::from_str(&saved).unwrap();
         reopened.entities.reverse();
         reopened.constraints.reverse();
+        let before = reopened.clone();
         let profile = crate::profile::profiles(&reopened, Plane::XY).unwrap().remove(0);
         let expected = soliddraft_kernel_api::Profile::rectangle(
             Plane::XY,
@@ -164,7 +165,7 @@ mod tests {
             90.0,
         );
         assert_eq!(profile, expected, "the saved references determine the exact plate boundary");
-        assert_eq!(serde_json::to_string(&sketch).unwrap(), saved, "profile extraction does not edit the sketch");
+        assert_eq!(reopened, before, "profile extraction preserves the authored coordinates");
     }
 
     #[test]

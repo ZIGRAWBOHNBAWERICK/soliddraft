@@ -274,18 +274,23 @@ pub fn click_ribbon(app: &mut App, label: &str) {
     app.run_steps(4);
 }
 
-/// Rests the pointer on a control until its tooltip shows, and returns what the tooltip
-/// added to the frame.
+/// Rests the pointer on a control and reads only that control's tooltip node.
 pub fn tooltip(app: &mut App, rect: Rect) -> String {
-    let before: Vec<String> = painted(app).into_iter().map(|p| p.text).collect();
+    let control = app
+        .get_all(By::new().role(egui::accesskit::Role::Button))
+        .find(|n| n.rect() == rect)
+        .expect("the control has an accessibility node")
+        .accesskit_node()
+        .id();
     app.hover_at(rect.center());
     app.run_steps(36);
-    let status = band(app);
-    let said: Vec<String> = painted(app)
-        .into_iter()
-        .filter(|p| !status.intersects(p.rect))
-        .map(|p| p.text)
-        .filter(|t| !before.contains(t))
+    let hovered = app.ctx.interaction_snapshot(|s| s.contains_pointer.iter().copied().collect::<Vec<_>>());
+    let widget = hovered.into_iter().find(|id| id.accesskit_id() == control).expect("the control is hovered");
+    let tooltip_id = egui::Tooltip::tooltip_id(widget, 0).accesskit_id();
+    let tooltip = app.get(By::new().predicate(move |n| n.id() == tooltip_id));
+    let said: Vec<String> = tooltip
+        .query_all(By::new().role(egui::accesskit::Role::Label))
+        .filter_map(|n| n.accesskit_node().value().map(str::to_owned))
         .collect();
     let rest = window(app).center();
     app.hover_at(rest);

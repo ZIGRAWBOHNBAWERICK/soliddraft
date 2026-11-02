@@ -200,12 +200,10 @@ impl RibbonTab {
         }
     }
 
-    /// Why the tab cannot open yet. A planned tab stays on the strip, disabled, so the
-    /// strip is honest about where the app is going.
+    /// The placeholder tooltip for an unfinished tab.
     pub fn planned(&self) -> Option<&'static str> {
         match self {
-            RibbonTab::Surface => Some("Planned: surface modelling has no commands yet"),
-            RibbonTab::PointCloud => Some("Planned: point clouds cannot be imported yet"),
+            RibbonTab::Surface | RibbonTab::PointCloud => Some("Coming soon"),
             _ => None,
         }
     }

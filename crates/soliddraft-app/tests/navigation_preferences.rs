@@ -121,9 +121,9 @@ fn reserved_categories_are_not_finished_pages() {
     w.run_steps(2);
     let saves_before = saves();
     for label in reserved {
-        let text = format!("{label} · coming later");
+        let text = format!("{label} · Coming soon");
         let node = w.get_by_label(&text);
-        assert!(node.accesskit_node().is_disabled(), "{label} is shown as coming later, not as a page");
+        assert!(node.accesskit_node().is_disabled(), "{label} is shown as Coming soon, not as a page");
         node.click();
         w.run_steps(2);
         assert_eq!(w.state().page, preferences::MOUSE, "selecting {label} opens nothing");
@@ -481,17 +481,12 @@ fn unsupported_camera_modes_are_not_presented_as_working() {
     let mut w = window();
     w.run_steps(2);
     click(&mut w, "Orbit and zoom");
-    for (label, why) in [
-        ("Free trackball", "free trackball"),
-        ("Under the cursor", "pivot under the cursor"),
-        ("Selection", "pivot at the selection"),
-        ("Origin", "pivot at the origin"),
-    ] {
+    for label in ["Free trackball", "Under the cursor", "Selection", "Origin"] {
         let node = w.get_by_role_and_label(Role::RadioButton, label);
         assert!(node.accesskit_node().is_disabled(), "{label} is not offered as working");
         node.click();
         w.run_steps(2);
-        assert!(has(&w, why), "{label} says what is missing");
+        assert!(has(&w, "Coming soon"), "{label}");
     }
     assert_eq!(
         settings::navigation(InstallKind::Existing).camera.pivot,
@@ -502,13 +497,13 @@ fn unsupported_camera_modes_are_not_presented_as_working() {
         serde_json::from_value(serde_json::json!({"pivot": "cursor"})).unwrap_or_default();
     assert_eq!(stored.pivot, navigation::Pivot::Target, "an unsupported pivot cannot be stored as active");
 
-    // The mouse table: roll rows say they need camera roll and cannot be changed.
+    // Roll rows stay disabled and say Coming soon.
     click(&mut w, "Mouse");
     for preset in ["SOLIDWORKS", "Creo Parametric"] {
         w.get_by_role_and_label(Role::RadioButton, preset).click();
         w.run_steps(3);
-        let roll = text_of(&w, "Roll:");
-        assert!(roll.contains("not available") && roll.contains("roll"), "{preset}: {roll}");
+        let roll = text_of(&w, "Roll ·");
+        assert_eq!(roll, "Roll · Coming soon", "{preset}");
         assert!(w.query_by_label("Change roll").is_none(), "{preset}: roll cannot be edited as if it worked");
     }
     let mut sw = Router::for_preset(navigation::preset("solidworks").unwrap().clone(), false);
@@ -546,8 +541,8 @@ fn view_keys_page_shows_profiles_and_conflicts() {
     assert!(has(&w, "None: this profile takes no command's key"));
     w.get_by_role_and_label(Role::RadioButton, "Blender").click();
     w.run_steps(3);
-    assert!(has(&w, "numeric keypad"), "the keypad limitation shows");
-    assert!(has(&w, "not available"));
+    assert!(!has(&w, "needs the numeric keypad"));
+    assert!(has(&w, "Coming soon"));
 }
 
 #[test]

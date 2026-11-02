@@ -152,7 +152,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(AppAction::Select(Some(reference)));
             }
         }
-        row(ui, RowSpec { indent: 0, icon: Icon::Material, name: "Material", sub: "Not set", ..RowSpec::plain() });
+        let material = state.doc.model().material(state.doc.model().active_configuration());
+        row(
+            ui,
+            RowSpec {
+                indent: 0,
+                icon: Icon::Material,
+                name: "Material",
+                sub: material.map_or("Coming soon", |m| m.name.as_str()),
+                ..RowSpec::plain()
+            },
+        );
         // The body row: selecting it shows every dimension that builds the body.
         if state.doc.display_body().is_some() {
             let r = row(

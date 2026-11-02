@@ -2,6 +2,7 @@
 
 pub mod guides;
 pub mod hover;
+pub(crate) mod mass;
 pub mod panel;
 pub(crate) mod registry;
 pub(crate) mod tools;

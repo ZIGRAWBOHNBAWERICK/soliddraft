@@ -640,6 +640,8 @@ def export_check(args, directory, spec, previous):
                 exported["checks"].append(raw_step_check(path, directory, f"{label}-raw-step", args.timeout))
             exported["pass"] = all(c["pass"] for c in exported["checks"])
             return exported
+        if extension in ("step", "stp") and spec.get("raw_valid"):
+            exported["checks"].append(raw_step_check(path, directory, f"{label}-raw-step", args.timeout))
         if "same_export_as" in spec:
             expected = previous.get((spec["same_export_as"], extension))
             exported["checks"].append({"check": "same exported bytes", "expected": expected,

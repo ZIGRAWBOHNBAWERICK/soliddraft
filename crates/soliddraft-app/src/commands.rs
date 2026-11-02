@@ -1419,6 +1419,8 @@ fn registry() -> Vec<CommandSpec> {
         )
         .on(Inspect, "Measure", Large)
         .run(|_| AppAction::MeasureMassProperties)
+        .when(|_| !cfg!(target_arch = "wasm32"))
+        .hint(|_| cfg!(target_arch = "wasm32").then(|| COMING_SOON.into()))
 .agents(
             Agents::Tool,
             "Calculate volume in mm³, surface area in mm² and centre of mass after the named feature. \

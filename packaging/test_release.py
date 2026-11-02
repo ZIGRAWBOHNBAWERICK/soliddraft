@@ -1,5 +1,6 @@
 """Reject release notes that would misidentify the packaged kernel."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -76,6 +77,89 @@ class ReleaseSourceTests(unittest.TestCase):
                     release.check_source("v0.1.0")
 
 
+class ReleaseHistoryTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.git("init", "-b", "main")
+        self.git("config", "user.name", "Release test")
+        self.git("config", "user.email", "release@example.invalid")
+        (self.root / "Cargo.toml").write_text('[workspace.package]\nversion = "0.2.0"\n')
+        kind = self.root / "crates/soliddraft-document/src/kind.rs"
+        kind.parent.mkdir(parents=True)
+        kind.write_text('DocKind::Part => "soliddraft-part/1"\n'
+                        'DocKind::Assembly => "soliddraft-assembly/1"\n'
+                        'DocKind::Drawing => "soliddraft-drawing/1"\n')
+        self.base = self.commit("base")
+
+    def git(self, *args):
+        return subprocess.check_output(["git", *args], cwd=self.root, text=True,
+                                       stderr=subprocess.PIPE).strip()
+
+    def commit(self, message):
+        (self.root / "change").write_text(message)
+        self.git("add", ".")
+        self.git("commit", "-m", message)
+        return self.git("rev-parse", "HEAD")
+
+    def test_previous_published_version_need_not_be_an_ancestor(self):
+        self.git("checkout", "-b", "old-release")
+        self.commit("previous release")
+        self.git("tag", "v0.1.0")
+        self.git("checkout", "main")
+        self.commit("current release")
+        for tag in ("v0.0.9", "v0.2.0", "v0.3.0", "v0.1.9"):
+            self.git("tag", tag)
+        releases = self.root / "releases.json"
+        releases.write_text(json.dumps(["v0.3.0", "v0.0.9", "v0.2.0", "v0.1.0", "v0.2.0-rc1"]))
+        with patch.object(release, "ROOT", self.root):
+            previous = release.previous_release(releases)
+            self.assertEqual(previous, "v0.1.0")
+            pulls = self.root / "pulls.json"
+            pulls.write_text("[[]]")
+            with patch.object(release, "source_revisions", return_value=("a", "b")), \
+                    patch.object(release, "known_gap_notes", return_value=[]):
+                release.notes(pulls, previous, False)
+            notes = (self.root / "dist/release-notes.md").read_text()
+            self.assertEqual(notes.count("(unchanged)"), 3)
+            self.assertNotIn("first release", notes)
+            releases.write_text(json.dumps(["v0.2.0", "v0.3.0", "invalid"]))
+            self.assertEqual(release.previous_release(releases), "")
+            releases.write_text(json.dumps(["v0.0.9", "v0.0.10"]))
+            self.assertEqual(release.previous_release(releases), "v0.0.10")
+
+    def test_cherry_picked_pulls_are_included_once_and_previous_pulls_excluded(self):
+        old = self.commit("already shipped")
+        new = self.commit("new fix")
+        self.git("checkout", "-b", "old-release", self.base)
+        self.git("cherry-pick", "-x", old)
+        self.git("tag", "v0.1.0")
+        self.git("checkout", "-b", "candidate", old)
+        self.git("cherry-pick", "-x", new)
+        direct = self.commit("direct merge")
+        prs = [dict(number=number, title=f"Fix {number}", user={"login": "author"},
+                    html_url=f"https://example.invalid/pull/{number}",
+                    merged_at="2026-11-01T00:00:00Z", merge_commit_sha=sha)
+               for number, sha in ((1, old), (2, new), (3, direct), (4, "f" * 40))]
+        prs.append(dict(prs[2], number=5, merged_at=None))
+        pulls = self.root / "pulls.json"
+        pulls.write_text(json.dumps([prs[2:], prs[:2]]))
+        with patch.object(release, "ROOT", self.root):
+            text = release.pull_request_notes(pulls, "v0.1.0")
+            self.assertNotIn(prs[0]["html_url"], text)
+            self.assertEqual(text.count(prs[1]["html_url"]), 1)
+            self.assertEqual(text.count(prs[2]["html_url"]), 1)
+            self.assertNotIn(prs[3]["html_url"], text)
+            self.assertNotIn("Fix 5", text)
+            self.assertLess(text.index("Fix 2"), text.index("Fix 3"))
+            first = release.pull_request_notes(pulls, None)
+            self.assertIn(prs[0]["html_url"], first)
+            self.assertIn(prs[1]["html_url"], first)
+            pulls.write_text("[[]]")
+            self.assertIn("No merged pull requests", release.pull_request_notes(pulls, None))
+
+
 
 class DeferredWindowsTests(unittest.TestCase):
     NAMES = ("linux-x86_64.AppImage", "linux-x86_64.deb", "linux-x86_64.tar.gz", "macos-universal.dmg", "web.zip")
@@ -127,6 +211,7 @@ class DeferredWindowsTests(unittest.TestCase):
                 self.assertIn(present, text)
                 self.assertNotIn(absent, text)
                 self.assertIn("macOS Gatekeeper", text)
+                self.assertIn("[SolidDraft website](https://zigrawbohnbawerick.github.io/soliddraft/)", text)
 
 
 class KnownGapNotesTests(unittest.TestCase):

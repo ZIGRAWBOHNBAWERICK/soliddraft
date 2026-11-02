@@ -255,7 +255,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Pick the closest released version reachable from this commit, not an unrelated tag.
+          # Compare with the highest published version below this one, across release branches.
           gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --slurp \
             > "$RUNNER_TEMP/release-pages.json"
           jq '[.[][] | select(.draft == false) | .tag_name]' "$RUNNER_TEMP/release-pages.json" \

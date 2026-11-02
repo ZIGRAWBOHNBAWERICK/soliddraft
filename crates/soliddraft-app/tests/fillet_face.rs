@@ -7,7 +7,7 @@
 //! slot is the captain's body: Catallax rounds its whole top boundary and one straight top
 //! edge, and the viewport draws both. It still refuses a chamfer of that boundary and a
 //! radius too large for the slot, so it also carries the refusal cases: the panel must
-//! show the kernel's typed reason, the part must stay usable, and no red failed feature
+//! retain the typed diagnostic behind its explanation, the part must stay usable, and no red failed feature
 //! may block the next pick.
 //!
 //! Asserts a renderer exists: an acceptance run that skips is not acceptance.
@@ -202,8 +202,7 @@ fn panel_edges(doc: &Document, refs: &[EdgeRef]) -> Vec<EdgeId> {
         .collect()
 }
 
-/// The kernel's typed reason, such as `fillet.unsupported-contact`, from a refusal
-/// text: the app must show the kernel's own classification, not a generic sentence.
+/// The typed diagnostic retained behind the interface's explanation.
 fn typed_reason(text: &str) -> String {
     let start = ["fillet.", "chamfer."]
         .iter()
@@ -214,9 +213,8 @@ fn typed_reason(text: &str) -> String {
     text[start..end].to_owned()
 }
 
-/// What the kernel itself says about this edge set and size. Nothing about the message
-/// is pinned by hand: the app has to show the reason the kernel gave for the very same
-/// edges, radius (or distance) and body.
+/// The diagnostic for this edge set and size. The editor and note retain it even
+/// when the interface presents a plain explanation.
 fn kernel_refusal(doc: &Document, edges: &[EdgeId], size: f64, chamfer: bool) -> String {
     let body = doc.display_body().expect("a body");
     let tag = OpTag::new("contract");

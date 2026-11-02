@@ -117,6 +117,7 @@ pub enum AppAction {
     ResetLayout,
     /// Show or hide the side area.
     TogglePanel(crate::panels::Side),
+    ShowPreferences,
     ShowShortcuts,
     /// Opens the command palette, or closes it when it is open.
     TogglePalette,
@@ -816,13 +817,15 @@ impl AppState {
         self.actions.push(action);
     }
 
-    /// Runs a command from the registry, as a ribbon button, a shortcut, a menu or the
-    /// command search does, and remembers it as recent. A disabled command runs nothing
-    /// and says why, when its hint has a reason.
+    /// Runs a registry command from a button, shortcut, menu or command search.
+    /// Opening Preferences leaves history unchanged so browsing does not write settings.
+    /// A disabled command runs nothing and says why when its hint has a reason.
     pub fn run_command(&mut self, command: &crate::commands::CommandSpec) {
         match command.action_now(self) {
             Some(action) => {
-                self.commands.record(command.id);
+                if !matches!(&action, AppAction::ShowPreferences) {
+                    self.commands.record(command.id);
+                }
                 self.push(action);
             }
             None => {

@@ -1108,7 +1108,7 @@ fn view_keys_page_shows_profiles_and_conflicts() {
     app.get_by_role_and_label(egui::accesskit::Role::RadioButton, "SOLIDWORKS").click();
     app.run_steps(4);
     assert_eq!(app.state().state.navigation.keyboard_profile, "solidworks");
-    assert!(app.query_all_by_label_contains("Fit: F — blocked").next().is_some());
+    assert!(app.query_all_by_label_contains("Fit: F - blocked").next().is_some());
     preferences_frame(&mut app, "view-keys");
     app.state_mut().preferences = None;
     app.run_steps(2);

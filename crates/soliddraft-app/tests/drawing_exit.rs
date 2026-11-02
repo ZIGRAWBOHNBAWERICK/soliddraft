@@ -87,11 +87,10 @@ fn click_at(harness: &mut App<'_>, pos: Pos2) {
     harness.run_steps(3);
 }
 
-/// Clicks the first button with this label; ribbon items come before panel buttons.
-/// Window, Open drawings. A menu entry's name ends with its shortcut column, empty here.
+/// Opens drawings from the Window menu.
 fn open_drawings(harness: &mut App<'_>) {
     click_button(harness, "Window");
-    click_button(harness, "Open drawings ");
+    click_button(harness, "Open drawings");
 }
 
 fn make_drawing(harness: &mut App<'_>) {

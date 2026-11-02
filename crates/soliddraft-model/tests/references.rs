@@ -128,6 +128,60 @@ fn diameter(doc: &Document, sketch: FeatureId) -> ConstraintId {
     s.sketch.constraints.iter().find(|c| c.is_dimension()).unwrap().id
 }
 
+/// A sketch on a split face takes the plane the display topology gives, with no mesh of
+/// the body under it. Only the part's final body is meshed.
+#[test]
+fn an_edit_places_sketches_on_faces_without_meshing_the_bodies_under_them() {
+    let kernel = Arc::new(CatallaxKernel::with_diagnostics(100_000_000));
+    let mut doc = Document::new("Plate", kernel.clone());
+    let s = add(
+        &mut doc,
+        "Plate sketch",
+        sketch(top(), |s| {
+            s.rectangle(P2::new(60.0, 45.0), 120.0, 90.0).unwrap();
+        }),
+    );
+    let plate = add(&mut doc, "Plate", extrude(s, ExtrudeOp::Boss, blind(10.0)));
+    let plane = on(&doc, plate, Generator::EndCap);
+    let groove_sketch = add(
+        &mut doc,
+        "Groove sketch",
+        sketch(plane.clone(), |s| {
+            s.rectangle(P2::new(100.0, 45.0), 6.0, 100.0).unwrap();
+        }),
+    );
+    add(&mut doc, "Groove", extrude(groove_sketch, ExtrudeOp::Cut, blind(5.0)));
+    let pin_sketch = add(
+        &mut doc,
+        "Pin sketch",
+        sketch(plane, |s| {
+            s.circle_at(P2::new(30.0, 45.0), 6.0).unwrap();
+        }),
+    );
+    add(&mut doc, "Pin", extrude(pin_sketch, ExtrudeOp::Cut, blind(4.0)));
+
+    kernel.take_diagnostics().unwrap();
+    let edit = extrude(s, ExtrudeOp::Boss, blind(12.0));
+    doc.execute(Command::EditFeature { id: plate, kind: edit }).unwrap();
+    let log = kernel.take_diagnostics().unwrap();
+    let calls = log["calls"].as_array().unwrap();
+    let asked = |name: &str| calls.iter().filter(|c| c["operation"] == name && c["nested"] == false);
+    assert!(asked("face_carriers").count() >= 2, "both sketches read carriers: {calls:?}");
+    let built = asked("topology").filter(|c| c["work"]["used"].as_u64().is_some_and(|used| used > 0));
+    assert!(built.count() <= 1, "only the final body may build a topology: {calls:?}");
+
+    assert!(report(&doc).lines().all(|line| line.ends_with("Ok")), "{}", report(&doc));
+    for id in [groove_sketch, pin_sketch] {
+        let (t, pieces) = carriers(&doc, doc.body_before(id).unwrap(), &face_ref(&doc, id));
+        assert!(!pieces.is_empty());
+        for piece in pieces {
+            let face = t.face(piece).unwrap();
+            let expected = soliddraft_model::plane_on_face(face.normal.unwrap(), face.centroid);
+            assert_eq!(doc.built_sketch(id).unwrap().plane, expected, "{piece}");
+        }
+    }
+}
+
 #[test]
 fn references_survive_edits_renames_splits_merges_suppression_undo_and_reopening() {
     let mut doc = Document::new("Bracket", Arc::new(CatallaxKernel::new()));

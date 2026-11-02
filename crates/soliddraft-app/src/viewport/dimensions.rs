@@ -209,6 +209,7 @@ pub fn paint(
 fn values(kind: &FeatureKind) -> Vec<String> {
     match kind {
         FeatureKind::Revolve(r) => vec![format!("{}°", fmt_mm(r.angle_deg))],
+        FeatureKind::Sweep(_) => vec![],
         FeatureKind::Fillet(p) => vec![format!("R{}", fmt_mm(p.radius))],
         FeatureKind::Chamfer(p) => vec![fmt_mm(p.distance)],
         FeatureKind::Draft(d) => vec![format!("{}°", fmt_mm(d.angle))],

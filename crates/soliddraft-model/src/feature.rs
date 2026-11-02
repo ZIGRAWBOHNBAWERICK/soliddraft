@@ -58,6 +58,8 @@ pub enum FeatureKind {
     Extrude(ExtrudeFeature),
     /// A sketch swept around a model-space axis.
     Revolve(RevolveFeature),
+    /// A polygon sketch translated along a straight path.
+    Sweep(SweepFeature),
     /// Rounds edges.
     Fillet(BlendFeature),
     /// Bevels edges.
@@ -87,6 +89,7 @@ impl FeatureKind {
             FeatureKind::ReferencePlane(_) => "Plane",
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Revolve(_) => "Revolve",
+            FeatureKind::Sweep(_) => "Sweep",
             FeatureKind::Extrude(e) if e.operation == ExtrudeOp::Cut => "Cut-Extrude",
             FeatureKind::Extrude(_) => "Boss-Extrude",
             FeatureKind::Fillet(_) => "Fillet",
@@ -125,6 +128,7 @@ impl FeatureKind {
             FeatureKind::Sketch(s) => out.extend(s.plane.dependencies()),
             FeatureKind::ReferencePlane(p) => out.extend(p.dependencies()),
             FeatureKind::Revolve(r) => out.push(r.sketch),
+            FeatureKind::Sweep(s) => out.push(s.sketch),
             FeatureKind::Extrude(e) => {
                 if let ProfileSource::Sketch { feature } = e.profile {
                     out.push(feature);
@@ -165,6 +169,16 @@ pub struct RevolveFeature {
     pub axis_direction: [f64; 3],
     /// Sweep angle in degrees, greater than zero and at most 360.
     pub angle_deg: f64,
+}
+
+/// A polygon sketch translated by the displacement of one saved straight segment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepFeature {
+    /// The closed polygon sketch.
+    pub sketch: FeatureId,
+    /// The saved path, including its segment identity.
+    pub path: soliddraft_kernel_api::Sweep,
 }
 
 /// A sketch and the plane it is drawn on.
@@ -579,6 +593,9 @@ pub struct ImportStepFeature {
     /// Who accepted the proposals, as the app supplied it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub approver: String,
+    /// The saved import result, verified against the source when reopening.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<soliddraft_kernel_api::RepairRecord>,
 }
 
 impl ImportStepFeature {
@@ -590,6 +607,7 @@ impl ImportStepFeature {
             source,
             decisions: BTreeMap::new(),
             approver: String::new(),
+            record: None,
         }
     }
 
@@ -602,6 +620,7 @@ impl ImportStepFeature {
     pub fn accepted(&self, question: &str, tolerance_mm: &str, approver: &str) -> ImportStepFeature {
         let mut out = self.clone();
         out.decisions.insert(question.to_string(), format!("accept:{tolerance_mm}"));
+        out.record = None;
         out.approver = approver.to_string();
         out
     }
@@ -610,6 +629,7 @@ impl ImportStepFeature {
     pub fn declined(&self, question: &str) -> ImportStepFeature {
         let mut out = self.clone();
         out.decisions.insert(question.to_string(), "decline".to_string());
+        out.record = None;
         out
     }
 
@@ -617,6 +637,7 @@ impl ImportStepFeature {
     pub fn unanswered(&self, question: &str) -> ImportStepFeature {
         let mut out = self.clone();
         out.decisions.remove(question);
+        out.record = None;
         out
     }
 

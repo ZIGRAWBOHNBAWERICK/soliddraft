@@ -405,6 +405,7 @@ fn grade_field(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_kernel_api
 fn editor(ui: &mut egui::Ui, state: &mut AppState) {
     let (title, icon) = match state.editor.as_ref().map(|e| &e.params) {
         Some(EditorParams::Revolve(_)) => (state.editor.as_ref().unwrap().title(), Icon::Revolve),
+        Some(EditorParams::Sweep(_)) => (state.editor.as_ref().unwrap().title(), Icon::Sweep),
         Some(EditorParams::Extrude(_)) => (state.editor.as_ref().unwrap().title(), Icon::Extrude),
         Some(EditorParams::Cut(_)) => (state.editor.as_ref().unwrap().title(), Icon::Cut),
         Some(EditorParams::Fillet(_)) => (state.editor.as_ref().unwrap().title(), Icon::Fillet),
@@ -466,6 +467,29 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(editor) = state.editor.as_mut() else { return };
     egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| match &mut editor.params {
+            EditorParams::Sweep(s) => {
+                theme::section_label(ui, "Polygon profile");
+                ui.label(
+                    sketch_names
+                        .iter()
+                        .find(|(id, _)| *id == s.sketch.0 as u64)
+                        .map(|(_, name)| name.as_str())
+                        .unwrap_or("Missing sketch"),
+                );
+                theme::section_label(ui, "Straight path start");
+                ui.horizontal(|ui| {
+                    for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
+                        coord(ui, &format!("sweep start {label}"), label, &mut s.path.start[i]);
+                    }
+                });
+                theme::section_label(ui, "Straight path end");
+                ui.horizontal(|ui| {
+                    for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
+                        coord(ui, &format!("sweep end {label}"), label, &mut s.path.end[i]);
+                    }
+                });
+                ui.label("The profile stays in place and follows the path's displacement.");
+            }
             EditorParams::Revolve(r) => {
                 theme::section_label(ui, "Meridian sketch");
                 ui.label(

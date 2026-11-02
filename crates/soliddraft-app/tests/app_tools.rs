@@ -326,6 +326,20 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert!(!edited.is_null(), "edit_revolve must succeed");
     s.call("undo", json!({}));
     s.call("redo", json!({}));
+    // Sweep and its edit each add one undo step on a fresh part.
+    s.call("new_part", json!({}));
+    s.call(
+        "sketch",
+        json!({"plane":"top", "shapes":[
+            {"shape":"rectangle", "center":[0,0,0], "width":4, "height":2}
+        ]}),
+    );
+    let swept = s.call("sweep", json!({"sketch":"Sketch1", "start":[0,0,0], "end":[2,1,3]}));
+    assert!(!swept.is_null(), "sweep must succeed");
+    let edited = s.call("edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "end":[2,1,6]}));
+    assert!(!edited.is_null(), "edit_sweep must succeed");
+    s.call("undo", json!({}));
+    s.call("redo", json!({}));
     // The terminal lattice and its edit each add one undo step.
     s.call("new_part", json!({}));
     s.call(

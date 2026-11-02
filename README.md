@@ -47,9 +47,11 @@ Work in progress. SolidDraft runs only on Catallax. See [the backend gaps](docs/
 - The desktop app, with its ribbon, feature tree, property panel, command line, assistant session and wgpu viewport.
 - Desktop depth, fillet-radius and chamfer-distance edits separate construction display from exact proof. Supported construction charts produce selectable provisional faces before proof finishes; one drag is one undo step. Pending or failed input cannot export, and a failed edit restores the whole last proved part while its feature stays red with a reason.
 - Sketching on a plane or a planar face with line, rectangle, circle, arc and slot tools, with relations and dimensions. The Modify group adds polygon, trim and extend by pointer with a live preview, and offset, mirror and linear and circular patterns of the selection with their values typed in the property panel.
-- Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; booleans and rational-frame revolves through the kernel and recipe runner. The revolve ribbon command still waits for its application editor. Persistent references, undo and redo, feature tree editing and part files work.
+- Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; booleans and rational-frame revolves through the kernel and recipe runner. Persistent references, undo and redo, feature tree editing and part files work.
+- Straight sweeps of closed polygon profiles, with path endpoints in the property panel, editing, undo, save and reopen. This is in the feature batch after 0.2.0. Curved paths and profiles remain unavailable; loft is coming soon.
 - Holes on a planar face, blind or through, with flat or drill-point tips, counterbores and countersinks at any angle, including the standard 118° tip and 82°, 90° and 100° countersinks. A countersink or drill point cannot yet go into a body that has another cylinder; see [the backend gaps](docs/needs-catallax.md).
 - Linear and circular patterns and mirrors of the part's body.
+- Clean single-body analytic STEP import with source preservation, review, save/reopen and checked export. This addition is for the next feature batch, after 0.2.0. See [STEP import](docs/exchange.md#step-import).
 - Analytic planar shells with selected open faces, editable wall thickness and persistent inner-wall names. See [shell coverage and evidence](docs/l08-shell-tool.md).
 - Fillets and equal-distance chamfers between planes and between planes and cylinders, and drafts of planar faces and cylinders parallel to the pull.
 - Drawings use Catallax meshes for polygon hidden-line removal. Plane sections on screen are cut from the same meshes; an exported section subtracts a half-space through a Catallax boolean. ISO and ANSI sheets, aligned views, dimensions and annotations keep their formats. Output to drawing files, SVG, PDF and DXF works, and every exported view curve says whether it is the model's exact line or circle or a mesh polyline. Exact silhouettes and some curve conversions remain pending.
@@ -57,15 +59,15 @@ Work in progress. SolidDraft runs only on Catallax. See [the backend gaps](docs/
 - A headless command line that replays recipes, rebuilds parts, renders hidden-line views and makes drawings.
 - A WebAssembly build that runs the app and Catallax in one browser module.
 
-Waiting commands stay visible and disabled with a tooltip naming their Catallax stage. Opening a part with a waiting feature rebuilds its available prefix and marks the feature with an error; that prefix is not a proved whole part and cannot export.
+Waiting commands stay visible and disabled with a short explanation. Opening a part with a waiting feature rebuilds its available prefix and marks the feature with an error; that prefix is not a proved whole part and cannot export.
 
 | Waiting feature | Catallax stage |
 |---|---|
 | Offset and thicken; unsupported shell envelopes | 3 |
 | Up to a curved face (Catallax covers bare stock targets only) | 3 |
 | Other fillets | 4 |
-| Sweep and loft; spline, ellipse and text profiles | 5 |
-| STEP import | 6 |
+| Curved sweeps and loft; spline, ellipse and text profiles | 5 |
+| STEP spline files and unsupported analytic imports | 6 |
 
 Parts export as STEP AP242 and supported exact-surface IGES 5.3 with Catallax's proven deviation, and as STL, 3MF and OBJ from Catallax's meshes, from File > Export or `soliddraft export`; see [part export](docs/exchange.md). IGES import, surfacing and sheet metal are not available. In the desktop app an assembly opens in a tab beside the part: File > New assembly or Make assembly from part, insert parts from a file dialog or by dropping their files on the window, place each by typing its position and rotation, then save and reopen it; see [assemblies](docs/assemblies.md#in-the-app). Mates come next. The [roadmap](docs/roadmap.md) orders the remaining work.
 

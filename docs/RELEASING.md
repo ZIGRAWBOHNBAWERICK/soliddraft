@@ -30,6 +30,8 @@ Linux desktop entries declare `application/vnd.soliddraft.part` for `.dwprt` and
 
 The SBOM comes from Syft through `anchore/sbom-action`. It inventories the checked-out source, locked dependencies and staged packages; it is not a claim that every workspace dependency is linked into every executable. The tag workflow creates GitHub build-provenance attestations for every downloadable file, including the notes, SBOM and checksum manifest. Dry runs do not publish attestations.
 
+Generated notes compare document formats with the highest published version below the candidate version, even when that tag is on another release branch. Pull request lists include original merge commits and fixes recorded by `git cherry-pick -x`, and exclude pull requests already shipped in the previous release. Notes also link the SolidDraft website.
+
 Verify a download with `sha256sum -c SHA256SUMS` after downloading the complete set, or check its individual entry. Verify provenance with:
 
 ```sh

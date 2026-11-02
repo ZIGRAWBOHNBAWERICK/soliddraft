@@ -239,7 +239,7 @@ impl CatallaxKernel {
             "questions":questions}))
     }
 
-    /// The retained definition: a native Catallax recipe for fields, a legacy recipe for B-reps.
+    /// The retained definition, using native recipes for fields and straight sweeps.
     pub fn body_recipe(&self, body: BodyId) -> KernelResult<Value> {
         if let Some(field) = self.field(body)? {
             return Ok(field.recipe());
@@ -251,8 +251,13 @@ impl CatallaxKernel {
         } else {
             "soliddraft-recipe/1"
         };
-        Ok(json!({"format":format, "name":"SolidDraft",
-            "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result}))
+        let recipe = json!({"format":format, "name":"SolidDraft",
+            "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
+        if stored.steps.values().any(|s| s["op"] == "straight_sweep") {
+            return serde_json::to_value(converted_recipe(&recipe, OpKind::Sweep)?.recipe)
+                .map_err(|e| KernelError::InvalidInput(e.to_string()));
+        }
+        Ok(recipe)
     }
 
     fn observe<T>(&self, operation: &str, run: impl FnOnce() -> KernelResult<T>) -> KernelResult<T> {
@@ -349,6 +354,9 @@ impl CatallaxKernel {
             .collect();
         let exact = app.checkpoint.built();
         if exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty {
+            if op == OpKind::Sweep {
+                return Err(KernelError::InvalidInput("Sweep path must leave the profile plane".into()));
+            }
             return Err(KernelError::Unsupported(
                 "empty results have no BodyKind or centroid in the existing application interface is not available in the Catallax application entry".into(),
             ));
@@ -427,11 +435,26 @@ fn gap(what: &str) -> KernelError {
 
 /// Converts retained application definitions, preserving native steps and frames.
 fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::soliddraft::Converted> {
-    // The converter reads `soliddraft-recipe/1` only. A native step stands in as an
-    // identity union of the body it reads, then takes its own operation back.
+    // The shared converter reads `soliddraft-recipe/1` only. Replace unsupported
+    // steps during conversion, then restore their native definitions before building.
     let mut legacy = input.clone();
     let mut natives = Vec::new();
     for step in legacy["steps"].as_array_mut().expect("generated recipe steps") {
+        if step["op"] == "straight_sweep" {
+            let tag = step["id"].as_str().expect("stored sweep id").to_owned();
+            let profile = step["profile"].clone();
+            let path = step["path"].clone();
+            natives.push((
+                tag.clone(),
+                serde_json::from_value(json!({
+                    "op":"sweep", "profile":profile, "path":format!("{tag}_path"), "orientation":"fixed"
+                }))
+                .map_err(|e| KernelError::InvalidInput(format!("stored sweep: {e}")))?,
+                path,
+            ));
+            *step = json!({"id":tag,"op":"extrude","profile":profile,"distance":1.0});
+            continue;
+        }
         if step["op"] != "native" {
             continue;
         }
@@ -497,8 +520,23 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
         {
             *d = Some(direction);
         }
-        let step = converted.recipe.steps.iter_mut().find(|s| s.id == id).expect("converted native step");
-        step.op = native;
+        let index = converted.recipe.steps.iter().position(|s| s.id == id).expect("converted native step");
+        converted.recipe.steps[index].op = native;
+        if !stored_sweep["segment_id"].is_null() {
+            let point = |key: &str| -> KernelResult<Value> {
+                let p: [f64; 3] = serde_json::from_value(stored_sweep[key].clone())
+                    .map_err(|e| KernelError::InvalidInput(e.to_string()))?;
+                Ok(json!([
+                    native::number(p[0], "path endpoint")?,
+                    native::number(p[1], "path endpoint")?,
+                    native::number(p[2], "path endpoint")?
+                ]))
+            };
+            let path = serde_json::from_value(json!({"id":format!("{tag}_path"),"op":"path",
+                "start":point("start")?,"segments":[{"kind":"line","id":stored_sweep["segment_id"],"to":point("end")?}]}))
+                .map_err(|e| KernelError::InvalidInput(format!("stored sweep path: {e}")))?;
+            converted.recipe.steps.insert(index, path);
+        }
     }
     Ok(converted)
 }
@@ -523,7 +561,13 @@ fn build(
     Ok((app, converted.steps))
 }
 
+const SWEEP_REFUSAL: &str =
+    "This sweep could not finish. Try a simpler polygon profile and a straight path that leaves its plane";
+
 fn build_error(op: OpKind, error: Error) -> KernelError {
+    if op == OpKind::Sweep {
+        return KernelError::Unsupported(SWEEP_REFUSAL.into());
+    }
     let code = error.code();
     if matches!(error, Error::Conversion(catallax_app::soliddraft::ConversionError::NotYet { .. })) {
         return gap(&format!("{op:?}"));
@@ -641,6 +685,49 @@ impl Kernel for CatallaxKernel {
             let step =
                 json!({"op":"extrude","profile":p.result,"distance":params.distance,"direction":params.direction});
             self.operation(state, tag, OpKind::Extrude, &[profile], step)
+        })
+    }
+
+    fn sweep(&self, tag: &OpTag, profile: BodyId, params: &soliddraft_kernel_api::Sweep) -> KernelResult<OpResult> {
+        self.observe("sweep", || {
+            if !params.start.iter().chain(&params.end).all(|v| v.is_finite()) || params.start == params.end {
+                return Err(KernelError::InvalidInput("Sweep needs two different finite endpoints".into()));
+            }
+            let state = self.state()?;
+            let p = state.get(profile)?;
+            if p.solid.is_some() {
+                return Err(KernelError::InvalidInput("Select a closed polygon sketch to sweep".into()));
+            }
+            let source = p.steps.values().find(|step| step["id"] == p.result).expect("stored profile");
+            let shape: Profile = serde_json::from_value(
+                json!({"plane":source["plane"], "outer":source["loops"]["outer"], "holes":source["loops"]["holes"]}),
+            )
+            .map_err(|e| KernelError::InvalidInput(e.to_string()))?;
+            if std::iter::once(&shape.outer)
+                .chain(&shape.holes)
+                .flat_map(|l| &l.0)
+                .any(|s| !matches!(s, soliddraft_kernel_api::Segment::Line { .. }))
+            {
+                return Err(KernelError::InvalidInput(
+                    "Sweep currently needs a closed polygon profile with straight sides".into(),
+                ));
+            }
+            let _: catallax_recipe::ElementId = serde_json::from_value(json!(params.segment_id))
+                .map_err(|_| KernelError::InvalidInput("Sweep path segment needs a valid name".into()))?;
+            let result = p.result.clone();
+            self.operation(
+                state,
+                tag,
+                OpKind::Sweep,
+                &[profile],
+                json!({
+                    "op":"straight_sweep", "profile":result, "path":params
+                }),
+            )
+        })
+        .map_err(|error| match error {
+            KernelError::Unavailable(_) => KernelError::Unsupported(SWEEP_REFUSAL.into()),
+            other => other,
         })
     }
 

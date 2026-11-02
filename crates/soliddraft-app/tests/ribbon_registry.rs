@@ -221,7 +221,16 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             continue;
         }
         let current = now["commands"].get(id).unwrap_or_else(|| panic!("{id} is gone"));
-        let current = configuration_registry::before_configurations(id, current, plain);
+        let mut current = configuration_registry::before_configurations(id, current, plain);
+        if id == "sweep" {
+            assert_eq!(current["agents"], "verb");
+            assert_eq!(current["undo"], "step");
+            assert_eq!(current["tool"]["name"], "sweep");
+            // Sweep gained a tool and history; its other ribbon contracts stay frozen.
+            for field in ["agents", "undo", "tool"] {
+                current[field] = row[field].clone();
+            }
+        }
         assert_eq!(&current, row, "{id} changed");
     }
     for list in ["agent_tools", "verbs"] {

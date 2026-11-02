@@ -92,6 +92,11 @@ impl Kernel for Counting {
         self.inner.extrude(tag, profile, params)
     }
 
+    fn sweep(&self, tag: &OpTag, profile: BodyId, params: &crate::Sweep) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.sweep(tag, profile, params)
+    }
+
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.revolve(tag, profile, params)

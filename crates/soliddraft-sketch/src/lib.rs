@@ -12,6 +12,7 @@
 //! so another solver can take its place.
 
 pub mod profile;
+mod references;
 mod shapes;
 pub mod solve;
 pub mod tools;

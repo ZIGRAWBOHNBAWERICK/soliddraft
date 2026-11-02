@@ -14,6 +14,8 @@ pub(super) fn before_configurations(id: &str, current: &Value, plain: fn(&Value)
         "set_configuration_value",
         "reference_plane",
         "edit_reference_plane",
+        "sweep",
+        "edit_sweep",
     ]);
     let mut found = BTreeSet::new();
     let lines = current.pointer_mut("/tool/input/properties/commands/items/anyOf").unwrap().as_array_mut().unwrap();

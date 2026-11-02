@@ -9,7 +9,7 @@ use crate::document::{
 };
 use crate::document::{EdgeRef, EntityRef};
 use crate::drag::{Dimension, DragPreview, Finish};
-use crate::sketch::{ConstraintId, EntityId, P2, PointRef, Sketch};
+use crate::sketch::{ConstraintId, EntityId, EntityKind, P2, PointRef, Sketch, tools::Operation};
 use crate::viewport::ViewportState;
 use crate::viewport::camera::StandardView;
 use crate::viewport::look::Preset;
@@ -360,6 +360,20 @@ pub enum Tool {
     Slot,
     Point,
     Dimension,
+    /// A regular polygon from a centre and a first vertex.
+    Polygon,
+    /// Removes the piece of a line or arc under the pointer, between its crossings.
+    Trim,
+    /// Lengthens the end of a line or arc under the pointer to the nearest curve beyond it.
+    Extend,
+    /// Copies the selected chain at a distance.
+    Offset,
+    /// Copies the selection across an axis.
+    Mirror,
+    /// Copies the selection along a step.
+    LinearPattern,
+    /// Copies the selection around a centre.
+    CircularPattern,
 }
 
 impl Tool {
@@ -373,8 +387,103 @@ impl Tool {
             Tool::Slot => "Slot",
             Tool::Point => "Point",
             Tool::Dimension => "Smart dimension",
+            Tool::Polygon => "Polygon",
+            Tool::Trim => "Trim",
+            Tool::Extend => "Extend",
+            Tool::Offset => "Offset",
+            Tool::Mirror => "Mirror entities",
+            Tool::LinearPattern => "Linear pattern",
+            Tool::CircularPattern => "Circular pattern",
         }
     }
+
+    /// Tools that place points with the sketcher's inference, one click at a time.
+    pub fn places_points(self) -> bool {
+        matches!(
+            self,
+            Tool::Line | Tool::Rectangle | Tool::Circle | Tool::Arc | Tool::Slot | Tool::Point | Tool::Polygon
+        )
+    }
+
+    /// Tools that change the line or arc under the pointer, and preview the change first.
+    pub fn picks_curve(self) -> bool {
+        matches!(self, Tool::Trim | Tool::Extend)
+    }
+
+    /// Tools that work on the selection: the pointer keeps selecting while they are active,
+    /// and the property panel holds their values and applies them.
+    pub fn selects(self) -> bool {
+        matches!(self, Tool::Select | Tool::Offset | Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
+    }
+
+    /// The tools of the ribbon's Modify group, which make or change geometry through
+    /// [`crate::sketch::tools::Operation`].
+    pub fn modifies(self) -> bool {
+        matches!(
+            self,
+            Tool::Polygon
+                | Tool::Trim
+                | Tool::Extend
+                | Tool::Offset
+                | Tool::Mirror
+                | Tool::LinearPattern
+                | Tool::CircularPattern
+        )
+    }
+}
+
+/// The typed values of the Modify tools, kept while the sketch is open so that the ribbon,
+/// the property panel and the pointer share them. Coordinates are in the sketch plane, mm.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModifyInputs {
+    /// Polygon sides, 3 to 1000.
+    pub sides: u32,
+    /// Offset distance; positive is left of the chain's walking direction.
+    pub distance: f64,
+    /// The mirror axis.
+    pub axis_start: P2,
+    pub axis_end: P2,
+    /// The linear pattern's step between instances.
+    pub step: P2,
+    /// Instances including the seed, for both patterns.
+    pub count: u32,
+    /// The circular pattern's centre and the angle between instances, in degrees.
+    pub center: P2,
+    pub angle: f64,
+}
+
+impl Default for ModifyInputs {
+    fn default() -> Self {
+        Self {
+            sides: 6,
+            distance: 2.0,
+            axis_start: P2::ZERO,
+            axis_end: P2::new(0.0, 10.0),
+            step: P2::new(20.0, 0.0),
+            count: 3,
+            center: P2::ZERO,
+            angle: 90.0,
+        }
+    }
+}
+
+/// What the active Modify tool would do now: at the pointer for Trim and Extend, with the
+/// selection and the typed values for the copy tools. The sketcher draws it every frame
+/// and applies `operation` on the click or the Apply button.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ToolPreview {
+    /// Geometry the tool would add, or the new shape of what it changes.
+    pub added: Vec<EntityKind>,
+    /// Geometry the tool would remove.
+    pub removed: Vec<EntityKind>,
+    /// The entity Trim or Extend works on.
+    pub target: Option<EntityId>,
+    /// The curve an extension meets.
+    pub boundary: Option<EntityId>,
+    /// The operation the preview shows, ready to apply. `None` with `refused` says why not.
+    pub operation: Option<Operation>,
+    /// Why the tool can do nothing yet, in the user's words.
+    pub refused: Option<String>,
 }
 
 /// Something selected inside a sketch.
@@ -433,6 +542,10 @@ pub struct SketchSession {
     pub auto_relations: bool,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
+    /// The Modify tools' typed values.
+    pub modify: ModifyInputs,
+    /// What the active Modify tool would do now, redrawn every frame.
+    pub preview: Option<ToolPreview>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -463,9 +576,13 @@ impl SketchSession {
             message: None,
             auto_relations: true,
             construction: false,
+            modify: ModifyInputs::default(),
+            preview: None,
         }
     }
 
+    /// Picks a tool. Whatever the old tool had started is dropped. A tool that works on
+    /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
         self.tool = tool;
         self.pending.clear();
@@ -473,9 +590,16 @@ impl SketchSession {
         self.dim_first = None;
         self.dim_second = None;
         self.dim_edit = None;
-        if tool != Tool::Select {
+        self.preview = None;
+        if !tool.selects() {
             self.selection.clear();
         }
+    }
+
+    /// Whether Escape has something to drop before it leaves the sketch: a tool other
+    /// than Select, a started shape or a started dimension.
+    pub fn tool_in_progress(&self) -> bool {
+        self.tool != Tool::Select || !self.pending.is_empty() || self.dim_first.is_some()
     }
 
     pub fn say(&mut self, text: impl Into<String>) {

@@ -93,7 +93,7 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
     use DrawingTab as D;
     match tab {
         Tab::Part(RibbonTab::Solid) => &["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"],
-        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Constrain", "Use sketch", "View"],
+        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Modify", "Constrain", "Use sketch", "View"],
         Tab::Part(RibbonTab::Inspect) => &["Measure", "Check", "Surface quality"],
         Tab::Part(RibbonTab::View) => &["Orientation", "Display", "Projection", "Panels"],
         Tab::Part(RibbonTab::Assembly | RibbonTab::Surface | RibbonTab::PointCloud) => &[],
@@ -1041,6 +1041,55 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Point))
 .app_only(SKETCHER),
+        // The Modify tools: each previews what it will do and applies it on a click or
+        // from the property panel. Escape or a right-click returns to Select.
+        cmd("sketch_polygon", "Polygon", Icon::Polygon, "Regular polygon: click the centre, then a vertex")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Polygon))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Polygon))
+.app_only(SKETCHER),
+        cmd("sketch_trim", "Trim", Icon::Trim, "Trim: click the piece of a line or arc to remove")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Trim))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Trim))
+.app_only(SKETCHER),
+        cmd("sketch_extend", "Extend", Icon::Extend, "Extend: click the end of a line or arc to lengthen it to the next curve")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Extend))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Extend))
+.app_only(SKETCHER),
+        cmd("sketch_offset", "Offset", Icon::Offset, "Offset: copy the selected chain at a distance")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Offset))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Offset))
+.app_only(SKETCHER),
+        cmd("sketch_mirror", "Mirror entities", Icon::Mirror, "Mirror: copy the selected entities across an axis")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Mirror))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Mirror))
+.app_only(SKETCHER),
+        cmd("sketch_linear_pattern", "Linear pattern", Icon::LinearPattern, "Copy the selected entities along a step")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::LinearPattern))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::LinearPattern))
+.app_only(SKETCHER),
+        cmd(
+            "sketch_circular_pattern",
+            "Circular pattern",
+            Icon::CircularPattern,
+            "Copy the selected entities around a centre",
+        )
+        .on(Sketch, "Modify", Small)
+        .run(|_| AppAction::SketchTool(Tool::CircularPattern))
+        .when(AppState::in_sketch)
+        .lit(|s| tool_is(s, Tool::CircularPattern))
+.app_only(SKETCHER),
         cmd("sketch_select", "Select", Icon::Sketch, "Select and drag sketch geometry")
             .key(Scope::Sketch, none, Key::V)
             .run(|_| AppAction::SketchTool(Tool::Select))
@@ -1677,7 +1726,7 @@ fn registry() -> Vec<CommandSpec> {
             "cancel",
             "Cancel",
             Icon::Close,
-            "Cancel a typed value, a drag or the open feature, leave the sketch, or clear the selection",
+            "Cancel a typed value, a drag, the open feature or the sketch tool, leave the sketch, or clear the selection",
         )
         .key(Scope::Part, none, Key::Escape)
         .run(|s| {
@@ -1688,6 +1737,9 @@ fn registry() -> Vec<CommandSpec> {
                 AppAction::Drawing(DrawingAction::CancelNewDrawing)
             } else if s.editor.is_some() {
                 AppAction::CancelEditor
+            } else if s.sketch.as_ref().is_some_and(|k| k.tool_in_progress()) {
+                // The first Escape drops the tool and what it started; the next leaves the sketch.
+                AppAction::SketchTool(Tool::Select)
             } else if s.in_sketch() {
                 AppAction::ExitSketch(None)
             } else if s.drag_preview.is_some() {

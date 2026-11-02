@@ -12,8 +12,10 @@ use crate::document::{Command, Document};
 use crate::sketch::{
     Align, Constraint, ConstraintId, ConstraintKind, DistanceKind, Entity, EntityId, EntityKind, P2, PointRef, Sketch,
     SolveStatus, fmt_value, solve,
+    tools::{End, Operation, polygon_corners},
 };
-use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool};
+use crate::sketch_tools;
+use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool, ToolPreview};
 use crate::theme;
 use crate::viewport::camera::Camera;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
@@ -116,6 +118,19 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
         }
     }
     best.map(|(_, id)| SketchSel::Entity(id))
+}
+
+/// The line or arc under the pointer, for the tools that change one. Points, circles and
+/// relation glyphs are not candidates, and a point of a curve counts as the curve.
+fn hit_curve(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2) -> Option<EntityId> {
+    let mut best: Option<(f32, EntityId)> = None;
+    for e in sketch.drawn().filter(|e| e.is_line() || matches!(e.kind, EntityKind::Arc { .. })) {
+        let d = entity_distance(frame, e, pos);
+        if d <= POINT_REACH && best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, e.id));
+        }
+    }
+    best.map(|(_, id)| id)
 }
 
 /// Snaps a cursor position and names the inferences that moved it.
@@ -246,13 +261,16 @@ pub fn run(
     let hover_pos = resp.hover_pos().filter(|_| !resp.dragged());
     s.cursor = hover_pos.and_then(|p| frame.plane_at(p));
 
-    // Hover and inference.
+    // Hover and inference. A tool that places points infers at the pointer; one that
+    // changes a curve finds the curve under it and previews the change; the rest pick.
     s.hover = None;
     s.snaps.clear();
-    let drawing = !matches!(s.tool, Tool::Select | Tool::Dimension);
+    s.preview = None;
+    let places = s.tool.places_points();
+    let picks = s.tool.picks_curve();
     let mut snapped: Option<P2> = None;
     if let Some(pos) = hover_pos {
-        if drawing {
+        if places {
             let prev = s.pending.last().map(|(p, _)| *p);
             let ignore: Vec<EntityId> = Vec::new();
             if let (Some(raw), Some(inferred)) = (frame.plane_at(pos), infer(&frame, &s.sketch, pos, prev, &ignore)) {
@@ -260,6 +278,9 @@ pub fn run(
                 snapped = Some(p);
                 s.snaps = snaps;
             }
+        } else if picks {
+            s.hover = hit_curve(&frame, &s.sketch, pos).map(SketchSel::Entity);
+            s.preview = curve_preview(s, &frame, pos);
         } else {
             s.hover = hit_test(&frame, &s.sketch, pos, &glyphs);
             if s.hover.is_none()
@@ -269,8 +290,12 @@ pub fn run(
             }
         }
     }
+    if s.tool.selects() && s.tool != Tool::Select {
+        s.preview = sketch_tools::selection_preview(s);
+    }
     if hover_pos.is_some() {
-        ui.ctx().set_cursor_icon(if drawing { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Default });
+        let cursor = if places || picks { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Default };
+        ui.ctx().set_cursor_icon(cursor);
     }
 
     let modifiers = ui.input(|i| i.modifiers);
@@ -280,10 +305,23 @@ pub fn run(
 
     // Tool input.
     match s.tool {
-        Tool::Select => select_input(ui, s, &frame, resp, clicked, double, modifiers, &mut actions),
+        tool if tool.selects() => select_input(ui, s, &frame, resp, clicked, double, modifiers, &mut actions),
         Tool::Dimension => {
             if clicked && let Some(pos) = hover_pos {
                 dimension_click(s, &frame, pos, &mut actions);
+            }
+        }
+        Tool::Trim | Tool::Extend => {
+            if clicked {
+                match s.preview.as_ref().and_then(|p| p.operation.clone()) {
+                    Some(operation) => {
+                        sketch_tools::apply(s, &operation, &mut actions);
+                    }
+                    None => {
+                        let why = s.preview.as_ref().and_then(|p| p.refused.clone());
+                        s.say(why.unwrap_or_else(|| "Point at a line or arc".to_owned()));
+                    }
+                }
             }
         }
         _ => {
@@ -295,8 +333,8 @@ pub fn run(
             }
         }
     }
-    if secondary && drawing {
-        // Right click ends the current chain or tool.
+    if secondary && s.tool != Tool::Select {
+        // Right click ends the current chain, or puts the tool down.
         if s.pending.is_empty() {
             s.set_tool(Tool::Select);
         } else {
@@ -312,6 +350,7 @@ pub fn run(
     paint_glyphs(&painter, s, &glyphs);
     paint_dimensions(&painter, &frame, s);
     paint_rubber_band(&painter, &frame, s, snapped);
+    paint_tool_preview(&painter, &frame, s);
     paint_snaps(&painter, &frame, s, hover_pos, snapped);
     dim_editor(ui, s, &frame, &mut actions);
     paint_status(ui, s, rect);
@@ -414,6 +453,52 @@ fn select_input(
             None => s.selection.clear(),
         }
     }
+}
+
+/// What Trim or Extend would do to the line or arc under the pointer. Extend lengthens
+/// the end nearer the pointer to the nearest curve beyond it; Trim removes the interval
+/// under the pointer. The preview carries the operation a click applies.
+fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<ToolPreview> {
+    let id = hit_curve(frame, &s.sketch, pos)?;
+    let at = frame.plane_at(pos)?;
+    let entity = *s.sketch.entity(id)?;
+    let preview = match s.tool {
+        Tool::Trim => match s.sketch.trim_preview(id, at) {
+            Ok(trim) => ToolPreview {
+                removed: vec![trim.removed],
+                target: Some(id),
+                operation: Some(Operation::Trim { entity: id, at }),
+                ..Default::default()
+            },
+            Err(e) => ToolPreview { target: Some(id), refused: Some(e.0), ..Default::default() },
+        },
+        Tool::Extend => {
+            // The end to move is the one nearer the pointer on screen.
+            let (a, b) = match entity.kind {
+                EntityKind::Line { a, b } => (a, b),
+                EntityKind::Arc { start, end, .. } => (start, end),
+                _ => return None,
+            };
+            let nearer = |p: P2| frame.screen(p).map(|sp| (sp - pos).length()).unwrap_or(f32::INFINITY);
+            let end = if nearer(a) <= nearer(b) { End::Start } else { End::End };
+            match s.sketch.extend_boundary(id, end) {
+                Some(boundary) => {
+                    let operation = Operation::Extend { entity: id, end, boundary };
+                    let mut preview = sketch_tools::try_operation(s, operation);
+                    preview.target = Some(id);
+                    preview.boundary = Some(boundary);
+                    preview
+                }
+                None => ToolPreview {
+                    target: Some(id),
+                    refused: Some("Nothing lies beyond that end to extend to".into()),
+                    ..Default::default()
+                },
+            }
+        }
+        _ => return None,
+    };
+    Some(preview)
 }
 
 /// A click with a drawing tool.
@@ -575,7 +660,34 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
             solve::solve(&mut s.sketch, None, true);
             commit(s, actions);
         }
-        Tool::Select | Tool::Dimension => {}
+        Tool::Polygon => match s.pending.pop() {
+            None => s.pending.push((p, snaps)),
+            Some((c, c_snaps)) => {
+                let operation = Operation::Polygon { center: c, vertex: p, sides: s.modify.sides };
+                let before = s.sketch.entities.len();
+                if sketch_tools::apply(s, &operation, actions) {
+                    // The first vertex keeps the relation its snap showed; the centre is
+                    // not a point of the sketch.
+                    if let Some(first) = s.sketch.entities.get(before).map(|e| e.id) {
+                        apply_snaps(&mut s.sketch, PointRef::new(first, 0), &snaps, None);
+                        solve::solve(&mut s.sketch, None, true);
+                        if let Some(AppAction::Command(Command::EditSketch { sketch, .. })) = actions.last_mut() {
+                            *sketch = s.sketch.clone();
+                        }
+                    }
+                } else {
+                    s.pending.push((c, c_snaps));
+                }
+            }
+        },
+        Tool::Select
+        | Tool::Dimension
+        | Tool::Trim
+        | Tool::Extend
+        | Tool::Offset
+        | Tool::Mirror
+        | Tool::LinearPattern
+        | Tool::CircularPattern => {}
     }
 }
 
@@ -1283,6 +1395,14 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
                 curve(e.polyline(64));
             }
         }
+        (Tool::Polygon, [(c, _)]) => {
+            if let Ok(corners) = polygon_corners(*c, p, s.modify.sides) {
+                let mut closed = corners.clone();
+                closed.push(corners[0]);
+                curve(closed);
+                seg(*c, p);
+            }
+        }
         (Tool::Slot, [(c0, _)]) => seg(*c0, p),
         (Tool::Slot, [(c0, _), (c1, _)]) => {
             let d = c1.sub(*c0);
@@ -1306,6 +1426,34 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
             }
         }
         _ => {}
+    }
+}
+
+/// The active Modify tool's preview: what it adds in the accent, what it removes in the
+/// error colour, over the geometry as it is.
+fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
+    let Some(preview) = &s.preview else { return };
+    let curve = |kind: EntityKind, stroke: Stroke| {
+        let e = Entity { id: 0, kind, construction: false };
+        let pts: Vec<Pos2> = e.polyline(96).into_iter().filter_map(|q| frame.screen(q)).collect();
+        if e.is_point() {
+            if let Some(p) = pts.first() {
+                painter.rect_filled(Rect::from_center_size(*p, vec2(5.0, 5.0)), CornerRadius::ZERO, stroke.color);
+            }
+        } else if pts.len() >= 2 {
+            painter.add(egui::Shape::line(pts, stroke));
+        }
+    };
+    for kind in &preview.removed {
+        curve(*kind, Stroke::new(4.0, theme::error().gamma_multiply(0.9)));
+    }
+    for kind in &preview.added {
+        curve(*kind, Stroke::new(2.0, theme::accent()));
+    }
+    if let Some(boundary) = preview.boundary
+        && let Some(e) = s.sketch.entity(boundary)
+    {
+        curve(e.kind, Stroke::new(3.0, theme::selection_bg()));
     }
 }
 
@@ -1491,6 +1639,14 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
                 "Smart dimension: pick an entity or point"
             }
         }
+        (Tool::Polygon, 0) => "Polygon: click the centre",
+        (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
+        (Tool::Trim, _) => "Trim: click the piece of a line or arc to remove; Esc or right-click ends",
+        (Tool::Extend, _) => "Extend: click the end of a line or arc to lengthen; Esc or right-click ends",
+        (Tool::Offset, _) => "Offset: select the chain in walking order, then Apply in the panel",
+        (Tool::Mirror, _) => "Mirror: select the entities and give the axis, then Apply in the panel",
+        (Tool::LinearPattern, _) => "Linear pattern: select the entities and give the step, then Apply in the panel",
+        (Tool::CircularPattern, _) => "Circular pattern: select the entities and give the centre, then Apply",
     };
     let message = s.message.as_ref().filter(|(_, at)| at.elapsed().as_secs_f32() < 4.0).map(|(m, _)| m.clone());
     let line2 = message.unwrap_or_else(|| hint.to_owned());

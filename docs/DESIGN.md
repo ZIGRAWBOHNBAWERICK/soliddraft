@@ -93,7 +93,12 @@ The sketcher draws on the 3D view with the egui painter; the sketch plane maps p
 - **Sketches on faces** use a frame with u to the right and v up when the face is looked at from outside, and the model origin projected onto the face as origin. A sketch therefore does not move when the face's outline changes, and a bore sketched on a boss reads as x, y of the part.
 - **Entering a sketch** looks straight at the plane, switches to orthographic, and fits the body or, with nothing built yet, a 200 mm workspace. Leaving it restores the projection. The ribbon jumps to the Sketch tab and back.
 
-The sketch properties panel's **Polygon and modify** controls apply regular polygons, trim, extend, offset, mirror, and linear or circular patterns through `soliddraft_sketch::tools::Operation`. Coordinates are in the sketch plane, in millimetres. These tools use the existing `f64` sketch model, solver and joining tolerances. The kernel geometry is exact after the existing Catallax recipe conversion; the sketch calculations are not exact rational arithmetic.
+The Sketch tab's **Modify** group holds polygon, trim, extend, offset, mirror and the linear and circular patterns, all through `soliddraft_sketch::tools::Operation`, the same operations the `sketch_geometry` verb runs headlessly. Each tool shows what it will do before it does it: added geometry in the accent, removed geometry in the error colour. Escape or a right-click puts a tool down and returns to Select; a second Escape leaves the sketch. Coordinates are in the sketch plane, in millimetres. These tools use the existing `f64` sketch model, solver and joining tolerances. The kernel geometry is exact after the existing Catallax recipe conversion; the sketch calculations are not exact rational arithmetic.
+
+- **Polygon** is two clicks: the centre, then the first vertex, which sets the size and the turn. The polygon follows the pointer between them. The number of sides is in the property panel.
+- **Trim** removes the piece of the line or arc under the pointer between its nearest crossings, or the whole curve when nothing crosses it. The piece that would go is drawn in the error colour before the click.
+- **Extend** lengthens the end of the line or arc nearer the pointer to the nearest curve beyond it, with no boundary to pick; the new length and the curve it meets are drawn before the click.
+- **Offset, Mirror entities, Linear pattern and Circular pattern** work on the selection. The pointer keeps selecting while they are active, entities picked before the tool stay selected, and the property panel holds the distance, axis, step, centre, angle and count. The copies they would add are drawn as the values change, and Apply adds them as one undo step. A refusal is shown in the panel in the tool's own words and changes nothing. Placing their values with the pointer is the next slice.
 
 Trim removes the picked interval between intersections with bounded sketch curves. Extend moves the selected start or end to the nearest intersection beyond it with the selected boundary. Both preserve the target entity id when a piece remains and discard its old relations, so an old dimension cannot restore the trimmed or extended geometry. A refused operation leaves the sketch unchanged.
 
@@ -101,7 +106,7 @@ Offset copies a connected chain selected in walking order, starting in the first
 
 Polygon and circular-pattern rotations preserve exact degree-specified right angles with coordinate swaps and signs. Other angles retain their trigonometric values, without a near-angle snapping tolerance. This avoids introducing tiny nonzero coordinates at 90-degree increments that can make the rational arc converter refuse an otherwise valid profile. Each pattern instance computes its transform once for all copied points.
 
-Pointer-led selection workflows, tool previews, dedicated ribbon commands and placement feedback for these tools remain interface-design work. Ellipse, spline and text profiles still wait for Catallax stage 5.
+Pointer placement of the offset distance, the mirror axis, the pattern step and the pattern centre remains interface-design work; those four tools take their values from the property panel. Ellipse, spline and text profiles still wait for Catallax stage 5.
 
 
 ## Phase 2: one body, references and repair

@@ -103,6 +103,34 @@ pub struct ToolError(pub String);
 
 type Result<T, E = ToolError> = std::result::Result<T, E>;
 
+/// What a trim at a point would do: the interval that goes and the pieces that stay.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrimPreview {
+    /// The interval of the target between its nearest crossings, which the trim removes.
+    pub removed: EntityKind,
+    /// The pieces of the target that remain, from its start to its end.
+    pub kept: Vec<EntityKind>,
+}
+
+/// The corners of a regular polygon, counter-clockwise from `vertex` about `center`.
+/// Right angles come out exact, as [`Operation::Polygon`] makes them.
+pub fn polygon_corners(center: P2, vertex: P2, sides: u32) -> Result<Vec<P2>> {
+    if !finite(center) || !finite(vertex) || center.dist(vertex) <= EPS || !(3..=1000).contains(&sides) {
+        return refuse("a polygon needs a finite centre, a distinct vertex and 3 to 1000 sides");
+    }
+    let d = vertex - center;
+    Ok((0..sides)
+        .map(|i| {
+            if i == 0 {
+                vertex
+            } else {
+                let (s, c) = rotation_sin_cos(360.0 * f64::from(i) / f64::from(sides));
+                center + P2::new(c * d.u - s * d.v, s * d.u + c * d.v)
+            }
+        })
+        .collect())
+}
+
 fn refuse<T>(message: &str) -> Result<T> {
     Err(ToolError(message.into()))
 }
@@ -258,6 +286,45 @@ fn point_at(kind: EntityKind, t: f64) -> P2 {
     }
 }
 
+/// The nearest point where `target`, lengthened beyond `end`, meets the bounded `limit`,
+/// with how far the end travels to reach it. A line or arc target only.
+fn extension(target: &Entity, end: End, limit: &Entity) -> Option<(f64, P2)> {
+    let [a, b] = ends(target.kind)?;
+    let mut candidates: Vec<_> = intersections(target.kind, limit.kind)
+        .into_iter()
+        .filter_map(|p| {
+            if !on_curve(limit.kind, p) {
+                return None;
+            }
+            let distance = match target.kind {
+                EntityKind::Line { .. } => {
+                    let t = parameter(target.kind, p)?;
+                    match end {
+                        End::Start if t < 0.0 => a.dist(p),
+                        End::End if t > 1.0 => b.dist(p),
+                        _ => return None,
+                    }
+                }
+                EntityKind::Arc { center, .. } => {
+                    let (_, sweep) = target.arc_angles()?;
+                    let delta = match end {
+                        End::Start => ((a - center).angle() - (p - center).angle()).rem_euclid(TAU),
+                        End::End => ((p - center).angle() - (b - center).angle()).rem_euclid(TAU),
+                    };
+                    if sweep + delta >= TAU - EPS / center.dist(a) {
+                        return None;
+                    }
+                    delta * center.dist(a)
+                }
+                _ => return None,
+            };
+            (distance > EPS).then_some((distance, p))
+        })
+        .collect();
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+    candidates.first().copied()
+}
+
 impl Sketch {
     fn tool_entity(&self, id: EntityId) -> Result<Entity> {
         self.entity(id)
@@ -314,20 +381,7 @@ impl Sketch {
         match operation {
             Operation::Add { kind, construction } => self.add_tool_entities(vec![(*kind, *construction)]),
             Operation::Polygon { center, vertex, sides } => {
-                if !finite(*center) || !finite(*vertex) || center.dist(*vertex) <= EPS || !(3..=1000).contains(sides) {
-                    return refuse("a polygon needs a finite centre, a distinct vertex and 3 to 1000 sides");
-                }
-                let d = *vertex - *center;
-                let corners: Vec<_> = (0..*sides)
-                    .map(|i| {
-                        if i == 0 {
-                            *vertex
-                        } else {
-                            let (s, c) = rotation_sin_cos(360.0 * f64::from(i) / f64::from(*sides));
-                            *center + P2::new(c * d.u - s * d.v, s * d.u + c * d.v)
-                        }
-                    })
-                    .collect();
+                let corners = polygon_corners(*center, *vertex, *sides)?;
                 self.add_tool_entities(
                     (0..corners.len())
                         .map(|i| (EntityKind::Line { a: corners[i], b: corners[(i + 1) % corners.len()] }, false))
@@ -437,7 +491,8 @@ impl Sketch {
         Ok(ids)
     }
 
-    fn trim_interval(&mut self, id: EntityId, at: P2) -> Result<Vec<EntityId>> {
+    /// What trimming `id` at `at` removes and keeps, without changing the sketch.
+    pub fn trim_preview(&self, id: EntityId, at: P2) -> Result<TrimPreview> {
         let target = self.tool_entity(id)?;
         if !finite(at) || ends(target.kind).is_none() {
             return refuse("trim needs a line or arc and a finite pick point");
@@ -460,16 +515,36 @@ impl Sketch {
         let Some(pair) = cuts.windows(2).find(|w| w[0] < t && t < w[1]) else {
             return refuse("no trim interval at this point");
         };
-        let mut pieces = Vec::with_capacity(2);
-        for (a, b) in [(0.0, pair[0]), (pair[1], 1.0)] {
-            if point_at(target.kind, a).dist(point_at(target.kind, b)) > EPS {
-                let mut kind = target.kind;
-                set_end(&mut kind, End::Start, point_at(target.kind, a));
-                set_end(&mut kind, End::End, point_at(target.kind, b));
-                pieces.push(kind);
-            }
-        }
-        self.replace_tool_entity(id, pieces)
+        let piece = |a: f64, b: f64| {
+            let mut kind = target.kind;
+            set_end(&mut kind, End::Start, point_at(target.kind, a));
+            set_end(&mut kind, End::End, point_at(target.kind, b));
+            kind
+        };
+        let kept = [(0.0, pair[0]), (pair[1], 1.0)]
+            .into_iter()
+            .filter(|(a, b)| point_at(target.kind, *a).dist(point_at(target.kind, *b)) > EPS)
+            .map(|(a, b)| piece(a, b))
+            .collect();
+        Ok(TrimPreview { removed: piece(pair[0], pair[1]), kept })
+    }
+
+    fn trim_interval(&mut self, id: EntityId, at: P2) -> Result<Vec<EntityId>> {
+        let preview = self.trim_preview(id, at)?;
+        self.replace_tool_entity(id, preview.kept)
+    }
+
+    /// The bounded entity a pointer extend of `id` meets first beyond `end`: the nearest
+    /// intersection over every other drawn line, arc and circle. `None` when nothing lies
+    /// beyond that end, or when `id` is not a line or arc.
+    pub fn extend_boundary(&self, id: EntityId, end: End) -> Option<EntityId> {
+        let target = self.tool_entity(id).ok()?;
+        ends(target.kind)?;
+        self.drawn()
+            .filter(|e| e.id != id && valid(e.kind) && !e.is_point())
+            .filter_map(|limit| extension(&target, end, limit).map(|(distance, _)| (distance, limit.id)))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, id)| id)
     }
 
     fn extend_to(&mut self, id: EntityId, end: End, boundary: EntityId) -> Result<Vec<EntityId>> {
@@ -478,46 +553,14 @@ impl Sketch {
         }
         let target = self.tool_entity(id)?;
         let limit = self.tool_entity(boundary)?;
-        let Some([a, b]) = ends(target.kind) else {
+        if ends(target.kind).is_none() {
             return refuse("extend needs a line or arc");
-        };
-        let mut candidates: Vec<_> = intersections(target.kind, limit.kind)
-            .into_iter()
-            .filter_map(|p| {
-                if !on_curve(limit.kind, p) {
-                    return None;
-                }
-                let distance = match target.kind {
-                    EntityKind::Line { .. } => {
-                        let t = parameter(target.kind, p)?;
-                        match end {
-                            End::Start if t < 0.0 => a.dist(p),
-                            End::End if t > 1.0 => b.dist(p),
-                            _ => return None,
-                        }
-                    }
-                    EntityKind::Arc { center, .. } => {
-                        let (_, sweep) = target.arc_angles()?;
-                        let delta = match end {
-                            End::Start => ((a - center).angle() - (p - center).angle()).rem_euclid(TAU),
-                            End::End => ((p - center).angle() - (b - center).angle()).rem_euclid(TAU),
-                        };
-                        if sweep + delta >= TAU - EPS / center.dist(a) {
-                            return None;
-                        }
-                        delta * center.dist(a)
-                    }
-                    _ => return None,
-                };
-                (distance > EPS).then_some((distance, p))
-            })
-            .collect();
-        candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let Some((_, p)) = candidates.first() else {
+        }
+        let Some((_, p)) = extension(&target, end, &limit) else {
             return refuse("the boundary has no intersection beyond that endpoint");
         };
         let mut kind = target.kind;
-        set_end(&mut kind, end, *p);
+        set_end(&mut kind, end, p);
         self.replace_tool_entity(id, vec![kind])
     }
 

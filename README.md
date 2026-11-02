@@ -50,6 +50,7 @@ Work in progress. SolidDraft runs only on Catallax. See [the backend gaps](docs/
 - Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; booleans and rational-frame revolves through the kernel and recipe runner. The revolve ribbon command still waits for its application editor. Persistent references, undo and redo, feature tree editing and part files work.
 - Holes on a planar face, blind or through, with flat or drill-point tips, counterbores and countersinks at any angle, including the standard 118° tip and 82°, 90° and 100° countersinks. A countersink or drill point cannot yet go into a body that has another cylinder; see [the backend gaps](docs/needs-catallax.md).
 - Linear and circular patterns and mirrors of the part's body.
+- Clean single-body analytic STEP import with source preservation, review, save/reopen and checked export. This addition is for the next feature batch, after 0.2.0. See [STEP import](docs/exchange.md#step-import).
 - Analytic planar shells with selected open faces, editable wall thickness and persistent inner-wall names. See [shell coverage and evidence](docs/l08-shell-tool.md).
 - Fillets and equal-distance chamfers between planes and between planes and cylinders, and drafts of planar faces and cylinders parallel to the pull.
 - Drawings use Catallax meshes for polygon hidden-line removal. Plane sections on screen are cut from the same meshes; an exported section subtracts a half-space through a Catallax boolean. ISO and ANSI sheets, aligned views, dimensions and annotations keep their formats. Output to drawing files, SVG, PDF and DXF works, and every exported view curve says whether it is the model's exact line or circle or a mesh polyline. Exact silhouettes and some curve conversions remain pending.
@@ -65,7 +66,7 @@ Waiting commands stay visible and disabled with a tooltip naming their Catallax 
 | Up to a curved face (Catallax covers bare stock targets only) | 3 |
 | Other fillets | 4 |
 | Sweep and loft; spline, ellipse and text profiles | 5 |
-| STEP import | 6 |
+| STEP spline files and unsupported analytic imports | 6 |
 
 Parts export as STEP AP242 and supported exact-surface IGES 5.3 with Catallax's proven deviation, and as STL, 3MF and OBJ from Catallax's meshes, from File > Export or `soliddraft export`; see [part export](docs/exchange.md). IGES import, surfacing and sheet metal are not available. In the desktop app an assembly opens in a tab beside the part: File > New assembly or Make assembly from part, insert parts from a file dialog or by dropping their files on the window, place each by typing its position and rotation, then save and reopen it; see [assemblies](docs/assemblies.md#in-the-app). Mates come next. The [roadmap](docs/roadmap.md) orders the remaining work.
 

@@ -9,7 +9,7 @@ use catallax_numbers::{Decider, Rational};
 use serde_json::json;
 use soliddraft_kernel_api::*;
 
-use crate::{CatallaxKernel, MeshCache, Solid, Stored, build_error, convert, display_key};
+use crate::{CatallaxKernel, MeshCache, Solid, Stored, convert, display_key};
 
 fn options(input: &ImportOptions) -> KernelResult<catallax_import::ImportOptions> {
     Ok(catallax_import::ImportOptions {
@@ -24,10 +24,26 @@ fn wire<T: serde::de::DeserializeOwned>(input: impl serde::Serialize) -> KernelR
 }
 
 fn refusal(error: catallax_import::ImportRefusal) -> KernelError {
-    KernelError::InvalidInput(format!(
-        "STEP import refused: {}",
-        serde_json::to_string(&error).expect("import refusals serialize")
-    ))
+    use catallax_import::ImportRefusal::*;
+    let message = match error {
+        Malformed { .. } => "This file could not be read as a STEP solid.".into(),
+        Unsupported { entity, .. } => format!(
+            "This STEP file contains geometry that cannot be imported yet, at {entity}. Try a file with a single closed analytic solid."
+        ),
+        UnknownUnit { .. } => "This STEP file's length units could not be read.".into(),
+        HashMismatch { .. } => "The saved import does not match the original file.".into(),
+        NotSolid { .. } => "This STEP file does not contain a supported closed solid.".into(),
+        InvalidDecision { .. } => "The saved repair decision does not match this STEP file.".into(),
+        ValidationFailed { .. } => "This STEP file could not be imported without an unverified repair.".into(),
+        SelfIntersecting { faces, .. } => {
+            format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
+        }
+        SelfIntersectionNotVerified { faces, reason, .. } => {
+            format!("This STEP solid could not be verified at faces {} and {}: {reason}", faces[0], faces[1])
+        }
+        ResourceLimit => "This STEP file could not be checked within the available work limit.".into(),
+    };
+    KernelError::InvalidInput(message)
 }
 
 pub(super) fn propose(source: &[u8], input: &ImportOptions) -> KernelResult<ProposalSet> {
@@ -51,6 +67,22 @@ impl CatallaxKernel {
             None,
         )
         .map_err(refusal)?;
+        if let Some(saved) = request.record {
+            let saved: catallax_import::RepairRecord = wire(saved)?;
+            catallax_import::rebuild(
+                &mut catallax_topology::Model::new(),
+                request.source,
+                &options(request.options)?,
+                &saved,
+                None,
+            )
+            .map_err(refusal)?;
+            if saved != imported.record {
+                return Err(KernelError::InvalidInput(
+                    "the saved import record does not match this file and its decisions".into(),
+                ));
+            }
+        }
         let count = imported.bodies.len() + imported.left_open.len();
         if count != 1 {
             let names = imported
@@ -103,7 +135,12 @@ impl CatallaxKernel {
         if capture {
             self.state()?.questions.push(json!({"format":"catallax-question/1","source":"recipe","problem":problem}));
         }
-        let app = app.map_err(|e| build_error(OpKind::ImportStep, e))?;
+        let app = app.map_err(|_| {
+            KernelError::InvalidInput(
+                "This STEP body could not be imported and displayed. Try a file with a single closed analytic solid."
+                    .into(),
+            )
+        })?;
         let display = MeshCache::new();
         display.get(display_key(&catallax_mesh::MeshOptions::default()), || Ok(app.display.value))?;
         let app = catallax_app::EvaluatedApplicationBody { checkpoint: app.checkpoint, names: app.names };

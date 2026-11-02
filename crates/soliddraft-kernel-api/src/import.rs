@@ -194,6 +194,8 @@ pub struct ImportStepRequest<'a> {
     pub options: &'a ImportOptions,
     /// The answers saved so far.
     pub decisions: &'a [Decision],
+    /// The saved record to verify when reopening an import.
+    pub record: Option<&'a RepairRecord>,
 }
 
 /// One solid of the file, built.

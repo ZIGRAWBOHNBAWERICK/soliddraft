@@ -5,6 +5,10 @@ Both revisions run the head's scenario runner on one CPU in alternating order. O
 pair is discarded. Answers must match in every run; kernel work may differ, so it is
 recorded, never compared. Timing means nothing outside a hosted runner.
 
+A pull request that moves the Catallax pin runs two kernels, whose answers may rightly
+differ. Each revision then has to agree only with itself, and the medians are labelled as a
+pin move, not a same-kernel comparison.
+
 Hosted runners differ in CPU, so each run records its CPU model and a calibration figure.
 """
 import argparse
@@ -45,15 +49,15 @@ def checkout(root, sha):
 
 def build(args):
     """Builds both revisions in one checkout and target, so only their difference recompiles."""
-    root, pins = args.app, []
+    root, kernels = args.app, {}
     args.binaries.mkdir(parents=True)
     for revision, sha in (("baseline", os.environ["BASE_SHA"]), ("candidate", os.environ["HEAD_SHA"])):
         checkout(root, sha)
-        pins.append(PIN.search((root / PIN_SOURCE).read_text())[1])
+        kernels[revision] = PIN.search((root / PIN_SOURCE).read_text())[1]
         subprocess.run(["cargo", "build", "--release", "--locked", "-p", "soliddraft-cli"], cwd=root, check=True)
         (args.binaries / revision).write_bytes((root / "target/release/soliddraft").read_bytes())
         (args.binaries / revision).chmod(0o755)
-    assert pins[0] == pins[1], f"the kernel revision moved: {pins}"
+    (args.binaries / "kernels.json").write_text(json.dumps(kernels, indent=2) + "\n")
 
 
 def truncated(source, targets):
@@ -68,6 +72,30 @@ def truncated(source, targets):
         step.pop("checked_step_export", None)
         step.pop("drawing", None)
     return {**source, "steps": steps}
+
+
+def pin_moved(kernels):
+    return kernels["baseline"] != kernels["candidate"]
+
+
+def answer_group(name, revision, kernels):
+    """Which runs must give one answer: every run of a scenario, or each kernel's own."""
+    return (name, revision) if pin_moved(kernels) else name
+
+
+def comparison(kernels):
+    if pin_moved(kernels):
+        return "pin move: part files, recipes, kernel questions, views and command answers identical within each revision"
+    return "identical part files, recipes, kernel questions, views and command answers in every run"
+
+
+def heading(pins, kernels, pairs):
+    line = f"Base `{pins[0]}`, head `{pins[1]}`, {pairs} measured pairs.\n\n"
+    if not pin_moved(kernels):
+        return line
+    return (f"**Pin move, not a same-kernel comparison.** Base runs Catallax `{kernels['baseline']}`, head runs "
+            f"Catallax `{kernels['candidate']}`. Each revision's answers are compared only with its own runs. "
+            "These figures show the pin and the application change together.\n\n" + line)
 
 
 def compare_answers(comparator, left, right, pins):
@@ -183,6 +211,7 @@ def run(args):
     host = host_record(args.out)
     comparator = load(args.app / "ci/compare-scenario-bundles.py", "compare_bundles")
     pins = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
+    kernels = json.loads((args.binaries / "kernels.json").read_text())
     scenarios = args.out / "inputs"
     scenarios.mkdir()
     for name, targets in TARGETS.items():
@@ -197,16 +226,17 @@ def run(args):
                 load_before = os.getloadavg()
                 command = [sys.executable, str(args.app / "ci/run-scenarios.py"), str(scenarios / f"{name}.json"),
                            "--out", str(dest), "--soliddraft", str(args.binaries / revision),
-                           "--catallax-verify", str(args.verifier)]
+                           "--catallax-verify", str(args.verifier), "--catallax-revision", kernels[revision]]
                 with (dest.parent / f"{name}.log").open("w") as log:
                     result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
                 assert result.returncode == 0, f"scenario failed: {dest.parent / (name + '.log')}"
                 report = json.loads((dest / "result.json").read_text())
                 assert report["pass"], f"incomplete or failed scenario: {dest}"
-                if name in references:
-                    compare_answers(comparator, references[name], dest, pins)
+                group = answer_group(name, revision, kernels)
+                if group in references:
+                    compare_answers(comparator, references[group], dest, pins)
                 else:
-                    references[name] = dest
+                    references[group] = dest
                 for number in targets:
                     row = dict(pair=pair, warmup=pair == 0, revision=revision, scenario=name, step=number,
                                load_before=load_before, load_after=os.getloadavg(),
@@ -218,15 +248,15 @@ def run(args):
     report = dict(base=pins[0], head=pins[1], core=core, host=host, measured_pairs=MEASURED_PAIRS,
                   binary_sha256={r: hashlib.sha256((args.binaries / r).read_bytes()).hexdigest()
                                  for r in ("baseline", "candidate")},
-                  comparison="identical part files, recipes, kernel questions, views and command answers in every run",
+                  catallax=kernels, pin_move=pin_moved(kernels), comparison=comparison(kernels),
                   medians=rows, samples=samples)
     (args.out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-    print(host_line(host) + "\n" + table(rows))
+    title = heading(pins, kernels, MEASURED_PAIRS)
+    print(title + host_line(host) + "\n" + table(rows))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as out:
-            out.write(f"Base `{pins[0]}`, head `{pins[1]}`, {MEASURED_PAIRS} measured pairs.\n\n"
-                      + host_line(host) + "\n" + table(rows))
+            out.write(title + host_line(host) + "\n" + table(rows))
 
 
 if __name__ == "__main__":

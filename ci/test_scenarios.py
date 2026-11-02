@@ -870,7 +870,7 @@ class RunnerEndToEnd(unittest.TestCase):
             scenario.write_text(json.dumps({"format": "soliddraft-scenario/1", "name": "synthetic-gate",
                                             "steps": [step]}))
             args = argparse.Namespace(scenario=scenario, out=root / "run", soliddraft=str(FAKE),
-                                      catallax_verify="unused", timeout=timeout, strict=strict)
+                                      catallax_verify="unused", catallax_revision=None, timeout=timeout, strict=strict)
             os.environ["FAKE_MODE"] = mode
             os.environ["FAKE_PIN"] = scenarios.pinned_revision()
             if known_file is None:
@@ -902,7 +902,7 @@ class RunnerEndToEnd(unittest.TestCase):
                 "format": "soliddraft-scenario/1", "name": "synthetic-fresh", "steps": steps,
                 "setup": [["check-configuration-grid.py", "fixtures", "{bundle}/fixtures"]]}))
             args = argparse.Namespace(scenario=scenario, out=root / "run", soliddraft=str(FAKE),
-                                      catallax_verify="unused", timeout=scenarios.HANG_TIMEOUT_S, strict=False)
+                                      catallax_verify="unused", catallax_revision=None, timeout=scenarios.HANG_TIMEOUT_S, strict=False)
             os.environ["FAKE_MODE"] = "ok"
             os.environ["FAKE_PIN"] = scenarios.pinned_revision()
             try:
@@ -931,7 +931,7 @@ class RunnerEndToEnd(unittest.TestCase):
                 {"tool": "open", "arguments": {}, "fresh_process": True},
                 {"tool": "feature", "arguments": {}, "same_geometry_as_step": 1}]}))
             args = argparse.Namespace(scenario=scenario, out=root / "run", soliddraft=str(FAKE),
-                                      catallax_verify="unused", timeout=30, strict=False)
+                                      catallax_verify="unused", catallax_revision=None, timeout=30, strict=False)
             info = {"pass": True, "geometry_hash": "same"}
             with mock.patch.dict(os.environ, {"FAKE_MODE": "ok", "FAKE_PIN": scenarios.pinned_revision(),
                                               "FAKE_LOG": str(log)}), \

@@ -82,6 +82,33 @@ class Truncation(unittest.TestCase):
             self.assertEqual(len(edit_speed.truncated(source, targets)["steps"]), max(targets))
 
 
+class PinMove(unittest.TestCase):
+    same = dict(baseline="a" * 40, candidate="a" * 40)
+    moved = dict(baseline="a" * 40, candidate="b" * 40)
+
+    def test_one_kernel_keeps_every_run_of_a_scenario_in_one_group(self):
+        self.assertEqual(edit_speed.answer_group("bracket", "baseline", self.same),
+                         edit_speed.answer_group("bracket", "candidate", self.same))
+
+    def test_a_pin_move_compares_each_kernel_with_itself(self):
+        self.assertNotEqual(edit_speed.answer_group("bracket", "baseline", self.moved),
+                            edit_speed.answer_group("bracket", "candidate", self.moved))
+        self.assertEqual(edit_speed.answer_group("bracket", "candidate", self.moved),
+                         edit_speed.answer_group("bracket", "candidate", self.moved))
+
+    def test_one_kernel_keeps_its_heading_and_claim(self):
+        self.assertEqual(edit_speed.heading(("x", "y"), self.same, 9), "Base `x`, head `y`, 9 measured pairs.\n\n")
+        self.assertEqual(edit_speed.comparison(self.same),
+                         "identical part files, recipes, kernel questions, views and command answers in every run")
+
+    def test_a_pin_move_says_so_and_names_both_kernels(self):
+        text = edit_speed.heading(("x", "y"), self.moved, 9)
+        self.assertTrue(text.startswith("**Pin move, not a same-kernel comparison.**"))
+        self.assertIn(f"Base runs Catallax `{'a' * 40}`, head runs Catallax `{'b' * 40}`", text)
+        self.assertTrue(text.endswith("Base `x`, head `y`, 9 measured pairs.\n\n"))
+        self.assertTrue(edit_speed.comparison(self.moved).startswith("pin move: "))
+
+
 class Answers(unittest.TestCase):
     def bundle(self, root, background):
         folder = root / "commands" / "0001"

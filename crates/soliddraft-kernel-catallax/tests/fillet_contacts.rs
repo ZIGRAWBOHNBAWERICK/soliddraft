@@ -32,6 +32,9 @@ fn assert_one_strip(k: &CatallaxKernel, body: BodyId, at: Vec3, radius: f64, out
     let before = k.mass_properties(body).unwrap();
     for (edit, radius) in [radius, radius / 2.0].into_iter().enumerate() {
         let rounded = k.fillet(&OpTag::new("round"), body, &[edge], radius).unwrap();
+        let saved = k.body_recipe(rounded.body).unwrap();
+        let operation = &saved["steps"].as_array().unwrap().last().unwrap()["native"];
+        assert!(operation["edges"][0]["near"].is_array(), "a shared origin pair retains the picked point");
         assert!(k.validate(rounded.body).unwrap().valid);
         let topology = k.topology(rounded.body).unwrap();
         let cylinders = topology.faces.iter().filter(|f| f.surface == SurfaceKind::Cylinder).count();

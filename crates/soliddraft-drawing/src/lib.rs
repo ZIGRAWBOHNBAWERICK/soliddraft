@@ -81,7 +81,7 @@ pub enum DrawingError {
     #[error("no {0} in the drawing")]
     UnknownAnnotation(AnnotationId),
     /// The operation is not built yet.
-    #[error("{0} is not implemented yet")]
+    #[error("{0} is coming soon.")]
     NotYetImplemented(&'static str),
     /// The command reads the part; run it with [`apply_with`].
     #[error("{0} needs the part")]

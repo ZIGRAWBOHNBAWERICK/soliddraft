@@ -46,6 +46,13 @@ impl Built {
     }
 }
 
+fn feature_error(error: KernelError) -> String {
+    match error {
+        KernelError::Unsupported(message) if message.ends_with(" is coming soon.") => message,
+        other => other.to_string(),
+    }
+}
+
 impl Document {
     /// A copy of the part that shares this one's feature builds and bodies, so the copy
     /// builds only what changes in it. It has the same id, features and settings, and
@@ -378,7 +385,7 @@ impl Document {
                 if let Some(body) = mine {
                     let _ = self.kernel.release(body);
                 }
-                Built::failed(current, error.to_string())
+                Built::failed(current, feature_error(error))
             }
         }
     }
@@ -435,7 +442,7 @@ impl Document {
                 };
                 let bbox = match self.kernel.topology(body) {
                     Ok(t) => t.bbox,
-                    Err(err) => return Built::failed(current, err.to_string()),
+                    Err(err) => return Built::failed(current, feature_error(err)),
                 };
                 let (lo, hi) = (bbox.min, bbox.max);
                 let reach = (0..8)
@@ -520,7 +527,7 @@ impl Document {
                 if let Some(body) = mine {
                     let _ = self.kernel.release(body);
                 }
-                Built::failed(current, err.to_string())
+                Built::failed(current, feature_error(err))
             }
         }
     }
@@ -535,7 +542,7 @@ impl Document {
         }
         let t = match self.view_of(body) {
             Ok(v) => v,
-            Err(err) => return Built::failed(current, err.to_string()),
+            Err(err) => return Built::failed(current, feature_error(err)),
         };
         let names = self.name_map();
         let view = View { topology: &t };
@@ -563,7 +570,7 @@ impl Document {
         };
         let result = match result {
             Ok(r) => r,
-            Err(err) => return Built::failed(current, err.to_string()),
+            Err(err) => return Built::failed(current, feature_error(err)),
         };
         let faces = result
             .record
@@ -642,7 +649,7 @@ impl Document {
                 version: 0,
                 import_record: None,
             },
-            Err(err) => Built::failed(current, err.to_string()),
+            Err(err) => Built::failed(current, feature_error(err)),
         }
     }
 
@@ -905,10 +912,8 @@ impl Document {
                     import_record: Some(r.record),
                 }
             }
-            Err(KernelError::Unsupported(what)) => {
-                Built::failed(current, format!("this build cannot import STEP files yet: the backend has no {what}"))
-            }
-            Err(err) => Built::failed(current, err.to_string()),
+            Err(KernelError::Unsupported(_)) => Built::failed(current, "STEP import is coming soon."),
+            Err(err) => Built::failed(current, feature_error(err)),
         }
     }
 

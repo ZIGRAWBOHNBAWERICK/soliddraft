@@ -591,8 +591,8 @@ impl ViewportState {
             HudItem::Text("R", "Right view (R)"),
             HudItem::Sep,
             HudItem::Icon(Icon::Display, "Display style"),
-            HudItem::Icon(Icon::Section, "Section view (phase 2)"),
-            HudItem::Icon(Icon::Measure, "Measure (phase 2)"),
+            HudItem::Icon(Icon::Section, "Coming soon"),
+            HudItem::Icon(Icon::Measure, "Coming soon"),
         ];
         let width: f32 = items.iter().map(|i| i.width()).sum::<f32>() + 10.0;
         let hud = Rect::from_center_size(pos2(rect.center().x, rect.top() + 12.0 + height / 2.0), vec2(width, height));
@@ -614,7 +614,7 @@ impl ViewportState {
                     continue;
                 }
                 HudItem::Icon(icon, tip) | HudItem::IconText(icon, tip) => {
-                    let enabled = !tip.contains("phase 2");
+                    let enabled = !matches!(icon, Icon::Section | Icon::Measure);
                     let resp = hud_button(ui, r, idx, enabled, tip, |p, c| icons::paint(p, *icon, r.shrink(5.0), c));
                     if resp.clicked() {
                         match idx {

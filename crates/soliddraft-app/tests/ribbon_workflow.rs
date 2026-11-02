@@ -52,12 +52,12 @@ const NEEDS_A_BODY: [(&str, &str); 9] = [
 
 /// What has no action yet, whatever the part holds, and what it says.
 const NOT_YET: [(&str, &str); 6] = [
-    ("Sweep", "Arrives with Catallax stage 5"),
-    ("Loft", "Arrives with Catallax stage 5"),
-    ("Slot", "Arrives in a later phase"),
-    ("Plane", "Arrives in a later phase"),
-    ("Axis", "Arrives in a later phase"),
-    ("Point", "Arrives in a later phase"),
+    ("Sweep", "Coming soon"),
+    ("Loft", "Coming soon"),
+    ("Slot", "Coming soon"),
+    ("Plane", "Coming soon"),
+    ("Axis", "Coming soon"),
+    ("Point", "Coming soon"),
 ];
 
 fn settle(app: &mut App) {
@@ -93,7 +93,7 @@ fn properties_below(app: &App, tree: &str) {
     assert!(view.right() >= ribbon::window(app).right() - TOLERANCE, "nothing is right of the viewport: {view:?}");
 }
 
-/// The disabled tabs say why and do nothing: not to the part, the open editor or the ribbon.
+/// The unfinished tabs say Coming soon and leave the part, editor and ribbon unchanged.
 fn placeholders_change_nothing(app: &mut App) {
     let before = ribbon::fingerprint(app);
     let captions = ribbon::caption_names(app);
@@ -101,7 +101,7 @@ fn placeholders_change_nothing(app: &mut App) {
         let tab = ribbon::tab(app, name);
         assert!(!tab.enabled, "{name} is disabled");
         let said = ribbon::tooltip(app, tab.rect);
-        assert!(said.to_lowercase().contains("planned"), "{name} says it is planned: {said:?}");
+        assert_eq!(said, "Coming soon", "{name}");
         ribbon::click_at(app, tab.rect.center());
         let rest = ribbon::window(app).center();
         app.hover_at(rest);
@@ -169,7 +169,7 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
             let button = ribbon::ribbon_button(app, label);
             assert!(!button.enabled, "{label} is disabled on a blank part");
             let said = ribbon::tooltip(app, button.rect);
-            assert!(said.contains(says), "{label} says {says}: {said:?}");
+            assert_eq!(said, *says, "{label}");
         }
         for (label, says) in [("Revolve", "sketch"), ("Cut", "Cut needs a body and a sketch")] {
             let button = ribbon::ribbon_button(app, label);

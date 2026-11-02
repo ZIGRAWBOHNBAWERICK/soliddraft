@@ -5,7 +5,9 @@ use super::{
     GRID_AND_PLANES, Hit, MOUSE, Message, ORBIT_ZOOM, Preferences, Status, VIEW_KEYS, categories, page, search,
 };
 use crate::navigation::view_keys::{self, RowState};
-use crate::navigation::{Action, Binding, Capability, EventKind, Outcome, Pivot, ZoomAnchor, gather, presets};
+use crate::navigation::{
+    Action, Binding, Capability, EventKind, LimitKind, Outcome, Pivot, ZoomAnchor, gather, presets,
+};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, vec2};
 
@@ -97,7 +99,7 @@ fn categories_list(p: &mut Preferences, ui: &mut egui::Ui) {
                 }
             }
             Status::Reserved => {
-                ui.add_enabled(false, egui::Button::new(format!("{} · coming later", c.label)).frame(false));
+                ui.add_enabled(false, egui::Button::new(format!("{} · Coming soon", c.label)).frame(false));
             }
         }
     }
@@ -143,9 +145,7 @@ fn heading(ui: &mut egui::Ui, id: &str) {
 fn missing(b: &Binding) -> Option<&'static str> {
     match b.requires {
         Capability::None => None,
-        Capability::CameraRoll => Some("needs camera roll, which SolidDraft's camera does not have yet"),
-        Capability::NumpadLocation => Some("needs the numeric keypad told apart from the number row"),
-        Capability::OrderedButtons => Some("needs ordered button presses"),
+        _ => Some("Coming soon"),
     }
 }
 
@@ -180,10 +180,11 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
                 for b in preset.bindings.iter().filter(|b| b.event != EventKind::Key) {
                     let lit = p.highlight.as_deref() == Some(&format!("row.{}", b.id)[..]);
                     ui.horizontal(|ui| {
-                        let mut text = format!("{}: {}", b.action.label(), b.text(p.mac));
-                        if let Some(why) = missing(b) {
-                            text.push_str(&format!(" — not available: {why}"));
-                        }
+                        let text = if missing(b).is_some() {
+                            format!("{} · Coming soon", b.action.label())
+                        } else {
+                            format!("{}: {}", b.action.label(), b.text(p.mac))
+                        };
                         let rich = egui::RichText::new(text);
                         ui.label(if lit { rich.color(theme::accent()) } else { rich });
                         let editable = missing(b).is_none() && !matches!(b.event, EventKind::Wheel | EventKind::Pinch);
@@ -211,14 +212,20 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
                             | Action::NormalOrNearest
                     )
                 }) {
-                    ui.label(format!("{}: {}{}", b.action.label(), b.text(p.mac), state_text(&keys, b, *state)));
+                    ui.label(binding_text(&keys, b, *state, p.mac));
                 }
             }
             ui.add_space(4.0);
             control(lit(p, "limitations"), ui, |ui| {
                 ui.label(egui::RichText::new("Limitations").strong());
                 for l in &preset.limitations {
-                    ui.label(egui::RichText::new(l.text).color(theme::muted()));
+                    let text = match l.kind {
+                        LimitKind::NeedsCameraRoll
+                        | LimitKind::NeedsNumpadLocation
+                        | LimitKind::NeedsOrderedButtons => "Coming soon",
+                        _ => l.text,
+                    };
+                    ui.label(egui::RichText::new(text).color(theme::muted()));
                 }
             });
             if control(lit(p, "reset_preset"), ui, |ui| ui.button("Reset preset")).clicked() {
@@ -229,13 +236,21 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
     });
 }
 
+fn binding_text(keys: &view_keys::ViewKeys, b: &Binding, state: RowState, mac: bool) -> String {
+    if matches!(state, RowState::Unavailable(_)) {
+        format!("{} · Coming soon", b.action.label())
+    } else {
+        format!("{}: {}{}", b.action.label(), b.text(mac), state_text(keys, b, state))
+    }
+}
+
 fn state_text(keys: &view_keys::ViewKeys, b: &Binding, state: RowState) -> String {
     match state {
         RowState::Active => String::new(),
         RowState::Duplicate(c) => format!(" — SolidDraft's {c} already has it"),
         RowState::Supersedes(c) => format!(" — takes the key over from {c}"),
         RowState::OutsideSketch => " — outside a sketch; in a sketch the key stays the sketch's".into(),
-        RowState::Unavailable(why) => format!(" — not available: {why}"),
+        RowState::Unavailable(_) => " · Coming soon".into(),
         RowState::Blocked => {
             let owners: Vec<String> = keys
                 .conflicts
@@ -269,7 +284,7 @@ fn practice(p: &mut Preferences, ui: &mut egui::Ui) {
             }
             p.practice_label = match r.outcome {
                 Outcome::Action(a) => a.label().to_owned(),
-                Outcome::Unsupported(a) => format!("{} (not available)", a.label()),
+                Outcome::Unsupported(a) => format!("{} · Coming soon", a.label()),
                 Outcome::None => continue,
             };
         }
@@ -357,13 +372,9 @@ fn orbit_zoom_page(p: &mut Preferences, ui: &mut egui::Ui) {
         ui.label("Orbit pivot");
         ui.horizontal_wrapped(|ui| {
             let _ = ui.radio(p.draft.camera.pivot == Pivot::Target, "View centre");
-            for (label, why) in [
-                ("Under the cursor", "needs a pivot under the cursor"),
-                ("Selection", "needs a pivot at the selection"),
-                ("Origin", "needs a pivot at the origin"),
-            ] {
-                ui.add_enabled(false, egui::RadioButton::new(false, label)).on_disabled_hover_text(why);
-                ui.label(egui::RichText::new(format!("({why})")).color(theme::muted()).small());
+            for label in ["Under the cursor", "Selection", "Origin"] {
+                ui.add_enabled(false, egui::RadioButton::new(false, label)).on_disabled_hover_text("Coming soon");
+                ui.label(egui::RichText::new("Coming soon").color(theme::muted()).small());
             }
         });
     });
@@ -371,9 +382,7 @@ fn orbit_zoom_page(p: &mut Preferences, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let _ = ui.radio(true, "Turntable, upright");
             ui.add_enabled(false, egui::RadioButton::new(false, "Free trackball"));
-            ui.label(
-                egui::RichText::new("(needs a free trackball camera; not available yet)").color(theme::muted()).small(),
-            );
+            ui.label(egui::RichText::new("Coming soon").color(theme::muted()).small());
         });
     });
     slider(p, ui, "transition", "Transition duration (s)", 0.0..=1.0, |s| &mut s.camera.transition_seconds);
@@ -423,7 +432,7 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
     ui.add_space(6.0);
     control(lit(p, "fit"), ui, |ui| {
         for (b, state) in keys.rows.iter().filter(|(b, _)| matches!(b.action, Action::Fit | Action::FitSelected)) {
-            ui.label(format!("{}: {}{}", b.action.label(), b.text(p.mac), state_text(&keys, b, *state)));
+            ui.label(binding_text(&keys, b, *state, p.mac));
         }
     });
     control(lit(p, "normal"), ui, |ui| {
@@ -433,7 +442,7 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
                 Action::NormalTo | Action::NormalToggle | Action::NormalOrNearest | Action::AlignTopToFace
             )
         }) {
-            ui.label(format!("{}: {}{}", b.action.label(), b.text(p.mac), state_text(&keys, b, *state)));
+            ui.label(binding_text(&keys, b, *state, p.mac));
         }
     });
     for (b, state) in keys.rows.iter().filter(|(b, _)| {
@@ -447,7 +456,7 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
                 | Action::AlignTopToFace
         )
     }) {
-        ui.label(format!("{}: {}{}", b.action.label(), b.text(p.mac), state_text(&keys, b, *state)));
+        ui.label(binding_text(&keys, b, *state, p.mac));
     }
     if keys.rows.is_empty() {
         ui.label("SolidDraft's own keys: Z fits, N turns normal to, F, T, R and I show the views.");
@@ -470,7 +479,13 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
         }
     });
     for l in &keys.profile.limitations {
-        ui.label(egui::RichText::new(l.text).color(theme::muted()));
+        let text = match l.kind {
+            LimitKind::NeedsCameraRoll | LimitKind::NeedsNumpadLocation | LimitKind::NeedsOrderedButtons => {
+                "Coming soon"
+            }
+            _ => l.text,
+        };
+        ui.label(egui::RichText::new(text).color(theme::muted()));
     }
     if control(lit(p, "reset_view_keys"), ui, |ui| ui.button("Reset view keys")).clicked() {
         p.reset_view_keys();

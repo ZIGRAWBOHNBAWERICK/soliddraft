@@ -152,7 +152,7 @@ fn section_panel(ui: &mut egui::Ui, s: &mut DrawingSession, replace: Option<View
         section_gap(ui);
         theme::section_label(ui, "Section");
         choice(ui, true, "Full section", None);
-        choice(ui, false, "Slice (cut faces only)", Some("later"));
+        choice(ui, false, "Slice (cut faces only)", Some("Coming soon"));
         if let Some(h) = hatch_combo(ui, "section_tool_hatch", s.draft.hatch.as_deref()) {
             s.draft.hatch = h;
         }

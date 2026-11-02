@@ -223,7 +223,7 @@ fn add_property(state: &mut AppState) -> Option<String> {
 fn import(state: &mut AppState) -> Option<String> {
     // The browser's upload route opens documents; a table needs its own.
     if cfg!(target_arch = "wasm32") {
-        return Some("Importing a table in the browser is coming soon".to_owned());
+        return Some("Coming soon".to_owned());
     }
     let path = crate::platform::open_path("Import configuration table", "Configuration table", &["csv", "xlsx"])?;
     Some(match super::tools::preview_file(state, &path) {

@@ -383,7 +383,7 @@ pub(super) fn topology(
                     return Err(KernelError::QueryFailed {
                         query: "topology".into(),
                         code: 0,
-                        message: "Catallax display face has no nondegenerate triangles (Catallax stage 1)".into(),
+                        message: "Catallax display face has no nondegenerate triangles".into(),
                     });
                 }
                 let bbox = bounds(triangles.iter().flat_map(|t| t.vertices).map(|v| mesh.positions[v].into()), chord);

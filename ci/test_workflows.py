@@ -215,7 +215,7 @@ class RustCache(unittest.TestCase):
                 self.assertIsNotNone(key, path.name)
                 keys.add(key[1])
                 self.assertNotRegex(block, r"(?m)^          key:")
-        self.assertEqual(count, 13)
+        self.assertEqual(count, 14)
         self.assertEqual(keys, {'native-dev', 'native-test-opt2', 'wasm-dev',
                                 'native-release', 'wasm-release'})
 

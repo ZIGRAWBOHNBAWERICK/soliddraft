@@ -1088,6 +1088,13 @@ impl Kernel for CatallaxKernel {
         })
     }
 
+    fn face_carriers(&self, body: BodyId) -> KernelResult<Vec<FaceCarrier>> {
+        self.observe("face_carriers", || {
+            let solid = self.solid(body)?;
+            convert::face_carriers(&solid.app, &solid.ids)
+        })
+    }
+
     fn measured_topology(&self, body: BodyId) -> KernelResult<Topology> {
         self.observe("measured_topology", || {
             let solid = self.solid(body)?;
@@ -1250,6 +1257,46 @@ mod tests {
         assert!(Arc::ptr_eq(&mesh, &cached.unwrap()));
         assert!(kernel.retained_bytes(body).unwrap() > retained);
         assert!(kernel.topology(body).is_ok(), "a mesh refusal must not poison the topology cache");
+    }
+
+    #[test]
+    fn face_carriers_match_the_topology_and_build_no_mesh() {
+        let kernel = CatallaxKernel::new();
+        let block = contract::block(&kernel);
+        let pin = contract::cylinder(&kernel, Vec3::new(1.0, 1.0, 1.0), 0.5, 3.0);
+        let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, block, pin).unwrap().body;
+        for body in [block, pin, cut] {
+            let carriers = kernel.face_carriers(body).unwrap();
+            let mut meshes = 0;
+            kernel.solid(body).unwrap().display.each(|_| meshes += 1);
+            assert_eq!(meshes, 0, "carriers come from the model");
+            let topology = kernel.topology(body).unwrap();
+            let ids = |mut faces: Vec<FaceId>| {
+                faces.sort();
+                faces
+            };
+            assert_eq!(
+                ids(carriers.iter().map(|f| f.id).collect()),
+                ids(topology.faces.iter().map(|f| f.id).collect())
+            );
+            for carrier in &carriers {
+                let face = topology.face(carrier.id).unwrap();
+                assert_eq!(
+                    (carrier.surface, carrier.normal, &carrier.origins),
+                    (face.surface, face.normal, &face.origins)
+                );
+                // The offset a sketch plane takes, bit for bit, wherever a rebuild reads it here.
+                if let (Some(normal), Some(point)) = (carrier.normal, carrier.on_plane) {
+                    let (exact, display) = (point.dot(normal), face.centroid.dot(normal));
+                    assert!((exact - display).abs() < 1e-9, "{}", carrier.id);
+                    if exact != 0.0 {
+                        assert_eq!(exact.to_bits(), display.to_bits(), "{}", carrier.id);
+                    }
+                } else {
+                    assert_eq!((carrier.normal, carrier.on_plane), (None, None));
+                }
+            }
+        }
     }
 
     #[test]

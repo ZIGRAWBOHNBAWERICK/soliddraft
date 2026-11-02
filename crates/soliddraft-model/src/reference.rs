@@ -28,7 +28,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::{
-    CurveKind, EdgeId, EdgeInfo, FaceId, FaceInfo, HolePart, Origin, SurfaceKind, Topology, Vec3,
+    CurveKind, EdgeId, EdgeInfo, FaceCarrier, FaceId, FaceInfo, HolePart, Origin, SurfaceKind, Topology, Vec3,
 };
 use soliddraft_sketch::EntityId;
 
@@ -120,10 +120,14 @@ impl FaceFingerprint {
 
     /// Why `face` is not the face this fingerprint describes, if it is not.
     fn mismatch(&self, face: &FaceInfo) -> Option<String> {
-        if face.surface != self.surface {
-            return Some(format!("the face became {:?} instead of {:?}", face.surface, self.surface));
+        self.changed(face.surface, face.normal)
+    }
+
+    fn changed(&self, surface: SurfaceKind, normal: Option<Vec3>) -> Option<String> {
+        if surface != self.surface {
+            return Some(format!("the face became {:?} instead of {:?}", surface, self.surface));
         }
-        match (self.normal, face.normal) {
+        match (self.normal, normal) {
             (Some(a), Some(b)) if a.dot(b) < 1.0 - 1e-6 => {
                 Some(format!("the face now faces {:?} instead of {:?}", round3(b), round3(a)))
             }
@@ -409,6 +413,25 @@ pub(crate) fn resolve_plane(r: &FaceRef, view: &View, names: &NameMap) -> Result
     }
 }
 
+/// The normal and a point of the plane [`resolve_plane`] would find, from exact carriers
+/// alone. `None` leaves the answer to `resolve_plane` and the display topology: a broken
+/// reference ranks its repair candidates by area and centroid, and only an axis-aligned
+/// plane clear of the origin has an offset that cannot depend on the display centroid.
+/// There the topology's snap of that centroid onto the plane cancels exactly, and a
+/// tilted plane keeps its round-off, or a plane through the origin its sign of zero.
+pub(crate) fn carrier_plane(r: &FaceRef, carriers: &[FaceCarrier], names: &NameMap) -> Option<(Vec3, Vec3)> {
+    let seed = names.get(&r.feature)?.iter().find(|n| n.generator == r.generator && n.ordinal == r.ordinal)?;
+    let mut pieces = carriers.iter().filter(|f| f.origins.contains(&seed.origin));
+    let first = pieces.next()?;
+    let (normal, on_plane) = (first.normal?, first.on_plane?);
+    let offset = on_plane.dot(normal);
+    let axis_aligned = [normal.x, normal.y, normal.z].iter().filter(|v| **v == 0.0).count() == 2;
+    let unchanged = |f: &FaceCarrier| r.fingerprint.changed(f.surface, f.normal).is_none();
+    let same_plane = |f: &FaceCarrier| f.normal == Some(normal) && f.on_plane.is_some_and(|p| p.dot(normal) == offset);
+    let clean = axis_aligned && offset.abs() > SAME_PLANE && unchanged(first);
+    (clean && pieces.all(|f| unchanged(f) && same_plane(f))).then_some((normal, on_plane))
+}
+
 /// Every current face a face reference names, for an assignment that follows a face
 /// through later features, such as an appearance: every piece of a split face matches.
 /// Only a missing face, or one whose surface type or facing changed, breaks it.
@@ -642,6 +665,50 @@ mod tests {
             vertices: Vec::new(),
             bbox: Aabb { min: Vec3::ZERO, max: Vec3::new(1.0, 1.0, 1.0) },
             display_chord_height: None,
+        }
+    }
+
+    fn carrier(id: u64, z: f64, origins: Vec<Origin>) -> FaceCarrier {
+        FaceCarrier {
+            id: FaceId::from_raw(id),
+            surface: SurfaceKind::Plane,
+            normal: Some(Vec3::Z),
+            on_plane: Some(Vec3::new(3.0, 4.0, z)),
+            origins,
+        }
+    }
+
+    #[test]
+    fn carriers_answer_only_clean_planes_and_leave_the_rest_to_the_topology() {
+        let cap = origin("F2.r0.sweep", FaceRole::EndCap);
+        let named = [NamedFace { origin: cap.clone(), generator: Generator::EndCap, ordinal: 0 }];
+        let names: NameMap = [(FeatureId(2), &named[..])].into();
+        let r = FaceRef {
+            feature: FeatureId(2),
+            generator: Generator::EndCap,
+            ordinal: 0,
+            fingerprint: FaceFingerprint::of(&face(1, 10.0, vec![])),
+            label: String::new(),
+        };
+        let plane = |faces: &[FaceCarrier]| carrier_plane(&r, faces, &names);
+        let whole = carrier(1, 10.0, vec![cap.clone()]);
+        assert_eq!(plane(std::slice::from_ref(&whole)), whole.normal.zip(whole.on_plane));
+        // The pieces of a split face give one plane, whichever comes first.
+        let piece = carrier(2, 10.0, vec![cap.clone()]);
+        assert_eq!(plane(&[whole.clone(), piece.clone()]), whole.normal.zip(whole.on_plane));
+        assert_eq!(plane(&[piece.clone(), whole.clone()]), piece.normal.zip(piece.on_plane));
+        // Each of these needs a display area or centroid, or may take its bits from one.
+        let refused = [
+            ("the origin is gone", vec![carrier(1, 10.0, vec![])]),
+            ("pieces lie in two planes", vec![whole.clone(), carrier(2, 12.0, vec![cap.clone()])]),
+            ("a plane through the origin", vec![carrier(1, 0.0, vec![cap.clone()])]),
+            ("the face turned over", vec![FaceCarrier { normal: Some(-Vec3::Z), ..whole.clone() }]),
+            ("the face is curved", vec![FaceCarrier { normal: None, on_plane: None, ..whole.clone() }]),
+            ("the surface changed", vec![FaceCarrier { surface: SurfaceKind::Cylinder, ..whole.clone() }]),
+            ("a tilted plane", vec![FaceCarrier { normal: Some(Vec3::new(0.0, 0.6, 0.8)), ..whole.clone() }]),
+        ];
+        for (why, faces) in refused {
+            assert_eq!(plane(&faces), None, "{why}");
         }
     }
 

@@ -51,8 +51,7 @@ const NEEDS_A_BODY: [(&str, &str); 9] = [
 ];
 
 /// What has no action yet, whatever the part holds, and what it says.
-const NOT_YET: [(&str, &str); 6] = [
-    ("Sweep", "Coming soon"),
+const NOT_YET: [(&str, &str); 5] = [
     ("Loft", "Coming soon"),
     ("Slot", "Coming soon"),
     ("Plane", "Coming soon"),
@@ -171,7 +170,9 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
             let said = ribbon::tooltip(app, button.rect);
             assert_eq!(said, *says, "{label}");
         }
-        for (label, says) in [("Revolve", "sketch"), ("Cut", "Cut needs a body and a sketch")] {
+        for (label, says) in
+            [("Revolve", "sketch"), ("Sweep", "polygon sketch"), ("Cut", "Cut needs a body and a sketch")]
+        {
             let button = ribbon::ribbon_button(app, label);
             assert!(!button.enabled, "{label} is disabled without its sketch");
             let said = ribbon::tooltip(app, button.rect);

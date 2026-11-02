@@ -182,6 +182,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 FeatureKind::Sketch(_) => Icon::Sketch,
                 FeatureKind::Extrude(_) => Icon::Extrude,
                 FeatureKind::Revolve(_) => Icon::Revolve,
+                FeatureKind::Sweep(_) => Icon::Sweep,
                 FeatureKind::Cut(_) => Icon::Cut,
                 FeatureKind::Fillet(_) => Icon::Fillet,
                 FeatureKind::Chamfer(_) => Icon::Chamfer,

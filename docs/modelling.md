@@ -286,7 +286,7 @@ The labels say what each value is: the lattice's "Beam radius (mm), controls den
 
 A field part has two explicit outputs besides its certified STL, each computed only when asked for and within one application allowance of 19,999,999 work units. The `field_mass` tool proves the field's own unit-density volume, centre of gravity and centroidal inertia as exact rational enclosures, within 0.01 mm³, 0.001 mm and 0.1 mm⁵; no preview or mesh contributes, and the display region's placeholder area and centroid are never reported as measured. The Mass stand-in command (in the command palette), the `export_stand_in` tool and `soliddraft export --stand-in` write a STEP file with the field's source envelope as a massless surface and unit-density proxy solids whose proven moments, after the file's rounding, lie inside the field's; see [exchange](exchange.md).
 
-While a field is last, every CAD command (sketch, extrude, revolve, cut, hole, fillet, chamfer, shell, draft, patterns, mirror) and a second field are disabled with the field's reason, and their agent verbs refuse with it before reading any named input. The reason is Catallax's terminal-field policy, `lattice.cad-after-lattice`; Catallax also refuses a CAD operation that reads a field body. Return before the field to continue CAD work.
+While a field is last, every CAD command (sketch, extrude, revolve, sweep, cut, hole, fillet, chamfer, shell, draft, patterns, mirror) and a second field are disabled with the field's reason, and their agent verbs refuse with it before reading any named input. The reason is Catallax's terminal-field policy, `lattice.cad-after-lattice`; Catallax also refuses a CAD operation that reads a field body. Return before the field to continue CAD work.
 
 ## Named values
 

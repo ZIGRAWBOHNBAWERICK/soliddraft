@@ -227,6 +227,10 @@ impl SolidDraftApp {
                             }),
                         );
                     }
+                    Some(ExitInto::Sweep) => {
+                        self.state.doc.selection = Some(Selection::Feature(id));
+                        self.apply(ctx, AppAction::StartSweep);
+                    }
                     Some(ExitInto::Revolve) => {
                         self.state.doc.selection = Some(Selection::Feature(id));
                         self.apply(ctx, AppAction::StartRevolve);
@@ -248,6 +252,35 @@ impl SolidDraftApp {
                     None => ExtrudeParams::default(),
                 };
                 self.open_editor(None, EditorParams::Extrude(params));
+            }
+            AppAction::StartSweep => {
+                if self.state.in_sketch() {
+                    self.apply(ctx, AppAction::ExitSketch(Some(ExitInto::Sweep)));
+                    return;
+                }
+                match self.state.selected_sketch().filter(|id| self.state.doc.consumer_of(*id).is_none()) {
+                    Some(id) => {
+                        let normal = self
+                            .state
+                            .doc
+                            .feature(id)
+                            .and_then(|f| f.plane)
+                            .map(|p| p.normal)
+                            .unwrap_or(soliddraft_kernel_api::Vec3::Z);
+                        self.open_editor(
+                            None,
+                            EditorParams::Sweep(soliddraft_model::SweepFeature {
+                                sketch: soliddraft_model::FeatureId(id as u32),
+                                path: soliddraft_kernel_api::Sweep {
+                                    start: [0.0; 3],
+                                    end: (normal * 10.0).into(),
+                                    segment_id: "travel".into(),
+                                },
+                            }),
+                        );
+                    }
+                    None => self.state.note("Select a closed polygon sketch to sweep", NoteKind::Info),
+                }
             }
             AppAction::StartRevolve => {
                 if self.state.in_sketch() {
@@ -382,6 +415,7 @@ impl SolidDraftApp {
                     }
                     FeatureKind::Extrude(p) => EditorParams::Extrude(p.clone()),
                     FeatureKind::Revolve(r) => EditorParams::Revolve(r.clone()),
+                    FeatureKind::Sweep(s) => EditorParams::Sweep(s.clone()),
                     FeatureKind::Cut(p) => EditorParams::Cut(p.clone()),
                     FeatureKind::Fillet(p) => EditorParams::Fillet(p.clone()),
                     FeatureKind::Chamfer(p) => EditorParams::Chamfer(p.clone()),
@@ -424,6 +458,10 @@ impl SolidDraftApp {
                 }
                 let Some(e) = self.close_editor() else { return };
                 let cmd = match (e.target, e.params) {
+                    (target, EditorParams::Sweep(s)) => match target {
+                        Some(id) => Command::EditFeature { id, kind: FeatureKind::Sweep(s) },
+                        None => Command::AddFeature(FeatureKind::Sweep(s)),
+                    },
                     (target, EditorParams::Revolve(r)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Revolve(r) },
                         None => Command::AddFeature(FeatureKind::Revolve(r)),

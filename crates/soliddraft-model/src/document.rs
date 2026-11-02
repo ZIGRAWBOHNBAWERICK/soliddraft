@@ -523,7 +523,8 @@ impl Document {
     fn profile_sketch(&self, id: FeatureId) -> Option<Sketch> {
         match &self.feature(id)?.kind {
             FeatureKind::Sketch(s) => Some(s.sketch.clone()),
-            FeatureKind::Revolve(r) => match &self.feature(r.sketch)?.kind {
+            FeatureKind::Sweep(crate::SweepFeature { sketch, .. })
+            | FeatureKind::Revolve(crate::RevolveFeature { sketch, .. }) => match &self.feature(*sketch)?.kind {
                 FeatureKind::Sketch(s) => Some(s.sketch.clone()),
                 _ => None,
             },

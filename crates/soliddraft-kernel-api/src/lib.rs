@@ -102,6 +102,18 @@ pub struct Revolve {
     pub angle_deg: f64,
 }
 
+/// A single straight path, in model millimetres. The profile keeps its placement.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sweep {
+    /// Start of the path.
+    pub start: [f64; 3],
+    /// End of the path.
+    pub end: [f64; 3],
+    /// Stable saved identity of the path segment.
+    pub segment_id: String,
+}
+
 /// Where one hole starts and which way it drills.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HolePlacement {
@@ -775,6 +787,10 @@ pub trait Kernel: Send + Sync {
 
     /// Turns a profile body about an axis into a solid.
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult>;
+    /// Sweeps a polygon profile along one nonzero straight segment.
+    fn sweep(&self, _tag: &OpTag, _profile: BodyId, _params: &Sweep) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Straight-path sweep is unavailable".into()))
+    }
 
     /// Combines two solids. Both inputs stay as they are.
     fn boolean(&self, tag: &OpTag, op: BooleanOp, target: BodyId, tool: BodyId) -> KernelResult<OpResult>;

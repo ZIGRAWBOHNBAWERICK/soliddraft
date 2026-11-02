@@ -1,0 +1,214 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "straight-sweep",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 11,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              9,
+              -2,
+              11
+            ],
+            "width": 4,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sweep",
+      "arguments": {
+        "sketch": "Sketch1",
+        "start": [
+          100,
+          200,
+          300
+        ],
+        "end": [
+          102,
+          201,
+          303
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 24,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": 7
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 14
+        }
+      ]
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          100,
+          200,
+          300
+        ],
+        "end": [
+          102,
+          201,
+          306
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 48,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 24,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 2
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 48,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          100,
+          200,
+          300
+        ],
+        "end": [
+          100,
+          200,
+          300
+        ]
+      },
+      "refused": "Sweep needs two different finite endpoints",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 48,
+          "tolerance": 0.001
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          100,
+          200,
+          300
+        ],
+        "end": [
+          102,
+          201,
+          300
+        ]
+      },
+      "refused": "Sweep path must leave the profile plane",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 48,
+          "tolerance": 0.001
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/straight-sweep.dwprt"
+      },
+      "files": [
+        "{bundle}/straight-sweep.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/straight-sweep.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 3,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 48,
+          "tolerance": 0.001
+        }
+      ],
+      "checked_step_export": "{bundle}/straight-sweep.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "plane": 6
+        },
+        "volume": 48,
+        "floor": 1e-06,
+        "inside": [
+          [
+            10,
+            -1.5,
+            14
+          ]
+        ],
+        "outside": [
+          [
+            100,
+            200,
+            300
+          ],
+          [
+            6,
+            -2,
+            12
+          ]
+        ]
+      }
+    }
+  ]
+}

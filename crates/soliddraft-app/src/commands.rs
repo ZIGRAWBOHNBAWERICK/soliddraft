@@ -578,7 +578,7 @@ impl CommandSpec {
     /// Commands whose geometry is waiting for Catallax, in roadmap section 6 order.
     pub fn catallax_wait(&self) -> Option<&'static str> {
         match self.id {
-            "sweep" | "loft" => Some(COMING_SOON),
+            "loft" => Some(COMING_SOON),
             _ => None,
         }
     }
@@ -1143,7 +1143,17 @@ fn registry() -> Vec<CommandSpec> {
         cmd("edit_revolve", "Edit revolve", Icon::Revolve, "Change a revolution angle")
             .agents(Agents::Verb, "Preserves the sketch and axis.", tools::edit_revolve_params)
             .undo(Undo::Step),
-        cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a profile along a path").on(Solid, "Create", Small),
+        cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along a straight path")
+            .on(Solid, "Create", Small)
+            .run(|s| if s.in_sketch() { AppAction::ExitSketch(Some(ExitInto::Sweep)) } else { AppAction::StartSweep })
+            .when(|s| field_open(s) && (s.in_sketch() || s.selected_sketch().is_some()))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_))))
+            .hint(|s| after_field(s).or_else(|| (!s.in_sketch() && s.selected_sketch().is_none()).then(|| "Select a closed polygon sketch to sweep".into())))
+            .agents(Agents::Verb, "Translate a closed polygon sketch by one straight path segment. The profile keeps its placement.", tools::sweep_params)
+            .undo(Undo::Step),
+        cmd("edit_sweep", "Edit sweep", Icon::Sweep, "Change a straight sweep path")
+            .agents(Agents::Verb, "Preserves the profile and path segment identity.", tools::edit_sweep_params)
+            .undo(Undo::Step),
         cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft between profiles").on(Solid, "Create", Small),
         // Cut.
         cmd("cut", "Cut", Icon::Cad("cut"), "Remove material: cut a sketch into the part")
@@ -1606,7 +1616,7 @@ fn registry() -> Vec<CommandSpec> {
                 }
             })
             .when(|s| s.selected_feature().is_some())
-.app_only("It opens the feature's PropertyManager; agents and scripts change a feature with edit_extrude, edit_revolve, edit_cut, edit_fillet, edit_chamfer and edit_dimension"),
+.app_only("It opens the feature's PropertyManager; agents and scripts change a feature with edit_extrude, edit_revolve, edit_sweep, edit_cut, edit_fillet, edit_chamfer and edit_dimension"),
         cmd("rename", "Rename", Icon::Props, "Rename the selected feature")
             .key(Scope::Part, none, Key::F2)
             .run(|_| AppAction::RenameSelected)

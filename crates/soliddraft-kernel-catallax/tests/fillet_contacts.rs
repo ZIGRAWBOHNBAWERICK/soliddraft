@@ -29,9 +29,26 @@ fn assert_one_strip(k: &CatallaxKernel, body: BodyId, at: Vec3, radius: f64, out
     let topology = k.topology(body).unwrap();
     let edge = topology.edges.iter().find(|e| e.midpoint.distance(at) < 1e-6).expect("picked generator").id;
     let original_cylinders = topology.faces.iter().filter(|f| f.surface == SurfaceKind::Cylinder).count();
+    let selected = topology.edge(edge).unwrap();
+    let opposite = topology
+        .edges
+        .iter()
+        .find(|other| {
+            other.id != edge
+                && other.faces.len() == selected.faces.len()
+                && other.faces.iter().all(|face| selected.faces.contains(face))
+        })
+        .expect("the shared support pair has two generators");
+    let rounded = k.fillet(&OpTag::new("opposite"), body, &[opposite.id], radius).unwrap();
+    assert!(rounded.record.face_roles.iter().any(|face| face.role == FaceRole::Blend { edge: opposite.id }));
+    k.release(rounded.body).unwrap();
     let before = k.mass_properties(body).unwrap();
     for (edit, radius) in [radius, radius / 2.0].into_iter().enumerate() {
         let rounded = k.fillet(&OpTag::new("round"), body, &[edge], radius).unwrap();
+        let strips: Vec<_> =
+            rounded.record.face_roles.iter().filter(|face| matches!(face.role, FaceRole::Blend { .. })).collect();
+        assert_eq!(strips.len(), 1);
+        assert_eq!(strips[0].role, FaceRole::Blend { edge }, "blend belongs to the picked generator");
         let saved = k.body_recipe(rounded.body).unwrap();
         let operation = &saved["steps"].as_array().unwrap().last().unwrap()["native"];
         assert!(operation["edges"][0]["near"].is_array(), "a shared origin pair retains the picked point");

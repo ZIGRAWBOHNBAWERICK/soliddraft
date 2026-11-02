@@ -15,8 +15,9 @@
 //!
 //! The result is checked against a geometric fingerprint taken when the reference was
 //! made: the surface or curve type must not change, and a planar face must still face
-//! the same way. The fingerprint never chooses a face; its position and size only rank
-//! the candidates offered when a reference breaks.
+//! the same way. Shared generator edges also require the edge and both support faces
+//! to retain their recorded fingerprints. Other references use position and size only
+//! to rank the candidates offered when a reference breaks.
 //!
 //! A reference that resolves to no entity, to several, or to one that fails the check
 //! does not guess. The feature stops with a [`RepairNeeded`] that says which reference

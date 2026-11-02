@@ -3,6 +3,7 @@
 #[path = "support/ribbon.rs"]
 mod ribbon;
 
+use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::kittest::{NodeT, Queryable};
 use soliddraft_app::{command_line, commands, preferences, settings};
@@ -35,7 +36,7 @@ fn settings_command_opens_preferences_and_saves_navigation() {
     app.get_by_label("Interface · Coming soon").click();
     app.run_steps(3);
     assert_eq!(app.state().preferences.as_ref().unwrap().page, "interface");
-    assert!(app.query_by_label("Coming soon").is_some());
+    assert!(app.query_by_role_and_label(Role::Label, "Coming soon").is_some());
     assert!(app.query_by_label("Navigation preset").is_none());
     assert!(
         !app.get_by_label("Search settings").accesskit_node().is_disabled(),
@@ -50,7 +51,9 @@ fn settings_command_opens_preferences_and_saves_navigation() {
     assert_eq!(app.state().preferences.as_ref().unwrap().draft.preset_id, "onshape");
     app.get_by_label("Close window").click();
     app.run_steps(3);
-    ribbon::menu(&mut app, "Tools", "Preferences…");
+    app.get_by_label("Tools").click();
+    app.run_steps(3);
+    app.get_by_label("Preferences…").click();
     app.run_steps(3);
     assert!(app.state().preferences.is_some());
     app.set_size(vec2(800.0, 640.0));
@@ -70,7 +73,7 @@ fn settings_command_opens_preferences_and_saves_navigation() {
     app.get_by_label("Assistant settings · Coming soon").click();
     app.run_steps(3);
     assert_eq!(app.state().preferences.as_ref().unwrap().page, "assistant");
-    assert!(app.query_by_label("Coming soon").is_some());
+    assert!(app.query_by_role_and_label(Role::Label, "Coming soon").is_some());
     if let Some(proof) = std::env::var_os("SDC_SETTINGS_PROOF_DIR") {
         app.render().unwrap().save(std::path::Path::new(&proof).join("settings-coming-soon.png")).unwrap();
     }

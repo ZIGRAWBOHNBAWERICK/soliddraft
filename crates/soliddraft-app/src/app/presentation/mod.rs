@@ -586,7 +586,10 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
         debug_assert!(false, "no command {id}");
         return;
     };
-    let button = egui::Button::new(label).shortcut_text(command.shortcut_text().unwrap_or_default());
+    let mut button = egui::Button::new(label);
+    if let Some(shortcut) = command.shortcut_text() {
+        button = button.shortcut_text(shortcut);
+    }
     if ui.add_enabled(command.is_enabled(st), button).on_hover_text(command.tip(st)).clicked() {
         st.run_command(command);
         ui.close();

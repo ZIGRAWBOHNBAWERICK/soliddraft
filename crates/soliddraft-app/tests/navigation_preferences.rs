@@ -239,7 +239,7 @@ fn mouse_page_preset_switch_updates_list_practice_and_settings() {
     for row in ["Orbit: Right drag", "Pan: Middle drag", "Pan: Ctrl+Right drag", "Fit: Middle double-click"] {
         assert!(w.query_by_label(row).is_some(), "the list reads {row}");
     }
-    let fit_key = text_of(&w, "Fit: F: blocked");
+    let fit_key = text_of(&w, "Fit: F - blocked");
     assert!(fit_key.contains("Front") && fit_key.contains("Fillet"), "{fit_key}");
     assert!(has(&w, "Normal to, again to reverse: N"));
     assert!(has(&w, "physical Control key") && has(&w, "right click"), "the limitations name Ctrl and the right click");
@@ -533,7 +533,7 @@ fn view_keys_page_shows_profiles_and_conflicts() {
     w.get_by_role_and_label(Role::RadioButton, "SOLIDWORKS").click();
     w.run_steps(3);
     assert_eq!(settings::navigation(InstallKind::Existing).keyboard_profile, "solidworks");
-    assert!(has(&w, "Fit: F: blocked"), "the blocked row shows");
+    assert!(has(&w, "Fit: F - blocked"), "the blocked row shows");
     let lines: Vec<String> = w
         .query_all_by_label_contains("is off; the key stays")
         .map(|n| {
@@ -541,8 +541,8 @@ fn view_keys_page_shows_profiles_and_conflicts() {
             format!("{}{}", n.label().unwrap_or_default(), n.value().unwrap_or_default())
         })
         .collect();
-    assert!(lines.iter().any(|l| l.contains("Front") && l.contains("view_front")), "{lines:?}");
-    assert!(lines.iter().any(|l| l.contains("Fillet") && l.contains("fillet")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.contains("Front") && !l.contains("view_front")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.contains("Fillet") && !l.contains("fillet")), "{lines:?}");
     w.get_by_role_and_label(Role::RadioButton, "Fusion 360").click();
     w.run_steps(3);
     assert!(has(&w, "Fit: F6"));

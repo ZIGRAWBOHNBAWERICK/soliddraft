@@ -11,7 +11,7 @@
 mod ui;
 
 use crate::navigation::view_keys::{self, ViewKeys};
-use crate::navigation::{Chord, NavigationSettings, Refusal, Router, presets};
+use crate::navigation::{Chord, NavigationSettings, Refusal, Router, SchemaError, presets};
 use crate::settings::ReferenceDisplay;
 
 /// A page of the window.
@@ -244,7 +244,13 @@ impl Preferences {
     }
 
     fn refuse(&mut self, refusal: Refusal) -> Result<(), Refusal> {
-        self.message = Some(Message { text: refusal.to_string(), error: true });
+        let text = match &refusal {
+            Refusal::Invalid(errors) if errors.iter().any(|e| matches!(e, SchemaError::DuplicateChord { .. })) => {
+                "These actions use the same gesture. Try another gesture.".to_owned()
+            }
+            _ => refusal.to_string(),
+        };
+        self.message = Some(Message { text, error: true });
         Err(refusal)
     }
 
@@ -286,7 +292,9 @@ impl Preferences {
         let preset = s.active_preset().id;
         match s.set_override(preset, binding, chord) {
             Ok(()) => {
-                self.commit(s, Some(format!("{binding} changed.")));
+                let label =
+                    s.active_preset().bindings.iter().find(|b| b.id == binding).map_or("Mouse", |b| b.action.label());
+                self.commit(s, Some(format!("{label} gesture changed.")));
                 Ok(())
             }
             Err(r) => self.refuse(r),

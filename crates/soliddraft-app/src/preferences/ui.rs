@@ -218,8 +218,9 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
             });
             if let Some(id) = change {
                 p.capture = Some(id);
+                let label = preset.bindings.iter().find(|b| b.id == id).map_or("navigation", |b| b.action.label());
                 p.message =
-                    Some(Message { text: format!("Do the new gesture for {id} in the practice area."), error: false });
+                    Some(Message { text: format!("Do the new {label} gesture in the practice area."), error: false });
             }
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Keyboard, in this preset's view-key profile").strong());
@@ -267,20 +268,21 @@ fn binding_text(keys: &view_keys::ViewKeys, b: &Binding, state: RowState, mac: b
 }
 
 fn state_text(keys: &view_keys::ViewKeys, b: &Binding, state: RowState) -> String {
+    let label = |id| crate::commands::get(id).map_or("the existing command", |c| c.label);
     match state {
         RowState::Active => String::new(),
-        RowState::Duplicate(c) => format!(": SolidDraft's {c} already has it"),
-        RowState::Supersedes(c) => format!(": takes the key over from {c}"),
-        RowState::OutsideSketch => ": outside a sketch; in a sketch the key stays the sketch's".into(),
+        RowState::Duplicate(c) => format!(" - SolidDraft's {} already has it", label(c)),
+        RowState::Supersedes(c) => format!(" - takes the key over from {}", label(c)),
+        RowState::OutsideSketch => " - outside a sketch; in a sketch the key stays the sketch's".into(),
         RowState::Unavailable(_) => " · Coming soon".into(),
         RowState::Blocked => {
             let owners: Vec<String> = keys
                 .conflicts
                 .iter()
                 .filter(|c| c.row == b.id)
-                .map(|c| format!("{} ({}, {})", c.label, c.command, c.scope.label()))
+                .map(|c| format!("{} ({})", c.label, c.scope.label()))
                 .collect();
-            format!(": blocked: the key is {}", owners.join(" and "))
+            format!(" - blocked: the key is {}", owners.join(" and "))
         }
     }
 }
@@ -491,11 +493,10 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
         }
         for c in &keys.conflicts {
             ui.label(format!(
-                "{}: {} is off; the key stays {} ({}, {}), which keeps its button and menu entry",
+                "{}: {} is off; the key stays {} ({}), which keeps its button and menu entry",
                 c.key,
                 c.action.label(),
                 c.label,
-                c.command,
                 c.scope.label()
             ));
         }

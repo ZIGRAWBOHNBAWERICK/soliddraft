@@ -25,7 +25,7 @@ fn tool(state: &mut soliddraft_app::state::AppState, name: &str, input: Value) -
 fn check_cylinder_mesh(mesh: &soliddraft_app::document::DisplayMesh, chord: f64, angle_deg: f64) -> Value {
     let mut worst_chord = 0.0_f64;
     let mut worst_angle = 0.0_f64;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let ids = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
         let points = ids.map(|i| mesh.positions[i].as_dvec3());
         if mesh.normals[ids[0]].z.abs() > 0.5 {

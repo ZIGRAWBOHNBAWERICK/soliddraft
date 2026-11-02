@@ -122,7 +122,6 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
         EntityKind::Arc { center: P2::new(15.0, -12.0), start: P2::new(20.0, -12.0), end: P2::new(15.0, -7.0) },
         false,
     );
-    let source = sketch.clone();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = launch(doc, STANDARD);
     let view = app.state().state.viewport.rect;
@@ -133,6 +132,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     assert!(app.state().state.sketch.is_some());
     app.key_press(Key::Z);
     settle(&mut app);
+    let source = session(&app).sketch.clone();
 
     // Select the chain in order. Dragging its reversed member keeps the signed side.
     click(&mut app, P2::new(-12.0, -10.0), Modifiers::default());
@@ -176,6 +176,24 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     assert_eq!(session(&app).sketch, source);
     frame(&mut app, "03-offset-refusal");
 
+    // An arc uses the same radial distance and keeps its angular extent.
+    let radial = 0.5f64.sqrt();
+    let arc_at = |r| P2::new(15.0 + r * radial, -12.0 + r * radial);
+    select(&mut app, arc_at(5.0));
+    ribbon::click_ribbon(&mut app, "Offset");
+    drag(&mut app, arc_at(5.0), arc_at(7.0));
+    assert!((session(&app).modify.distance + 2.0).abs() < 0.08);
+    match session(&app).preview.as_ref().unwrap().added[0] {
+        EntityKind::Arc { center, start, end } => {
+            near(center, P2::new(15.0, -12.0));
+            near(start, P2::new(22.0, -12.0));
+            near(end, P2::new(15.0, -5.0));
+        }
+        _ => panic!("arc copy"),
+    }
+    assert_eq!(session(&app).sketch, source);
+    frame(&mut app, "03b-arc-offset-preview");
+
     // Two mirror points, with the second point previewed before it is clicked.
     select(&mut app, P2::new(-12.0, -10.0));
     ribbon::click_ribbon(&mut app, "Mirror entities");
@@ -183,6 +201,13 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     hover(&mut app, P2::new(-5.0, 15.0));
     assert_eq!(count(&app), 4);
     near(session(&app).modify.axis_end, P2::new(-5.0, 15.0));
+    match session(&app).preview.as_ref().unwrap().added[0] {
+        EntityKind::Line { a, b } => {
+            near(a, P2::new(10.0, -10.0));
+            near(b, P2::new(-10.0, -10.0));
+        }
+        _ => panic!("mirrored line"),
+    }
     frame(&mut app, "04-mirror-live-preview");
     click(&mut app, P2::new(-5.0, 15.0), Modifiers::default());
     let preview = session(&app).preview.as_ref().unwrap().added.clone();

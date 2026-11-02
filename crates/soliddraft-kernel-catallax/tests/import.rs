@@ -32,6 +32,7 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
         sha256: &feature.sha256,
         options: &options,
         decisions: &decisions,
+        record: None,
     };
     let declined = kernel.import_step(&OpTag::new("declined"), &request).unwrap();
     assert_eq!(declined.left_open, ["#178"]);
@@ -45,6 +46,15 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
     assert_eq!(topology.faces.len(), 6);
     assert_eq!(topology.edges.len(), 12);
     assert!((kernel.mass_properties(body).unwrap().volume - 10004.0).abs() <= 1e-6);
+    let mut saved = accepted.record.clone();
+    kernel
+        .import_step(&OpTag::new("reopened"), &ImportStepRequest { decisions: &[], record: Some(&saved), ..request })
+        .unwrap();
+    saved.source.sha256 = "0".repeat(64);
+    let mismatch = kernel
+        .import_step(&OpTag::new("tampered"), &ImportStepRequest { decisions: &[], record: Some(&saved), ..request })
+        .unwrap_err();
+    assert!(mismatch.to_string().contains("does not match"), "{mismatch}");
     kernel.release(body).unwrap();
     let two = ImportStepFeature::new("two-blocks-5um.step", TWO.to_vec());
     let refused = kernel
@@ -56,6 +66,7 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
                 sha256: &two.sha256,
                 options: &options,
                 decisions: &[],
+                record: None,
             },
         )
         .unwrap_err();

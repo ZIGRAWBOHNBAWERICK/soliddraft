@@ -26,6 +26,7 @@ use web_time::Instant;
 pub enum ExitInto {
     Extrude,
     Revolve,
+    Sweep,
     Cut,
 }
 
@@ -46,6 +47,7 @@ pub enum AppAction {
     ExitSketch(Option<ExitInto>),
     StartExtrude,
     StartRevolve,
+    StartSweep,
     StartCut,
     StartFillet,
     StartChamfer,
@@ -228,6 +230,7 @@ pub struct FeatureEditor {
 pub enum EditorParams {
     Extrude(ExtrudeParams),
     Revolve(soliddraft_model::RevolveFeature),
+    Sweep(soliddraft_model::SweepFeature),
     Cut(CutParams),
     Fillet(FilletParams),
     Chamfer(ChamferParams),
@@ -267,6 +270,7 @@ impl FeatureEditor {
         match &self.params {
             EditorParams::Extrude(_) => format!("{edit}Boss-Extrude"),
             EditorParams::Revolve(_) => format!("{edit}Revolve"),
+            EditorParams::Sweep(_) => format!("{edit}Sweep"),
             EditorParams::Cut(_) => format!("{edit}Cut-Extrude"),
             EditorParams::Fillet(_) => format!("{edit}Fillet"),
             EditorParams::Chamfer(_) => format!("{edit}Chamfer"),
@@ -323,6 +327,7 @@ impl FeatureEditor {
         let result = match &self.params {
             EditorParams::Extrude(p) => doc.preview_extrude(p),
             EditorParams::Revolve(r) => doc.preview_revolve(r),
+            EditorParams::Sweep(s) => doc.preview_sweep(s),
             EditorParams::Cut(p) => doc.preview_cut(p, before),
             EditorParams::Fillet(f) => doc.preview_rounding(&f.edges, f.radius, false, before),
             EditorParams::Chamfer(c) => doc.preview_rounding(&c.edges, c.distance, true, before),

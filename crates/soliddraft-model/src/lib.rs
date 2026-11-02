@@ -46,7 +46,8 @@ pub use evaluate::plane_on_face;
 pub use feature::{
     BlendFeature, BuiltinShape, DatumPlane, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId,
     FeatureKind, GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, MirrorFeature, PatternFeature,
-    PatternSpec, PlaneRef, ProfileSource, RevolveFeature, ShellFeature, SketchFeature, SketchPlane, sha256_hex,
+    PatternSpec, PlaneRef, ProfileSource, RevolveFeature, ShellFeature, SketchFeature, SketchPlane, SweepFeature,
+    sha256_hex,
 };
 pub use file::FileError;
 pub use materials::{

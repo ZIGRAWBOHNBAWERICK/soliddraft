@@ -83,7 +83,8 @@ Application work for a feature, such as its PropertyManager page, ribbon command
 | Fillet between planes and cylinders | 3 | Works |
 | Other fillets | 4 | Waits |
 | Draft | 4 | Works for planar faces and cylinders parallel to the pull |
-| Sweep, loft; spline, ellipse and text profiles | 5 | Waits |
+| Straight sweep | 5 | Works for closed polygons and one nonzero straight path; after 0.2.0 |
+| Curved sweeps, loft; spline, ellipse and text profiles | 5 | Waits |
 | STEP import, then IGES import | 6 | Waits for Catallax's importers |
 | Lattice, gyroid, graded density, field-driven thickness | Field-only track, after stage 3 | One cubic lattice or one network gyroid works as the last feature, its radius or level constant or graded linearly along a part axis, with proven field moments and an explicit mass stand-in; other grades and field-driven thickness wait |
 

@@ -447,6 +447,7 @@ pub enum FeatureKind {
     Sketch(SketchFeature),
     Extrude(ExtrudeParams),
     Revolve(model::RevolveFeature),
+    Sweep(model::SweepFeature),
     Cut(CutParams),
     Fillet(FilletParams),
     Chamfer(ChamferParams),
@@ -467,6 +468,7 @@ impl FeatureKind {
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Extrude(_) => "Boss-Extrude",
             FeatureKind::Revolve(_) => "Revolve",
+            FeatureKind::Sweep(_) => "Sweep",
             FeatureKind::Cut(_) => "Cut-Extrude",
             FeatureKind::Fillet(_) => "Fillet",
             FeatureKind::Chamfer(_) => "Chamfer",
@@ -491,6 +493,7 @@ impl FeatureKind {
             FeatureKind::Sketch(_) => "sketch",
             FeatureKind::Extrude(_) => "extrude",
             FeatureKind::Revolve(_) => "revolve",
+            FeatureKind::Sweep(_) => "sweep",
             FeatureKind::Cut(_) => "cut",
             FeatureKind::Fillet(_) => "fillet",
             FeatureKind::Chamfer(_) => "chamfer",
@@ -513,6 +516,7 @@ impl FeatureKind {
         match self {
             FeatureKind::Extrude(p) => p.sketch,
             FeatureKind::Revolve(r) => Some(app_id(r.sketch)),
+            FeatureKind::Sweep(s) => Some(app_id(s.sketch)),
             FeatureKind::Cut(p) => Some(p.sketch),
             _ => None,
         }
@@ -549,6 +553,7 @@ impl FeatureKind {
                 model::FeatureKind::Chamfer(model::BlendFeature { edges: p.edges.clone(), size: p.distance })
             }
             FeatureKind::Revolve(r) => model::FeatureKind::Revolve(r.clone()),
+            FeatureKind::Sweep(s) => model::FeatureKind::Sweep(s.clone()),
             FeatureKind::Hole(h) => model::FeatureKind::Hole(h.clone()),
             FeatureKind::Pattern(p) => model::FeatureKind::Pattern(p.clone()),
             FeatureKind::Mirror(m) => model::FeatureKind::Mirror(m.clone()),
@@ -585,6 +590,7 @@ impl FeatureKind {
                 FeatureKind::Sketch(SketchFeature { plane, sketch })
             }
             model::FeatureKind::Revolve(r) => FeatureKind::Revolve(r.clone()),
+            model::FeatureKind::Sweep(s) => FeatureKind::Sweep(s.clone()),
             model::FeatureKind::Extrude(e) => {
                 let (end, depth) = EndKind::from_model(&e.end);
                 let depth = depth.unwrap_or(10.0);
@@ -754,6 +760,13 @@ impl Feature {
                 end => end.label().to_lowercase(),
             },
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
+            FeatureKind::Sweep(s) => format!(
+                "{} mm",
+                fmt_mm(
+                    (soliddraft_kernel_api::Vec3::from(s.path.end) - soliddraft_kernel_api::Vec3::from(s.path.start))
+                        .length()
+                )
+            ),
             FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
             FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
             FeatureKind::Hole(h) => {
@@ -2774,6 +2787,42 @@ impl Document {
         Ok(Preview { result: None, tool: Some(result?), removes: false })
     }
 
+    /// Builds the sweep tool for the editor without changing the document.
+    /// Temporary bodies are released on both success and refusal.
+    pub fn preview_sweep(&self, params: &model::SweepFeature) -> Result<Preview, String> {
+        let (profiles, _) = self.sketch_profiles(app_id(params.sketch))?;
+        let k = self.kernel();
+        let failure = |error: soliddraft_kernel_api::KernelError| match error {
+            soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
+            soliddraft_kernel_api::KernelError::Profile(error) => error.to_string(),
+            _ => "This sweep could not finish. Try a simpler polygon profile".into(),
+        };
+        let mut made = Vec::new();
+        let result = (|| -> Result<Arc<DisplayMesh>, String> {
+            let mut body = None;
+            for profile in profiles {
+                let sheet = k.create_body_from_profile(&OpTag::new("preview-profile"), &profile).map_err(failure)?;
+                made.push(sheet.body);
+                let tool = k.sweep(&OpTag::new("preview-sweep"), sheet.body, &params.path).map_err(failure)?;
+                made.push(tool.body);
+                body = Some(match body {
+                    None => tool.body,
+                    Some(previous) => {
+                        let joined = k
+                            .boolean(&OpTag::new("preview-union"), BooleanOp::Union, previous, tool.body)
+                            .map_err(failure)?;
+                        made.push(joined.body);
+                        joined.body
+                    }
+                });
+            }
+            self.mesh_of(body.ok_or("Select a closed polygon sketch to sweep")?)
+                .map_err(|_| "This sweep could not be displayed. Try a simpler polygon profile".into())
+        })();
+        self.release_all(&made);
+        Ok(Preview { result: None, tool: Some(result?), removes: false })
+    }
+
     /// Builds the extrusion tool without changing the document.
     pub fn preview_extrude(&self, params: &ExtrudeParams) -> Result<Preview, String> {
         if params.end != EndKind::Blind {
@@ -3074,6 +3123,13 @@ impl Document {
                         };
                         details.push(("Profile".to_owned(), profile));
                         details.push(("Depth".to_owned(), f.summary()));
+                    }
+                    FeatureKind::Sweep(s) => {
+                        details.push((
+                            "Profile".into(),
+                            self.feature(app_id(s.sketch)).map(|f| f.name.clone()).unwrap_or("Missing sketch".into()),
+                        ));
+                        details.push(("Straight path".into(), f.summary()));
                     }
                     FeatureKind::Revolve(r) => {
                         details.push((

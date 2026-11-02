@@ -757,6 +757,20 @@
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "One straight generator of a radius-5 cylinder cut flat at y=3, radius 1 edited to 0.5 mm.",
       "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+    },
+    {
+      "id": "straight-sweep",
+      "file": "ci/scenarios/straight-sweep.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "d821451665765f2092eda2725d3faffea0976db6",
+      "route": "MCP sweep and edit_sweep -> document rebuild -> native path and sweep -> viewport and checked STEP export",
+      "supported_limits": "Closed polygon profile on an offset plane; one nonzero straight segment with displacement [2,1,3], edited to [2,1,6]; authored profile placement, picking names, undo/redo, invalid edit preservation, save and fresh-process reopen; loft and curved profiles remain unavailable; post-0.2.0 batch",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent planar-solid volume and point oracle"
     }
   ]
 }

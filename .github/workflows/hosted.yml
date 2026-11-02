@@ -232,6 +232,13 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: error
           retention-days: 1
+      - name: Retain the release fillet preview proof
+        uses: actions/upload-artifact@v4
+        if: always() && startsWith(github.ref, 'refs/heads/release/')
+        with:
+          name: fillet-proof-linux-${{ matrix.shard }}
+          path: target/ux-tools/ux-fillet-preview
+          if-no-files-found: ignore
 
   build-macos:
     needs: select
@@ -296,6 +303,13 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: error
           retention-days: 1
+      - name: Retain the release fillet preview proof
+        uses: actions/upload-artifact@v4
+        if: always() && startsWith(github.ref, 'refs/heads/release/')
+        with:
+          name: fillet-proof-macos-${{ matrix.shard }}
+          path: target/ux-tools/ux-fillet-preview
+          if-no-files-found: ignore
 
   # Deferred until a later catch-up: only a manual run with windows_catch_up selects this job.
   test-windows:

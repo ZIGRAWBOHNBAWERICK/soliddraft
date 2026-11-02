@@ -94,7 +94,9 @@ impl Solid {
         let cat = self.cat_edge(edge, body)?;
         if let Some(name) = &self.app.names.edges[&cat] {
             let [a, b] = name.between();
-            return Ok(EdgeRef { between: [pattern(a), pattern(b)], touching: vec![], near: None });
+            let shared = self.app.names.edges.values().filter(|other| other.as_ref() == Some(name)).count();
+            let near = if shared > 1 { Some(self.point_on_edge(cat, edge)?) } else { None };
+            return Ok(EdgeRef { between: [pattern(a), pattern(b)], touching: vec![], near });
         }
         let model = &self.app.checkpoint.built().model;
         let faces: Vec<_> = model
@@ -111,13 +113,15 @@ impl Solid {
         let [Some(a), Some(b)] = [faces.first().and_then(first), faces.last().and_then(first)] else {
             return Err(KernelError::InvalidInput(format!("{edge} does not separate two named faces")));
         };
+        Ok(EdgeRef { between: [a, b], touching: vec![], near: Some(self.point_on_edge(cat, edge)?) })
+    }
+
+    fn point_on_edge(&self, cat: catallax_topology::EdgeId, edge: EdgeId) -> KernelResult<Point3> {
         let mesh = self.display(&catallax_mesh::MeshOptions::default(), "edge_ref")?;
         let line = mesh.edges.iter().find(|e| e.edge == cat).map(|e| &e.vertices);
-        let near = line.and_then(|v| exact_point(mesh.positions[v[v.len() / 2]]));
-        if near.is_none() {
-            return Err(KernelError::InvalidInput(format!("{edge} has no display polyline")));
-        }
-        Ok(EdgeRef { between: [a, b], touching: vec![], near })
+        line.and_then(|vertices| vertices.get(vertices.len() / 2))
+            .and_then(|&vertex| exact_point(mesh.positions[vertex]))
+            .ok_or_else(|| KernelError::InvalidInput(format!("{edge} has no display polyline")))
     }
 }
 

@@ -50,6 +50,8 @@ fn is_zero(v: &f64) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// A reusable offset plane with a persistent source.
+    ReferencePlane(SketchPlane),
     /// A 2D sketch on a plane.
     Sketch(SketchFeature),
     /// A boss or cut swept from a sketch's closed regions.
@@ -84,6 +86,7 @@ impl FeatureKind {
     /// The tree's base name for the kind, numbered to make a feature name.
     pub fn base_name(&self) -> &'static str {
         match self {
+            FeatureKind::ReferencePlane(_) => "Plane",
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Revolve(_) => "Revolve",
             FeatureKind::Sweep(_) => "Sweep",
@@ -122,11 +125,8 @@ impl FeatureKind {
     pub fn dependencies(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
         match self {
-            FeatureKind::Sketch(s) => {
-                if let SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } = &s.plane {
-                    out.push(face.feature);
-                }
-            }
+            FeatureKind::Sketch(s) => out.extend(s.plane.dependencies()),
+            FeatureKind::ReferencePlane(p) => out.extend(p.dependencies()),
             FeatureKind::Revolve(r) => out.push(r.sketch),
             FeatureKind::Sweep(s) => out.push(s.sketch),
             FeatureKind::Extrude(e) => {
@@ -144,16 +144,12 @@ impl FeatureKind {
             FeatureKind::Pattern(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {
             }
             FeatureKind::Mirror(m) => {
-                if let PlaneRef::Face { face } = &m.plane {
-                    out.push(face.feature);
-                }
+                out.extend(m.plane.dependencies());
             }
             FeatureKind::Shell(s) => out.extend(s.open_faces.iter().map(|f| f.feature)),
             FeatureKind::Draft(d) => {
                 out.extend(d.faces.iter().map(|f| f.feature));
-                if let PlaneRef::Face { face } = &d.neutral {
-                    out.push(face.feature);
-                }
+                out.extend(d.neutral.dependencies());
             }
         }
         out.sort();
@@ -198,6 +194,14 @@ pub struct SketchFeature {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "on", rename_all = "snake_case")]
 pub enum SketchPlane {
+    /// A reusable plane feature, followed through edits and renames.
+    Feature {
+        /// Stable identity of the source plane.
+        feature: FeatureId,
+        /// Signed distance along its normal, in millimetres.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        offset: f64,
+    },
     /// A reference plane, moved along its normal by `offset` millimetres.
     Datum {
         /// Which reference plane.
@@ -224,10 +228,19 @@ pub enum SketchPlane {
 }
 
 impl SketchPlane {
+    /// Features that define this plane.
+    pub fn dependencies(&self) -> Vec<FeatureId> {
+        match self {
+            Self::Feature { feature, .. } => vec![*feature],
+            Self::Face { face } | Self::FaceOffset { face, .. } => vec![face.feature],
+            Self::Datum { .. } => Vec::new(),
+        }
+    }
+
     /// Signed distance from the datum or face plane, in millimetres.
     pub fn offset(&self) -> f64 {
         match self {
-            Self::Datum { offset, .. } | Self::FaceOffset { offset, .. } => *offset,
+            Self::Datum { offset, .. } | Self::FaceOffset { offset, .. } | Self::Feature { offset, .. } => *offset,
             Self::Face { .. } => 0.0,
         }
     }
@@ -427,6 +440,11 @@ pub struct PatternFeature {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "on", rename_all = "snake_case")]
 pub enum PlaneRef {
+    /// A reusable plane feature.
+    Feature {
+        /// Stable identity of the source plane.
+        feature: FeatureId,
+    },
     /// A reference plane, moved along its normal by `offset` millimetres.
     Datum {
         /// Which reference plane.
@@ -440,6 +458,17 @@ pub enum PlaneRef {
         /// The face.
         face: FaceRef,
     },
+}
+
+impl PlaneRef {
+    /// Features that define this plane.
+    pub fn dependencies(&self) -> Vec<FeatureId> {
+        match self {
+            Self::Feature { feature } => vec![*feature],
+            Self::Face { face } => vec![face.feature],
+            Self::Datum { .. } => Vec::new(),
+        }
+    }
 }
 
 /// The part's body reflected in a plane.

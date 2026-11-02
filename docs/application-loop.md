@@ -102,6 +102,15 @@ pieces after splits and merges. For example, `front` has normal -Y, so
 `offset: -6` places the sketch at y=6. World-coordinate shapes must lie on that displaced plane;
 `sketch_geometry` operations still use its local u/v coordinates.
 
+`reference_plane` creates a named reusable offset plane from an origin plane,
+an earlier plane feature or a persistent planar face. `edit_reference_plane`
+changes its source and offset. Both sketch tools and `mirror` accept its feature
+name. `reference-planes.json` exercises chained planes, upstream depth edits,
+renames, offset edits, coplanar splits and merges, undo/redo, native reopening,
+suppression/restoration and
+deleted sources. The attached cut and mirrored body retain material-volume and
+world-bound checks. This scenario is separate from the release acceptance set.
+
 `datum-offset.json` exercises this control at the normal 20M allowance. It
 extrudes from the displaced plane, saves and reopens the part, then edits the
 extrusion and sketch dimension. Volume and world-space bounds must survive;
@@ -397,9 +406,9 @@ and work limits remain hard acceptance checks, including when `--strict` is used
 `result.json` records `catallax_revision`, the full commit sha in `CATALLAX_REVISION`,
 and every command must report that same sha as its backend version
 (`Catallax backend is the pinned revision`). Evidence from another revision, a branch name
-or a missing version fails the step. The runner cannot yet check the replay verifier the
-same way: `catallax-verify about` does not report its source commit, so hosted CI builds it
-from the pinned sha and the workflow remains the evidence for that binary.
+or a missing version fails the step. The runner does not yet validate the replay
+verifier's source commit. Hosted CI builds it from the pinned sha. Local runs should
+retain its `catallax-verify about` reply, whose kernel metadata records that commit.
 
 The baseline-reuse ledger holds no measured real-corpus time saving, so this runner
 claims none and does not consume it. A reused baseline would have to arrive as pinned,

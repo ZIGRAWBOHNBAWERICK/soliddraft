@@ -558,7 +558,20 @@ fn part_status(st: &AppState) -> Status {
         note: st
             .doc
             .display_failure()
-            .map(|text| StatusNote { text: text.to_owned(), color: theme::error(), fresh: true })
+            .map(|text| StatusNote {
+                text: crate::geometry_message::for_user(text).to_owned(),
+                color: theme::error(),
+                fresh: true,
+            })
+            .or_else(|| st.note.as_ref().filter(|note| note.kind == NoteKind::Error).map(StatusNote::of))
+            .or_else(|| {
+                let body = st.doc.display_body()?;
+                st.doc.kernel().body_notice(body).map(|text| StatusNote {
+                    text: text.to_owned(),
+                    color: theme::warn(),
+                    fresh: true,
+                })
+            })
             .or_else(|| st.note.as_ref().map(StatusNote::of)),
         details: vec![
             mode,

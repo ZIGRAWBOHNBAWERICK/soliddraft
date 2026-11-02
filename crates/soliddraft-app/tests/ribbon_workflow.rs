@@ -51,13 +51,8 @@ const NEEDS_A_BODY: [(&str, &str); 9] = [
 ];
 
 /// What has no action yet, whatever the part holds, and what it says.
-const NOT_YET: [(&str, &str); 5] = [
-    ("Loft", "Coming soon"),
-    ("Slot", "Coming soon"),
-    ("Plane", "Coming soon"),
-    ("Axis", "Coming soon"),
-    ("Point", "Coming soon"),
-];
+const NOT_YET: [(&str, &str); 4] =
+    [("Loft", "Coming soon"), ("Slot", "Coming soon"), ("Axis", "Coming soon"), ("Point", "Coming soon")];
 
 fn settle(app: &mut App) {
     app.run_steps(30);
@@ -390,5 +385,85 @@ fn assembly_is_discoverable_without_applying_part_commands_to_it() {
             assert!(!ribbon::ribbon_button(app, label).enabled, "{label} is off without a body");
         }
         properties_below(app, "Feature tree");
+    });
+}
+
+#[test]
+fn reference_plane_editor_creates_a_plane_and_attaches_a_sketch() {
+    let case = ribbon::case("reference-plane");
+    let mut app = ribbon::app(ribbon::blank());
+    case.run(&mut app, |app| {
+        settle(app);
+        assert!(ribbon::ribbon_button(app, "Plane").enabled);
+        ribbon::click_ribbon(app, "Plane");
+        settle(app);
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::ReferencePlane(_))));
+        ribbon::type_field(app, "Offset value", "-6");
+        let ok = ribbon::button_rect(app, "OK (Enter)", left_column(app));
+        ribbon::click_at(app, ok.center());
+        ribbon::until(app, "the reference plane", |a| {
+            a.state().state.editor.is_none() && a.state().state.doc.features.len() == 1
+        });
+        settle(app);
+        let plane = app.state().state.doc.features[0].clone();
+        assert_eq!(plane.name, "Plane1");
+        assert_eq!(plane.plane.unwrap().origin.z, -6.0);
+        case.frame(app, "reference-plane");
+        let eye = app.get_by_label("Hide Plane1").rect();
+        ribbon::click_at(app, eye.center());
+        settle(app);
+        assert_eq!(
+            app.state().state.doc.view_choice(soliddraft_app::document::ViewItem::Feature(plane.id)),
+            Some(false)
+        );
+        let eye = app.get_by_label("Show Plane1").rect();
+        ribbon::click_at(app, eye.center());
+        settle(app);
+        let row = ribbon::button_rect(app, "Plane1", left_column(app));
+        ribbon::click_at(app, row.center());
+        ribbon::click_ribbon(app, "Sketch");
+        ribbon::until(app, "the attached sketch", |a| a.state().state.sketch.is_some());
+        let session = app.state().state.sketch.as_ref().unwrap();
+        assert_eq!(session.plane.origin.z, -6.0);
+        case.frame(app, "sketch-on-plane");
+    });
+}
+
+#[test]
+fn reference_plane_on_a_translated_part_is_visible() {
+    use soliddraft_app::document::{Command, ExtrudeParams, PlaneKind, SketchPlane};
+    let case = ribbon::case("reference-plane-translated");
+    let mut doc = ribbon::blank();
+    let sketch = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    let mut drawing = soliddraft_sketch::Sketch::new();
+    drawing.rectangle(soliddraft_sketch::P2::new(1005.0, 1005.0), 10.0, 10.0).unwrap();
+    doc.apply(Command::EditSketch { id: sketch, sketch: drawing }).unwrap();
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams { sketch: Some(sketch), depth: 5.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        settle(app);
+        app.key_press(Key::Z);
+        settle(app);
+        ribbon::click_ribbon(app, "Plane");
+        settle(app);
+        ribbon::type_field(app, "Offset value", "-6");
+        let ok = ribbon::button_rect(app, "OK (Enter)", left_column(app));
+        ribbon::click_at(app, ok.center());
+        ribbon::until(app, "the translated part's plane", |a| {
+            a.state().state.editor.is_none() && a.state().state.doc.features.len() == 3
+        });
+        settle(app);
+        case.frame(app, "translated-reference-plane");
+        assert!(
+            ribbon::painted_in(app, viewport(app)).iter().any(|p| p.text == "Plane1"),
+            "the shown plane is labelled in the viewport"
+        );
     });
 }

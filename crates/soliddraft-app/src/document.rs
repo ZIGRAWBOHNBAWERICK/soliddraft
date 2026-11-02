@@ -175,6 +175,11 @@ pub enum Reference {
 /// Where a sketch lies: a reference plane or a planar face of the body so far.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SketchPlane {
+    Feature {
+        feature: FeatureId,
+        #[serde(default)]
+        offset: f64,
+    },
     Reference {
         plane: PlaneKind,
         /// Signed distance along the datum normal, in millimetres.
@@ -194,6 +199,7 @@ pub enum SketchPlane {
 impl SketchPlane {
     pub fn label(&self) -> String {
         match self {
+            SketchPlane::Feature { offset, .. } => format!("Reference plane (offset {} mm)", fmt_mm(*offset)),
             SketchPlane::Reference { plane, offset } if *offset == 0.0 => plane.label().to_owned(),
             SketchPlane::Reference { plane, offset } => {
                 format!("{} (offset {} mm)", plane.label(), fmt_mm(*offset))
@@ -209,13 +215,16 @@ impl SketchPlane {
     /// Signed distance from the datum or face plane, in millimetres.
     pub fn offset(&self) -> f64 {
         match self {
-            Self::Reference { offset, .. } | Self::FaceOffset { offset, .. } => *offset,
+            Self::Reference { offset, .. } | Self::FaceOffset { offset, .. } | Self::Feature { offset, .. } => *offset,
             Self::Face { .. } => 0.0,
         }
     }
 
-    fn to_model(&self) -> model::SketchPlane {
+    pub(crate) fn to_model(&self) -> model::SketchPlane {
         match self {
+            SketchPlane::Feature { feature, offset } => {
+                model::SketchPlane::Feature { feature: model_id(*feature), offset: *offset }
+            }
             SketchPlane::Reference { plane, offset } => {
                 model::SketchPlane::Datum { datum: plane.to_model(), offset: *offset }
             }
@@ -424,6 +433,7 @@ impl DraftParams {
 /// A plane's label for people.
 pub fn plane_ref_label(plane: &model::PlaneRef) -> String {
     match plane {
+        model::PlaneRef::Feature { .. } => "Reference plane".into(),
         model::PlaneRef::Datum { datum, offset } if *offset == 0.0 => datum.label().to_owned(),
         model::PlaneRef::Datum { datum, offset } => format!("{} + {} mm", datum.label(), fmt_mm(*offset)),
         model::PlaneRef::Face { face } if face.label.is_empty() => "Face".to_owned(),
@@ -433,6 +443,7 @@ pub fn plane_ref_label(plane: &model::PlaneRef) -> String {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FeatureKind {
+    ReferencePlane(model::SketchPlane),
     Sketch(SketchFeature),
     Extrude(ExtrudeParams),
     Revolve(model::RevolveFeature),
@@ -453,6 +464,7 @@ pub enum FeatureKind {
 impl FeatureKind {
     pub fn prefix(&self) -> &'static str {
         match self {
+            FeatureKind::ReferencePlane(_) => "Plane",
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Extrude(_) => "Boss-Extrude",
             FeatureKind::Revolve(_) => "Revolve",
@@ -477,6 +489,7 @@ impl FeatureKind {
     /// The kind in lower case, for menu labels: "hole", "linear pattern".
     pub fn noun(&self) -> &'static str {
         match self {
+            FeatureKind::ReferencePlane(_) => "reference plane",
             FeatureKind::Sketch(_) => "sketch",
             FeatureKind::Extrude(_) => "extrude",
             FeatureKind::Revolve(_) => "revolve",
@@ -513,6 +526,7 @@ impl FeatureKind {
     /// panels; a sketch is stored as the panels solved it.
     pub(crate) fn to_model(&self) -> model::FeatureKind {
         match self {
+            FeatureKind::ReferencePlane(p) => model::FeatureKind::ReferencePlane(p.clone()),
             FeatureKind::Sketch(s) => {
                 model::FeatureKind::Sketch(model::SketchFeature { plane: s.plane.to_model(), sketch: s.sketch.clone() })
             }
@@ -553,8 +567,12 @@ impl FeatureKind {
 
     fn from_model(kind: &model::FeatureKind) -> Self {
         match kind {
+            model::FeatureKind::ReferencePlane(p) => FeatureKind::ReferencePlane(p.clone()),
             model::FeatureKind::Sketch(s) => {
                 let plane = match &s.plane {
+                    model::SketchPlane::Feature { feature, offset } => {
+                        SketchPlane::Feature { feature: app_id(*feature), offset: *offset }
+                    }
                     model::SketchPlane::Datum { datum, offset } => {
                         SketchPlane::Reference { plane: PlaneKind::from_model(*datum), offset: *offset }
                     }
@@ -630,16 +648,18 @@ impl FeatureKind {
     }
 }
 
-/// Whether a reference names a face or an edge.
+/// Whether a reference names a plane, face or edge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefKind {
+    Plane,
     Face,
     Edge,
 }
 
-/// A face or edge reference, as the repair editor collects them.
+/// A replacement reference collected by the repair editor.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EntityRef {
+    Plane { plane: model::SketchPlane, label: String },
     Face(FaceRef),
     Edge(EdgeRef),
 }
@@ -647,6 +667,7 @@ pub enum EntityRef {
 impl EntityRef {
     pub fn label(&self) -> &str {
         match self {
+            EntityRef::Plane { label, .. } => label,
             EntityRef::Face(f) => &f.label,
             EntityRef::Edge(e) => &e.label,
         }
@@ -654,6 +675,7 @@ impl EntityRef {
 
     pub fn kind(&self) -> RefKind {
         match self {
+            EntityRef::Plane { .. } => RefKind::Plane,
             EntityRef::Face(_) => RefKind::Face,
             EntityRef::Edge(_) => RefKind::Edge,
         }
@@ -712,7 +734,7 @@ pub struct Feature {
     pub suppressed: bool,
     /// The body after this feature, when it was built.
     pub body: Option<BodyId>,
-    /// The resolved plane of a sketch feature.
+    /// The resolved plane of a sketch or reference plane feature.
     pub plane: Option<Plane>,
     /// Who created the feature: the user through the ribbon or the assistant.
     pub via_assistant: bool,
@@ -721,6 +743,7 @@ pub struct Feature {
 impl Feature {
     pub fn summary(&self) -> String {
         match &self.kind {
+            FeatureKind::ReferencePlane(p) => format!("offset {} mm", fmt_mm(p.offset())),
             FeatureKind::Sketch(s) => {
                 let n = s.sketch.drawn().count();
                 match s.sketch.status {
@@ -1495,7 +1518,11 @@ impl Document {
         if self.proof_pending() {
             return Some(("Proof pending", false));
         }
-        self.display_failure.as_deref().or(self.proof_notice.as_deref()).map(|message| (message, false))
+        self.display_failure
+            .as_deref()
+            .or(self.proof_notice.as_deref())
+            .map(|message| (message, false))
+            .or_else(|| self.kernel().body_notice(self.display_body()?).map(|message| (message, false)))
     }
 
     /// Why the part has no display mesh, or why the last change was rolled back for
@@ -2155,7 +2182,15 @@ impl Document {
             Command::AddChamfer { params } => vec![add(FeatureKind::Chamfer(params).to_model(), false)],
             Command::EditChamfer { id, params } => vec![edit(id, &FeatureKind::Chamfer(params))],
             Command::AddFeature(kind) => vec![add(kind.to_model(), false)],
-            Command::EditFeature { id, kind } => vec![edit(id, &kind)],
+            Command::EditFeature { id, kind } => {
+                if let FeatureKind::ReferencePlane(source) = &kind {
+                    let target = self.index_of(id).ok_or("no such reference plane")?;
+                    if source.dependencies().iter().any(|id| self.model.index_of(*id).is_some_and(|i| i >= target)) {
+                        return Err("Choose a source above this plane in the feature tree".into());
+                    }
+                }
+                vec![edit(id, &kind)]
+            }
             Command::DeleteFeature(id) => {
                 let index = self.index_of(id).ok_or("no such feature")?;
                 // Deleting a feature also deletes the sketch it absorbed, and
@@ -2234,12 +2269,40 @@ impl Document {
                 let f = self.model.feature(model_id(id)).ok_or("no such feature")?;
                 let mut kind = f.kind.clone();
                 match (&mut kind, replacement) {
+                    (model::FeatureKind::ReferencePlane(p), EntityRef::Plane { mut plane, .. }) if index == 0 => {
+                        match &mut plane {
+                            model::SketchPlane::Datum { offset, .. }
+                            | model::SketchPlane::Feature { offset, .. }
+                            | model::SketchPlane::FaceOffset { offset, .. } => *offset = p.offset(),
+                            _ => {}
+                        }
+                        *p = plane;
+                    }
+                    (model::FeatureKind::ReferencePlane(p), EntityRef::Face(face)) if index == 0 => {
+                        *p = model::SketchPlane::FaceOffset { face, offset: p.offset() };
+                    }
+                    (model::FeatureKind::Sketch(s), EntityRef::Plane { mut plane, .. }) if index == 0 => {
+                        match &mut plane {
+                            model::SketchPlane::Datum { offset, .. }
+                            | model::SketchPlane::Feature { offset, .. }
+                            | model::SketchPlane::FaceOffset { offset, .. } => *offset = s.plane.offset(),
+                            _ => {}
+                        }
+                        s.plane = plane;
+                    }
+                    (model::FeatureKind::Mirror(m), EntityRef::Plane { plane, .. }) if index == 0 => {
+                        m.plane = match plane {
+                            model::SketchPlane::Datum { datum, offset } => model::PlaneRef::Datum { datum, offset },
+                            model::SketchPlane::Feature { feature, .. } => model::PlaneRef::Feature { feature },
+                            _ => return Err("choose a reference plane".into()),
+                        };
+                    }
                     (model::FeatureKind::Sketch(s), EntityRef::Face(face)) if index == 0 => {
-                        s.plane = match s.plane {
-                            model::SketchPlane::FaceOffset { offset, .. } => {
-                                model::SketchPlane::FaceOffset { face, offset }
-                            }
-                            _ => model::SketchPlane::Face { face },
+                        let offset = s.plane.offset();
+                        s.plane = if offset == 0.0 {
+                            model::SketchPlane::Face { face }
+                        } else {
+                            model::SketchPlane::FaceOffset { face, offset }
                         };
                     }
                     (model::FeatureKind::Fillet(b) | model::FeatureKind::Chamfer(b), EntityRef::Edge(edge)) => {
@@ -2359,7 +2422,7 @@ impl Document {
                     },
                     suppressed: f.suppressed,
                     body: if inactive || index >= pending_from { None } else { m.body_after(f.id) },
-                    plane: m.built_sketch(f.id).map(|b| b.plane),
+                    plane: m.built_sketch(f.id).map(|b| b.plane).or_else(|| m.reference_plane(f.id)),
                     via_assistant: f.via_assistant,
                 }
             })
@@ -3023,8 +3086,31 @@ impl Document {
                 let f = self.feature(id)?;
                 let mut details = Vec::new();
                 match &f.kind {
+                    FeatureKind::ReferencePlane(p) => {
+                        let source = match p {
+                            model::SketchPlane::Datum { datum, .. } => self.model().datum_name(*datum).to_owned(),
+                            model::SketchPlane::Feature { feature, .. } => self
+                                .feature(app_id(*feature))
+                                .map(|f| f.name.clone())
+                                .unwrap_or_else(|| "Missing plane".into()),
+                            model::SketchPlane::Face { face } | model::SketchPlane::FaceOffset { face, .. } => {
+                                face.label.clone()
+                            }
+                        };
+                        details.push(("Source".into(), source));
+                        details.push(("Offset".into(), format!("{} mm", fmt_mm(p.offset()))));
+                    }
                     FeatureKind::Sketch(s) => {
-                        details.push(("Plane".to_owned(), s.plane.label()));
+                        details.push((
+                            "Plane".to_owned(),
+                            match &s.plane {
+                                SketchPlane::Feature { feature, .. } => self
+                                    .feature(*feature)
+                                    .map(|f| f.name.clone())
+                                    .unwrap_or_else(|| "Missing plane".into()),
+                                _ => s.plane.label(),
+                            },
+                        ));
                         let (dims, rels) = s.sketch.counts();
                         details.push(("Entities".to_owned(), s.sketch.drawn().count().to_string()));
                         details.push(("Relations".to_owned(), format!("{rels} relations, {dims} dimensions")));
@@ -3335,9 +3421,12 @@ fn view_status(
                                 model::SketchPlane::Face { face } | model::SketchPlane::FaceOffset { face, .. } => {
                                     face.label.clone()
                                 }
+                                model::SketchPlane::Feature { feature, .. } => {
+                                    names.get(feature).cloned().unwrap_or_else(|| "Reference plane".into())
+                                }
                                 model::SketchPlane::Datum { .. } => String::new(),
                             };
-                            (0, RefKind::Face, label)
+                            (0, RefKind::Plane, label)
                         }
                         (
                             model::ReferenceSlot::Edge { index },
@@ -3360,8 +3449,27 @@ fn view_status(
                         (model::ReferenceSlot::Plane, model::FeatureKind::Hole(h)) => {
                             (0, RefKind::Face, h.face.label.clone())
                         }
+                        (
+                            model::ReferenceSlot::SketchPlane | model::ReferenceSlot::Plane,
+                            model::FeatureKind::ReferencePlane(source),
+                        ) => {
+                            let label = match source {
+                                model::SketchPlane::Feature { feature, .. } => {
+                                    names.get(feature).cloned().unwrap_or_else(|| "Reference plane".into())
+                                }
+                                model::SketchPlane::Face { face } | model::SketchPlane::FaceOffset { face, .. } => {
+                                    if face.label.is_empty() {
+                                        "Source face".into()
+                                    } else {
+                                        face.label.clone()
+                                    }
+                                }
+                                model::SketchPlane::Datum { datum, .. } => datum.label().to_owned(),
+                            };
+                            (0, RefKind::Plane, label)
+                        }
                         (model::ReferenceSlot::Plane, model::FeatureKind::Mirror(m)) => {
-                            (0, RefKind::Face, plane_ref_label(&m.plane))
+                            (0, RefKind::Plane, plane_ref_label(&m.plane))
                         }
                         (model::ReferenceSlot::Limit, model::FeatureKind::Extrude(e)) => {
                             let label = match &e.end {

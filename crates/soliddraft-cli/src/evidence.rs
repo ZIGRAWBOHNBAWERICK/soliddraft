@@ -251,13 +251,28 @@ fn references(doc: &soliddraft_model::Document) -> Value {
     fn plane(p: &PlaneRef) -> Option<(ReferenceSlot, String, Vec<&FaceRef>)> {
         match p {
             PlaneRef::Face { face } => Some((ReferenceSlot::Plane, origin(face), vec![face])),
+            PlaneRef::Feature { feature } => Some((ReferenceSlot::Plane, format!("plane:{feature}"), Vec::new())),
             PlaneRef::Datum { .. } => None,
         }
     }
     let mut out = Vec::new();
     for f in doc.features() {
         let refs: Vec<(ReferenceSlot, String, Vec<&FaceRef>)> = match &f.kind {
+            FeatureKind::ReferencePlane(p) => match p {
+                SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
+                    vec![(ReferenceSlot::Plane, origin(face), vec![face])]
+                }
+                SketchPlane::Datum { datum, .. } => {
+                    vec![(ReferenceSlot::Plane, format!("datum:{datum:?}"), Vec::new())]
+                }
+                SketchPlane::Feature { feature, .. } => {
+                    vec![(ReferenceSlot::Plane, format!("plane:{feature}"), Vec::new())]
+                }
+            },
             FeatureKind::Sketch(s) => match &s.plane {
+                SketchPlane::Feature { feature, .. } => {
+                    vec![(ReferenceSlot::SketchPlane, format!("plane:{feature}"), Vec::new())]
+                }
                 SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
                     vec![(ReferenceSlot::SketchPlane, origin(face), vec![face])]
                 }
@@ -335,6 +350,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
             } else {
                 Some(match &f.kind {
                     FeatureKind::Sketch(s) => doc.built_sketch(f.id).is_some_and(|built| match &s.plane {
+                        SketchPlane::Feature { feature, offset } => doc
+                            .reference_plane(*feature)
+                            .is_some_and(|p| built.plane == p.with_origin(p.origin + p.normal * *offset)),
                         SketchPlane::Datum { datum, offset } => {
                             let p = datum.plane();
                             built.plane == p.with_origin(p.origin + p.normal * *offset)
@@ -350,6 +368,26 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                                 })
                         }),
                     }),
+                    FeatureKind::ReferencePlane(source) => {
+                        doc.reference_plane(f.id).is_some_and(|plane| match source {
+                            SketchPlane::Datum { datum, offset } => {
+                                let p = datum.plane();
+                                plane == p.with_origin(p.origin + p.normal * *offset)
+                            }
+                            SketchPlane::Feature { feature, offset } => doc
+                                .reference_plane(*feature)
+                                .is_some_and(|p| plane == p.with_origin(p.origin + p.normal * *offset)),
+                            SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => carriers.iter().all(|set| {
+                                !set.is_empty()
+                                    && set.iter().all(|face| {
+                                        face.normal == Some(plane.normal)
+                                            && ((plane.origin - face.centroid).dot(plane.normal) - source.offset())
+                                                .abs()
+                                                <= 1e-6
+                                    })
+                            }),
+                        })
+                    }
                     _ => carriers.iter().all(|set| !set.is_empty()),
                 })
             };

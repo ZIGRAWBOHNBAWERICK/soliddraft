@@ -56,6 +56,7 @@ pub enum AppAction {
         circular: bool,
     },
     StartMirror,
+    StartReferencePlane,
     StartDraft,
     StartShell,
     StartLattice,
@@ -236,6 +237,7 @@ pub enum EditorParams {
     Hole(HoleParams),
     Pattern(soliddraft_model::PatternFeature),
     Mirror(soliddraft_model::MirrorFeature),
+    ReferencePlane(soliddraft_model::SketchPlane),
     Draft(DraftParams),
     Shell(soliddraft_model::ShellFeature),
     Lattice(soliddraft_model::LatticeFeature),
@@ -278,6 +280,7 @@ impl FeatureEditor {
                 soliddraft_model::PatternSpec::Circular { .. } => format!("{edit}Circular Pattern"),
             },
             EditorParams::Mirror(_) => format!("{edit}Mirror"),
+            EditorParams::ReferencePlane(_) => format!("{edit}Reference Plane"),
             EditorParams::Draft(_) => format!("{edit}Draft"),
             EditorParams::Shell(_) => format!("{edit}Shell"),
             EditorParams::Lattice(_) => format!("{edit}Lattice"),
@@ -334,6 +337,7 @@ impl FeatureEditor {
             | EditorParams::Gyroid(_)
             | EditorParams::Hole(_)
             | EditorParams::Pattern(_)
+            | EditorParams::ReferencePlane(_)
             | EditorParams::Mirror(_)
             | EditorParams::Draft(_)
             | EditorParams::PickPlane

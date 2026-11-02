@@ -92,6 +92,10 @@ pub struct EditSweepLine {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Line {
+    /// Creates a reusable offset plane.
+    ReferencePlane { plane: String, offset: f64 },
+    /// Changes a reusable plane's source and distance.
+    EditReferencePlane { feature: String, plane: String, offset: f64 },
     /// Adds an inactive configuration row.
     AddConfiguration { name: String },
     /// Changes one row override.
@@ -131,7 +135,7 @@ pub enum Line {
     },
     /// A sketch of closed shapes on a reference plane or a planar face.
     Sketch {
-        /// `top`, `front`, `right`, or a planar face's name.
+        /// `top`, `front`, `right`, a reusable plane name, or a planar face's name.
         plane: String,
         /// Signed distance along the plane or face normal, mm; omitted means zero.
         #[serde(default)]
@@ -232,7 +236,7 @@ pub enum Line {
     },
     /// Reflects the part's body in a plane.
     Mirror {
-        /// `top`, `front`, `right`, or a planar face's name.
+        /// `top`, `front`, `right`, a reusable plane name, or a planar face's name.
         plane: String,
         /// Unite the reflection with the original.
         keep_original: bool,
@@ -279,7 +283,7 @@ pub enum Line {
     Draft {
         /// Face names.
         faces: Vec<String>,
-        /// `top`, `front`, `right`, or a planar face's name.
+        /// `top`, `front`, `right`, a reusable plane name, or a planar face's name.
         neutral: String,
         /// Draft angle, degrees.
         angle: f64,
@@ -599,10 +603,25 @@ pub fn circular_pattern_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+/// The `reference_plane` verb's parameters.
+pub fn reference_plane_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("plane", string("Origin plane, reusable plane name, or planar face name")),
+        ("offset", number("Signed distance along the source normal, in millimetres")),
+    ]
+}
+
+/// The `edit_reference_plane` verb's parameters.
+pub fn edit_reference_plane_params() -> Vec<(&'static str, Value)> {
+    let mut params = vec![("feature", string("Reference plane feature name"))];
+    params.extend(reference_plane_params());
+    params
+}
+
 /// The `mirror` verb's parameters.
 pub fn mirror_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("plane", string("`top`, `front`, `right`, or a planar face's name")),
+        ("plane", string("`top`, `front`, `right`, a reusable plane name, or a planar face's name")),
         ("keep_original", boolean("true unites the reflection with the original")),
     ]
 }
@@ -676,7 +695,10 @@ pub fn edit_shell_params() -> Vec<(&'static str, Value)> {
 pub fn draft_params() -> Vec<(&'static str, Value)> {
     vec![
         ("faces", non_empty_array(string("A face name"), "The faces to tilt")),
-        ("neutral", string("The neutral plane: `top`, `front`, `right`, or a planar face's name")),
+        (
+            "neutral",
+            string("The neutral plane: `top`, `front`, `right`, a reusable plane name, or a planar face's name"),
+        ),
         ("angle", number("Draft angle, degrees, between -90 and 90")),
         ("reverse", boolean("true pulls against the neutral plane's normal")),
     ]
@@ -949,8 +971,11 @@ fn sketch_plane(doc: &Document, plane: &str, offset: f64) -> Result<SketchPlane,
     if let Some(plane) = datum_by_name(doc, plane) {
         return Ok(SketchPlane::Reference { plane, offset });
     }
+    if let Some(f) = doc.features.iter().find(|f| f.name == plane && matches!(f.kind, FeatureKind::ReferencePlane(_))) {
+        return Ok(SketchPlane::Feature { feature: f.id, offset });
+    }
     let face = face_by_name(doc, plane).ok_or_else(|| {
-        format!("`{plane}` is neither top, front, right nor a face name; `feature` lists each feature's faces")
+        format!("`{plane}` is not an origin plane, reusable plane or planar face; `feature` lists their names")
     })?;
     let face = doc.face_ref(face).ok_or_else(|| format!("`{plane}` is not planar, so it cannot carry a sketch"))?;
     Ok(if offset == 0.0 { SketchPlane::Face { face } } else { SketchPlane::FaceOffset { face, offset } })
@@ -966,6 +991,9 @@ fn face_ref_by_name(doc: &Document, name: &str) -> Result<crate::document::FaceR
 /// A reference plane or a planar face, by name.
 fn plane_ref(doc: &Document, plane: &str) -> Result<PlaneRef, String> {
     Ok(match sketch_plane(doc, plane, 0.0)? {
+        SketchPlane::Feature { feature, .. } => {
+            PlaneRef::Feature { feature: soliddraft_model::FeatureId(feature as u32) }
+        }
         SketchPlane::Reference { plane, offset } => PlaneRef::Datum {
             datum: match plane {
                 PlaneKind::Top => DatumPlane::Top,
@@ -1187,6 +1215,18 @@ impl Line {
                 let input = serde_json::to_value(self).map_err(|e| e.to_string())?;
                 let command = value_command(doc, self.op(), &input)?;
                 run.apply(doc, command)?;
+            }
+            Line::ReferencePlane { plane, offset } => {
+                let source = sketch_plane(doc, plane, *offset)?.to_model();
+                run.apply(doc, Command::AddFeature(FeatureKind::ReferencePlane(source)))?;
+            }
+            Line::EditReferencePlane { feature, plane, offset } => {
+                let id = feature_by_name(doc, feature)?;
+                if !matches!(doc.feature(id).map(|f| &f.kind), Some(FeatureKind::ReferencePlane(_))) {
+                    return Err(format!("{feature} is not a reference plane"));
+                }
+                let source = sketch_plane(doc, plane, *offset)?.to_model();
+                run.apply(doc, Command::EditFeature { id, kind: FeatureKind::ReferencePlane(source) })?;
             }
             Line::Sketch { plane, offset, shapes } => {
                 if shapes.is_empty() {
@@ -1554,7 +1594,8 @@ impl Line {
     fn adds_cad(&self) -> bool {
         matches!(
             self,
-            Line::Sketch { .. }
+            Line::ReferencePlane { .. }
+                | Line::Sketch { .. }
                 | Line::SketchGeometry { .. }
                 | Line::Extrude { .. }
                 | Line::Revolve { .. }
@@ -1580,6 +1621,8 @@ impl Line {
             Line::SetValue { .. } => "set_value",
             Line::RenameValue { .. } => "rename_value",
             Line::Drive { .. } => "drive",
+            Line::ReferencePlane { .. } => "reference_plane",
+            Line::EditReferencePlane { .. } => "edit_reference_plane",
             Line::Sketch { .. } => "sketch",
             Line::SketchGeometry { .. } => "sketch_geometry",
             Line::Extrude { .. } => "extrude",
@@ -1631,6 +1674,12 @@ impl Line {
             _ => otherwise,
         };
         match self {
+            Line::ReferencePlane { plane, offset } => {
+                ("Reference Plane".into(), format!("{plane}, offset {} mm", fmt_mm(*offset)))
+            }
+            Line::EditReferencePlane { feature, plane, offset } => {
+                (format!("Edit {feature}"), format!("{plane}, offset {} mm", fmt_mm(*offset)))
+            }
             Line::Sketch { plane, offset, shapes } => {
                 let list: Vec<String> = shapes
                     .iter()
@@ -2325,9 +2374,11 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
     let name = |id: FeatureId| doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "missing".into());
     let labels = |refs: &[EdgeRef]| refs.iter().map(|r| r.label.clone()).collect::<Vec<_>>();
     match kind {
+        FeatureKind::ReferencePlane(p) => json!({"type": "reference_plane", "source": p, "offset": p.offset()}),
         FeatureKind::Sketch(s) => json!({
             "type": "sketch",
             "plane": match &s.plane {
+                SketchPlane::Feature { feature, .. } => name(*feature),
                 SketchPlane::Reference { plane, .. } => doc.model().datum_name(plane.to_model()).to_owned(),
                 other => other.label(),
             },
@@ -2392,7 +2443,7 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             }),
         },
         FeatureKind::Mirror(m) => {
-            json!({ "type": "mirror", "plane": plane_ref_label(&m.plane), "keep_original": m.keep_original })
+            json!({ "type": "mirror", "plane": match &m.plane { PlaneRef::Feature { feature } => name(feature.0 as _), _ => plane_ref_label(&m.plane) }, "keep_original": m.keep_original })
         }
         FeatureKind::Shell(s) => json!({
             "type": "shell", "open_faces": s.open_faces.iter().map(|f| f.label.clone()).collect::<Vec<_>>(),

@@ -5,7 +5,8 @@
 //! to the model.
 //!
 //! An item the user has not chosen for follows the defaults: the body shows, a plane
-//! follows the Show origin planes setting and shows while it is selected, the axes show
+//! at the origin follows the Show origin planes setting and shows while selected.
+//! Reusable planes show until hidden. The axes show
 //! while a reference is selected, while a Revolve or Pattern editor is open or when the
 //! user keeps them on, and a sketch shows quietly while it is selected. A choice wins
 //! over its default, so selecting the origin cannot bring back an axis the user hid.
@@ -46,6 +47,7 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
                 || tool_wants_an_axis(state),
         ),
         ViewItem::Feature(id) => match doc.feature(id) {
+            Some(f) if matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)) => choice.unwrap_or(true),
             Some(f) if f.is_sketch() => choice.unwrap_or(state.selected_sketch() == Some(id)),
             Some(_) => body_shown(doc),
             None => false,
@@ -60,7 +62,11 @@ fn tool_wants_an_axis(state: &AppState) -> bool {
 
 /// The body shows unless a feature that shapes it is hidden.
 fn body_shown(doc: &Document) -> bool {
-    !doc.features.iter().any(|f| !f.is_sketch() && doc.view_choice(ViewItem::Feature(f.id)) == Some(false))
+    !doc.features.iter().any(|f| {
+        !f.is_sketch()
+            && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
+            && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
+    })
 }
 
 /// What the viewport draws this frame.
@@ -86,12 +92,18 @@ pub fn toggle(state: &mut AppState, item: ViewItem) {
     let doc = &mut state.doc;
     if show
         && let ViewItem::Feature(id) = item
-        && doc.feature(id).is_some_and(|f| !f.is_sketch())
+        && doc
+            .feature(id)
+            .is_some_and(|f| !f.is_sketch() && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
     {
         let hidden: Vec<FeatureId> = doc
             .features
             .iter()
-            .filter(|f| !f.is_sketch() && doc.view_choice(ViewItem::Feature(f.id)) == Some(false))
+            .filter(|f| {
+                !f.is_sketch()
+                    && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
+                    && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
+            })
             .map(|f| f.id)
             .collect();
         for other in hidden {

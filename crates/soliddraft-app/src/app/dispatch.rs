@@ -173,6 +173,14 @@ impl SolidDraftApp {
                     return;
                 }
                 let plane = match self.state.doc.selection {
+                    Some(Selection::Feature(id))
+                        if matches!(
+                            self.state.doc.feature(id).map(|f| &f.kind),
+                            Some(FeatureKind::ReferencePlane(_))
+                        ) =>
+                    {
+                        Some(SketchPlane::Feature { feature: id, offset: 0.0 })
+                    }
                     Some(Selection::Face(f)) => self.state.doc.face_ref(f).map(|face| SketchPlane::Face { face }),
                     Some(Selection::Reference(Reference::Plane(plane))) => {
                         Some(SketchPlane::Reference { plane, offset: 0.0 })
@@ -354,8 +362,37 @@ impl SolidDraftApp {
                 };
                 self.open_editor(None, EditorParams::Pattern(soliddraft_model::PatternFeature { layout }));
             }
+            AppAction::StartReferencePlane => {
+                let source = match self.state.doc.selection {
+                    Some(Selection::Feature(id))
+                        if matches!(
+                            self.state.doc.feature(id).map(|f| &f.kind),
+                            Some(FeatureKind::ReferencePlane(_))
+                        ) =>
+                    {
+                        soliddraft_model::SketchPlane::Feature {
+                            feature: soliddraft_model::FeatureId(id as u32),
+                            offset: 10.0,
+                        }
+                    }
+                    Some(Selection::Face(id)) => match self.state.doc.face_ref(id) {
+                        Some(face) => soliddraft_model::SketchPlane::FaceOffset { face, offset: 10.0 },
+                        None => {
+                            self.state.note("Choose a planar face or reference plane", NoteKind::Info);
+                            return;
+                        }
+                    },
+                    Some(Selection::Reference(Reference::Plane(plane))) => {
+                        soliddraft_model::SketchPlane::Datum { datum: plane.to_model(), offset: 10.0 }
+                    }
+                    _ => {
+                        soliddraft_model::SketchPlane::Datum { datum: soliddraft_model::DatumPlane::Top, offset: 10.0 }
+                    }
+                };
+                self.open_editor(None, EditorParams::ReferencePlane(source));
+            }
             AppAction::StartMirror => {
-                let plane = match self.state.doc.selection.and_then(|s| match s {
+                let mut plane = match self.state.doc.selection.and_then(|s| match s {
                     Selection::Face(f) => self.state.doc.face_ref(f),
                     _ => None,
                 }) {
@@ -364,6 +401,11 @@ impl SolidDraftApp {
                         soliddraft_model::PlaneRef::Datum { datum: soliddraft_model::DatumPlane::Right, offset: 0.0 }
                     }
                 };
+                if let Some(Selection::Feature(id)) = self.state.doc.selection
+                    && matches!(self.state.doc.feature(id).map(|f| &f.kind), Some(FeatureKind::ReferencePlane(_)))
+                {
+                    plane = soliddraft_model::PlaneRef::Feature { feature: soliddraft_model::FeatureId(id as u32) };
+                }
                 self.open_editor(
                     None,
                     EditorParams::Mirror(soliddraft_model::MirrorFeature { plane, keep_original: true }),
@@ -404,7 +446,10 @@ impl SolidDraftApp {
                 };
                 let n = items.len();
                 self.open_editor(Some(id), EditorParams::Repair { items, chosen: vec![None; n], active: 0 });
-                self.state.note("Click the replacement edge or face in the viewport", NoteKind::Info);
+                self.state.note(
+                    "Choose a replacement plane in the tree, or an edge or planar face in the viewport",
+                    NoteKind::Info,
+                );
             }
             AppAction::EditFeature(id) => {
                 let Some(f) = self.state.doc.feature(id) else { return };
@@ -428,6 +473,7 @@ impl SolidDraftApp {
                         head: h.head,
                     }),
                     FeatureKind::Pattern(p) => EditorParams::Pattern(p.clone()),
+                    FeatureKind::ReferencePlane(p) => EditorParams::ReferencePlane(p.clone()),
                     FeatureKind::Mirror(m) => EditorParams::Mirror(m.clone()),
                     FeatureKind::Shell(s) => EditorParams::Shell(s.clone()),
                     FeatureKind::Draft(d) => EditorParams::Draft(DraftParams {
@@ -487,6 +533,10 @@ impl SolidDraftApp {
                     (target, EditorParams::Pattern(p)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Pattern(p) },
                         None => Command::AddFeature(FeatureKind::Pattern(p)),
+                    },
+                    (target, EditorParams::ReferencePlane(p)) => match target {
+                        Some(id) => Command::EditFeature { id, kind: FeatureKind::ReferencePlane(p) },
+                        None => Command::AddFeature(FeatureKind::ReferencePlane(p)),
                     },
                     (target, EditorParams::Mirror(m)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Mirror(m) },
@@ -577,6 +627,54 @@ impl SolidDraftApp {
                             }
                             return;
                         }
+                        (EditorParams::ReferencePlane(p), Some(Selection::Reference(Reference::Plane(plane)))) => {
+                            *p = soliddraft_model::SketchPlane::Datum { datum: plane.to_model(), offset: p.offset() };
+                        }
+                        (EditorParams::Mirror(m), Some(Selection::Reference(Reference::Plane(plane)))) => {
+                            m.plane = soliddraft_model::PlaneRef::Datum { datum: plane.to_model(), offset: 0.0 };
+                        }
+                        (EditorParams::ReferencePlane(p), Some(Selection::Face(f))) => {
+                            if let Some(face) = self.state.doc.face_ref(f) {
+                                *p = soliddraft_model::SketchPlane::FaceOffset { face, offset: p.offset() };
+                            }
+                        }
+                        (EditorParams::ReferencePlane(p), Some(Selection::Feature(id)))
+                            if self
+                                .state
+                                .doc
+                                .model()
+                                .reference_plane(soliddraft_model::FeatureId(id as u32))
+                                .is_some() =>
+                        {
+                            *p = soliddraft_model::SketchPlane::Feature {
+                                feature: soliddraft_model::FeatureId(id as u32),
+                                offset: p.offset(),
+                            };
+                        }
+                        (EditorParams::Mirror(m), Some(Selection::Feature(id)))
+                            if self
+                                .state
+                                .doc
+                                .model()
+                                .reference_plane(soliddraft_model::FeatureId(id as u32))
+                                .is_some() =>
+                        {
+                            m.plane =
+                                soliddraft_model::PlaneRef::Feature { feature: soliddraft_model::FeatureId(id as u32) };
+                        }
+                        (EditorParams::PickPlane, Some(Selection::Feature(id)))
+                            if self
+                                .state
+                                .doc
+                                .model()
+                                .reference_plane(soliddraft_model::FeatureId(id as u32))
+                                .is_some() =>
+                        {
+                            self.apply(
+                                ctx,
+                                AppAction::StartSketchOn(SketchPlane::Feature { feature: id, offset: 0.0 }),
+                            );
+                        }
                         (EditorParams::Mirror(m), Some(Selection::Face(f))) => {
                             match self.state.doc.face_ref(f) {
                                 Some(face) => m.plane = soliddraft_model::PlaneRef::Face { face },
@@ -645,9 +743,35 @@ impl SolidDraftApp {
                                 (Some(crate::document::RefKind::Edge), Selection::Edge(edge)) => {
                                     self.state.doc.edge_ref(edge).map(crate::document::EntityRef::Edge)
                                 }
-                                (Some(crate::document::RefKind::Face), Selection::Face(face)) => {
-                                    self.state.doc.face_ref(face).map(crate::document::EntityRef::Face)
+                                (Some(crate::document::RefKind::Plane), Selection::Feature(id))
+                                    if self
+                                        .state
+                                        .doc
+                                        .model()
+                                        .reference_plane(soliddraft_model::FeatureId(id as u32))
+                                        .is_some() =>
+                                {
+                                    Some(crate::document::EntityRef::Plane {
+                                        plane: soliddraft_model::SketchPlane::Feature {
+                                            feature: soliddraft_model::FeatureId(id as u32),
+                                            offset: 0.0,
+                                        },
+                                        label: self.state.doc.feature(id).unwrap().name.clone(),
+                                    })
                                 }
+                                (Some(crate::document::RefKind::Plane), Selection::Reference(Reference::Plane(p))) => {
+                                    Some(crate::document::EntityRef::Plane {
+                                        plane: soliddraft_model::SketchPlane::Datum {
+                                            datum: p.to_model(),
+                                            offset: 0.0,
+                                        },
+                                        label: self.state.doc.model().datum_name(p.to_model()).to_owned(),
+                                    })
+                                }
+                                (
+                                    Some(crate::document::RefKind::Face | crate::document::RefKind::Plane),
+                                    Selection::Face(face),
+                                ) => self.state.doc.face_ref(face).map(crate::document::EntityRef::Face),
                                 _ => None,
                             };
                             match r {
@@ -664,6 +788,9 @@ impl SolidDraftApp {
                                     e.error = Some(match wanted {
                                         Some(crate::document::RefKind::Edge) => {
                                             "Pick an edge for this reference".into()
+                                        }
+                                        Some(crate::document::RefKind::Plane) => {
+                                            "Choose a reference plane or planar face".into()
                                         }
                                         _ => "Pick a planar face for this reference".into(),
                                     })

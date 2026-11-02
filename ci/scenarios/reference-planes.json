@@ -1,0 +1,360 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "reference-planes",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              5,
+              5,
+              0
+            ],
+            "width": 10,
+            "height": 10
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 5,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 500,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "Boss-Extrude1 \u00b7 End cap",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              5,
+              5,
+              5
+            ],
+            "width": 1,
+            "height": 12
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 1,
+        "through_all": false,
+        "flip": false
+      }
+    },
+    {
+      "tool": "reference_plane",
+      "arguments": {
+        "plane": "Boss-Extrude1 \u00b7 End cap",
+        "offset": 3
+      },
+      "checks": [
+        {
+          "pointer": "/references/2/carrier_counts/0",
+          "equals": 2
+        }
+      ]
+    },
+    {
+      "tool": "reference_plane",
+      "arguments": {
+        "plane": "Plane1",
+        "offset": -2
+      }
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "Plane2",
+        "operations": [
+          {
+            "tool": "polygon",
+            "center": {
+              "u": 2,
+              "v": 5
+            },
+            "vertex": {
+              "u": 3,
+              "v": 5
+            },
+            "sides": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch3",
+        "depth": 3,
+        "through_all": false,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 486,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_extrude",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "depth": 7,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 686,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Plane1",
+        "name": "Upper plane"
+      }
+    },
+    {
+      "tool": "edit_reference_plane",
+      "arguments": {
+        "feature": "Upper plane",
+        "plane": "Boss-Extrude1 \u00b7 End cap",
+        "offset": 4
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 686,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Cut-Extrude1",
+        "suppressed": true
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 698,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/references/2/carrier_counts/0",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Cut-Extrude1",
+        "suppressed": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/references/2/carrier_counts/0",
+          "equals": 2
+        }
+      ]
+    },
+    {
+      "tool": "reference_plane",
+      "arguments": {
+        "plane": "right",
+        "offset": 10
+      }
+    },
+    {
+      "tool": "mirror",
+      "arguments": {
+        "plane": "Plane1",
+        "keep_original": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 20,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "rename",
+      "arguments": {
+        "feature": "Plane1",
+        "name": "Mirror plane"
+      }
+    },
+    {
+      "tool": "edit_reference_plane",
+      "arguments": {
+        "feature": "Mirror plane",
+        "plane": "right",
+        "offset": 12
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 24,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/reference-planes.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/reference-planes.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 24,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Upper plane",
+        "suppressed": true
+      },
+      "repair": [
+        "Plane2",
+        "Sketch3"
+      ]
+    },
+    {
+      "tool": "suppress",
+      "arguments": {
+        "feature": "Upper plane",
+        "suppressed": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 24,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "delete_feature",
+      "arguments": {
+        "feature": "Mirror plane"
+      },
+      "repair": [
+        "Mirror1"
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 688,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 24,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "delete_feature",
+      "arguments": {
+        "feature": "Upper plane"
+      },
+      "repair": [
+        "Plane2",
+        "Sketch3"
+      ]
+    }
+  ]
+}

@@ -78,6 +78,10 @@ impl Kernel for Counting {
         self.inner.backend()
     }
 
+    fn body_notice(&self, body: BodyId) -> Option<&'static str> {
+        self.inner.body_notice(body)
+    }
+
     fn create_body_from_profile(&self, tag: &OpTag, profile: &Profile) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.create_body_from_profile(tag, profile)

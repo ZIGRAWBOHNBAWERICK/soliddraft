@@ -219,10 +219,12 @@ impl ViewportState {
         self.hover = None;
         self.hover_reference = None;
         self.hover_point = None;
+        let mut can_pick_references = false;
         if let (Some(px), Some(pos)) = (cursor_px, hover_pos) {
             let sample = self.pick.lock().unwrap();
             self.hover = (sample.revision == pick_revision).then(|| decode_pick(&sample, px[0], px[1])).flatten();
             let current = planes::sample_is_current(&sample, pick_revision, self.pick_view(rect, ppp), px);
+            can_pick_references = current;
             drop(sample);
             if let Some(picked) = self.hover {
                 let (o, d) = self.camera.ray(pos, rect);
@@ -294,6 +296,9 @@ impl ViewportState {
             self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);
         }
         self.paint_plane_names(ui, &scene, rect);
+        if !sketching {
+            self.paint_reference_planes(ui, doc, rect, can_pick_references, &response, &mut events);
+        }
         if visible.body {
             self.paint_highlights(&painter, doc, selection, rect);
         }
@@ -564,6 +569,67 @@ impl ViewportState {
                     theme::font_semibold(10.0),
                     color,
                 );
+            }
+        }
+    }
+
+    fn paint_reference_planes(
+        &self,
+        ui: &mut egui::Ui,
+        doc: &Document,
+        rect: Rect,
+        can_pick: bool,
+        response: &egui::Response,
+        events: &mut ViewportEvents,
+    ) {
+        let bounds = doc.bounds();
+        for f in &doc.features {
+            if !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
+                || doc.view_choice(crate::document::ViewItem::Feature(f.id)) == Some(false)
+            {
+                continue;
+            }
+            let Some(plane) = f.plane else { continue };
+            let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+            let origin = v(plane.origin);
+            let x = v(plane.x_dir);
+            let y = v(plane.normal).cross(x);
+            // Center the guide over the part without moving the plane's sketch origin.
+            let (center, half) = bounds.map_or((origin, 50.0), |(lo, hi)| {
+                let relative = (lo + hi) * 0.5 - origin;
+                (origin + x * relative.dot(x) + y * relative.dot(y), (hi - lo).length() * 0.625)
+            });
+            let u = x * half;
+            let w = y * half;
+            let corners: Option<Vec<_>> = [center - u - w, center + u - w, center + u + w, center - u + w]
+                .into_iter()
+                .map(|p| self.camera.project(p, rect))
+                .collect();
+            let Some(corners) = corners else { continue };
+            let ink =
+                theme::accent().gamma_multiply(if doc.selection == Some(Selection::Feature(f.id)) { 1.0 } else { 0.6 });
+            let painter = ui.painter().with_clip_rect(rect);
+            painter.add(egui::Shape::closed_line(corners.clone(), egui::Stroke::new(1.25, ink)));
+            let label =
+                painter.text(corners[2], egui::Align2::LEFT_BOTTOM, &f.name, egui::FontId::proportional(11.0), ink);
+            let response_label = ui.interact(label, ui.id().with(("reference plane label", f.id)), Sense::hover());
+            response_label.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} in the view", f.name))
+            });
+            if can_pick
+                && self.hover.is_none()
+                && response.clicked_by(egui::PointerButton::Primary)
+                && let Some(pos) = response.interact_pointer_pos()
+                && corners.iter().zip(corners.iter().cycle().skip(1)).any(|(a, b)| {
+                    let d = *b - *a;
+                    let t = ((pos - *a).dot(d) / d.length_sq().max(1e-6)).clamp(0.0, 1.0);
+                    pos.distance(*a + d * t) < 6.0
+                })
+            {
+                events.clicked = None;
+                events.clicked_reference = None;
+                events.actions.push(AppAction::Select(Some(Selection::Feature(f.id))));
+                break;
             }
         }
     }

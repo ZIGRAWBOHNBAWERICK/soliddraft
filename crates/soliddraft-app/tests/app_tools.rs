@@ -129,6 +129,8 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert!(dir.join("bracket.iges").is_file());
 
     // The verbs, each as one undo step.
+    s.call("reference_plane", json!({"plane": "top", "offset": 2}));
+    s.call("edit_reference_plane", json!({"feature": "Plane1", "plane": "top", "offset": 3}));
     let circle = json!({ "shape": "circle", "center": [20, 70, 10], "diameter": 8 });
     s.call("sketch", json!({ "plane": "Boss-Extrude1 · End cap", "shapes": [circle] }));
     s.call("cut", json!({ "sketch": "Sketch5", "through_all": true, "depth": 1, "flip": false }));
@@ -699,4 +701,208 @@ fn repairing_a_face_offset_preserves_its_distance() {
     assert!(matches!(doc.feature(sketch).unwrap().status, FeatureStatus::NeedsRepair(_)));
     doc.redo().unwrap();
     assert_eq!(doc.feature(sketch).unwrap().plane.unwrap().origin.z, 7.0);
+}
+
+#[test]
+fn reference_planes_follow_edits_renames_visibility_and_reopening() {
+    use soliddraft_app::document::{Command, FeatureKind, FeatureStatus, Selection, ViewItem};
+    use soliddraft_app::tree_visibility;
+    let mut s = offset_session();
+    s.call(
+        "sketch",
+        json!({"plane":"top", "shapes":[{"shape":"rectangle", "center":[5,5,0], "width":10, "height":10}]}),
+    );
+    s.call("extrude", json!({"sketch":"Sketch1", "depth":5, "flip":false}));
+    s.call("reference_plane", json!({"plane":"Boss-Extrude1 · End cap", "offset":3}));
+    s.call("reference_plane", json!({"plane":"Plane1", "offset":-2}));
+    s.call("sketch_geometry", json!({"plane":"Plane2", "operations":[{"tool":"polygon", "center":{"u":5,"v":5}, "vertex":{"u":6,"v":5},"sides":4}]}));
+    let plane1 = s.state.doc.features.iter().find(|f| f.name == "Plane1").unwrap().id;
+    let plane2 = s.state.doc.features.iter().find(|f| f.name == "Plane2").unwrap().id;
+    let sketch = s.state.doc.features.iter().find(|f| f.name == "Sketch2").unwrap().id;
+    let z = |s: &Session, id| s.state.doc.feature(id).unwrap().plane.unwrap().origin.z;
+    assert_eq!(z(&s, plane1), 8.0);
+    assert_eq!(z(&s, sketch), 6.0);
+    s.call("edit_extrude", json!({"feature":"Boss-Extrude1", "depth":7, "flip":false}));
+    assert_eq!(z(&s, sketch), 8.0);
+    s.call("rename", json!({"feature":"Plane1", "name":"Upper plane"}));
+    assert_eq!(z(&s, sketch), 8.0);
+    s.call("edit_reference_plane", json!({"feature":"Upper plane", "plane":"Boss-Extrude1 · End cap", "offset":4}));
+    assert_eq!(z(&s, sketch), 9.0);
+    s.call("undo", json!({}));
+    assert_eq!(z(&s, sketch), 8.0);
+    s.call("redo", json!({}));
+    assert_eq!(z(&s, sketch), 9.0);
+    s.state.doc.selection = Some(Selection::Feature(plane2));
+    tree_visibility::toggle(&mut s.state, ViewItem::Feature(plane2));
+    assert!(!tree_visibility::shown(&s.state, ViewItem::Feature(plane2)));
+    assert!(tree_visibility::visible(&s.state).body);
+    assert!(tree_visibility::shown(&s.state, ViewItem::Feature(plane1)));
+    let body = s.state.doc.features.iter().find(|f| f.name == "Boss-Extrude1").unwrap().id;
+    s.state.doc.set_view_choice(ViewItem::Feature(body), Some(false));
+    tree_visibility::toggle(&mut s.state, ViewItem::Feature(plane2));
+    assert!(!tree_visibility::visible(&s.state).body);
+    s.state.doc.set_view_choice(ViewItem::Feature(body), None);
+    tree_visibility::toggle(&mut s.state, ViewItem::Feature(plane2));
+    let bytes = s.state.doc.model().to_bytes().unwrap();
+    let model = soliddraft_model::Document::from_bytes(&bytes, s.state.doc.kernel().clone()).unwrap();
+    s.state.doc = soliddraft_app::document::Document::from_model(model);
+    assert_eq!(s.state.doc.view_choice(ViewItem::Feature(plane2)), Some(false));
+    assert_eq!(z(&s, sketch), 9.0);
+    assert!(matches!(s.state.doc.feature(plane1).unwrap().kind, FeatureKind::ReferencePlane(_)));
+    s.call("suppress", json!({"feature":"Upper plane", "suppressed":true}));
+    assert!(matches!(s.state.doc.feature(plane2).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    assert!(matches!(s.state.doc.feature(sketch).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    s.call("suppress", json!({"feature":"Upper plane", "suppressed":false}));
+    assert_eq!(z(&s, sketch), 9.0);
+    s.call("suppress", json!({"feature":"Plane2", "suppressed":true}));
+    s.state
+        .doc
+        .apply(Command::Repair {
+            id: sketch,
+            index: 0,
+            replacement: soliddraft_app::document::EntityRef::Plane {
+                plane: soliddraft_model::SketchPlane::Feature {
+                    feature: soliddraft_model::FeatureId(plane1 as u32),
+                    offset: 0.0,
+                },
+                label: "Upper plane".into(),
+            },
+        })
+        .unwrap();
+    assert_eq!(z(&s, sketch), 11.0);
+    s.call("undo", json!({}));
+    assert!(matches!(s.state.doc.feature(sketch).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    s.call("suppress", json!({"feature":"Plane2", "suppressed":false}));
+    s.state.doc.apply(Command::DeleteFeature(plane1)).unwrap();
+    assert!(matches!(s.state.doc.feature(plane2).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    assert!(s.state.doc.feature(plane2).unwrap().plane.is_none());
+    s.state
+        .doc
+        .apply(Command::Repair {
+            id: plane2,
+            index: 0,
+            replacement: soliddraft_app::document::EntityRef::Plane {
+                plane: soliddraft_model::SketchPlane::Datum { datum: soliddraft_model::DatumPlane::Top, offset: 0.0 },
+                label: "Top plane".into(),
+            },
+        })
+        .unwrap();
+    assert_eq!(z(&s, sketch), -2.0);
+    s.call("undo", json!({}));
+    assert!(matches!(s.state.doc.feature(plane2).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    s.call("redo", json!({}));
+    assert_eq!(z(&s, sketch), -2.0);
+    s.call("undo", json!({}));
+    assert!(matches!(s.state.doc.feature(plane2).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    s.call("undo", json!({}));
+    assert_eq!(z(&s, sketch), 9.0);
+}
+
+#[test]
+fn reference_planes_drive_mirrors_and_reject_invalid_sources() {
+    let mut s = offset_session();
+    s.call(
+        "sketch",
+        json!({"plane":"top", "shapes":[{"shape":"rectangle", "center":[5,5,0], "width":10, "height":10}]}),
+    );
+    s.call("extrude", json!({"sketch":"Sketch1", "depth":5, "flip":false}));
+    s.call("reference_plane", json!({"plane":"right", "offset":10}));
+    s.call("mirror", json!({"plane":"Plane1", "keep_original":false}));
+    let mass = |s: &Session| s.state.doc.kernel().mass_properties(s.state.doc.display_body().unwrap()).unwrap();
+    assert!((mass(&s).centroid.x - 15.0).abs() < 1e-6);
+    s.call("edit_reference_plane", json!({"feature":"Plane1", "plane":"right", "offset":12}));
+    assert!((mass(&s).centroid.x - 19.0).abs() < 1e-6);
+    for arguments in [
+        json!({"feature":"Plane1", "plane":"Plane1", "offset":1}),
+        json!({"feature":"Plane1", "plane":"right", "offset":1e10}),
+        json!({"feature":"Plane1", "plane":"missing", "offset":1}),
+    ] {
+        let before = depths(&s.state);
+        let bytes = s.state.doc.model().part_json();
+        let out = call_checked(
+            &mut AppTools { state: &mut s.state },
+            "edit_reference_plane",
+            arguments,
+            &Caller::Mcp { client: "test".into() },
+        );
+        assert!(out.is_error, "{}", out.content);
+        assert_eq!(before, depths(&s.state));
+        assert_eq!(bytes, s.state.doc.model().part_json());
+    }
+    let plane = s.state.doc.features.iter().find(|f| f.name == "Plane1").unwrap().id;
+    let before = depths(&s.state);
+    let bytes = s.state.doc.model().part_json();
+    let invalid = s.state.doc.apply(soliddraft_app::document::Command::EditFeature {
+        id: plane,
+        kind: soliddraft_app::document::FeatureKind::ReferencePlane(soliddraft_model::SketchPlane::Feature {
+            feature: soliddraft_model::FeatureId(999_999),
+            offset: 0.0,
+        }),
+    });
+    assert!(invalid.is_err());
+    assert_eq!(before, depths(&s.state));
+    assert_eq!(bytes, s.state.doc.model().part_json());
+    let mirror = s.state.doc.features.iter().find(|f| f.name == "Mirror1").unwrap().id;
+    s.state.doc.apply(soliddraft_app::document::Command::DeleteFeature(plane)).unwrap();
+    assert!(matches!(
+        s.state.doc.feature(mirror).unwrap().status,
+        soliddraft_app::document::FeatureStatus::NeedsRepair(_)
+    ));
+    s.state
+        .doc
+        .apply(soliddraft_app::document::Command::Repair {
+            id: mirror,
+            index: 0,
+            replacement: soliddraft_app::document::EntityRef::Plane {
+                plane: soliddraft_model::SketchPlane::Datum { datum: soliddraft_model::DatumPlane::Right, offset: 0.0 },
+                label: "Right plane".into(),
+            },
+        })
+        .unwrap();
+    assert!((mass(&s).centroid.x + 5.0).abs() < 1e-6);
+    s.call("undo", json!({}));
+    assert!(matches!(
+        s.state.doc.feature(mirror).unwrap().status,
+        soliddraft_app::document::FeatureStatus::NeedsRepair(_)
+    ));
+    s.call("redo", json!({}));
+    assert!((mass(&s).centroid.x + 5.0).abs() < 1e-6);
+    s.call("undo", json!({}));
+    s.call("undo", json!({}));
+    assert!((mass(&s).centroid.x - 19.0).abs() < 1e-6);
+}
+
+#[test]
+fn reference_planes_reserve_origin_plane_aliases() {
+    let mut s = offset_session();
+    s.call("rename_plane", json!({"plane":"top", "name":"Plane1 plane"}));
+    s.call("reference_plane", json!({"plane":"front", "offset":-6}));
+    assert_eq!(s.state.doc.features[0].name, "Plane2");
+    s.call("sketch_geometry", json!({"plane":"Plane2", "operations":[{"tool":"polygon", "center":{"u":0,"v":0}, "vertex":{"u":1,"v":0},"sides":4}]}));
+    assert_eq!(s.state.doc.features[1].plane.unwrap().origin.y, 6.0);
+    let out = call_checked(
+        &mut AppTools { state: &mut s.state },
+        "rename",
+        json!({"feature":"Plane2","name":"Top plane"}),
+        &Caller::Mcp { client: "test".into() },
+    );
+    assert!(out.is_error, "{}", out.content);
+    assert_eq!(s.state.doc.features[0].name, "Plane2");
+}
+
+#[test]
+fn reference_planes_repair_messages_follow_suppressed_source_renames() {
+    let mut s = offset_session();
+    s.call("reference_plane", json!({"plane":"top", "offset":3}));
+    s.call("reference_plane", json!({"plane":"Plane1", "offset":2}));
+    s.call("suppress", json!({"feature":"Plane1", "suppressed":true}));
+    let before = s.call("feature", json!({"name":"Plane2"}));
+    assert!(before["status"].as_str().unwrap().contains("Plane1"), "{before}");
+    s.call("rename", json!({"feature":"Plane1", "name":"Raised plane"}));
+    let after = s.call("feature", json!({"name":"Plane2"}));
+    assert_eq!(after["status"], "needs repair: Raised plane no longer resolves");
+    let id = s.state.doc.features.iter().find(|f| f.name == "Plane2").unwrap().id;
+    assert!(
+        matches!(s.state.doc.model().status(soliddraft_model::FeatureId(id as u32)), Some(soliddraft_model::FeatureStatus::RepairNeeded(items)) if items[0].message.contains("Raised plane"))
+    );
 }

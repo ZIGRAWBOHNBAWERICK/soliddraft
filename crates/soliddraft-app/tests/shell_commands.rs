@@ -111,7 +111,7 @@ fn saved_openings(state: &AppState) -> serde_json::Value {
 fn nothing_left(state: &AppState) {
     assert_eq!(state.doc.features.last().unwrap().status, FeatureStatus::Ok);
     assert_eq!(state.doc.display_body(), None);
-    let refusal = state.doc.model().export(Format::Step).err().expect("no body to export");
+    let Err(refusal) = state.doc.model().export(Format::Step) else { panic!("no body to export") };
     assert_eq!(refusal, "the part has no body to export");
 }
 

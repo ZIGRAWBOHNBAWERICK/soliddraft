@@ -1,0 +1,149 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "parallel-plane-fillet",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 10
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 12,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "Boss-Extrude1 · End cap",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              8,
+              12
+            ],
+            "width": 24,
+            "height": 10
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 12,
+        "flip": false
+      }
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Cut-Extrude1 · Edge 3"
+        ],
+        "radius": 1
+      },
+      "label": "parallel-plane-fillet build"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0.5
+      },
+      "label": "parallel-plane-fillet edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 7
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/parallel-plane-fillet.dwprt"
+      },
+      "files": [
+        "{bundle}/parallel-plane-fillet.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/parallel-plane-fillet.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 7,
+      "exports": [
+        {
+          "format": "stl"
+        },
+        {
+          "format": "step"
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        },
+        {
+          "pointer": "/result/radius",
+          "equals": 0.5
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0
+      },
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 12
+    }
+  ]
+}

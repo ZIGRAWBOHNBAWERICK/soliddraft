@@ -52,6 +52,7 @@ impl Dimension {
             FeatureKind::Chamfer(_) => Some(Dimension::Distance),
             FeatureKind::Extrude(_)
             | FeatureKind::Cut(_)
+            | FeatureKind::ReferencePlane(_)
             | FeatureKind::Sketch(_)
             | FeatureKind::Hole(_)
             | FeatureKind::Pattern(_)
@@ -111,7 +112,11 @@ pub fn edit_command(id: FeatureId, kind: FeatureKind) -> Option<Command> {
         | FeatureKind::Draft(_)
         | FeatureKind::Shell(_)
         | FeatureKind::Revolve(_)) => Command::EditFeature { id, kind },
-        FeatureKind::Sketch(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {
+        FeatureKind::ReferencePlane(_)
+        | FeatureKind::Sketch(_)
+        | FeatureKind::ImportStep(_)
+        | FeatureKind::Lattice(_)
+        | FeatureKind::Gyroid(_) => {
             return None;
         }
     })

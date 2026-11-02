@@ -436,6 +436,16 @@
       ]
     },
     {
+      "id": "reference-planes",
+      "file": "ci/scenarios/reference-planes.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "references",
       "file": "ci/scenarios/references.json",
       "acceptance": false,
@@ -691,6 +701,62 @@
       "route": "MCP edits -> document rebuild and immutable display meshes -> retained offscreen viewport -> development rebuild report",
       "supported_limits": "One part at a time; rounded boss dimension and fillet edits, rename, undo/redo, suppress/restore and fresh reopen; unchanged meshes keep their GPU buffers.",
       "evidence": "commands/NNNN and commands-1/NNNN/{command.json,display.json,kernel.json,viewport.png,view.svg}; rounded.dwprt; foreground mesh requests and GPU body placements checked separately from background display refinement"
+    },
+    {
+      "id": "bored-tray-shell",
+      "file": "ci/scenarios/bored-tray-shell.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "d821451665765f2092eda2725d3faffea0976db6",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Convex 40 x 30 x 12 mm tray with a diameter-6 through bore, top open, wall 2 edited to 1.5 mm.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+    },
+    {
+      "id": "oblique-cylinder-fillet",
+      "file": "ci/scenarios/oblique-cylinder-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "d821451665765f2092eda2725d3faffea0976db6",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One closed ellipse of a radius-5 cylinder cut by z=8-0.75x, radius 1 edited to 0.5 mm. Mesh export supported; volume, mass and STEP remain unavailable.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+    },
+    {
+      "id": "parallel-cylinder-fillet",
+      "file": "ci/scenarios/parallel-cylinder-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "d821451665765f2092eda2725d3faffea0976db6",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One straight generator between overlapping through bores, radius 0.5 edited to 0.25 mm.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+    },
+    {
+      "id": "parallel-plane-fillet",
+      "file": "ci/scenarios/parallel-plane-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "d821451665765f2092eda2725d3faffea0976db6",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One straight generator of a radius-5 cylinder cut flat at y=3, radius 1 edited to 0.5 mm.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
     }
   ]
 }

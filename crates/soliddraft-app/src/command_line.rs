@@ -155,7 +155,11 @@ impl StatusNote {
             NoteKind::Ok => theme::ok(),
             NoteKind::Error => theme::error(),
         };
-        Self { text: note.text.clone(), color, fresh: note.at.elapsed() < NOTE_ON_BAR }
+        Self {
+            text: crate::geometry_message::for_user(&note.text).to_owned(),
+            color,
+            fresh: note.at.elapsed() < NOTE_ON_BAR,
+        }
     }
 }
 

@@ -46,6 +46,13 @@ pub enum Command {
         /// The new definition.
         kind: FeatureKind,
     },
+    /// Restores a prior definition for undo, including references that are now missing.
+    RestoreFeatureKind {
+        /// The existing feature.
+        id: FeatureId,
+        /// Its prior definition.
+        kind: FeatureKind,
+    },
     /// Sets a dimension of a sketch and solves the sketch.
     SetSketchDimension {
         /// The sketch feature.
@@ -334,6 +341,12 @@ impl Document {
                 return Err(CommandError::Invalid(format!("another plane is already named {name}")));
             }
         }
+        if self.features.iter().any(|f| {
+            matches!(f.kind, FeatureKind::ReferencePlane(_))
+                && f.name.trim().to_ascii_lowercase().trim_end_matches(" plane") == key
+        }) {
+            return Err(CommandError::Invalid(format!("another plane is already named {name}")));
+        }
         let old = self.datum_name(datum).to_owned();
         if name == datum.label() {
             self.datum_names.remove(&datum);
@@ -555,6 +568,9 @@ impl Document {
 
     pub(crate) fn check_kind(kind: &FeatureKind) -> Result<(), CommandError> {
         match kind {
+            FeatureKind::ReferencePlane(p) if !p.offset().is_finite() || p.offset().abs() > 100_000.0 => {
+                Err(CommandError::Invalid("plane offset must be finite and within 100000 mm of zero".into()))
+            }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) if !(b.size.is_finite() && b.size > 0.0) => {
                 Err(CommandError::Invalid(format!("size must be positive, got {}", b.size)))
             }
@@ -634,7 +650,17 @@ impl Document {
 
     /// The next free name for a kind: "Sketch1", "Sketch2", ...
     fn fresh_name(&self, base: &str) -> String {
-        (1..).map(|n| format!("{base}{n}")).find(|name| self.features.iter().all(|f| &f.name != name)).unwrap()
+        (1..)
+            .map(|n| format!("{base}{n}"))
+            .find(|name| {
+                self.features.iter().all(|f| &f.name != name)
+                    && (base != "Plane"
+                        || [DatumPlane::Top, DatumPlane::Front, DatumPlane::Right].into_iter().all(|d| {
+                            self.datum_name(d).trim().to_ascii_lowercase().trim_end_matches(" plane")
+                                != name.to_ascii_lowercase().trim_end_matches(" plane")
+                        }))
+            })
+            .unwrap()
     }
 
     fn insert(&mut self, feature: Feature, position: usize) -> Result<(), CommandError> {
@@ -740,6 +766,35 @@ impl Document {
         Ok(applied)
     }
 
+    fn edit_feature_definition(
+        &mut self,
+        id: FeatureId,
+        kind: FeatureKind,
+        restoring: bool,
+    ) -> Result<Applied, CommandError> {
+        Self::check_kind(&kind)?;
+        if !restoring {
+            self.check_inputs(&kind)?;
+        }
+        let i = self.index(id)?;
+        let mut next = self.features.clone();
+        let old = std::mem::replace(&mut next[i].kind, kind.clone());
+        if !old.same_stage(&kind) {
+            return Err(CommandError::Invalid("a feature cannot change into or out of a terminal field".into()));
+        }
+        Self::check_order(&next)?;
+        self.check_drivers(&next)?;
+        let label = format!("edit {}", next[i].name);
+        self.features = next;
+        self.touch(i);
+        Ok(Applied {
+            inverse: Command::RestoreFeatureKind { id, kind: old },
+            redo: if restoring { Command::RestoreFeatureKind { id, kind } } else { Command::EditFeature { id, kind } },
+            created: None,
+            label,
+        })
+    }
+
     fn apply_inner(&mut self, command: Command) -> Result<Applied, CommandError> {
         match command {
             command @ (Command::AddConfiguration { .. }
@@ -780,29 +835,8 @@ impl Document {
                     label,
                 })
             }
-            Command::EditFeature { id, kind } => {
-                Self::check_kind(&kind)?;
-                self.check_inputs(&kind)?;
-                let i = self.index(id)?;
-                let mut next = self.features.clone();
-                let old = std::mem::replace(&mut next[i].kind, kind.clone());
-                if !old.same_stage(&kind) {
-                    return Err(CommandError::Invalid(
-                        "a feature cannot change into or out of a terminal field".into(),
-                    ));
-                }
-                Self::check_order(&next)?;
-                self.check_drivers(&next)?;
-                let label = format!("edit {}", next[i].name);
-                self.features = next;
-                self.touch(i);
-                Ok(Applied {
-                    inverse: Command::EditFeature { id, kind: old },
-                    redo: Command::EditFeature { id, kind },
-                    created: None,
-                    label,
-                })
-            }
+            Command::EditFeature { id, kind } => self.edit_feature_definition(id, kind, false),
+            Command::RestoreFeatureKind { id, kind } => self.edit_feature_definition(id, kind, true),
             Command::SetSketchDimension { id, constraint, value } => {
                 let i = self.index(id)?;
                 let FeatureKind::Sketch(old) = &self.features[i].kind else {
@@ -829,7 +863,7 @@ impl Document {
                 self.last_solve = Some(status);
                 self.touch(i);
                 Ok(Applied {
-                    inverse: Command::EditFeature { id, kind: old },
+                    inverse: Command::RestoreFeatureKind { id, kind: old },
                     redo: Command::EditFeature { id, kind },
                     created: None,
                     label,
@@ -840,6 +874,18 @@ impl Document {
                     return Err(CommandError::Invalid("a feature name cannot be empty".into()));
                 }
                 let i = self.index(id)?;
+                if matches!(self.features[i].kind, FeatureKind::ReferencePlane(_)) {
+                    let key = name.trim().to_ascii_lowercase();
+                    let key = key.trim_end_matches(" plane");
+                    if [DatumPlane::Top, DatumPlane::Front, DatumPlane::Right].into_iter().any(|d| {
+                        [self.datum_name(d), d.label()]
+                            .iter()
+                            .any(|n| n.trim().to_ascii_lowercase().trim_end_matches(" plane") == key)
+                    }) || self.features.iter().any(|f| f.id != id && f.name.trim().eq_ignore_ascii_case(name.trim()))
+                    {
+                        return Err(CommandError::Invalid(format!("another plane is already named {name}")));
+                    }
+                }
                 let old = std::mem::replace(&mut self.features[i].name, name.clone());
                 // Messages that name the feature are made again; every build is reused.
                 self.touch(i);

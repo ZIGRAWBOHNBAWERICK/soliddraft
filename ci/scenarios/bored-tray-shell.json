@@ -1,0 +1,123 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "bored-tray-shell",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 12,
+        "flip": false
+      }
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Boss-Extrude1 · End cap",
+        "points": [
+          [
+            0,
+            0,
+            12
+          ]
+        ],
+        "diameter": 6
+      }
+    },
+    {
+      "tool": "shell",
+      "arguments": {
+        "open_faces": [
+          "Boss-Extrude1 · End cap"
+        ],
+        "thickness": 2
+      },
+      "label": "bored-tray-shell build",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 5486.10615680975,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 1.5
+      },
+      "label": "bored-tray-shell edit",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4239.189131381832,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "same_geometry_as_step": 4
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/bored-tray-shell.dwprt"
+      },
+      "files": [
+        "{bundle}/bored-tray-shell.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/bored-tray-shell.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 5,
+      "exports": [
+        {
+          "format": "stl"
+        },
+        {
+          "format": "step"
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 0
+      },
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 9
+    }
+  ]
+}

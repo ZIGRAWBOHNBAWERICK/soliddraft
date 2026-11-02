@@ -206,11 +206,19 @@ fn dimension_field(ui: &mut egui::Ui, state: &mut AppState, id: FeatureId, kind:
         && drag.feature() == id
     {
         let (message, failed) = drag.label();
-        ui.label(egui::RichText::new(message).size(11.0).color(if failed { theme::error() } else { theme::muted() }));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(&message)).size(11.0).color(if failed {
+            theme::error()
+        } else {
+            theme::muted()
+        }));
     } else if let Some(message) = state.doc.display_failure() {
-        ui.label(egui::RichText::new(message).size(11.0).color(theme::error()));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(message)).size(11.0).color(theme::error()));
     } else if let Some((message, failed)) = state.doc.proof_message() {
-        ui.label(egui::RichText::new(message).size(11.0).color(if failed { theme::error() } else { theme::muted() }));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(message)).size(11.0).color(if failed {
+            theme::error()
+        } else {
+            theme::muted()
+        }));
     }
 }
 
@@ -307,18 +315,28 @@ fn axis_combo(ui: &mut egui::Ui, id: &str, label: &str, direction: &mut Vec3) {
 }
 
 /// A reference plane choice; a picked face shows by its label.
-fn plane_combo(ui: &mut egui::Ui, id: &str, plane: &mut PlaneRef) {
-    egui::ComboBox::from_id_salt(id).width(ui.available_width() - 4.0).selected_text(plane_ref_label(plane)).show_ui(
-        ui,
-        |ui| {
+fn plane_combo(ui: &mut egui::Ui, id: &str, plane: &mut PlaneRef, choices: &[(soliddraft_model::FeatureId, String)]) {
+    egui::ComboBox::from_id_salt(id)
+        .width(ui.available_width() - 4.0)
+        .selected_text(match plane {
+            PlaneRef::Feature { feature } => choices
+                .iter()
+                .find(|(id, _)| id == feature)
+                .map(|(_, name)| name.clone())
+                .unwrap_or_else(|| "Missing plane".into()),
+            _ => plane_ref_label(plane),
+        })
+        .show_ui(ui, |ui| {
+            for (feature, name) in choices {
+                ui.selectable_value(plane, PlaneRef::Feature { feature: *feature }, name);
+            }
             for datum in [DatumPlane::Top, DatumPlane::Front, DatumPlane::Right] {
                 let chosen = matches!(plane, PlaneRef::Datum { datum: d, .. } if *d == datum);
                 if ui.selectable_label(chosen, datum.label()).clicked() {
                     *plane = PlaneRef::Datum { datum, offset: 0.0 };
                 }
             }
-        },
-    );
+        });
 }
 
 fn section_gap(ui: &mut egui::Ui) {
@@ -336,7 +354,7 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
         icons::paint(ui.painter(), Icon::Warning, r, theme::error());
-        ui.label(egui::RichText::new(err).size(11.5).color(theme::error()));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(err)).size(11.5).color(theme::error()));
     });
 }
 
@@ -396,6 +414,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
             state.editor.as_ref().unwrap().title(),
             if matches!(p.layout, PatternSpec::Linear { .. }) { Icon::LinearPattern } else { Icon::CircularPattern },
         ),
+        Some(EditorParams::ReferencePlane(_)) => (state.editor.as_ref().unwrap().title(), Icon::Plane),
         Some(EditorParams::Mirror(_)) => (state.editor.as_ref().unwrap().title(), Icon::Mirror),
         Some(EditorParams::Draft(_)) => (state.editor.as_ref().unwrap().title(), Icon::Draft),
         Some(EditorParams::Lattice(_) | EditorParams::Gyroid(_)) => {
@@ -429,6 +448,20 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
 
     let sketch_names: Vec<(crate::document::FeatureId, String)> =
         state.doc.features.iter().filter(|f| f.is_sketch()).map(|f| (f.id, f.name.clone())).collect();
+    let target = state
+        .editor
+        .as_ref()
+        .and_then(|e| e.target)
+        .and_then(|id| state.doc.index_of(id))
+        .unwrap_or(state.doc.features.len());
+    let plane_choices: Vec<_> = state
+        .doc
+        .features
+        .iter()
+        .take(target)
+        .filter(|f| matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
+        .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
+        .collect();
     let mut actions = Vec::new();
     let Some(editor) = state.editor.as_mut() else { return };
     egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
@@ -721,9 +754,27 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.add_space(8.0);
                 hint(ui, "Copies the part's body and unites the copies with it.");
             }
+            EditorParams::ReferencePlane(source) => {
+                theme::section_label(ui, "Source plane");
+                let mut plane = match source {
+                    soliddraft_model::SketchPlane::Datum { datum, .. } => PlaneRef::Datum { datum: *datum, offset: 0.0 },
+                    soliddraft_model::SketchPlane::Feature { feature, .. } => PlaneRef::Feature { feature: *feature },
+                    soliddraft_model::SketchPlane::Face { face } | soliddraft_model::SketchPlane::FaceOffset { face, .. } => PlaneRef::Face { face: face.clone() },
+                };
+                let mut offset = source.offset();
+                plane_combo(ui, "reference_plane_source", &mut plane, &plane_choices);
+                let response = labelled_field(ui, "Offset", "mm", |ui| ui.add(egui::DragValue::new(&mut offset).speed(0.5).range(-100_000.0..=100_000.0)));
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Offset value"));
+                *source = match plane {
+                    PlaneRef::Datum { datum, .. } => soliddraft_model::SketchPlane::Datum { datum, offset },
+                    PlaneRef::Feature { feature } => soliddraft_model::SketchPlane::Feature { feature, offset },
+                    PlaneRef::Face { face } => soliddraft_model::SketchPlane::FaceOffset { face, offset },
+                };
+                hint(ui, "Choose a plane in the tree or click a planar face. A negative offset moves in the opposite direction.");
+            }
             EditorParams::Mirror(m) => {
                 theme::section_label(ui, "Mirror plane");
-                plane_combo(ui, "mirror_plane", &mut m.plane);
+                plane_combo(ui, "mirror_plane", &mut m.plane, &plane_choices);
                 hint(ui, "Or click a planar face in the viewport.");
                 ui.checkbox(&mut m.keep_original, "Keep the original");
                 if let Some(err) = &editor.error {
@@ -830,7 +881,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 section_gap(ui);
                 theme::section_label(ui, "Neutral plane");
-                plane_combo(ui, "draft_neutral", &mut d.neutral);
+                plane_combo(ui, "draft_neutral", &mut d.neutral, &plane_choices);
                 ui.checkbox(&mut d.picking_neutral, "Next face click sets the neutral plane");
                 unit_field(ui, "Angle", &mut d.angle, "°");
                 ui.checkbox(&mut d.reverse, "Pull against the neutral normal");
@@ -844,6 +895,9 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 theme::section_label(ui, "Sketch plane");
                 hint(ui, "Choose a reference plane, or click a planar face of the body.");
                 ui.add_space(4.0);
+                for (feature, name) in &plane_choices {
+                    if ui.button(name).clicked() { actions.push(AppAction::StartSketchOn(SketchPlane::Feature { feature: feature.0 as _, offset: 0.0 })); }
+                }
                 for p in PlaneKind::ALL {
                     if ui
                         .add_sized(
@@ -875,7 +929,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                                 let (r, _) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
                                 let icon = match item.kind {
                                     crate::document::RefKind::Edge => Icon::Axis,
-                                    crate::document::RefKind::Face => Icon::Plane,
+                                    crate::document::RefKind::Face | crate::document::RefKind::Plane => Icon::Plane,
                                 };
                                 icons::paint(ui.painter(), icon, r, theme::muted());
                                 ui.label(
@@ -892,6 +946,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                                             match item.kind {
                                                 crate::document::RefKind::Edge => "Click the replacement edge",
                                                 crate::document::RefKind::Face => "Click the replacement face",
+                                                crate::document::RefKind::Plane => "Choose a plane or planar face",
                                             }
                                         } else {
                                             "Waiting"
@@ -1259,6 +1314,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
     let feature = info.feature.and_then(|id| state.doc.feature(id)).cloned();
     let feature = feature.as_ref();
     let icon = match (sel, feature.map(|f| &f.kind)) {
+        (Selection::Feature(_), Some(crate::document::FeatureKind::ReferencePlane(_))) => Icon::Plane,
         (Selection::Feature(_), Some(crate::document::FeatureKind::Sketch(_))) => Icon::Sketch,
         (Selection::Feature(_), Some(crate::document::FeatureKind::Cut(_))) => Icon::Cut,
         (Selection::Feature(_), Some(crate::document::FeatureKind::Fillet(_))) => Icon::Fillet,

@@ -2,13 +2,19 @@ use serde_json::Value;
 use soliddraft_app::{command_tools::line_schema, commands};
 use std::collections::BTreeSet;
 
-/// Compare the frozen proposal contract after checking its three new alternatives.
+/// Compare the frozen proposal contract after checking the added alternatives.
 pub(super) fn before_configurations(id: &str, current: &Value, plain: fn(&Value) -> Value) -> Value {
     let mut current = current.clone();
     if id != "propose" {
         return current;
     }
-    let expected = BTreeSet::from(["activate_configuration", "add_configuration", "set_configuration_value"]);
+    let expected = BTreeSet::from([
+        "activate_configuration",
+        "add_configuration",
+        "set_configuration_value",
+        "reference_plane",
+        "edit_reference_plane",
+    ]);
     let mut found = BTreeSet::new();
     let lines = current.pointer_mut("/tool/input/properties/commands/items/anyOf").unwrap().as_array_mut().unwrap();
     lines.retain(|line| {

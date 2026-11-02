@@ -130,3 +130,40 @@ fn unsupported_nonconvex_shell_refuses_without_mutating_input() {
     assert_eq!(k.mass_properties(blank).unwrap(), before);
     assert!(k.validate(blank).unwrap().valid);
 }
+
+#[test]
+fn bored_tray_edits_preserve_inner_walls_and_export() {
+    let k = CatallaxKernel::new();
+    let blank = extruded(&k, Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0), 12.0);
+    let bore = soliddraft_kernel_api::contract::cylinder(&k, Vec3::ZERO, 3.0, 12.0);
+    let bored = k.boolean(&OpTag::new("bore"), soliddraft_kernel_api::BooleanOp::Subtract, blank, bore).unwrap().body;
+    let topology = k.topology(bored).unwrap();
+    let top = topology.faces.iter().find(|face| face.normal == Some(Vec3::Z)).unwrap().id;
+    let before = k.mass_properties(bored).unwrap();
+    let mut names = None;
+    for thickness in [2.0, 1.5] {
+        let tray = k.shell(&OpTag::new("tray"), bored, &[top], thickness).unwrap();
+        assert!(k.validate(tray.body).unwrap().valid);
+        let expected = 14400.0
+            - std::f64::consts::PI * 9.0 * 12.0
+            - ((40.0 - 2.0 * thickness) * (30.0 - 2.0 * thickness) - std::f64::consts::PI * (3.0 + thickness).powi(2))
+                * (12.0 - thickness);
+        assert!((k.mass_properties(tray.body).unwrap().volume - expected).abs() < 1e-6);
+        let inner: Vec<_> = tray
+            .record
+            .face_roles
+            .iter()
+            .filter_map(|face| if let FaceRole::Offset { face } = face.role { Some(face) } else { None })
+            .collect();
+        assert_eq!(inner.len(), 6, "floor, four walls and expanded bore wall");
+        if let Some(before) = &names {
+            assert_eq!(&inner, before);
+        }
+        names = Some(inner);
+        let step = k.export_step(tray.body, &StepOptions::default()).unwrap();
+        assert!(step.report.within_tolerance);
+        assert_eq!(step.report.solids, 1);
+        k.release(tray.body).unwrap();
+    }
+    assert_eq!(k.mass_properties(bored).unwrap(), before);
+}

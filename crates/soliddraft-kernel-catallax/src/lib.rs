@@ -279,11 +279,12 @@ impl CatallaxKernel {
         inputs: &[BodyId],
         step: Value,
     ) -> KernelResult<OpResult> {
-        self.operation_reading(state, tag, op, inputs, &[], step)
+        self.operation_reading(state, tag, op, inputs, &[], &[], step)
     }
 
     /// Like [`CatallaxKernel::operation`], also reading the steps of `context` bodies
     /// whose faces the operation only looks at, so their history stays out of the result's.
+    #[allow(clippy::too_many_arguments)]
     fn operation_reading(
         &self,
         mut state: MutexGuard<'_, State>,
@@ -291,6 +292,7 @@ impl CatallaxKernel {
         op: OpKind,
         inputs: &[BodyId],
         context: &[BodyId],
+        selected_edges: &[EdgeId],
         mut step: Value,
     ) -> KernelResult<OpResult> {
         if let Some(field) = inputs.iter().chain(context).find(|body| state.fields.contains_key(body)) {
@@ -351,7 +353,13 @@ impl CatallaxKernel {
                 "empty results have no BodyKind or centroid in the existing application interface is not available in the Catallax application entry".into(),
             ));
         }
-        let ids = convert::Ids::new(&app, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>(), &tags, &mut state.next);
+        let ids = convert::Ids::new(
+            &app,
+            &parents.iter().map(|p| &p.ids).collect::<Vec<_>>(),
+            &tags,
+            &mut state.next,
+            selected_edges,
+        );
         let record = ids.record(seq, tag, op, &result, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>());
         history.insert(seq, record.clone());
         let body = BodyId::from_raw(state.id());
@@ -387,13 +395,14 @@ impl CatallaxKernel {
         inputs: &[BodyId],
         native: catallax_recipe::Operation,
         sweep: Option<Value>,
+        selected_edges: &[EdgeId],
     ) -> KernelResult<OpResult> {
         let base = state.get(base)?.result.clone();
         let mut step = json!({"op":"native","base":base,"native":native});
         if let Some(sweep) = sweep {
             step["sweep"] = sweep;
         }
-        self.operation(state, tag, op, inputs, step)
+        self.operation_reading(state, tag, op, inputs, &[], selected_edges, step)
     }
 
     fn state(&self) -> KernelResult<MutexGuard<'_, State>> {
@@ -661,6 +670,22 @@ impl Kernel for CatallaxKernel {
         })
     }
 
+    fn body_notice(&self, body: BodyId) -> Option<&'static str> {
+        let solid = self.solid(body).ok()?;
+        let built = solid.app.checkpoint.built();
+        built
+            .model
+            .faces_of_body(built.result)
+            .into_iter()
+            .any(|face| {
+                matches!(
+                    built.model.geom().surface(built.model.face(face).surface),
+                    catallax_shapes::Surface::BSpline(catallax_shapes::SplineSupport::RollingPipe(_))
+                )
+            })
+            .then_some("This fillet can be saved and exported as a mesh. Volume, mass and STEP export are unavailable.")
+    }
+
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult> {
         self.observe("fillet", || {
             let state = self.state()?;
@@ -674,7 +699,7 @@ impl Kernel for CatallaxKernel {
                 edges: catallax_recipe::EdgeSelection::Refs(refs),
                 radius: native::number(radius, "fillet radius")?,
             };
-            self.native(state, tag, OpKind::Fillet, body, &[body], native, None)
+            self.native(state, tag, OpKind::Fillet, body, &[body], native, None, edges)
         })
     }
 
@@ -692,7 +717,7 @@ impl Kernel for CatallaxKernel {
                 distance: native::number(distance, "chamfer distance")?,
                 other_distance: None,
             };
-            self.native(state, tag, OpKind::Chamfer, body, &[body], native, None)
+            self.native(state, tag, OpKind::Chamfer, body, &[body], native, None, edges)
         })
     }
 
@@ -701,7 +726,7 @@ impl Kernel for CatallaxKernel {
             let state = self.state()?;
             let solid = state.solid(body)?;
             let operation = shell::operation(state.step(body)?, open, thickness, |face| solid.face_ref(face, body))?;
-            self.native(state, tag, OpKind::Shell, body, &[body], operation, None)
+            self.native(state, tag, OpKind::Shell, body, &[body], operation, None, &[])
         })
     }
 
@@ -738,7 +763,7 @@ impl Kernel for CatallaxKernel {
             let base = state.get(target)?.result.clone();
             let step = json!({"op":"native","base":base,"native":native,"sweep":sweep});
             // The swept solid's history starts at the profile: the target is only read.
-            self.operation_reading(state, tag, OpKind::ExtrudeTo, &[profile], &[target], step)
+            self.operation_reading(state, tag, OpKind::ExtrudeTo, &[profile], &[target], &[], step)
         })
     }
 
@@ -747,7 +772,7 @@ impl Kernel for CatallaxKernel {
             let state = self.state()?;
             let solid = state.solid(body)?;
             let native = native::hole(state.step(body)?, &solid, body, params)?;
-            self.native(state, tag, OpKind::Hole, body, &[body], native, None)
+            self.native(state, tag, OpKind::Hole, body, &[body], native, None, &[])
         })
     }
 
@@ -759,7 +784,7 @@ impl Kernel for CatallaxKernel {
                 body: state.step(body)?,
                 layout: native::pattern_layout(layout)?,
             };
-            self.native(state, tag, OpKind::Pattern, body, &[body], native, None)
+            self.native(state, tag, OpKind::Pattern, body, &[body], native, None, &[])
         })
     }
 
@@ -772,7 +797,7 @@ impl Kernel for CatallaxKernel {
                 plane: native::plane(params.plane_origin, params.plane_normal, "mirror plane")?,
                 keep_original: params.keep_original,
             };
-            self.native(state, tag, OpKind::Mirror, body, &[body], native, None)
+            self.native(state, tag, OpKind::Mirror, body, &[body], native, None, &[])
         })
     }
 
@@ -791,7 +816,7 @@ impl Kernel for CatallaxKernel {
                 angle: native::number(params.angle_deg, "draft angle")?,
                 keep_regions: None,
             };
-            self.native(state, tag, OpKind::Draft, body, &[body], native, None)
+            self.native(state, tag, OpKind::Draft, body, &[body], native, None, &[])
         })
     }
 

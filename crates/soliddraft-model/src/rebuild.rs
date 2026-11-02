@@ -88,8 +88,8 @@ impl Default for BuildCache {
 }
 
 impl BuildCache {
-    /// The key of `feature` built on `input`, from the sketch build `profile` for an
-    /// extrusion of a sketch.
+    /// The key of `feature` built on `input`. `profile` is the version of its sketch
+    /// or reusable plane input, which can change without changing the body.
     pub(crate) fn key(&mut self, feature: &Feature, input: Option<BodyId>, profile: Option<u64>) -> StepKey {
         let definition = match crate::exact::bytes(&feature.kind) {
             Some(bytes) => Definition::Exact(bytes),

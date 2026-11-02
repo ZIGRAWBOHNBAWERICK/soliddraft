@@ -576,7 +576,7 @@ fn invalid_datum_offsets_leave_the_part_and_history_unchanged() {
         ),
         (
             "sketch_geometry",
-            json!({"plane": "top", "offset": soliddraft_app::command_tools::MAX_LENGTH_MM + 1.0,
+            json!({"plane": "Boss-Extrude1 · End cap", "offset": soliddraft_app::command_tools::MAX_LENGTH_MM + 1.0,
                    "operations": [{"tool": "polygon", "center": {"u": 0, "v": 0},
                                    "vertex": {"u": 2, "v": 0}, "sides": 4}]}),
         ),
@@ -591,4 +591,112 @@ fn invalid_datum_offsets_leave_the_part_and_history_unchanged() {
         assert_eq!(depths(&s.state), before);
         assert_eq!(s.state.doc.display_body(), Some(body));
     }
+}
+
+#[test]
+fn face_offsets_follow_the_normal_and_upstream_edits() {
+    for (face, offset, z, depth, removed, edited_z) in [
+        ("End cap", 3.0, 8.0, 5.0, 32.0, 10.0),
+        ("End cap", -2.0, 3.0, 1.0, 16.0, 5.0),
+        ("Start cap", 2.0, -2.0, 4.0, 32.0, -2.0),
+    ] {
+        let mut s = offset_session();
+        s.call(
+            "sketch",
+            json!({"plane":"top", "shapes":[
+                {"shape":"rectangle", "center":[5,5,0], "width":10, "height":10}
+            ]}),
+        );
+        s.call("extrude", json!({"sketch":"Sketch1", "depth":5, "flip":false}));
+        s.call(
+            "sketch",
+            json!({"plane":format!("Boss-Extrude1 · {face}"), "offset":offset, "shapes":[
+                {"shape":"rectangle", "center":[5,5,z], "width":4, "height":4}
+            ]}),
+        );
+        let saved: Value = serde_json::from_str(&s.state.doc.model().part_json()).unwrap();
+        assert_eq!(saved["features"][2]["kind"]["plane"]["on"], "face_offset");
+        assert_eq!(saved["features"][2]["kind"]["plane"]["offset"], offset);
+        s.call("cut", json!({"sketch":"Sketch2", "depth":depth, "through_all":false, "flip":false}));
+        let volume = || s.state.doc.kernel().mass_properties(s.state.doc.display_body().unwrap()).unwrap().volume;
+        assert!((volume() - (500.0 - removed)).abs() < 0.005);
+        s.call("edit_extrude", json!({"feature":"Boss-Extrude1", "depth":7, "flip":false}));
+        let sketch = s.state.doc.features.iter().find(|f| f.name == "Sketch2").unwrap();
+        assert!((sketch.plane.unwrap().origin.z - edited_z).abs() < 1e-9);
+        s.call("undo", json!({}));
+        let sketch = s.state.doc.features.iter().find(|f| f.name == "Sketch2").unwrap();
+        assert!((sketch.plane.unwrap().origin.z - z).abs() < 1e-9);
+        s.call("redo", json!({}));
+        let sketch = s.state.doc.features.iter().find(|f| f.name == "Sketch2").unwrap();
+        assert!((sketch.plane.unwrap().origin.z - edited_z).abs() < 1e-9);
+        let bytes = s.state.doc.model().to_bytes().unwrap();
+        let model = soliddraft_model::Document::from_bytes(&bytes, s.state.doc.kernel().clone()).unwrap();
+        let reopened = soliddraft_app::document::Document::from_model(model);
+        let sketch = reopened.features.iter().find(|f| f.name == "Sketch2").unwrap();
+        assert!((sketch.plane.unwrap().origin.z - edited_z).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn geometry_sketch_face_offset_uses_local_coordinates() {
+    let mut s = offset_session();
+    s.call(
+        "sketch",
+        json!({"plane":"top", "shapes":[
+            {"shape":"rectangle", "center":[5,5,0], "width":10, "height":10}
+        ]}),
+    );
+    s.call("extrude", json!({"sketch":"Sketch1", "depth":5, "flip":false}));
+    s.call(
+        "sketch_geometry",
+        json!({"plane":"Boss-Extrude1 · End cap", "offset":3,
+        "operations":[{"tool":"polygon", "center":{"u":5,"v":5},
+                       "vertex":{"u":7,"v":5},"sides":4}]}),
+    );
+    s.call("cut", json!({"sketch":"Sketch2", "depth":5, "through_all":false, "flip":false}));
+    let mass = s.state.doc.kernel().mass_properties(s.state.doc.display_body().unwrap()).unwrap();
+    assert!((mass.volume - 484.0).abs() < 0.005);
+}
+
+#[test]
+fn repairing_a_face_offset_preserves_its_distance() {
+    use soliddraft_app::document::{Command, EntityRef, FeatureStatus, SketchPlane};
+
+    let mut s = offset_session();
+    s.call(
+        "sketch",
+        json!({"plane":"top", "shapes":[
+            {"shape":"rectangle", "center":[5,5,0], "width":10, "height":10}
+        ]}),
+    );
+    s.call("extrude", json!({"sketch":"Sketch1", "depth":5, "flip":false}));
+    s.call(
+        "sketch",
+        json!({"plane":"Boss-Extrude1 · End cap", "shapes":[
+            {"shape":"rectangle", "center":[5,5,5], "width":4, "height":4}
+        ]}),
+    );
+    s.call("extrude", json!({"sketch":"Sketch2", "depth":3, "flip":false}));
+    s.call(
+        "sketch_geometry",
+        json!({"plane":"Boss-Extrude2 · End cap", "offset":2,
+        "operations":[{"tool":"polygon", "center":{"u":5,"v":5},
+                       "vertex":{"u":6,"v":5},"sides":4}]}),
+    );
+    let doc = &mut s.state.doc;
+    let boss = doc.features.iter().find(|f| f.name == "Boss-Extrude2").unwrap().id;
+    let sketch = doc.features.iter().find(|f| f.name == "Sketch3").unwrap().id;
+    doc.apply(Command::Suppress { id: boss, suppressed: true }).unwrap();
+    assert!(matches!(doc.feature(sketch).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    let top = doc.faces.iter().find(|f| f.label == "End cap").unwrap().id;
+    let replacement = EntityRef::Face(doc.face_ref(top).unwrap());
+    doc.apply(Command::Repair { id: sketch, index: 0, replacement }).unwrap();
+    assert_eq!(doc.feature(sketch).unwrap().status, FeatureStatus::Ok);
+    assert_eq!(doc.feature(sketch).unwrap().plane.unwrap().origin.z, 7.0);
+    let soliddraft_app::document::FeatureKind::Sketch(s) = &doc.feature(sketch).unwrap().kind else { panic!() };
+    assert!(matches!(s.plane, SketchPlane::FaceOffset { offset: 2.0, .. }));
+    doc.undo().unwrap();
+    assert!(matches!(doc.feature(sketch).unwrap().status, FeatureStatus::NeedsRepair(_)));
+    doc.redo().unwrap();
+    assert_eq!(doc.feature(sketch).unwrap().plane.unwrap().origin.z, 7.0);
 }

@@ -109,7 +109,7 @@ pub enum Line {
     Sketch {
         /// `top`, `front`, `right`, or a planar face's name.
         plane: String,
-        /// Signed datum offset along its normal, mm; omitted means zero. Faces require zero.
+        /// Signed distance along the plane or face normal, mm; omitted means zero.
         #[serde(default)]
         offset: f64,
         /// The shapes.
@@ -119,7 +119,7 @@ pub enum Line {
     SketchGeometry {
         /// Reference plane or planar face name.
         plane: String,
-        /// Signed datum offset along its normal, mm; omitted means zero. Faces require zero.
+        /// Signed distance along the plane or face normal, mm; omitted means zero.
         #[serde(default)]
         offset: f64,
         /// Operations in order; entity ids start at 1 and are never reused.
@@ -452,7 +452,7 @@ pub fn sketch_params() -> Vec<(&'static str, Value)> {
                  face's name, such as Boss-Extrude1 · End cap (its u and v are listed by `feature`)",
             ),
         ),
-        ("offset", optional(number("Signed datum offset along its normal, mm; default 0. Not supported on faces"))),
+        ("offset", optional(number("Signed distance along the plane or face normal, mm; default 0"))),
         ("shapes", non_empty_array(shape_schema(), "The closed shapes")),
     ]
 }
@@ -461,7 +461,7 @@ pub fn sketch_params() -> Vec<(&'static str, Value)> {
 pub fn sketch_geometry_params() -> Vec<(&'static str, Value)> {
     vec![
         ("plane", string("top, front, right, or a planar face name")),
-        ("offset", optional(number("Signed datum offset along its normal, mm; default 0. Not supported on faces"))),
+        ("offset", optional(number("Signed distance along the plane or face normal, mm; default 0"))),
         (
             "operations",
             non_empty_array(
@@ -898,7 +898,7 @@ fn datum_by_name(doc: &Document, name: &str) -> Option<PlaneKind> {
 
 fn sketch_plane(doc: &Document, plane: &str, offset: f64) -> Result<SketchPlane, String> {
     if !offset.is_finite() || offset.abs() > MAX_LENGTH_MM {
-        return Err(format!("datum offset must be finite and within {MAX_LENGTH_MM} mm of zero"));
+        return Err(format!("plane offset must be finite and within {MAX_LENGTH_MM} mm of zero"));
     }
     if let Some(plane) = datum_by_name(doc, plane) {
         return Ok(SketchPlane::Reference { plane, offset });
@@ -906,11 +906,8 @@ fn sketch_plane(doc: &Document, plane: &str, offset: f64) -> Result<SketchPlane,
     let face = face_by_name(doc, plane).ok_or_else(|| {
         format!("`{plane}` is neither top, front, right nor a face name; `feature` lists each feature's faces")
     })?;
-    if offset != 0.0 {
-        return Err("datum offset is supported only on reference planes, not on faces".into());
-    }
     let face = doc.face_ref(face).ok_or_else(|| format!("`{plane}` is not planar, so it cannot carry a sketch"))?;
-    Ok(SketchPlane::Face { face })
+    Ok(if offset == 0.0 { SketchPlane::Face { face } } else { SketchPlane::FaceOffset { face, offset } })
 }
 
 /// Any face by name, as a persistent reference.
@@ -931,7 +928,7 @@ fn plane_ref(doc: &Document, plane: &str) -> Result<PlaneRef, String> {
             },
             offset,
         },
-        SketchPlane::Face { face } => PlaneRef::Face { face },
+        SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => PlaneRef::Face { face },
     })
 }
 
@@ -2264,8 +2261,8 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
                 other => other.label(),
             },
             "offset": match &s.plane {
-                SketchPlane::Reference { offset, .. } => Some(*offset),
                 SketchPlane::Face { .. } => None,
+                _ => Some(s.plane.offset()),
             },
             "entities": s.sketch.drawn().count(),
             "state": s.sketch.status.label(),

@@ -42,8 +42,10 @@ unproved preview. Memory accounting does not request a display.
 sketches on the plate's and the boss's top faces, splits the plate's top with a groove,
 sketches on one piece, and merges the top with a flush tab. It then changes the plate
 thickness and the boss diameter, renames features and the Top reference plane, suppresses
-and restores the groove, undoes and redoes, and saves and reopens the part. Every
-reference must survive these steps, including the datum references. Deleting the boss
+and restores the groove, undoes and redoes, and saves and reopens the part. Its
+face sketches use positive and negative offsets, with boss and cut depths
+adjusted to keep the same material intervals. Every reference must survive these
+steps, including the datum references and the face offsets. Deleting the boss
 then raises the repair prompt for the bore's missing plane. Split and merge checks
 inspect the actual origin sets, not just feature statuses.
 
@@ -70,9 +72,10 @@ piece and allocates another id only when it splits a curve. Copies receive new
 ids. See the scenarios for complete requests, including construction boundaries.
 
 Both sketch tools accept an optional signed `offset` in millimetres along a
-reference plane's normal. Omitted offsets are zero; nonzero offsets on body
-faces are refused. For example, `front` has normal -Y, so `offset: -6` places
-the sketch at y=6. World-coordinate shapes must lie on that displaced plane;
+reference plane's or planar face's normal. Omitted offsets are zero. A face
+offset follows the persistently named face on rebuild, including coplanar
+pieces after splits and merges. For example, `front` has normal -Y, so
+`offset: -6` places the sketch at y=6. World-coordinate shapes must lie on that displaced plane;
 `sketch_geometry` operations still use its local u/v coordinates.
 
 `datum-offset.json` exercises this control at the normal 20M allowance. It

@@ -28,7 +28,7 @@ use soliddraft_assistant::tools::schema::{
 use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
 use soliddraft_kernel_api::{FaceId, Plane, SurfaceKind};
 use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip};
-use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef};
+use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef, ShellOpenings};
 
 /// A world point in a recipe line, in millimetres.
 pub type Point = [f64; 3];
@@ -276,6 +276,9 @@ pub enum Line {
     Shell {
         /// Faces left open; empty requests a closed shell.
         open_faces: Vec<String>,
+        /// Opens every face, in place of naming any.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all_faces: bool,
         /// Positive wall thickness, mm.
         thickness: f64,
     },
@@ -682,6 +685,7 @@ pub fn edit_gyroid_params() -> Vec<(&'static str, Value)> {
 pub fn shell_params() -> Vec<(&'static str, Value)> {
     vec![
         ("open_faces", array(string("A face name"), "Faces left open; empty for a closed shell")),
+        ("all_faces", optional(boolean("true opens every face, which leaves nothing; open_faces must then be empty"))),
         ("thickness", number("Wall thickness, mm, greater than 0")),
     ]
 }
@@ -1459,9 +1463,18 @@ impl Line {
                 };
                 run.apply(doc, Command::EditFeature { id, kind })?;
             }
-            Line::Shell { open_faces, thickness } => {
+            Line::Shell { open_faces, all_faces, thickness } => {
+                if *all_faces && !open_faces.is_empty() {
+                    return Err("name faces in open_faces or set all_faces, not both".into());
+                }
                 let shell = soliddraft_model::ShellFeature {
-                    open_faces: open_faces.iter().map(|f| face_ref_by_name(doc, f)).collect::<Result<Vec<_>, _>>()?,
+                    open_faces: if *all_faces {
+                        ShellOpenings::All
+                    } else {
+                        ShellOpenings::Faces(
+                            open_faces.iter().map(|f| face_ref_by_name(doc, f)).collect::<Result<Vec<_>, _>>()?,
+                        )
+                    },
                     thickness: positive("wall thickness", *thickness)?,
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Shell(shell)))?;
@@ -1770,12 +1783,18 @@ impl Line {
             Line::GradeField { feature, axis, from, to, start, end } => {
                 (format!("Grade {feature}"), format!("{start} to {end} along {} from {from} to {to} mm", axis.name()))
             }
-            Line::Shell { open_faces, thickness } => (
+            Line::Shell { open_faces, all_faces, thickness } => (
                 "Shell".into(),
                 format!(
                     "{} mm wall, {}",
                     fmt_mm(*thickness),
-                    if open_faces.is_empty() { "closed".into() } else { format!("open at {}", open_faces.join(", ")) }
+                    if *all_faces {
+                        "every face open".into()
+                    } else if open_faces.is_empty() {
+                        "closed".into()
+                    } else {
+                        format!("open at {}", open_faces.join(", "))
+                    }
                 ),
             ),
             Line::EditShell { feature, thickness } => {
@@ -2446,8 +2465,8 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             json!({ "type": "mirror", "plane": match &m.plane { PlaneRef::Feature { feature } => name(feature.0 as _), _ => plane_ref_label(&m.plane) }, "keep_original": m.keep_original })
         }
         FeatureKind::Shell(s) => json!({
-            "type": "shell", "open_faces": s.open_faces.iter().map(|f| f.label.clone()).collect::<Vec<_>>(),
-            "thickness": s.thickness,
+            "type": "shell", "open_faces": s.open_faces.picked().iter().map(|f| f.label.clone()).collect::<Vec<_>>(),
+            "all_faces": s.open_faces.is_all(), "thickness": s.thickness,
         }),
         FeatureKind::Draft(d) => json!({
             "type": "draft", "faces": d.faces.iter().map(|f| f.label.clone()).collect::<Vec<_>>(),

@@ -1941,7 +1941,24 @@ impl Document {
     /// Index of the last feature that is built and displayed.
     pub fn display_index(&self) -> Option<usize> {
         let end = self.rollback.unwrap_or(self.features.len()).min(self.features.len());
-        (0..end).rev().find(|&i| self.features[i].body.is_some())
+        self.last_body(end)
+    }
+
+    /// The last feature before `end` with a body, unless a later one left none.
+    fn last_body(&self, end: usize) -> Option<usize> {
+        let last = (0..end).rev().find(|&i| self.features[i].body.is_some() || self.left_nothing(i))?;
+        self.features[last].body.is_some().then_some(last)
+    }
+
+    /// Whether feature `index` built and took the part's whole body away, as opening every
+    /// face of a shell does. A feature that is suppressed, pending or failed has not.
+    fn left_nothing(&self, index: usize) -> bool {
+        let feature = &self.features[index];
+        let id = model_id(feature.id);
+        feature.status == FeatureStatus::Ok
+            && !feature.suppressed
+            && self.model.body_after(id).is_none()
+            && self.model.body_before(id).is_some()
     }
 
     /// The viewport body. A failed edit displays the last proved model, never
@@ -1957,7 +1974,7 @@ impl Document {
 
     /// The running body before feature `index`.
     pub fn body_before(&self, index: usize) -> Option<BodyId> {
-        (0..index.min(self.features.len())).rev().find_map(|i| self.features[i].body)
+        self.last_body(index.min(self.features.len())).and_then(|i| self.features[i].body)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -2312,8 +2329,11 @@ impl Document {
                     (model::FeatureKind::Mirror(m), EntityRef::Face(face)) if index == 0 => {
                         m.plane = model::PlaneRef::Face { face };
                     }
-                    (model::FeatureKind::Shell(s), EntityRef::Face(face)) if index < s.open_faces.len() => {
-                        s.open_faces[index] = face;
+                    (model::FeatureKind::Shell(s), EntityRef::Face(face)) => {
+                        let model::ShellOpenings::Faces(faces) = &mut s.open_faces else {
+                            return Err("no such reference".into());
+                        };
+                        *faces.get_mut(index).ok_or("no such reference")? = face;
                     }
                     (model::FeatureKind::Draft(d), EntityRef::Face(face)) if index < d.faces.len() => {
                         d.faces[index] = face;
@@ -2904,8 +2924,13 @@ impl Document {
     /// Preview an analytic shell through the same kernel operation as a committed feature.
     pub fn preview_shell(&self, shell: &model::ShellFeature, before: Option<BodyId>) -> Result<Preview, String> {
         let body = before.ok_or("nothing to shell yet")?;
+        if shell.open_faces.is_all() {
+            self.kernel().shell_all_faces(body, shell.thickness).map_err(|error| error.to_string())?;
+            return Ok(Preview { result: Some(Arc::default()), tool: None, removes: false });
+        }
         let faces = shell
             .open_faces
+            .picked()
             .iter()
             .map(|reference| {
                 self.model
@@ -3163,7 +3188,11 @@ impl Document {
                         }
                     }
                     FeatureKind::Shell(s) => {
-                        details.push(("Open faces".to_owned(), s.open_faces.len().to_string()));
+                        let open = match &s.open_faces {
+                            model::ShellOpenings::All => "All".to_owned(),
+                            model::ShellOpenings::Faces(faces) => faces.len().to_string(),
+                        };
+                        details.push(("Open faces".to_owned(), open));
                         details.push(("Wall thickness".to_owned(), f.summary()));
                     }
                     FeatureKind::Pattern(_) | FeatureKind::Mirror(_) | FeatureKind::Draft(_) => {
@@ -3450,7 +3479,8 @@ fn view_status(
                             (index as usize, RefKind::Edge, label)
                         }
                         (model::ReferenceSlot::Face { index }, model::FeatureKind::Shell(s)) => {
-                            let label = s.open_faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
+                            let faces = s.open_faces.picked();
+                            let label = faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
                             (index as usize, RefKind::Face, label)
                         }
                         (model::ReferenceSlot::Face { index }, model::FeatureKind::Draft(d)) => {

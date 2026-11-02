@@ -1,12 +1,19 @@
-//! Rendered Shell click path. This is the analytic tray, not full P4's final intersection.
+//! Rendered Shell click paths: the analytic tray, not full P4's final intersection, the
+//! tray with a through bore, and opening every face.
 
 use egui::{Key, Modifiers, Pos2, vec2};
 use egui_kittest::{Harness, kittest::Queryable};
 use soliddraft_app::app::{Automation, SolidDraftApp};
+use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureKind, FeatureStatus, ProfileKind, Selection};
-use soliddraft_app::state::{AppAction, EditorParams};
+use soliddraft_app::state::{AppAction, AppState, EditorParams};
+use soliddraft_assistant::{Caller, tools::call_checked};
+use soliddraft_model::{Generator, ShellOpenings};
 
 type App = Harness<'static, SolidDraftApp>;
+
+/// The rendered harnesses share one adapter; one test at a time.
+static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn button(app: &mut App, label: &str) {
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
@@ -50,6 +57,7 @@ fn check_volume(app: &App, thickness: f64) {
 
 #[test]
 fn shell_opens_picks_previews_edits_persists_selects_and_exports() {
+    let _gpu = GPU.lock().unwrap_or_else(|poison| poison.into_inner());
     let instance = egui_wgpu::wgpu::Instance::default();
     assert!(
         !pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all())).is_empty(),
@@ -87,7 +95,7 @@ fn shell_opens_picks_previews_edits_persists_selects_and_exports() {
     click(&mut app, point);
     let editor = app.state().state.editor.as_ref().expect("Shell editor opened");
     let EditorParams::Shell(shell) = &editor.params else { panic!("wrong editor") };
-    assert_eq!(shell.open_faces.len(), 1, "viewport click selects the open top");
+    assert_eq!(shell.open_faces.picked().len(), 1, "viewport click selects the open top");
     assert!(editor.preview.result.is_some(), "{:?}", editor.error);
     field(&mut app, "2");
     button(&mut app, "OK (Enter)");
@@ -160,4 +168,169 @@ fn shell_opens_picks_previews_edits_persists_selects_and_exports() {
         .unwrap(),
     )
     .unwrap();
+}
+
+fn window(doc: Document) -> App {
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    app.run_steps(30);
+    app.key_press(Key::Z);
+    app.run_steps(30);
+    app
+}
+
+/// A 40 x 30 x 12 mm block with a diameter-6 through bore, made by the part's own commands.
+fn bored_block() -> Document {
+    let mut state = AppState::new(Document::new("Bored tray", soliddraft_app::kernel()));
+    let caller = Caller::Mcp { client: "shell-tool".into() };
+    for (tool, arguments) in [
+        (
+            "sketch",
+            serde_json::json!({"plane":"top","shapes":[
+            {"shape":"rectangle","center":[0,0,0],"width":40,"height":30}]}),
+        ),
+        ("extrude", serde_json::json!({"sketch":"Sketch1","depth":12,"flip":false})),
+        ("hole", serde_json::json!({"face":"Boss-Extrude1 · End cap","points":[[0,0,12]],"diameter":6})),
+    ] {
+        let out = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
+        assert!(!out.is_error, "{tool}: {}", out.content);
+    }
+    state.doc
+}
+
+fn check_bored_volume(app: &App, expected: f64) {
+    let doc = &app.state().state.doc;
+    let volume = doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap().volume;
+    assert!((volume - expected).abs() < 0.005, "{volume} != {expected}");
+}
+
+fn click_model(app: &mut App, point: glam::Vec3) {
+    let state = &app.state().state;
+    let screen = state.viewport.camera.project(point, state.viewport.rect).unwrap();
+    click(app, screen);
+}
+
+fn shell_feature(app: &App) -> soliddraft_app::document::FeatureId {
+    app.state().state.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Shell(_))).unwrap().id
+}
+
+#[test]
+fn bored_tray_creates_edits_persists_selects_and_exports() {
+    let _gpu = GPU.lock().unwrap_or_else(|poison| poison.into_inner());
+    let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/bored-tray");
+    std::fs::create_dir_all(&out).unwrap();
+    soliddraft_app::file::set_config_dir(Some(out.join("config")));
+    let mut app = window(bored_block());
+
+    button(&mut app, "Shell");
+    click_model(&mut app, glam::Vec3::new(12.0, 8.0, 12.0));
+    let EditorParams::Shell(shell) = &app.state().state.editor.as_ref().unwrap().params else { panic!("wrong editor") };
+    assert_eq!(shell.open_faces.picked().len(), 1, "a click beside the bore picks the open top");
+    field(&mut app, "2");
+    button(&mut app, "OK (Enter)");
+    app.run_steps(30);
+    let shell = shell_feature(&app);
+    assert_eq!(app.state().state.doc.feature(shell).unwrap().status, FeatureStatus::Ok);
+    check_bored_volume(&app, 5486.10615680975);
+    let (floor, bore_wall) = {
+        let doc = &app.state().state.doc;
+        let topology = doc.kernel().topology(doc.display_body().unwrap()).unwrap();
+        let floor = topology.faces.iter().find(|f| f.normal.is_some() && (f.centroid.z - 2.0).abs() < 1e-9).unwrap();
+        let wall = topology
+            .faces
+            .iter()
+            .filter(|f| f.surface == soliddraft_kernel_api::SurfaceKind::Cylinder)
+            .max_by(|a, b| a.area.total_cmp(&b.area))
+            .unwrap();
+        (doc.any_face_ref(floor.id).unwrap(), doc.any_face_ref(wall.id).unwrap())
+    };
+    app.render().unwrap().save(out.join("bored-tray-2mm.png")).unwrap();
+
+    button(&mut app, "Shell1");
+    button(&mut app, "Edit feature");
+    field(&mut app, "1.5");
+    assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
+    button(&mut app, "OK (Enter)");
+    app.run_steps(30);
+    check_bored_volume(&app, 4239.189131381832);
+
+    let save = out.join("bored-tray.dwprt");
+    app.state_mut().state.push(AppAction::SaveAs(Some(save.clone())));
+    app.run_steps(4);
+    assert!(save.is_file());
+    app.state_mut().state.push(AppAction::Open(Some(save)));
+    app.run_steps(30);
+    check_bored_volume(&app, 4239.189131381832);
+    let doc = &app.state().state.doc;
+    let body = doc.display_body().unwrap();
+    assert!(doc.model().resolve_face(&floor, body).is_ok(), "the inner floor's name survives the edit and reopen");
+    assert!(doc.model().resolve_face(&bore_wall, body).is_ok(), "so does the expanded bore wall's");
+
+    // Well inside the walls and clear of the bore's tube along the line of sight.
+    click_model(&mut app, glam::Vec3::new(0.0, 10.0, 1.5));
+    let doc = &app.state().state.doc;
+    let Some(Selection::Face(face)) = doc.selection else { panic!("the inner floor must be pickable") };
+    assert_eq!(doc.any_face_ref(face).unwrap().generator, Generator::ShellWall);
+
+    let step = out.join("bored-tray.step");
+    app.state_mut()
+        .state
+        .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(step.clone()) });
+    app.run_steps(8);
+    assert!(std::fs::read_to_string(step).unwrap().starts_with("ISO-10303-21;"));
+    app.render().unwrap().save(out.join("bored-tray-1.5mm-reopened.png")).unwrap();
+}
+
+#[test]
+fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
+    let _gpu = GPU.lock().unwrap_or_else(|poison| poison.into_inner());
+    let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/all-faces-shell");
+    std::fs::create_dir_all(&out).unwrap();
+    soliddraft_app::file::set_config_dir(Some(out.join("config")));
+    let mut app = window(bored_block());
+    let solid = app.state().state.doc.display_body();
+
+    button(&mut app, "Shell");
+    app.get_by_label("Open every face").click();
+    app.run_steps(6);
+    app.render().unwrap().save(out.join("every-face-chosen.png")).unwrap();
+    click_model(&mut app, glam::Vec3::new(12.0, 8.0, 12.0));
+    let editor = app.state().state.editor.as_ref().unwrap();
+    let EditorParams::Shell(shell) = &editor.params else { panic!("wrong editor") };
+    assert_eq!(shell.open_faces, ShellOpenings::All, "a viewport click does not turn it back into a pick");
+    assert!(editor.error.is_none(), "{:?}", editor.error);
+    assert!(editor.preview.result.as_ref().is_some_and(|mesh| mesh.indices.is_empty()), "the preview shows nothing");
+
+    button(&mut app, "OK (Enter)");
+    app.run_steps(30);
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.feature(shell_feature(&app)).unwrap().status, FeatureStatus::Ok);
+    assert_eq!(doc.display_body(), None);
+    app.render().unwrap().save(out.join("nothing-left.png")).unwrap();
+
+    let save = out.join("nothing-left.dwprt");
+    app.state_mut().state.push(AppAction::SaveAs(Some(save.clone())));
+    app.run_steps(4);
+    app.state_mut().state.push(AppAction::Open(Some(save)));
+    app.run_steps(30);
+    let doc = &app.state().state.doc;
+    let FeatureKind::Shell(shell) = &doc.feature(shell_feature(&app)).unwrap().kind else { panic!("shell") };
+    assert_eq!(shell.open_faces, ShellOpenings::All, "reopening keeps the choice");
+    assert_eq!(doc.display_body(), None);
+
+    button(&mut app, "Shell1");
+    button(&mut app, "Edit feature");
+    app.get_by_label("Open every face").click();
+    app.run_steps(6);
+    button(&mut app, "OK (Enter)");
+    app.run_steps(30);
+    let doc = &app.state().state.doc;
+    assert!(doc.display_body().is_some(), "clearing the choice gives a closed shell, a real body again");
+    assert_ne!(doc.display_body(), solid);
+    app.render().unwrap().save(out.join("closed-again.png")).unwrap();
 }

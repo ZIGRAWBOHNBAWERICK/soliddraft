@@ -85,7 +85,7 @@ impl Solid {
         } else {
             None
         };
-        Ok(FaceRef { face: face_pattern, touching: vec![], near })
+        Ok(FaceRef { face: Some(face_pattern), touching: vec![], near })
     }
 
     /// Names one edge of this body by the origins of the faces it separates, with a

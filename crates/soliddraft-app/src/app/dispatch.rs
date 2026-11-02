@@ -427,7 +427,10 @@ impl SolidDraftApp {
                 };
                 self.open_editor(
                     None,
-                    EditorParams::Shell(soliddraft_model::ShellFeature { open_faces, thickness: 2.0 }),
+                    EditorParams::Shell(soliddraft_model::ShellFeature {
+                        open_faces: soliddraft_model::ShellOpenings::Faces(open_faces),
+                        thickness: 2.0,
+                    }),
                 );
                 self.state.doc.selection = None;
             }
@@ -683,11 +686,13 @@ impl SolidDraftApp {
                             return;
                         }
                         (EditorParams::Shell(s), Some(Selection::Face(f))) => {
-                            if let Some(reference) = self.state.doc.any_face_ref(f) {
-                                if let Some(i) = s.open_faces.iter().position(|face| face == &reference) {
-                                    s.open_faces.remove(i);
+                            if let soliddraft_model::ShellOpenings::Faces(faces) = &mut s.open_faces
+                                && let Some(reference) = self.state.doc.any_face_ref(f)
+                            {
+                                if let Some(i) = faces.iter().position(|face| face == &reference) {
+                                    faces.remove(i);
                                 } else {
-                                    s.open_faces.push(reference);
+                                    faces.push(reference);
                                 }
                             }
                             return;

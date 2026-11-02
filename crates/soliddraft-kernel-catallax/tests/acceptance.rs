@@ -168,7 +168,7 @@ fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
     k.release(p).unwrap();
     let before = summarize(&k, b).unwrap();
     assert!(
-        matches!(k.boolean(&OpTag::new("empty"), BooleanOp::Subtract, b, b), Err(KernelError::Unsupported(message)) if message.contains("empty results"))
+        matches!(k.boolean(&OpTag::new("empty"), BooleanOp::Subtract, b, b), Err(KernelError::Unsupported(message)) if message.contains("leave nothing of the part"))
     );
     assert_eq!(before, summarize(&k, b).unwrap());
     assert!(k.validate(b).unwrap().valid);

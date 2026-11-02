@@ -935,7 +935,7 @@
         "name": "Void"
       },
       "label": "refused unbuildable row",
-      "refused": "does not rebuild: Cut-Extrude1 (error: unsupported: empty results",
+      "refused": "does not rebuild: Cut-Extrude1 (error: unsupported: this would leave nothing of the part",
       "checks": [
         {
           "pointer": "/revision",

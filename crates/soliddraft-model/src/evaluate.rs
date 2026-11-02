@@ -853,9 +853,15 @@ impl Document {
 
     fn build_shell(&self, f: &Feature, s: &crate::ShellFeature, current: Option<BodyId>) -> Built {
         let Some(body) = current else { return Built::failed(current, "there is no body to shell") };
+        if s.open_faces.is_all() {
+            return match self.kernel.shell_all_faces(body, s.thickness) {
+                Ok(()) => Built::pass(FeatureStatus::Ok, None),
+                Err(error) => Built::failed(current, feature_error(error)),
+            };
+        }
         let mut repairs = Vec::new();
         let mut faces = Vec::new();
-        for (i, reference) in s.open_faces.iter().enumerate() {
+        for (i, reference) in s.open_faces.picked().iter().enumerate() {
             match self.resolve_face(reference, body) {
                 Ok(face) => faces.push(face),
                 Err(repair) => repairs.push(RepairNeeded { slot: ReferenceSlot::Face { index: i as u32 }, ..repair }),

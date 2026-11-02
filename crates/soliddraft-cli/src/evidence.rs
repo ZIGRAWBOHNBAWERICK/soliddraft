@@ -297,6 +297,7 @@ fn references(doc: &soliddraft_model::Document) -> Value {
             FeatureKind::Mirror(m) => plane(&m.plane).into_iter().collect(),
             FeatureKind::Shell(s) => s
                 .open_faces
+                .picked()
                 .iter()
                 .enumerate()
                 .map(|(i, face)| (ReferenceSlot::Face { index: i as u32 }, origin(face), vec![face]))

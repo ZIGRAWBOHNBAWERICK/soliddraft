@@ -146,7 +146,7 @@ impl FeatureKind {
             FeatureKind::Mirror(m) => {
                 out.extend(m.plane.dependencies());
             }
-            FeatureKind::Shell(s) => out.extend(s.open_faces.iter().map(|f| f.feature)),
+            FeatureKind::Shell(s) => out.extend(s.open_faces.picked().iter().map(|f| f.feature)),
             FeatureKind::Draft(d) => {
                 out.extend(d.faces.iter().map(|f| f.feature));
                 out.extend(d.neutral.dependencies());
@@ -495,11 +495,76 @@ pub struct DraftFeature {
     pub reverse: bool,
 }
 
+/// Which faces a shell opens. Saved as a list: `[]` opens nothing, a list of references
+/// opens those faces, and `[{}]` opens every face. A picked face that vanishes stays a
+/// lost reference to repair; it never widens to every face.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShellOpenings {
+    /// The picked faces; none means a closed shell.
+    Faces(Vec<FaceRef>),
+    /// Every face of the body, whichever faces earlier features leave.
+    All,
+}
+
+impl ShellOpenings {
+    /// The picked faces. An all-faces opening picks none.
+    pub fn picked(&self) -> &[FaceRef] {
+        match self {
+            ShellOpenings::Faces(faces) => faces,
+            ShellOpenings::All => &[],
+        }
+    }
+
+    /// Whether this opens every face.
+    pub fn is_all(&self) -> bool {
+        matches!(self, ShellOpenings::All)
+    }
+}
+
+/// One saved entry: `{}`, or a picked face. Any other object is refused, so a malformed
+/// reference is never read as every face.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedOpening {
+    Face(FaceRef),
+    All(AllFaces),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AllFaces {}
+
+impl Serialize for ShellOpenings {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ShellOpenings::Faces(faces) => faces.serialize(serializer),
+            ShellOpenings::All => [SavedOpening::All(AllFaces {})].serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ShellOpenings {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let saved = Vec::<SavedOpening>::deserialize(deserializer)?;
+        if matches!(saved.as_slice(), [SavedOpening::All(_)]) {
+            return Ok(ShellOpenings::All);
+        }
+        saved
+            .into_iter()
+            .map(|opening| match opening {
+                SavedOpening::Face(face) => Ok(face),
+                SavedOpening::All(_) => Err(serde::de::Error::custom("{} must be the shell's only opening")),
+            })
+            .collect::<Result<_, _>>()
+            .map(ShellOpenings::Faces)
+    }
+}
+
 /// A constant-thickness shell with persistent references to its openings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShellFeature {
-    /// Faces removed to open the shell; empty means a closed shell.
-    pub open_faces: Vec<FaceRef>,
+    /// Faces removed to open the shell.
+    pub open_faces: ShellOpenings,
     /// Positive, finite wall thickness in millimetres.
     pub thickness: f64,
 }

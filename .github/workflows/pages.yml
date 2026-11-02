@@ -57,28 +57,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.3'
-      - name: Install site dependencies
-        working-directory: site/app
-        run: bun install --frozen-lockfile
-      - name: Build the site under the repository path with the released version
-        working-directory: site/app
+      - name: Build the site and released browser application
         env:
           SITE_BASE: /${{ github.event.repository.name }}/
           VITE_SOLIDDRAFT_VERSION: ${{ steps.release.outputs.version }}
           VITE_SOLIDDRAFT_PRERELEASE: ${{ steps.release.outputs.prerelease }}
-        run: |
-          bun run lint
-          bun run test
-          bun run build:pages
-      - name: Put the released browser application under app/
-        run: |
-          set -euo pipefail
-          mkdir -p site/app/dist/pages/app
-          cp -R "$RUNNER_TEMP/web/." site/app/dist/pages/app/
-          test -f site/app/dist/pages/index.html
-          test -f site/app/dist/pages/app/index.html
-          # The browser build runs the kernel locally. It has no assistant relay and no API key.
-          ! grep -rl "sk-ant-" site/app/dist/pages/app >/dev/null
+        run: bash packaging/pages-payload.sh "$RUNNER_TEMP/web"
       # The payload is produced on every run, so a dry run can be inspected without a deploy.
       - uses: actions/upload-pages-artifact@v3
         with:

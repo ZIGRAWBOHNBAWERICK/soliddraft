@@ -1,0 +1,151 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "parallel-cylinder-fillet",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      }
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Boss-Extrude1 · End cap",
+        "points": [
+          [
+            -3,
+            0,
+            10
+          ]
+        ],
+        "diameter": 10
+      }
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Boss-Extrude1 · End cap",
+        "points": [
+          [
+            3,
+            0,
+            10
+          ]
+        ],
+        "diameter": 10
+      }
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Hole2 · Edge 4"
+        ],
+        "radius": 0.5
+      },
+      "label": "parallel-cylinder-fillet build"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0.25
+      },
+      "label": "parallel-cylinder-fillet edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 7
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/parallel-cylinder-fillet.dwprt"
+      },
+      "files": [
+        "{bundle}/parallel-cylinder-fillet.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/parallel-cylinder-fillet.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 7,
+      "exports": [
+        {
+          "format": "stl"
+        },
+        {
+          "format": "step"
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        },
+        {
+          "pointer": "/result/radius",
+          "equals": 0.25
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0
+      },
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 12
+    }
+  ]
+}

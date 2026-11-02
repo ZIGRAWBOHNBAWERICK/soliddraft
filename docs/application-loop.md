@@ -400,9 +400,9 @@ and work limits remain hard acceptance checks, including when `--strict` is used
 `result.json` records `catallax_revision`, the full commit sha in `CATALLAX_REVISION`,
 and every command must report that same sha as its backend version
 (`Catallax backend is the pinned revision`). Evidence from another revision, a branch name
-or a missing version fails the step. The runner cannot yet check the replay verifier the
-same way: `catallax-verify about` does not report its source commit, so hosted CI builds it
-from the pinned sha and the workflow remains the evidence for that binary.
+or a missing version fails the step. The runner does not yet validate the replay
+verifier's source commit. Hosted CI builds it from the pinned sha. Local runs should
+retain its `catallax-verify about` reply, whose kernel metadata records that commit.
 
 The baseline-reuse ledger holds no measured real-corpus time saving, so this runner
 claims none and does not consume it. A reused baseline would have to arrive as pinned,

@@ -1505,7 +1505,11 @@ impl Document {
         if self.proof_pending() {
             return Some(("Proof pending", false));
         }
-        self.display_failure.as_deref().or(self.proof_notice.as_deref()).map(|message| (message, false))
+        self.display_failure
+            .as_deref()
+            .or(self.proof_notice.as_deref())
+            .map(|message| (message, false))
+            .or_else(|| self.kernel().body_notice(self.display_body()?).map(|message| (message, false)))
     }
 
     /// Why the part has no display mesh, or why the last change was rolled back for

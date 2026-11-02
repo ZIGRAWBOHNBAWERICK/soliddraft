@@ -52,6 +52,7 @@ impl Ids {
         parents: &[&Ids],
         tags: &BTreeMap<String, OpTag>,
         next: &mut u64,
+        selected_edges: &[EdgeId],
     ) -> Self {
         let mut keys = Keys::new(app);
         let mut ids = Self {
@@ -77,7 +78,7 @@ impl Ids {
             // An origin whose role the interface cannot express is left out, never guessed.
             let mut named = Vec::new();
             for o in &origins {
-                let Some(n) = named_origin(o, parents, tags) else {
+                let Some(n) = named_origin_for_edges(o, parents, tags, selected_edges) else {
                     continue;
                 };
                 if !ids.named.iter().any(|(c, _)| c == o) {
@@ -150,8 +151,9 @@ impl Ids {
             .map(|face| {
                 let role = self.origins[face]
                     .iter()
-                    .find(|o| o.step.as_str() == step)
-                    .and_then(|o| face_role(&o.role, parents))
+                    .find(|origin| origin.step.as_str() == step)
+                    .and_then(|origin| self.named.iter().find(|(source, _)| source == origin))
+                    .map(|(_, origin)| origin.role)
                     .unwrap_or(FaceRole::Other);
                 FaceOrigin { face: *face, role }
             })
@@ -188,6 +190,15 @@ pub(super) fn named_origin(
     parents: &[&Ids],
     tags: &BTreeMap<String, OpTag>,
 ) -> Option<soliddraft_kernel_api::Origin> {
+    named_origin_for_edges(origin, parents, tags, &[])
+}
+
+fn named_origin_for_edges(
+    origin: &Origin,
+    parents: &[&Ids],
+    tags: &BTreeMap<String, OpTag>,
+    selected_edges: &[EdgeId],
+) -> Option<soliddraft_kernel_api::Origin> {
     parents
         .iter()
         .find_map(|parent| parent.named.iter().find_map(|(source, named)| (source == origin).then_some(named)))
@@ -195,13 +206,13 @@ pub(super) fn named_origin(
         .or_else(|| {
             Some(soliddraft_kernel_api::Origin {
                 tag: tags.get(origin.step.as_str())?.clone(),
-                role: face_role(&origin.role, parents)?,
+                role: face_role(&origin.role, parents, selected_edges)?,
             })
         })
 }
 
 /// The interface's role for a Catallax role, when the interface has one.
-fn face_role(role: &Role, parents: &[&Ids]) -> Option<FaceRole> {
+fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option<FaceRole> {
     match role {
         Role::Start => Some(FaceRole::StartCap),
         Role::End => Some(FaceRole::EndCap),
@@ -217,10 +228,19 @@ fn face_role(role: &Role, parents: &[&Ids]) -> Option<FaceRole> {
             .map(|placement| FaceRole::Hole { placement, part: hole_part(*part) }),
         Role::Blend { edge } | Role::Bevel { edge } => {
             let name = serde_json::to_string(edge).expect("edge name serializes");
-            parents
+            let candidates: BTreeSet<_> = parents
                 .iter()
-                .find_map(|p| p.edge_names.iter().find_map(|(id, n)| (*n == name).then_some(*id)))
-                .map(|edge| FaceRole::Blend { edge })
+                .flat_map(|p| p.edge_names.iter().filter_map(|(id, n)| (*n == name).then_some(*id)))
+                .collect();
+            // A shared origin pair names both generators. Keep the caller's selected
+            // edge as the blend source instead of taking the first matching handle.
+            let selected: Vec<_> = candidates.iter().filter(|id| selected_edges.contains(id)).copied().collect();
+            let edge = match selected.as_slice() {
+                [edge] => Some(*edge),
+                [] if candidates.len() == 1 => candidates.first().copied(),
+                _ => None,
+            };
+            edge.map(|edge| FaceRole::Blend { edge })
         }
         Role::Corner { vertex } => {
             let name = serde_json::to_string(vertex).expect("vertex name serializes");

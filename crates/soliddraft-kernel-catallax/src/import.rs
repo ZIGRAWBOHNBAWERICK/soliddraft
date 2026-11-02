@@ -109,7 +109,7 @@ impl CatallaxKernel {
         let app = catallax_app::EvaluatedApplicationBody { checkpoint: app.checkpoint, names: app.names };
         let mut state = self.state()?;
         let tags = BTreeMap::from([(result.clone(), tag.clone())]);
-        let ids = convert::Ids::new(&app, &[], &tags, &mut state.next);
+        let ids = convert::Ids::new(&app, &[], &tags, &mut state.next, &[]);
         let history = ids.record(seq, tag, OpKind::ImportStep, &result, &[]);
         let body = BodyId::from_raw(state.id());
         state.bodies.insert(

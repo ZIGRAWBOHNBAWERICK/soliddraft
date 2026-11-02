@@ -21,6 +21,7 @@ pub mod drag;
 pub mod drawing;
 pub mod file;
 pub mod fillet_collect;
+mod geometry_message;
 mod grid;
 pub mod icons;
 pub mod import;

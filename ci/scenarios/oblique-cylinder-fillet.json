@@ -1,0 +1,202 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "oblique-cylinder-fillet",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 10
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 16,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "front",
+        "offset": 30,
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -30,
+                "v": 30.5
+              },
+              "b": {
+                "u": 30,
+                "v": -14.5
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 30,
+                "v": -14.5
+              },
+              "b": {
+                "u": 30,
+                "v": 40
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 30,
+                "v": 40
+              },
+              "b": {
+                "u": -30,
+                "v": 40
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -30,
+                "v": 40
+              },
+              "b": {
+                "u": -30,
+                "v": 30.5
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 60,
+        "through_all": false,
+        "flip": false
+      }
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Cut-Extrude1 · Edge 1"
+        ],
+        "radius": 1
+      },
+      "label": "oblique-cylinder-fillet build"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0.5
+      },
+      "label": "oblique-cylinder-fillet edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 7
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/oblique-cylinder-fillet.dwprt"
+      },
+      "files": [
+        "{bundle}/oblique-cylinder-fillet.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/oblique-cylinder-fillet.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 7,
+      "exports": [
+        {
+          "format": "stl"
+        },
+        {
+          "format": "step",
+          "refused": "unsupported",
+          "sentinel": "keep existing STEP"
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        },
+        {
+          "pointer": "/result/radius",
+          "equals": 0.5
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0
+      },
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 12
+    }
+  ]
+}

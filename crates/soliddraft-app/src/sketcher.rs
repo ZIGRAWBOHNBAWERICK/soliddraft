@@ -268,9 +268,12 @@ pub fn run(
     s.preview = None;
     let places = s.tool.places_points();
     let picks = s.tool.picks_curve();
+    let copy_places = matches!(s.tool, Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
+        && !sketch_tools::selected_in_order(s).is_empty()
+        && !ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
     let mut snapped: Option<P2> = None;
     if let Some(pos) = hover_pos {
-        if places {
+        if places || copy_places {
             let prev = s.pending.last().map(|(p, _)| *p);
             let ignore: Vec<EntityId> = Vec::new();
             if let (Some(raw), Some(inferred)) = (frame.plane_at(pos), infer(&frame, &s.sketch, pos, prev, &ignore)) {
@@ -291,10 +294,14 @@ pub fn run(
         }
     }
     if s.tool.selects() && s.tool != Tool::Select {
+        if copy_places && let Some(p) = snapped {
+            copy_value(s, p);
+        }
         s.preview = sketch_tools::selection_preview(s);
     }
     if hover_pos.is_some() {
-        let cursor = if places || picks { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Default };
+        let cursor =
+            if places || picks || copy_places { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Default };
         ui.ctx().set_cursor_icon(cursor);
     }
 
@@ -305,7 +312,11 @@ pub fn run(
 
     // Tool input.
     match s.tool {
-        tool if tool.selects() => select_input(ui, s, &frame, resp, clicked, double, modifiers, &mut actions),
+        Tool::Select => select_input(ui, s, &frame, resp, clicked, double, modifiers, &mut actions),
+        tool if tool.selects() => {
+            copy_input(ui, s, &frame, resp, clicked, snapped);
+            s.preview = sketch_tools::selection_preview(s);
+        }
         Tool::Dimension => {
             if clicked && let Some(pos) = hover_pos {
                 dimension_click(s, &frame, pos, &mut actions);
@@ -333,7 +344,9 @@ pub fn run(
             }
         }
     }
-    if secondary && s.tool != Tool::Select {
+    if secondary && s.tool.selects() && s.tool != Tool::Select {
+        s.set_tool(Tool::Select);
+    } else if secondary && s.tool != Tool::Select {
         // Right click ends the current chain, or puts the tool down.
         if s.pending.is_empty() {
             s.set_tool(Tool::Select);
@@ -356,6 +369,122 @@ pub fn run(
     paint_status(ui, s, rect);
     crate::measure::guides::switches(ui, s, rect);
     actions
+}
+
+/// Sets the value that follows the pointer until its placement is complete.
+fn copy_value(s: &mut SketchSession, p: P2) {
+    match s.tool {
+        Tool::Mirror if s.pending.len() == 1 => s.modify.axis_end = p,
+        Tool::LinearPattern if s.pending.len() == 1 => s.modify.step = p.sub(s.pending[0].0),
+        Tool::CircularPattern if s.pending.is_empty() => s.modify.center = p,
+        _ => {}
+    }
+}
+
+/// Signed distance from a selected curve, respecting the chain's walking direction.
+fn offset_distance(s: &SketchSession, target: EntityId, p: P2) -> Option<f64> {
+    let mut previous: Option<P2> = None;
+    for id in sketch_tools::selected_in_order(s) {
+        let kind = s.sketch.entity(id)?.kind;
+        let (a, b) = match kind {
+            EntityKind::Line { a, b } => (a, b),
+            EntityKind::Arc { start, end, .. } => (start, end),
+            EntityKind::Circle { center, radius } if id == target => return Some(radius - center.dist(p)),
+            _ => return None,
+        };
+        let reverse = previous.is_some_and(|q| a.dist(q) > 1e-6 && b.dist(q) <= 1e-6);
+        if id == target {
+            let distance = match kind {
+                EntityKind::Line { .. } => p.sub(a).dot(b.sub(a).normalized().perp()),
+                EntityKind::Arc { center, .. } => center.dist(a) - center.dist(p),
+                _ => unreachable!(),
+            };
+            return Some(if reverse { -distance } else { distance });
+        }
+        previous = Some(if reverse { a } else { b });
+    }
+    None
+}
+
+/// Copy tools select without moving the source. Ctrl/Shift keeps selecting after a seed
+/// is picked; ordinary clicks then place the axis, step or centre.
+fn copy_input(
+    ui: &egui::Ui,
+    s: &mut SketchSession,
+    frame: &Frame<'_>,
+    resp: &egui::Response,
+    clicked: bool,
+    snapped: Option<P2>,
+) {
+    let modifiers = ui.input(|i| i.modifiers);
+    if s.tool == Tool::Offset {
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        {
+            let hit = hit_test(frame, &s.sketch, origin, &[]);
+            let id = match hit {
+                Some(SketchSel::Point(p)) => Some(p.entity),
+                Some(SketchSel::Entity(id)) => Some(id),
+                _ => None,
+            };
+            if let Some(entity) = id.filter(|id| sketch_tools::selected_in_order(s).contains(id)) {
+                s.drag = Some(SketchDrag::Offset { entity });
+            }
+        }
+        if let Some(SketchDrag::Offset { entity }) = s.drag
+            && let Some(p) = resp.interact_pointer_pos().and_then(|pos| frame.plane_at(pos))
+            && let Some(distance) = offset_distance(s, entity, p)
+        {
+            s.modify.distance = distance;
+        }
+        if resp.drag_stopped_by(egui::PointerButton::Primary) {
+            s.drag = None;
+        }
+    }
+    if !clicked {
+        return;
+    }
+    if modifiers.ctrl || modifiers.shift || sketch_tools::selected_in_order(s).is_empty() || s.tool == Tool::Offset {
+        if let Some(h) = resp.hover_pos().and_then(|pos| hit_test(frame, &s.sketch, pos, &[])) {
+            if modifiers.ctrl || modifiers.shift {
+                let entity = |pick: &SketchSel| match pick {
+                    SketchSel::Entity(id) => Some(*id),
+                    SketchSel::Point(p) => Some(p.entity),
+                    _ => None,
+                };
+                if s.selection.iter().any(|pick| entity(pick) == entity(&h)) {
+                    s.selection.retain(|pick| entity(pick) != entity(&h));
+                } else {
+                    s.selection.push(h);
+                }
+            } else {
+                s.selection = vec![h];
+            }
+            s.pending.clear();
+        }
+        return;
+    }
+    let Some(p) = snapped else { return };
+    match s.tool {
+        Tool::Mirror | Tool::LinearPattern => {
+            if s.pending.len() != 1 {
+                s.pending.clear();
+                s.pending.push((p, Vec::new()));
+                if s.tool == Tool::Mirror {
+                    s.modify.axis_start = p;
+                }
+                copy_value(s, p);
+            } else {
+                copy_value(s, p);
+                s.pending.push((p, Vec::new()));
+            }
+        }
+        Tool::CircularPattern => {
+            s.modify.center = p;
+            s.pending = vec![(p, Vec::new())];
+        }
+        _ => {}
+    }
 }
 
 /// Pointer input for the select tool: clicks pick, drags move, double-clicks edit.
@@ -415,6 +544,7 @@ fn select_input(
                     c.set_label(at.add(offset));
                 }
             }
+            Some(SketchDrag::Offset { .. }) => {}
             None => {}
         }
     }
@@ -1433,6 +1563,21 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
 /// error colour, over the geometry as it is.
 fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
     let Some(preview) = &s.preview else { return };
+    let guide = match s.tool {
+        Tool::Mirror => Some((s.modify.axis_start, s.modify.axis_end)),
+        Tool::LinearPattern => s.pending.first().map(|(a, _)| (*a, a.add(s.modify.step))),
+        Tool::CircularPattern => Some((s.modify.center, s.modify.center)),
+        _ => None,
+    };
+    if let Some((a, b)) = guide
+        && let (Some(a), Some(b)) = (frame.screen(a), frame.screen(b))
+    {
+        let stroke = Stroke::new(1.5, theme::accent());
+        painter.add(egui::Shape::dashed_line(&[a, b], stroke, 5.0, 4.0));
+        for p in [a, b] {
+            painter.circle_stroke(p, 4.0, stroke);
+        }
+    }
     let curve = |kind: EntityKind, stroke: Stroke| {
         let e = Entity { id: 0, kind, construction: false };
         let pts: Vec<Pos2> = e.polyline(96).into_iter().filter_map(|q| frame.screen(q)).collect();
@@ -1643,10 +1788,14 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
         (Tool::Trim, _) => "Trim: click the piece of a line or arc to remove; Esc or right-click ends",
         (Tool::Extend, _) => "Extend: click the end of a line or arc to lengthen; Esc or right-click ends",
-        (Tool::Offset, _) => "Offset: select the chain in walking order, then Apply in the panel",
-        (Tool::Mirror, _) => "Mirror: select the entities and give the axis, then Apply in the panel",
-        (Tool::LinearPattern, _) => "Linear pattern: select the entities and give the step, then Apply in the panel",
-        (Tool::CircularPattern, _) => "Circular pattern: select the entities and give the centre, then Apply",
+        (Tool::Offset, _) => "Offset: drag a selected curve to set distance and side, then Apply",
+        (Tool::Mirror, 0) => "Mirror: click the axis start; Ctrl-click selects entities",
+        (Tool::Mirror, 1) => "Mirror: click the axis end, then Apply",
+        (Tool::Mirror, _) => "Mirror: axis placed; Apply adds the copies",
+        (Tool::LinearPattern, 0) => "Linear pattern: click the step start; Ctrl-click selects entities",
+        (Tool::LinearPattern, 1) => "Linear pattern: click the step end, then Apply",
+        (Tool::LinearPattern, _) => "Linear pattern: step placed; Apply adds the copies",
+        (Tool::CircularPattern, _) => "Circular pattern: click the centre, then Apply; Ctrl-click selects entities",
     };
     let message = s.message.as_ref().filter(|(_, at)| at.elapsed().as_secs_f32() < 4.0).map(|(m, _)| m.clone());
     let line2 = message.unwrap_or_else(|| hint.to_owned());

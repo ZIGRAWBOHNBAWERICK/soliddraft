@@ -68,11 +68,16 @@ and exports its actual Catallax recipe and allowance. The runner calls
 `catallax-verify replay` and requires the same refusal code and a complete
 response. A crash, timeout, invalid input or missing response fails the scenario.
 
-The seven `sketch-*.json` scenarios create profiles using `sketch_geometry`, then
+The eight `sketch-*.json` scenarios create profiles using `sketch_geometry`, then
 extrude them through Catallax and check volume and extrusion height. They cover a
 regular polygon, line and arc trim, line and arc extend, a mixed line/arc offset,
-mirror, linear pattern and circular pattern. Rendered steps retain the SVG view
-and viewport PNG through the same runner as the bracket.
+mirror, linear pattern and circular pattern. `sketch-polygon-trim-extend.json` is
+the profile the pointer test `crates/soliddraft-app/tests/ux_sketch_modify.rs`
+draws with the mouse: a hexagon, a chord extended to two of its sides and the cap
+above the chord trimmed away. The pointer test holds the volume to a millimetre
+cubed, since the vertex lands where the pixel is; the scenario checks it exactly.
+Rendered steps retain the SVG view and viewport PNG through the same runner as the
+bracket.
 
 `sketch_geometry` accepts `plane` and an ordered `operations` array. Operations
 use the same `soliddraft_sketch::tools::Operation` implementation as the sketch

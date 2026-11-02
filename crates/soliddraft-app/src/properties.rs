@@ -1013,6 +1013,13 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::Slot, Icon::Slot, "Slot (S)"),
                 (Tool::Point, Icon::Point, "Point (P)"),
                 (Tool::Dimension, Icon::SmartDim, "Smart dimension (D)"),
+                (Tool::Polygon, Icon::Polygon, "Polygon"),
+                (Tool::Trim, Icon::Trim, "Trim"),
+                (Tool::Extend, Icon::Extend, "Extend"),
+                (Tool::Offset, Icon::Offset, "Offset"),
+                (Tool::Mirror, Icon::Mirror, "Mirror entities"),
+                (Tool::LinearPattern, Icon::LinearPattern, "Linear pattern"),
+                (Tool::CircularPattern, Icon::CircularPattern, "Circular pattern"),
             ];
             ui.horizontal_wrapped(|ui| {
                 for (tool, icon, tip) in tools {
@@ -1037,8 +1044,10 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
             });
-            section_gap(ui);
-            crate::sketch_tools::panel(ui, s, &mut actions);
+            if s.tool.modifies() {
+                section_gap(ui);
+                crate::sketch_tools::panel(ui, s, &mut actions);
+            }
             section_gap(ui);
 
             // Selection.

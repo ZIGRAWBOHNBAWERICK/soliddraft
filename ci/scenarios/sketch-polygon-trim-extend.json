@@ -1,0 +1,97 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-polygon-trim-extend",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "polygon",
+            "center": {
+              "u": 0,
+              "v": 0
+            },
+            "vertex": {
+              "u": 20,
+              "v": 0
+            },
+            "sides": 6
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -10,
+                "v": 5
+              },
+              "b": {
+                "u": 10,
+                "v": 5
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "extend",
+            "entity": 7,
+            "end": "start",
+            "boundary": 3
+          },
+          {
+            "tool": "extend",
+            "entity": 7,
+            "end": "end",
+            "boundary": 1
+          },
+          {
+            "tool": "trim",
+            "entity": 2,
+            "at": {
+              "u": 0,
+              "v": 17.32
+            }
+          },
+          {
+            "tool": "trim",
+            "entity": 1,
+            "at": {
+              "u": 12.5,
+              "v": 13
+            }
+          },
+          {
+            "tool": "trim",
+            "entity": 3,
+            "at": {
+              "u": -12.5,
+              "v": 13
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 7051.814855409226,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 10,
+          "tolerance": 0.001
+        }
+      ]
+    }
+  ]
+}

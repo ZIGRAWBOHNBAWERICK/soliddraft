@@ -516,6 +516,16 @@
       ]
     },
     {
+      "id": "sketch-polygon-trim-extend",
+      "file": "ci/scenarios/sketch-polygon-trim-extend.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-trim",
       "file": "ci/scenarios/sketch-trim.json",
       "acceptance": false,

@@ -172,3 +172,54 @@ fn invalid_tools_do_not_consume_ids_or_touch_constraints() {
         assert_eq!(s, before);
     }
 }
+
+#[test]
+fn trim_preview_names_the_removed_interval_and_the_kept_pieces() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
+    line(&mut s, p(-3.0, -2.0), p(-3.0, 2.0), true);
+    line(&mut s, p(4.0, -2.0), p(4.0, 2.0), true);
+    let before = s.clone();
+    let preview = s.trim_preview(target, P2::ZERO).unwrap();
+    assert_eq!(preview.removed, EntityKind::Line { a: p(-3.0, 0.0), b: p(4.0, 0.0) });
+    assert_eq!(
+        preview.kept,
+        [EntityKind::Line { a: p(-10.0, 0.0), b: p(-3.0, 0.0) }, EntityKind::Line { a: p(4.0, 0.0), b: p(10.0, 0.0) }]
+    );
+    assert_eq!(s, before, "a preview changes nothing");
+    // The whole target goes when its only crossings are its own ends.
+    let whole = line(&mut s, p(0.0, 5.0), p(0.0, 9.0), false);
+    let preview = s.trim_preview(whole, p(0.0, 7.0)).unwrap();
+    assert!(preview.kept.is_empty());
+    assert_eq!(preview.removed, EntityKind::Line { a: p(0.0, 5.0), b: p(0.0, 9.0) });
+    assert!(s.trim_preview(target, p(-3.0, 0.0)).is_err(), "a pick on a crossing has no interval");
+}
+
+#[test]
+fn extend_boundary_is_the_nearest_crossing_beyond_the_end() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, p(0.0, 0.0), p(2.0, 0.0), false);
+    let far = line(&mut s, p(9.0, -1.0), p(9.0, 1.0), false);
+    let near = line(&mut s, p(5.0, -1.0), p(5.0, 1.0), false);
+    let behind = line(&mut s, p(-4.0, -1.0), p(-4.0, 1.0), false);
+    let aside = line(&mut s, p(7.0, 2.0), p(7.0, 4.0), false);
+    let _ = (far, aside);
+    assert_eq!(s.extend_boundary(target, End::End), Some(near));
+    assert_eq!(s.extend_boundary(target, End::Start), Some(behind));
+    let lone = line(&mut s, p(20.0, 20.0), p(21.0, 20.0), false);
+    assert_eq!(s.extend_boundary(lone, End::End), None);
+    s.apply_operation(&Operation::Extend { entity: target, end: End::End, boundary: near }).unwrap();
+    assert_eq!(s.entity(target).unwrap().kind, EntityKind::Line { a: P2::ZERO, b: p(5.0, 0.0) });
+}
+
+#[test]
+fn polygon_corners_match_the_polygon_tool() {
+    let corners = super::tools::polygon_corners(p(0.0, 0.0), p(20.0, 0.0), 6).unwrap();
+    assert_eq!(corners.len(), 6);
+    assert_eq!(corners[0], p(20.0, 0.0));
+    close(corners[1].u, 10.0);
+    close(corners[1].v, 20.0 * 0.75f64.sqrt());
+    assert_eq!(corners[3], p(-20.0, 0.0), "the half turn is exact");
+    assert!(super::tools::polygon_corners(P2::ZERO, P2::ZERO, 6).is_err());
+    assert!(super::tools::polygon_corners(P2::ZERO, p(1.0, 0.0), 2).is_err());
+}

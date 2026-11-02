@@ -308,6 +308,7 @@ fn source_bytes_and_decisions_reopen_identically() {
 
     let reopened = Document::from_bytes(&bytes, kernel.clone()).unwrap();
     let Some(FeatureKind::ImportStep(back)) = reopened.feature(id).map(|f| f.kind.clone()) else { panic!() };
+    i.record = doc.import_record(id).cloned();
     assert_eq!(back, i);
     assert_eq!(back.source, source);
     assert_eq!(reopened.to_bytes().unwrap(), bytes, "saving an opened file reproduces it");

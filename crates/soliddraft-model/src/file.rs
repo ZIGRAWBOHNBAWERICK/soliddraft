@@ -183,7 +183,19 @@ impl Document {
             format: FORMAT.into(),
             name: self.name.clone(),
             units: Units::Mm,
-            features: self.features.clone(),
+            features: self
+                .features
+                .iter()
+                .map(|feature| {
+                    let mut saved = feature.clone();
+                    if let crate::FeatureKind::ImportStep(import) = &mut saved.kind
+                        && let Some(record) = self.import_record(feature.id)
+                    {
+                        import.record = Some(record.clone());
+                    }
+                    saved
+                })
+                .collect(),
             values: self.values.clone(),
             configurations: self.configurations.clone(),
             properties: self.properties.clone(),

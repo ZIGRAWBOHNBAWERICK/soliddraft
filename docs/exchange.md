@@ -55,8 +55,12 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 ## STEP import
 
+The next feature batch adds clean single-body analytic STEP import. This addition is not part of 0.2.0. A self-authored block and cylinder exercise preview, acceptance, the rendered coarse, standard and fine display levels, source preservation, save/reopen and checked STEP export. General cone angles, sphere and torus poles, spline files and IGES import remain outside this coverage. Unsupported geometry gets a plain message and leaves the part unchanged.
+
 File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. Decline keeps the source with a declined answer and an unbuilt import in the tree. Cancel leaves the part unchanged. Closing the preview also cancels it. Files with several solids are refused because a part holds one body.
 
-The part file keeps the original source bytes, their SHA-256 and the repair decisions. Reopening checks the digest and rebuilds the same import and change record. Repairs never overwrite the source file. A built import can be exported through the checked STEP route above.
+The part file keeps the original source bytes, their SHA-256, repair decisions and the import record. Reopening checks the digest and verifies the saved record against the source before rebuilding the body. Repairs never overwrite the source file. A built import can be exported through the checked STEP route above.
 
 MCP clients use `preview_import {"path":"source.step"}` to read the preview, then pass its token to `import_step {"path":"source.step","preview_token":"<token>","decline":["g0"]}` to decline a gap. The token binds the source digest and the repair questions shown. A changed file or changed questions require another preview. An empty decline list applies automatic repairs. This batch supports one planar AP214 body with a straight seam inside the 0.01 mm automatic cap. Other repair approvals remain later work.
+
+The focused rollout check is `CARGO_BUILD_JOBS=3 cargo test -p soliddraft-app --test step_import_rollout -- --test-threads=1`. Set `SOLIDDRAFT_STEP_IMPORT_PROOF_DIR` to keep its source files, saved parts, display screenshots, measured f32 mesh bounds and checked export reports outside the checkout. The test uses the real import dialog and renderer. It does not qualify new repair cases or independently validate the export in another CAD application.

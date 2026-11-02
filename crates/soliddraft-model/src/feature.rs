@@ -579,6 +579,9 @@ pub struct ImportStepFeature {
     /// Who accepted the proposals, as the app supplied it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub approver: String,
+    /// The saved import result, verified against the source when reopening.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<soliddraft_kernel_api::RepairRecord>,
 }
 
 impl ImportStepFeature {
@@ -590,6 +593,7 @@ impl ImportStepFeature {
             source,
             decisions: BTreeMap::new(),
             approver: String::new(),
+            record: None,
         }
     }
 
@@ -602,6 +606,7 @@ impl ImportStepFeature {
     pub fn accepted(&self, question: &str, tolerance_mm: &str, approver: &str) -> ImportStepFeature {
         let mut out = self.clone();
         out.decisions.insert(question.to_string(), format!("accept:{tolerance_mm}"));
+        out.record = None;
         out.approver = approver.to_string();
         out
     }
@@ -610,6 +615,7 @@ impl ImportStepFeature {
     pub fn declined(&self, question: &str) -> ImportStepFeature {
         let mut out = self.clone();
         out.decisions.insert(question.to_string(), "decline".to_string());
+        out.record = None;
         out
     }
 
@@ -617,6 +623,7 @@ impl ImportStepFeature {
     pub fn unanswered(&self, question: &str) -> ImportStepFeature {
         let mut out = self.clone();
         out.decisions.remove(question);
+        out.record = None;
         out
     }
 

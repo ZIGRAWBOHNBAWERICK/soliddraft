@@ -1,0 +1,293 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sphere-revolve",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "arc",
+              "center": {
+                "u": 0,
+                "v": 0
+              },
+              "start": {
+                "u": 0,
+                "v": -1
+              },
+              "end": {
+                "u": 0,
+                "v": 1
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0,
+                "v": 1
+              },
+              "b": {
+                "u": 0,
+                "v": -1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "revolve",
+      "arguments": {
+        "sketch": "Sketch1",
+        "axis_origin": [
+          0,
+          0,
+          0
+        ],
+        "axis_direction": [
+          0,
+          1,
+          0
+        ],
+        "angle_deg": 360
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4.1887902047863905,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 12.566370614359172,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/2",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/0",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/1",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/2",
+          "approx": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "drawing": true
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/sphere-revolve.dwprt"
+      },
+      "files": [
+        "{bundle}/sphere-revolve.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/sphere-revolve.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 2,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4.1887902047863905,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 12.566370614359172,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/2",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/0",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/1",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/2",
+          "approx": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "drawing": true,
+      "checked_step_export": "{bundle}/sphere-revolve.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "sphere": 1
+        },
+        "volume": 4.1887902047863905,
+        "floor": 1e-06,
+        "inside": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.5,
+            0,
+            0
+          ]
+        ],
+        "outside": [
+          [
+            1.1,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "tool": "edit_revolve",
+      "arguments": {
+        "feature": "Revolve1",
+        "angle_deg": 0
+      },
+      "refused": "revolve needs a finite axis, nonzero direction and angle in (0, 360]",
+      "same_geometry_as_step": 2,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4.1887902047863905,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/measurement/area_mm2",
+          "approx": 12.566370614359172,
+          "tolerance": 0.005
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/0",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/2",
+          "approx": -1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/0",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 1,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/0",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/1",
+          "approx": 0,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/measurement/centre_of_mass/2",
+          "approx": 0,
+          "tolerance": 0.001
+        }
+      ]
+    }
+  ]
+}

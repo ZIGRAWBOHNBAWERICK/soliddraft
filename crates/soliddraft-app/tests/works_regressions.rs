@@ -2,6 +2,7 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
+use kurbo::Shape;
 use serde_json::{Value, json};
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use std::io::{Read, Write};
@@ -103,6 +104,88 @@ fn replay(app: &mut App, fixture: &str, count: usize, dir: &std::path::Path) {
         let refused = step["refused"].is_string();
         assert_eq!(reply["isError"], refused, "{fixture} step {} {name}: {reply}", i + 1);
     }
+}
+
+fn basic_curved_shape(shape: &str, count: usize) {
+    let _native = native_lock();
+    let dir = directory(shape);
+    let mut app = app();
+    replay(&mut app, shape, count, &dir);
+    let mut calls = Vec::new();
+    for (name, arguments) in [
+        ("save", json!({"path":dir.join("part.dwprt")})),
+        ("open", json!({"path":dir.join("part.dwprt")})),
+        ("export_step", json!({"path":dir.join("part.step")})),
+        ("make_drawing", json!({"template":"iso-a3"})),
+        ("drawing_save", json!({"path":dir.join("drawing.dwdrw")})),
+        ("open", json!({"path":dir.join("drawing.dwdrw")})),
+    ] {
+        let started = Instant::now();
+        let (reply, longest) = request(&mut app, name, arguments);
+        let elapsed = started.elapsed();
+        calls.push(json!({"tool":name,"elapsed_ms":elapsed.as_secs_f64()*1000.0,
+            "longest_update_ms":longest.as_secs_f64()*1000.0,"reply":reply}));
+        std::fs::write(dir.join("calls.json"), serde_json::to_vec_pretty(&calls).unwrap()).unwrap();
+        assert_eq!(reply["isError"], false, "{shape} {name}: {reply}");
+        if name == "make_drawing" {
+            assert!(elapsed < Duration::from_secs(100), "{shape} drawing exceeded 100 seconds: {elapsed:?}");
+        }
+    }
+    let session = app.state().state.drawing.session.as_ref().unwrap();
+    assert!(app.state().state.drawing.is_active(), "{shape} drawing is not active");
+    assert!(!session.sheet().views.is_empty(), "{shape} drawing has no views");
+    for view in &session.sheet().views {
+        assert!(!view.geometry.curves.is_empty(), "{shape} drawing view has no curves");
+        if shape != "rod-cut-28deg" {
+            let frame = soliddraft_drawing::project::view_spec(&session.doc.drawing, view.id).unwrap().frame().unwrap();
+            let scale = soliddraft_drawing::project::view_scale(&session.doc.drawing, view.id).unwrap();
+            let extent = |axis: soliddraft_kernel_api::Vec3| {
+                let radius =
+                    if shape == "sphere-revolve" { 1.0 } else { 3.0 * (1.0 - axis.y * axis.y).max(0.0).sqrt() + 1.0 };
+                2.0 * radius * scale
+            };
+            let bounds = view
+                .geometry
+                .curves
+                .iter()
+                .filter(|curve| curve.visible)
+                .map(|curve| curve.path.bounding_box())
+                .reduce(|a, b| a.union(b))
+                .expect("drawing view has visible paths");
+            let (width, height) = (bounds.width(), bounds.height());
+            let tolerance = 0.005 * scale + 0.0002;
+            assert!(
+                (width - extent(frame.right)).abs() <= tolerance,
+                "{shape} view {:?}: width {width}, expected {}",
+                view.id,
+                extent(frame.right)
+            );
+            assert!(
+                (height - extent(frame.up)).abs() <= tolerance,
+                "{shape} view {:?}: height {height}, expected {}",
+                view.id,
+                extent(frame.up)
+            );
+        }
+    }
+    assert!(std::fs::metadata(dir.join("part.step")).unwrap().len() > 0);
+    app.run_steps(3);
+    app.render().unwrap().save(dir.join("drawing.png")).unwrap();
+}
+
+#[test]
+fn sphere_revolve_has_full_drawing_views_and_file_roundtrips() {
+    basic_curved_shape("sphere-revolve", 2);
+}
+
+#[test]
+fn torus_revolve_has_full_drawing_views_and_file_roundtrips() {
+    basic_curved_shape("torus-revolve", 2);
+}
+
+#[test]
+fn angled_rod_has_drawing_views_and_file_roundtrips() {
+    basic_curved_shape("rod-cut-28deg", 4);
 }
 
 #[test]
@@ -294,10 +377,10 @@ fn drawing_over_budget_returns_a_plain_refusal_and_keeps_the_part() {
     kernel.rules.lock().unwrap().drawing_delay = Duration::from_secs(121);
     let started = Instant::now();
     let (reply, longest_frame) = request(&mut app, "make_drawing", json!({"template":"iso-a3"}));
-    assert!(started.elapsed() < Duration::from_secs(30), "the caller waited for the HTTP timeout");
+    assert!(started.elapsed() < Duration::from_secs(120), "the caller waited for the HTTP timeout");
     assert!(longest_frame < Duration::from_secs(2), "drawing blocked a native frame for {longest_frame:?}");
     assert_eq!(reply["isError"], true, "{reply}");
-    assert!(reply["content"][0]["text"].as_str().unwrap().contains("time limit"), "{reply}");
+    assert!(reply["content"][0]["text"].as_str().unwrap().contains("100-second time limit"), "{reply}");
     assert!(app.state().state.drawing.session.is_none());
     assert_eq!((app.state().state.doc.model().id(), app.state().state.doc.undo_depth()), before);
     let started = Instant::now();

@@ -46,8 +46,14 @@ pub fn view_curves(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec) -> Kernel
     }
     let size = topology.bbox.diagonal().max(1.0);
     let chord = if spec.tolerance > 0.0 { spec.tolerance } else { 2e-5 * size };
-    let params =
-        TessellationParams { chord_height: chord, curve_angle_deg: 2.0, surface_angle_deg: 2.0, ..Default::default() };
+    // Screen line work needs the chord bound; the viewport's normal-angle target suffices.
+    let angle = if spec.preview { TessellationParams::default().surface_angle_deg } else { 2.0 };
+    let params = TessellationParams {
+        chord_height: chord,
+        curve_angle_deg: angle,
+        surface_angle_deg: angle,
+        ..Default::default()
+    };
     // A view for the screen may come from the preview mesh; an exported one never does.
     let (mesh, polylines) = if spec.preview {
         (kernel.preview(body, &params)?, kernel.preview_edges(body, &params)?)
@@ -105,7 +111,8 @@ pub fn silhouettes(mesh: &Mesh, frame: &ViewFrame) -> Vec<SourcedPolyline> {
     for (&(a, b), tris) in &sides {
         if let [t0, t1] = tris[..] {
             let face = mesh.triangle_faces[t0];
-            if face == mesh.triangle_faces[t1] && facing[t0] * facing[t1] < 0.0 {
+            // Edge-on facets belong to the back side so their front boundary stays drawable.
+            if face == mesh.triangle_faces[t1] && (facing[t0] > 0.0) != (facing[t1] > 0.0) {
                 segments.entry(face).or_default().push((a, b));
             }
         }
@@ -394,6 +401,40 @@ mod tests {
         let out = hidden_lines(&mesh, &[on_top], &frame, 1e-6);
         assert_eq!(out.counts(), (1, 0));
         assert!(matches!(&out.curves[0].curve, Curve3::Polyline { points } if points.len() >= 2));
+    }
+
+    #[test]
+    fn silhouettes_include_the_boundary_of_edge_on_facets() {
+        let mut mesh = Mesh {
+            positions: vec![
+                [-1.0, -1.0, -1.0],
+                [1.0, -1.0, -1.0],
+                [1.0, 1.0, -1.0],
+                [-1.0, 1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+                [1.0, -1.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [-1.0, 1.0, 1.0],
+            ],
+            indices: vec![
+                0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3,
+                4, 7,
+            ],
+            ..Mesh::default()
+        };
+        // One faceted curved face can have an edge-on band between front and back facets.
+        mesh.triangle_faces = vec![FaceId::from_raw(1); mesh.triangle_count()];
+        for direction in [Vec3::Z, -Vec3::Z] {
+            let frame = ViewSpec::new(direction, Vec3::Y).frame().unwrap();
+            let lines = silhouettes(&mesh, &frame);
+            assert_eq!(lines.len(), 1, "the edge-on band must leave one closed outline");
+            let points = &lines[0].points;
+            assert_eq!(points.len(), 5);
+            assert_eq!(points.first(), points.last());
+            let curves = hidden_lines(&mesh, &lines, &frame, 0.001);
+            assert_eq!(curves.bbox_2d, [-1.0, -1.0, 1.0, 1.0]);
+            assert!(curves.curves.iter().all(|curve| curve.visible));
+        }
     }
 
     #[test]

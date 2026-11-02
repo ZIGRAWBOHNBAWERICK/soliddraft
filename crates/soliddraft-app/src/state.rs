@@ -417,8 +417,7 @@ impl Tool {
         matches!(self, Tool::Trim | Tool::Extend)
     }
 
-    /// Tools that work on the selection: the pointer keeps selecting while they are active,
-    /// and the property panel holds their values and applies them.
+    /// Tools that keep the selection as their input.
     pub fn selects(self) -> bool {
         matches!(self, Tool::Select | Tool::Offset | Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
     }
@@ -439,7 +438,7 @@ impl Tool {
     }
 }
 
-/// The typed values of the Modify tools, kept while the sketch is open so that the ribbon,
+/// The values of the Modify tools, kept while the sketch is open so that the ribbon,
 /// the property panel and the pointer share them. Coordinates are in the sketch plane, mm.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModifyInputs {
@@ -475,7 +474,7 @@ impl Default for ModifyInputs {
 }
 
 /// What the active Modify tool would do now: at the pointer for Trim and Extend, with the
-/// selection and the typed values for the copy tools. The sketcher draws it every frame
+/// selection and the current values for the copy tools. The sketcher draws it every frame
 /// and applies `operation` on the click or the Apply button.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolPreview {
@@ -549,7 +548,7 @@ pub struct SketchSession {
     pub auto_relations: bool,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
-    /// The Modify tools' typed values.
+    /// The Modify tools' numeric and pointer-placed values.
     pub modify: ModifyInputs,
     /// What the active Modify tool would do now, redrawn every frame.
     pub preview: Option<ToolPreview>,
@@ -557,9 +556,23 @@ pub struct SketchSession {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SketchDrag {
-    Point { point: PointRef, moved: bool },
-    Entity { entity: EntityId, last: P2, moved: bool },
-    Label { constraint: ConstraintId, offset: P2 },
+    /// Distance placement on a selected offset curve, without moving the source.
+    Offset {
+        entity: EntityId,
+    },
+    Point {
+        point: PointRef,
+        moved: bool,
+    },
+    Entity {
+        entity: EntityId,
+        last: P2,
+        moved: bool,
+    },
+    Label {
+        constraint: ConstraintId,
+        offset: P2,
+    },
 }
 
 impl SketchSession {
@@ -598,6 +611,7 @@ impl SketchSession {
         self.dim_second = None;
         self.dim_edit = None;
         self.preview = None;
+        self.drag = None;
         if !tool.selects() {
             self.selection.clear();
         }

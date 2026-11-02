@@ -229,7 +229,8 @@ impl Document {
             return Built::pass(FeatureStatus::RepairNeeded(vec![self.missing_plane(id, slot)]), current);
         }
         let profile = match &f.kind {
-            FeatureKind::Revolve(RevolveFeature { sketch: feature, .. })
+            FeatureKind::Sweep(crate::SweepFeature { sketch: feature, .. })
+            | FeatureKind::Revolve(RevolveFeature { sketch: feature, .. })
             | FeatureKind::Extrude(ExtrudeFeature { profile: ProfileSource::Sketch { feature }, .. }) => {
                 match self.profile_input(*feature, current) {
                     Ok(input) => Some(input.version),
@@ -261,6 +262,9 @@ impl Document {
             FeatureKind::Sketch(s) => self.build_sketch(s, current),
             FeatureKind::Extrude(e) => self.build_extrude(f, e, current),
             FeatureKind::Revolve(r) => self.build_revolve(f, r, current),
+            FeatureKind::Sweep(s) => {
+                self.build_profile_tool(f, s.sketch, current, |tag, profile| self.kernel.sweep(tag, profile, &s.path))
+            }
             FeatureKind::Fillet(b) => self.build_blend(f, b, false, current),
             FeatureKind::Chamfer(b) => self.build_blend(f, b, true, current),
             FeatureKind::Hole(h) => self.build_hole(f, h, current),
@@ -385,14 +389,34 @@ impl Document {
         {
             return Built::failed(current, "revolve needs a finite axis, nonzero direction and angle in (0, 360]");
         }
-        let input = match self.profile_input(r.sketch, current) {
+        self.build_profile_tool(f, r.sketch, current, |tag, profile| {
+            self.kernel.revolve(
+                tag,
+                profile,
+                &soliddraft_kernel_api::Revolve {
+                    axis_origin: r.axis_origin.into(),
+                    axis_direction: r.axis_direction.into(),
+                    angle_deg: r.angle_deg,
+                },
+            )
+        })
+    }
+
+    fn build_profile_tool(
+        &self,
+        f: &Feature,
+        sketch: FeatureId,
+        current: Option<BodyId>,
+        tool: impl Fn(&OpTag, BodyId) -> KernelResult<soliddraft_kernel_api::OpResult>,
+    ) -> Built {
+        let input = match self.profile_input(sketch, current) {
             Ok(input) => input,
             Err(refused) => return *refused,
         };
         let sk = input.sketch.as_ref().expect("a profile input is a built sketch");
         let regions = match &sk.regions {
             Ok(regions) if !regions.is_empty() => regions,
-            _ => return Built::failed(current, "revolve needs a closed sketch region"),
+            _ => return Built::failed(current, "Select a closed sketch region"),
         };
         let mut mine = None;
         let mut faces = Vec::new();
@@ -402,15 +426,7 @@ impl Document {
             for (i, region) in regions.iter().enumerate() {
                 let tag = |step: &str| OpTag::new(format!("{}.r{i}.{step}", f.id));
                 let sheet = k.create_body_from_profile(&tag("profile"), &region.to_profile(sk.plane))?;
-                let tool = k.revolve(
-                    &tag("sweep"),
-                    sheet.body,
-                    &soliddraft_kernel_api::Revolve {
-                        axis_origin: r.axis_origin.into(),
-                        axis_direction: r.axis_direction.into(),
-                        angle_deg: r.angle_deg,
-                    },
-                );
+                let tool = tool(&tag("sweep"), sheet.body);
                 let _ = k.release(sheet.body);
                 let tool = tool?;
                 for origin in &tool.record.face_roles {
@@ -455,7 +471,16 @@ impl Document {
                 if let Some(body) = mine {
                     let _ = self.kernel.release(body);
                 }
-                Built::failed(current, feature_error(error))
+                let message = if matches!(f.kind, FeatureKind::Sweep(_)) {
+                    match error {
+                        soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
+                        soliddraft_kernel_api::KernelError::Profile(error) => error.to_string(),
+                        _ => "This sweep could not be built from this profile and path".into(),
+                    }
+                } else {
+                    feature_error(error)
+                };
+                Built::failed(current, message)
             }
         }
     }

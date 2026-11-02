@@ -58,9 +58,10 @@ const PLATE_STARTERS: [(&str, IsEditor); 10] = [
 ];
 
 /// Solid's starters that take a selected sketch, and whether it has to sit on a body.
-const SKETCH_STARTERS: [(&str, bool, IsEditor); 3] = [
+const SKETCH_STARTERS: [(&str, bool, IsEditor); 4] = [
     ("Extrude", false, |p| matches!(p, EditorParams::Extrude(_))),
     ("Revolve", true, |p| matches!(p, EditorParams::Revolve(_))),
+    ("Sweep", false, |p| matches!(p, EditorParams::Sweep(_))),
     ("Cut", true, |p| matches!(p, EditorParams::Cut(_))),
 ];
 

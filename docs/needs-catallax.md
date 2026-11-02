@@ -17,6 +17,7 @@ does not discard an otherwise matching checkpoint through a format upgrade.
 The document's first-changed-feature cache supplies earlier bodies for parameter edits,
 so both model-feature reuse and native prefix reuse apply to the changed suffix.
 
+- Straight sweep accepts a closed polygon profile and one nonzero straight path segment. The adapter retains both segment identities, emits native `path` and `sweep` definitions, and keeps the profile at its authored placement. Curved profiles, curved paths and multi-segment paths are outside this command. Loft remains coming soon. This belongs to the batch after 0.2.0.
 - Stage 1 profiles are definitions, not sheet bodies. The recipe runner now defers profiles and reports loop count, closure and tags without querying sheet topology, mass or validity. An extrusion or revolution creates and releases the backend's temporary profile handle. Direct sheet queries return `Unsupported`.
 - Stage 1 empty boolean results cannot be expressed by the existing solid/sheet `BodyKind` and mandatory centroid. The adapter returns `Unsupported` without changing the operands.
 - Measurement proves volume, area, centroid and centroidal unit-density inertia enclosures. The adapter returns their midpoints in the existing floating-point interface. A body with a fitted rolling-envelope blend has no second moments, so it reports no inertia, and Catallax refuses the areas and lengths of faces and edges on the fitted boundary at no work. Those values come from the display mesh.

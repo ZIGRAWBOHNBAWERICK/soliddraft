@@ -27,6 +27,8 @@ pub enum OpKind {
     ExtrudeTo,
     /// `revolve`.
     Revolve,
+    /// `sweep`.
+    Sweep,
     /// `boolean` with [`BooleanOp::Union`](crate::BooleanOp::Union).
     Union,
     /// `boolean` with [`BooleanOp::Subtract`](crate::BooleanOp::Subtract).
@@ -63,6 +65,7 @@ impl OpKind {
             OpKind::Extrude => "extrude",
             OpKind::ExtrudeTo => "extrude_to",
             OpKind::Revolve => "revolve",
+            OpKind::Sweep => "sweep",
             OpKind::Union => "union",
             OpKind::Subtract => "subtract",
             OpKind::Intersect => "intersect",

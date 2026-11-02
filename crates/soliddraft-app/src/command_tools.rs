@@ -64,6 +64,30 @@ pub enum Shape {
     },
 }
 
+/// A polygon sketch and one straight path segment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepLine {
+    /// Profile sketch name.
+    pub sketch: String,
+    /// Path start in model millimetres.
+    pub start: [f64; 3],
+    /// Path end in model millimetres.
+    pub end: [f64; 3],
+}
+
+/// New endpoints for an existing straight sweep.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditSweepLine {
+    /// Sweep feature name.
+    pub feature: String,
+    /// Path start in model millimetres.
+    pub start: [f64; 3],
+    /// Path end in model millimetres.
+    pub end: [f64; 3],
+}
+
 /// One recipe line: a command-layer verb with every reference by name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -148,6 +172,10 @@ pub enum Line {
     Revolve { sketch: String, axis_origin: [f64; 3], axis_direction: [f64; 3], angle_deg: f64 },
     /// Changes a revolution angle without changing its sketch or axis.
     EditRevolve { feature: String, angle_deg: f64 },
+    /// Sweeps a closed polygon along a single straight segment.
+    Sweep(SweepLine),
+    /// Changes endpoints while retaining the path segment's identity.
+    EditSweep(EditSweepLine),
     /// Removes material: cuts a sketch's profiles into the part.
     Cut {
         /// The sketch's name, or `previous`.
@@ -500,6 +528,24 @@ pub fn revolve_params() -> Vec<(&'static str, Value)> {
 /// The `edit_revolve` verb's parameters.
 pub fn edit_revolve_params() -> Vec<(&'static str, Value)> {
     vec![feature_param(), ("angle_deg", number("Angle in degrees, greater than 0 and at most 360"))]
+}
+
+/// The `sweep` verb's parameters.
+pub fn sweep_params() -> Vec<(&'static str, Value)> {
+    vec![
+        sketch_param(),
+        ("start", array(number("component"), "Straight path start [x, y, z], mm")),
+        ("end", array(number("component"), "Different straight path end [x, y, z], mm")),
+    ]
+}
+
+/// The `edit_sweep` verb's parameters.
+pub fn edit_sweep_params() -> Vec<(&'static str, Value)> {
+    vec![
+        feature_param(),
+        ("start", array(number("component"), "Straight path start [x, y, z], mm")),
+        ("end", array(number("component"), "Different straight path end [x, y, z], mm")),
+    ]
 }
 
 /// The `cut` verb's parameters.
@@ -1221,6 +1267,22 @@ impl Line {
                 };
                 run.apply(doc, Command::AddExtrude { params, via_assistant: true })?;
             }
+            Line::Sweep(SweepLine { sketch, start, end }) => {
+                let s = soliddraft_model::SweepFeature {
+                    sketch: soliddraft_model::FeatureId(run.sketch(doc, sketch)? as u32),
+                    path: soliddraft_kernel_api::Sweep { start: *start, end: *end, segment_id: "travel".into() },
+                };
+                run.apply(doc, Command::AddFeature(FeatureKind::Sweep(s)))?;
+            }
+            Line::EditSweep(EditSweepLine { feature, start, end }) => {
+                let id = feature_by_name(doc, feature)?;
+                let Some(FeatureKind::Sweep(mut s)) = doc.feature(id).map(|f| f.kind.clone()) else {
+                    return Err(format!("{feature} is not a sweep"));
+                };
+                s.path.start = *start;
+                s.path.end = *end;
+                run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Sweep(s) })?;
+            }
             Line::Revolve { sketch, axis_origin, axis_direction, angle_deg } => {
                 if axis_direction.iter().any(|v| !v.is_finite()) || axis_direction.iter().all(|v| *v == 0.0) {
                     return Err("axis direction must be finite and nonzero".into());
@@ -1537,6 +1599,7 @@ impl Line {
                 | Line::SketchGeometry { .. }
                 | Line::Extrude { .. }
                 | Line::Revolve { .. }
+                | Line::Sweep(_)
                 | Line::Cut { .. }
                 | Line::Fillet { .. }
                 | Line::Chamfer { .. }
@@ -1564,6 +1627,8 @@ impl Line {
             Line::SketchGeometry { .. } => "sketch_geometry",
             Line::Extrude { .. } => "extrude",
             Line::Revolve { .. } => "revolve",
+            Line::Sweep(_) => "sweep",
+            Line::EditSweep(_) => "edit_sweep",
             Line::EditRevolve { .. } => "edit_revolve",
             Line::Cut { .. } => "cut",
             Line::Fillet { .. } => "fillet",
@@ -1649,6 +1714,12 @@ impl Line {
                     format!("Sketch geometry on {plane}, offset {} mm", fmt_mm(*offset))
                 };
                 (title, format!("{} tool operations", operations.len()))
+            }
+            Line::Sweep(SweepLine { sketch, start, end }) => {
+                ("Sweep".into(), format!("{sketch}, {start:?} to {end:?}"))
+            }
+            Line::EditSweep(EditSweepLine { feature, start, end }) => {
+                (format!("Edit {feature}"), format!("{start:?} to {end:?}"))
             }
             Line::Revolve { sketch, angle_deg, .. } => ("Revolve".into(), format!("{sketch}, {}°", fmt_mm(*angle_deg))),
             Line::EditRevolve { feature, angle_deg } => (format!("Edit {feature}"), format!("{}°", fmt_mm(*angle_deg))),
@@ -2334,6 +2405,9 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             });
             end_json(&mut v, &p.end());
             v
+        }
+        FeatureKind::Sweep(s) => {
+            json!({"type":"sweep","sketch":name(s.sketch.0 as u64),"path":s.path})
         }
         FeatureKind::Revolve(r) => {
             json!({"type":"revolve","sketch":name(r.sketch.0 as u64),"axis_origin":r.axis_origin,"axis_direction":r.axis_direction,"angle_deg":r.angle_deg})

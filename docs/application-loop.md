@@ -45,6 +45,12 @@ its undo and redo must make no kernel operations, mesh requests or GPU placement
 Changed shapes must upload their new meshes. The scenario also replaces the document
 and checks that a refused zero-depth edit preserves the displayed result.
 
+`straight-sweep.json` checks a polygon translated by one straight path segment.
+It edits the endpoint displacement, undoes and redoes, refuses zero-length and
+in-plane paths without changing the body, saves, reopens in a fresh process and
+exports checked STEP. The profile stays on its authored offset plane. This scenario
+belongs to the feature batch after 0.2.0.
+
 `sphere-revolve.json` and `torus-revolve.json` retain their construction, drawing
 and independent STEP checks, then edit the sphere's angle or the torus's tube
 diameter. They check undo, redo, rename, suppress and restore, reuse of the exact

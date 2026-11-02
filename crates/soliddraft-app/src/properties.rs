@@ -859,18 +859,30 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
             }
             EditorParams::Shell(s) => {
                 theme::section_label(ui, "Open faces");
-                pick_prompt(ui, "Click faces to open; leave empty for a closed shell");
-                let mut remove = None;
-                for (i, face) in s.open_faces.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(&face.label).size(12.0));
-                        if ui.add(egui::Button::new("×").small().frame(false)).on_hover_text("Remove").clicked() {
-                            remove = Some(i);
-                        }
-                    });
+                let mut every_face = s.open_faces.is_all();
+                if ui.checkbox(&mut every_face, "Open every face").changed() {
+                    s.open_faces = if every_face {
+                        soliddraft_model::ShellOpenings::All
+                    } else {
+                        soliddraft_model::ShellOpenings::Faces(Vec::new())
+                    };
                 }
-                if let Some(i) = remove {
-                    s.open_faces.remove(i);
+                if let soliddraft_model::ShellOpenings::Faces(faces) = &mut s.open_faces {
+                    pick_prompt(ui, "Click faces to open; leave empty for a closed shell");
+                    let mut remove = None;
+                    for (i, face) in faces.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&face.label).size(12.0));
+                            if ui.add(egui::Button::new("×").small().frame(false)).on_hover_text("Remove").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove {
+                        faces.remove(i);
+                    }
+                } else {
+                    ui.label("Nothing of the part remains.");
                 }
                 section_gap(ui);
                 // Keep the user's typed value: invalid walls must be reported, not

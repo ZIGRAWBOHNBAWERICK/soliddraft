@@ -38,7 +38,7 @@ fn straight_sweep_retains_path_names_and_exact_displacement_through_export() {
     let continued = k.boolean(&OpTag::new("continued"), BooleanOp::Union, swept.body, swept.body).unwrap().body;
     assert!((k.mass_properties(continued).unwrap().volume - 24.0).abs() < 1e-8);
     let continued_recipe = k.body_recipe(continued).unwrap();
-    assert_eq!(continued_recipe["format"], "catallax-recipe/4");
+    assert_eq!(continued_recipe["format"], "catallax-recipe/5");
     assert!(continued_recipe["steps"].as_array().unwrap().iter().any(|s| s["op"] == "path"));
     k.release(continued).unwrap();
     k.release(sheet).unwrap();

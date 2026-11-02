@@ -122,6 +122,11 @@ impl Kernel for Counting {
         self.inner.shell(tag, body, open_faces, thickness)
     }
 
+    fn shell_all_faces(&self, body: BodyId, thickness: f64) -> KernelResult<()> {
+        self.op(&OpTag::new("shell_all_faces"));
+        self.inner.shell_all_faces(body, thickness)
+    }
+
     fn extrude_to(
         &self,
         tag: &OpTag,

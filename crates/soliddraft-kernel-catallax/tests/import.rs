@@ -50,6 +50,23 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
     kernel
         .import_step(&OpTag::new("reopened"), &ImportStepRequest { decisions: &[], record: Some(&saved), ..request })
         .unwrap();
+    assert_eq!(saved.format, soliddraft_kernel_api::REPAIR_FORMAT);
+
+    // A part saved before face tolerances: no such field, and the older format.
+    let mut older = serde_json::to_value(&saved).unwrap();
+    older["format"] = soliddraft_kernel_api::LEGACY_REPAIR_FORMAT.into();
+    older.as_object_mut().unwrap().remove("face_tolerances");
+    let mut older: soliddraft_kernel_api::RepairRecord = serde_json::from_value(older).unwrap();
+    let reopened = kernel
+        .import_step(&OpTag::new("older"), &ImportStepRequest { decisions: &[], record: Some(&older), ..request })
+        .unwrap();
+    assert_eq!(reopened.record, saved, "the import is redone and certified, not relabelled");
+    older.source.sha256 = "0".repeat(64);
+    let stale = kernel
+        .import_step(&OpTag::new("stale"), &ImportStepRequest { decisions: &[], record: Some(&older), ..request })
+        .unwrap_err();
+    assert!(stale.to_string().contains("does not match"), "{stale}");
+
     saved.source.sha256 = "0".repeat(64);
     let mismatch = kernel
         .import_step(&OpTag::new("tampered"), &ImportStepRequest { decisions: &[], record: Some(&saved), ..request })

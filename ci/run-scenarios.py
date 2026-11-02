@@ -918,7 +918,7 @@ def run(args):
     args.out.mkdir(parents=True, exist_ok=False)
     write(args.out / "scenario.json", scenario)
     scenario_folders(args.out, scenario.get("folders", []))
-    pin = pinned_revision()
+    pin = args.catallax_revision or pinned_revision()
     report = {"format": "soliddraft-scenario-result/1", "name": scenario["name"], "catallax_revision": pin,
               "soliddraft_revision": subprocess.check_output(
                   ["git", "-C", str(pathlib.Path(__file__).resolve().parent.parent), "rev-parse", "HEAD"], text=True).strip(),
@@ -1223,6 +1223,8 @@ def main():
     parser.add_argument("--out", type=pathlib.Path, required=True, help="new bundle directory, never overwritten")
     parser.add_argument("--soliddraft", required=True, help="built soliddraft executable")
     parser.add_argument("--catallax-verify", required=True, help="verifier built from the pinned Catallax revision")
+    parser.add_argument("--catallax-revision",
+                        help="the revision this executable was built on, when that is not this checkout's pin")
     parser.add_argument("--strict", action="store_true",
                         help="release-path verdict: exit nonzero unless every timing budget was met")
     parser.add_argument("--timeout", type=int, default=HANG_TIMEOUT_S,

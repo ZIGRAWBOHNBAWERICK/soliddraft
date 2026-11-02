@@ -183,7 +183,7 @@ fn g_refuse_every_bad_file_changes_nothing_and_a_good_one_still_imports() {
         cases.push((format!("duplicate-header.{extension}"), vec!["duplicate column plate_w"]));
         cases.push((format!("unknown-value.{extension}"), vec!["unknown named value missing_w"]));
         cases.push((format!("cycle.{extension}"), vec![WIDE_ROW, "cycle"]));
-        cases.push((format!("empty-active.{extension}"), vec!["Narrow", "Cut-Extrude1", "empty results"]));
+        cases.push((format!("empty-active.{extension}"), vec!["Narrow", "Cut-Extrude1", "leave nothing of the part"]));
     }
     for (file, words) in &cases {
         let error = match preview_file(&mut state, file) {

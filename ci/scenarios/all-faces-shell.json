@@ -1,0 +1,151 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "all-faces-shell",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 12,
+        "flip": false
+      }
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Boss-Extrude1 · End cap",
+        "points": [
+          [
+            0,
+            0,
+            12
+          ]
+        ],
+        "diameter": 6
+      }
+    },
+    {
+      "tool": "chamfer",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude1 · Edge 1"
+        ],
+        "distance": 1
+      }
+    },
+    {
+      "tool": "shell",
+      "arguments": {
+        "open_faces": [],
+        "all_faces": true,
+        "thickness": 2
+      },
+      "label": "all-faces-shell build"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Shell1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/all_faces",
+          "equals": true
+        },
+        {
+          "pointer": "/result/open_faces",
+          "length": 0
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 1.5
+      },
+      "label": "all-faces-shell edit"
+    },
+    {
+      "tool": "edit_extrude",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "depth": 20,
+        "flip": false
+      }
+    },
+    {
+      "tool": "undo",
+      "arguments": {}
+    },
+    {
+      "tool": "redo",
+      "arguments": {}
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/all-faces-shell.dwprt"
+      },
+      "files": [
+        "{bundle}/all-faces-shell.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/all-faces-shell.dwprt"
+      },
+      "fresh_process": true,
+      "exports": [
+        {
+          "format": "step",
+          "refused": "the part has no body to export"
+        },
+        {
+          "format": "stl",
+          "refused": "the part has no body to export"
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Shell1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/all_faces",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 0
+      },
+      "refused": "must be greater than 0"
+    }
+  ]
+}

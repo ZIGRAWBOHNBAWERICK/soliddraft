@@ -50,9 +50,9 @@ pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, 
 pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
-    Approval, DecimalBounds, Decision, Disposition, ImportOptions, ImportStepRequest, ImportStepResult, ImportedBody,
-    PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange, RepairDerivative, RepairRecord, RepairSource,
-    question_id, question_index,
+    Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportOptions, ImportStepRequest, ImportStepResult,
+    ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange,
+    RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
 };
 pub use profile::{Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 
@@ -827,6 +827,13 @@ pub trait Kernel: Send + Sync {
 
     /// Hollows a solid to wall `thickness`, leaving `open_faces` open.
     fn shell(&self, tag: &OpTag, body: BodyId, open_faces: &[FaceId], thickness: f64) -> KernelResult<OpResult>;
+
+    /// Opens every face of `body`, an explicit choice rather than a list of picked faces.
+    /// Nothing remains, so a success has no result body, and the part carries on without
+    /// one. A refusal leaves `body` as it was.
+    fn shell_all_faces(&self, _body: BodyId, _thickness: f64) -> KernelResult<()> {
+        Err(KernelError::Unsupported("Opening every face is coming soon.".into()))
+    }
 
     /// Sweeps a profile along a straight line until it meets `target` as `limit` says,
     /// and returns the swept solid alone; the caller joins or cuts it. `direction`

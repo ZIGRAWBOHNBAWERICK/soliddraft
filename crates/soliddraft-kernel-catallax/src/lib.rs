@@ -33,7 +33,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "f335a6c39f6240c1f7d91b6c87d41111a02c88d6";
+pub const CATALLAX_REVISION: &str = "8bc431813630f8f8e066d0174741162066f465b9";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -292,14 +292,71 @@ impl CatallaxKernel {
     #[allow(clippy::too_many_arguments)]
     fn operation_reading(
         &self,
-        mut state: MutexGuard<'_, State>,
+        state: MutexGuard<'_, State>,
         tag: &OpTag,
         op: OpKind,
         inputs: &[BodyId],
         context: &[BodyId],
         selected_edges: &[EdgeId],
-        mut step: Value,
+        step: Value,
     ) -> KernelResult<OpResult> {
+        let (mut state, evaluated) = self.evaluate(state, op, inputs, context, step)?;
+        let Evaluated { app, names, steps, mut history, parents, seq, result } = evaluated;
+        // Catallax names faces by recipe step; the interface uses the caller's tag.
+        let tags: BTreeMap<String, OpTag> = names
+            .into_iter()
+            .filter_map(|(name, id)| {
+                let n: u64 = name.strip_prefix("op_")?.parse().ok()?;
+                let tag = if n == seq { tag.clone() } else { history.get(&n)?.tag.clone() };
+                Some((id.as_str().to_owned(), tag))
+            })
+            .collect();
+        if is_empty(&app) {
+            if op == OpKind::Sweep {
+                return Err(KernelError::InvalidInput("Sweep path must leave the profile plane".into()));
+            }
+            return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
+        }
+        let ids = convert::Ids::new(
+            &app,
+            &parents.iter().map(|p| &p.ids).collect::<Vec<_>>(),
+            &tags,
+            &mut state.next,
+            selected_edges,
+        );
+        let record = ids.record(seq, tag, op, &result, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>());
+        history.insert(seq, record.clone());
+        let body = BodyId::from_raw(state.id());
+        let display = MeshCache::new();
+        state.bodies.insert(
+            body,
+            Stored {
+                steps,
+                result,
+                history: history.into_values().collect(),
+                solid: Some(Arc::new(Solid {
+                    app,
+                    ids,
+                    display,
+                    previews: MeshCache::new(),
+                    topology: OnceLock::new(),
+                    measured: OnceLock::new(),
+                    mass: OnceLock::new(),
+                })),
+            },
+        );
+        Ok(OpResult { body, record })
+    }
+
+    /// Builds the chain of `inputs` and `context` with `step` on the end, stored nowhere.
+    fn evaluate<'a>(
+        &'a self,
+        mut state: MutexGuard<'a, State>,
+        op: OpKind,
+        inputs: &[BodyId],
+        context: &[BodyId],
+        mut step: Value,
+    ) -> KernelResult<(MutexGuard<'a, State>, Evaluated)> {
         if let Some(field) = inputs.iter().chain(context).find(|body| state.fields.contains_key(body)) {
             return Err(terminal_field(*field));
         }
@@ -343,53 +400,7 @@ impl CatallaxKernel {
         // A refused build keeps its question too.
         state.questions.extend(questions);
         let (app, names) = built?;
-        // Catallax names faces by recipe step; the interface uses the caller's tag.
-        let tags: BTreeMap<String, OpTag> = names
-            .into_iter()
-            .filter_map(|(name, id)| {
-                let n: u64 = name.strip_prefix("op_")?.parse().ok()?;
-                let tag = if n == seq { tag.clone() } else { history.get(&n)?.tag.clone() };
-                Some((id.as_str().to_owned(), tag))
-            })
-            .collect();
-        let exact = app.checkpoint.built();
-        if exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty {
-            if op == OpKind::Sweep {
-                return Err(KernelError::InvalidInput("Sweep path must leave the profile plane".into()));
-            }
-            return Err(KernelError::Unsupported(
-                "empty results have no BodyKind or centroid in the existing application interface is not available in the Catallax application entry".into(),
-            ));
-        }
-        let ids = convert::Ids::new(
-            &app,
-            &parents.iter().map(|p| &p.ids).collect::<Vec<_>>(),
-            &tags,
-            &mut state.next,
-            selected_edges,
-        );
-        let record = ids.record(seq, tag, op, &result, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>());
-        history.insert(seq, record.clone());
-        let body = BodyId::from_raw(state.id());
-        let display = MeshCache::new();
-        state.bodies.insert(
-            body,
-            Stored {
-                steps,
-                result,
-                history: history.into_values().collect(),
-                solid: Some(Arc::new(Solid {
-                    app,
-                    ids,
-                    display,
-                    previews: MeshCache::new(),
-                    topology: OnceLock::new(),
-                    measured: OnceLock::new(),
-                    mass: OnceLock::new(),
-                })),
-            },
-        );
-        Ok(OpResult { body, record })
+        Ok((state, Evaluated { app, names, steps, history, parents, seq, result }))
     }
 
     /// Stores a Catallax-native step that reads the solid `base` and builds the chain.
@@ -427,6 +438,24 @@ fn terminal_field(body: BodyId) -> KernelError {
     KernelError::InvalidInput(format!(
         "lattice.cad-after-lattice: {body} is a terminal field; return before it to edit"
     ))
+}
+
+/// The operation's result, before it becomes a stored body.
+struct Evaluated {
+    app: EvaluatedApplicationBody,
+    names: BTreeMap<String, catallax_recipe::StepId>,
+    steps: BTreeMap<u64, Value>,
+    history: BTreeMap<u64, HistoryRecord>,
+    parents: Vec<Arc<Solid>>,
+    seq: u64,
+    result: String,
+}
+
+const NOTHING_LEFT: &str = "this would leave nothing of the part";
+
+fn is_empty(app: &EvaluatedApplicationBody) -> bool {
+    let exact = app.checkpoint.built();
+    exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty
 }
 
 fn gap(what: &str) -> KernelError {
@@ -467,9 +496,9 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     }
     let mut converted =
         catallax_app::soliddraft::convert(&legacy.to_string()).map_err(|e| build_error(op, Error::Conversion(e)))?;
-    // Start in the end-condition format so adding a limited sweep does not discard
-    // an otherwise identical target checkpoint merely to upgrade its recipe version.
-    catallax_recipe::FORMAT_V4.clone_into(&mut converted.recipe.format);
+    // Start in the newest format so adding a limited sweep or an all-faces shell does not
+    // discard an otherwise identical target checkpoint merely to upgrade its recipe version.
+    catallax_recipe::FORMAT_V5.clone_into(&mut converted.recipe.format);
     let sources = input["steps"].as_array().expect("generated recipe steps");
     let mut planes = BTreeMap::new();
     for source in sources {
@@ -789,6 +818,27 @@ impl Kernel for CatallaxKernel {
                 other_distance: None,
             };
             self.native(state, tag, OpKind::Chamfer, body, &[body], native, None, edges)
+        })
+    }
+
+    fn shell_all_faces(&self, body: BodyId, thickness: f64) -> KernelResult<()> {
+        self.observe("shell", || {
+            let state = self.state()?;
+            state.solid(body)?;
+            let base = state.get(body)?.result.clone();
+            let native = shell::all_faces(state.step(body)?, thickness)?;
+            let step = json!({"op":"native","base":base,"native":native});
+            let (state, evaluated) = self.evaluate(state, OpKind::Shell, &[body], &[], step)?;
+            drop(state);
+            if is_empty(&evaluated.app) {
+                Ok(())
+            } else {
+                Err(KernelError::Failed {
+                    op: OpKind::Shell,
+                    code: 0,
+                    message: "opening every face left material behind".into(),
+                })
+            }
         })
     }
 

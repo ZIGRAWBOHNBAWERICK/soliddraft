@@ -54,6 +54,19 @@ fn foreign_or_lost_face_refuses_the_whole_operation() {
 }
 
 #[test]
+fn all_faces_request_is_one_unfiltered_reference_and_stays_apart_from_closed() {
+    let body = StepId::new("blank").unwrap();
+    let Operation::Shell { open, .. } = shell::all_faces(body.clone(), 2.0).unwrap() else { panic!("expected shell") };
+    assert_eq!(serde_json::to_value(open).unwrap(), json!([{}]));
+    let Operation::Shell { open, .. } = shell::operation(body.clone(), &[], 2.0, |_| panic!("no faces")).unwrap()
+    else {
+        panic!("expected shell")
+    };
+    assert_eq!(serde_json::to_value(open).unwrap(), json!([]));
+    assert!(matches!(shell::all_faces(body, 0.0), Err(KernelError::InvalidInput(_))));
+}
+
+#[test]
 fn no_open_faces_preserves_closed_shell_request() {
     let op =
         shell::operation(StepId::new("blank").unwrap(), &[], 0.1, |_| panic!("closed shell has no selected faces"))
@@ -166,4 +179,63 @@ fn bored_tray_edits_preserve_inner_walls_and_export() {
         k.release(tray.body).unwrap();
     }
     assert_eq!(k.mass_properties(bored).unwrap(), before);
+}
+
+fn last_question(k: &CatallaxKernel) -> serde_json::Value {
+    k.take_diagnostics().unwrap()["questions"].as_array().unwrap().last().unwrap()["problem"].clone()
+}
+
+#[test]
+fn all_faces_after_a_boolean_and_a_finish_saves_version_five_and_leaves_inputs_alone() {
+    let k = CatallaxKernel::with_operation_log();
+    let blank = extruded(&k, Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0), 12.0);
+    let bore = soliddraft_kernel_api::contract::cylinder(&k, Vec3::ZERO, 3.0, 12.0);
+    let bored = k.boolean(&OpTag::new("bore"), soliddraft_kernel_api::BooleanOp::Subtract, blank, bore).unwrap().body;
+    let topology = k.topology(bored).unwrap();
+    let side = topology.edges.iter().find(|e| e.curve == soliddraft_kernel_api::CurveKind::Line).unwrap().id;
+    let rounded = k.fillet(&OpTag::new("round"), bored, &[side], 1.0).unwrap().body;
+    for body in [bored, rounded] {
+        let before = k.mass_properties(body).unwrap();
+        k.shell_all_faces(body, 2.0).unwrap();
+        let recipe = last_question(&k);
+        assert_eq!(recipe["format"], "catallax-recipe/5");
+        let shell = recipe["steps"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(shell["open"], json!([{}]), "not a list of surviving origins");
+        catallax_recipe::Recipe::parse(&recipe.to_string()).expect("the saved request reads back");
+        assert_eq!(k.mass_properties(body).unwrap(), before);
+    }
+}
+
+#[test]
+fn saved_older_versions_stay_as_they_were_and_only_version_five_opens_all_faces() {
+    let recipe = |format: &str, open: serde_json::Value| {
+        json!({"format":format, "name":"tray", "result":"tray", "steps":[
+            {"id":"blank", "op":"block", "size":["40","30","12"], "pose":{
+                "rotation":["1","0","0","0"], "translation":["0","0","0"]}},
+            {"id":"tray", "op":"shell", "body":"blank", "open":open, "thickness":"2"}
+        ]})
+        .to_string()
+    };
+    let named = json!([{"face":{"step":"blank","role":"end"}}]);
+    for format in ["catallax-recipe/3", "catallax-recipe/4", "catallax-recipe/5"] {
+        let read = catallax_recipe::Recipe::parse(&recipe(format, named.clone())).unwrap();
+        assert_eq!(read.format, format, "parsing never upgrades a saved version");
+        catallax_recipe::Recipe::parse(&recipe(format, json!([]))).unwrap();
+    }
+    catallax_recipe::Recipe::parse(&recipe("catallax-recipe/5", json!([{}]))).unwrap();
+    for format in ["catallax-recipe/3", "catallax-recipe/4"] {
+        assert!(catallax_recipe::Recipe::parse(&recipe(format, json!([{}]))).is_err(), "{format}");
+    }
+}
+
+#[test]
+fn opening_all_faces_by_name_is_a_plain_refusal() {
+    let k = CatallaxKernel::new();
+    let blank = extruded(&k, Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 40.0, 30.0), 12.0);
+    let faces: Vec<_> = k.topology(blank).unwrap().faces.iter().map(|f| f.id).collect();
+    let refusal = k.shell(&OpTag::new("tray"), blank, &faces, 2.0).unwrap_err().to_string();
+    assert!(refusal.contains("leave nothing of the part"), "{refusal}");
+    for internal in ["Catallax", "BodyKind", "kernel"] {
+        assert!(!refusal.contains(internal), "{refusal}");
+    }
 }

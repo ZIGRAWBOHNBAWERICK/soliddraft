@@ -13,6 +13,14 @@ inner walls are named by the source faces' persistent ordering. Measurement is u
 only by tests, not by shell construction or preview. STEP uses the existing export
 path and its proof requirements.
 
+The editor's Open every face choice saves as `[{}]`, apart from no faces, `[]`. It
+is one selection, not a list of the faces there are, so it means the same after an
+upstream edit. It leaves nothing of the part, so the feature builds and the part has
+no body to display or export until the choice is undone or cleared. `bored_tray_creates_edits_persists_selects_and_exports`
+and `opening_every_face_in_the_editor_leaves_nothing_until_undo` drive these paths in
+the rendered window; `bored-tray-shell` and `all-faces-shell` drive them through MCP
+and a fresh process.
+
 ## Defect ledger and acceptance
 
 | Item | Historical behavior | Current status |
@@ -58,8 +66,10 @@ were changed.
 ## Script and MCP commands
 
 `shell` takes `open_faces` (an array of persistent face labels; an empty array
-requests a closed shell) and positive `thickness` in mm. `edit_shell` takes the
-shell `feature` name and positive `thickness`, retaining the openings. Both use
+requests a closed shell) and positive `thickness` in mm. Setting `all_faces` to true
+with an empty `open_faces` opens every face; naming faces as well is refused.
+`edit_shell` takes the shell `feature` name and positive `thickness`, retaining the
+openings. Both use
 the normal feature commands and undo history. Missing faces, invalid thickness,
 wrong feature kinds and malformed arguments refuse without changing the part.
 

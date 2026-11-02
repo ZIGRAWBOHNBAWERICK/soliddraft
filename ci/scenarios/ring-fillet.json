@@ -1,0 +1,148 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "ring-fillet",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 20
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 40,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              20
+            ],
+            "diameter": 8
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 20,
+        "flip": false
+      }
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude2 · Edge 1"
+        ],
+        "radius": 1
+      },
+      "label": "ring-fillet build"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        },
+        {
+          "pointer": "/result/radius",
+          "equals": 1.0
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0.75
+      },
+      "label": "ring-fillet edit"
+    },
+    {
+      "tool": "undo",
+      "arguments": {}
+    },
+    {
+      "tool": "redo",
+      "arguments": {}
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/ring-fillet.dwprt"
+      },
+      "files": [
+        "{bundle}/ring-fillet.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/ring-fillet.dwprt"
+      },
+      "fresh_process": true,
+      "exports": [
+        {
+          "format": "stl"
+        },
+        {
+          "format": "step",
+          "refused": "step.unsupported-geometry"
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 1
+        },
+        {
+          "pointer": "/result/radius",
+          "equals": 0.75
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0
+      },
+      "refused": "must be greater than 0"
+    }
+  ]
+}

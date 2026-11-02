@@ -157,3 +157,64 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     assert_eq!(session.doc.seen_digest, before_failure.model.pinned);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
+    use soliddraft_app::document::Document;
+    use soliddraft_kernel_catallax::CatallaxKernel;
+    use std::sync::Arc;
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-quality-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let kernel = Arc::new(CatallaxKernel::with_operation_log());
+    let mut state = AppState::new(Document::new("Tilted rod cut", kernel.clone()));
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/rod-cut-28deg.json")).unwrap();
+    for step in scenario["steps"].as_array().unwrap() {
+        let tool = step["tool"].as_str().unwrap();
+        if tool == "save" {
+            break;
+        }
+        call(&mut state, tool, step["arguments"].clone());
+    }
+    call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
+    let shown = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
+    let views = shown.sheets[0].views.len();
+    assert_eq!(views, 4);
+    // Catallax refuses this body's preview, so the screen uses a proved coarse mesh.
+    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved && v.geometry.coarse));
+
+    let part = PartContext::new(&state.doc).unwrap();
+    let mut fine = shown.clone();
+    apply_with(&mut fine, &Command::UpdateFromModel, &part.certified_part()).unwrap();
+    assert!(fine.sheets[0].views.iter().all(|v| !v.geometry.unproved && !v.geometry.coarse));
+    let fine_svg = export::bytes(&layout_sheet(&fine, 0), Format::Svg, &fine.meta.title).unwrap();
+
+    for (tool, extension) in
+        [("drawing_export_svg", "svg"), ("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")]
+    {
+        let path = dir.join(format!("rod.{extension}"));
+        let caller = Caller::Mcp { client: "test".into() };
+        let out = call_checked(&mut AppTools { state: &mut state }, tool, json!({ "path": path }), &caller);
+        assert!(!out.is_error, "{tool}: {}", out.content);
+        let result: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(result["redrawn_from_certified_mesh"], json!(views), "{tool}: {result}");
+        assert!(path.is_file());
+    }
+    assert_eq!(std::fs::read(dir.join("rod.svg")).unwrap(), fine_svg);
+    assert_eq!(state.drawing.session.as_ref().unwrap().doc.drawing, shown);
+
+    state.drawing.session.as_mut().unwrap().doc.drawing = fine;
+    let calls = kernel.take_diagnostics().unwrap();
+    assert!(calls["calls"].as_array().unwrap().iter().any(|c| c["operation"] == "view_curves"));
+    call(&mut state, "drawing_export_svg", json!({ "path": dir.join("fine.svg") }));
+    let calls = kernel.take_diagnostics().unwrap();
+    assert!(
+        !calls["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| matches!(c["operation"].as_str(), Some("view_curves" | "tessellate")))
+    );
+    assert_eq!(std::fs::read(dir.join("fine.svg")).unwrap(), fine_svg);
+    std::fs::remove_dir_all(dir).unwrap();
+}

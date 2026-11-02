@@ -498,7 +498,7 @@ pub(crate) fn resolve_edge(r: &EdgeRef, view: &View, names: &NameMap) -> Result<
         }
         return Err(Unresolved {
             reason: RepairReason::Ambiguous,
-            message: "the selected generator or its supporting faces changed; pick the edge again".into(),
+            message: "The selected edge or its adjacent faces changed. Pick the edge again.".into(),
             candidates: ranked_edges(&r.fingerprint, found.iter().map(|edge| edge.id), view),
         });
     }

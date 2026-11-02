@@ -628,6 +628,18 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         assert_eq!(s.sketch.drawn().count(), 5, "two lines, two arcs and the centreline");
     }
     dimension_line(&mut harness, P2::new(36.0, 44.0), P2::new(40.0, 52.0), "28");
+    let slot_area: f64 = harness
+        .state()
+        .state
+        .sketch
+        .as_ref()
+        .unwrap()
+        .sketch
+        .regions()
+        .unwrap()
+        .iter()
+        .map(|region| region.area())
+        .sum();
     save(&mut harness, "16-slot-sketch");
     click_button(&mut harness, "Cut");
     harness.key_press(Key::Enter);
@@ -638,6 +650,8 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         "{:?}",
         feature_status(&harness, "Cut-Extrude2")
     );
+    let removed = v_bore - volume(&harness);
+    assert!((removed - slot_area * 10.0).abs() < 1.0, "the slot removes the full flange thickness: {removed}");
 
     save(&mut harness, "17-coplanar-slot-cut");
 

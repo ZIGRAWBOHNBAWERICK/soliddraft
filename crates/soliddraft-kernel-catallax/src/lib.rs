@@ -147,11 +147,7 @@ impl Solid {
                 return self.app.display(options, &mut Decider::default()).map(|answer| answer.value).map_err(
                     |error| match error {
                         Error::Display(refusal) => query_error(query, refusal),
-                        other => KernelError::QueryFailed {
-                            query: query.into(),
-                            code: 0,
-                            message: format!("{other} (Catallax stage 1)"),
-                        },
+                        other => KernelError::QueryFailed { query: query.into(), code: 0, message: other.to_string() },
                     },
                 );
             }
@@ -204,7 +200,7 @@ impl State {
         if self.fields.contains_key(&body) {
             return Err(terminal_field(body));
         }
-        self.get(body)?.solid.clone().ok_or_else(|| gap("profile sheet queries", "1"))
+        self.get(body)?.solid.clone().ok_or_else(|| gap("Profile sheet queries"))
     }
 
     fn step(&self, body: BodyId) -> KernelResult<StepId> {
@@ -351,7 +347,9 @@ impl CatallaxKernel {
             .collect();
         let exact = app.checkpoint.built();
         if exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty {
-            return Err(gap("empty results have no BodyKind or centroid in the existing application interface", "1"));
+            return Err(KernelError::Unsupported(
+                "empty results have no BodyKind or centroid in the existing application interface is not available in the Catallax application entry".into(),
+            ));
         }
         let ids = convert::Ids::new(&app, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>(), &tags, &mut state.next);
         let record = ids.record(seq, tag, op, &result, &parents.iter().map(|p| &p.ids).collect::<Vec<_>>());
@@ -410,14 +408,12 @@ impl CatallaxKernel {
 /// A terminal field is last: no CAD step or B-rep query reads it.
 fn terminal_field(body: BodyId) -> KernelError {
     KernelError::InvalidInput(format!(
-        "lattice.cad-after-lattice: {body} is a terminal field; return before it to edit (Catallax stage 1)"
+        "lattice.cad-after-lattice: {body} is a terminal field; return before it to edit"
     ))
 }
 
-fn gap(what: &str, stage: &str) -> KernelError {
-    KernelError::Unsupported(format!(
-        "{what} is not available in the Catallax application entry (Catallax stage {stage})"
-    ))
+fn gap(what: &str) -> KernelError {
+    KernelError::Unsupported(format!("{what} is coming soon."))
 }
 
 /// Converts retained application definitions, preserving native steps and frames.
@@ -518,31 +514,16 @@ fn build(
     Ok((app, converted.steps))
 }
 
-/// The Catallax stage that brought an operation.
-fn stage(op: OpKind) -> &'static str {
-    match op {
-        OpKind::Fillet => "3 for fillets between planes and cylinders; other fillets wait for Catallax stage 4",
-        OpKind::Chamfer => "3 for chamfers between planes and cylinders; other chamfers wait for chamfer continuation",
-        OpKind::ExtrudeTo | OpKind::Shell | OpKind::Hole | OpKind::Pattern | OpKind::Mirror => "3",
-        OpKind::Draft => "4",
-        _ => "1",
-    }
-}
-
 fn build_error(op: OpKind, error: Error) -> KernelError {
     let code = error.code();
     if matches!(error, Error::Conversion(catallax_app::soliddraft::ConversionError::NotYet { .. })) {
-        return gap(&format!("{code}: {error}"), stage(op));
+        return gap(&format!("{op:?}"));
     }
-    KernelError::Failed { op, code: 0, message: format!("{code}: {error} (Catallax stage {})", stage(op)) }
+    KernelError::Failed { op, code: 0, message: format!("{code}: {error}") }
 }
 
 fn query_error(query: &str, error: catallax_numbers::Refusal) -> KernelError {
-    KernelError::QueryFailed {
-        query: query.into(),
-        code: 0,
-        message: format!("{}: {} (Catallax stage 1)", error.code, error.detail),
-    }
+    KernelError::QueryFailed { query: query.into(), code: 0, message: format!("{}: {}", error.code, error.detail) }
 }
 
 fn numerical<T>(
@@ -849,7 +830,9 @@ impl Kernel for CatallaxKernel {
                 let rounded = p.map(|v| f64::from(v as f32));
                 !rounded.iter().all(|v| v.is_finite()) || Vec3::from(*p).distance(rounded.into()) > rounding_budget
             }) {
-                return Err(gap("requested chord tolerance cannot survive f32 display rounding", "1"));
+                return Err(KernelError::Unsupported(
+                    "requested chord tolerance cannot survive f32 display rounding is not available in the Catallax application entry".into(),
+                ));
             }
             Ok(convert::mesh(&mesh, &solid.ids, params))
         })
@@ -898,7 +881,10 @@ impl Kernel for CatallaxKernel {
                 return self.tessellate(body, params);
             };
             if mesh.positions.iter().flatten().any(|v| !(*v as f32).is_finite()) {
-                return Err(gap("preview coordinates beyond f32 display range", "1"));
+                return Err(KernelError::Unsupported(
+                    "preview coordinates beyond f32 display range is not available in the Catallax application entry"
+                        .into(),
+                ));
             }
             Ok(convert::preview(mesh, &solid.ids))
         })
@@ -958,10 +944,14 @@ impl Kernel for CatallaxKernel {
                     Ok(MassProperties {
                         volume: convert::midpoint(&mass.volume),
                         area: convert::midpoint(&mass.area),
-                        centroid: mass
-                            .centroid
-                            .map(|c| Vec3::from(c.each_ref().map(convert::midpoint)))
-                            .ok_or_else(|| gap("centroid of an empty body", "1"))?,
+                        centroid: mass.centroid.map(|c| Vec3::from(c.each_ref().map(convert::midpoint))).ok_or_else(
+                            || {
+                                KernelError::Unsupported(
+                                    "centroid of an empty body is not available in the Catallax application entry"
+                                        .into(),
+                                )
+                            },
+                        )?,
                         inertia: mass.inertia.map(|i| i.map(|row| row.each_ref().map(convert::midpoint))),
                     })
                 })
@@ -1106,10 +1096,10 @@ impl Kernel for CatallaxKernel {
         })
     }
     fn silhouette_curves(&self, _: BodyId, _: Vec3) -> KernelResult<Vec<drawing::ViewCurve>> {
-        self.observe("silhouette_curves", || Err(gap("exact silhouettes", "1, drawing queries (roadmap section 7)")))
+        self.observe("silhouette_curves", || Err(gap("Exact silhouettes")))
     }
     fn section_curves(&self, _: BodyId, _: &Plane) -> KernelResult<Vec<drawing::ViewCurve>> {
-        self.observe("section_curves", || Err(gap("section curves", "1, drawing queries (roadmap section 7)")))
+        self.observe("section_curves", || Err(gap("Section curves")))
     }
     fn edge_curve(&self, body: BodyId, edge: EdgeId) -> KernelResult<drawing::Curve3> {
         self.observe("edge_curve", || drawing_queries::edge_curve(self.solid(body)?.as_ref(), body, edge))
@@ -1118,9 +1108,7 @@ impl Kernel for CatallaxKernel {
         self.observe("face_loops", || drawing_queries::face_loops(self.solid(body)?.as_ref(), body, face))
     }
     fn lines_and_arcs(&self, _: &drawing::Curve3, _: f64) -> KernelResult<Vec<drawing::Curve3>> {
-        self.observe("lines_and_arcs", || {
-            Err(gap("curve approximation for drawings", "1, drawing queries (roadmap section 7)"))
-        })
+        self.observe("lines_and_arcs", || Err(gap("Curve approximation for drawings")))
     }
 
     fn export_iges(&self, body: BodyId, options: &IgesOptions) -> KernelResult<IgesExport> {

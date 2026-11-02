@@ -518,7 +518,7 @@ fn view_panel(
                     display: soliddraft_drawing::ViewDisplay { hidden: HiddenLines::Visible, ..v.display },
                 }));
             }
-            choice(ui, false, "Wireframe", Some("later"));
+            choice(ui, false, "Wireframe", Some("Coming soon"));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add_sized(

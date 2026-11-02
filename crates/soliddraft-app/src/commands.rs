@@ -429,7 +429,7 @@ pub struct CommandSpec {
     pub hint: fn(&AppState) -> Option<String>,
 }
 
-const LATER: &str = "Arrives in a later phase";
+const COMING_SOON: &str = "Coming soon";
 
 // Why commands run only in the app, for their rows.
 const CAMERA: &str = "It moves the viewport camera, which only the window has";
@@ -578,7 +578,7 @@ impl CommandSpec {
     /// Commands whose geometry is waiting for Catallax, in roadmap section 6 order.
     pub fn catallax_wait(&self) -> Option<&'static str> {
         match self.id {
-            "sweep" | "loft" => Some("Arrives with Catallax stage 5"),
+            "sweep" | "loft" => Some(COMING_SOON),
             _ => None,
         }
     }
@@ -594,10 +594,10 @@ impl CommandSpec {
 
     /// What its hint says now, or why it is disabled.
     pub fn hint_now(&self, state: &AppState) -> Option<String> {
-        self.catallax_wait()
-            .map(str::to_owned)
-            .or_else(|| (self.hint)(state))
-            .or_else(|| self.action.is_none().then(|| LATER.to_owned()))
+        if self.action.is_none() {
+            return Some(COMING_SOON.to_owned());
+        }
+        self.catallax_wait().map(str::to_owned).or_else(|| (self.hint)(state))
     }
 
     /// The first shortcut, as hints show it.
@@ -1803,7 +1803,6 @@ fn drawing_registry() -> Vec<CommandSpec> {
     let none = Modifiers::NONE;
     let ctrl = Modifiers::COMMAND;
     let cmd = |id, label, icon, doc| CommandSpec::new(id, label, icon, doc).drawing();
-    const P3: &str = "Arrives in phase 3 (assistant)";
     vec![
         // Views.
         cmd(
@@ -1997,8 +1996,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
         cmd("drawing_explain", "Explain", Icon::Chat, "Ask the assistant to explain the selected annotation")
             .on(Views, "Assistant", Small)
             .on(Annotate, "Assistant", Small)
-            .on(Assistant, "Chat", Large)
-            .hint(|_| Some(P3.into())),
+            .on(Assistant, "Chat", Large),
         // Annotate.
         drawing_tool!(
             "drawing_smart_dimension", "Smart dimension", Icon::SmartDim,
@@ -2197,14 +2195,11 @@ fn drawing_registry() -> Vec<CommandSpec> {
 .agents(Agents::Mcp, "Unsaved changes to the drawing are dropped.", Vec::new).undo(Undo::Replaces),
         // Assistant.
         cmd("drawing_check_sheet", "Check sheet", Icon::Check, "Ask the assistant to check the sheet")
-            .on(Assistant, "Drawing", Large)
-            .hint(|_| Some(P3.into())),
+            .on(Assistant, "Drawing", Large),
         cmd("drawing_propose_dimensions", "Propose dimensions", Icon::SmartDim, "Ask the assistant to dimension the views")
-            .on(Assistant, "Drawing", Small)
-            .hint(|_| Some(P3.into())),
+            .on(Assistant, "Drawing", Small),
         cmd("drawing_find_issues", "Find issues", Icon::Warning, "Ask the assistant for problems on the sheet")
-            .on(Assistant, "Drawing", Small)
-            .hint(|_| Some(P3.into())),
+            .on(Assistant, "Drawing", Small),
         // Keys.
         drawing_tool!(
             "drawing_select", "Select", Icon::Sketch, "Select and drag views and annotations",
@@ -2249,21 +2244,17 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn waiting_commands_stay_visible_disabled_and_name_their_stages() {
+    fn unfinished_commands_stay_visible_disabled_and_say_only_coming_soon() {
         let state = AppState::new(crate::demo_document());
-        for (id, stages) in [("sweep", &[5][..]), ("loft", &[5][..])] {
+        for command in all().iter().filter(|c| c.in_app() && (c.action.is_none() || c.catallax_wait().is_some())) {
+            assert!(!command.is_enabled(&state), "{}", command.id);
+            assert!(command.action_now(&state).is_none(), "{}", command.id);
+            assert_eq!(command.tip(&state), "Coming soon", "{}", command.id);
+        }
+        for id in ["sweep", "loft"] {
             let command = get(id).unwrap();
             assert!(!command.ribbon.is_empty(), "{id}");
             assert!((command.shown)(&state), "{id}");
-            assert!(!command.is_enabled(&state), "{id}");
-            assert!(command.action_now(&state).is_none(), "{id}");
-            for stage in stages {
-                assert!(
-                    command.tip(&state).contains(&format!("Catallax stage {stage}")),
-                    "{id}: {}",
-                    command.tip(&state)
-                );
-            }
         }
     }
 

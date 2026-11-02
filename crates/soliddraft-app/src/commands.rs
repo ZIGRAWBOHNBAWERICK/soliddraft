@@ -2349,7 +2349,7 @@ mod tests {
     fn the_ribbon_keeps_its_layout() {
         let panels = |tab: RibbonTab| ribbon(tab).iter().map(|(p, _)| *p).collect::<Vec<_>>();
         assert_eq!(panels(RibbonTab::Solid), ["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"]);
-        assert_eq!(panels(RibbonTab::Sketch), ["Sketch", "Draw", "Constrain", "Use sketch", "View"]);
+        assert_eq!(panels(RibbonTab::Sketch), ["Sketch", "Draw", "Modify", "Constrain", "Use sketch", "View"]);
         assert_eq!(panels(RibbonTab::Assembly), ["Edit", "Component", "File", "View"]);
         assert_eq!(panels(RibbonTab::Inspect), ["Measure", "Check", "Surface quality"]);
         assert_eq!(panels(RibbonTab::View), ["Orientation", "Display", "Projection", "Panels"]);

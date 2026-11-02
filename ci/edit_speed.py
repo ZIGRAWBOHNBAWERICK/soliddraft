@@ -4,6 +4,8 @@
 Both revisions run the head's scenario runner on one CPU in alternating order. One warmup
 pair is discarded. Answers must match in every run; kernel work may differ, so it is
 recorded, never compared. Timing means nothing outside a hosted runner.
+
+Hosted runners differ in CPU, so each run records its CPU model and a calibration figure.
 """
 import argparse
 import hashlib
@@ -11,10 +13,12 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import statistics
 import subprocess
 import sys
+import time
 
 TARGETS = {"bracket": {27: "edit_dimension", 43: "set_value"},
            "drawing": {24: "edit_extrude"},
@@ -23,6 +27,7 @@ LABELS = {("bracket", 27): "Bracket dimension", ("bracket", 43): "Bracket value"
           ("drawing", 24): "Drawing extrusion", ("references", 17): "Reference extrusion",
           ("references", 18): "Reference dimension"}
 MEASURED_PAIRS = 9
+CALIBRATION_ROUNDS = 7
 PIN = re.compile(r'pub const CATALLAX_REVISION: &str = "([0-9a-f]{40})";')
 PIN_SOURCE = "crates/soliddraft-kernel-catallax/src/lib.rs"
 
@@ -126,10 +131,56 @@ def table(rows):
     return "\n".join(lines) + "\n"
 
 
+def calibration_workload():
+    """Fixed integer and memory work, timed to compare hosts.
+
+    It is interpreted Python because hashing would run crypto instructions that only some
+    hosted CPUs have. Changing it breaks comparison with every earlier run.
+    """
+    state, table = 1, list(range(1 << 16))
+    for _ in range(1_000_000):
+        state = (state * 1103515245 + 12345) & 0x7fffffff
+        slot = state & 0xffff
+        table[slot], state = state, state ^ table[slot]
+    return state
+
+
+def calibrate(workload=calibration_workload):
+    """The fastest round, since other work on the host can only slow a round down."""
+    rounds = []
+    for _ in range(CALIBRATION_ROUNDS):
+        start = time.perf_counter()
+        workload()
+        rounds.append(1000 * (time.perf_counter() - start))
+    return min(rounds), rounds
+
+
+def cpu_model(lscpu):
+    return re.search(r"^Model name:\s*(.+)$", lscpu, re.MULTILINE)[1].strip()
+
+
+def host_record(out):
+    """Keeps the host's identity in the artifact from the start, so a failed run has it too."""
+    lscpu = subprocess.run(["lscpu"], env={**os.environ, "LC_ALL": "C"}, capture_output=True, text=True,
+                           check=True).stdout
+    (out / "lscpu.txt").write_text(lscpu)
+    calibration_ms, calibration_rounds_ms = calibrate()
+    host = dict(cpu=cpu_model(lscpu), python=platform.python_version(), calibration_ms=calibration_ms,
+                calibration_rounds_ms=calibration_rounds_ms)
+    (out / "host.json").write_text(json.dumps(host, indent=2) + "\n")
+    return host
+
+
+def host_line(host):
+    return (f"CPU `{host['cpu']}`, calibration {host['calibration_ms']:.1f} ms "
+            f"(fastest of {len(host['calibration_rounds_ms'])} rounds, Python {host['python']}).\n")
+
+
 def run(args):
     args.out.mkdir(parents=True)
     core = min(os.sched_getaffinity(0))
     os.sched_setaffinity(0, {core})
+    host = host_record(args.out)
     comparator = load(args.app / "ci/compare-scenario-bundles.py", "compare_bundles")
     pins = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
     scenarios = args.out / "inputs"
@@ -164,17 +215,18 @@ def run(args):
                     print(json.dumps(row), flush=True)
                 (args.out / "samples.json").write_text(json.dumps(samples, indent=2) + "\n")
     rows = medians(samples)
-    report = dict(base=pins[0], head=pins[1], core=core, measured_pairs=MEASURED_PAIRS,
+    report = dict(base=pins[0], head=pins[1], core=core, host=host, measured_pairs=MEASURED_PAIRS,
                   binary_sha256={r: hashlib.sha256((args.binaries / r).read_bytes()).hexdigest()
                                  for r in ("baseline", "candidate")},
                   comparison="identical part files, recipes, kernel questions, views and command answers in every run",
                   medians=rows, samples=samples)
     (args.out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-    print(table(rows))
+    print(host_line(host) + "\n" + table(rows))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as out:
-            out.write(f"Base `{pins[0]}`, head `{pins[1]}`, {MEASURED_PAIRS} measured pairs.\n\n" + table(rows))
+            out.write(f"Base `{pins[0]}`, head `{pins[1]}`, {MEASURED_PAIRS} measured pairs.\n\n"
+                      + host_line(host) + "\n" + table(rows))
 
 
 if __name__ == "__main__":

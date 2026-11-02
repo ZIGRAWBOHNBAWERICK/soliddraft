@@ -412,8 +412,7 @@ impl Tool {
         matches!(self, Tool::Trim | Tool::Extend)
     }
 
-    /// Tools that work on the selection: the pointer keeps selecting while they are active,
-    /// and the property panel holds their values and applies them.
+    /// Tools that keep the selection as their input.
     pub fn selects(self) -> bool {
         matches!(self, Tool::Select | Tool::Offset | Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
     }
@@ -552,9 +551,23 @@ pub struct SketchSession {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SketchDrag {
-    Point { point: PointRef, moved: bool },
-    Entity { entity: EntityId, last: P2, moved: bool },
-    Label { constraint: ConstraintId, offset: P2 },
+    /// Distance placement on a selected offset curve, without moving the source.
+    Offset {
+        entity: EntityId,
+    },
+    Point {
+        point: PointRef,
+        moved: bool,
+    },
+    Entity {
+        entity: EntityId,
+        last: P2,
+        moved: bool,
+    },
+    Label {
+        constraint: ConstraintId,
+        offset: P2,
+    },
 }
 
 impl SketchSession {
@@ -593,6 +606,7 @@ impl SketchSession {
         self.dim_second = None;
         self.dim_edit = None;
         self.preview = None;
+        self.drag = None;
         if !tool.selects() {
             self.selection.clear();
         }

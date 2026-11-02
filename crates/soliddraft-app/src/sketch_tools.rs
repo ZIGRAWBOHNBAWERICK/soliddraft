@@ -1,6 +1,6 @@
 //! The Modify tools of the sketcher: polygon, trim, extend, offset, mirror and the two
-//! patterns, all through [`Operation`]. The pointer drives polygon, trim and extend in
-//! `sketcher.rs`; the copy tools take the selection and the values typed here. Every
+//! patterns, all through [`Operation`]. The pointer places geometry and copy values in
+//! `sketcher.rs`; the panel also accepts numeric values for the copies. Every
 //! tool previews what it will do before it does it, and a refused operation changes
 //! nothing. The MCP `sketch_geometry` verb runs the same operations headlessly.
 
@@ -42,8 +42,7 @@ pub fn selected_in_order(s: &SketchSession) -> Vec<EntityId> {
     selected
 }
 
-/// The operation a copy tool would run on the selection with the typed values. `None`
-/// for the tools the pointer drives and for an empty selection.
+/// The operation a copy tool would run on the selection with the current values.
 pub fn operation_for(s: &SketchSession) -> Option<Operation> {
     let entities = selected_in_order(s);
     if entities.is_empty() {
@@ -105,6 +104,8 @@ pub fn apply(s: &mut SketchSession, operation: &Operation, actions: &mut Vec<App
                 s.selection = ids.into_iter().map(SketchSel::Entity).collect();
             }
             s.preview = None;
+            s.pending.clear();
+            s.drag = None;
             s.say(format!("{name} applied"));
             true
         }
@@ -135,21 +136,24 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             hint(ui, "Point at the end of a line or arc and click. It lengthens to the nearest curve in its way.");
         }
         Tool::Offset => {
-            hint(ui, "Select a connected chain in walking order. Positive is left of the first entity's direction.");
+            hint(
+                ui,
+                "Select a connected chain in walking order, then drag a selected curve to the side and distance you want. Apply adds the copy.",
+            );
             ui.add(egui::DragValue::new(&mut s.modify.distance).speed(0.25).prefix("Distance ").suffix(" mm"));
         }
         Tool::Mirror => {
-            hint(ui, "Select the entities and give the axis. Copies keep construction status.");
+            hint(ui, "Select the entities, then click two points on the mirror axis. Apply adds the copies.");
             point(ui, "Axis start", &mut s.modify.axis_start);
             point(ui, "Axis end", &mut s.modify.axis_end);
         }
         Tool::LinearPattern => {
-            hint(ui, "Select the entities and give the step between instances.");
+            hint(ui, "Select the entities, then click the start and end of one step. Apply adds the copies.");
             point(ui, "Step", &mut s.modify.step);
             ui.add(egui::DragValue::new(&mut s.modify.count).range(2..=1000).prefix("Instances "));
         }
         Tool::CircularPattern => {
-            hint(ui, "Select the entities and give the centre and the angle between instances.");
+            hint(ui, "Select the entities, then click the centre. Set the angle and count here, then Apply.");
             point(ui, "Centre", &mut s.modify.center);
             ui.add(egui::DragValue::new(&mut s.modify.angle).speed(1.0).suffix(" degrees"));
             ui.add(egui::DragValue::new(&mut s.modify.count).range(2..=1000).prefix("Instances "));
@@ -159,8 +163,11 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
     if tool.selects() {
         hint(ui, "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed.");
         let selected = selected_in_order(s).len();
-        hint(ui, &format!("{selected} selected. Click an entity to select it; Ctrl-click adds to the selection."));
-        let preview = s.preview.clone().or_else(|| selection_preview(s));
+        hint(
+            ui,
+            &format!("{selected} selected. Ctrl-click adds or removes entities. Esc or Cancel returns to Select."),
+        );
+        let preview = selection_preview(s);
         if let Some(why) = preview.as_ref().and_then(|p| p.refused.as_deref()) {
             ui.label(egui::RichText::new(why).size(11.0).color(theme::error()));
         }

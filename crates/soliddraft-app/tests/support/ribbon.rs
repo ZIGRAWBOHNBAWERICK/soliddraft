@@ -280,7 +280,13 @@ pub fn tooltip(app: &mut App, rect: Rect) -> String {
     let before: Vec<String> = painted(app).into_iter().map(|p| p.text).collect();
     app.hover_at(rect.center());
     app.run_steps(36);
-    let said: Vec<String> = painted(app).into_iter().map(|p| p.text).filter(|t| !before.contains(t)).collect();
+    let status = band(app);
+    let said: Vec<String> = painted(app)
+        .into_iter()
+        .filter(|p| !status.intersects(p.rect))
+        .map(|p| p.text)
+        .filter(|t| !before.contains(t))
+        .collect();
     let rest = window(app).center();
     app.hover_at(rest);
     app.run_steps(2);

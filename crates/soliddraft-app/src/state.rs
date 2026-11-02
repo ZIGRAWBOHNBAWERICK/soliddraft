@@ -433,7 +433,7 @@ impl Tool {
     }
 }
 
-/// The typed values of the Modify tools, kept while the sketch is open so that the ribbon,
+/// The values of the Modify tools, kept while the sketch is open so that the ribbon,
 /// the property panel and the pointer share them. Coordinates are in the sketch plane, mm.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModifyInputs {
@@ -469,7 +469,7 @@ impl Default for ModifyInputs {
 }
 
 /// What the active Modify tool would do now: at the pointer for Trim and Extend, with the
-/// selection and the typed values for the copy tools. The sketcher draws it every frame
+/// selection and the current values for the copy tools. The sketcher draws it every frame
 /// and applies `operation` on the click or the Apply button.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolPreview {
@@ -543,7 +543,7 @@ pub struct SketchSession {
     pub auto_relations: bool,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
-    /// The Modify tools' typed values.
+    /// The Modify tools' numeric and pointer-placed values.
     pub modify: ModifyInputs,
     /// What the active Modify tool would do now, redrawn every frame.
     pub preview: Option<ToolPreview>,

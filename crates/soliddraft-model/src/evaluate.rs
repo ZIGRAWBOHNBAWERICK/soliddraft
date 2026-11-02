@@ -976,6 +976,7 @@ impl Document {
             sha256: &i.sha256,
             options: &ImportOptions::default(),
             decisions: &decisions,
+            record: i.record.as_ref(),
         };
         match self.kernel.import_step(&OpTag::new(format!("{}.import", f.id)), &request) {
             Ok(mut r) => {

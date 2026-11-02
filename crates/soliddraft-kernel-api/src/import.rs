@@ -1,6 +1,6 @@
 //! Bounded repair of an imported STEP body: what the app asks of the kernel and what it
 //! gets back, as the JSON shapes of `catallax-import-proposals/1` and
-//! `catallax-import-repair/1`.
+//! `catallax-import-repair/2`.
 //!
 //! The source bytes are immutable and addressed by their sha256. The repaired body is
 //! derived from the source and the user's decisions; it is never written over the source.
@@ -11,7 +11,11 @@ use serde::{Deserialize, Serialize};
 use crate::OpResult;
 
 /// The format tag of a change record.
-pub const REPAIR_FORMAT: &str = "catallax-import-repair/1";
+pub const REPAIR_FORMAT: &str = "catallax-import-repair/2";
+
+/// The format tag of a change record saved before records carried face tolerances. Such a
+/// record is never relabelled: its import is redone and certified again on opening.
+pub const LEGACY_REPAIR_FORMAT: &str = "catallax-import-repair/1";
 
 /// The format tag of a proposal set.
 pub const PROPOSALS_FORMAT: &str = "catallax-import-proposals/1";
@@ -153,7 +157,24 @@ pub struct RepairDerivative {
     pub sha256: String,
 }
 
-/// The change record of one import: `catallax-import-repair/1`.
+/// How far a repaired face lies from its source face, as exact decimal strings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FaceTolerance {
+    /// The source solid.
+    pub solid: String,
+    /// The source face.
+    pub face: String,
+    /// Proven lower bound of the whole face's deviation, in millimetres.
+    pub deviation_lower_mm: String,
+    /// Proven upper bound of the whole face's deviation, in millimetres.
+    pub deviation_upper_mm: String,
+    /// The approved limit, in millimetres, apart from the deviation attained.
+    pub approved_tolerance_mm: String,
+    /// The conservative nearest-feature size squared, in square millimetres.
+    pub feature_size_squared_mm2: String,
+}
+
+/// The change record of one import: `catallax-import-repair/2`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepairRecord {
     /// Always [`REPAIR_FORMAT`].
@@ -165,6 +186,9 @@ pub struct RepairRecord {
     pub derivative: Option<RepairDerivative>,
     /// Every change, in order.
     pub changes: Vec<RepairChange>,
+    /// The repaired faces' deviations from the source. A [`LEGACY_REPAIR_FORMAT`] file has none.
+    #[serde(default)]
+    pub face_tolerances: Vec<FaceTolerance>,
 }
 
 /// How far from a feature the importer looks for another that might close a gap.

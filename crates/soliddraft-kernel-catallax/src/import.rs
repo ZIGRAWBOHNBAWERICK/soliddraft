@@ -67,21 +67,34 @@ impl CatallaxKernel {
             None,
         )
         .map_err(refusal)?;
-        if let Some(saved) = request.record {
-            let saved: catallax_import::RepairRecord = wire(saved)?;
-            catallax_import::rebuild(
-                &mut catallax_topology::Model::new(),
-                request.source,
-                &options(request.options)?,
-                &saved,
-                None,
-            )
-            .map_err(refusal)?;
-            if saved != imported.record {
-                return Err(KernelError::InvalidInput(
-                    "the saved import record does not match this file and its decisions".into(),
-                ));
+        let mismatch =
+            || KernelError::InvalidInput("the saved import record does not match this file and its decisions".into());
+        match request.record {
+            // `apply` above redid the import and certified it again, which is what a record
+            // from before face tolerances needs. It may not be relabelled, only matched.
+            Some(saved) if saved.format == LEGACY_REPAIR_FORMAT => {
+                let fresh: RepairRecord = wire(&imported.record)?;
+                if (&saved.source, &saved.derivative, &saved.changes)
+                    != (&fresh.source, &fresh.derivative, &fresh.changes)
+                {
+                    return Err(mismatch());
+                }
             }
+            Some(saved) => {
+                let saved: catallax_import::RepairRecord = wire(saved)?;
+                catallax_import::rebuild(
+                    &mut catallax_topology::Model::new(),
+                    request.source,
+                    &options(request.options)?,
+                    &saved,
+                    None,
+                )
+                .map_err(refusal)?;
+                if saved != imported.record {
+                    return Err(mismatch());
+                }
+            }
+            None => {}
         }
         let count = imported.bodies.len() + imported.left_open.len();
         if count != 1 {

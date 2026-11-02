@@ -50,9 +50,9 @@ pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, 
 pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
-    Approval, DecimalBounds, Decision, Disposition, ImportOptions, ImportStepRequest, ImportStepResult, ImportedBody,
-    PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange, RepairDerivative, RepairRecord, RepairSource,
-    question_id, question_index,
+    Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportOptions, ImportStepRequest, ImportStepResult,
+    ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange,
+    RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
 };
 pub use profile::{Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 

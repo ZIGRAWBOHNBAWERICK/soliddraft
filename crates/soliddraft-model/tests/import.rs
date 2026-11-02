@@ -139,10 +139,11 @@ impl Kernel for Importer {
             bodies,
             left_open: self.left_open.clone(),
             record: RepairRecord {
-                format: "catallax-import-repair/1".into(),
+                format: soliddraft_kernel_api::REPAIR_FORMAT.into(),
                 source: RepairSource { name: request.name.into(), sha256: request.sha256.into() },
                 derivative: Some(RepairDerivative { sha256: "00".repeat(32) }),
                 changes: vec![change],
+                face_tolerances: Vec::new(),
             },
         })
     }

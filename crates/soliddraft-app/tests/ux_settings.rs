@@ -21,9 +21,15 @@ fn settings_command_opens_preferences_and_saves_navigation() {
         }
     }
 
+    let before_open = std::fs::read(dir.join("settings.json")).unwrap_or_default();
     ribbon::type_command(&mut app, "settings");
     app.run_steps(3);
     assert_eq!(app.state().preferences.as_ref().unwrap().page, preferences::MOUSE);
+    assert_eq!(
+        std::fs::read(dir.join("settings.json")).unwrap_or_default(),
+        before_open,
+        "opening Preferences does not write settings"
+    );
     app.get_by_label("Onshape").click();
     app.run_steps(3);
     assert_eq!(app.state().state.navigation.preset_id, "onshape");

@@ -116,15 +116,16 @@ fn clean_block_and_cylinder_import_render_save_reopen_and_checked_export() {
         assert!(record.derivative.is_none());
         assert_eq!(record.source.sha256, hash);
         let chord = doc.display_quality().levels().params(Level::Standard).chord_height;
-        for (level, ratio) in [(Level::Coarse, 0.1), (Level::Standard, 0.6), (Level::Fine, 2.0)] {
+        for (level, ratio) in [(Level::Coarse, 0.02), (Level::Standard, 0.6), (Level::Fine, 2.0)] {
+            let pixels_per_point = app.ctx.pixels_per_point();
             let state = &mut app.state_mut().state;
             let bounds = state.doc.meshes[&body].bounds().unwrap();
             state.viewport.camera.pan(0.0, 0.0, state.viewport.rect.height());
             state.viewport.camera.target = (bounds.0 + bounds.1) * 0.5;
             state.viewport.camera.orthographic = true;
             let pixels_per_mm = ratio / chord;
-            state.viewport.camera.distance =
-                state.viewport.rect.height() / (2.0 * (state.viewport.camera.fov_y / 2.0).tan() * pixels_per_mm as f32);
+            state.viewport.camera.distance = state.viewport.rect.height() * pixels_per_point
+                / (2.0 * (state.viewport.camera.fov_y / 2.0).tan() * pixels_per_mm as f32);
             let start = Instant::now();
             loop {
                 app.run_steps(1);

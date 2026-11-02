@@ -126,9 +126,10 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         let ctx = &contexts[&id];
         follow_parent(drawing, id, &contexts);
         let view = drawing.view_mut(id).expect("listed");
-        // Certified line work replaces a preview of the same revision, never the reverse.
+        // Proof and quality can improve independently at the same revision.
         if view.geometry.source_digest != part.digest.as_str()
             || (view.geometry.unproved && !ctx.projected.geometry.unproved)
+            || (view.geometry.coarse && !ctx.projected.geometry.coarse)
         {
             view.geometry = ctx.projected.geometry.clone();
             report.views_updated += 1;

@@ -170,7 +170,7 @@ fn compute_view_at(
             let spec = spec_in(drawing, sheet, view).ok_or(DrawingError::BadView(view.id))?;
             let curves = view_curves(part, &spec)?;
             let xf = transform(&curves, &spec, scale)?;
-            let projected = project(index, &curves, &xf, part.digest.as_str());
+            let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: is_pictorial(&spec), projected }
         }
         ViewKind::Section { parent, line, flip, model_line, .. } => {
@@ -182,7 +182,7 @@ fn compute_view_at(
                 .kernel
                 .section_view(part.body, &SectionSpec { view: ViewSpec { preview: part.preview, ..spec }, origin })?;
             let xf = transform(&section.curves, &spec, scale)?;
-            let mut projected = project(index, &section.curves, &xf, part.digest.as_str());
+            let mut projected = project(index, &section.curves, &xf, part.digest.as_str(), part.preview);
             projected.geometry.hatch = section.regions.iter().map(|r| region_polygon(r, &xf, None)).collect();
             ViewContext { id: view.id, curves: section.curves, xf, pictorial: false, projected }
         }
@@ -248,6 +248,7 @@ fn compute_view_at(
                 outline: None,
                 bbox: parent.geometry.bbox,
                 unproved: parent.geometry.unproved,
+                coarse: parent.geometry.coarse,
             };
             let mut projected = Projected { geometry, transform: xf, circles };
             clip_projected(&mut projected, &boundary, true);
@@ -261,7 +262,7 @@ fn compute_view_at(
             let spec = with_display(ViewSpec::new(direction, up), &view.display);
             let curves = view_curves(part, &spec)?;
             let xf = transform(&curves, &spec, scale)?;
-            let projected = project(index, &curves, &xf, part.digest.as_str());
+            let projected = project(index, &curves, &xf, part.digest.as_str(), part.preview);
             ViewContext { id: view.id, curves, xf, pictorial: false, projected }
         }
     };
@@ -308,7 +309,7 @@ fn broken_out(part: &Part, index: &PartIndex, ctx: &mut ViewContext, b: &BrokenO
     spec.smooth_edges = ctx.projected.geometry.curves.iter().any(|c| c.tangent);
     spec.preview = part.preview;
     let section = part.kernel.section_view(part.body, &SectionSpec { view: spec, origin: d * (front - b.depth) })?;
-    let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str());
+    let mut cut = project(index, &section.curves, &ctx.xf, part.digest.as_str(), part.preview);
     clip_projected(&mut ctx.projected, &b.boundary, false);
     clip_projected(&mut cut, &b.boundary, true);
     ctx.projected.geometry.curves.extend(cut.geometry.curves);
@@ -705,7 +706,7 @@ impl Projected {
 }
 
 /// Projects the kernel's curves into a view's line work.
-pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, digest: &str) -> Projected {
+pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, digest: &str, coarse: bool) -> Projected {
     let mut out = Vec::with_capacity(curves.curves.len());
     let mut circles: Vec<CircleInfo> = Vec::new();
     for c in &curves.curves {
@@ -746,6 +747,7 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
         outline: None,
         bbox: [lo.u, lo.v, hi.u, hi.v],
         unproved: curves.unproved,
+        coarse,
     };
     Projected { geometry, transform: *xf, circles }
 }
@@ -754,7 +756,7 @@ pub fn project(index: &PartIndex, curves: &ViewCurves, xf: &ViewTransform, diges
 pub fn project_part(part: &Part, index: &PartIndex, spec: &ViewSpec, scale: f64) -> Result<Projected, DrawingError> {
     let curves = view_curves(part, spec)?;
     let xf = transform(&curves, spec, scale)?;
-    Ok(project(index, &curves, &xf, part.digest.as_str()))
+    Ok(project(index, &curves, &xf, part.digest.as_str(), part.preview))
 }
 
 /// Centre marks for the circles a view sees face-on, one per centre (the largest circle

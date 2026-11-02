@@ -439,6 +439,10 @@ pub struct ViewGeometry {
     /// it and are made from certified line work instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// Sampled at screen quality, independently of whether the mesh was proved.
+    /// Exports regenerate this line work at fine quality.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub coarse: bool,
 }
 
 /// One curve of a view.

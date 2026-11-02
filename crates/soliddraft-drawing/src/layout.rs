@@ -298,7 +298,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
     for (id, c) in ids.iter().zip(curves) {
         let spec = project::view_spec(&drawing, *id)?;
         let xf = project::transform(&c, &spec, project::view_scale(&drawing, *id)?)?;
-        let projected = project::project(&index, &c, &xf, part.digest.as_str());
+        let projected = project::project(&index, &c, &xf, part.digest.as_str(), part.preview);
         drawing.view_mut(*id).expect("just placed").geometry = projected.geometry.clone();
         let pictorial = project::is_pictorial(&spec);
         contexts.push(ViewContext { id: *id, curves: c, xf, pictorial, projected });

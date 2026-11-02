@@ -1743,8 +1743,8 @@ pub struct SheetExport {
 }
 
 /// Writes the drawing as `format` at `path`: the current sheet, or every sheet as a
-/// page of a PDF. Views shown from the kernel's unproved preview are drawn again from
-/// the certified mesh of `part`, on a copy, so the file never comes from a preview.
+/// page of a PDF. Unproved or coarse screen views are drawn again from the fine
+/// certified mesh of `part`, on a copy.
 pub(crate) fn write_sheet(
     s: &mut DrawingSession,
     part: Option<&PartContext>,
@@ -1790,24 +1790,25 @@ pub(crate) fn write_sheet(
     Ok(SheetExport { views: written.len(), redrawn, revision: drawing.model.pinned.clone(), accuracy })
 }
 
-/// A copy of `drawing` with its preview views drawn from the certified mesh, or `None`
-/// when no view is a preview, with the number of views drawn again. Only views of the
-/// open part's current revision can be certified; a preview of another revision waits
-/// for a Rebuild.
+/// A copy of `drawing` with unproved or coarse views drawn from the fine certified
+/// mesh, or `None` when all views are already fine and proved, with the number drawn
+/// again. Only views of the open part's current revision can be regenerated.
+/// Another revision waits for a Rebuild.
 fn certified(drawing: &Drawing, part: Option<&PartContext>) -> Result<(Option<Drawing>, usize), String> {
-    let previews: Vec<&View> = drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.geometry.unproved).collect();
-    if previews.is_empty() {
+    let needs_fine: Vec<&View> =
+        drawing.sheets.iter().flat_map(|s| &s.views).filter(|v| v.geometry.unproved || v.geometry.coarse).collect();
+    if needs_fine.is_empty() {
         return Ok((None, 0));
     }
     let unproved = || soliddraft_drawing::DrawingError::Unproved.to_string();
     let part = part.ok_or_else(unproved)?;
-    if previews.iter().any(|v| v.geometry.source_digest != part.digest.as_str()) {
+    if needs_fine.iter().any(|v| v.geometry.source_digest != part.digest.as_str()) {
         return Err(unproved());
     }
     let mut copy = drawing.clone();
     soliddraft_drawing::apply_with(&mut copy, &Command::UpdateFromModel, &part.certified_part())
         .map_err(|e| e.to_string())?;
-    Ok((Some(copy), previews.len()))
+    Ok((Some(copy), needs_fine.len()))
 }
 
 fn save_drawing(state: &mut AppState, path: Option<PathBuf>) {

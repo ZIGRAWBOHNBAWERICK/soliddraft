@@ -1,5 +1,7 @@
 # Measure and track
 
+Inspect > Mass props calculates the selected feature's properties on a desktop worker. The viewport stays interactive while the result is pending. The properties panel then shows volume, area, centre of mass and mass from the assigned material's density. Without a material or density, mass stays unknown. Editing or opening another part cannot attach an old refusal to the new revision. A new request uses its cached answer immediately or replaces the queued request. One calculation runs at a time; the latest request waits visibly while an active calculation finishes within its work limit. The browser action shows Coming soon.
+
 Open Inspect > Measure and pick an edge or face. The panel shows the kernel's proven length in mm or area in mm2 and labels it exact or bounded. A bounded result carries an enclosure. The MCP `measure_entity` tool returns its outward-rounded endpoints, part frame and geometry hash.
 
 Enter a value name, or leave it blank for an automatic name, then press Track this. An optional check takes `<`, `<=`, `>` or `>=` and one limit. Bare limits use the measured unit. Length limits also accept the value model's length units. A check passes or fails only when the whole enclosure proves that answer. Otherwise it is unknown.

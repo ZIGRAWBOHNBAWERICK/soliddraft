@@ -3198,11 +3198,25 @@ impl Document {
                     }
                 }
                 if !f.is_sketch()
+                    && self.current_exact_display()
                     && let Some(body) = f.body
                     && let Some(mp) = self.kernel().cached_mass_properties(body)
                 {
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));
+                    let material = self.model().material(self.model().active_configuration());
+                    let mass = soliddraft_materials::mass::of_body(&mp, material);
+                    details.push((
+                        "Mass".into(),
+                        match mass {
+                            Ok(mass) => format!("{:.6} kg", mass.mass_kg),
+                            Err(why) => why.to_string(),
+                        },
+                    ));
+                    details.push((
+                        "Centre of mass".into(),
+                        format!("{:.3}, {:.3}, {:.3} mm", mp.centroid.x, mp.centroid.y, mp.centroid.z),
+                    ));
                 }
                 let made = self.faces.iter().filter(|nf| nf.feature == id).count();
                 if made > 0 {

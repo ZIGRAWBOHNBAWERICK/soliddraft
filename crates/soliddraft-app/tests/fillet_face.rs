@@ -34,6 +34,120 @@ type App = Harness<'static, SolidDraftApp>;
 /// The rendered harnesses share one adapter; one test at a time.
 static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[test]
+fn oblique_fillet_mass_properties_appear_in_the_window() {
+    use soliddraft_app::app_tools::AppTools;
+    use soliddraft_app::state::{AppAction, AppState};
+    use soliddraft_assistant::{Caller, tools::call_checked};
+    use soliddraft_kernel_api::Kernel;
+    let _gpu = gpu();
+    let scenario: serde_json::Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
+    let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+    let mut state = AppState::new(Document::new("Oblique rim", kernel.clone()));
+    for step in scenario["steps"].as_array().unwrap().iter().take(5) {
+        let out = call_checked(
+            &mut AppTools { state: &mut state },
+            step["tool"].as_str().unwrap(),
+            step["arguments"].clone(),
+            &Caller::Mcp { client: "fillet-test".into() },
+        );
+        assert!(!out.is_error, "{}", out.content);
+    }
+    let mut material = soliddraft_materials::Material::new("fixture", "Fixture material");
+    material.density_kg_m3 = Some(2700.0);
+    let command = soliddraft_model::Command::SetMaterial {
+        material: Some(material),
+        default_appearance: None,
+        scope: soliddraft_document::ConfigScope::All,
+    };
+    state.doc.run_journal_command(serde_json::json!({"op":"execute","command":command})).unwrap();
+    let id = state.doc.features.last().unwrap().id;
+    state.doc.selection = Some(Selection::Feature(id));
+    let mut app = harness(state.doc);
+    app.state_mut().state.push(AppAction::MeasureMassProperties);
+    app.run_steps(4);
+    app.get_by_label("Calculating mass properties...");
+    app.render().unwrap().save(proof_folder().join("mass-pending.png")).unwrap();
+    app.key_press(Key::T);
+    app.run_steps(4);
+    assert_eq!(app.state().state.viewport.camera.view_name, "Top");
+    assert!(
+        kernel.cached_mass_properties(app.state().state.doc.display_body().unwrap()).is_none(),
+        "the camera command completed before the pending measurement"
+    );
+    let start = std::time::Instant::now();
+    let mut diagnostics = serde_json::json!({"calls":[],"questions":[]});
+    loop {
+        collect_kernel_diagnostics(&kernel, &mut diagnostics);
+        if let Some(refused) = diagnostics["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|call| call["operation"] == "mass_properties" && call["status"] == "refused")
+        {
+            std::fs::write(proof_folder().join("kernel.json"), serde_json::to_vec_pretty(&diagnostics).unwrap())
+                .unwrap();
+            panic!("mass properties refused: {}", refused["error"]);
+        }
+        let state = &app.state().state;
+        assert!(
+            !state.note.as_ref().is_some_and(|n| n.kind == NoteKind::Error),
+            "{}",
+            state.note.as_ref().map_or("", |n| n.text.as_str())
+        );
+        if state.doc.kernel().cached_mass_properties(state.doc.feature(id).unwrap().body.unwrap()).is_some() {
+            break;
+        }
+        assert!(start.elapsed().as_secs() < 600, "mass properties did not arrive");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
+    app.run_steps(2);
+    app.get_by_label("Volume");
+    let mass = app.state().state.doc.mass_properties(id).unwrap();
+    assert!(mass.volume > 600.0 && mass.volume < 200.0 * std::f64::consts::PI);
+    assert!(mass.inertia.is_some());
+    app.get_by_label(&format!("{:.0} mm³", mass.volume));
+    app.get_by_label("Mass");
+    let kg = mass.volume * 2700e-9;
+    app.get_by_label(&format!("{kg:.6} kg"));
+    let folder = proof_folder();
+    app.render().unwrap().save(folder.join("mass-result.png")).unwrap();
+    let exported = call_checked(
+        &mut AppTools { state: &mut app.state_mut().state },
+        "export_step",
+        serde_json::json!({"path":folder.join("oblique.step")}),
+        &Caller::Mcp { client: "fillet-test".into() },
+    );
+    assert!(!exported.is_error, "{}", exported.content);
+    std::fs::write(
+        folder.join("properties.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "volume":mass.volume,"area":mass.area,"mass_kg":kg,"centroid":mass.centroid,
+            "inertia":mass.inertia,"camera_while_pending":"Top"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    collect_kernel_diagnostics(&kernel, &mut diagnostics);
+    assert!(
+        diagnostics["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|call| call["operation"] == "mass_properties" && call["on_capture_thread"] == false)
+    );
+    std::fs::write(folder.join("kernel.json"), serde_json::to_vec_pretty(&diagnostics).unwrap()).unwrap();
+}
+
+fn collect_kernel_diagnostics(kernel: &soliddraft_kernel_catallax::CatallaxKernel, collected: &mut serde_json::Value) {
+    let mut chunk = kernel.take_diagnostics().unwrap();
+    for key in ["calls", "questions"] {
+        collected[key].as_array_mut().unwrap().append(chunk[key].as_array_mut().unwrap());
+    }
+}
+
 fn gpu() -> std::sync::MutexGuard<'static, ()> {
     let guard = GPU.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let _ = env_logger::try_init();
@@ -667,4 +781,60 @@ fn fillet_refusal_then_retry_rounds_the_box_top() {
     the_rounding(&state.doc, false);
     let expected = rounded_box_volume(60.0, 40.0, 20.0, radius);
     assert!(close(volume(&state.doc), expected), "{} not {expected}", volume(&state.doc));
+}
+
+#[test]
+fn output_refusals_are_plain_in_the_window() {
+    use soliddraft_app::app_tools::AppTools;
+    use soliddraft_app::state::AppState;
+    use soliddraft_assistant::{Caller, tools::call_checked};
+    let _gpu = gpu();
+    let scenario: serde_json::Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
+    let mut state = AppState::new(Document::new("Output refusals", soliddraft_app::kernel()));
+    for step in scenario["steps"].as_array().unwrap().iter().take(5) {
+        let out = call_checked(
+            &mut AppTools { state: &mut state },
+            step["tool"].as_str().unwrap(),
+            step["arguments"].clone(),
+            &Caller::Mcp { client: "fillet-test".into() },
+        );
+        assert!(!out.is_error, "{}", out.content);
+    }
+    let mut app = harness(state.doc);
+    // These diagnostic fixtures exercise presentation; the attempted two-band and trimmed feature paths cannot build yet.
+    for (diagnostic, shown, frame) in [
+        (
+            "export_step failed: step.unsupported-geometry: disagreeing shared-wall seam frames",
+            "STEP export is unavailable for this shape. Save the part or export a mesh instead.",
+            "shared-wall-refusal",
+        ),
+        (
+            "mass_properties failed: measure.unsupported-surface: trimmed rolling band",
+            "Volume and mass are unavailable for this shape. You can still save the part and export a mesh.",
+            "trimmed-band-refusal",
+        ),
+        (
+            "fillet failed in the kernel: intersect.unsupported-pair: surface pair is outside piece 4 coverage",
+            "This operation is unavailable for the selected shape.",
+            "construction-refusal",
+        ),
+    ] {
+        app.state_mut().state.note(diagnostic, NoteKind::Error);
+        app.run_steps(2);
+        button(&mut app, "Status details");
+        app.get_by_label(shown);
+        assert!(app.query_all_by_label(diagnostic).next().is_none());
+        app.render().unwrap().save(proof_folder().join(format!("{frame}.png"))).unwrap();
+        app.key_press(Key::Escape);
+        app.run_steps(2);
+    }
+}
+
+fn proof_folder() -> std::path::PathBuf {
+    let folder = std::env::var_os("SOLIDDRAFT_TEST_OUT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-oblique-{}", std::process::id())));
+    std::fs::create_dir_all(&folder).unwrap();
+    folder
 }

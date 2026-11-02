@@ -13,11 +13,19 @@ pub(crate) fn for_user(message: &str) -> &str {
         "Volume and mass are unavailable for this shape. You can still save the part and export a mesh."
     } else if message.contains("distance.unsupported-envelope") || message.contains("distance.cylinder-domain") {
         "This shape cannot be shelled. Use a convex tray with separated through bores and open its top or bottom face."
-    } else if message.contains("export_step") && message.contains("unsupported") {
+    } else if message.contains("step.unsupported-geometry")
+        || (message.contains("export_step") && message.contains("unsupported"))
+    {
         "STEP export is unavailable for this shape. Save the part or export a mesh instead."
     } else if message.contains("fillet.") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
-    } else if message.contains("Catallax") {
+    } else if message.contains("mass_properties") {
+        "These properties could not be calculated. Try again or choose another feature."
+    } else if message.contains("Catallax")
+        || message.contains("kernel")
+        || message.contains("intersect.")
+        || message.contains("numbers.")
+    {
         "This operation is unavailable for the selected shape."
     } else {
         message
@@ -38,7 +46,14 @@ mod tests {
             "measure.unsupported-surface",
             "distance.unsupported-envelope",
             "export_step: unsupported surface",
+            "step.unsupported-geometry",
+            "mass_properties failed",
+            "numbers.operation-budget",
+            "kernel unavailable",
+            "intersect.unsupported-pair",
+            "fillet failed in the kernel: unsupported surface",
         ] {
+            assert!(!for_user(code).contains(code));
             let diagnostic = format!("{code}: refused (Catallax stage 3)");
             let shown = for_user(&diagnostic);
             assert!(!shown.contains(code) && !shown.contains("Catallax") && !shown.contains("stage"));

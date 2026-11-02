@@ -807,10 +807,11 @@ impl SolidDraftApp {
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));
-                if let Some(id) = feature
-                    && self.state.doc.mass_properties(id).is_some()
-                {
-                    self.state.doc.selection = Some(Selection::Feature(id));
+                if let Some(id) = feature {
+                    match self.state.mass.request(&self.state.doc, id, ctx) {
+                        Ok(()) => self.state.doc.selection = Some(Selection::Feature(id)),
+                        Err(message) => self.state.note(message, NoteKind::Error),
+                    }
                 } else {
                     self.state.note("Select a solid feature with measurable properties", NoteKind::Error);
                 }

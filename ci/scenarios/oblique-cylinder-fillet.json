@@ -168,8 +168,7 @@
         },
         {
           "format": "step",
-          "refused": "unsupported",
-          "sentinel": "keep existing STEP"
+          "raw_valid": true
         }
       ]
     },

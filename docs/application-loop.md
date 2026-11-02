@@ -45,6 +45,12 @@ its undo and redo must make no kernel operations, mesh requests or GPU placement
 Changed shapes must upload their new meshes. The scenario also replaces the document
 and checks that a refused zero-depth edit preserves the displayed result.
 
+`sphere-revolve.json` and `torus-revolve.json` retain their construction, drawing
+and independent STEP checks, then edit the sphere's angle or the torus's tube
+diameter. They check undo, redo, rename, suppress and restore, reuse of the exact
+prior parameter value, and another fresh-process reopen. Rename must make no
+kernel operations, foreground mesh requests or GPU body placements.
+
 `references.json` is the reference survival scenario. It builds the bracket with
 sketches on the plate's and the boss's top faces, splits the plate's top with a groove,
 sketches on one piece, and merges the top with a flush tab. It then changes the plate

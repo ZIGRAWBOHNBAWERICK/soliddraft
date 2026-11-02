@@ -11,7 +11,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document and assembly commands -> Catallax adapter -> pinned kernel -> assembly loader",
       "supported_limits": "One floating component at identity placement, default configuration; in-session freshness, saved-part transactional Update; partial M4 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt and work/rig.dwasm"
@@ -35,7 +35,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "Prismatic and cylindrical features on top and right planes; centred Sketch1 plate width 120 -> 140 mm, supported widths >= 120 mm; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; partial M1 evidence, not canonical P1; known click gaps in ci/known-over-budget.json; plain named values and stable bindings; whole bare literals use mm, multiplicative bare literals are factors; mm, cm, m, in and deg; width >= 120 mm, depth > 37 mm; automatic dotted names, functions and configs deferred; partial M2 evidence",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,viewport.png,view.svg}; step 25 drawing.dwdrw and drawing.svg; steps 27-32 width edit, undo, redo, save, diverge and reopen; bracket-140.dwprt; commands/0032/{part.step,step-report.json,check-step.stdout,check-step.stderr}; geometry-info.stdout recipe hashes; steps 33-50 named width, derived depth, rename, exact inch literal conversion, cycle and unit refusals, undo/redo/reopen; bracket-named.dwprt, bracket-inch.dwprt; commands/0040 and commands/0050 checked STEP exports"
@@ -59,7 +59,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "P2 collar: radii 6 to 12 mm, height 12 mm, revolved 360 degrees about Y, outer-rim chamfers 1 and 0.75 mm; one plain through hole on the top annulus at radius 9 mm, diameter 2 edited to 2.5 mm, strictly inside both bevel rings; volume tolerance 0.005 mm3 at a 20M work allowance; a hole whose wall meets a bevel cone retains intersect.traced-pair-required; partial M7 evidence",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,measurement.json,viewport.png,view.svg}; steps 3-4 drawing.dwdrw, drawing.svg and STEP/STL exports; steps 10 and 13 Hole1 wall name; collar-hole.dwprt; commands/0012/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout,raw-step.stderr}; commands/0014 refusal question and replay; geometry-info.stdout recipe hashes"
@@ -73,7 +73,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "60 x 40 x 5 mm plate at the origin corner, two 90-degree countersinks, a radius-8 boss and a third countersink 14 mm from its axis; volume tolerance 0.005 mm3 and bounds tolerance 0.001 mm; true cone/cylinder meeting retains intersect.traced-pair-required; partial M7 evidence",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,measurement.json,viewport.png,view.svg}; steps 12 and 15 Hole2 face names; countersink-boss.dwprt; commands/0014/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout,raw-step.stderr}; geometry-info.stdout recipe hashes"
@@ -97,7 +97,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, draft, boss and edit_draft -> real document rebuild -> pinned Catallax analytic draft -> checked STEP on one request allowance",
       "supported_limits": "Two planar walls of a block drafted 3 and 5 degrees about z=0, with a boss on the top face; 20M per request, export included; broader draft arrangements stay refused; other rational angles are unproved here",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; commands/0003/{part.step,step-oracle.json,step-oracle.stdout}; draft-checked.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
@@ -111,7 +111,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, boss on the end cap, hole through the boss, draft, track and edit_draft -> real document rebuild -> pinned Catallax bored-boss draft -> checked STEP on one request allowance",
       "supported_limits": "A 40 x 30 x 20 mm block with a boss of radius 4 and height 5 at (6, 2) and a through hole of diameter 4 at (7, 2) from the boss top through the base, both made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a bore touching or crossing the boss wall, a blind or stepped bore and several bored bosses stay refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked shoulder, boss, bore and side references through edit, undo, redo, reopen and refusal; draft-bored-boss.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
@@ -125,7 +125,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, boss on the end cap, hole, draft, track and edit_draft -> real document rebuild -> pinned Catallax preserved-boss and preserved-bore draft -> checked STEP on one request allowance",
       "supported_limits": "A 40 x 30 x 20 mm block with a boss of radius 4 and height 5 at (6, 2) and a through hole of diameter 6 at x=-8, both made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; this scenario's hole stands clear of the boss, and draft-bored-boss has the bore through a boss; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked shoulder, boss, bore and side references through edit, undo, redo, reopen and refusal; draft-boss-through-hole.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
@@ -139,7 +139,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, countersunk hole, draft, track and edit_draft -> real document rebuild -> pinned Catallax countersunk-hole draft -> checked STEP on one request allowance",
       "supported_limits": "A 40 x 30 x 20 mm block with one through hole of diameter 4 at (6, 2) and a 90-degree countersink of diameter 8, made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a cone touching or crossing an outer wall, a blind hole and a selected hole face stay refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked cap, cone, wall and both side references through edit, undo, redo, reopen and refusal; draft-countersink.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
@@ -153,7 +153,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch_geometry, extrude, draft, track and edit_draft -> real document rebuild -> pinned Catallax concave planar draft -> checked STEP on one request allowance",
       "supported_limits": "A hole-free 40 x 30 x 20 mm L bracket with its right, inner and left walls drafted 3 and 5 degrees about z=0; the notch wall and the other walls stay; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a concave base with a preserved bore or boss stays refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked notch and inner wall references through edit, undo, redo, reopen and refusal; commands/0004/{part.step,step-oracle.json} for a3; concave-draft.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit; the exact material table in crates/soliddraft-kernel-catallax/tests/material_queries.rs"
@@ -167,7 +167,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, boss on the end cap, draft, track and edit_draft -> real document rebuild -> pinned Catallax preserved-boss draft -> checked STEP on one request allowance",
       "supported_limits": "A 40 x 30 x 20 mm block with a boss of radius 4 and height 5 at (6, 2) made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a boss touching or crossing the cap edge and several bosses stay refused in Catallax; this scenario's boss has no bore, and draft-bored-boss has one; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked shoulder, boss and side references through edit, undo, redo, reopen and refusal; draft-preserved-boss.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
@@ -181,7 +181,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, hole, draft, track and edit_draft -> real document rebuild -> pinned Catallax preserved-bore draft -> checked STEP on one request allowance",
       "supported_limits": "A 40 x 30 x 20 mm block with one through hole of diameter 10 made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a hole touching or crossing a wall stays refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; 3-degree draft commands/0004/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}; tracked wall and side references through edit, undo, redo, reopen and refusal; draft-through-hole.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
@@ -195,7 +195,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch, extrude, two holes, draft, track and edit_draft -> real document rebuild -> pinned Catallax preserved-bore draft -> checked STEP on one request allowance",
       "supported_limits": "A 40 x 30 x 20 mm block with through holes of diameter 6 at x=-8 and 8 at x=8, both made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; touching or crossing bores stay refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; 3-degree draft commands/0005/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}; tracked wall and side references through edit, undo, redo, reopen and refusal; draft-through-holes.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
@@ -249,7 +249,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL, field moments and explicit mass stand-in STEP",
       "supported_limits": "V7d-S: a cubic lattice radius or a network gyroid level graded linearly along one part axis, clamped beyond its anchors, in the part frame. D0-D2 (cell 100 mm, radius 1 to 2 mm along z from 20 to 30 mm, region 6 x 6 x 10 or 12 mm) and G0-G2 (period 10 mm, level -1/10 to 1/10 along z from -1 to 1 mm, region 2 or 12/5 x 2 x 2 mm), accuracy 0.1 mm (D0 and G0 also 0.5 mm), minimum detail 0.1 mm, default caps, every action within 19,999,999 work. Kernel coverage: radius endpoints at most a quarter of the cell, slope at most 1/2; level endpoints in [-1/4, 1/4], slope at most 1/10 per mm. Drawings, other field functions and density percentages remain deferred.",
       "evidence": "result.json and commands/NNNN/{command.json,kernel.json,recipe.json,viewport.png,part.stl,export-stl-oracle.stdout,stand-in.step,export-stand-in.stdout,export-stand-in-oracle.stdout,stand-in-question.json,stand-in-replay/answer.step,field-mass.json,field-mass-oracle.stdout}; d.dwprt, d1.dwprt, g.dwprt, g1.dwprt"
@@ -263,7 +263,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL",
       "supported_limits": "One terminal network gyroid in the part frame with a constant dimensionless level; the scenario uses period 10 mm, levels 0 and -1/2, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Sheet gyroids and drawings remain deferred; graded levels and field mass are in the graded-fields scenario.",
       "evidence": "result.json and commands/NNNN/{command.json,kernel.json,viewport.png,part.stl,export-stl-oracle.stdout}"
@@ -288,7 +288,7 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "One AP214 MANIFOLD_SOLID_BREP of planar faces in millimetres; one straight seam within the 0.01 mm automatic cap; decline leaves the solid open and unbuilt; files with more than one solid are refused; over-cap, opening, uncertain, curved and unsupported-entity cases are later V9 batches",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; declined.dwprt and imported.dwprt; step 12 part.step, step-report.json, check-step.stdout and check-step.stderr; geometry-info.stdout recipe hashes"
@@ -302,7 +302,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL",
       "supported_limits": "One terminal cubic lattice in the part frame; S1 uses cell size 5 mm, radius 1 to 1.5 mm, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Drawings remain deferred; graded radii and field mass are in the graded-fields scenario. Each export is one whole request within the 20M application limit, with fixed output hashes; a zero allowance or one above the limit refuses and leaves the destination unchanged.",
       "evidence": "result.json and commands/NNNN/{command.json,kernel.json,viewport.png,part.stl,export-stl-oracle.stdout}"
@@ -318,7 +318,7 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "75bc8b56dbf3d2222301c2e8edcf9a4594e9f9e4",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP assembly and mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "Origin and distance mates between axis-aligned planar faces of the root's own part components, default configuration; identity and exact half-turn placements carry the exact claim; partial M2/M3/M4/M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
@@ -334,7 +334,7 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "e139919ae1d6b3718e49ff4519f956cc429c36ac",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP assembly and Coincident mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "V6 batch 2: Coincident mates between two proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; partial and strict solves, an over-constrained distance refused, distance edits and drivers refused, explicit Update, delete and replacement by a distance; saved as its own kind with no distance; partial M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
@@ -348,7 +348,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP measure_entity and track -> persistent references -> Catallax single-entity proofs",
       "supported_limits": "B-rep edge length and face area, part frame, exact or bounded; <, <=, > and >= checks with one limit; tracked names cannot drive expressions; partial M2/M3 evidence; hover points and guides deferred",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png}; 27-step update/stale/reference scenario; measure.dwprt and commands/0024/{part.step,step-report.json,check-step.stdout,check-step.stderr}; tracked_proof and measure_panel tests"
@@ -362,7 +362,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP measure, measure_entity and track with two sources -> persistent edge, face and midpoint references -> Catallax pair and midpoint proofs",
       "supported_limits": "One part frame; straight-edge midpoint; finite straight-edge minimum distance; midpoint point distance; parallel planar trimmed-face minimum distance; exact 0 and 90 deg straight-edge angles; curved, mixed, nonparallel and oblique pairs refused by name",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png}; 38-step T1-T13 pair/stale/reopen scenario; measure-pairs-current.dwprt and measure-pairs-stale.dwprt; measure_pairs, measure_panel and measure_guides tests"
@@ -396,7 +396,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP revolve, four-point hole, fillet and edit_fillet -> real document rebuild -> pinned Catallax fitted and analytic junctions",
       "supported_limits": "Radii 2 and 2.5 on the canonical P5 housing, the ball resting on all four countersink mouths, radius 0.999 and 0.5, whose one torus clears them, and radius 1, whose rail touches all four mouths at isolated points; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; mass properties of a fitted body have no inertia; fitted face and edge values are display estimates",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; steps 1-16 edit, undo, redo, reopen and refusal; p5-flanged-housing.dwprt and commands/0013/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout}; steps 17-41 radius 0.999 edit, undo, redo, fresh-process reopen, refusal and return to radius 2.5; p5-clearance.dwprt and commands-1/0001/{part.step,step-oracle.json,step-oracle.stdout}; steps 42-72 tracked mouth area, radius 1 and 0.5 edits, undo, redo, return to radius 1, fresh-process reopen and refusal; p5-separated.dwprt and commands-1/0022/{part.step,step-oracle.json,step-oracle.stdout}; p5-tangent.dwprt and commands-2/0005/{part.step,step-oracle.json,step-oracle.stdout}"
@@ -410,7 +410,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch on an offset datum, revolve about a tilted axis, four-point hole, fillet and edit_fillet -> real document rebuild -> pinned Catallax fitted junction",
       "supported_limits": "The P5 housing under an in-plane rotation and translation, built from ordinary app commands; radii 2 and 2.5 at the mouths; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; a fitted body's box is a display estimate, so only the housing and drilled boxes are checked tight",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; 28-step edit, undo, redo, fresh-process reopen and refusal scenario; p5-placed-housing.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
@@ -534,7 +534,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP sketch_geometry, extrude, fillet, track and edit_fillet -> real document rebuild -> pinned Catallax skew spherical corners -> checked STEP on one request allowance",
       "supported_limits": "A triangular prism (0,0), (8,0), (0,6), 10 mm deep, with all nine edges filleted at radius 1 and 1/2: 5 planes, 9 cylinders and 6 spheres; 20M per request, export included; volume and area tolerance 0.005, box 0.001 mm; concave, curved and unequal-radius corners stay refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked skew blend and corner references through edit, undo, redo, reopen and refusal; commands/0004/{part.step,step-oracle.json} for radius 1; skew-corner.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit; material_queries.rs and fillet_corner_names.rs for the exact points and the stored corner reference"
@@ -548,7 +548,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "634e8031048d7e33321d3507029bd83cf4c945d0",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "One part with named-value overrides only; widths 120, 140 and 152.4 mm; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; rows Default, Narrow, Wide, Zero and Void; Zero rejects zero depth, Void rejects the empty cut with flange_d 5 mm and hole_d 200 mm, then repairs with hole_d 12 mm",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,viewport.png,view.svg}; narrow.dwprt; wide.dwprt; commands/0024 and commands/0028/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -562,7 +562,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP configuration grid tools -> CSV codec -> document transaction -> Catallax adapter -> pinned kernel",
       "supported_limits": "Text properties and named values of one part with rows Default, Narrow and a quoted row; the complete row set must be present; no row rename or deletion; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; app work cap 20M",
       "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; csv-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -576,7 +576,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP configuration grid tools -> OOXML codec -> document transaction -> Catallax adapter -> pinned kernel",
       "supported_limits": "One Configurations sheet of string and numeric cells mapped by header name; formula cells are refused; other limits as configuration-grid-csv",
       "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; xlsx-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -591,7 +591,7 @@
         "soliddraft-drawing",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP grid and drawing tools -> document transaction -> drawing source snapshot -> SVG writer; Catallax adapter -> pinned kernel",
       "supported_limits": "One title field bound to a text property of the part the drawing pins; automatic update off; no component configuration selector; app work cap 20M",
       "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,helper-*.stdout}; out/{family,revised}.svg; title-wide.dwprt; title-wide.dwdrw; commands-1/0003/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
@@ -606,7 +606,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "659259eedbd0f156ab601784f29f42e87e419c76",
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
       "route": "MCP assembly, mate and Form subassembly commands -> formation plan -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
       "supported_limits": "V6 batch 1, all four increments: root part occurrences in their default state formed into a new separate file with internal and crossing distance mates, one-step undo and redo, a typed cycle refusal, a part edit accepted by the sub-assembly's Update then the root's, and the reopened root's value driving nested parts through root-owned overrides; default configuration, no patterns; partial M4/M6 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,inspect-*.stdout}; work/parts/base.dwprt, work/parts/pin.dwprt, work/root.dwasm and work/modules/pack.dwasm"
@@ -623,6 +623,48 @@
       "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
       "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
       "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
+    },
+    {
+      "id": "rod-cut-28deg",
+      "file": "ci/scenarios/rod-cut-28deg.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R1 rod, height 10 mm, one-sided Front-plane through cut at 28 degrees through z=5 mm; y<0 is cut and y>0 retains its height-10 cap, matching the supplied native input; volume 7.5*pi, area 16.5*pi + pi/(2*cos(28 deg)) + 10; volume and area tolerance 0.005, box and centroid tolerance 0.001 mm; save, fresh-process reopen and a refused zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "sphere-revolve",
+      "file": "ci/scenarios/sphere-revolve.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "torus-revolve",
+      "file": "ci/scenarios/torus-revolve.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "02cf21a324c40e857b53a4e6b2e29a82823aa1d1",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
     },
     {
       "id": "edit-display-reuse",

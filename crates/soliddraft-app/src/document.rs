@@ -184,6 +184,11 @@ pub enum SketchPlane {
     Face {
         face: FaceRef,
     },
+    FaceOffset {
+        face: FaceRef,
+        /// Signed distance along the face normal, in millimetres.
+        offset: f64,
+    },
 }
 
 impl SketchPlane {
@@ -193,8 +198,19 @@ impl SketchPlane {
             SketchPlane::Reference { plane, offset } => {
                 format!("{} (offset {} mm)", plane.label(), fmt_mm(*offset))
             }
-            SketchPlane::Face { face } if face.label.is_empty() => "Face".to_owned(),
-            SketchPlane::Face { face } => face.label.clone(),
+            SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
+                let offset = self.offset();
+                let label = if face.label.is_empty() { "Face" } else { &face.label };
+                if offset == 0.0 { label.to_owned() } else { format!("{label} (offset {} mm)", fmt_mm(offset)) }
+            }
+        }
+    }
+
+    /// Signed distance from the datum or face plane, in millimetres.
+    pub fn offset(&self) -> f64 {
+        match self {
+            Self::Reference { offset, .. } | Self::FaceOffset { offset, .. } => *offset,
+            Self::Face { .. } => 0.0,
         }
     }
 
@@ -204,6 +220,9 @@ impl SketchPlane {
                 model::SketchPlane::Datum { datum: plane.to_model(), offset: *offset }
             }
             SketchPlane::Face { face } => model::SketchPlane::Face { face: face.clone() },
+            SketchPlane::FaceOffset { face, offset } => {
+                model::SketchPlane::FaceOffset { face: face.clone(), offset: *offset }
+            }
         }
     }
 }
@@ -535,6 +554,9 @@ impl FeatureKind {
                         SketchPlane::Reference { plane: PlaneKind::from_model(*datum), offset: *offset }
                     }
                     model::SketchPlane::Face { face } => SketchPlane::Face { face: face.clone() },
+                    model::SketchPlane::FaceOffset { face, offset } => {
+                        SketchPlane::FaceOffset { face: face.clone(), offset: *offset }
+                    }
                 };
                 let mut sketch = s.sketch.clone();
                 if sketch.status == sketch::SolveStatus::Empty {
@@ -2200,7 +2222,12 @@ impl Document {
                 let mut kind = f.kind.clone();
                 match (&mut kind, replacement) {
                     (model::FeatureKind::Sketch(s), EntityRef::Face(face)) if index == 0 => {
-                        s.plane = model::SketchPlane::Face { face };
+                        s.plane = match s.plane {
+                            model::SketchPlane::FaceOffset { offset, .. } => {
+                                model::SketchPlane::FaceOffset { face, offset }
+                            }
+                            _ => model::SketchPlane::Face { face },
+                        };
                     }
                     (model::FeatureKind::Fillet(b) | model::FeatureKind::Chamfer(b), EntityRef::Edge(edge)) => {
                         *b.edges.get_mut(index).ok_or("no such reference")? = edge;
@@ -3249,7 +3276,9 @@ fn view_status(
                     let (index, kind, label) = match (r.slot, kind) {
                         (model::ReferenceSlot::SketchPlane, model::FeatureKind::Sketch(s)) => {
                             let label = match &s.plane {
-                                model::SketchPlane::Face { face } => face.label.clone(),
+                                model::SketchPlane::Face { face } | model::SketchPlane::FaceOffset { face, .. } => {
+                                    face.label.clone()
+                                }
                                 model::SketchPlane::Datum { .. } => String::new(),
                             };
                             (0, RefKind::Face, label)

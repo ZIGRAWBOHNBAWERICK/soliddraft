@@ -120,7 +120,7 @@ impl FeatureKind {
         let mut out = Vec::new();
         match self {
             FeatureKind::Sketch(s) => {
-                if let SketchPlane::Face { face } = &s.plane {
+                if let SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } = &s.plane {
                     out.push(face.feature);
                 }
             }
@@ -200,6 +200,23 @@ pub enum SketchPlane {
         /// The face.
         face: FaceRef,
     },
+    /// A plane offset from a persistently named planar face.
+    FaceOffset {
+        /// The face whose plane follows upstream edits.
+        face: FaceRef,
+        /// Signed distance along the face normal, in millimetres.
+        offset: f64,
+    },
+}
+
+impl SketchPlane {
+    /// Signed distance from the datum or face plane, in millimetres.
+    pub fn offset(&self) -> f64 {
+        match self {
+            Self::Datum { offset, .. } | Self::FaceOffset { offset, .. } => *offset,
+            Self::Face { .. } => 0.0,
+        }
+    }
 }
 
 /// The three reference planes. Z is up; the Front plane faces a viewer standing on -Y.

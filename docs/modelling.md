@@ -54,7 +54,7 @@ arc traversed against its own direction, such as a concave bite out of an edge, 
 
 | Feature | Parameters |
 |---|---|
-| Sketch | a plane (Top, Front or Right, optionally offset, or a planar face of the part by persistent name) and a sketch |
+| Sketch | a plane (Top, Front or Right, or a planar face by persistent name), optionally offset along its normal and a sketch |
 | Extrude | a profile (a sketch, or a built-in rectangle or circle on a reference plane), boss or cut, blind depth or through all, reversed or not |
 | Extrude end | blind, through all, up to the next boundary, or up to a face by persistent name |
 | Fillet, Chamfer | edges by persistent name, radius or distance |
@@ -70,7 +70,9 @@ reaches past the far side of the body's bounding box.
 A sketch on a face of the part lies on the face's plane with its normal pointing out of
 the material. Its X axis is horizontal when the face is not, and the world X axis
 projected onto the face when it is; its origin is the world origin projected onto the
-face. A boss or cut from such a sketch starts exactly on the face, forwards or
+face. Both datum and face sketches can store a signed offset along that normal.
+Face offsets follow the named origin through edits and coplanar splits and merges.
+Without an offset, a boss or cut starts exactly on the face, forwards or
 reversed; the tool is never moved off the face, and the kernel's coplanar Boolean rules
 decide the face the tool and the part share.
 

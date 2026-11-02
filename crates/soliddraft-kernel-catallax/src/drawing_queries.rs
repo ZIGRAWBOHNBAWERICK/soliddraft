@@ -14,6 +14,9 @@ use crate::{CatallaxKernel, Solid};
 /// route, whose cost grows as the chord shrinks, and a view's automatic chord is far below a pixel.
 const FITTED_VIEW_CHORD: f64 = 0.02;
 
+/// Automatic screen views use a chord of 0.02 percent of the body diagonal.
+const PREVIEW_VIEW_CHORD_RATIO: f64 = 2e-4;
+
 /// The view a request means on this body. An exported view and an explicit tolerance stay as
 /// they are. The chord also sets the depth margin, so the two stay matched.
 pub(super) fn resolved_view(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> ViewSpec {
@@ -21,8 +24,15 @@ pub(super) fn resolved_view(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -
         let built = solid.app.checkpoint.built();
         built.model.blend_base(built.result).is_some()
     });
-    if spec.preview && spec.tolerance <= 0.0 && fitted {
-        ViewSpec { tolerance: FITTED_VIEW_CHORD, ..*spec }
+    if spec.preview && spec.tolerance <= 0.0 {
+        let tolerance = if fitted {
+            FITTED_VIEW_CHORD
+        } else if let Ok(topology) = k.topology(body) {
+            PREVIEW_VIEW_CHORD_RATIO * topology.bbox.diagonal().max(1.0)
+        } else {
+            return *spec;
+        };
+        ViewSpec { tolerance, ..*spec }
     } else {
         *spec
     }

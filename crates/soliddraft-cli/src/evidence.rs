@@ -258,7 +258,9 @@ fn references(doc: &soliddraft_model::Document) -> Value {
     for f in doc.features() {
         let refs: Vec<(ReferenceSlot, String, Vec<&FaceRef>)> = match &f.kind {
             FeatureKind::Sketch(s) => match &s.plane {
-                SketchPlane::Face { face } => vec![(ReferenceSlot::SketchPlane, origin(face), vec![face])],
+                SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
+                    vec![(ReferenceSlot::SketchPlane, origin(face), vec![face])]
+                }
                 SketchPlane::Datum { datum, .. } => {
                     vec![(ReferenceSlot::SketchPlane, format!("datum:{datum:?}"), Vec::new())]
                 }
@@ -336,11 +338,14 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                             let p = datum.plane();
                             built.plane == p.with_origin(p.origin + p.normal * *offset)
                         }
-                        SketchPlane::Face { .. } => carriers.iter().all(|set| {
+                        SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => carriers.iter().all(|set| {
                             !set.is_empty()
                                 && set.iter().all(|f| {
                                     f.normal == Some(built.plane.normal)
-                                        && (f.centroid - built.plane.origin).dot(built.plane.normal).abs() <= 1e-6
+                                        && ((built.plane.origin - f.centroid).dot(built.plane.normal)
+                                            - s.plane.offset())
+                                        .abs()
+                                            <= 1e-6
                                 })
                         }),
                     }),

@@ -96,7 +96,6 @@ impl SolidDraftApp {
 
     pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         let st = &mut self.state;
-        let preferences = &mut self.preferences;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let (brand, _) = ui.allocate_exact_size(vec2(96.0, theme::MENU_HEIGHT), Sense::hover());
@@ -267,10 +266,7 @@ impl SolidDraftApp {
                 }
                 ui.separator();
                 menu_command(ui, st, "file_locations", "File locations…");
-                if ui.button("Preferences…").clicked() {
-                    *preferences = Some(crate::preferences::Preferences::new(&st.navigation, st.viewport.references));
-                    ui.close();
-                }
+                menu_command(ui, st, "settings", "Preferences…");
             });
             ui.menu_button("Window", |ui| {
                 menu_command(ui, st, "reset_layout", "Reset panel layout");

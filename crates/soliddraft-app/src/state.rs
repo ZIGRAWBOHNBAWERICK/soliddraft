@@ -115,6 +115,7 @@ pub enum AppAction {
     ResetLayout,
     /// Show or hide the side area.
     TogglePanel(crate::panels::Side),
+    ShowPreferences,
     ShowShortcuts,
     /// Opens the command palette, or closes it when it is open.
     TogglePalette,

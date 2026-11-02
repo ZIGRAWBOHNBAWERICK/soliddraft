@@ -111,23 +111,31 @@ fn reserved_categories_are_not_finished_pages() {
     let (_guard, _dir) = config_dir("reserved");
     let ids: Vec<&str> = preferences::available_pages().iter().map(|p| p.id).collect();
     assert_eq!(ids, ["navigation.mouse", "navigation.orbit_zoom", "navigation.view_keys", "viewport.grid_and_planes"]);
-    let reserved: Vec<&str> = preferences::reserved_categories().iter().map(|c| c.label).collect();
+    let reserved = preferences::reserved_categories();
+    let labels: Vec<&str> = reserved.iter().map(|c| c.label).collect();
     for label in ["Selection and editing", "Interface", "Appearance and graphics", "General and documents", "Assistant"]
     {
-        assert!(reserved.contains(&label), "{label} is reserved: {reserved:?}");
+        assert!(labels.contains(&label), "{label} is reserved: {labels:?}");
     }
     assert!(preferences::reserved_categories().iter().all(|c| c.status == preferences::Status::Reserved));
     let mut w = window();
     w.run_steps(2);
     let saves_before = saves();
-    for label in reserved {
-        let text = format!("{label} · Coming soon");
-        let node = w.get_by_label(&text);
-        assert!(node.accesskit_node().is_disabled(), "{label} is shown as Coming soon, not as a page");
-        node.click();
-        w.run_steps(2);
-        assert_eq!(w.state().page, preferences::MOUSE, "selecting {label} opens nothing");
+    for category in reserved {
+        click(&mut w, &format!("{} · Coming soon", category.label));
+        assert_eq!(w.state().page, category.id);
+        assert!(w.query_by_label(category.label).is_some(), "the chosen category has a heading");
+        assert!(w.query_by_label("Coming soon").is_some());
+        assert!(w.query_by_label("Navigation preset").is_none());
     }
+    search_for(&mut w, "appearance");
+    click(&mut w, "Appearance and graphics settings · Coming soon");
+    assert_eq!(w.state().page, "appearance_graphics");
+    assert!(w.state().search.is_empty());
+    assert!(w.query_by_label("Coming soon").is_some());
+    click(&mut w, "Mouse");
+    assert_eq!(w.state().page, preferences::MOUSE);
+    assert!(w.query_by_label("Navigation preset").is_some());
     assert_eq!(saves(), saves_before, "and writes nothing");
     for absent in ["Selection profile", "Ribbon", "Units", "Provider"] {
         assert!(!has(&w, absent), "no {absent} control from a reserved page");
@@ -148,7 +156,7 @@ fn search_finds_controls_presets_and_bindings() {
     w.get_by_label("Search settings").type_text("  WHEEL ");
     w.run_steps(3);
     assert_eq!(w.state().search.trim(), "WHEEL");
-    let hit = "Navigation > Orbit and zoom — Wheel direction: invert";
+    let hit = "Navigation > Orbit and zoom: Wheel direction: invert";
     assert!(w.query_by_label(hit).is_some(), "wheel finds the Wheel direction control, case and spaces aside");
     click(&mut w, hit);
     assert_eq!(w.state().page, preferences::ORBIT_ZOOM);
@@ -156,7 +164,7 @@ fn search_finds_controls_presets_and_bindings() {
     assert!(w.query_by_label("Wheel direction: invert").is_some());
 
     search_for(&mut w, "Fusion");
-    let fusion = "Navigation > Mouse — Fusion 360 navigation preset";
+    let fusion = "Navigation > Mouse: Fusion 360 navigation preset";
     assert!(w.query_by_label(fusion).is_some());
     click(&mut w, fusion);
     assert_eq!(w.state().page, preferences::MOUSE);
@@ -170,9 +178,9 @@ fn search_finds_controls_presets_and_bindings() {
     assert_eq!(w.state().page, preferences::MOUSE);
 
     search_for(&mut w, "normal");
-    assert!(w.query_by_label("Navigation > View keys — Normal to and reverse normal keys").is_some());
+    assert!(w.query_by_label("Navigation > View keys: Normal to and reverse normal keys").is_some());
     assert!(w.query_all_by_label_contains("Normal to").count() > 1, "and the normal-to rows");
-    click(&mut w, "Navigation > View keys — Normal to and reverse normal keys");
+    click(&mut w, "Navigation > View keys: Normal to and reverse normal keys");
     assert_eq!(w.state().page, preferences::VIEW_KEYS);
 
     search_for(&mut w, "ZZZ");
@@ -231,7 +239,7 @@ fn mouse_page_preset_switch_updates_list_practice_and_settings() {
     for row in ["Orbit: Right drag", "Pan: Middle drag", "Pan: Ctrl+Right drag", "Fit: Middle double-click"] {
         assert!(w.query_by_label(row).is_some(), "the list reads {row}");
     }
-    let fit_key = text_of(&w, "Fit: F — blocked");
+    let fit_key = text_of(&w, "Fit: F: blocked");
     assert!(fit_key.contains("Front") && fit_key.contains("Fillet"), "{fit_key}");
     assert!(has(&w, "Normal to, again to reverse: N"));
     assert!(has(&w, "physical Control key") && has(&w, "right click"), "the limitations name Ctrl and the right click");
@@ -525,7 +533,7 @@ fn view_keys_page_shows_profiles_and_conflicts() {
     w.get_by_role_and_label(Role::RadioButton, "SOLIDWORKS").click();
     w.run_steps(3);
     assert_eq!(settings::navigation(InstallKind::Existing).keyboard_profile, "solidworks");
-    assert!(has(&w, "Fit: F — blocked"), "the blocked row shows");
+    assert!(has(&w, "Fit: F: blocked"), "the blocked row shows");
     let lines: Vec<String> = w
         .query_all_by_label_contains("is off; the key stays")
         .map(|n| {

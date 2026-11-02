@@ -1010,6 +1010,11 @@ impl SolidDraftApp {
             AppAction::ShowFileLocations(kind) => {
                 self.state.locations_dialog = Some(crate::locations::LocationsDialog::new(kind));
             }
+            AppAction::ShowPreferences => {
+                self.preferences.get_or_insert_with(|| {
+                    crate::preferences::Preferences::new(&self.state.navigation, self.state.viewport.references)
+                });
+            }
             AppAction::ShowShortcuts => self.state.show_shortcuts = true,
             AppAction::TogglePalette => crate::palette::toggle(&mut self.state),
             AppAction::ShowAbout => self.state.show_about = true,

@@ -1,7 +1,7 @@
 //! The Preferences window: a searchable list of categories on the left and the chosen
 //! page on the right. It fills Navigation > Mouse, Navigation > Orbit and zoom,
 //! Navigation > View keys and Viewport > Grid and planes; the other categories are
-//! reserved here as data and shown as coming later, never as finished pages.
+//! selectable and searchable, with a Coming soon page until their controls work.
 //!
 //! [`Preferences`] holds the window's state and a draft of the settings it edits. Every
 //! accepted change is handed back as a [`Change`]; the app saves it
@@ -52,11 +52,16 @@ pub fn page(id: &str) -> Option<&'static Page> {
     PAGES.iter().find(|p| p.id == id)
 }
 
+/// The category whose controls are not available yet.
+pub fn reserved_category(id: &str) -> Option<&'static Category> {
+    CATEGORIES.iter().find(|c| c.id == id && c.status == Status::Reserved)
+}
+
 /// Whether a category has pages yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     Available,
-    /// Its id is kept for the pages to come; it shows as coming later.
+    /// Its page shows Coming soon.
     Reserved,
 }
 
@@ -101,6 +106,9 @@ pub struct Hit {
 fn index() -> Vec<Hit> {
     let hit = |page, control: Option<String>, label: String| Hit { page, control, label };
     let mut all: Vec<Hit> = PAGES.iter().map(|p| hit(p.id, None, p.path())).collect();
+    all.extend(
+        reserved_categories().into_iter().map(|c| hit(c.id, None, format!("{} settings · Coming soon", c.label))),
+    );
     for (control, label) in ui::ORBIT_ZOOM_CONTROLS {
         all.push(hit(ORBIT_ZOOM, Some(control.to_owned()), label.to_owned()));
     }
@@ -212,8 +220,13 @@ impl Preferences {
     }
 
     pub fn open_page(&mut self, id: &str) {
-        if let Some(p) = page(id) {
-            self.page = p.id;
+        let id = page(id).map(|p| p.id).or_else(|| reserved_category(id).map(|c| c.id));
+        if let Some(id) = id {
+            self.page = id;
+            self.search.clear();
+            self.highlight = None;
+            self.message = None;
+            self.capture = None;
         }
     }
 
@@ -329,7 +342,8 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
     let mut open = true;
     egui::Window::new("Preferences")
         .open(&mut open)
-        .default_size([760.0, 520.0])
+        .default_size([980.0, 640.0])
+        .min_size([700.0, 420.0])
         .collapsible(false)
         .show(ctx, |ui| p.ui(ui));
     for change in p.take_changes() {

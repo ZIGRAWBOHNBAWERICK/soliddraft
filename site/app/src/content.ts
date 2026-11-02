@@ -142,8 +142,8 @@ export const captions: Caption[] = [
     from: 0,
     to: 0.5,
     title: "On your desktop.",
-    line: "A feature tree, a ribbon, a GPU viewport and a command line that opens an assistant session. Alpha builds for Linux, Windows and macOS are on the releases page.",
-    items: ["Linux AppImage and .deb", "Windows .msi", "macOS .dmg"],
+    line: "A feature tree, a ribbon, a GPU viewport and a command line that opens an assistant session. Alpha builds for Linux and macOS are on the releases page.",
+    items: ["Linux AppImage, .deb and portable archive", "macOS .dmg"],
   },
   {
     chapter: "screen",

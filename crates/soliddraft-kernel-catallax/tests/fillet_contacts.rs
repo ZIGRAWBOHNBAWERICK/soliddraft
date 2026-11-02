@@ -93,7 +93,7 @@ fn picking_one_cylinder_flat_generator_rounds_only_that_edge() {
 }
 
 #[test]
-fn oblique_rim_displays_and_reports_unavailable_outputs() {
+fn oblique_rim_measures_and_exports() {
     let k = CatallaxKernel::with_diagnostics(20_000_000);
     let cylinder = contract::cylinder(&k, Vec3::ZERO, 5.0, 16.0);
     let points = [(-30.0, 30.5), (30.0, -14.5), (30.0, 40.0), (-30.0, 40.0)].map(|(u, v)| Point2::new(u, v));
@@ -111,13 +111,13 @@ fn oblique_rim_displays_and_reports_unavailable_outputs() {
     for radius in [1.0, 0.5] {
         let rounded = k.fillet(&OpTag::new("round"), cut, &[edge], radius).unwrap();
         assert!(k.validate(rounded.body).unwrap().valid);
-        let notice = k.body_notice(rounded.body).expect("output limitations remain visible after rebuild");
-        assert!(notice.contains("Volume, mass and STEP export are unavailable"));
-        assert!(!notice.contains("Catallax") && !notice.contains("stage"));
+        assert!(k.body_notice(rounded.body).is_none());
         assert!(!k.tessellate(rounded.body, &TessellationParams::default()).unwrap().indices.is_empty());
-        let error = k.mass_properties(rounded.body).unwrap_err();
-        assert!(error.to_string().contains("measure.unsupported-surface"), "{error}");
-        assert!(k.export_step(rounded.body, &StepOptions::default()).is_err());
+        let measured = k.mass_properties(rounded.body).unwrap();
+        assert!(measured.volume > 600.0 && measured.volume < before.volume);
+        assert!(measured.area > 0.0 && measured.inertia.is_some());
+        assert!(k.measured_topology(rounded.body).unwrap().bbox.diagonal().is_finite());
+        assert!(k.export_step(rounded.body, &StepOptions::default()).unwrap().report.within_tolerance);
         k.release(rounded.body).unwrap();
     }
     assert_eq!(k.mass_properties(cut).unwrap(), before);

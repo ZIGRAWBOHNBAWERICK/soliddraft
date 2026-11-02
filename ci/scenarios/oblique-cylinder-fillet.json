@@ -167,11 +167,11 @@
           "format": "stl"
         },
         {
-          "format": "step",
-          "refused": "unsupported",
-          "sentinel": "keep existing STEP"
+          "format": "step"
         }
-      ]
+      ],
+      "checked_step_export": "{bundle}/oblique-cylinder-fillet.dwprt",
+      "checked_step_max_work": 20000000
     },
     {
       "tool": "feature",

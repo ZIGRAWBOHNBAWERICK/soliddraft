@@ -658,6 +658,7 @@ pub struct Rename {
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
+    pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
@@ -723,6 +724,7 @@ impl AppState {
         Self {
             doc,
             measure: Default::default(),
+            mass: Default::default(),
             viewport: ViewportState::default(),
             editor: None,
             sketch: None,

@@ -93,6 +93,12 @@ pub enum Icon {
     Rollback,
     Relation,
     Suppress,
+    /// The sketch Modify tools: a regular polygon, a cut-out interval, a lengthened end and
+    /// a parallel copy.
+    Polygon,
+    Trim,
+    Extend,
+    Offset,
     /// A CAD drawing of the catalogue, by its key, in its own colours.
     Cad(&'static str),
     /// A line glyph of the catalogue, by its key, in the colour it is painted with.
@@ -583,6 +589,42 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.line(p, &[(2.0, 11.0), (8.0, 8.0)]);
             g.line(p, &[(8.0, 2.0), (8.0, 8.0)]);
             g.line(p, &[(14.0, 11.0), (8.0, 8.0)]);
+        }
+        // The Modify drawings keep their ink symmetric about the grid's centre, so the art
+        // sits centred on its ribbon tile as the layout rule asks.
+        Icon::Polygon => {
+            let pts: Vec<(f32, f32)> = (0..6)
+                .map(|i| {
+                    let a = i as f32 / 6.0 * TAU;
+                    (8.0 + 6.0 * a.cos(), 8.0 + 6.0 * a.sin())
+                })
+                .collect();
+            g.closed(p, &pts);
+            g.dot(p, 8.0, 8.0, 1.0);
+        }
+        Icon::Trim => {
+            // A line crossed twice, with the piece between the crossings gone.
+            g.line(p, &[(2.0, 8.0), (5.0, 8.0)]);
+            g.line(p, &[(11.0, 8.0), (14.0, 8.0)]);
+            g.line(p, &[(5.0, 3.0), (5.0, 13.0)]);
+            g.line(p, &[(11.0, 3.0), (11.0, 13.0)]);
+            g.line(p, &[(6.8, 6.8), (9.2, 9.2)]);
+            g.line(p, &[(9.2, 6.8), (6.8, 9.2)]);
+        }
+        Icon::Extend => {
+            // A line reaching on to a boundary.
+            g.dot(p, 3.0, 9.0, 1.3);
+            g.line(p, &[(3.0, 9.0), (7.0, 9.0)]);
+            p.add(egui::Shape::dashed_line(&[g.p(7.0, 9.0), g.p(11.5, 9.0)], g.stroke, g.len(1.6), g.len(1.2)));
+            g.arrow_head(p, (11.5, 9.0), vec2(1.0, 0.0), 2.2);
+            g.line(p, &[(13.5, 3.0), (13.5, 14.0)]);
+        }
+        Icon::Offset => {
+            // A corner and its parallel copy.
+            g.line(p, &[(4.0, 13.5), (4.0, 5.5), (12.0, 5.5)]);
+            g.line(p, &[(7.5, 13.5), (7.5, 9.0), (12.0, 9.0)]);
+            g.arrow_head(p, (12.0, 5.5), vec2(1.0, 0.0), 1.8);
+            g.arrow_head(p, (12.0, 9.0), vec2(1.0, 0.0), 1.8);
         }
     }
 }

@@ -160,6 +160,18 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                 "Draw",
                 &["sketch_line", "sketch_circle", "sketch_rectangle", "sketch_arc", "sketch_slot", "sketch_point"],
             ),
+            (
+                "Modify",
+                &[
+                    "sketch_polygon",
+                    "sketch_trim",
+                    "sketch_extend",
+                    "sketch_offset",
+                    "sketch_mirror",
+                    "sketch_linear_pattern",
+                    "sketch_circular_pattern",
+                ],
+            ),
             ("Constrain", &["smart_dimension", "relations", "construction"]),
             ("Use sketch", &["extrude", "revolve", "cut"]),
             ("View", &["normal_to"]),

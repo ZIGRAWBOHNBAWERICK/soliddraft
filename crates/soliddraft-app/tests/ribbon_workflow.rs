@@ -28,9 +28,10 @@ const SOLID: [(&str, &[&str]); 6] = [
     ("Reference", &["Plane", "Axis", "Point"]),
 ];
 
-const SKETCH: [(&str, &[&str]); 5] = [
+const SKETCH: [(&str, &[&str]); 6] = [
     ("Sketch", &["Sketch", "Exit"]),
     ("Draw", &["Line", "Circle", "Rectangle", "Arc", "Slot", "Point"]),
+    ("Modify", &["Polygon", "Trim", "Extend", "Offset", "Mirror entities", "Linear pattern", "Circular pattern"]),
     ("Constrain", &["Smart dim", "Construction", "Relations"]),
     ("Use sketch", &["Extrude", "Revolve", "Cut"]),
     ("View", &["Normal to"]),

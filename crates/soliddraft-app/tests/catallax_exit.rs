@@ -252,9 +252,10 @@ fn drawing_workspace(harness: &mut Harness<'_, SolidDraftApp>) {
 }
 
 #[test]
-fn polygon_controls_commit_undo_redo_and_extrude_on_catallax() {
+fn polygon_tool_commits_undoes_redoes_and_extrudes_on_catallax() {
     use soliddraft_app::document::{Command, ExtrudeParams, PlaneKind, SketchPlane};
-    use soliddraft_app::state::AppAction;
+    use soliddraft_app::sketcher::Frame;
+    use soliddraft_app::state::{AppAction, Tool};
 
     let instance = egui_wgpu::wgpu::Instance::default();
     if pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all())).is_empty() {
@@ -272,27 +273,35 @@ fn polygon_controls_commit_undo_redo_and_extrude_on_catallax() {
         .state
         .push(AppAction::StartSketchOn(SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 }));
     harness.run_steps(5);
-    harness.get_by_label("Polygon and modify").scroll_to_me();
+    // The Polygon tool from the ribbon's Modify group: the centre on the origin, then the
+    // first vertex 10 mm along u, the two clicks a user makes.
+    click_button(&mut harness, "Polygon");
     harness.run_steps(3);
-    harness.get_by_label("Polygon and modify").click();
-    harness.run_steps(4);
-    harness.get_by_label("Apply sketch tool").scroll_to_me();
-    harness.run_steps(3);
-    harness.get_by_label("Apply sketch tool").click();
+    assert_eq!(harness.state().state.sketch.as_ref().unwrap().tool, Tool::Polygon);
+    for p in [P2::ZERO, P2::new(10.0, 0.0)] {
+        let pos = {
+            let st = &harness.state().state;
+            let s = st.sketch.as_ref().unwrap();
+            Frame { plane: s.plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(p).unwrap()
+        };
+        click_at(&mut harness, pos);
+        harness.run_steps(3);
+    }
     harness.run_steps(5);
     let sketch_id = harness.state().state.sketch.as_ref().unwrap().feature;
     let area = 150.0 * 3.0_f64.sqrt();
     let sketch_area = |h: &Harness<'_, SolidDraftApp>| {
         h.state().state.sketch.as_ref().unwrap().sketch.regions().unwrap().iter().map(|r| r.area()).sum::<f64>()
     };
-    assert!((sketch_area(&harness) - area).abs() < 1e-5);
+    // The pointer lands the vertex to a pixel, so the area is held to a hundredth.
+    assert!((sketch_area(&harness) - area).abs() < 1e-2, "area {}", sketch_area(&harness));
     harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
     harness.run_steps(4);
     assert!(harness.state().state.sketch.as_ref().unwrap().sketch.is_empty());
     harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Y);
     harness.run_steps(4);
-    assert!((sketch_area(&harness) - area).abs() < 1e-5);
-    let image = harness.render().expect("polygon numeric controls render");
+    assert!((sketch_area(&harness) - area).abs() < 1e-2);
+    let image = harness.render().expect("the polygon tool renders");
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/sketch-polygon.png");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     image.save(path).unwrap();
@@ -304,5 +313,5 @@ fn polygon_controls_commit_undo_redo_and_extrude_on_catallax() {
         via_assistant: false,
     })
     .unwrap();
-    assert!((volume(doc) - area * 2.0).abs() < 0.01);
+    assert!((volume(doc) - area * 2.0).abs() < 0.02, "volume {}", volume(doc));
 }

@@ -46,7 +46,7 @@ Work in progress. SolidDraft runs only on Catallax. See [the backend gaps](docs/
 
 - The desktop app, with its ribbon, feature tree, property panel, command line, assistant session and wgpu viewport.
 - Desktop depth, fillet-radius and chamfer-distance edits separate construction display from exact proof. Supported construction charts produce selectable provisional faces before proof finishes; one drag is one undo step. Pending or failed input cannot export, and a failed edit restores the whole last proved part while its feature stays red with a reason.
-- Sketching on a plane or a planar face with line, rectangle, circle, arc and slot tools, with relations and dimensions.
+- Sketching on a plane or a planar face with line, rectangle, circle, arc and slot tools, with relations and dimensions. The Modify group adds polygon, trim and extend by pointer with a live preview, and offset, mirror and linear and circular patterns of the selection with their values typed in the property panel.
 - Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; booleans and rational-frame revolves through the kernel and recipe runner. The revolve ribbon command still waits for its application editor. Persistent references, undo and redo, feature tree editing and part files work.
 - Holes on a planar face, blind or through, with flat or drill-point tips, counterbores and countersinks at any angle, including the standard 118° tip and 82°, 90° and 100° countersinks. A countersink or drill point cannot yet go into a body that has another cylinder; see [the backend gaps](docs/needs-catallax.md).
 - Linear and circular patterns and mirrors of the part's body.

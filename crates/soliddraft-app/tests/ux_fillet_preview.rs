@@ -1107,7 +1107,14 @@ fn unsupported_picks_and_radii_refuse_locally_then_recover() {
         assert!(error.contains(reason), "the refusal is {reason}: {error}");
         assert!(preview(app).is_none(), "no preview for the refused R20");
         let (top, bottom) = radius_band(app);
-        assert_painted_between(&case, app, reason, top, bottom, "R20 refusal");
+        assert_painted_between(
+            &case,
+            app,
+            text("/expected/refusals/slot_overflow_message"),
+            top,
+            bottom,
+            "R20 refusal",
+        );
         case.frame(app, "slot-r20-refused");
         assert_eq!(committed(app), before, "a refusal commits nothing");
         assert_s(&case, app, "S under the refusal");

@@ -206,11 +206,19 @@ fn dimension_field(ui: &mut egui::Ui, state: &mut AppState, id: FeatureId, kind:
         && drag.feature() == id
     {
         let (message, failed) = drag.label();
-        ui.label(egui::RichText::new(message).size(11.0).color(if failed { theme::error() } else { theme::muted() }));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(message)).size(11.0).color(if failed {
+            theme::error()
+        } else {
+            theme::muted()
+        }));
     } else if let Some(message) = state.doc.display_failure() {
-        ui.label(egui::RichText::new(message).size(11.0).color(theme::error()));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(message)).size(11.0).color(theme::error()));
     } else if let Some((message, failed)) = state.doc.proof_message() {
-        ui.label(egui::RichText::new(message).size(11.0).color(if failed { theme::error() } else { theme::muted() }));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(message)).size(11.0).color(if failed {
+            theme::error()
+        } else {
+            theme::muted()
+        }));
     }
 }
 
@@ -336,7 +344,7 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
         icons::paint(ui.painter(), Icon::Warning, r, theme::error());
-        ui.label(egui::RichText::new(err).size(11.5).color(theme::error()));
+        ui.label(egui::RichText::new(crate::geometry_message::for_user(err)).size(11.5).color(theme::error()));
     });
 }
 

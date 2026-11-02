@@ -765,6 +765,11 @@ pub trait Kernel: Send + Sync {
     /// Which backend this is.
     fn backend(&self) -> BackendInfo;
 
+    /// A user-facing limitation of the current body, if any.
+    fn body_notice(&self, _body: BodyId) -> Option<&'static str> {
+        None
+    }
+
     /// Registers a closed profile for an extrusion or revolution.
     /// Catallax defers profile geometry
     /// until a sweep and reports sheet queries as unsupported.

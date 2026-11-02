@@ -33,7 +33,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "02cf21a324c40e857b53a4e6b2e29a82823aa1d1";
+pub const CATALLAX_REVISION: &str = "d821451665765f2092eda2725d3faffea0976db6";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -521,7 +521,7 @@ fn build(
 /// The Catallax stage that brought an operation.
 fn stage(op: OpKind) -> &'static str {
     match op {
-        OpKind::Fillet => "3 for fillets between planes and cylinders; other fillets wait for Catallax stage 4",
+        OpKind::Fillet => "3 and later for plane, parallel-cylinder and oblique plane/cylinder fillets",
         OpKind::Chamfer => "3 for chamfers between planes and cylinders; other chamfers wait for chamfer continuation",
         OpKind::ExtrudeTo | OpKind::Shell | OpKind::Hole | OpKind::Pattern | OpKind::Mirror => "3",
         OpKind::Draft => "4",
@@ -678,6 +678,22 @@ impl Kernel for CatallaxKernel {
                 json!({"op":"boolean","kind":op,"target":state.get(target)?.result,"tool":state.get(tool)?.result});
             self.operation(state, tag, op.kind(), &[target, tool], step)
         })
+    }
+
+    fn body_notice(&self, body: BodyId) -> Option<&'static str> {
+        let solid = self.solid(body).ok()?;
+        let built = solid.app.checkpoint.built();
+        built
+            .model
+            .faces_of_body(built.result)
+            .into_iter()
+            .any(|face| {
+                matches!(
+                    built.model.geom().surface(built.model.face(face).surface),
+                    catallax_shapes::Surface::BSpline(catallax_shapes::SplineSupport::RollingPipe(_))
+                )
+            })
+            .then_some("This fillet can be saved and exported as a mesh. Volume, mass and STEP export are unavailable.")
     }
 
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult> {

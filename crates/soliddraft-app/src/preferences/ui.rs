@@ -59,18 +59,24 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(190.0);
-            categories_list(p, ui);
+            egui::ScrollArea::vertical().id_salt("settings_categories").show(ui, |ui| categories_list(p, ui));
         });
         ui.separator();
         ui.vertical(|ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_min_width(0.0);
+            egui::ScrollArea::vertical().id_salt("settings_page").auto_shrink([false, false]).show(ui, |ui| {
                 if p.search.trim().is_empty() {
                     match p.page {
                         MOUSE => mouse_page(p, ui),
                         ORBIT_ZOOM => orbit_zoom_page(p, ui),
                         VIEW_KEYS => view_keys_page(p, ui),
                         GRID_AND_PLANES => grid_and_planes_page(p, ui),
-                        _ => {}
+                        id => {
+                            if let Some(c) = super::reserved_category(id) {
+                                ui.heading(c.label);
+                                ui.label("Coming soon");
+                            }
+                        }
                     }
                 } else {
                     results(p, ui);
@@ -92,14 +98,20 @@ fn categories_list(p: &mut Preferences, ui: &mut egui::Ui) {
                 ui.label(egui::RichText::new(c.label).strong());
                 for page in super::available_pages().iter().filter(|x| x.category == c.id) {
                     if ui.selectable_label(p.page == page.id && p.search.trim().is_empty(), page.title).clicked() {
-                        p.page = page.id;
-                        p.search.clear();
-                        p.highlight = None;
+                        p.open_page(page.id);
                     }
                 }
             }
             Status::Reserved => {
-                ui.add_enabled(false, egui::Button::new(format!("{} · Coming soon", c.label)).frame(false));
+                if ui
+                    .selectable_label(
+                        p.page == c.id && p.search.trim().is_empty(),
+                        format!("{} · Coming soon", c.label),
+                    )
+                    .clicked()
+                {
+                    p.open_page(c.id);
+                }
             }
         }
     }
@@ -114,7 +126,11 @@ fn results(p: &mut Preferences, ui: &mut egui::Ui) {
     let mut chosen: Option<Hit> = None;
     for hit in hits {
         let path = page(hit.page).map(|x| x.path()).unwrap_or_default();
-        let text = if hit.control.is_none() { path } else { format!("{path} — {}", hit.label) };
+        let text = if hit.control.is_none() {
+            if path.is_empty() { hit.label.clone() } else { path }
+        } else {
+            format!("{path}: {}", hit.label)
+        };
         if ui.button(text).clicked() {
             chosen = Some(hit);
         }
@@ -171,7 +187,13 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
     }
     let preset = p.draft.effective(p.draft.active_preset());
     ui.add_space(6.0);
-    ui.horizontal_top(|ui| {
+    let side_by_side = ui.available_width() >= 650.0;
+    let layout = if side_by_side {
+        egui::Layout::left_to_right(egui::Align::TOP)
+    } else {
+        egui::Layout::top_down(egui::Align::LEFT)
+    };
+    ui.with_layout(layout, |ui| {
         ui.vertical(|ui| {
             ui.set_width(330.0);
             let mut change = None;
@@ -179,7 +201,7 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
                 ui.label(egui::RichText::new("Mouse gestures").strong());
                 for b in preset.bindings.iter().filter(|b| b.event != EventKind::Key) {
                     let lit = p.highlight.as_deref() == Some(&format!("row.{}", b.id)[..]);
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let text = if missing(b).is_some() {
                             format!("{} · Coming soon", b.action.label())
                         } else {
@@ -196,8 +218,9 @@ fn mouse_page(p: &mut Preferences, ui: &mut egui::Ui) {
             });
             if let Some(id) = change {
                 p.capture = Some(id);
+                let label = preset.bindings.iter().find(|b| b.id == id).map_or("navigation", |b| b.action.label());
                 p.message =
-                    Some(Message { text: format!("Do the new gesture for {id} in the practice area."), error: false });
+                    Some(Message { text: format!("Do the new {label} gesture in the practice area."), error: false });
             }
             ui.add_space(4.0);
             ui.label(egui::RichText::new("Keyboard, in this preset's view-key profile").strong());
@@ -245,20 +268,21 @@ fn binding_text(keys: &view_keys::ViewKeys, b: &Binding, state: RowState, mac: b
 }
 
 fn state_text(keys: &view_keys::ViewKeys, b: &Binding, state: RowState) -> String {
+    let label = |id| crate::commands::get(id).map_or("the existing command", |c| c.label);
     match state {
         RowState::Active => String::new(),
-        RowState::Duplicate(c) => format!(" — SolidDraft's {c} already has it"),
-        RowState::Supersedes(c) => format!(" — takes the key over from {c}"),
-        RowState::OutsideSketch => " — outside a sketch; in a sketch the key stays the sketch's".into(),
+        RowState::Duplicate(c) => format!(" - SolidDraft's {} already has it", label(c)),
+        RowState::Supersedes(c) => format!(" - takes the key over from {}", label(c)),
+        RowState::OutsideSketch => " - outside a sketch; in a sketch the key stays the sketch's".into(),
         RowState::Unavailable(_) => " · Coming soon".into(),
         RowState::Blocked => {
             let owners: Vec<String> = keys
                 .conflicts
                 .iter()
                 .filter(|c| c.row == b.id)
-                .map(|c| format!("{} ({}, {})", c.label, c.command, c.scope.label()))
+                .map(|c| format!("{} ({})", c.label, c.scope.label()))
                 .collect();
-            format!(" — blocked: the key is {}", owners.join(" and "))
+            format!(" - blocked: the key is {}", owners.join(" and "))
         }
     }
 }
@@ -469,11 +493,10 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
         }
         for c in &keys.conflicts {
             ui.label(format!(
-                "{}: {} is off; the key stays {} ({}, {}), which keeps its button and menu entry",
+                "{}: {} is off; the key stays {} ({}), which keeps its button and menu entry",
                 c.key,
                 c.action.label(),
                 c.label,
-                c.command,
                 c.scope.label()
             ));
         }

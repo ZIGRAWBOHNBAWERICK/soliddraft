@@ -72,6 +72,16 @@ The bar along the bottom (`command_line.rs`) holds a row of tool chips, a prompt
 
 `ai` (the `AI_COMMAND` constant), Shift+F9, / or Tools, Assistant, Ask opens the assistant session: a terminal-like pane on a dark ground that grows upward from the bar and resizes by its top edge. Its scrollback shows the assistant's replies, its tool calls and its proposal cards with Preview, Apply, Discard and Undo. At its prompt a line that is a command's name, or starts with `/`, runs the command; anything else goes to the assistant. Esc, `exit`, `close` or the header's close button collapse it back to the bar; Esc stops an answer in progress first. The bar and the session take their colours from named tokens in `theme.rs`.
 
+## Preferences
+
+Tools, Preferences and the command line's `settings` or `Preferences` open the same
+window in every document. It starts on Navigation > Mouse with the saved preset.
+Search finds working controls, navigation presets, bindings and planned categories.
+Selecting a planned category shows its name and Coming soon. Browsing writes no settings.
+The category list and content scroll separately. The mouse gestures and practice area
+sit side by side when there is room and stack in a narrower window. Changes to working
+controls save immediately; a failed save restores the saved choice and shows the error.
+
 ## Shortcuts
 
 F, T, R, I views, N normal to the sketch plane or the selected face. Z zoom to fit. S sketch, E extrude, X cut, F or C fillet or chamfer the selected edge. Enter and Esc apply or cancel the open feature and leave a sketch. Delete removes the selected feature or sketch entity, F2 renames. Ctrl+Z and Ctrl+Y undo and redo, Ctrl+S and Ctrl+O save and open, Ctrl+N new part, Ctrl+Q quit. In a sketch, L R C A S P D pick the line, rectangle, circle, arc, slot, point and smart dimension tools and X toggles construction. / opens the assistant session at its prompt, ? opens the shortcut list, Ctrl+Shift+P opens the command palette. F9 hides or shows the feature tree, Shift+F9 opens or closes the assistant session.

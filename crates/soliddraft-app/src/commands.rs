@@ -1550,6 +1550,10 @@ fn registry() -> Vec<CommandSpec> {
             .on(View, "Panels", Small)
             .run(|_| AppAction::ResetLayout)
 .app_only(PANELS),
+        cmd("settings", "Preferences", Icon::Config, "Open settings for navigation, the viewport and more")
+            .both()
+            .run(|_| AppAction::ShowPreferences)
+.app_only("It opens the Preferences window"),
         // Files.
         cmd("new_part", "New part", Icon::Glyph("new"), "Start a new, empty part")
             .key(Scope::Part, ctrl, Key::N)

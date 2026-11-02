@@ -218,3 +218,78 @@ fn a_certified_coarse_rod_cut_is_redrawn_at_fine_quality_for_export() {
     assert_eq!(std::fs::read(dir.join("fine.svg")).unwrap(), fine_svg);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_saved_rod_cache_without_quality_is_regenerated_after_reopening() {
+    use soliddraft_app::document::Document;
+    use soliddraft_document::manifest::{self, Entry, Package};
+    use soliddraft_kernel_catallax::CatallaxKernel;
+    use std::sync::Arc;
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-drawing-old-quality-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(Document::new("Old rod cache", Arc::new(CatallaxKernel::new())));
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/rod-cut-28deg.json")).unwrap();
+    for step in scenario["steps"].as_array().unwrap() {
+        let tool = step["tool"].as_str().unwrap();
+        if tool == "save" {
+            break;
+        }
+        call(&mut state, tool, step["arguments"].clone());
+    }
+    call(&mut state, "save", json!({ "path": dir.join("rod.dwprt") }));
+    call(&mut state, "make_drawing", json!({ "template": "iso-a3" }));
+    let path = dir.join("old.dwdrw");
+    call(&mut state, "drawing_save", json!({ "path": path }));
+
+    // Generate the cache format written before quality was stored separately from proof.
+    let bytes = std::fs::read(&path).unwrap();
+    let mut package = Package::from_bytes(&bytes).unwrap();
+    let mut entries = Vec::new();
+    for name in package.names().into_iter().filter(|name| name != manifest::MANIFEST) {
+        let mut bytes = package.read(&name).unwrap().unwrap();
+        if name.starts_with("cache/views/") {
+            let mut geometry: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(geometry.as_object_mut().unwrap().remove("coarse"), Some(json!(true)));
+            bytes = serde_json::to_vec(&geometry).unwrap();
+        }
+        entries.push(Entry::new(name, bytes));
+    }
+    std::fs::write(&path, manifest::write_package(package.manifest().unwrap(), &entries).unwrap()).unwrap();
+    drop(state);
+
+    let kernel = Arc::new(CatallaxKernel::with_operation_log());
+    let mut reopened = AppState::new(Document::new("Part1", kernel.clone()));
+    call(&mut reopened, "open", json!({ "path": path }));
+    let shown = reopened.drawing.session.as_ref().unwrap().doc.drawing.clone();
+    assert_eq!(shown.sheets[0].views.len(), 4);
+    assert!(shown.sheets[0].views.iter().all(|v| !v.geometry.unproved));
+    assert_eq!(shown.model.pinned, PartContext::new(&reopened.doc).unwrap().digest);
+    soliddraft_app::drawing::follow_part(&mut reopened);
+    assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+
+    let mut exported = Vec::new();
+    for (tool, extension) in
+        [("drawing_export_svg", "svg"), ("drawing_export_pdf", "pdf"), ("drawing_export_dxf", "dxf")]
+    {
+        kernel.take_diagnostics().unwrap();
+        let path = dir.join(format!("reopened.{extension}"));
+        let caller = Caller::Mcp { client: "test".into() };
+        let out = call_checked(&mut AppTools { state: &mut reopened }, tool, json!({ "path": path }), &caller);
+        assert!(!out.is_error, "{tool}: {}", out.content);
+        let result: Value = serde_json::from_str(&out.content).unwrap();
+        let calls = kernel.take_diagnostics().unwrap();
+        let fine_requests = calls["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["operation"] == "tessellate" && c["log_scope"] == "view_curves")
+            .count();
+        eprintln!("{tool}: redrawn={}, fine tessellations={fine_requests}", result["redrawn_from_certified_mesh"]);
+        exported.push((result["redrawn_from_certified_mesh"].clone(), fine_requests));
+        assert!(path.is_file());
+    }
+    assert_eq!(reopened.drawing.session.as_ref().unwrap().doc.drawing, shown);
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(exported.iter().all(|(redrawn, fine)| *redrawn == json!(4) && *fine == 4), "{exported:?}");
+}

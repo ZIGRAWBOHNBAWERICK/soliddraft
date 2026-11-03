@@ -291,7 +291,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             let inactive = item.suppressed || matches!(item.status, FeatureStatus::Inactive);
             let error = match &item.status {
-                FeatureStatus::Error(e) => Some(crate::geometry_message::for_user(e).to_owned()),
+                FeatureStatus::Error(e) => Some(crate::geometry_message::for_user(e)),
                 _ => None,
             };
             let repair = match &item.status {

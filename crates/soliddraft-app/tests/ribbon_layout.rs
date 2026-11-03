@@ -290,7 +290,7 @@ fn shell_from(case: &Case, half: &str) -> EditorParams {
     case.run(&mut plate, |app| {
         settle(app);
         let start = ribbon::fingerprint(app);
-        let rects = panel_rects(app, "Feature tree");
+        let rects = panel_rects(app, "Tree");
         let shell = tile(app, "Shell", body(app));
         let point = if half == "icon" { shell.icon.center() } else { shell.label.full.center() };
         let button = shell.control.rect;
@@ -300,7 +300,7 @@ fn shell_from(case: &Case, half: &str) -> EditorParams {
         let params = editor(app).unwrap_or_else(|| panic!("the {half} of Shell opens an editor"));
         assert!(matches!(params, EditorParams::Shell(_)), "the {half} of Shell opens Shell: {params:?}");
         assert_eq!(app.state().state.doc.features.len(), start.features.len(), "nothing committed");
-        assert_eq!(panel_rects(app, "Feature tree"), rects, "opening a tool moves no panel");
+        assert_eq!(panel_rects(app, "Tree"), rects, "opening a tool moves no panel");
         app.key_press(Key::Escape);
         settle(app);
         assert_eq!(ribbon::fingerprint(app).without_history(), start.clone().without_history());
@@ -577,7 +577,7 @@ fn resize_restores(app: &mut App, size: Vec2, what: &str) {
     assert_eq!(ribbon::caption_names(app), SOLID_CAPTIONS, "{what}: the six captions are back");
     every_tile(app, tab, &format!("{what} widened"));
     assert!(!popup_open(app), "{what}: no row is left open over the model");
-    layout_holds(app, "Feature tree", what);
+    layout_holds(app, "Tree", what);
     assert_eq!(ribbon::fingerprint(app), start, "{what}: resizing runs nothing");
     app.set_size(size);
     settle(app);
@@ -613,7 +613,7 @@ fn narrow_window(case: &Case, size: Vec2, ppp: f32) {
     let mut plate = ribbon::app_unrendered(ribbon::plate(), size, ppp);
     case.run(&mut plate, |app| {
         settle(app);
-        layout_holds(app, "Feature tree", &what);
+        layout_holds(app, "Tree", &what);
         assert_eq!(ribbon::caption_names(app), SOLID_CAPTIONS, "{what}: every group keeps its name");
         case.frame(app, &format!("solid-{what}"));
         if let Some(group) = collapsed(app, RibbonTab::Solid.into()).last() {
@@ -624,22 +624,15 @@ fn narrow_window(case: &Case, size: Vec2, ppp: f32) {
         if size.x <= 960.0 {
             the_band_holds(app, &what);
         }
-        walk(app, Some("Solid"), RibbonTab::Solid.into(), &[], "Feature tree", &format!("{what} solid"));
-        walk(app, Some("Assembly"), RibbonTab::Assembly.into(), &[], "Feature tree", &format!("{what} assembly tab"));
-        walk(
-            app,
-            Some("Inspect"),
-            RibbonTab::Inspect.into(),
-            &INSPECT_RUNS,
-            "Feature tree",
-            &format!("{what} inspect"),
-        );
+        walk(app, Some("Solid"), RibbonTab::Solid.into(), &[], "Tree", &format!("{what} solid"));
+        walk(app, Some("Assembly"), RibbonTab::Assembly.into(), &[], "Tree", &format!("{what} assembly tab"));
+        walk(app, Some("Inspect"), RibbonTab::Inspect.into(), &INSPECT_RUNS, "Tree", &format!("{what} inspect"));
     });
     drop(plate);
     let mut plate = ribbon::app_unrendered(ribbon::plate(), size, ppp);
     case.run(&mut plate, |app| {
         settle(app);
-        walk(app, Some("View"), RibbonTab::View.into(), &VIEW_RUNS, "Feature tree", &format!("{what} view"));
+        walk(app, Some("View"), RibbonTab::View.into(), &VIEW_RUNS, "Tree", &format!("{what} view"));
     });
     drop(plate);
 
@@ -660,7 +653,7 @@ fn narrow_window(case: &Case, size: Vec2, ppp: f32) {
         open_sketch(app);
         ribbon::click_tab(app, "Sketch");
         settle(app);
-        let tree = "Feature tree";
+        let tree = "Tree";
         walk(app, Some("Sketch"), RibbonTab::Sketch.into(), &SKETCH_RUNS, tree, &format!("{what} sketch"));
     });
     drop(sketch);

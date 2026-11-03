@@ -401,7 +401,8 @@ impl Document {
             doc.rename_datum(datum, &name).map_err(|e| FileError::Invalid(e.to_string()))?;
         }
         crate::configs::check_properties(&recipe.properties).map_err(FileError::Invalid)?;
-        let resolved = recipe.configurations.validate(&recipe.values, &recipe.features).map_err(FileError::Invalid)?;
+        let resolved =
+            recipe.configurations.validate(&mut recipe.values, &recipe.features).map_err(FileError::Invalid)?;
         // Solving a variant also fills solver caches that saved sketches omit.
         let consistent = if recipe.configurations.is_empty() {
             resolved == recipe.features

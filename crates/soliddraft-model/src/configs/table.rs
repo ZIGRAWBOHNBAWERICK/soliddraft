@@ -2,7 +2,7 @@
 //! properties, by row. A blank cell is absent from its row and inherits.
 
 use super::{Configurations, properties};
-use crate::{Document, values::Values};
+use crate::{Document, Feature, values::Values};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use soliddraft_document::ConfigurationId;
@@ -82,13 +82,22 @@ fn unit_words(unit: &str) -> String {
 
 /// Overlays one row's cells on `base`. When the row fails as a whole, a cell that fails
 /// alone takes the blame; a fault across cells stays with the row.
-fn overlay(base: &Values, row: &str, cells: &BTreeMap<String, String>) -> Result<Values, GridRefusal> {
-    base.overlay(cells).map_err(|whole| {
+fn overlay(
+    base: &Values,
+    row: &str,
+    cells: &BTreeMap<String, String>,
+    features: &[Feature],
+) -> Result<Values, GridRefusal> {
+    let mut base = base.clone();
+    for (name, text) in cells {
+        base.pin_cell(name, text, features);
+    }
+    base.overlay(cells, features).map_err(|whole| {
         cells
             .iter()
             .find_map(|(name, text)| {
                 let one = BTreeMap::from([(name.clone(), text.clone())]);
-                base.overlay(&one).err().map(|reason| refusal(row, Some(name), reason))
+                base.overlay(&one, features).err().map(|reason| refusal(row, Some(name), reason))
             })
             .unwrap_or_else(|| refusal(row, None, whole))
     })
@@ -116,21 +125,29 @@ fn canonical(layer: &Values, cells: &mut BTreeMap<String, String>) {
 }
 
 impl Configurations {
-    /// The rows after Default, with their overrides as authored.
-    fn grid_rows(&self) -> impl Iterator<Item = GridRow> + '_ {
+    /// The rows after Default, with their globals' overrides as authored. The table
+    /// lists globals only; a parameter's override stays out of it.
+    fn grid_rows<'a>(&'a self, values: &'a Values) -> impl Iterator<Item = GridRow> + 'a {
         self.rows.iter().map(|r| GridRow {
             id: Some(r.id.clone()),
             name: r.name.clone(),
-            values: r.overrides.clone(),
+            values: r
+                .overrides
+                .iter()
+                .filter(|(k, _)| values.has_global(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             properties: r.properties.clone(),
         })
     }
 
-    /// Replaces every row's cells, keeping its identity and place.
+    /// Replaces every row's cells, keeping its identity and place, and its parameters'
+    /// overrides, which the table does not list.
     pub(super) fn set_grid(&mut self, grid: &Grid) {
         for row in &mut self.rows {
             if let Some(cells) = grid.rows.iter().find(|r| r.name == row.name) {
-                row.overrides = cells.values.clone();
+                row.overrides.retain(|name, _| !grid.values.iter().any(|v| v.name == *name));
+                row.overrides.extend(cells.values.clone());
                 row.properties = cells.properties.clone();
             }
         }
@@ -153,7 +170,8 @@ impl Document {
             values.iter().filter_map(|v| Some((v.name.clone(), self.values.expression(&v.name)?.to_owned()))).collect();
         let default_row =
             GridRow { id: None, name: DEFAULT_ROW.into(), values: default_cells, properties: self.properties.clone() };
-        let rows: Vec<GridRow> = std::iter::once(default_row).chain(self.configurations.grid_rows()).collect();
+        let rows: Vec<GridRow> =
+            std::iter::once(default_row).chain(self.configurations.grid_rows(&self.values)).collect();
         for row in &rows {
             names.extend(row.properties.keys().cloned());
         }
@@ -206,16 +224,27 @@ impl Document {
         if let Some(value) = live.values.iter().find(|v| !default.values.contains_key(&v.name)) {
             return Err(refusal(DEFAULT_ROW, Some(&value.name), "missing required cell"));
         }
-        let defaults = overlay(&self.values, DEFAULT_ROW, &default.values)?;
+        let base = self.configurations.base_or(&self.features);
+        let defaults = overlay(&self.values, DEFAULT_ROW, &default.values, base)?;
         let expected: BTreeMap<_, _> = live.values.iter().map(|v| (v.name.clone(), v.unit.clone())).collect();
         check_units(&defaults, default, &expected)?;
         canonical(&defaults, &mut default.values);
-        let base = self.configurations.base_or(&self.features);
-        defaults.validate(base).map_err(|reason| refusal(DEFAULT_ROW, None, reason))?;
         for row in grid.rows.iter_mut().skip(1) {
-            let layer = overlay(&defaults, &row.name, &row.values)?;
+            let mut layer = overlay(&defaults, &row.name, &row.values, base)?;
             check_units(&layer, row, &expected)?;
             canonical(&layer, &mut row.values);
+            // The row keeps its parameters' overrides, which the table does not list.
+            if let Some(kept) = self.configurations.rows.iter().find(|r| r.name == row.name) {
+                let hidden: BTreeMap<_, _> = kept
+                    .overrides
+                    .iter()
+                    .filter(|(k, _)| !self.values.has_global(k))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                if !hidden.is_empty() {
+                    layer = layer.overlay(&hidden, base).map_err(|reason| refusal(&row.name, None, reason))?;
+                }
+            }
             layer.validate(base).map_err(|reason| refusal(&row.name, None, reason))?;
         }
         let used: BTreeSet<_> = grid.rows.iter().flat_map(|row| row.properties.keys().cloned()).collect();
@@ -227,12 +256,13 @@ impl Document {
     /// have passed [`check_configuration_grid`](Self::check_configuration_grid).
     pub fn resolve_configuration_grid(&self, grid: &Grid) -> Value {
         let Some(default) = grid.rows.first() else { return json!([]) };
-        let Ok(defaults) = self.values.overlay(&default.values) else { return json!([]) };
+        let base = self.configurations.base_or(&self.features);
+        let Ok(defaults) = self.values.overlay(&default.values, base) else { return json!([]) };
         grid.rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
-                let layer = if i == 0 { Ok(defaults.clone()) } else { defaults.overlay(&row.values) };
+                let layer = if i == 0 { Ok(defaults.clone()) } else { defaults.overlay(&row.values, base) };
                 let mut properties = default.properties.clone();
                 properties.extend(row.properties.clone());
                 let inherited: Vec<_> = properties.keys().filter(|p| !row.properties.contains_key(*p)).collect();

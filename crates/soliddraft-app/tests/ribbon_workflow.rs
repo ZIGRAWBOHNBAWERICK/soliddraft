@@ -256,11 +256,11 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         );
         assert!(extruding, "an Extrude of the fixture's sketch is open");
         assert_eq!(selected_tabs(app), ["Solid"]);
-        let tree = ribbon::title_rect(app, "Feature tree");
+        let tree = ribbon::title_rect(app, "Tree");
         let ok = ribbon::button_rect(app, "OK (Enter)", left_column(app));
         assert!(ok.top() > tree.bottom(), "the editor's controls are below the tree: {ok:?} {tree:?}");
         assert!(same_rect(viewport(app), before), "the editor leaves the viewport: {:?} {before:?}", viewport(app));
-        properties_below(app, "Feature tree");
+        properties_below(app, "Tree");
 
         // Depth and OK.
         ribbon::type_field(app, "Depth value", "20");
@@ -355,7 +355,7 @@ fn assembly_is_discoverable_without_applying_part_commands_to_it() {
         ribbon::click_at(app, insert.rect.center());
         settle(app);
         assert_eq!(ribbon::fingerprint(app), start, "the disabled button does nothing");
-        properties_below(app, "Feature tree");
+        properties_below(app, "Tree");
 
         // A real assembly switches it on.
         ribbon::menu(app, "File", "New assembly");
@@ -384,7 +384,7 @@ fn assembly_is_discoverable_without_applying_part_commands_to_it() {
         for (label, _) in NEEDS_A_BODY {
             assert!(!ribbon::ribbon_button(app, label).enabled, "{label} is off without a body");
         }
-        properties_below(app, "Feature tree");
+        properties_below(app, "Tree");
     });
 }
 

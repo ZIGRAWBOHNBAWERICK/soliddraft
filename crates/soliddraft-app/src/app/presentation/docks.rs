@@ -15,6 +15,8 @@ use crate::app::dispatch::selection_of;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Tree,
+    /// Globals, the numbers typed into features and the configurations, beside the tree.
+    Values,
     Properties,
     Viewport,
     /// The drawing document, opened beside the part by Make drawing.
@@ -26,7 +28,8 @@ pub enum Tab {
 impl Tab {
     fn title(&self) -> &'static str {
         match self {
-            Tab::Tree => "Feature tree",
+            Tab::Tree => "Tree",
+            Tab::Values => "Values",
             Tab::Properties => "Properties",
             Tab::Viewport => "Part",
             Tab::Drawing => "Drawing",
@@ -40,9 +43,10 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
     DockState::new(vec![Tab::Viewport])
 }
 
-/// The left side area: the feature tree with the property panel under it.
+/// The left side area: the feature tree and the Values tab, with the property panel under
+/// them.
 pub(in crate::app) fn tree_dock() -> DockState<Tab> {
-    let mut dock = DockState::new(vec![Tab::Tree]);
+    let mut dock = DockState::new(vec![Tab::Tree, Tab::Values]);
     dock.main_surface_mut().split_below(NodeIndex::root(), 0.46, vec![Tab::Properties]);
     dock
 }
@@ -122,6 +126,7 @@ impl TabViewer for Panels<'_> {
             Tab::Assembly => crate::assembly::viewport(ui, self.state),
             Tab::Tree if self.state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, self.state),
             Tab::Tree => tree::show(ui, self.state),
+            Tab::Values => crate::values_tab::show(ui, self.state),
             Tab::Properties if self.state.drawing.new.is_some() && !self.state.drawing.is_active() => {
                 crate::drawing::properties_drawing::new_drawing(ui, self.state)
             }

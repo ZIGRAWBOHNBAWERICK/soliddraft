@@ -1,16 +1,11 @@
-//! V3 increment 2, from the independent acceptance report: G-UI drives the real window and
-//! controls; G-REFUSE, G-TOKEN and the title stacks run through the production tools.
+//! V3 increment 2, from the independent acceptance report: G-REFUSE, G-TOKEN and the title
+//! stacks run through the production tools. The Values tab that replaced the window is
+//! driven in `ux_values_tab.rs`.
 //!
 //! The files in `fixtures/configuration_grid` come from `ci/check-configuration-grid.py
 //! fixtures`, never from this application.
 
-use egui::{Key, Modifiers, vec2};
-use egui_kittest::{
-    Harness,
-    kittest::{NodeT, Queryable},
-};
 use serde_json::{Value, json};
-use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::document::Document;
 use soliddraft_app::state::AppState;
@@ -18,19 +13,13 @@ use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
 use soliddraft_drawing::display::{Item, layout_sheet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-/// The hang guard every test shares: a wait this long means stuck, not slow.
-const HANG: Duration = Duration::from_secs(600);
 const FAMILY: &str = "Bracket, \"family\"";
 const WIDE: &str = "Bracket, \"wide\"";
 const WIDE_ROW: &str = "Wide, \"shop\"";
 const WIDTH: &str = "value:plate_w [mm]";
 const TITLE: &str = "property:title [text]";
-/// The report's expected volumes of Narrow at 120 and 130 mm, digit for digit.
-#[allow(clippy::excessive_precision)]
-const VOLUME_120: f64 = 151869.02664470769;
+/// The report's expected volume of Narrow at 130 mm, digit for digit.
 #[allow(clippy::excessive_precision)]
 const VOLUME_130: f64 = 165369.02664470769;
 
@@ -289,250 +278,4 @@ fn d_title_the_two_undo_stacks_stay_apart_and_title_and_views_move_together() {
     call(&mut state, "redo", json!({}));
     assert_eq!(pinned(&state), wide);
     assert_eq!(state.doc.undo_depth(), part_undo);
-}
-
-// ----- The window -----
-
-type App<'a> = Harness<'a, SolidDraftApp>;
-
-fn settle(h: &mut App<'_>) {
-    h.run_steps(5);
-    let until = Instant::now() + HANG;
-    while h.state().state.doc.proof_pending() {
-        assert!(Instant::now() < until, "proof did not settle");
-        std::thread::sleep(Duration::from_millis(10));
-        h.run_steps(1);
-    }
-    h.run_steps(3);
-}
-
-fn button(h: &mut App<'_>, name: &str) {
-    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().click();
-    settle(h);
-}
-
-/// Replaces a cell's text as a person does.
-fn type_in(h: &mut App<'_>, label: &str, text: &str) {
-    h.get_by_label(label).click();
-    h.run_steps(2);
-    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    h.get_by_label(label).type_text(text);
-    h.run_steps(3);
-}
-
-/// The candidate from the report: a title column and Narrow at 130 mm.
-fn edit_candidate(h: &mut App<'_>) {
-    type_in(h, "New property", "title");
-    button(h, "Add property");
-    type_in(h, &format!("Default {TITLE}"), FAMILY);
-    type_in(h, &format!("{WIDE_ROW} {TITLE}"), WIDE);
-    type_in(h, &format!("Narrow {WIDTH}"), "130 mm");
-}
-
-/// The bracket with Narrow selected in the real application, where this machine has a GPU.
-fn window(name: &str) -> Option<(App<'static>, PathBuf)> {
-    let instance = egui_wgpu::wgpu::Instance::default();
-    let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
-    if adapters.is_empty() {
-        assert!(std::env::var_os("SOLIDDRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable");
-        eprintln!("no GPU adapter; skipping");
-        return None;
-    }
-    let config = scratch(name);
-    soliddraft_app::file::set_config_dir(Some(config.clone()));
-    let mut state = AppState::new(Document::new("Part1", Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new())));
-    bracket(&mut state);
-    call(&mut state, "activate_configuration", json!({ "name": "Narrow" }));
-    let doc = state.doc;
-    let mut h = Harness::builder()
-        .with_size(vec2(1600.0, 1000.0))
-        .with_pixels_per_point(1.0)
-        .with_render_every_step(true)
-        .with_step_dt(1.0 / 60.0)
-        .wgpu()
-        .build_eframe(|cc| SolidDraftApp::new(cc, doc, Automation::default()));
-    settle(&mut h);
-    Some((h, config))
-}
-
-fn open_grid(h: &mut App<'_>) {
-    button(h, "View tab");
-    button(h, "Configuration grid");
-    assert!(h.state().state.grid.open);
-}
-
-#[test]
-fn g_ui_the_window_edits_previews_cancels_and_applies_one_step() {
-    let Some((mut h, config)) = window("window") else { return };
-    let start = accepted(&mut h.state_mut().state, None);
-    assert!((volume(&mut h.state_mut().state) - VOLUME_120).abs() < 0.005);
-
-    // The visible command opens the window on the live table.
-    open_grid(&mut h);
-    edit_candidate(&mut h);
-    button(&mut h, "Preview");
-    h.get_by_label(&format!("Narrow: plate_w 130 mm, flange_d 65 mm, hole_d 12 mm, title {FAMILY} (inherited)"));
-    h.get_by_label(&format!("Default: plate_w 140 mm, flange_d 70 mm, hole_d 12 mm, title {FAMILY}"));
-    h.get_by_label(&format!("{WIDE_ROW}: plate_w 152.40 mm, flange_d 76.20 mm, hole_d 12 mm, title {WIDE}"));
-    assert_eq!(accepted(&mut h.state_mut().state, None), start, "a preview published something");
-
-    // Cancel: nothing published, and nothing of the draft survives.
-    button(&mut h, "Cancel");
-    assert_eq!(accepted(&mut h.state_mut().state, None), start);
-    let csv = config.join("cancelled.csv");
-    let arguments = json!({ "path": csv, "format": "csv" });
-    call(&mut h.state_mut().state, "export_configuration_grid", arguments);
-    let text = std::fs::read_to_string(&csv).unwrap();
-    assert!(text.contains("Narrow,120,") && !text.contains("title"), "{text}");
-    settle(&mut h);
-    assert_eq!(h.get_by_label(&format!("Narrow {WIDTH}")).value().as_deref(), Some("120"));
-
-    // Apply: one undo step for the width and the properties together.
-    edit_candidate(&mut h);
-    button(&mut h, "Preview");
-    button(&mut h, "Apply");
-    let st = &mut h.state_mut().state;
-    let depth = st.doc.undo_depth();
-    assert_eq!(depth, start.journal["undo"].as_array().unwrap().len() + 1);
-    assert!((volume(st) - VOLUME_130).abs() < 0.005);
-    let grid = call(st, "configuration_grid", json!({}));
-    assert_eq!(grid["rows"][1]["cells"], json!(["130 mm", "", "", ""]));
-    assert_eq!(grid["resolved"][1]["values"][1]["value"], 65.0);
-    assert_eq!(grid["resolved"][1]["properties"]["title"], FAMILY);
-    assert_eq!(serde_json::to_value(&grid["rows"][2]["id"]).unwrap(), start.grid["rows"][2]["id"]);
-    let applied = (st.doc.model().semantic_hash(), st.doc.model().geometry_hash());
-    st.doc.undo().unwrap();
-    assert_eq!(st.doc.model().semantic_hash().to_string(), start.revision);
-    assert_eq!(st.doc.model().geometry_hash().to_string(), start.geometry);
-    assert!(st.doc.model().resolved_properties().is_empty(), "undo removes the properties too");
-    st.doc.redo().unwrap();
-    assert_eq!((st.doc.model().semantic_hash(), st.doc.model().geometry_hash()), applied);
-
-    // The existing verb puts Narrow back; the properties stay, and that is G0.
-    let row = json!({ "configuration": "Narrow", "name": "plate_w", "expression": "120" });
-    call(st, "set_configuration_value", row);
-    let grid = call(st, "configuration_grid", json!({}));
-    let rows: Vec<Value> = grid["rows"].as_array().unwrap().iter().map(|r| r["cells"].clone()).collect();
-    assert_eq!(rows[1], json!(["120", "", "", ""]));
-    assert_eq!(rows[0], json!(["140", "plate_w / 2", "12", FAMILY]));
-    assert_eq!(rows[2], json!(["152.4 mm", "", "", WIDE]));
-    assert!((volume(st) - VOLUME_120).abs() < 0.005);
-    assert_eq!(st.doc.model().geometry_hash().to_string(), start.geometry);
-    let _ = std::fs::remove_dir_all(&config);
-}
-
-fn narrow_cell(h: &App<'_>) -> Option<String> {
-    h.get_by_label(&format!("Narrow {WIDTH}")).value()
-}
-
-fn apply_is_offered(h: &App<'_>) -> bool {
-    !h.get_all_by_role_and_label(egui::accesskit::Role::Button, "Apply").next().unwrap().accesskit_node().is_disabled()
-}
-
-fn preview_twice(h: &mut App<'_>) {
-    type_in(h, &format!("Narrow {WIDTH}"), "130 mm");
-    button(h, "Preview");
-    button(h, "Preview");
-}
-
-/// Presses Apply, which must not do anything, and proves a token cannot reach the part either.
-fn nothing_to_apply(h: &mut App<'_>, start: &Accepted, tokens: &[&str]) {
-    button(h, "Apply");
-    assert_eq!(&accepted(&mut h.state_mut().state, None), start, "Apply published what the window does not show");
-    assert!(!apply_is_offered(h));
-    for token in tokens {
-        let error = apply(&mut h.state_mut().state, token).unwrap_err();
-        assert!(error.contains("expired preview"), "{token}: {error}");
-    }
-    assert_eq!(&accepted(&mut h.state_mut().state, None), start);
-}
-
-#[test]
-fn g_ui_cancel_after_repeated_previews_leaves_nothing_to_apply() {
-    let Some((mut h, config)) = window("cancel") else { return };
-    let start = accepted(&mut h.state_mut().state, None);
-    open_grid(&mut h);
-    preview_twice(&mut h);
-    assert!(apply_is_offered(&h));
-    button(&mut h, "Cancel");
-    assert_eq!(narrow_cell(&h).as_deref(), Some("120"));
-    nothing_to_apply(&mut h, &start, &["grid-1", "grid-2"]);
-    let _ = std::fs::remove_dir_all(&config);
-}
-
-#[test]
-fn g_ui_an_edit_after_repeated_previews_withdraws_them_all() {
-    let Some((mut h, config)) = window("edit") else { return };
-    let start = accepted(&mut h.state_mut().state, None);
-    open_grid(&mut h);
-    preview_twice(&mut h);
-    type_in(&mut h, &format!("Narrow {WIDTH}"), "125 mm");
-    nothing_to_apply(&mut h, &start, &["grid-1", "grid-2"]);
-
-    // The cells on screen are still the draft, and they preview and apply as one step.
-    assert_eq!(narrow_cell(&h).as_deref(), Some("125 mm"));
-    button(&mut h, "Preview");
-    button(&mut h, "Apply");
-    let st = &mut h.state_mut().state;
-    assert_eq!(st.doc.undo_depth(), start.journal["undo"].as_array().unwrap().len() + 1);
-    let grid = call(st, "configuration_grid", json!({}));
-    assert_eq!(grid["rows"][1]["cells"][0], "125 mm");
-    let _ = std::fs::remove_dir_all(&config);
-}
-
-#[test]
-fn g_ui_closing_the_window_either_way_withdraws_its_previews() {
-    let Some((mut h, config)) = window("close") else { return };
-    let start = accepted(&mut h.state_mut().state, None);
-    open_grid(&mut h);
-    let mut issued = 0;
-    for close in ["Close window", "Configuration grid"] {
-        preview_twice(&mut h);
-        button(&mut h, close);
-        assert!(!h.state().state.grid.open, "{close}");
-        button(&mut h, "Configuration grid");
-        assert_eq!(narrow_cell(&h).as_deref(), Some("120"), "{close}");
-        issued += 2;
-        let tokens: Vec<String> = (issued - 1..=issued).map(|n| format!("grid-{n}")).collect();
-        nothing_to_apply(&mut h, &start, &tokens.iter().map(String::as_str).collect::<Vec<_>>());
-    }
-    let _ = std::fs::remove_dir_all(&config);
-}
-
-#[test]
-fn g_ui_an_agents_previews_stay_apart_from_the_window() {
-    let Some((mut h, config)) = window("agent") else { return };
-    let start = accepted(&mut h.state_mut().state, None);
-    open_grid(&mut h);
-    type_in(&mut h, &format!("Narrow {WIDTH}"), "125 mm");
-
-    // Two previews the window did not make, of a width it does not show.
-    let st = &mut h.state_mut().state;
-    let live = call(st, "configuration_grid", json!({}));
-    let table = |row: &Value| {
-        let cells = row["cells"].as_array().unwrap();
-        Value::Array(std::iter::once(row["name"].clone()).chain(cells.iter().cloned()).collect())
-    };
-    let mut rows: Vec<Value> = live["rows"].as_array().unwrap().iter().map(table).collect();
-    rows[1][1] = json!("130 mm");
-    let kept = preview_cells(st, json!(rows))["preview_id"].as_str().unwrap().to_owned();
-    let dropped = preview_cells(st, json!(rows))["preview_id"].as_str().unwrap().to_owned();
-    settle(&mut h);
-    assert!(!apply_is_offered(&h), "the window offered an agent's preview");
-    button(&mut h, "Apply");
-    assert_eq!(accepted(&mut h.state_mut().state, None), start);
-
-    // An agent's cancel leaves the person's typing alone.
-    call(&mut h.state_mut().state, "cancel_configuration_grid", json!({ "preview_id": dropped }));
-    settle(&mut h);
-    assert_eq!(narrow_cell(&h).as_deref(), Some("125 mm"));
-
-    // The window's Cancel retires its own preview and leaves the agent's open.
-    button(&mut h, "Preview");
-    button(&mut h, "Cancel");
-    assert_eq!(narrow_cell(&h).as_deref(), Some("120"));
-    let st = &mut h.state_mut().state;
-    apply(st, &kept).unwrap();
-    assert_eq!(call(st, "configuration_grid", json!({}))["rows"][1]["cells"][0], "130 mm");
-    let _ = std::fs::remove_dir_all(&config);
 }

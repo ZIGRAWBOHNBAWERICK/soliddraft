@@ -35,8 +35,8 @@ pub enum ExitInto {
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppAction {
     Command(Command),
-    /// A step of the configuration grid window.
-    Grid(crate::grid::panel::GridAction),
+    /// A step of the Values tab.
+    Values(crate::values_tab::ValuesAction),
     Undo,
     Redo,
     /// Starts a sketch on the selected plane or face, or asks for one.
@@ -715,8 +715,10 @@ pub struct AppState {
     pub assembly: crate::assembly::AssemblyState,
     /// A document a tool requested, consumed before the dock sets the active flags.
     pub(crate) tool_document: Option<crate::app::Tab>,
-    /// The configuration grid window and its preview.
+    /// Previews of candidate configuration tables.
     pub grid: crate::grid::preview::GridState,
+    /// The Values tab beside the feature tree.
+    pub values: crate::values_tab::ValuesTab,
     /// Whether the side area is shown and how wide it is.
     pub layout: crate::panels::Layout,
     /// The command line along the bottom and the assistant session above it.
@@ -768,6 +770,7 @@ impl AppState {
             frame_ms: 0.0,
             drawing: Default::default(),
             grid: Default::default(),
+            values: Default::default(),
             assembly: Default::default(),
             tool_document: None,
             layout: crate::panels::Layout::load(),

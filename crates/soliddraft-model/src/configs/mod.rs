@@ -53,7 +53,7 @@ impl Configurations {
         self.rows.iter().position(|r| r.name == name).ok_or_else(|| format!("unknown configuration {name}"))
     }
 
-    pub(crate) fn validate(&mut self, defaults: &Values, features: &[Feature]) -> Result<Vec<Feature>, String> {
+    pub(crate) fn validate(&mut self, defaults: &mut Values, features: &[Feature]) -> Result<Vec<Feature>, String> {
         if self.is_empty() {
             if self.active.is_some() || !self.base.is_empty() {
                 return Err("configuration state has no rows".into());
@@ -86,7 +86,7 @@ impl Configurations {
             if row.id.0.is_empty() || !ids.insert(&row.id) || !names.insert(&row.name) {
                 return Err("duplicate configuration id or name".into());
             }
-            let values = defaults.overlay(&row.overrides).map_err(|e| format!("{}: {e}", row.name))?;
+            let mut values = defaults.overlay(&row.overrides, &self.base).map_err(|e| format!("{}: {e}", row.name))?;
             values.validate(&self.base).map_err(|e| format!("{}: {e}", row.name))?;
             if self.active.as_ref() == Some(&row.id) {
                 active_values = Some(values);
@@ -95,7 +95,10 @@ impl Configurations {
         if self.active.is_some() && active_values.is_none() {
             return Err("unknown active configuration".into());
         }
-        let features = active_values.as_ref().unwrap_or(defaults).validate(&self.base)?;
+        let features = match active_values.as_mut() {
+            Some(values) => values.validate(&self.base)?,
+            None => defaults.validate(&self.base)?,
+        };
         self.resolved = active_values;
         Ok(features)
     }
@@ -122,6 +125,24 @@ impl Configurations {
     }
 }
 
+impl Configurations {
+    /// Sets one override in row `i`, in canonical text.
+    fn set_override(
+        &mut self,
+        i: usize,
+        defaults: &mut Values,
+        name: &str,
+        text: &str,
+        features: &[Feature],
+    ) -> Result<(), String> {
+        defaults.pin_cell(name, text, features);
+        self.rows[i].overrides.insert(name.to_owned(), text.to_owned());
+        let layer = defaults.overlay(&self.rows[i].overrides, &self.base)?;
+        self.rows[i].overrides.insert(name.to_owned(), layer.expression(name).ok_or("unknown value")?.into());
+        Ok(())
+    }
+}
+
 fn check_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() || name.len() > 128 || name == "Default" {
         return Err("a configuration needs a nonempty name other than reserved Default".into());
@@ -137,7 +158,15 @@ pub(crate) fn handles(command: &Command, has_rows: bool) -> bool {
             | Command::ActivateConfiguration { .. }
             | Command::SetConfigurationGrid { .. }
             | Command::RestoreConfigurations { .. }
-    ) || has_rows && matches!(command, Command::SetValue { .. } | Command::Drive { .. } | Command::RenameValue { .. })
+    ) || has_rows
+        && matches!(
+            command,
+            Command::SetValue { .. }
+                | Command::Drive { .. }
+                | Command::RenameValue { .. }
+                | Command::SetValueCell { .. }
+                | Command::RemoveValue { .. }
+        )
 }
 
 impl Document {
@@ -174,6 +203,8 @@ impl Document {
         let mut features = self.features.clone();
         let mut file_properties = self.properties.clone();
         let result = (|| -> Result<String, String> {
+            // Parameter names follow the common definitions, or the tree without rows.
+            let base = state.base_or(&features).to_vec();
             let label = match &command {
                 Command::AddConfiguration { name } => {
                     check_name(name)?;
@@ -193,10 +224,38 @@ impl Document {
                 }
                 Command::SetConfigurationValue { configuration, name, expression } => {
                     let i = state.row(configuration)?;
-                    state.rows[i].overrides.insert(name.clone(), expression.clone());
-                    let layer = defaults.overlay(&state.rows[i].overrides)?;
-                    state.rows[i].overrides.insert(name.clone(), layer.expression(name).ok_or("unknown value")?.into());
+                    state.set_override(i, &mut defaults, name, expression, &features)?;
                     format!("set {configuration} value {name}")
+                }
+                Command::SetValueCell { configuration, name, expression } if configuration != DEFAULT_ROW => {
+                    let i = state.row(configuration)?;
+                    match expression {
+                        Some(text) => state.set_override(i, &mut defaults, name, text, &features)?,
+                        None => {
+                            state.rows[i].overrides.remove(name);
+                        }
+                    }
+                    format!("set {configuration} value {name}")
+                }
+                Command::SetValueCell { name, expression, .. } => {
+                    let mut base = state.base.clone();
+                    defaults.set_default_cell(name, expression.as_deref(), &mut base)?;
+                    state.base = base;
+                    format!("set value {name}")
+                }
+                Command::RemoveValue { name } => {
+                    if let Some(row) = state.rows.iter().find(|r| {
+                        r.overrides
+                            .iter()
+                            .any(|(key, text)| key != name && crate::value_expr::names(text).contains(name))
+                    }) {
+                        return Err(format!("{name} is used in configuration {}", row.name));
+                    }
+                    defaults.remove(name)?;
+                    for row in &mut state.rows {
+                        row.overrides.remove(name);
+                    }
+                    format!("delete value {name}")
                 }
                 Command::ActivateConfiguration { name } => {
                     state.active = if name == "Default" { None } else { Some(state.rows[state.row(name)?].id.clone()) };
@@ -208,20 +267,21 @@ impl Document {
                         .iter_mut()
                         .find(|r| Some(&r.id) == state.active.as_ref() && r.overrides.contains_key(name))
                     {
+                        defaults.pin_cell(name, expression, &base);
                         row.overrides.insert(name.clone(), expression.clone());
-                        let layer = defaults.overlay(&row.overrides)?;
+                        let layer = defaults.overlay(&row.overrides, &base)?;
                         row.overrides.insert(name.clone(), layer.expression(name).ok_or("unknown value")?.into());
                     } else {
-                        defaults.set(name, expression)?;
+                        defaults.set(name, expression, &base)?;
                     }
                     format!("set value {name}")
                 }
                 Command::Drive { input, expression } => {
-                    defaults.drive(input.clone(), expression)?;
+                    defaults.drive(input.clone(), expression, &base)?;
                     "drive input".into()
                 }
                 Command::RenameValue { name, to } => {
-                    defaults.rename(name, to)?;
+                    defaults.rename(name, to, &base)?;
                     for row in &mut state.rows {
                         if let Some(text) = row.overrides.remove(name) {
                             row.overrides.insert(to.clone(), text);
@@ -235,7 +295,12 @@ impl Document {
                 Command::SetConfigurationGrid { grid } => {
                     let grid = self.check_configuration_grid(grid).map_err(|e| e.to_string())?;
                     let default = grid.rows.first().ok_or("the table has no Default row")?;
-                    defaults = defaults.overlay(&default.values)?;
+                    for row in &grid.rows {
+                        for (name, text) in &row.values {
+                            defaults.pin_cell(name, text, &base);
+                        }
+                    }
+                    defaults = defaults.overlay(&default.values, &base)?;
                     file_properties = default.properties.clone();
                     state.set_grid(&grid);
                     "edit configuration grid".into()
@@ -249,7 +314,7 @@ impl Document {
                 }
                 _ => unreachable!(),
             };
-            features = state.validate(&defaults, &features)?;
+            features = state.validate(&mut defaults, &features)?;
             Ok(label)
         })();
         let label = result.map_err(CommandError::Invalid)?;
@@ -280,5 +345,114 @@ impl Document {
             properties: self.properties.clone(),
         };
         Ok(Applied { inverse: old, redo, created: None, label })
+    }
+}
+
+/// One row of the values table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValueRow {
+    /// The name formulas use.
+    pub name: String,
+    /// The label people read: a global's name, or a parameter's such as `Depth`.
+    pub label: String,
+    /// The unit symbol, empty for a count or a plain number.
+    pub unit: String,
+    /// The parameter's identity; none for a global.
+    pub input: Option<crate::values::Input>,
+    /// Authored text by column, Default first. A blank configuration cell inherits; a
+    /// parameter's blank Default cell holds the number typed into its feature.
+    pub cells: Vec<Option<String>>,
+    /// What the row comes to in each column, when that column resolves.
+    pub values: Vec<Option<f64>>,
+}
+
+/// A feature's parameters, in tree order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValueGroup {
+    /// The feature.
+    pub feature: crate::FeatureId,
+    /// Its tree name.
+    pub name: String,
+    /// Its parameters.
+    pub rows: Vec<ValueRow>,
+}
+
+/// Globals and every feature's parameters, with a column per configuration.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ValuesTable {
+    /// Column names: Default, then each configuration in creation order.
+    pub columns: Vec<String>,
+    /// The selected column.
+    pub active: usize,
+    /// User-defined globals, in creation order.
+    pub globals: Vec<ValueRow>,
+    /// Parameters by feature.
+    pub groups: Vec<ValueGroup>,
+}
+
+impl Document {
+    /// The values table: what the Values tab shows.
+    pub fn values_table(&self) -> ValuesTable {
+        let state = &self.configurations;
+        let base = state.base_or(&self.features);
+        let defaults = &self.values;
+        let mut columns = vec![DEFAULT_ROW.to_owned()];
+        columns.extend(state.rows.iter().map(|r| r.name.clone()));
+        let active =
+            state.active.as_ref().and_then(|id| state.rows.iter().position(|r| r.id == *id)).map_or(0, |i| i + 1);
+        let resolved: Vec<Option<Vec<(String, f64, String)>>> = std::iter::once(defaults.column(base).ok())
+            .chain(
+                state.rows.iter().map(|r| defaults.overlay(&r.overrides, base).ok().and_then(|v| v.column(base).ok())),
+            )
+            .collect();
+        let value = |column: usize, name: &str| {
+            resolved[column].as_ref().and_then(|c| c.iter().find(|(n, ..)| n == name)).map(|(_, v, _)| *v)
+        };
+        let unit = |name: &str| {
+            resolved.iter().flatten().flat_map(|c| c.iter()).find(|(n, ..)| n == name).map(|(.., u)| u.clone())
+        };
+        let row = |name: &str, label: String, input: Option<crate::values::Input>, default: Option<String>| {
+            let mut cells = vec![default];
+            cells.extend(state.rows.iter().map(|r| r.overrides.get(name).cloned()));
+            ValueRow {
+                name: name.to_owned(),
+                label,
+                unit: unit(name).unwrap_or_default(),
+                input,
+                cells,
+                values: (0..columns.len()).map(|c| value(c, name)).collect(),
+            }
+        };
+        let globals = defaults
+            .summary()
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v["name"].as_str())
+            .map(|name| row(name, name.to_owned(), None, defaults.expression(name).map(str::to_owned)))
+            .collect();
+        let parameters = defaults.parameter_names(base);
+        let groups = base
+            .iter()
+            .filter_map(|f| {
+                let rows: Vec<ValueRow> = parameters
+                    .iter()
+                    .filter(|p| p.input.feature() == f.id)
+                    .map(|p| {
+                        let mut r = row(
+                            &p.name,
+                            p.label.clone(),
+                            Some(p.input.clone()),
+                            defaults.driver(&p.input).map(str::to_owned),
+                        );
+                        r.unit = p.unit.symbol().to_owned();
+                        r
+                    })
+                    .collect();
+                (!rows.is_empty()).then(|| ValueGroup { feature: f.id, name: f.name.clone(), rows })
+            })
+            .collect();
+        ValuesTable { columns, active, globals, groups }
     }
 }

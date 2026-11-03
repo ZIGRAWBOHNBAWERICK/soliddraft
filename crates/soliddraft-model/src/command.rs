@@ -92,6 +92,23 @@ pub enum Command {
         /// New identifier.
         to: String,
     },
+    /// Sets one cell of the values table: a global's expression or a parameter's number
+    /// or formula, in one configuration's column. With no expression, a configuration's
+    /// cell inherits again and a parameter's Default cell keeps its number undriven.
+    SetValueCell {
+        /// The column: `Default` or a configuration's name.
+        configuration: String,
+        /// The global's or the parameter's name.
+        name: String,
+        /// Authored text, or none to clear the cell.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+    },
+    /// Deletes a global that nothing reads.
+    RemoveValue {
+        /// The global's name.
+        name: String,
+    },
     /// Restores value truth and resolved feature definitions for undo.
     RestoreValues {
         /// Authored values and bindings.
@@ -681,7 +698,7 @@ impl Document {
     }
 
     fn check_drivers(&self, features: &[Feature]) -> Result<(), CommandError> {
-        let resolved = self.values().validate(features).map_err(CommandError::Invalid)?;
+        let resolved = self.values().clone().validate(features).map_err(CommandError::Invalid)?;
         if resolved != features {
             return Err(CommandError::Invalid("edit the driving value instead of its driven input".into()));
         }
@@ -697,16 +714,27 @@ impl Document {
                 self.track_request(&mut state, name, source, check.as_deref()).map_err(CommandError::Invalid)?
             }
             Command::SetValue { name, expression } => {
-                state.set(name, expression).map_err(CommandError::Invalid)?;
+                state.set(name, expression, &features).map_err(CommandError::Invalid)?;
                 format!("set value {name}")
             }
             Command::Drive { input, expression } => {
-                state.drive(input.clone(), expression).map_err(CommandError::Invalid)?;
+                state.drive(input.clone(), expression, &features).map_err(CommandError::Invalid)?;
                 "drive input".into()
             }
             Command::RenameValue { name, to } => {
-                state.rename(name, to).map_err(CommandError::Invalid)?;
+                state.rename(name, to, &features).map_err(CommandError::Invalid)?;
                 format!("rename value {name}")
+            }
+            Command::SetValueCell { configuration, name, expression } => {
+                if configuration != crate::configs::DEFAULT_ROW {
+                    return Err(CommandError::Invalid(format!("unknown configuration {configuration}")));
+                }
+                state.set_default_cell(name, expression.as_deref(), &mut features).map_err(CommandError::Invalid)?;
+                format!("set value {name}")
+            }
+            Command::RemoveValue { name } => {
+                state.remove(name).map_err(CommandError::Invalid)?;
+                format!("delete value {name}")
             }
             Command::RestoreValues { state: restored, features: restored_features } => {
                 state = restored.clone();
@@ -806,6 +834,8 @@ impl Document {
             | Command::SetValue { .. }
             | Command::Drive { .. }
             | Command::RenameValue { .. }
+            | Command::SetValueCell { .. }
+            | Command::RemoveValue { .. }
             | Command::RestoreValues { .. }) => self.apply_values(command),
             Command::AddFeature { kind, name, position, via_assistant } => {
                 Self::check_kind(&kind)?;

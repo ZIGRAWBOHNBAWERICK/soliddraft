@@ -33,6 +33,7 @@ mod exact;
 mod feature;
 pub mod file;
 pub mod materials;
+pub mod params;
 pub mod rebuild;
 pub mod reference;
 pub mod tracked;

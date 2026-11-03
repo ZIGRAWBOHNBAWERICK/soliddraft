@@ -31,6 +31,8 @@ pub struct Expression {
 pub(crate) enum Expr {
     Number(f64, i32, i32),
     Ref(u32),
+    /// A feature parameter, by its stable identity.
+    Param(crate::values::Input),
     Op(char, Box<Expr>, Box<Expr>),
     Neg(Box<Expr>),
 }
@@ -43,6 +45,10 @@ pub(crate) struct Quantity {
 }
 
 impl Quantity {
+    fn is_unitless(&self) -> bool {
+        self.length == 0 && self.angle == 0
+    }
+
     fn document_units(mut self) -> Self {
         if self.length == 0 && self.angle == 0 {
             self.length = 1;
@@ -71,8 +77,9 @@ pub(crate) fn resolve(entries: &[NamedValue]) -> Result<BTreeMap<u32, Quantity>,
         let v = entries.iter().find(|v| v.id == id).ok_or("missing value reference")?;
         visiting.push(id);
         let mut depth = 1;
-        let q = evaluate_tree(&v.expression.tree, &mut |other| {
-            let (quantity, dependency_depth) = visit(entries, other, visiting, done)?;
+        let q = evaluate_tree(&v.expression.tree, &mut |atom| {
+            let Expr::Ref(other) = atom else { return Err("missing value reference".into()) };
+            let (quantity, dependency_depth) = visit(entries, *other, visiting, done)?;
             depth = depth.max(dependency_depth + 1);
             Ok(quantity)
         })?;
@@ -100,18 +107,25 @@ fn bare_literal(tree: &Expr) -> bool {
 
 /// What an expression comes to, given the values it may read.
 pub(crate) fn evaluate(expression: &Expression, resolved: &BTreeMap<u32, Quantity>) -> Result<Quantity, String> {
-    evaluate_tree(&expression.tree, &mut |id| resolved.get(&id).copied().ok_or("missing value".into()))
+    evaluate_tree(&expression.tree, &mut |atom| match atom {
+        Expr::Ref(id) => resolved.get(id).copied().ok_or("missing value".into()),
+        _ => Err("missing value".into()),
+    })
 }
 
-fn evaluate_tree(tree: &Expr, reference: &mut impl FnMut(u32) -> Result<Quantity, String>) -> Result<Quantity, String> {
+/// What a tree comes to; `reference` answers each [`Expr::Ref`] and [`Expr::Param`].
+pub(crate) fn evaluate_tree(
+    tree: &Expr,
+    reference: &mut impl FnMut(&Expr) -> Result<Quantity, String>,
+) -> Result<Quantity, String> {
     let q = eval(tree, reference)?;
     Ok(if bare_literal(tree) { q.document_units() } else { q })
 }
 
-fn eval(tree: &Expr, reference: &mut impl FnMut(u32) -> Result<Quantity, String>) -> Result<Quantity, String> {
+fn eval(tree: &Expr, reference: &mut impl FnMut(&Expr) -> Result<Quantity, String>) -> Result<Quantity, String> {
     let q = match tree {
         Expr::Number(value, length, angle) => Quantity { value: *value, length: *length, angle: *angle },
-        Expr::Ref(id) => reference(*id)?,
+        Expr::Ref(_) | Expr::Param(_) => reference(tree)?,
         Expr::Neg(e) => {
             let mut q = eval(e, reference)?;
             q.value = -q.value;
@@ -124,10 +138,12 @@ fn eval(tree: &Expr, reference: &mut impl FnMut(u32) -> Result<Quantity, String>
             let mut b = eval(b, reference)?;
             match op {
                 '+' | '-' => {
-                    if a_bare {
+                    // A bare number beside a plain count stays a count; elsewhere it is
+                    // in document units.
+                    if a_bare && !(b.is_unitless() && !b_bare) {
                         a = a.document_units();
                     }
-                    if b_bare {
+                    if b_bare && !(a.is_unitless() && !a_bare) {
                         b = b.document_units();
                     }
                     if (a.length, a.angle) != (b.length, b.angle) {
@@ -141,6 +157,7 @@ fn eval(tree: &Expr, reference: &mut impl FnMut(u32) -> Result<Quantity, String>
                     length: a.length.checked_add(b.length).ok_or("unit exponent too large")?,
                     angle: a.angle.checked_add(b.angle).ok_or("unit exponent too large")?,
                 },
+                '/' if b.value == 0.0 => return Err("division by zero".into()),
                 '/' => Quantity {
                     value: a.value / b.value,
                     length: a.length.checked_sub(b.length).ok_or("unit exponent too large")?,
@@ -204,8 +221,13 @@ fn tokenize(text: &str) -> Result<Vec<&str>, String> {
                 }
             }
         } else if bytes[at].is_ascii_alphabetic() || bytes[at] == b'_' {
+            // A parameter name joins identifiers with dots, as in Sketch1.D1.
             at += 1;
-            while at < bytes.len() && (bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_') {
+            while at < bytes.len()
+                && (bytes[at].is_ascii_alphanumeric()
+                    || bytes[at] == b'_'
+                    || bytes[at] == b'.' && bytes.get(at + 1).is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_'))
+            {
                 at += 1;
             }
         } else if b"+-*/()".contains(&bytes[at]) {
@@ -234,7 +256,7 @@ pub(crate) fn rename_tokens(text: &str, from: &str, to: &str) -> String {
 struct Parser<'a> {
     tokens: &'a [&'a str],
     at: usize,
-    lookup: &'a dyn Fn(&str) -> Result<u32, String>,
+    lookup: &'a dyn Fn(&str) -> Result<Expr, String>,
 }
 impl Parser<'_> {
     fn sum(&mut self) -> Result<Expr, String> {
@@ -283,7 +305,7 @@ impl Parser<'_> {
                     }
                     Ok(Expr::Number(value, 0, 0))
                 } else {
-                    (self.lookup)(token).map(Expr::Ref)
+                    (self.lookup)(token)
                 }
             }
         }
@@ -310,7 +332,7 @@ fn convert_decimal(text: &str, factor: i128, scale: i32) -> Result<f64, String> 
 }
 
 /// Parses `text`, reading names through `lookup`. The expression keeps the text as written.
-pub(crate) fn parse(text: &str, lookup: &dyn Fn(&str) -> Result<u32, String>) -> Result<Expression, String> {
+pub(crate) fn parse(text: &str, lookup: &dyn Fn(&str) -> Result<Expr, String>) -> Result<Expression, String> {
     if text.len() > 2048 {
         return Err("expression is too long".into());
     }
@@ -371,7 +393,7 @@ impl Expression {
     pub fn references(&self) -> Vec<u32> {
         fn walk(tree: &Expr, out: &mut Vec<u32>) {
             match tree {
-                Expr::Number(..) => {}
+                Expr::Number(..) | Expr::Param(_) => {}
                 Expr::Ref(id) if out.contains(id) => {}
                 Expr::Ref(id) => out.push(*id),
                 Expr::Neg(inner) => walk(inner, out),
@@ -385,6 +407,26 @@ impl Expression {
         walk(&self.tree, &mut out);
         out
     }
+}
+
+/// The names an expression's text uses, once each, in the order written.
+pub(crate) fn names(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for token in tokenize(text).unwrap_or_default() {
+        let first = token.as_bytes()[0];
+        if (first.is_ascii_alphabetic() || first == b'_') && unit(token).is_none() && !out.iter().any(|n| n == token) {
+            out.push(token.to_owned());
+        }
+    }
+    out
+}
+
+/// Checks a parameter's name: identifiers joined by dots, such as Sketch1.D1.
+pub(crate) fn check_parameter_name(name: &str) -> Result<(), String> {
+    if name.len() > 128 || name.split('.').any(|part| check_name(part).is_err()) {
+        return Err(format!("{name}: a name must be letters, digits and underscores, with dots between parts"));
+    }
+    Ok(())
 }
 
 /// A table of named values for a document that binds them to inputs of its own. Ids come
@@ -413,7 +455,7 @@ impl ValueTable {
 
     /// Parses `text` against this table.
     pub fn parse(&self, text: &str) -> Result<Expression, String> {
-        parse(text, &|token| self.id_of(token).ok_or_else(|| format!("unknown value {token}")))
+        parse(text, &|token| self.id_of(token).map(Expr::Ref).ok_or_else(|| format!("unknown value {token}")))
     }
 
     /// Gives the value called `name` a new expression, adding it under `new_id()` if it is

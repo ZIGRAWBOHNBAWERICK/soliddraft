@@ -521,7 +521,9 @@ command bundle, scenario runner and CI, not in the model build or normal edit pa
 
 The grid shows the file's `Default` row and each named row. It holds authored expressions and text properties, never resolved numbers, and a blank cell in a named row inherits. Blank `flange_d` keeps meaning `plate_w / 2`, so changing the width also changes the depth.
 
-View, Panels, Configuration grid opens the window. Agents use the same steps:
+People edit it in the Values tab, beside the feature tree in the same panel (tabs Tree and Values); View, Panels, Values brings the tab forward. The tab lists globals first, then every number typed into a feature, grouped by feature in tree order, with a column per configuration. A parameter's default name is its feature's name without spaces or punctuation, a dot and the parameter, such as `BossExtrude1.Depth` or `Sketch1.D2`. A cell takes a number, a name or a formula such as `=Plate*2`; Enter applies it as one undo step through `SetValueCell`, and a refusal stays on the cell in words. A plain number in the Default column edits the feature as its property panel does. A formula may read globals and other parameters, and a global's formula may read parameters. A parameter's name is saved once a formula reads it, a configuration overrides it or it is renamed; renaming rewrites every formula that reads it. The table below lists globals only, and keeps parameter overrides as they are.
+
+Agents use the same steps:
 
 | Tool | What it does |
 |---|---|
@@ -531,7 +533,7 @@ View, Panels, Configuration grid opens the window. Agents use the same steps:
 | `apply_configuration_grid` | Rebuilds the selected row on a scratch copy, then publishes one undo step |
 | `export_configuration_grid` | Writes the accepted table as CSV or XLSX |
 
-A preview is bound to the document and revision it came from and is used once. Applying one after the part changed, or one that was cancelled or applied, is refused. The window holds one preview of its own: previewing again replaces it, and editing a cell, Cancel or closing the window retires it. Previews made through these tools stay open under their own ids; the window neither shows nor applies them, and cancelling one leaves the window's cells alone. Other rows keep the rule of the single verbs: their graph is checked now and they build when activated.
+A preview is bound to the document and revision it came from and is used once. Applying one after the part changed, or one that was cancelled or applied, is refused. The Values tab's Import table previews the file and applies it as one step. Previews made through these tools stay open under their own ids; the tab neither shows nor applies them. Other rows keep the rule of the single verbs: their graph is checked now and they build when activated.
 
 Both files use the same columns, mapped by header name, in any order:
 

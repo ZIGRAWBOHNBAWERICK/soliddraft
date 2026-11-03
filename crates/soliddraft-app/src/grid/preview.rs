@@ -16,19 +16,6 @@ const RETIRED: usize = 32;
 /// How many previews can stay open. Each is bound to the revision it was made from.
 const OPEN: usize = 8;
 
-/// The editor's unsaved cells.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Draft {
-    /// The header, then each row.
-    pub table: Vec<Vec<String>>,
-    /// The Add property field.
-    pub new_property: String,
-    /// The part's revision when these cells were read.
-    pub revision: u64,
-    /// Whether anyone has changed them since.
-    pub edited: bool,
-}
-
 /// A checked candidate waiting for Apply or Cancel.
 #[derive(Clone, Debug)]
 pub struct Preview {
@@ -40,18 +27,13 @@ pub struct Preview {
     pub report: Value,
 }
 
-/// The configuration grid's session state.
+/// The configuration table's previews.
 #[derive(Clone, Debug, Default)]
 pub struct GridState {
-    /// Whether the panel is showing.
-    pub open: bool,
-    pub draft: Option<Draft>,
     /// Open previews, oldest first. Publishing one makes the others stale.
     previews: Vec<Preview>,
-    /// The one preview the window shows and applies. Each agent addresses its own by id.
+    /// The one preview the Values tab's import applies. Each agent addresses its own by id.
     window: Option<String>,
-    /// The panel's last message.
-    pub message: Option<String>,
     retired: VecDeque<(String, &'static str)>,
     issued: u64,
 }
@@ -71,6 +53,7 @@ impl GridState {
     }
 
     /// Retires the window's preview, as an edit, Cancel or Close does.
+    #[cfg(test)]
     pub(crate) fn withdraw(&mut self) {
         self.release("cancelled");
     }
@@ -204,7 +187,6 @@ pub(crate) fn apply(state: &mut AppState, id: &str) -> Result<Value, String> {
     if let Some(reason) = busy(state) {
         return Err(reason.into());
     }
-    let from_window = state.grid.window.as_deref() == Some(id);
     let preview = state.grid.take(id)?;
     let model = state.doc.model();
     let stale = if preview.document != model.id() {
@@ -227,9 +209,6 @@ pub(crate) fn apply(state: &mut AppState, id: &str) -> Result<Value, String> {
     let how = if outcome.is_ok() { "applied" } else { "refused" };
     state.grid.retire(preview.id, how);
     outcome?;
-    if from_window {
-        state.grid.draft = None;
-    }
     Ok(json!({
         "applied": id,
         "revision": state.doc.model().semantic_hash().as_str(),

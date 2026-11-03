@@ -257,7 +257,11 @@ pub fn click_tab(app: &mut App, name: &str) {
 
 /// Everything above the side panels: the menus, the tabs and the ribbon.
 pub fn ribbon_region(app: &App) -> Rect {
-    let panels = painted(app).iter().filter(|p| p.text.ends_with(" tree")).map(|p| p.rect.top()).fold(0.0, f32::max);
+    let panels = painted(app)
+        .iter()
+        .filter(|p| p.text == "Tree" || p.text.ends_with(" tree"))
+        .map(|p| p.rect.top())
+        .fold(0.0, f32::max);
     let window = window(app);
     Rect::from_min_max(window.min, pos2(window.right(), panels))
 }

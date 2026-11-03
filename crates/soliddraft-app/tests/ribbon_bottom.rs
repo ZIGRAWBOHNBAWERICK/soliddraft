@@ -72,7 +72,7 @@ fn band_is_one_low_row(app: &App) {
 /// The tree's and the properties' titles stay in the left column, in that order.
 fn properties_under_the_tree(app: &App) {
     let view = viewport(app);
-    let tree = ribbon::title_rect(app, "Feature tree");
+    let tree = ribbon::title_rect(app, "Tree");
     let properties = ribbon::title_rect(app, "Properties");
     assert!(tree.right() <= view.left() + TOLERANCE, "the tree is left of the viewport: {tree:?} {view:?}");
     assert!(properties.right() <= view.left() + TOLERANCE, "so are the properties: {properties:?} {view:?}");
@@ -125,7 +125,7 @@ fn command_and_status_share_one_bottom_band() {
         let state = &app.state().state;
         assert!(matches!(state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Extrude(_))));
         assert!(state.doc.features.is_empty(), "nothing is committed yet");
-        let tree = ribbon::title_rect(app, "Feature tree");
+        let tree = ribbon::title_rect(app, "Tree");
         let cancel = in_the_left_column(app, "Cancel (Esc)");
         assert!(cancel.top() > tree.bottom(), "the editor's controls are below the tree: {cancel:?} {tree:?}");
         assert!(ribbon::status_lines(app).iter().any(|l| l == "Editing Extrude"));

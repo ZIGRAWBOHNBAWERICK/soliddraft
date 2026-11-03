@@ -13,7 +13,7 @@ use std::ops::RangeInclusive;
 /// 0.36, which is a strength of 0.6.
 const FULL_OPACITY: f32 = 0.6;
 /// Minor lines are drawn at this share of the major lines' opacity.
-const MINOR_SHARE: f32 = 0.45;
+const MINOR_SHARE: f32 = 0.55;
 /// A line over the dark theme's background stands out about twice as much as the same
 /// opacity over the light one, so the dark theme draws at this share, and one strength
 /// looks alike in both.
@@ -45,7 +45,7 @@ pub struct GridStyle {
 
 impl Default for GridStyle {
     fn default() -> Self {
-        Self { strength: 0.3, follow_zoom: true, gap: 16.0, fixed_mm: 10.0, major_every: 5, color: None }
+        Self { strength: 0.4, follow_zoom: true, gap: 16.0, fixed_mm: 10.0, major_every: 5, color: None }
     }
 }
 
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn the_default_grid_is_lighter_than_the_first_one() {
         let (minor, major) = GridStyle::default().opacity();
-        assert!(major < 0.36 * 0.6 && minor < 0.16 * 0.6, "{minor} {major}");
+        assert!(major <= 0.36 * 0.7 && minor <= 0.16 * 0.85, "{minor} {major}");
         assert!(minor > 0.0 && minor < major);
         let (_, full) = GridStyle { strength: 1.0, ..Default::default() }.opacity();
         assert!(full > 0.36, "full strength is stronger than the first grid");

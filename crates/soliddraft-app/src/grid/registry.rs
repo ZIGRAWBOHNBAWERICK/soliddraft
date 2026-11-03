@@ -1,6 +1,7 @@
 //! The three configuration verbs share the proposal and dry-run route; the table's
 //! tools hold a preview for the session and commit nothing until Apply.
-use super::{panel::GridAction, tools};
+use super::tools;
+use crate::values_tab::ValuesAction;
 use crate::{
     commands::{Agents, CommandSpec, Size, Undo},
     icons::Icon,
@@ -27,16 +28,20 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
                 tools::name_params,
             )
             .undo(Undo::Step),
-        cmd("configuration_grid", "Configuration grid", Icon::Config, "Edit configurations as one table")
-            .on(RibbonTab::View, "Panels", Size::Small)
-            .run(|_| AppAction::Grid(GridAction::Toggle))
-            .lit(|s| s.grid.open)
-            .agents(
-                Agents::Mcp,
-                "Reads the live table: columns, every row's stable id and authored cells, what each row resolves to, \
+        cmd(
+            "configuration_grid",
+            "Values",
+            Icon::Config,
+            "Show globals, feature values and configurations beside the tree",
+        )
+        .on(RibbonTab::View, "Panels", Size::Small)
+        .run(|_| AppAction::Values(ValuesAction::Show))
+        .agents(
+            Agents::Mcp,
+            "Reads the live table: columns, every row's stable id and authored cells, what each row resolves to, \
                  and the accepted state. A blank cell inherits.",
-                Vec::new,
-            ),
+            Vec::new,
+        ),
         cmd(
             "preview_configuration_grid",
             "Preview configuration grid",

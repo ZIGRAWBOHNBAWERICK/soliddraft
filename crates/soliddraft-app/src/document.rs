@@ -913,6 +913,16 @@ pub enum Command {
         name: String,
         to: String,
     },
+    /// One cell of the values table; see [`model::Command::SetValueCell`].
+    SetValueCell {
+        configuration: String,
+        name: String,
+        expression: Option<String>,
+    },
+    /// Deletes a global that nothing reads.
+    RemoveValue {
+        name: String,
+    },
     AddSketch {
         plane: SketchPlane,
     },
@@ -998,6 +1008,8 @@ impl Command {
             Command::SetValue { .. } => "Set value".into(),
             Command::Drive { .. } => "Drive input".into(),
             Command::RenameValue { .. } => "Rename value".into(),
+            Command::SetValueCell { .. } => "Set value".into(),
+            Command::RemoveValue { .. } => "Delete global".into(),
             Command::AddExtrude { .. } => "Add extrude".into(),
             Command::EditExtrude { .. } => "Edit extrude".into(),
             Command::AddCut { .. } => "Add cut".into(),
@@ -2170,6 +2182,10 @@ impl Document {
             Command::SetValue { name, expression } => vec![model::Command::SetValue { name, expression }],
             Command::Drive { input, expression } => vec![model::Command::Drive { input, expression }],
             Command::RenameValue { name, to } => vec![model::Command::RenameValue { name, to }],
+            Command::SetValueCell { configuration, name, expression } => {
+                vec![model::Command::SetValueCell { configuration, name, expression }]
+            }
+            Command::RemoveValue { name } => vec![model::Command::RemoveValue { name }],
             Command::AddSketch { plane } => {
                 let mut sketch = Sketch::new();
                 sketch::solve::solve(&mut sketch, None, true);

@@ -360,6 +360,11 @@ impl SolidDraftApp {
         let dock = match side {
             Side::Tree => &mut self.tree_dock,
         };
+        if std::mem::take(&mut self.state.values.focus)
+            && let Some(at) = dock.find_tab(&docks::Tab::Values)
+        {
+            let _ = dock.set_active_tab(at);
+        }
         let mut panels = Panels { state: &mut self.state };
         egui::Panel::show_switched(root, &mut shown, collapsed, expanded, |ui, expanded| {
             if expanded {
@@ -405,7 +410,6 @@ impl SolidDraftApp {
             );
         }
         self.assistant_settings(ctx);
-        crate::grid::panel::show(ctx, &mut self.state);
         crate::drawing::reference::window(ctx, &mut self.state);
         crate::locations::window(ctx, &mut self.state);
         crate::import::window(ctx, &mut self.state);

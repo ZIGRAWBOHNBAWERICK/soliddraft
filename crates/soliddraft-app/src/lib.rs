@@ -48,6 +48,7 @@ pub mod sweep_panel;
 pub mod theme;
 pub mod tree;
 pub mod tree_visibility;
+pub mod values_tab;
 pub mod viewport;
 #[cfg(target_arch = "wasm32")]
 pub mod web;

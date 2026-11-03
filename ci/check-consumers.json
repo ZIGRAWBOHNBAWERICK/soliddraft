@@ -1,6 +1,7 @@
 {
   "format": "soliddraft-check-consumers/1",
   "files": {
+    "ci/browser-documents.mjs": ["web"],
     "ci/browser-journal.js": ["web"],
     "ci/browser-preferences.mjs": ["web"],
     "ci/cargo-cache.sh": [],

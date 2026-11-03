@@ -824,7 +824,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "8bc431813630f8f8e066d0174741162066f465b9",
+      "catallax_revision": "8f1a7a3cd8a256bf782a9e1b910233caca3797bb",
       "route": "MCP sweep and edit_sweep with segments -> document rebuild -> native path and sweep with exact arc ends -> viewport and checked STEP export",
       "supported_limits": "Closed polygon profile beside the path; line, quarter arc, line chain with the profile turning along it, edited run length; refused oblique join, zero-length line and reversal without a turn axis leave the part unchanged; face measured by name, undo/redo, save and fresh-process reopen; other path motions and loft remain unavailable",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle over planes and cylinders"

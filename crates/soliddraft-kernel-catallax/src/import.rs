@@ -146,7 +146,9 @@ impl CatallaxKernel {
         }
         let step = json!({"id":result, "op":"import_step", "file":{"name":request.name,"sha256":request.sha256},
             "pose":{"rotation":["1","0","0","0"],"translation":["0","0","0"]}, "decisions":saved});
-        let problem = json!({"format":"catallax-recipe/3", "name":"SolidDraft", "steps":[step],"result":result});
+        // The format that later features convert to, so their builds resume this checkpoint
+        // instead of importing the file again.
+        let problem = json!({"format":catallax_recipe::FORMAT_V5, "name":"SolidDraft", "steps":[step],"result":result});
         let recipe = catallax_recipe::Recipe::parse(&problem.to_string())
             .map_err(|e| KernelError::InvalidInput(e.to_string()))?;
         let files = BTreeMap::from([(request.sha256.to_owned(), request.source)]);
@@ -170,6 +172,7 @@ impl CatallaxKernel {
         display.get(display_key(&catallax_mesh::MeshOptions::default()), || Ok(app.display.value))?;
         let app = catallax_app::EvaluatedApplicationBody { checkpoint: app.checkpoint, names: app.names };
         let mut state = self.state()?;
+        state.files.entry(request.sha256.to_owned()).or_insert_with(|| request.source.into());
         let tags = BTreeMap::from([(result.clone(), tag.clone())]);
         let ids = convert::Ids::new(&app, &[], &tags, &mut state.next, &[]);
         let history = ids.record(seq, tag, OpKind::ImportStep, &result, &[]);

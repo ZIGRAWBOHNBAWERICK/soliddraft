@@ -50,6 +50,9 @@ struct State {
     fields: BTreeMap<BodyId, Arc<lattice::Field>>,
     capture: bool,
     questions: Vec<Value>,
+    /// Imported STEP sources by SHA-256. Catallax reads them again for every build
+    /// that continues an imported body, even when the import itself is reused.
+    files: BTreeMap<String, Arc<[u8]>>,
 }
 
 struct Stored {
@@ -197,6 +200,21 @@ impl State {
         self.bodies.get(&body).ok_or(KernelError::UnknownBody(body))
     }
 
+    /// The STEP sources that the import steps among `steps` read.
+    fn sources(&self, steps: &BTreeMap<u64, Value>) -> KernelResult<BTreeMap<String, Arc<[u8]>>> {
+        steps
+            .values()
+            .filter(|step| step["op"] == "import_step")
+            .map(|step| {
+                let sha = step["file"]["sha256"].as_str().unwrap_or_default();
+                let bytes = self.files.get(sha).ok_or_else(|| {
+                    KernelError::InvalidInput("the imported file of this body is no longer loaded".into())
+                })?;
+                Ok((sha.to_owned(), bytes.clone()))
+            })
+            .collect()
+    }
+
     fn solid(&self, body: BodyId) -> KernelResult<Arc<Solid>> {
         if self.fields.contains_key(&body) {
             return Err(terminal_field(body));
@@ -247,15 +265,12 @@ impl CatallaxKernel {
         }
         let state = self.state()?;
         let stored = state.get(body)?;
-        let format = if stored.steps.values().any(|s| s["op"] == "import_step") {
-            "catallax-recipe/3"
-        } else {
-            "soliddraft-recipe/1"
-        };
-        let recipe = json!({"format":format, "name":"SolidDraft",
+        let recipe = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
             "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
-        if stored.steps.values().any(|s| s["op"] == "path_sweep") {
-            return serde_json::to_value(converted_recipe(&recipe, OpKind::Sweep)?.recipe)
+        let swept = stored.steps.values().any(|s| s["op"] == "path_sweep");
+        if swept || stored.steps.values().any(|s| s["op"] == "import_step") {
+            let op = if swept { OpKind::Sweep } else { OpKind::ImportStep };
+            return serde_json::to_value(converted_recipe(&recipe, op)?.recipe)
                 .map_err(|e| KernelError::InvalidInput(e.to_string()));
         }
         Ok(recipe)
@@ -393,10 +408,13 @@ impl CatallaxKernel {
         }
         let prefix = prefix.and_then(|stored| stored.solid.clone());
         let input = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft", "steps": steps.values().collect::<Vec<_>>(), "result": result});
+        let sources = state.sources(&steps)?;
         let capture = state.capture;
         drop(state);
         let mut questions = Vec::new();
-        let built = build(&input, op, prefix.as_ref().map(|solid| &solid.app), capture.then_some(&mut questions));
+        let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
+        let built =
+            build(&input, op, prefix.as_ref().map(|solid| &solid.app), &files, capture.then_some(&mut questions));
         let mut state = self.state()?;
         // A refused build keeps its question too.
         state.questions.extend(questions);
@@ -465,14 +483,29 @@ fn gap(what: &str) -> KernelError {
 
 /// Converts retained application definitions, preserving native steps and frames.
 fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::soliddraft::Converted> {
-    // The shared converter has no imported step, so no operation reads an imported body yet.
-    if input["steps"].as_array().is_some_and(|steps| steps.iter().any(|step| step["op"] == "import_step")) {
-        return Err(gap("Building on an imported body"));
-    }
     // The shared converter reads `soliddraft-recipe/1` only. Replace unsupported
     // steps during conversion, then restore their native definitions before building.
     let mut legacy = input.clone();
     let mut natives = Vec::new();
+    // An import has no counterpart there. A unit block stands in for it, built from a
+    // stand-in profile that is dropped again once the import step is back.
+    let mut imports = Vec::new();
+    let steps = legacy["steps"].as_array_mut().expect("generated recipe steps");
+    for index in (0..steps.len()).rev() {
+        if steps[index]["op"] != "import_step" {
+            continue;
+        }
+        let mut native = steps[index].clone();
+        let tag = native.as_object_mut().and_then(|o| o.remove("id")).and_then(|id| id.as_str().map(str::to_owned));
+        let tag = tag.expect("generated import id");
+        let native: catallax_recipe::Operation = serde_json::from_value(native)
+            .map_err(|e| KernelError::InvalidInput(format!("stored import step: {e}")))?;
+        let profile = format!("{tag}_import_profile");
+        steps[index] = json!({"id":tag, "op":"extrude", "profile":profile, "distance":1.0});
+        let rectangle = json!({"center":[0.0, 0.0], "width":1.0, "height":1.0});
+        steps.insert(index, json!({"id":profile, "op":"profile", "plane":"XY", "rectangle":rectangle}));
+        imports.push((tag, profile, native));
+    }
     for step in legacy["steps"].as_array_mut().expect("generated recipe steps") {
         if step["op"] == "path_sweep" {
             let tag = step["id"].as_str().expect("stored sweep id").to_owned();
@@ -494,6 +527,13 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     }
     let mut converted =
         catallax_app::soliddraft::convert(&legacy.to_string()).map_err(|e| build_error(op, Error::Conversion(e)))?;
+    for (tag, profile, native) in imports {
+        let stand_in = converted.steps.remove(&profile).expect("converted stand-in profile");
+        converted.recipe.steps.retain(|s| s.id != stand_in);
+        let id = &converted.steps[&tag];
+        let step = converted.recipe.steps.iter_mut().find(|s| &s.id == id).expect("converted import step");
+        step.op = native;
+    }
     // Start in the newest format so adding a limited sweep or an all-faces shell does not
     // discard an otherwise identical target checkpoint merely to upgrade its recipe version.
     catallax_recipe::FORMAT_V5.clone_into(&mut converted.recipe.format);
@@ -563,6 +603,7 @@ fn build(
     input: &Value,
     op: OpKind,
     prefix: Option<&EvaluatedApplicationBody>,
+    files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
 ) -> KernelResult<(EvaluatedApplicationBody, BTreeMap<String, catallax_recipe::StepId>)> {
     let converted = converted_recipe(input, op)?;
@@ -573,9 +614,44 @@ fn build(
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.
     let prefix = prefix.map(|app| app.checkpoint.clone());
-    let app = catallax_app::build_incremental_without_display(&converted.recipe, prefix, &mut Decider::default())
-        .map_err(|e| build_error(op, e))?;
+    let app = if files.is_empty() {
+        catallax_app::build_incremental_without_display(&converted.recipe, prefix, &mut Decider::default())
+    } else {
+        build_with_files(&converted.recipe, prefix, files)
+    }
+    .map_err(|e| build_error(op, e))?;
     Ok((app, converted.steps))
+}
+
+/// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
+/// sources: the same default allowance, result check and picking names.
+fn build_with_files(
+    recipe: &catallax_recipe::Recipe,
+    prefix: Option<catallax_features::EvaluationCheckpoint>,
+    files: &catallax_features::ImportFiles<'_>,
+) -> Result<EvaluatedApplicationBody, Error> {
+    let run = || {
+        let checkpoint =
+            catallax_features::evaluate_incremental_with_files(recipe, prefix, files, &mut Decider::default())
+                .map_err(Error::Build)?;
+        let built = checkpoint.built();
+        let (model, body) = (&built.model, built.result);
+        let faults = model.check(body);
+        if !faults.is_empty() {
+            return Err(Error::InvalidBody(faults));
+        }
+        let names = catallax_app::Names {
+            faces: model.faces_of_body(body).into_iter().map(|f| (f, model.face_origins(f).to_vec())).collect(),
+            edges: model.edges_of_body(body).into_iter().map(|e| (e, model.edge_name(body, e))).collect(),
+            vertices: model.vertices_of_body(body).into_iter().map(|v| (v, model.vertex_name(body, v))).collect(),
+        };
+        Ok(EvaluatedApplicationBody { checkpoint, names })
+    };
+    if catallax_numbers::operation_budget_active() {
+        return run();
+    }
+    let (result, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
+    if work.exhausted { Err(Error::ResourceLimit) } else { result }
 }
 
 fn build_error(op: OpKind, error: Error) -> KernelError {
@@ -1352,7 +1428,7 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (replayed, steps) = build(&recipe, OpKind::Subtract, None, None).unwrap();
+            let (replayed, steps) = build(&recipe, OpKind::Subtract, None, &Default::default(), None).unwrap();
             let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
             let result = steps[recipe["result"].as_str().unwrap()].as_str();
             assert!(operations.iter().any(|op| op["id"] == result), "{evidence}");
@@ -1400,7 +1476,7 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (fresh, _) = build(&recipe, OpKind::ExtrudeTo, None, None).unwrap();
+            let (fresh, _) = build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None).unwrap();
             assert_eq!(kernel.solid(swept.body).unwrap().app.names, fresh.names);
             assert_eq!(
                 kernel.export_step(swept.body, &StepOptions::default()).unwrap(),

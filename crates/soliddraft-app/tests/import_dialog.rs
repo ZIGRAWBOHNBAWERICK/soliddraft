@@ -259,8 +259,7 @@ fn a_declined_import_names_no_entity_number() {
 /// The real-use pass could not measure, sketch on or round anything of an imported body:
 /// its faces were listed as `Body · Face N`, a name no command took, and every edge
 /// "cannot be referenced". Imported faces now carry names by their order in the source
-/// file, and an operation the backend cannot run on an imported body yet says Coming soon
-/// and leaves the part as it was.
+/// file. Features that build on them are in `import_features.rs`.
 #[test]
 fn an_imported_body_has_faces_to_measure_and_sketch_on() {
     use serde_json::{Value, json};
@@ -307,17 +306,6 @@ fn an_imported_body_has_faces_to_measure_and_sketch_on() {
     let circle = json!({"shape":"circle","center":[10,10,10.004],"diameter":4});
     let sketch = call(&mut doc, &mut book, "sketch", json!({"plane":top,"shapes":[circle]}));
     assert!(!sketch.is_error, "{}", sketch.content);
-    let depth = doc.undo_depth();
-    for (tool, input) in [
-        ("fillet", json!({"edges":["Import1 · Edge 2"],"radius":1})),
-        ("extrude", json!({"sketch":"Sketch1","depth":5,"flip":false})),
-        ("shell", json!({"open_faces":[top],"thickness":1})),
-    ] {
-        let out = call(&mut doc, &mut book, tool, input);
-        assert!(out.is_error && out.content.contains("coming soon"), "{tool}: {}", out.content);
-        assert!(!out.content.contains("import_step"), "{tool}: {}", out.content);
-        assert_eq!(doc.undo_depth(), depth, "{tool} changed the part");
-    }
 
     let saved = dir.join("imported.dwprt");
     soliddraft_app::file::save(&mut doc, &saved).unwrap();

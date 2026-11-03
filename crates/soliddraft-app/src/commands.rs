@@ -197,7 +197,14 @@ impl Scope {
 
     /// Whether this scope's shortcuts win over `other`'s where both apply.
     pub fn narrower_than(self, other: Scope) -> bool {
-        matches!((self, other), (Scope::Edge, Scope::Model) | (Scope::Placing, Scope::Drawing))
+        matches!((self, other), (Scope::Edge, Scope::Model | Scope::Part) | (Scope::Placing, Scope::Drawing))
+    }
+
+    /// Whether two scopes can apply in the same context without one winning over the other.
+    pub fn conflicts_with(self, other: Scope) -> bool {
+        !self.narrower_than(other)
+            && !other.narrower_than(self)
+            && Context::all().into_iter().any(|c| self.applies(c) && other.applies(c))
     }
 
     /// Whether some wider scope gives way to this one.
@@ -288,7 +295,10 @@ impl Shortcut {
 
     /// The same key and modifiers.
     pub fn same_chord(&self, other: &Shortcut) -> bool {
-        self.key == other.key && self.modifiers == other.modifiers
+        self.key == other.key
+            && (self.modifiers.command || self.modifiers.ctrl) == (other.modifiers.command || other.modifiers.ctrl)
+            && self.modifiers.shift == other.modifiers.shift
+            && self.modifiers.alt == other.modifiers.alt
     }
 
     /// How many modifiers it holds. egui matches a plain chord even with Shift held, so
@@ -583,6 +593,44 @@ impl CommandSpec {
         }
     }
 
+    /// Whether the command works in the app now, rather than waiting as Coming soon.
+    pub fn is_working(&self) -> bool {
+        self.action.is_some() && self.catallax_wait().is_none()
+    }
+
+    /// The scope an assigned shortcut uses for this command.
+    pub fn default_scope(&self) -> Scope {
+        if let Some(first) = self.keys.first() {
+            return first.scope;
+        }
+        match self.workspace {
+            Workspace::Both => Scope::App,
+            Workspace::Drawing => Scope::Drawing,
+            Workspace::Assembly => Scope::Assembly,
+            Workspace::Part => {
+                if !self.ribbon.is_empty() && self.ribbon.iter().all(|p| p.tab == Tab::Part(RibbonTab::Sketch)) {
+                    Scope::Sketch
+                } else {
+                    Scope::Model
+                }
+            }
+        }
+    }
+
+    /// The command's name on the Shortcuts page, with its scope when another command in
+    /// the app shares its label.
+    pub fn shortcut_row_label(&self) -> String {
+        let shared = all()
+            .iter()
+            .filter(|c| c.in_app() && c.id != self.id && c.label == self.label)
+            .any(|c| c.is_working() == self.is_working());
+        if shared && !matches!(self.workspace, Workspace::Part | Workspace::Both) {
+            format!("{} ({})", self.label, self.default_scope().label())
+        } else {
+            self.label.to_owned()
+        }
+    }
+
     pub fn is_enabled(&self, state: &AppState) -> bool {
         self.catallax_wait().is_none() && self.action.is_some() && (self.enabled)(state)
     }
@@ -610,7 +658,7 @@ impl CommandSpec {
     pub fn tip(&self, state: &AppState) -> String {
         let text = self.hint_now(state).unwrap_or_else(|| self.doc.to_owned());
         let context = Context::of(state);
-        match self.keys.iter().find(|k| k.scope.applies(context)) {
+        match state.shortcuts.keys_of(self.id).into_iter().find(|k| k.scope.applies(context)) {
             Some(k) if self.is_enabled(state) => format!("{text} ({})", k.text()),
             _ => text,
         }
@@ -732,6 +780,392 @@ impl History {
     pub fn retain_known(&mut self) {
         self.pinned.retain(|id| get(id).is_some());
         self.recent.retain(|id| get(id).is_some());
+    }
+}
+
+/// A key and its modifiers, independent of scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct KeyChord {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub key: Key,
+}
+
+impl KeyChord {
+    pub const fn new(modifiers: Modifiers, key: Key) -> Self {
+        Self { ctrl: modifiers.command || modifiers.ctrl, shift: modifiers.shift, alt: modifiers.alt, key }
+    }
+
+    pub const fn plain(key: Key) -> Self {
+        Self { ctrl: false, shift: false, alt: false, key }
+    }
+
+    pub const fn ctrl(key: Key) -> Self {
+        Self { ctrl: true, shift: false, alt: false, key }
+    }
+
+    pub fn from_event(key: Key, _physical_key: Option<Key>, modifiers: Modifiers) -> Self {
+        Self::new(modifiers, key)
+    }
+
+    pub fn modifiers(self) -> Modifiers {
+        let mut m = Modifiers::NONE;
+        if self.ctrl {
+            m.command = true;
+        }
+        if self.shift {
+            m.shift = true;
+        }
+        if self.alt {
+            m.alt = true;
+        }
+        m
+    }
+
+    pub fn while_typing_for(self, command_id: &str) -> bool {
+        self.ctrl || command_id == "toggle_tree" || command_id == crate::command_line::AI_COMMAND
+    }
+
+    pub fn to_shortcut(self, scope: Scope, command_id: &str) -> Shortcut {
+        Shortcut { scope, modifiers: self.modifiers(), key: self.key, while_typing: self.while_typing_for(command_id) }
+    }
+
+    /// As the interface writes it: "Ctrl+Shift+S", "F2", "Del".
+    pub fn text(self) -> String {
+        Shortcut { scope: Scope::App, modifiers: self.modifiers(), key: self.key, while_typing: false }.text()
+    }
+
+    /// Parses a chord written as [`KeyChord::text`] writes it.
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut rest = text.trim();
+        if rest.is_empty() {
+            return None;
+        }
+        let mut ctrl = false;
+        let mut shift = false;
+        let mut alt = false;
+        loop {
+            let lower = rest.to_ascii_lowercase();
+            if let Some(after) = lower.strip_prefix("ctrl+").or_else(|| lower.strip_prefix("cmd+")) {
+                ctrl = true;
+                rest = &rest[rest.len() - after.len()..];
+            } else if let Some(after) = lower.strip_prefix("shift+") {
+                shift = true;
+                rest = &rest[rest.len() - after.len()..];
+            } else if let Some(after) = lower.strip_prefix("alt+").or_else(|| lower.strip_prefix("option+")) {
+                alt = true;
+                rest = &rest[rest.len() - after.len()..];
+            } else {
+                break;
+            }
+        }
+        let key = parse_key(rest.trim())?;
+        Some(Self { ctrl, shift, alt, key })
+    }
+}
+
+fn parse_key(token: &str) -> Option<Key> {
+    match token {
+        "Del" | "del" | "Delete" | "delete" => Some(Key::Delete),
+        "Esc" | "esc" | "Escape" | "escape" => Some(Key::Escape),
+        "Backspace" | "backspace" => Some(Key::Backspace),
+        "Enter" | "enter" | "Return" | "return" => Some(Key::Enter),
+        k => Key::ALL.iter().copied().find(|c| c.symbol_or_name() == k).or_else(|| Key::from_name(k)).or_else(|| {
+            Key::ALL
+                .iter()
+                .copied()
+                .find(|c| c.symbol_or_name().eq_ignore_ascii_case(k) || c.name().eq_ignore_ascii_case(k))
+        }),
+    }
+}
+
+impl From<Shortcut> for KeyChord {
+    fn from(s: Shortcut) -> Self {
+        Self::new(s.modifiers, s.key)
+    }
+}
+
+impl Serialize for KeyChord {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.text().serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for KeyChord {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        Self::parse(&text).ok_or_else(|| serde::de::Error::custom(format!("unknown shortcut {text}")))
+    }
+}
+
+/// A preset for the command shortcuts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutPreset {
+    #[default]
+    Soliddraft,
+    Solidworks,
+    Fusion,
+}
+
+impl ShortcutPreset {
+    pub const ALL: [ShortcutPreset; 3] =
+        [ShortcutPreset::Soliddraft, ShortcutPreset::Solidworks, ShortcutPreset::Fusion];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            ShortcutPreset::Soliddraft => "soliddraft",
+            ShortcutPreset::Solidworks => "solidworks",
+            ShortcutPreset::Fusion => "fusion",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ShortcutPreset::Soliddraft => "SolidDraft",
+            ShortcutPreset::Solidworks => "SolidWorks",
+            ShortcutPreset::Fusion => "Fusion",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id.trim().to_ascii_lowercase().as_str() {
+            "soliddraft" | "legacy_soliddraft" => Some(ShortcutPreset::Soliddraft),
+            "solidworks" => Some(ShortcutPreset::Solidworks),
+            "fusion" | "fusion 360" | "fusion_360" => Some(ShortcutPreset::Fusion),
+            _ => None,
+        }
+    }
+
+    /// The preset's default shortcuts for command `id`.
+    pub fn keys_of(self, id: &str) -> Vec<Shortcut> {
+        let Some(c) = get(id) else { return Vec::new() };
+        let key = |scope, modifiers: Modifiers, key| Shortcut {
+            scope,
+            modifiers,
+            key,
+            while_typing: modifiers.command || modifiers.ctrl,
+        };
+        match (self, id) {
+            (ShortcutPreset::Solidworks, "zoom_fit") => vec![
+                key(Scope::Part, Modifiers::NONE, Key::F),
+                key(Scope::Drawing, Modifiers::NONE, Key::Z),
+                key(Scope::Drawing, Modifiers::NONE, Key::F),
+                key(Scope::Assembly, Modifiers::NONE, Key::Z),
+            ],
+            (ShortcutPreset::Solidworks, "normal_to") => vec![key(Scope::Part, Modifiers::COMMAND, Key::Num8)],
+            (ShortcutPreset::Solidworks, "view_front") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num1)],
+            (ShortcutPreset::Solidworks, "view_back") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num2)],
+            (ShortcutPreset::Solidworks, "view_left") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num3)],
+            (ShortcutPreset::Solidworks, "view_right") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num4)],
+            (ShortcutPreset::Solidworks, "view_top") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num5)],
+            (ShortcutPreset::Solidworks, "view_bottom") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num6)],
+            (ShortcutPreset::Solidworks, "view_isometric") => vec![key(Scope::Model, Modifiers::COMMAND, Key::Num7)],
+            (ShortcutPreset::Fusion, "zoom_fit") => vec![
+                key(Scope::Part, Modifiers::NONE, Key::F6),
+                key(Scope::Drawing, Modifiers::NONE, Key::Z),
+                key(Scope::Drawing, Modifiers::NONE, Key::F),
+                key(Scope::Assembly, Modifiers::NONE, Key::Z),
+            ],
+            _ => c.keys.clone(),
+        }
+    }
+}
+
+/// A shortcut assignment that collides with one or more existing commands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShortcutConflict {
+    /// The command being assigned a shortcut.
+    pub command: &'static str,
+    /// The requested chord.
+    pub chord: KeyChord,
+    /// The commands that already use `chord` in a conflicting scope.
+    pub with: Vec<&'static str>,
+}
+
+impl ShortcutConflict {
+    /// A sentence naming the conflicting command and scope, and offering to swap.
+    pub fn message(&self) -> String {
+        let owners: Vec<String> = self
+            .with
+            .iter()
+            .filter_map(|id| get(id))
+            .map(|c| format!("{} ({})", c.label, c.default_scope().label()))
+            .collect();
+        let target = get(self.command).map_or(self.command, |c| c.label);
+        format!("{} is already used by {}. Swap shortcuts with {}?", self.chord.text(), owners.join(" and "), target)
+    }
+}
+
+/// The user's shortcut preset and per-command overrides, stored under `"shortcuts"`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Shortcuts {
+    pub preset: ShortcutPreset,
+    /// Changed commands: `Some(chord)` assigns a key, `None` clears the command's key.
+    pub overrides: std::collections::BTreeMap<String, Option<KeyChord>>,
+}
+
+impl Shortcuts {
+    pub fn for_preset(preset: ShortcutPreset) -> Self {
+        Self { preset, overrides: std::collections::BTreeMap::new() }
+    }
+
+    /// Reads the `shortcuts` value of the settings. Unknown commands or unreadable chords
+    /// are skipped without losing the rest.
+    pub fn from_json(value: &Value) -> Self {
+        let Some(obj) = value.as_object() else { return Self::default() };
+        let preset = obj.get("preset").and_then(Value::as_str).and_then(ShortcutPreset::from_id).unwrap_or_default();
+        let mut s = Self::for_preset(preset);
+        if let Some(overrides) = obj.get("overrides").and_then(Value::as_object) {
+            for (id, entry) in overrides {
+                let Some(c) = get(id).filter(|c| c.in_app() && c.is_working()) else { continue };
+                match entry {
+                    Value::Null => s.set_raw(c.id, None),
+                    Value::String(text) if text.trim().is_empty() => s.set_raw(c.id, None),
+                    Value::String(text) => {
+                        if let Some(chord) = KeyChord::parse(text) {
+                            s.set_raw(c.id, Some(chord));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Read the whole assignment before checking it: a swap can use two keys that
+        // the defaults still own until both overrides have been read.
+        let conflicting: Vec<_> = s
+            .overrides
+            .iter()
+            .filter_map(|(id, chord)| chord.filter(|chord| !s.conflicts_for(id, *chord).is_empty()).map(|_| id.clone()))
+            .collect();
+        for id in conflicting {
+            s.set_raw(&id, None);
+        }
+        s
+    }
+
+    /// The shortcuts currently bound to command `id`.
+    pub fn keys_of(&self, id: &str) -> Vec<Shortcut> {
+        let Some(c) = get(id) else { return Vec::new() };
+        if !c.is_working() {
+            return Vec::new();
+        }
+        match self.overrides.get(id) {
+            Some(None) => Vec::new(),
+            Some(Some(chord)) => vec![chord.to_shortcut(c.default_scope(), c.id)],
+            None => self.preset.keys_of(id),
+        }
+    }
+
+    /// The first shortcut for `id`, as menus and buttons show it.
+    pub fn shortcut_text(&self, id: &str) -> Option<String> {
+        self.keys_of(id).first().map(Shortcut::text)
+    }
+
+    /// The primary chord for `id`, if one is bound.
+    pub fn primary_chord(&self, id: &str) -> Option<KeyChord> {
+        self.keys_of(id).first().copied().map(KeyChord::from)
+    }
+
+    /// Whether `id`'s current shortcut differs from `self.preset`'s default.
+    pub fn is_modified(&self, id: &str) -> bool {
+        self.keys_of(id) != self.preset.keys_of(id)
+    }
+
+    /// Other commands whose current shortcuts conflict with assigning `chord` to `id`.
+    pub fn conflicts_for(&self, id: &str, chord: KeyChord) -> Vec<&'static CommandSpec> {
+        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return Vec::new() };
+        let scope = target.default_scope();
+        let candidate = chord.to_shortcut(scope, target.id);
+        all()
+            .iter()
+            .filter(|c| c.in_app() && c.is_working() && c.id != target.id)
+            .filter(|c| self.keys_of(c.id).iter().any(|k| k.same_chord(&candidate) && scope.conflicts_with(k.scope)))
+            .collect()
+    }
+
+    /// Assigns `chord` to `id`, or returns the conflicting commands without changing
+    /// anything.
+    pub fn assign(&mut self, id: &str, chord: KeyChord) -> Result<(), ShortcutConflict> {
+        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return Ok(()) };
+        let conflicts = self.conflicts_for(target.id, chord);
+        if !conflicts.is_empty() {
+            return Err(ShortcutConflict {
+                command: target.id,
+                chord,
+                with: conflicts.into_iter().map(|c| c.id).collect(),
+            });
+        }
+        self.set_raw(target.id, Some(chord));
+        Ok(())
+    }
+
+    /// Resolves `conflict` by giving `conflict.command` the new chord and giving the
+    /// conflicting command(s) `conflict.command`'s previous chord (or clearing them when
+    /// `conflict.command` had none).
+    pub fn swap(&mut self, conflict: &ShortcutConflict) {
+        let previous = self.primary_chord(conflict.command);
+        for &other in &conflict.with {
+            self.set_raw(other, None);
+        }
+        self.set_raw(conflict.command, Some(conflict.chord));
+        for &other in &conflict.with {
+            let replacement = previous.filter(|chord| self.conflicts_for(other, *chord).is_empty());
+            self.set_raw(other, replacement);
+        }
+    }
+
+    /// Clears `id`'s shortcut.
+    pub fn clear(&mut self, id: &str) {
+        self.set_raw(id, None);
+    }
+
+    /// Puts `id` back to `self.preset`'s default, clearing any other override that had
+    /// taken that key.
+    pub fn reset(&mut self, id: &str) {
+        let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let defaults = self.preset.keys_of(target.id);
+        for d in &defaults {
+            let dc = KeyChord::from(*d);
+            let clashing: Vec<&'static str> = self.conflicts_for(target.id, dc).into_iter().map(|c| c.id).collect();
+            for other in clashing {
+                self.set_raw(other, None);
+            }
+        }
+        self.overrides.remove(target.id);
+    }
+
+    /// Resets every command to `preset`'s defaults.
+    pub fn reset_all(&mut self, preset: ShortcutPreset) {
+        self.preset = preset;
+        self.overrides.clear();
+    }
+
+    /// The shortcuts that apply in `context`, in the order to try them: more modifiers
+    /// first, then narrower scopes first.
+    pub fn bindings(&self, context: Context) -> Vec<(&'static CommandSpec, Shortcut)> {
+        let mut out: Vec<(&'static CommandSpec, Shortcut)> = all()
+            .iter()
+            .flat_map(|c| self.keys_of(c.id).into_iter().map(move |k| (c, k)))
+            .filter(|(_, k)| k.scope.applies(context))
+            .collect();
+        out.sort_by_key(|(_, k)| (std::cmp::Reverse(k.modifier_count()), !k.scope.is_narrow()));
+        out
+    }
+
+    fn set_raw(&mut self, id: &str, value: Option<KeyChord>) {
+        let Some(c) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        let next = match value {
+            Some(chord) => vec![chord.to_shortcut(c.default_scope(), c.id)],
+            None => Vec::new(),
+        };
+        if next == self.preset.keys_of(c.id) {
+            self.overrides.remove(c.id);
+        } else {
+            self.overrides.insert(c.id.to_owned(), value);
+        }
     }
 }
 
@@ -2462,5 +2896,98 @@ mod tests {
         assert_eq!(text("ask"), "/");
         assert_eq!(text(crate::command_line::AI_COMMAND), "Shift+F9");
         assert_eq!(text("shortcuts"), "?");
+    }
+
+    #[test]
+    fn key_chords_round_trip_through_text() {
+        for key in Key::ALL.iter().copied() {
+            for ctrl in [false, true] {
+                for shift in [false, true] {
+                    for alt in [false, true] {
+                        let chord = KeyChord { ctrl, shift, alt, key };
+                        let text = chord.text();
+                        assert_eq!(KeyChord::parse(&text), Some(chord), "{text} for {chord:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shortcut_presets_do_not_collide_and_assign_clear_reset_and_swap_work() {
+        for preset in ShortcutPreset::ALL {
+            let shortcuts = Shortcuts::for_preset(preset);
+            for context in Context::all() {
+                let bound = shortcuts.bindings(context);
+                for (i, (a, ka)) in bound.iter().enumerate() {
+                    for (b, kb) in &bound[i + 1..] {
+                        if !ka.same_chord(kb) {
+                            continue;
+                        }
+                        let resolved = ka.scope.narrower_than(kb.scope) || kb.scope.narrower_than(ka.scope);
+                        assert!(
+                            resolved,
+                            "preset {:?}: {} and {} both take {} in {context:?}",
+                            preset,
+                            a.id,
+                            b.id,
+                            ka.text()
+                        );
+                    }
+                }
+            }
+        }
+        let sw = Shortcuts::for_preset(ShortcutPreset::Solidworks);
+        assert_eq!(sw.shortcut_text("zoom_fit").as_deref(), Some("F"));
+        assert_eq!(sw.shortcut_text("view_front").as_deref(), Some("Ctrl+1"));
+        assert_eq!(sw.shortcut_text("view_isometric").as_deref(), Some("Ctrl+7"));
+        assert_eq!(sw.shortcut_text("normal_to").as_deref(), Some("Ctrl+8"));
+        let fusion = Shortcuts::for_preset(ShortcutPreset::Fusion);
+        assert_eq!(fusion.shortcut_text("zoom_fit").as_deref(), Some("F6"));
+        assert_eq!(fusion.shortcut_text("view_front").as_deref(), Some("F"));
+
+        let mut s = Shortcuts::default();
+        assert_eq!(s.assign("revolve", KeyChord::plain(Key::V)), Ok(()));
+        assert_eq!(s.shortcut_text("revolve").as_deref(), Some("V"));
+        assert!(s.is_modified("revolve"));
+
+        let conflict = s.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
+        assert_eq!(conflict.command, "extrude");
+        assert_eq!(conflict.with, ["sketch"]);
+        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"), "refused until swapped");
+        s.swap(&conflict);
+        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("S"));
+        assert_eq!(s.shortcut_text("sketch").as_deref(), Some("E"));
+
+        s.clear("extrude");
+        assert_eq!(s.shortcut_text("extrude"), None);
+        s.reset("extrude");
+        assert_eq!(s.shortcut_text("extrude").as_deref(), Some("E"));
+        assert_eq!(s.shortcut_text("sketch"), None, "the command that held E is cleared so E is not bound twice");
+        s.reset("sketch");
+        assert_eq!(s.shortcut_text("sketch").as_deref(), Some("S"));
+        s.reset_all(ShortcutPreset::Solidworks);
+        assert!(s.overrides.is_empty());
+        assert_eq!(s.preset, ShortcutPreset::Solidworks);
+    }
+
+    #[test]
+    fn swapped_and_reassigned_keys_survive_settings_reload() {
+        let mut shortcuts = Shortcuts::default();
+        let conflict = shortcuts.assign("extrude", KeyChord::plain(Key::S)).unwrap_err();
+        shortcuts.swap(&conflict);
+        shortcuts.clear("chamfer");
+        shortcuts.assign("revolve", KeyChord::plain(Key::C)).unwrap();
+        let saved = serde_json::to_value(&shortcuts).unwrap();
+        assert_eq!(Shortcuts::from_json(&saved), shortcuts);
+    }
+
+    #[test]
+    fn working_commands_have_unique_shortcut_row_labels() {
+        let mut seen = HashSet::new();
+        for c in all().iter().filter(|c| c.in_app() && c.is_working()) {
+            let label = c.shortcut_row_label();
+            assert!(seen.insert(label.clone()), "duplicate shortcut row label {label} on {}", c.id);
+        }
     }
 }

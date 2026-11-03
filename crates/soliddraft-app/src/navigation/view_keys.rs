@@ -278,6 +278,26 @@ fn chord_is(row: &Binding, key: &commands::Shortcut) -> bool {
 }
 
 impl ViewKeys {
+    /// Explicit command edits take precedence over view-profile aliases, including
+    /// clearing a view command's old key.
+    pub fn with_shortcuts(mut self, shortcuts: &commands::Shortcuts) -> Self {
+        let explicit =
+            |id: &str| shortcuts.overrides.contains_key(id) || shortcuts.preset != commands::ShortcutPreset::Soliddraft;
+        self.rows.retain(|(row, _)| !same_command(row.action).or_else(|| extends(row.action)).is_some_and(explicit));
+        let assigned: Vec<_> = commands::all()
+            .iter()
+            .filter(|c| explicit(c.id))
+            .flat_map(|c| shortcuts.keys_of(c.id))
+            .filter(|k| in_part_view(k.scope))
+            .collect();
+        for (row, state) in &mut self.rows {
+            if assigned.iter().any(|key| chord_is(row, key)) {
+                *state = RowState::Blocked;
+            }
+        }
+        self
+    }
+
     /// The row a key press runs, if any: active rows, rows that took a key over, and in
     /// a sketch none that leave the key to it. Modifiers match exactly; a keypad row needs
     /// a key known to be on the keypad, and a main-row key also matches one egui could not

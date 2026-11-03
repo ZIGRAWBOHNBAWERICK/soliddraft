@@ -418,7 +418,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     actions.push(AppAction::StartRepair(id));
                     ui.close();
                 }
-                if ui.add(egui::Button::new("Rename").shortcut_text("F2")).clicked() {
+                let rename_key = state.shortcuts.shortcut_text("rename").unwrap_or_default();
+                if ui.add(egui::Button::new("Rename").shortcut_text(rename_key)).clicked() {
                     state.rename = Some(Rename { feature: id, text: name.clone(), focus: true });
                     ui.close();
                 }
@@ -435,8 +436,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.close();
                 }
                 ui.separator();
+                let delete_key = state.shortcuts.shortcut_text("delete").unwrap_or_default();
                 if ui
-                    .add(egui::Button::new(egui::RichText::new("Delete").color(theme::error())).shortcut_text("Del"))
+                    .add(
+                        egui::Button::new(egui::RichText::new("Delete").color(theme::error()))
+                            .shortcut_text(delete_key),
+                    )
                     .clicked()
                 {
                     actions.push(AppAction::Command(Command::DeleteFeature(id)));

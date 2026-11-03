@@ -66,7 +66,8 @@ fn launch() -> App {
     let view = settings::view();
     state.viewport.references = view.references;
     state.viewport.grid_style = view.grid;
-    let prefs = Preferences::new(&state.navigation, state.viewport.references, state.viewport.grid_style);
+    let prefs = Preferences::new(&state.navigation, state.viewport.references, state.viewport.grid_style)
+        .with_shortcuts(&state.shortcuts);
     let mut app = Harness::builder().with_size(vec2(1200.0, 820.0)).build_ui_state(
         |ui, (prefs, state): &mut (Option<Preferences>, AppState)| preferences::window(ui.ctx(), prefs, state),
         (Some(prefs), state),
@@ -260,4 +261,44 @@ fn a_strength_drag_shows_at_once_and_is_stored_when_let_go() {
     app.run_steps(3);
     let after = GridStyle::from_json(&stored(&browser(&shelf))["view"]["grid"]);
     assert_eq!(after.strength, state(&app).viewport.grid_style.strength, "the value let go of is stored");
+}
+
+fn shortcuts_survive_a_restart(store: Store) {
+    {
+        let _session = Session::on(store.clone());
+        let mut app = launch();
+        app.get_by_label("Shortcuts").click();
+        app.run_steps(3);
+        app.get_by_label("Search commands").type_text("extrude");
+        app.run_steps(3);
+        app.get_by_label("Assign Extrude").click();
+        app.run_steps(2);
+        app.key_press(egui::Key::G);
+        app.run_steps(3);
+        assert_eq!(
+            state(&app).shortcuts.shortcut_text("extrude").as_deref(),
+            Some("G"),
+            "assigned shortcut applies to AppState at once"
+        );
+        assert_eq!(stored(&store)["shortcuts"]["overrides"]["extrude"], "G");
+    }
+    let _session = Session::on(store);
+    let app = launch();
+    assert_eq!(state(&app).shortcuts.shortcut_text("extrude").as_deref(), Some("G"), "survives restart/reload");
+}
+
+#[test]
+fn shortcuts_survive_a_restart_on_the_desktop_and_per_browser() {
+    shortcuts_survive_a_restart(file_store("shortcuts"));
+    let (first, second) = (Memory::new(), Memory::new());
+    shortcuts_survive_a_restart(browser(&first));
+    {
+        let _session = Session::on(browser(&second));
+        let app = launch();
+        assert_eq!(
+            state(&app).shortcuts.shortcut_text("extrude").as_deref(),
+            Some("E"),
+            "another browser keeps its own default shortcuts"
+        );
+    }
 }

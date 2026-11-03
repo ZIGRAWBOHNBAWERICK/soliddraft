@@ -1,19 +1,21 @@
 //! The Preferences window: a searchable list of categories on the left and the chosen
 //! page on the right. It fills Navigation > Mouse, Navigation > Orbit and zoom,
-//! Navigation > View keys and Viewport > Grid and planes; the other categories are
-//! selectable and searchable, with a Coming soon page until their controls work.
+//! Navigation > View keys, Viewport > Grid and planes and Interface > Shortcuts; the
+//! other categories are selectable and searchable, with a Coming soon page until their
+//! controls work.
 //!
 //! [`Preferences`] holds the window's state and a draft of the settings it edits. Every
 //! accepted change is handed back as a [`Change`]; the app saves it
 //! (`AppState::set_navigation`, `AppState::set_reference_display`,
-//! `AppState::set_grid_style`) and the tests can do the same without a GPU.
+//! `AppState::set_grid_style`, `AppState::set_shortcuts`) and the tests can do the same
+//! without a GPU.
 
 mod ui;
 
+use crate::commands::{self, KeyChord, ShortcutConflict, ShortcutPreset, Shortcuts};
 use crate::navigation::view_keys::{self, ViewKeys};
 use crate::navigation::{Chord, NavigationSettings, Refusal, Router, SchemaError, presets};
 use crate::settings::{GridStyle, NotKept, ReferenceDisplay};
-
 /// A page of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -35,12 +37,14 @@ pub const MOUSE: &str = "navigation.mouse";
 pub const ORBIT_ZOOM: &str = "navigation.orbit_zoom";
 pub const VIEW_KEYS: &str = "navigation.view_keys";
 pub const GRID_AND_PLANES: &str = "viewport.grid_and_planes";
+pub const SHORTCUTS: &str = "interface.shortcuts";
 
-const PAGES: [Page; 4] = [
+const PAGES: [Page; 5] = [
     Page { id: MOUSE, category: "navigation", title: "Mouse" },
     Page { id: ORBIT_ZOOM, category: "navigation", title: "Orbit and zoom" },
     Page { id: VIEW_KEYS, category: "navigation", title: "View keys" },
     Page { id: GRID_AND_PLANES, category: "viewport", title: "Grid and planes" },
+    Page { id: SHORTCUTS, category: "interface", title: "Shortcuts" },
 ];
 
 /// The pages with controls, in the order the list shows them.
@@ -77,7 +81,7 @@ const CATEGORIES: [Category; 7] = [
     Category { id: "navigation", label: "Navigation", status: Status::Available },
     Category { id: "viewport", label: "Viewport", status: Status::Available },
     Category { id: "selection_editing", label: "Selection and editing", status: Status::Reserved },
-    Category { id: "interface", label: "Interface", status: Status::Reserved },
+    Category { id: "interface", label: "Interface", status: Status::Available },
     Category { id: "appearance_graphics", label: "Appearance and graphics", status: Status::Reserved },
     Category { id: "general_documents", label: "General and documents", status: Status::Reserved },
     Category { id: "assistant", label: "Assistant", status: Status::Reserved },
@@ -141,6 +145,29 @@ fn index() -> Vec<Hit> {
     for (control, label) in ui::GRID_AND_PLANES_CONTROLS {
         all.push(hit(GRID_AND_PLANES, Some(control.to_owned()), label.to_owned()));
     }
+    for (control, label) in ui::SHORTCUTS_CONTROLS {
+        all.push(hit(SHORTCUTS, Some(control.to_owned()), label.to_owned()));
+    }
+    for preset in ShortcutPreset::ALL {
+        all.push(hit(
+            SHORTCUTS,
+            Some(format!("shortcut_preset.{}", preset.id())),
+            format!("{} shortcut preset", preset.label()),
+        ));
+    }
+    for c in commands::all() {
+        let label = if !c.in_app() {
+            format!("{} · Automation only", c.label)
+        } else if c.is_working() {
+            match c.shortcut_text() {
+                Some(k) => format!("{}: {k}", c.shortcut_row_label()),
+                None => c.shortcut_row_label(),
+            }
+        } else {
+            format!("{} · Coming soon", c.label)
+        };
+        all.push(hit(SHORTCUTS, Some(format!("command.{}", c.id)), label));
+    }
     all
 }
 
@@ -163,6 +190,8 @@ pub enum Change {
     /// Use this grid style, and save it when `keep`. A slider being dragged shows its
     /// value at once and is saved when it is let go.
     Grid { style: GridStyle, keep: bool },
+    /// Save and use these command shortcuts.
+    Shortcuts(Shortcuts),
 }
 
 /// A line the window shows under its page.
@@ -186,6 +215,14 @@ pub struct Preferences {
     pub grid: GridStyle,
     /// The grid style was changed and not saved yet.
     grid_pending: bool,
+    /// The command shortcuts as the window shows them.
+    pub shortcuts: Shortcuts,
+    /// Filters the command rows on the Shortcuts page.
+    pub shortcut_search: String,
+    /// The command waiting for a new shortcut key press.
+    pub shortcut_capture: Option<&'static str>,
+    /// A shortcut assignment waiting for the user to confirm a swap.
+    pub shortcut_conflict: Option<ShortcutConflict>,
     pub message: Option<Message>,
     /// The row waiting for a new gesture from the practice area.
     pub capture: Option<&'static str>,
@@ -208,6 +245,10 @@ impl Preferences {
             display,
             grid,
             grid_pending: false,
+            shortcuts: crate::settings::shortcuts(),
+            shortcut_search: String::new(),
+            shortcut_capture: None,
+            shortcut_conflict: None,
             message: None,
             capture: None,
             practice_label: "Try a gesture here".to_owned(),
@@ -215,6 +256,17 @@ impl Preferences {
             mac,
             changes: Vec::new(),
         }
+    }
+
+    /// Sets the command shortcuts the window starts with.
+    pub fn with_shortcuts(mut self, shortcuts: &Shortcuts) -> Self {
+        self.shortcuts = shortcuts.clone();
+        self
+    }
+
+    /// Whether the Shortcuts page is waiting for the next key press.
+    pub fn is_capturing_key(&self) -> bool {
+        self.page == SHORTCUTS && self.search.trim().is_empty() && self.shortcut_capture.is_some()
     }
 
     /// The changes made since the last call, for the app to save.
@@ -236,6 +288,8 @@ impl Preferences {
             self.highlight = None;
             self.message = None;
             self.capture = None;
+            self.shortcut_capture = None;
+            self.shortcut_conflict = None;
         }
     }
 
@@ -367,6 +421,119 @@ impl Preferences {
         self.commit(s, Some("View keys are back to SolidDraft's own.".into()));
     }
 
+    fn commit_shortcuts(&mut self, said: Option<String>) {
+        self.message = said.map(|text| Message { text, error: false });
+        self.changes.push(Change::Shortcuts(self.shortcuts.clone()));
+    }
+
+    /// Starts waiting for a key press to assign to command `id`.
+    pub fn start_shortcut_capture(&mut self, id: &'static str) {
+        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        self.shortcut_capture = Some(c.id);
+        self.shortcut_conflict = None;
+        self.message = Some(Message {
+            text: format!("Press a new key for {}, or Esc to cancel.", c.shortcut_row_label()),
+            error: false,
+        });
+    }
+
+    /// Stops waiting for a key press without changing any shortcut.
+    pub fn cancel_shortcut_capture(&mut self) {
+        self.shortcut_capture = None;
+        self.message = None;
+    }
+
+    /// Assigns `chord` to command `id`. When another command in a conflicting scope
+    /// already holds `chord`, records the conflict and offers to swap instead of
+    /// overwriting it.
+    pub fn assign_shortcut(&mut self, id: &str, chord: KeyChord) -> Result<(), ShortcutConflict> {
+        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return Ok(()) };
+        self.shortcut_capture = None;
+        match self.shortcuts.assign(c.id, chord) {
+            Ok(()) => {
+                self.shortcut_conflict = None;
+                self.commit_shortcuts(Some(format!("{}: shortcut set to {}.", c.shortcut_row_label(), chord.text())));
+                Ok(())
+            }
+            Err(conflict) => {
+                let text = conflict.message();
+                self.shortcut_conflict = Some(conflict.clone());
+                self.message = Some(Message { text, error: true });
+                Err(conflict)
+            }
+        }
+    }
+
+    /// Swaps the pending conflicting shortcut between the target command and the command
+    /// that held it.
+    pub fn swap_shortcut(&mut self) -> bool {
+        let Some(conflict) = self.shortcut_conflict.take() else { return false };
+        self.shortcut_capture = None;
+        self.shortcuts.swap(&conflict);
+        let target = commands::get(conflict.command).map_or(conflict.command.to_owned(), |c| c.shortcut_row_label());
+        let others: Vec<String> = conflict
+            .with
+            .iter()
+            .filter_map(|id| commands::get(id))
+            .map(|c| {
+                let now = self.shortcuts.shortcut_text(c.id).unwrap_or_else(|| "None".to_owned());
+                format!("{} ({now})", c.shortcut_row_label())
+            })
+            .collect();
+        self.commit_shortcuts(Some(format!(
+            "Swapped shortcuts: {target} is now {}; {}.",
+            conflict.chord.text(),
+            others.join(", ")
+        )));
+        true
+    }
+
+    /// Dismisses the pending shortcut conflict without changing any shortcut.
+    pub fn cancel_shortcut_conflict(&mut self) {
+        self.shortcut_conflict = None;
+        self.message = None;
+    }
+
+    /// Clears command `id`'s shortcut.
+    pub fn clear_shortcut(&mut self, id: &str) {
+        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        self.shortcut_capture = None;
+        self.shortcut_conflict = None;
+        self.shortcuts.clear(c.id);
+        self.commit_shortcuts(Some(format!("{}: shortcut cleared.", c.shortcut_row_label())));
+    }
+
+    /// Resets command `id`'s shortcut back to the active preset's default.
+    pub fn reset_shortcut(&mut self, id: &str) {
+        let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
+        self.shortcut_capture = None;
+        self.shortcut_conflict = None;
+        for key in self.shortcuts.preset.keys_of(c.id) {
+            let chord = KeyChord::from(key);
+            if !self.shortcuts.conflicts_for(c.id, chord).is_empty() {
+                let _ = self.assign_shortcut(c.id, chord);
+                return;
+            }
+        }
+        self.shortcuts.reset(c.id);
+        let text = match self.shortcuts.shortcut_text(c.id) {
+            Some(k) => format!("{}: shortcut reset to {k}.", c.shortcut_row_label()),
+            None => format!("{}: shortcut reset to None.", c.shortcut_row_label()),
+        };
+        self.commit_shortcuts(Some(text));
+    }
+
+    /// Resets all shortcuts to `preset`.
+    pub fn reset_all_shortcuts(&mut self, preset: ShortcutPreset) {
+        self.shortcut_capture = None;
+        self.shortcut_conflict = None;
+        self.shortcuts.reset_all(preset);
+        let mut navigation = self.draft.clone();
+        navigation.keyboard_profile = preset.id().to_owned();
+        self.commit(navigation, None);
+        self.commit_shortcuts(Some(format!("Shortcuts reset to {}.", preset.label())));
+    }
+
     /// Draws the window's contents.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui::show(self, ui);
@@ -399,6 +566,11 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
             Change::Grid { style, keep: false } => state.viewport.grid_style = style,
             Change::Grid { style, keep: true } => {
                 if let Err(why) = state.set_grid_style(style) {
+                    p.not_kept(&why);
+                }
+            }
+            Change::Shortcuts(s) => {
+                if let Err(why) = state.set_shortcuts(s) {
                     p.not_kept(&why);
                 }
             }

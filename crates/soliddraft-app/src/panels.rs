@@ -36,12 +36,6 @@ impl Side {
         }
     }
 
-    /// The show-or-hide shortcut, from the command registry. F9 hides the FeatureManager
-    /// in SolidWorks.
-    pub fn shortcut(self) -> String {
-        crate::commands::get(self.command()).and_then(|c| c.shortcut_text()).unwrap_or_default()
-    }
-
     pub fn min_width(self) -> f32 {
         match self {
             Side::Tree => 200.0,

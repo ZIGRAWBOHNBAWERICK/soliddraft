@@ -507,12 +507,10 @@ impl Preferences {
         let Some(c) = commands::get(id).filter(|c| c.in_app() && c.is_working()) else { return };
         self.shortcut_capture = None;
         self.shortcut_conflict = None;
-        for key in self.shortcuts.preset.keys_of(c.id) {
-            let chord = KeyChord::from(key);
-            if !self.shortcuts.conflicts_for(c.id, chord).is_empty() {
-                let _ = self.assign_shortcut(c.id, chord);
-                return;
-            }
+        if let Some(conflict) = self.shortcuts.reset_conflict(c.id) {
+            self.shortcut_conflict = Some(conflict);
+            self.message = None;
+            return;
         }
         self.shortcuts.reset(c.id);
         let text = match self.shortcuts.shortcut_text(c.id) {

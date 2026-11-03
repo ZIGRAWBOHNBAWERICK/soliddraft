@@ -982,6 +982,8 @@ pub struct ShortcutConflict {
     pub chord: KeyChord,
     /// The commands that already use `chord` in a conflicting scope.
     pub with: Vec<&'static str>,
+    /// Restore all preset aliases rather than assigning a single replacement key.
+    restore_defaults: bool,
 }
 
 impl ShortcutConflict {
@@ -994,6 +996,9 @@ impl ShortcutConflict {
             .map(|c| format!("{} ({})", c.label, c.default_scope().label()))
             .collect();
         let target = get(self.command).map_or(self.command, |c| c.label);
+        if self.restore_defaults {
+            return format!("Restoring {target} shortcuts conflicts with {}. Swap shortcuts?", owners.join(" and "));
+        }
         format!("{} is already used by {}. Swap shortcuts with {}?", self.chord.text(), owners.join(" and "), target)
     }
 }
@@ -1077,12 +1082,16 @@ impl Shortcuts {
     /// Other commands whose current shortcuts conflict with assigning `chord` to `id`.
     pub fn conflicts_for(&self, id: &str, chord: KeyChord) -> Vec<&'static CommandSpec> {
         let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return Vec::new() };
-        let scope = target.default_scope();
-        let candidate = chord.to_shortcut(scope, target.id);
+        self.conflicts_for_key(target.id, chord.to_shortcut(target.default_scope(), target.id))
+    }
+
+    fn conflicts_for_key(&self, id: &str, candidate: Shortcut) -> Vec<&'static CommandSpec> {
         all()
             .iter()
-            .filter(|c| c.in_app() && c.is_working() && c.id != target.id)
-            .filter(|c| self.keys_of(c.id).iter().any(|k| k.same_chord(&candidate) && scope.conflicts_with(k.scope)))
+            .filter(|c| c.in_app() && c.is_working() && c.id != id)
+            .filter(|c| {
+                self.keys_of(c.id).iter().any(|k| k.same_chord(&candidate) && candidate.scope.conflicts_with(k.scope))
+            })
             .collect()
     }
 
@@ -1096,6 +1105,7 @@ impl Shortcuts {
                 command: target.id,
                 chord,
                 with: conflicts.into_iter().map(|c| c.id).collect(),
+                restore_defaults: false,
             });
         }
         self.set_raw(target.id, Some(chord));
@@ -1110,7 +1120,11 @@ impl Shortcuts {
         for &other in &conflict.with {
             self.set_raw(other, None);
         }
-        self.set_raw(conflict.command, Some(conflict.chord));
+        if conflict.restore_defaults {
+            self.overrides.remove(conflict.command);
+        } else {
+            self.set_raw(conflict.command, Some(conflict.chord));
+        }
         for &other in &conflict.with {
             let replacement = previous.filter(|chord| self.conflicts_for(other, *chord).is_empty());
             self.set_raw(other, replacement);
@@ -1122,14 +1136,33 @@ impl Shortcuts {
         self.set_raw(id, None);
     }
 
+    /// Conflicts with every preset alias, checked in that alias's actual workspace.
+    pub fn reset_conflict(&self, id: &str) -> Option<ShortcutConflict> {
+        let target = get(id).filter(|c| c.in_app() && c.is_working())?;
+        let defaults = self.preset.keys_of(target.id);
+        let mut with = Vec::new();
+        for key in &defaults {
+            for command in self.conflicts_for_key(target.id, *key) {
+                if !with.contains(&command.id) {
+                    with.push(command.id);
+                }
+            }
+        }
+        (!with.is_empty()).then(|| ShortcutConflict {
+            command: target.id,
+            chord: defaults[0].into(),
+            with,
+            restore_defaults: true,
+        })
+    }
+
     /// Puts `id` back to `self.preset`'s default, clearing any other override that had
     /// taken that key.
     pub fn reset(&mut self, id: &str) {
         let Some(target) = get(id).filter(|c| c.in_app() && c.is_working()) else { return };
         let defaults = self.preset.keys_of(target.id);
         for d in &defaults {
-            let dc = KeyChord::from(*d);
-            let clashing: Vec<&'static str> = self.conflicts_for(target.id, dc).into_iter().map(|c| c.id).collect();
+            let clashing: Vec<&'static str> = self.conflicts_for_key(target.id, *d).into_iter().map(|c| c.id).collect();
             for other in clashing {
                 self.set_raw(other, None);
             }

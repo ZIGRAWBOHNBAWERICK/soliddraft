@@ -666,3 +666,28 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "soliddraft");
     assert_eq!(file_json(&dir)["theme"], "dark", "other settings keys stay");
 }
+
+#[test]
+fn reset_warns_for_secondary_workspace_aliases_and_restores_all_of_them() {
+    use soliddraft_app::commands::ShortcutPreset;
+    let (_guard, dir) = config_dir("reset-workspace-alias");
+    write(&dir, r#"{"shortcuts":{"preset":"soliddraft","overrides":{"zoom_fit":null,"drawing_section":"Z"}}}"#);
+    let mut w = window();
+    w.run_steps(2);
+    click(&mut w, "Shortcuts");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("fit");
+    w.run_steps(3);
+    click(&mut w, "Reset Fit");
+    let conflict = w.state().shortcut_conflict.as_ref().expect("drawing Z requires confirmation");
+    assert_eq!(conflict.with, ["drawing_section"], "model Front's F does not conflict with drawing Fit's F");
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["drawing_section"], "Z", "nothing displaced yet");
+    assert!(w.state().shortcuts.keys_of("zoom_fit").is_empty());
+    click(&mut w, "Swap");
+    let shortcuts = &w.state().shortcuts;
+    assert_eq!(shortcuts.keys_of("zoom_fit"), ShortcutPreset::Soliddraft.keys_of("zoom_fit"));
+    assert!(shortcuts.keys_of("drawing_section").is_empty());
+    assert_eq!(shortcuts.shortcut_text("view_front").as_deref(), Some("F"), "Front keeps its unrelated key");
+    assert_eq!(settings::shortcuts(), *shortcuts, "all restored aliases survive a reload");
+    click(&mut w, "Reset Fit");
+    assert!(w.state().shortcut_conflict.is_none(), "resetting an unchanged default has no false conflict");
+}

@@ -1060,6 +1060,7 @@ impl SolidDraftApp {
                         self.state.viewport.references,
                         self.state.viewport.grid_style,
                     )
+                    .with_shortcuts(&self.state.shortcuts)
                 });
             }
             AppAction::ShowShortcuts => self.state.show_shortcuts = true,

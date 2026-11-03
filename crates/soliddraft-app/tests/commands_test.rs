@@ -37,6 +37,10 @@ fn harness() -> App<'static> {
 
 fn harness_with(doc: fn() -> soliddraft_app::document::Document) -> App<'static> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/commands");
+    harness_in(doc, dir)
+}
+
+fn harness_in(doc: fn() -> soliddraft_app::document::Document, dir: PathBuf) -> App<'static> {
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir));
     Harness::builder()
@@ -233,4 +237,74 @@ fn mass_properties_button_calculates_on_request_without_measuring_selection() {
     assert!(harness.query_by_label("12000 mm³").is_some());
     harness.render().unwrap().save(dir.join("after-request.png")).unwrap();
     println!("mass properties viewport proof: {}", dir.display());
+}
+
+#[test]
+fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
+    let _turn = gpu_turn();
+    if !gpu_available() {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("soliddraft-shortcut-editor-live-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut harness = harness_in(soliddraft_app::demo_document, dir.clone());
+    harness.run_steps(3);
+    let proof = std::env::var_os("SOLIDDRAFT_SHORTCUT_PROOF_DIR").map(PathBuf::from);
+    if let Some(proof) = &proof {
+        std::fs::create_dir_all(proof).unwrap();
+    }
+
+    // Open Preferences > Shortcuts, assign G to Extrude, and swap Sketch (S) with Chamfer (C).
+    harness.state_mut().state.push(AppAction::ShowPreferences);
+    harness.run_steps(3);
+    harness.get_by_label("Shortcuts").click();
+    harness.run_steps(3);
+    if let Some(proof) = &proof {
+        harness.render().unwrap().save(proof.join("shortcuts-editor.png")).unwrap();
+    }
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").type_text("extrude");
+    harness.run_steps(3);
+    harness.get_by_label("Assign Extrude").click();
+    harness.run_steps(2);
+    // While capturing a shortcut, pressing G assigns it instead of firing a viewport command.
+    harness.key_press(Key::G);
+    harness.run_steps(3);
+    assert!(harness.state().state.editor.is_none(), "capturing a key does not run a command");
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("extrude").as_deref(), Some("G"));
+
+    harness.get_by_label("Clear search").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").type_text("chamfer");
+    harness.run_steps(3);
+    harness.get_by_label("Assign Chamfer").click();
+    harness.run_steps(2);
+    harness.key_press(Key::S);
+    harness.run_steps(3);
+    if let Some(proof) = &proof {
+        harness.render().unwrap().save(proof.join("shortcut-conflict.png")).unwrap();
+    }
+    harness.get_by_label("Swap").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("chamfer").as_deref(), Some("S"));
+    assert_eq!(harness.state().state.shortcuts.shortcut_text("sketch").as_deref(), Some("C"));
+
+    // Close Preferences and press G: Extrude opens immediately without a restart.
+    harness.get_by_label("Close window").click();
+    harness.run_steps(3);
+    assert!(harness.state().preferences.is_none());
+    harness.key_press(Key::E);
+    harness.run_steps(2);
+    assert!(harness.state().state.editor.is_none(), "old key E no longer runs Extrude");
+    harness.key_press(Key::G);
+    harness.run_steps(3);
+    assert!(harness.state().state.editor.is_some(), "new key G runs Extrude immediately");
+    if let Some(proof) = &proof {
+        harness.render().unwrap().save(proof.join("assigned-key-extrude.png")).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }

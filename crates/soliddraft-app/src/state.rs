@@ -730,6 +730,8 @@ pub struct AppState {
     pub commands: crate::commands::History,
     /// The navigation preset, the wheel, the view keys and the camera settings.
     pub navigation: crate::navigation::NavigationSettings,
+    /// The shortcut preset and per-command overrides.
+    pub shortcuts: crate::commands::Shortcuts,
     /// Autosave and the copies found after a crash. `None` until the app starts it, and
     /// in tests and automated runs that do not.
     pub recovery: Option<crate::recovery::Recovery>,
@@ -778,6 +780,7 @@ impl AppState {
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),
             commands: crate::settings::command_history(),
             navigation: crate::settings::navigation(crate::settings::install_kind()),
+            shortcuts: crate::settings::shortcuts(),
             recovery: None,
             actions: Vec::new(),
         }
@@ -838,6 +841,14 @@ impl AppState {
                 Err(e)
             }
         }
+    }
+
+    /// Uses new command shortcuts and saves them, as [`AppState::set_reference_display`]
+    /// does. When they cannot be kept they still apply until the app closes, and the note
+    /// says so.
+    pub fn set_shortcuts(&mut self, shortcuts: crate::commands::Shortcuts) -> Result<(), crate::settings::NotKept> {
+        self.shortcuts = shortcuts;
+        crate::settings::save_shortcuts(&self.shortcuts).inspect_err(|why| self.not_kept("Shortcuts", why))
     }
 
     pub fn push(&mut self, action: AppAction) {

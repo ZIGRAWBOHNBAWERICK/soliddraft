@@ -39,9 +39,9 @@ fn settings_command_opens_preferences_and_saves_navigation() {
         app.render().unwrap().save(std::path::Path::new(&proof).join("settings-desktop.png")).unwrap();
     }
 
-    app.get_by_label("Interface · Coming soon").click();
+    app.get_by_label("Selection and editing · Coming soon").click();
     app.run_steps(3);
-    assert_eq!(app.state().preferences.as_ref().unwrap().page, "interface");
+    assert_eq!(app.state().preferences.as_ref().unwrap().page, "selection_editing");
     assert!(app.query_by_role_and_label(Role::Label, "Coming soon").is_some());
     assert!(app.query_by_label("Navigation preset").is_none());
     assert!(

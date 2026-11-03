@@ -18,7 +18,7 @@
 pub mod store;
 
 use crate::command_line::BarSettings;
-use crate::commands::History;
+use crate::commands::{History, Shortcuts};
 use crate::navigation::SaveError;
 use crate::panels::Layout;
 pub use crate::viewport::grid::GridStyle;
@@ -110,6 +110,21 @@ fn command_history_from(all: &Value) -> History {
     let mut history: History = serde_json::from_value(all["commands"].clone()).unwrap_or_default();
     history.retain_known();
     history
+}
+
+/// The user's shortcut preset and overrides, or the defaults when there are none or
+/// they are unreadable.
+pub fn shortcuts() -> Shortcuts {
+    shortcuts_from(&stored())
+}
+
+/// Saves the user's shortcut preset and overrides.
+pub fn save_shortcuts(shortcuts: &Shortcuts) -> Result<(), NotKept> {
+    save_section("shortcuts", shortcuts)
+}
+
+fn shortcuts_from(all: &Value) -> Shortcuts {
+    Shortcuts::from_json(&all["shortcuts"])
 }
 
 /// File locations, or none when there are none or they are unreadable.
@@ -559,6 +574,25 @@ mod tests {
             Some(ProviderKind::OpenRouter),
             "the assistant section is kept"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn shortcuts_persist_beside_other_keys() {
+        use crate::commands::{KeyChord, ShortcutPreset};
+        let dir = std::env::temp_dir().join(format!("soliddraft-shortcuts-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
+        let store = file_store(&file);
+        assert_eq!(shortcuts_from(&store.load()), Shortcuts::default());
+        let mut s = Shortcuts::for_preset(ShortcutPreset::Solidworks);
+        s.assign("revolve", KeyChord::plain(egui::Key::V)).unwrap();
+        s.clear("chamfer");
+        save_section_to(&store, "shortcuts", &s).unwrap();
+        assert_eq!(shortcuts_from(&store.load()), s);
+        let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(all["theme"], "dark");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

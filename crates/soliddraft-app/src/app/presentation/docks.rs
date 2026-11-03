@@ -67,11 +67,20 @@ pub(in crate::app) fn show_dock(ui: &mut egui::Ui, dock: &mut DockState<Tab>, id
 /// The strip a hidden side area leaves at its edge: a chevron pointing into the
 /// window and the title set on end, reading bottom to top like the tab of a collapsed
 /// task pane. Returns true when clicked.
-pub(in crate::app) fn strip(ui: &mut egui::Ui, side: Side, title: &str) -> bool {
+pub(in crate::app) fn strip(
+    ui: &mut egui::Ui,
+    side: Side,
+    title: &str,
+    shortcuts: &crate::commands::Shortcuts,
+) -> bool {
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
     let label = format!("Show the {}", side.name());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
-    let resp = resp.on_hover_text(format!("{label} ({})", side.shortcut()));
+    let hint = match shortcuts.shortcut_text(side.command()) {
+        Some(key) => format!("{label} ({key})"),
+        None => label,
+    };
+    let resp = resp.on_hover_text(hint);
     let painter = ui.painter();
     if resp.hovered() {
         painter.rect_filled(rect, CornerRadius::ZERO, theme::hover());

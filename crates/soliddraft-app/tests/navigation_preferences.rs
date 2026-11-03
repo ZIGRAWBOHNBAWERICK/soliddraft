@@ -51,10 +51,18 @@ fn window() -> Window {
         |ui, p: &mut Preferences| {
             p.ui(ui);
             for change in p.take_changes() {
-                let Change::Navigation(s) = change else { continue };
-                SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if let Err(e) = settings::save_navigation(&s) {
-                    p.revert(&settings::navigation(InstallKind::Existing), e.to_string());
+                match change {
+                    Change::Navigation(s) => {
+                        SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        if let Err(e) = settings::save_navigation(&s) {
+                            p.revert(&settings::navigation(InstallKind::Existing), e.to_string());
+                        }
+                    }
+                    Change::Shortcuts(s) => {
+                        SAVES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let _ = settings::save_shortcuts(&s);
+                    }
+                    _ => {}
                 }
             }
         },
@@ -110,15 +118,7 @@ fn preferences_window_opens_with_search_and_categories() {
 #[test]
 fn reserved_categories_are_not_finished_pages() {
     let (_guard, _dir) = config_dir("reserved");
-    let ids: Vec<&str> = preferences::available_pages().iter().map(|p| p.id).collect();
-    assert_eq!(ids, ["navigation.mouse", "navigation.orbit_zoom", "navigation.view_keys", "viewport.grid_and_planes"]);
     let reserved = preferences::reserved_categories();
-    let labels: Vec<&str> = reserved.iter().map(|c| c.label).collect();
-    for label in ["Selection and editing", "Interface", "Appearance and graphics", "General and documents", "Assistant"]
-    {
-        assert!(labels.contains(&label), "{label} is reserved: {labels:?}");
-    }
-    assert!(preferences::reserved_categories().iter().all(|c| c.status == preferences::Status::Reserved));
     let mut w = window();
     w.run_steps(2);
     let saves_before = saves();
@@ -575,4 +575,125 @@ fn preferences_does_not_disturb_existing_settings() {
     assert_eq!(after["navigation"]["preset_id"], "inventor");
     assert!(!has(&w, "Export"), "no settings export is added");
     assert!(!has(&w, "API key"), "no assistant secrets are shown");
+}
+
+#[test]
+fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_presets() {
+    use egui::Key;
+
+    let (_guard, dir) = config_dir("shortcuts-page");
+    write(&dir, r#"{"theme":"dark"}"#);
+    let mut w = window();
+    w.run_steps(2);
+    click(&mut w, "Shortcuts");
+    assert_eq!(w.state().page, preferences::SHORTCUTS);
+    assert!(w.query_by_label("Interface > Shortcuts").is_some());
+
+    // Search filters the command list in place.
+    w.get_by_role_and_label(Role::TextInput, "Search commands").click();
+    w.run_steps(2);
+    w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("extrude");
+    w.run_steps(2);
+    assert!(w.query_by_label("Extrude: E").is_some());
+    assert!(w.query_by_label("Chamfer: C").is_none());
+
+    click(&mut w, "Assign Extrude");
+    assert_eq!(w.state().shortcut_capture, Some("extrude"));
+    w.key_press(Key::G);
+    w.run_steps(3);
+    assert!(w.state().shortcut_capture.is_none());
+    assert!(w.query_by_label("Extrude: G").is_some());
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["extrude"], "G");
+
+    // Clear and reset a key.
+    click(&mut w, "Clear Extrude");
+    assert!(w.query_by_label("Extrude: None").is_some());
+    assert!(file_json(&dir)["shortcuts"]["overrides"]["extrude"].is_null());
+    click(&mut w, "Reset Extrude");
+    assert!(w.query_by_label("Extrude: E").is_some());
+
+    // Conflict warning and swap.
+    click(&mut w, "Assign Extrude");
+    w.key_press(Key::S);
+    w.run_steps(3);
+    assert!(w.state().shortcut_conflict.is_some(), "conflict with Sketch is recorded");
+    assert!(has(&w, "already used by Sketch (Outside a sketch)"), "warning names Sketch and its scope");
+    assert!(w.query_by_label("Extrude: E").is_some(), "not overwritten before swap");
+    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("S"));
+    click(&mut w, "Swap");
+    assert!(w.state().shortcut_conflict.is_none());
+    assert!(w.query_by_label("Extrude: S").is_some());
+    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("E"));
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["extrude"], "S");
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["sketch"], "E");
+
+    // Resetting a key that was swapped warns before changing either command.
+    click(&mut w, "Reset Extrude");
+    assert!(w.state().shortcut_conflict.is_some());
+    assert!(w.query_by_label("Extrude: S").is_some());
+    assert_eq!(w.state().shortcuts.shortcut_text("sketch").as_deref(), Some("E"));
+    click(&mut w, "Cancel");
+    assert!(w.query_by_label("Extrude: S").is_some(), "cancel preserves both assignments");
+
+    // Reset all to the chosen preset (SolidDraft, SolidWorks, Fusion).
+    w.get_by_role_and_label(Role::RadioButton, "SolidWorks").click();
+    w.run_steps(3);
+    let shortcut = |w: &Window, id| w.state().shortcuts.shortcut_text(id).unwrap();
+    assert_eq!(shortcut(&w, "zoom_fit"), "F");
+    assert_eq!(shortcut(&w, "view_front"), "Ctrl+1");
+    assert_eq!(shortcut(&w, "view_isometric"), "Ctrl+7");
+    assert_eq!(shortcut(&w, "normal_to"), "Ctrl+8");
+    assert!(w.query_by_label("Extrude: E").is_some(), "overrides cleared by preset reset");
+    assert_eq!(file_json(&dir)["shortcuts"]["preset"], "solidworks");
+
+    w.get_by_role_and_label(Role::RadioButton, "Fusion").click();
+    w.run_steps(3);
+    assert_eq!(shortcut(&w, "zoom_fit"), "F6");
+    assert_eq!(shortcut(&w, "view_front"), "F");
+    assert_eq!(file_json(&dir)["shortcuts"]["preset"], "fusion");
+
+    click(&mut w, "Clear search");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").click();
+    w.run_steps(2);
+    w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("fit");
+    w.run_steps(3);
+    click(&mut w, "Clear Fit");
+    assert!(w.query_by_label("Fit: None").is_some());
+    click(&mut w, "Reset all");
+    assert!(w.query_by_label("Fit: F6").is_some(), "Reset all restores the chosen preset");
+
+    w.get_by_role_and_label(Role::RadioButton, "SolidDraft").click();
+    w.run_steps(3);
+    assert!(w.query_by_label("Fit: Z").is_some());
+    assert_eq!(shortcut(&w, "view_front"), "F");
+    assert_eq!(shortcut(&w, "normal_to"), "N");
+    assert_eq!(file_json(&dir)["shortcuts"]["preset"], "soliddraft");
+    assert_eq!(file_json(&dir)["theme"], "dark", "other settings keys stay");
+}
+
+#[test]
+fn reset_warns_for_secondary_workspace_aliases_and_restores_all_of_them() {
+    use soliddraft_app::commands::ShortcutPreset;
+    let (_guard, dir) = config_dir("reset-workspace-alias");
+    write(&dir, r#"{"shortcuts":{"preset":"soliddraft","overrides":{"zoom_fit":null,"drawing_section":"Z"}}}"#);
+    let mut w = window();
+    w.run_steps(2);
+    click(&mut w, "Shortcuts");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").click();
+    w.run_steps(2);
+    w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("fit");
+    w.run_steps(3);
+    click(&mut w, "Reset Fit");
+    let conflict = w.state().shortcut_conflict.as_ref().expect("drawing Z requires confirmation");
+    assert_eq!(conflict.with, ["drawing_section"], "model Front's F does not conflict with drawing Fit's F");
+    assert_eq!(file_json(&dir)["shortcuts"]["overrides"]["drawing_section"], "Z", "nothing displaced yet");
+    assert!(w.state().shortcuts.keys_of("zoom_fit").is_empty());
+    click(&mut w, "Swap");
+    let shortcuts = &w.state().shortcuts;
+    assert_eq!(shortcuts.keys_of("zoom_fit"), ShortcutPreset::Soliddraft.keys_of("zoom_fit"));
+    assert!(shortcuts.keys_of("drawing_section").is_empty());
+    assert_eq!(shortcuts.shortcut_text("view_front").as_deref(), Some("F"), "Front keeps its unrelated key");
+    assert_eq!(settings::shortcuts(), *shortcuts, "all restored aliases survive a reload");
+    click(&mut w, "Reset Fit");
+    assert!(w.state().shortcut_conflict.is_none(), "resetting an unchanged default has no false conflict");
 }

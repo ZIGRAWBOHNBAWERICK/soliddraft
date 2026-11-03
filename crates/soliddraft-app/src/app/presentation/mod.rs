@@ -22,17 +22,23 @@ impl SolidDraftApp {
     /// them for the current context. A key whose command is disabled and has nothing to
     /// say is left for the widgets.
     pub(super) fn shortcuts(&mut self, ctx: &egui::Context) {
+        if self.preferences.as_ref().is_some_and(crate::preferences::Preferences::is_capturing_key) {
+            return;
+        }
         // The open palette takes the plain keys, as a focused text field does.
         let typing = ctx.egui_wants_keyboard_input() || self.state.palette.is_some();
         let state = &self.state;
         let context = commands::Context::of(state);
         // The view-key profile's rows run first. A row that took over a command's key
         // (Onshape's N) leaves that command off the key.
-        let view_keys = (context.part() && !typing).then(|| crate::navigation::view_keys::in_use(&state.navigation));
+        let view_keys = (context.part() && !typing)
+            .then(|| crate::navigation::view_keys::in_use(&state.navigation).with_shortcuts(&state.shortcuts));
         let superseded: Vec<(&str, Key)> = view_keys.iter().flat_map(|v| v.superseded()).collect();
         // Escape closes an open menu or ribbon row, not what is underneath it.
         let popup = egui::Popup::is_any_open(ctx);
-        let bindings: Vec<_> = commands::bindings(context)
+        let bindings: Vec<_> = state
+            .shortcuts
+            .bindings(context)
             .into_iter()
             .filter(|(_, k)| !(popup && k.key == Key::Escape))
             .filter(|(c, k)| (!typing || k.fires_while_typing()) && (c.is_enabled(state) || (c.hint)(state).is_some()))
@@ -236,7 +242,8 @@ impl SolidDraftApp {
                 ui.separator();
                 for side in Side::ALL {
                     let shown = st.layout.panel(side).shown;
-                    if ui.add(egui::Button::selectable(shown, side.title()).shortcut_text(side.shortcut())).clicked() {
+                    let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
+                    if ui.add(egui::Button::selectable(shown, side.title()).shortcut_text(key)).clicked() {
                         st.push(AppAction::TogglePanel(side));
                         ui.close();
                     }
@@ -369,7 +376,7 @@ impl SolidDraftApp {
         egui::Panel::show_switched(root, &mut shown, collapsed, expanded, |ui, expanded| {
             if expanded {
                 show_dock(ui, dock, side.panel_id().with("dock"), &mut panels);
-            } else if strip(ui, side, title) {
+            } else if strip(ui, side, title, &panels.state.shortcuts) {
                 open_requested = true;
             }
         });
@@ -384,12 +391,16 @@ impl SolidDraftApp {
         crate::palette::show(ctx, &mut self.state);
         let st = &mut self.state;
         if st.show_shortcuts {
+            let shortcuts = st.shortcuts.clone();
             egui::Window::new("Keyboard shortcuts")
                 .collapsible(false)
                 .resizable(false)
                 .open(&mut st.show_shortcuts)
                 .show(ctx, |ui| {
-                    egui::ScrollArea::vertical().min_scrolled_height(600.0).max_height(640.0).show(ui, shortcuts_grid);
+                    egui::ScrollArea::vertical()
+                        .min_scrolled_height(600.0)
+                        .max_height(640.0)
+                        .show(ui, |ui| shortcuts_grid(ui, &shortcuts));
                 });
         }
         if st.show_about {
@@ -591,7 +602,7 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
         return;
     };
     let mut button = egui::Button::new(label);
-    if let Some(shortcut) = command.shortcut_text() {
+    if let Some(shortcut) = st.shortcuts.shortcut_text(command.id) {
         button = button.shortcut_text(shortcut);
     }
     if ui.add_enabled(command.is_enabled(st), button).on_hover_text(command.tip(st)).clicked() {
@@ -624,14 +635,15 @@ fn quick_access(ui: &mut egui::Ui, st: &mut AppState) {
 }
 
 /// Every shortcut in the registry, by where it works, then the mouse.
-fn shortcuts_grid(ui: &mut egui::Ui) {
+fn shortcuts_grid(ui: &mut egui::Ui, shortcuts: &commands::Shortcuts) {
     egui::Grid::new("shortcuts").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
         for scope in commands::Scope::ALL {
             let rows: Vec<(String, &str)> = commands::all()
                 .iter()
                 .filter(|c| c.in_app())
                 .filter_map(|c| {
-                    let keys: Vec<String> = c.keys.iter().filter(|k| k.scope == scope).map(|k| k.text()).collect();
+                    let keys: Vec<String> =
+                        shortcuts.keys_of(c.id).into_iter().filter(|k| k.scope == scope).map(|k| k.text()).collect();
                     (!keys.is_empty()).then(|| (keys.join(" / "), c.doc))
                 })
                 .collect();
@@ -676,7 +688,12 @@ fn search_popup(ui: &mut egui::Ui, st: &mut AppState, anchor: &egui::Response) {
         .into_iter()
         .map(|m| {
             let c = m.command;
-            (c.label.to_owned(), c.shortcut_text().unwrap_or_default(), c.is_enabled(st), Pick::Command(c))
+            (
+                c.label.to_owned(),
+                st.shortcuts.shortcut_text(c.id).unwrap_or_default(),
+                c.is_enabled(st),
+                Pick::Command(c),
+            )
         })
         .collect();
     for f in &st.doc.features {

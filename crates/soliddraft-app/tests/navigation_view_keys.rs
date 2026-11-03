@@ -30,6 +30,27 @@ fn ctrl() -> Modifiers {
 }
 
 #[test]
+fn edited_commands_take_precedence_over_view_profile_aliases() {
+    use commands::{KeyChord, ShortcutPreset, Shortcuts};
+    let mut shortcuts = Shortcuts::default();
+    shortcuts.assign("extrude", KeyChord::ctrl(Key::Num1)).unwrap();
+    let sw = keys("solidworks").with_shortcuts(&shortcuts);
+    assert_eq!(press(&sw, Key::Num1, ctrl()), None, "the assigned command owns Ctrl+1");
+    assert_eq!(press(&sw, Key::Num7, ctrl()), Some(Action::Isometric), "unrelated aliases still work");
+
+    shortcuts.clear("view_isometric");
+    let sw = keys("solidworks").with_shortcuts(&shortcuts);
+    assert_eq!(press(&sw, Key::Num7, ctrl()), None, "clearing also removes the old profile alias");
+    shortcuts.clear("normal_to");
+    assert!(keys("onshape").with_shortcuts(&shortcuts).superseded().next().is_none());
+
+    shortcuts.reset_all(ShortcutPreset::Fusion);
+    let sw = keys("solidworks").with_shortcuts(&shortcuts);
+    assert_eq!(press(&sw, Key::Num1, ctrl()), None, "the chosen preset replaces other view aliases");
+    assert_eq!(shortcuts.shortcut_text("zoom_fit").as_deref(), Some("F6"));
+}
+
+#[test]
 fn view_key_profile_separation_and_conflict_list() {
     assert_eq!(view_keys::validate_all(), Ok(()));
     let ids: Vec<&str> = view_keys::profiles().iter().map(|p| p.id).collect();

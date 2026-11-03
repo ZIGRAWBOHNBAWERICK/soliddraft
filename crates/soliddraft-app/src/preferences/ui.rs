@@ -1,9 +1,11 @@
 //! The Preferences window's widgets: the search field, the category list, the three
-//! Navigation pages and Viewport > Grid and planes.
+//! Navigation pages, Viewport > Grid and planes and Interface > Shortcuts.
 
 use super::{
-    GRID_AND_PLANES, Hit, MOUSE, Message, ORBIT_ZOOM, Preferences, Status, VIEW_KEYS, categories, page, search,
+    GRID_AND_PLANES, Hit, MOUSE, Message, ORBIT_ZOOM, Preferences, SHORTCUTS, Status, VIEW_KEYS, categories, page,
+    search,
 };
+use crate::commands::{self, KeyChord, ShortcutPreset};
 use crate::navigation::view_keys::{self, RowState};
 use crate::navigation::{
     Action, Binding, Capability, EventKind, LimitKind, Outcome, Pivot, ZoomAnchor, gather, presets,
@@ -55,6 +57,13 @@ pub(super) const GRID_AND_PLANES_CONTROLS: [(&str, &str); 8] = [
     ("always_show_origin_axes", "Always show origin axes"),
 ];
 
+/// The Shortcuts page's controls, for search.
+pub(super) const SHORTCUTS_CONTROLS: [(&str, &str); 3] = [
+    ("shortcut_preset", "Shortcut preset"),
+    ("search_commands", "Search commands"),
+    ("reset_all_shortcuts", "Reset all shortcuts"),
+];
+
 pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Search");
@@ -77,6 +86,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                         ORBIT_ZOOM => orbit_zoom_page(p, ui),
                         VIEW_KEYS => view_keys_page(p, ui),
                         GRID_AND_PLANES => grid_and_planes_page(p, ui),
+                        SHORTCUTS => shortcuts_page(p, ui),
                         id => {
                             if let Some(c) = super::reserved_category(id) {
                                 ui.heading(c.label);
@@ -587,5 +597,191 @@ fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {
     }
     if control(lit(p, "reset_view_keys"), ui, |ui| ui.button("Reset view keys")).clicked() {
         p.reset_view_keys();
+    }
+}
+
+fn action_button(ui: &mut egui::Ui, caption: &str, label: &str, enabled: bool) -> egui::Response {
+    let response = ui.add_enabled(enabled, egui::Button::new(caption).min_size(vec2(0.0, 20.0)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    response
+}
+
+fn command_matches(p: &Preferences, c: &commands::CommandSpec, words: &[String]) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let row_label = c.shortcut_row_label().to_lowercase();
+    let id = c.id.to_lowercase();
+    let doc = c.doc.to_lowercase();
+    let scope = c.default_scope().label().to_lowercase();
+    let key = p
+        .shortcuts
+        .shortcut_text(c.id)
+        .unwrap_or_else(|| if c.is_working() { "None".to_owned() } else { "Coming soon".to_owned() })
+        .to_lowercase();
+    words
+        .iter()
+        .all(|w| row_label.contains(w) || id.contains(w) || doc.contains(w) || scope.contains(w) || key.contains(w))
+}
+
+fn shortcuts_page(p: &mut Preferences, ui: &mut egui::Ui) {
+    heading(ui, SHORTCUTS);
+    if let Some(target) = p.shortcut_capture {
+        let pressed = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers } => {
+                    Some((*key, *physical_key, *modifiers))
+                }
+                _ => None,
+            })
+        });
+        if let Some((key, physical_key, modifiers)) = pressed {
+            if key == egui::Key::Escape && modifiers.is_none() {
+                p.cancel_shortcut_capture();
+            } else {
+                let _ = p.assign_shortcut(target, KeyChord::from_event(key, physical_key, modifiers));
+            }
+        }
+    }
+
+    let current = p.shortcuts.preset;
+    let mut chosen_preset = None;
+    let mut reset_all = false;
+    control(lit(p, "shortcut_preset"), ui, |ui| {
+        ui.label("Shortcut preset");
+        ui.horizontal_wrapped(|ui| {
+            for preset in ShortcutPreset::ALL {
+                let lit = p.highlight.as_deref() == Some(&format!("shortcut_preset.{}", preset.id())[..]);
+                let text = if lit {
+                    egui::RichText::new(preset.label()).color(theme::accent())
+                } else {
+                    preset.label().into()
+                };
+                if ui.radio(current == preset, text).clicked() {
+                    chosen_preset = Some(preset);
+                }
+            }
+            if control(lit(p, "reset_all_shortcuts"), ui, |ui| ui.button("Reset all")).clicked() {
+                reset_all = true;
+            }
+        });
+    });
+    if let Some(preset) = chosen_preset {
+        p.reset_all_shortcuts(preset);
+    } else if reset_all {
+        p.reset_all_shortcuts(current);
+    }
+
+    ui.add_space(4.0);
+    control(lit(p, "search_commands"), ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Search commands");
+            ui.add(
+                egui::TextEdit::singleline(&mut p.shortcut_search).hint_text("Search commands").desired_width(280.0),
+            )
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search commands"));
+            if !p.shortcut_search.is_empty() && ui.small_button("Clear search").clicked() {
+                p.shortcut_search.clear();
+            }
+        });
+    });
+
+    if let Some(conflict) = p.shortcut_conflict.clone() {
+        ui.add_space(4.0);
+        egui::Frame::new().stroke(Stroke::new(1.5, theme::error())).inner_margin(6.0).corner_radius(4).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(conflict.message()).color(theme::error()));
+                if ui.button("Swap").clicked() {
+                    p.swap_shortcut();
+                }
+                if ui.button("Cancel").clicked() {
+                    p.cancel_shortcut_conflict();
+                }
+            });
+        });
+    }
+
+    ui.add_space(6.0);
+    let words: Vec<String> = p.shortcut_search.trim().to_lowercase().split_whitespace().map(str::to_owned).collect();
+    let commands: Vec<&'static commands::CommandSpec> =
+        commands::all().iter().filter(|c| command_matches(p, c, &words)).collect();
+    if commands.is_empty() {
+        ui.label("No matching commands");
+        return;
+    }
+
+    let mut start_capture = None;
+    let mut cancel_capture = false;
+    let mut clear_id = None;
+    let mut reset_id = None;
+    egui::ScrollArea::both()
+        .id_salt("shortcut_commands")
+        .max_height((ui.available_height() - 60.0).clamp(140.0, 440.0))
+        .show(ui, |ui| {
+            egui::Grid::new("shortcuts_editor_grid").num_columns(3).spacing([18.0, 6.0]).striped(true).show(ui, |ui| {
+                for c in commands {
+                    let row_lit = p.highlight.as_deref() == Some(&format!("command.{}", c.id)[..]);
+                    if !c.in_app() {
+                        ui.label(c.label).on_hover_text(c.doc);
+                        ui.label(egui::RichText::new("Automation only").color(theme::muted()));
+                        ui.label("None");
+                        ui.end_row();
+                        continue;
+                    }
+                    if !c.is_working() {
+                        let text = format!("{} · Coming soon", c.label);
+                        let rich =
+                            egui::RichText::new(text).color(if row_lit { theme::accent() } else { theme::muted() });
+                        ui.label(rich);
+                        ui.label("");
+                        ui.label("");
+                        ui.end_row();
+                        continue;
+                    }
+                    let row_name = c.shortcut_row_label();
+                    let key_text = if p.shortcut_capture == Some(c.id) {
+                        "Press a key…".to_owned()
+                    } else {
+                        p.shortcuts.shortcut_text(c.id).unwrap_or_else(|| "None".to_owned())
+                    };
+                    let summary = format!("{row_name}: {key_text}");
+                    let rich = if row_lit || p.shortcut_capture == Some(c.id) {
+                        egui::RichText::new(summary).color(theme::accent()).strong()
+                    } else {
+                        egui::RichText::new(summary)
+                    };
+                    ui.label(rich).on_hover_text(c.doc);
+                    ui.label(egui::RichText::new(c.default_scope().label()).color(theme::muted()));
+                    ui.horizontal(|ui| {
+                        ui.push_id(c.id, |ui| {
+                            if p.shortcut_capture == Some(c.id) {
+                                if action_button(ui, "Cancel", &format!("Cancel {row_name}"), true).clicked() {
+                                    cancel_capture = true;
+                                }
+                            } else {
+                                if action_button(ui, "Assign", &format!("Assign {row_name}"), true).clicked() {
+                                    start_capture = Some(c.id);
+                                }
+                                if action_button(ui, "Clear", &format!("Clear {row_name}"), true).clicked() {
+                                    clear_id = Some(c.id);
+                                }
+                                if action_button(ui, "Reset", &format!("Reset {row_name}"), true).clicked() {
+                                    reset_id = Some(c.id);
+                                }
+                            }
+                        });
+                    });
+                    ui.end_row();
+                }
+            });
+        });
+    if let Some(id) = start_capture {
+        p.start_shortcut_capture(id);
+    } else if cancel_capture {
+        p.cancel_shortcut_capture();
+    } else if let Some(id) = clear_id {
+        p.clear_shortcut(id);
+    } else if let Some(id) = reset_id {
+        p.reset_shortcut(id);
     }
 }

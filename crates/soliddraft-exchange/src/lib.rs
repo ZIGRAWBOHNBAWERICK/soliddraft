@@ -126,10 +126,10 @@ impl Report {
     pub fn summary(&self) -> String {
         match self {
             Report::Step(r) => {
-                let mut s = format!(
-                    "{} faces, {} edges; within {} mm of the exact part (proven)",
-                    r.faces, r.edges, r.max_deviation_mm
-                );
+                // A fitted surface's distance from its exact definition adds to the file's own.
+                let bound = if r.fit_mm > 0.0 { (r.max_deviation_mm + r.fit_mm).next_up() } else { r.max_deviation_mm };
+                let mut s =
+                    format!("{} faces, {} edges; within {bound} mm of the exact part (proven)", r.faces, r.edges);
                 if !r.within_tolerance {
                     s += "; over the requested tolerance";
                 }

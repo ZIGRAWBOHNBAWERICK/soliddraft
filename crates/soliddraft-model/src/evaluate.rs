@@ -1027,7 +1027,8 @@ impl Document {
                     import_record: Some(r.record),
                 }
             }
-            Err(KernelError::Unsupported(_)) => Built::failed(current, "STEP import is coming soon."),
+            Err(KernelError::Unsupported(_)) => Built::failed(current, "Coming soon"),
+            Err(KernelError::InvalidInput(message)) => Built::failed(current, message),
             Err(err) => Built::failed(current, feature_error(err)),
         }
     }

@@ -185,7 +185,7 @@ fn without_a_backend_reader_the_import_fails_in_words_and_keeps_the_source() {
     let mut doc = Document::new("Part1", kernel);
     let id = add(&mut doc, FeatureKind::ImportStep(import())).unwrap();
     let message = failure(&doc, id);
-    assert_eq!(message, "STEP import is coming soon.");
+    assert_eq!(message, "Coming soon");
     let Some(FeatureKind::ImportStep(kept)) = doc.feature(id).map(|f| f.kind.clone()) else { panic!() };
     assert_eq!(kept.source, STEP);
 }

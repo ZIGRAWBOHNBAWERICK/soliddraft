@@ -204,10 +204,89 @@ fn clean_block_and_cylinder_import_render_save_reopen_and_checked_export() {
         assert!(preview.summary()["proposals"].as_array().unwrap().is_empty());
         let mut reimported = Document::new("Re-export check", kernel.clone());
         let preview = soliddraft_app::import::Preview::read(&reimported, &exported).unwrap();
-        soliddraft_app::import::commit(&mut reimported, &preview, &[]).unwrap();
+        soliddraft_app::import::commit(&mut reimported, &preview, &Default::default()).unwrap();
         assert!((kernel.mass_properties(reimported.display_body().unwrap()).unwrap().volume - volume).abs() < 1e-6);
         app.render().unwrap().save(root.join(format!("{name}-reopened.png"))).unwrap();
     }
+}
+
+/// An approved seam through the real dialog, renderer, saved part and checked export.
+#[test]
+fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
+    let root = std::env::var_os("SOLIDDRAFT_STEP_IMPORT_PROOF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-step-repair-{}", std::process::id())));
+    std::fs::create_dir_all(&root).unwrap();
+    soliddraft_app::file::set_config_dir(Some(root.join("repair-config")));
+    let bytes = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step").to_vec();
+    let path = root.join("block-seam-20um.step");
+    std::fs::write(&path, &bytes).unwrap();
+    let kernel = soliddraft_app::kernel();
+    let mut app = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_step_dt(0.1)
+        .renderer(render_steps::renderer())
+        .build_eframe(|cc| SolidDraftApp::new(cc, Document::new("Repaired", kernel.clone()), Automation::default()));
+    app.run_steps(3);
+    app.state_mut().state.push(AppAction::ImportStep(Some(path.clone())));
+    app.run_steps(3);
+    app.get_by_label("Measured 0.02 mm");
+    app.render().unwrap().save(root.join("repair-review.png")).unwrap();
+    app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Approved by").click();
+    app.run_steps(2);
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    app.key_press(egui::Key::Delete);
+    app.run_steps(2);
+    app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Approved by").type_text("Ana Reviewer");
+    app.run_steps(3);
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    app.run_steps(3);
+
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.features[0].status, soliddraft_app::document::FeatureStatus::Ok);
+    let id = soliddraft_model::FeatureId(doc.features[0].id as u32);
+    let record = doc.model().import_record(id).unwrap().clone();
+    assert_eq!(record.changes[0].approval, soliddraft_kernel_api::Approval::User);
+    assert_eq!(record.changes[0].approver.as_deref(), Some("Ana Reviewer"));
+    assert_eq!(record.face_tolerances.len(), 4);
+    assert!(record.derivative.is_some());
+    let body = doc.display_body().unwrap();
+    assert_eq!(kernel.topology(body).unwrap().faces.len(), 6);
+    assert!((kernel.mass_properties(body).unwrap().volume - 10020.0).abs() < 1e-6);
+    let centre = app.state().state.viewport.rect.center();
+    render_steps::await_pick(&mut app, centre);
+    let selected = soliddraft_app::document::Selection::Feature(id.0.into());
+    app.state_mut().state.doc.selection = Some(selected);
+    app.run_steps(3);
+    app.get_by_label("Gap 1 approved limit");
+    app.get_by_label("Face #40 from source");
+    app.render().unwrap().save(root.join("repair-record.png")).unwrap();
+
+    let saved = root.join("repaired.dwprt");
+    tool(&mut app.state_mut().state, "save", json!({"path":saved}));
+    tool(&mut app.state_mut().state, "open", json!({"path":saved}));
+    app.run_steps(3);
+    let doc = &app.state().state.doc;
+    let soliddraft_app::document::FeatureKind::ImportStep(import) = &doc.features[0].kind else {
+        panic!("import feature")
+    };
+    assert_eq!(import.source, bytes, "the original file is kept as it was");
+    assert_eq!(import.sha256, soliddraft_model::sha256_hex(&bytes));
+    assert_eq!(import.record.as_ref(), Some(&record));
+    assert_eq!(import.decisions.values().next().unwrap(), "accept:0.02:Ana Reviewer");
+    assert!(doc.display_body().is_some(), "reopen verifies and rebuilds the repaired import");
+
+    let exported = root.join("repaired-export.step");
+    let answer = tool(&mut app.state_mut().state, "export_step", json!({"path":exported}));
+    std::fs::write(root.join("repaired-export-report.json"), serde_json::to_vec_pretty(&answer).unwrap()).unwrap();
+    assert!(!answer["report"].as_str().unwrap().contains("over the requested tolerance"));
+    let mut reimported = Document::new("Re-export check", kernel.clone());
+    let preview = soliddraft_app::import::Preview::read(&reimported, &exported).unwrap();
+    assert!(preview.summary()["proposals"].as_array().unwrap().is_empty(), "the export is closed");
+    soliddraft_app::import::commit(&mut reimported, &preview, &Default::default()).unwrap();
+    let volume = kernel.mass_properties(reimported.display_body().unwrap()).unwrap().volume;
+    assert!((volume - 10020.0).abs() < 1e-6, "{volume}");
+    app.render().unwrap().save(root.join("repair-reopened.png")).unwrap();
 }
 
 #[test]
@@ -216,10 +295,7 @@ fn unsupported_step_file_gets_a_plain_message_without_editing_the_part() {
     let source = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
     let spline = source.replace("PLANE(", "B_SPLINE_SURFACE_WITH_KNOTS(");
     let error = soliddraft_app::import::Preview::from_bytes(&doc, "spline.step", spline.into_bytes()).unwrap_err();
-    assert!(error.contains("geometry that cannot be imported yet"), "{error}");
-    for internal in ["Catallax", "stage", "unsupported", "B_SPLINE", "code"] {
-        assert!(!error.contains(internal), "{error}");
-    }
+    assert_eq!(error, "Coming soon");
     assert!(doc.features.is_empty());
     assert_eq!(doc.revision(), 0);
 }

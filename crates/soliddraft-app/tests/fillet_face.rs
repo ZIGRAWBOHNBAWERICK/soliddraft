@@ -806,12 +806,12 @@ fn output_refusals_are_plain_in_the_window() {
     for (diagnostic, shown, frame) in [
         (
             "export_step failed: step.unsupported-geometry: disagreeing shared-wall seam frames",
-            "STEP export is unavailable for this shape. Save the part or export a mesh instead.",
+            "Coming soon",
             "shared-wall-refusal",
         ),
         (
             "mass_properties failed: measure.unsupported-surface: trimmed rolling band",
-            "Volume and mass are unavailable for this shape. You can still save the part and export a mesh.",
+            "Coming soon",
             "trimmed-band-refusal",
         ),
         (
@@ -823,7 +823,7 @@ fn output_refusals_are_plain_in_the_window() {
         app.state_mut().state.note(diagnostic, NoteKind::Error);
         app.run_steps(2);
         button(&mut app, "Status details");
-        app.get_by_label(shown);
+        assert!(app.query_all_by_label(shown).next().is_some(), "{shown}");
         assert!(app.query_all_by_label(diagnostic).next().is_none());
         app.render().unwrap().save(proof_folder().join(format!("{frame}.png"))).unwrap();
         app.key_press(Key::Escape);

@@ -1,10 +1,11 @@
 //! A1: the independent V9 contract on the real adapter and exact fixture bytes.
 
-use soliddraft_kernel_api::{Decision, Disposition, ImportOptions, ImportStepRequest, Kernel, OpTag};
+use soliddraft_kernel_api::{Approval, Decision, Disposition, ImportOptions, ImportStepRequest, Kernel, OpTag};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::ImportStepFeature;
 
 const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 const TWO: &[u8] = include_bytes!("../../../ci/fixtures/import/two-blocks-5um.step");
 
 #[test]
@@ -89,4 +90,54 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
         .unwrap_err();
     assert!(refused.to_string().contains("2 solids"), "{refused}");
     assert!(refused.to_string().contains("a part holds one body"), "{refused}");
+}
+
+#[test]
+fn an_approved_seam_saves_its_limit_and_approver_and_verifies_on_reopen() {
+    let kernel = CatallaxKernel::new();
+    let options = ImportOptions::default();
+    let proposals = kernel.propose_import(WIDE, &options).unwrap().proposals;
+    let [proposal] = proposals.as_slice() else { panic!("one seam") };
+    assert_eq!(proposal.disposition, Disposition::Ask);
+    assert_eq!(proposal.tolerance_mm, "0.02");
+
+    let unanswered = ImportStepFeature::new("wide.step", WIDE.to_vec());
+    let feature = unanswered.accepted(&proposal.question, "0.03", "Ana: lead reviewer");
+    let decisions = feature.kernel_decisions().unwrap();
+    let request = ImportStepRequest {
+        name: &feature.source_name,
+        source: &feature.source,
+        sha256: &feature.sha256,
+        options: &options,
+        decisions: &decisions,
+        record: None,
+    };
+    let imported = kernel.import_step(&OpTag::new("approved"), &request).unwrap();
+    let body = imported.bodies[0].result.body;
+    assert!((kernel.mass_properties(body).unwrap().volume - 10020.0).abs() <= 1e-6);
+    let record = imported.record;
+    assert_eq!(record.format, soliddraft_kernel_api::REPAIR_FORMAT);
+    assert_eq!(record.changes[0].approval, Approval::User);
+    assert_eq!(record.changes[0].approver.as_deref(), Some("Ana: lead reviewer"));
+    assert_eq!(record.changes[0].tolerance_mm, "0.03");
+    assert_eq!(record.changes[0].max_movement_mm, "0.02");
+    assert_eq!(record.face_tolerances.len(), 4);
+    for face in &record.face_tolerances {
+        assert_eq!(face.deviation_upper_mm, "0.02", "attained, apart from the approved limit");
+        assert_eq!(face.approved_tolerance_mm, "0.03");
+    }
+
+    let reopened =
+        kernel.import_step(&OpTag::new("reopened"), &ImportStepRequest { record: Some(&record), ..request }).unwrap();
+    assert_eq!(reopened.record, record);
+    let mut forged = record.clone();
+    forged.face_tolerances[0].deviation_upper_mm = "0".into();
+    let refused =
+        kernel.import_step(&OpTag::new("forged"), &ImportStepRequest { record: Some(&forged), ..request }).unwrap_err();
+    assert!(refused.to_string().contains("without an unverified repair"), "{refused}");
+
+    let below = unanswered.accepted(&proposal.question, "0.01", "Ana").kernel_decisions().unwrap();
+    let refused =
+        kernel.import_step(&OpTag::new("below"), &ImportStepRequest { decisions: &below, ..request }).unwrap_err();
+    assert!(refused.to_string().contains("at least the measured gap"), "{refused}");
 }

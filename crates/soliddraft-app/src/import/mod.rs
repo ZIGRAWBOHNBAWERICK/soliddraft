@@ -1,10 +1,14 @@
 //! Review immutable STEP source bytes before committing the imported feature.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use serde::Deserialize;
 use serde_json::{Value, json};
-use soliddraft_assistant::tools::schema::{array, optional, string};
-use soliddraft_kernel_api::{Approval, Disposition, ImportOptions, ProposalSet};
+use soliddraft_assistant::tools::schema::{array, object, optional, string};
+use soliddraft_kernel_api::{
+    Approval, Disposition, ImportOptions, KernelError, Proposal, ProposalSet, RepairChange, RepairRecord,
+};
 use soliddraft_model::{ImportStepFeature, sha256_hex};
 
 use crate::document::{Command, Document, FeatureId, FeatureKind};
@@ -17,6 +21,17 @@ pub fn params() -> Vec<(&'static str, Value)> {
         string("The token returned by preview_import for this source and its repair questions."),
     ));
     params.push(("decline", optional(array(string("Gap id to decline, such as g0."), "Repairs to leave open."))));
+    params.push((
+        "accept",
+        optional(array(
+            object(&[
+                ("id", string("Gap id to repair, such as g0.")),
+                ("tolerance_mm", string("The allowed movement in millimetres, a plain decimal of at least the gap.")),
+                ("approver", string("The person who approved this repair.")),
+            ]),
+            "Repairs that need approval and that the user approved.",
+        )),
+    ));
     params
 }
 
@@ -29,12 +44,71 @@ pub fn source_path(input: &Value) -> Result<std::path::PathBuf, String> {
     Ok(path.into())
 }
 
+/// One repair the reviewer approved.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Approved {
+    /// The gap, such as `g0`.
+    pub id: String,
+    /// The allowed movement in millimetres, as a plain decimal.
+    pub tolerance_mm: String,
+    /// Who approved it.
+    pub approver: String,
+}
+
+/// The reviewer's answers to the proposed repairs.
+#[derive(Clone, Debug, Default)]
+pub struct Review {
+    /// Gaps to leave open. A declined gap leaves its solid unbuilt.
+    pub decline: Vec<String>,
+    /// Asked repairs to apply.
+    pub accept: Vec<Approved>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Preview {
     feature: ImportStepFeature,
     proposals: ProposalSet,
     revision: u64,
     document: soliddraft_document::DocumentId,
+    /// The dialog's allowed movement of each asked repair, by gap id.
+    allowed: BTreeMap<String, String>,
+    /// The dialog's approver.
+    approver: String,
+}
+
+/// An import failure as the interface says it.
+fn plain(error: KernelError) -> String {
+    match error {
+        KernelError::Unsupported(_) => "Coming soon".into(),
+        KernelError::InvalidInput(message) => message,
+        other => other.to_string(),
+    }
+}
+
+/// Whether a repair the kernel asks about can be approved. Only a seam can close.
+fn approvable(proposal: &Proposal) -> bool {
+    proposal.kind == "seam_close"
+}
+
+fn gap_name(proposal: &Proposal) -> String {
+    let number = proposal.id.strip_prefix('g').and_then(|n| n.parse::<usize>().ok()).unwrap_or(0) + 1;
+    format!("Gap {number}")
+}
+
+fn kind_name(kind: &str) -> &'static str {
+    match kind {
+        "seam_close" => "seam",
+        "body_gap" => "gap between bodies",
+        _ => "opening",
+    }
+}
+
+/// True for a plain decimal that covers the measured gap. The kernel checks it exactly.
+fn covers_gap(allowed: &str, proposal: &Proposal) -> bool {
+    let plain = !allowed.is_empty() && allowed.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    let reaches = |gap: f64| allowed.parse::<f64>().is_ok_and(|value| value >= gap);
+    plain && proposal.distance_max_mm.parse().is_ok_and(reaches)
 }
 
 impl Preview {
@@ -45,12 +119,14 @@ impl Preview {
 
     pub fn from_bytes(doc: &Document, name: &str, source: Vec<u8>) -> Result<Self, String> {
         let feature = ImportStepFeature::new(name, source);
-        let proposals =
-            doc.kernel().propose_import(&feature.source, &ImportOptions::default()).map_err(|e| e.to_string())?;
+        let proposals = doc.kernel().propose_import(&feature.source, &ImportOptions::default()).map_err(plain)?;
         if proposals.source_sha256 != feature.sha256 {
             return Err("the repair preview does not match the source file".into());
         }
-        Ok(Self { feature, proposals, revision: doc.revision(), document: doc.model().id() })
+        let asked = proposals.proposals.iter().filter(|p| p.disposition == Disposition::Ask);
+        let allowed = asked.map(|p| (p.id.clone(), p.tolerance_mm.clone())).collect();
+        let approver = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
+        Ok(Self { feature, proposals, revision: doc.revision(), document: doc.model().id(), allowed, approver })
     }
 
     pub fn token(&self) -> String {
@@ -70,21 +146,37 @@ impl Preview {
     }
 }
 
-pub fn commit(doc: &mut Document, preview: &Preview, decline: &[String]) -> Result<FeatureId, String> {
+pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<FeatureId, String> {
     if doc.revision() != preview.revision || doc.model().id() != preview.document || doc.proof_pending() {
         return Err("the part changed during the preview; review the import again".into());
     }
+    let find = |id: &String| {
+        let proposals = &preview.proposals.proposals;
+        proposals.iter().find(|p| &p.id == id).ok_or_else(|| format!("no repair named {id} in this file"))
+    };
     let mut feature = preview.feature.clone();
-    for id in decline {
-        let proposal = preview
-            .proposals
-            .proposals
-            .iter()
-            .find(|p| &p.id == id)
-            .ok_or_else(|| format!("no repair named {id} in this file"))?;
-        feature = feature.declined(&proposal.question);
+    for id in &review.decline {
+        feature = feature.declined(&find(id)?.question);
     }
-    if preview.proposals.proposals.iter().any(|p| p.disposition == Disposition::Ask && !decline.contains(&p.id)) {
+    for approved in &review.accept {
+        let proposal = find(&approved.id)?;
+        let approver = approved.approver.trim();
+        if proposal.disposition != Disposition::Ask {
+            return Err(format!("{} is repaired automatically and takes no approval", approved.id));
+        }
+        if review.decline.contains(&approved.id) {
+            return Err(format!("{} is both accepted and declined", approved.id));
+        }
+        if !approvable(proposal) {
+            return Err("Coming soon".into());
+        }
+        if approver.is_empty() {
+            return Err("an approved repair needs the name of who approved it".into());
+        }
+        feature = feature.accepted(&proposal.question, approved.tolerance_mm.trim(), approver);
+    }
+    let answered = |p: &Proposal| review.decline.contains(&p.id) || review.accept.iter().any(|a| a.id == p.id);
+    if preview.proposals.proposals.iter().any(|p| p.disposition == Disposition::Ask && !answered(p)) {
         return Err("this repair needs an explicit tolerance approval before it can be imported".into());
     }
     let command = Command::AddFeature(FeatureKind::ImportStep(feature));
@@ -115,40 +207,100 @@ pub fn commit(doc: &mut Document, preview: &Preview, decline: &[String]) -> Resu
     }
 }
 
+/// The repair record as rows of the feature's properties: how each gap was answered and the
+/// limit it was held to, how far its vertices moved, and how far each repaired face lies from
+/// the source. Output error belongs to an export, and later features are not covered.
+pub fn record_rows(record: &RepairRecord) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    for (index, change) in record.changes.iter().enumerate() {
+        let gap = format!("Gap {}", index + 1);
+        rows.push((gap.clone(), answer_text(change)));
+        if change.approval != Approval::Declined {
+            rows.push((format!("{gap} approved limit"), format!("{} mm", change.tolerance_mm)));
+            rows.push((format!("{gap} vertex movement"), format!("{} mm", change.max_movement_mm)));
+        }
+    }
+    for face in &record.face_tolerances {
+        rows.push((format!("Face {} from source", face.face), format!("up to {} mm", face.deviation_upper_mm)));
+    }
+    if !record.changes.is_empty() {
+        rows.push(("Repair figures".into(), "Cover the import only. Each export reports its own error.".into()));
+    }
+    rows
+}
+
+fn answer_text(change: &RepairChange) -> String {
+    let kind = kind_name(&change.kind);
+    match change.approval {
+        Approval::Automatic => format!("Repaired {kind} automatically"),
+        Approval::User => {
+            format!("Repaired {kind}, approved by {}", change.approver.as_deref().unwrap_or("the reviewer"))
+        }
+        Approval::Declined => format!("Declined {kind}; the solid stays open"),
+    }
+}
+
+fn proposal_group(ui: &mut egui::Ui, proposal: &Proposal, allowed: &mut BTreeMap<String, String>) {
+    ui.label(format!("{}: {}", gap_name(proposal), kind_name(&proposal.kind)));
+    ui.label(if proposal.distance_min_mm == proposal.distance_max_mm {
+        format!("Measured {} mm", proposal.distance_max_mm)
+    } else {
+        format!("Measured {} to {} mm", proposal.distance_min_mm, proposal.distance_max_mm)
+    });
+    match (proposal.disposition, allowed.get_mut(&proposal.id)) {
+        (Disposition::Ask, Some(_)) if !approvable(proposal) => {
+            ui.label("Coming soon");
+        }
+        (Disposition::Ask, Some(value)) => {
+            ui.horizontal(|ui| {
+                let label = ui.label("Allowed movement");
+                ui.add(egui::TextEdit::singleline(value).desired_width(90.0)).labelled_by(label.id);
+                ui.label("mm");
+            });
+            if !covers_gap(value.trim(), proposal) {
+                ui.label(format!("Enter at least {} mm", proposal.distance_max_mm));
+            }
+        }
+        _ => {
+            ui.label(format!("Repaired automatically, within {} mm", proposal.tolerance_mm));
+        }
+    }
+    let mut reason = proposal.reason.chars();
+    ui.label(reason.next().map_or(String::new(), |first| first.to_uppercase().chain(reason).collect()));
+    ui.label(format!("File entities {}", proposal.entities.join(", ")));
+}
+
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
-    let Some(preview) = state.import_dialog.take() else { return };
+    let Some(mut preview) = state.import_dialog.take() else { return };
     let mut open = true;
     let mut choice = None;
     let mut cancelled = false;
     egui::Window::new("Import STEP").collapsible(false).open(&mut open).show(ctx, |ui| {
         ui.label(&preview.feature.source_name);
         ui.label("Review repairs before importing. The original file stays unchanged.");
+        let Preview { proposals, allowed, approver, .. } = &mut preview;
+        let asked = || proposals.proposals.iter().filter(|p| p.disposition == Disposition::Ask);
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for proposal in &preview.proposals.proposals {
-                ui.group(|ui| {
-                    ui.label(format!("{}: {}", proposal.id, proposal.kind));
-                    ui.label(format!(
-                        "{} to {} mm seam; tolerance {} mm",
-                        proposal.distance_min_mm, proposal.distance_max_mm, proposal.tolerance_mm
-                    ));
-                    ui.label(match proposal.disposition {
-                        Disposition::Auto => "automatic",
-                        Disposition::Ask => "approval required",
-                    });
-                    ui.label(&proposal.reason);
-                    ui.label(proposal.entities.join(", "));
-                });
+            for proposal in &proposals.proposals {
+                ui.group(|ui| proposal_group(ui, proposal, allowed));
             }
-            if preview.proposals.proposals.is_empty() {
+            if proposals.proposals.is_empty() {
                 ui.label("No repairs proposed.");
             }
         });
+        if asked().any(approvable) {
+            ui.horizontal(|ui| {
+                let label = ui.label("Approved by");
+                ui.text_edit_singleline(approver).labelled_by(label.id);
+            });
+        }
+        let ready =
+            asked().all(|p| approvable(p) && !approver.trim().is_empty() && covers_gap(allowed[&p.id].trim(), p));
         ui.horizontal(|ui| {
-            let automatic = preview.proposals.proposals.iter().all(|p| p.disposition == Disposition::Auto);
-            if ui.add_enabled(automatic, egui::Button::new("Accept")).clicked() {
+            if ui.add_enabled(ready, egui::Button::new("Accept")).clicked() {
                 choice = Some(false);
             }
-            if ui.add_enabled(!preview.proposals.proposals.is_empty(), egui::Button::new("Decline")).clicked() {
+            if ui.add_enabled(!proposals.proposals.is_empty(), egui::Button::new("Decline")).clicked() {
                 choice = Some(true);
             }
             if ui.button("Cancel").clicked() {
@@ -157,13 +309,26 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         });
     });
     if let Some(decline) = choice {
-        let ids = if decline { preview.proposals.proposals.iter().map(|p| p.id.clone()).collect() } else { Vec::new() };
-        match commit(&mut state.doc, &preview, &ids) {
+        let proposals = &preview.proposals.proposals;
+        let review = if decline {
+            Review { decline: proposals.iter().map(|p| p.id.clone()).collect(), accept: Vec::new() }
+        } else {
+            let accept = preview.allowed.iter().map(|(id, tolerance_mm)| Approved {
+                id: id.clone(),
+                tolerance_mm: tolerance_mm.clone(),
+                approver: preview.approver.clone(),
+            });
+            Review { decline: Vec::new(), accept: accept.collect() }
+        };
+        match commit(&mut state.doc, &preview, &review) {
             Ok(_) => state.note(
-                if decline { "Import saved with declined repairs" } else { "Imported STEP body" },
+                if decline { "Import saved with declined repairs; the solid stays open" } else { "Imported STEP body" },
                 NoteKind::Info,
             ),
-            Err(error) => state.note(error, NoteKind::Error),
+            Err(error) => {
+                state.note(error, NoteKind::Error);
+                state.import_dialog = Some(preview);
+            }
         }
     } else if open && !cancelled {
         state.import_dialog = Some(preview);

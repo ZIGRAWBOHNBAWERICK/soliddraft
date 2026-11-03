@@ -652,12 +652,10 @@ pub struct ImportStepFeature {
     /// The file bytes, unchanged.
     #[serde(with = "hex_bytes")]
     pub source: Vec<u8>,
-    /// Answers to repair questions, by question id: `accept:<tolerance_mm>` or `decline`.
+    /// Answers to repair questions, by question id: `accept:<tolerance_mm>:<approver>` or
+    /// `decline`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub decisions: BTreeMap<String, String>,
-    /// Who accepted the proposals, as the app supplied it.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub approver: String,
     /// The saved import result, verified against the source when reopening.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record: Option<soliddraft_kernel_api::RepairRecord>,
@@ -671,7 +669,6 @@ impl ImportStepFeature {
             sha256: sha256_hex(&source),
             source,
             decisions: BTreeMap::new(),
-            approver: String::new(),
             record: None,
         }
     }
@@ -681,12 +678,12 @@ impl ImportStepFeature {
         self.sha256 == sha256_hex(&self.source)
     }
 
-    /// This import with `question` accepted at `tolerance_mm`, replacing any earlier answer.
+    /// This import with `question` accepted at `tolerance_mm` by `approver`, replacing any
+    /// earlier answer.
     pub fn accepted(&self, question: &str, tolerance_mm: &str, approver: &str) -> ImportStepFeature {
         let mut out = self.clone();
-        out.decisions.insert(question.to_string(), format!("accept:{tolerance_mm}"));
+        out.decisions.insert(question.to_string(), format!("accept:{tolerance_mm}:{approver}"));
         out.record = None;
-        out.approver = approver.to_string();
         out
     }
 
@@ -716,14 +713,20 @@ impl ImportStepFeature {
                 return Err(format!("{question} is not a question about this file"));
             };
             let id = format!("g{index}");
-            match answer.strip_prefix("accept:") {
-                _ if answer == "decline" => out.push(Decision::Decline { id }),
-                Some(tol) if is_decimal(tol) && !self.approver.is_empty() => {
-                    out.push(Decision::Accept { id, tolerance_mm: tol.to_string(), approver: self.approver.clone() });
-                }
-                Some(tol) if is_decimal(tol) => return Err(format!("{question} is accepted without an approver")),
-                _ => return Err(format!("{question} has an unreadable answer {answer:?}")),
+            if answer == "decline" {
+                out.push(Decision::Decline { id });
+                continue;
             }
+            let Some((tol, approver)) = answer.strip_prefix("accept:").and_then(|a| a.split_once(':')) else {
+                return Err(format!("{question} has an unreadable answer {answer:?}"));
+            };
+            if !is_decimal(tol) {
+                return Err(format!("{question} has an unreadable answer {answer:?}"));
+            }
+            if approver.is_empty() {
+                return Err(format!("{question} is accepted without an approver"));
+            }
+            out.push(Decision::Accept { id, tolerance_mm: tol.to_string(), approver: approver.to_string() });
         }
         Ok(out)
     }

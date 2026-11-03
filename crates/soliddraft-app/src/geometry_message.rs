@@ -10,13 +10,14 @@ pub(crate) fn for_user(message: &str) -> &str {
     } else if message.contains("recipe.ambiguous-reference") {
         "This selection matches more than one edge or face. Pick the intended edge or face again."
     } else if message.contains("measure.unsupported-surface") {
-        "Volume and mass are unavailable for this shape. You can still save the part and export a mesh."
+        "Coming soon"
     } else if message.contains("distance.unsupported-envelope") || message.contains("distance.cylinder-domain") {
         "This shape cannot be shelled. Use a convex tray with separated through bores and open its top or bottom face."
     } else if message.contains("step.unsupported-geometry")
+        || message.contains("numbers.geometric-gap-unproven")
         || (message.contains("export_step") && message.contains("unsupported"))
     {
-        "STEP export is unavailable for this shape. Save the part or export a mesh instead."
+        "Coming soon"
     } else if message.contains("fillet.") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
     } else if message.contains("mass_properties") {
@@ -47,6 +48,7 @@ mod tests {
             "distance.unsupported-envelope",
             "export_step: unsupported surface",
             "step.unsupported-geometry",
+            "numbers.geometric-gap-unproven",
             "mass_properties failed",
             "numbers.operation-budget",
             "kernel unavailable",

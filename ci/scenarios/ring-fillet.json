@@ -116,7 +116,21 @@
         },
         {
           "format": "step",
-          "refused": "step.unsupported-geometry"
+          "raw_valid": true,
+          "checks": [
+            {
+              "pointer": "/report/solids",
+              "equals": 1
+            },
+            {
+              "pointer": "/report/faces",
+              "equals": 6
+            },
+            {
+              "pointer": "/report/within_tolerance",
+              "equals": true
+            }
+          ]
         }
       ]
     },

@@ -371,7 +371,8 @@ jobs:
           chrome-devtools-axi run < ci/browser-journal.js
       - name: Keep preferences per browser in Chromium
         env:
-          CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+          # WebGL: a headless screenshot cannot read a WebGPU canvas.
+          CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
         run: |
           python3 -m http.server 8767 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/preferences-server.log" 2>&1 &
           server=$!

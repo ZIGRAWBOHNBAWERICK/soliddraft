@@ -13,6 +13,7 @@
 // time, starts with empty storage and the grid shown, and B's choice leaves A's alone.
 // The page sends nothing but GET requests for its own files.
 //
+// Run Chrome on WebGL: a headless screenshot cannot read a WebGPU canvas.
 // The clicks go to fixed points of a 1400 x 813 page. When the Preferences window's
 // layout changes, the frames this writes to OUTDIR show where its controls moved.
 
@@ -110,7 +111,12 @@ async function main() {
         for (let t = 0; t < 240; t++) {
           await sleep(500);
           const ready = await v.eval(`document.readyState === 'complete' && !!document.querySelector('#status.hidden')`).catch(() => false);
-          if (ready) { await sleep(3000); return; }
+          if (ready) {
+            await sleep(3000);
+            const size = await v.eval('[innerWidth, innerHeight]');
+            check(size[0] === SIZE.width && size[1] === SIZE.height, `${name}: the page is ${size}, the clicks need ${SIZE.width} x ${SIZE.height}`);
+            return;
+          }
         }
         await v.shot('not-started');
         throw new Error(`${name}: the app did not start`);
@@ -119,19 +125,41 @@ async function main() {
         const text = await v.eval(`localStorage.getItem(${JSON.stringify(KEY)})`);
         return text === null ? null : JSON.parse(text);
       },
+      // Lets the app draw `n` frames. A debug build can take over a second for one, and an
+      // input event is only seen by the frame after it.
+      async frames(n = 3) {
+        await v.eval(`new Promise(done => { let left = ${n}; const tick = () => --left ? requestAnimationFrame(tick) : done(); requestAnimationFrame(tick); })`);
+      },
       async click([x, y]) {
         await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-        await sleep(150);
+        await v.settle(300);
+        // A press held much longer than this is not a click to the app.
         await call('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
         await sleep(80);
         await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-        await sleep(600);
+        await v.settle(600);
+      },
+      // At least `ms`, and three frames.
+      async settle(ms) {
+        await sleep(ms);
+        await v.frames();
+      },
+      // The stored settings once `test` holds of them, or what is stored after 20 seconds.
+      async storedWhen(test) {
+        let stored;
+        for (let t = 0; t < 40; t++) {
+          stored = await v.stored();
+          if (test(stored)) return stored;
+          await sleep(500);
+        }
+        await v.shot('waited');
+        return stored;
       },
       async key(key, code, keyCode, modifiers = 0, text) {
         const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
         await call('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', ...base, text });
         await call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
-        await sleep(60);
+        await v.frames(1);
       },
       async type(text) {
         for (const c of text) {
@@ -141,11 +169,11 @@ async function main() {
       },
       async openPreferences() {
         await v.key('P', 'KeyP', 80, 2 | 8);
-        await sleep(500);
+        await v.settle(1000);
         await v.type('Preferences');
-        await sleep(400);
+        await v.settle(1000);
         await v.key('Enter', 'Enter', 13, 0, '\r');
-        await sleep(1500);
+        await v.settle(1500);
       },
       async shot(label) {
         const { data } = await call('Page.captureScreenshot', { format: 'png' });
@@ -189,11 +217,11 @@ async function main() {
   await a.openPreferences();
   await a.click(AT.solidworks);
   await a.shot('solidworks');
-  check((await a.stored())?.navigation?.preset_id === 'solidworks', 'choosing SOLIDWORKS is kept in this browser');
+  check((await a.storedWhen(s => s?.navigation?.preset_id === 'solidworks'))?.navigation?.preset_id === 'solidworks', 'choosing SOLIDWORKS is kept in this browser');
   await a.click(AT.gridAndPlanes);
   await a.click(AT.showGrid);
   await a.shot('grid-hidden');
-  check((await a.stored())?.view?.show_grid === false, 'hiding the grid is kept in this browser');
+  check((await a.storedWhen(s => s?.view?.show_grid === false))?.view?.show_grid === false, 'hiding the grid is kept in this browser');
 
   // The reload reads them back: the grid stays hidden, and a further change saves the
   // preset the app read, not a new browser's Fusion.
@@ -205,7 +233,7 @@ async function main() {
   await a.click(AT.orbitAndZoom);
   await a.click(AT.wheelInvert);
   await a.shot('reloaded-wheel-inverted');
-  const kept = await a.stored();
+  const kept = await a.storedWhen(s => s?.navigation?.wheel?.invert === true);
   check(kept?.navigation?.wheel?.invert === true, 'the wheel choice is kept');
   check(kept?.navigation?.preset_id === 'solidworks', `the reloaded app still follows SOLIDWORKS: ${kept?.navigation?.preset_id}`);
 
@@ -218,11 +246,14 @@ async function main() {
   check(other > 0.02, `the other browser shows the grid: ${other}`);
   await b.openPreferences();
   await b.click(AT.onshape);
-  check((await b.stored())?.navigation?.preset_id === 'onshape', 'the other browser keeps its own choice');
+  check((await b.storedWhen(s => s?.navigation?.preset_id === 'onshape'))?.navigation?.preset_id === 'onshape', 'the other browser keeps its own choice');
   await a.front();
   check((await a.stored())?.navigation?.preset_id === 'solidworks', 'and the first browser keeps its own');
 
-  const sent = requests.filter(r => r.method !== 'GET' || !r.url.startsWith(new URL(url).origin));
+  // Network requests only: the measuring above decodes frames from data: URLs.
+  const network = requests.filter(r => /^(https?|wss?):/.test(r.url));
+  const sent = network.filter(r => r.method !== 'GET' || !r.url.startsWith(new URL(url).origin));
+  check(network.length > 0, 'the requests were recorded');
   check(sent.length === 0, `settings never leave the browser: ${JSON.stringify(sent.map(r => [r.method, r.url]))}`);
 }
 

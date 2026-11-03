@@ -217,3 +217,41 @@ fn mcp_refuses_source_substitution_after_preview() {
         "neither decline nor acceptance can commit a substituted source"
     );
 }
+
+/// The real-use pass answered an approval with "abc" through import_step: the refusal
+/// was "the import made no feature", which says nothing about the answer.
+#[test]
+fn an_allowed_movement_that_is_not_a_number_says_so() {
+    let mut doc = Document::new("Wide seam", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "wide.step", WIDE.to_vec()).unwrap();
+    let revision = doc.revision();
+    for tolerance in ["abc", "", "0.0.3", "-0.03"] {
+        let review = soliddraft_app::import::Review {
+            decline: Vec::new(),
+            accept: vec![soliddraft_app::import::Approved {
+                id: "g0".into(),
+                tolerance_mm: tolerance.into(),
+                approver: "Ana Reviewer".into(),
+            }],
+        };
+        let error = soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap_err();
+        assert!(error.contains("must be a number of millimetres"), "{tolerance:?}: {error}");
+        assert!(doc.features.is_empty());
+        assert_eq!(doc.revision(), revision);
+    }
+}
+
+/// A declined repair names the unbuilt solid. A file that gives the solid no name left
+/// its STEP entity number in the tree, "#178 not imported until the gap is resolved".
+#[test]
+fn a_declined_import_names_no_entity_number() {
+    let mut doc = Document::new("Declined", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "block.step", BLOCK.to_vec()).unwrap();
+    let review = soliddraft_app::import::Review { decline: vec!["g0".into()], accept: Vec::new() };
+    soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap();
+    let soliddraft_app::document::FeatureStatus::Error(message) = &doc.features[0].status else {
+        panic!("a declined import is an error: {:?}", doc.features[0].status)
+    };
+    assert!(!message.contains('#'), "{message}");
+    assert!(message.starts_with("The solid is not imported until the gap is resolved"), "{message}");
+}

@@ -1021,7 +1021,16 @@ impl Document {
                 };
                 if !r.left_open.is_empty() {
                     release(&r);
-                    let names = r.left_open.join(", ");
+                    // A solid the file leaves unnamed is known by its entity number, such as
+                    // #178, which means nothing in the tree.
+                    let numbered = |name: &String| {
+                        name.strip_prefix('#').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+                    };
+                    let names = match r.left_open.as_slice() {
+                        [one] if numbered(one) => "The solid is".to_owned(),
+                        all if all.iter().all(numbered) => "The solids are".to_owned(),
+                        all => all.join(", "),
+                    };
                     let mut built = Built::failed(
                         current,
                         format!(

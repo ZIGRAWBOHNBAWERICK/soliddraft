@@ -395,7 +395,7 @@ impl SolidDraftApp {
                     ui.label("A parametric CAD application written in Rust.");
                     ui.label(
                         egui::RichText::new(format!(
-                            "Version {} · phase 2 modelling · kernel: {}",
+                            "Version {} · kernel: {}",
                             env!("CARGO_PKG_VERSION"),
                             st.doc.backend_name()
                         ))

@@ -922,7 +922,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     error_row(ui, err);
                 }
                 ui.add_space(8.0);
-                hint(ui, "Catallax drafts planar faces and cylinders parallel to the pull.");
+                hint(ui, "Draft tapers planar faces, and cylinders parallel to the pull.");
             }
             EditorParams::PickPlane => {
                 theme::section_label(ui, "Sketch plane");

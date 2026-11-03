@@ -8,9 +8,9 @@
 //! `tests/fixtures/ux_tools/tree_visibility.json`; nothing here derives them from the
 //! application. Every case drives the real app on a real adapter (software Vulkan counts)
 //! with pointer and menu input, and only reads state back. A missing adapter fails the
-//! case: a run that skips is not acceptance. Frames, the event log and any failure go to
-//! `target/ux-tools/ux-tree-visibility/<case>/`. No case asserts how long anything took;
-//! every wait has the 600-second hang guard.
+//! case: a run that skips is not acceptance. `SOLIDDRAFT_TREE_PROOF_DIR` chooses the
+//! frames and event log directory, otherwise they go under
+//! `target/ux-tools/ux-tree-visibility`. Every wait has the 600-second hang guard.
 
 use egui::{Modifiers, Pos2, Rect, pos2, vec2};
 use egui_kittest::Harness;
@@ -68,7 +68,12 @@ struct Case {
 impl Case {
     fn new(name: &str) -> Self {
         let serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ux-tools/ux-tree-visibility").join(name);
+        let dir = std::env::var_os("SOLIDDRAFT_TREE_PROOF_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ux-tools/ux-tree-visibility")
+            })
+            .join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("config")).unwrap();
         let log = std::fs::File::create(dir.join("run.log")).unwrap();
@@ -639,53 +644,64 @@ fn exterior(app: &App) -> impl Fn(Pos2) -> bool {
     move |p| inner.contains(p) && !near_hull(&body, p, 6.0) && !near_hull(&sketch, p, 6.0)
 }
 
-fn axis_coloured(axis: AxisKind, c: [i32; 3]) -> bool {
-    let [r, g, b] = c;
-    match axis {
-        AxisKind::X => r > g + 60 && r > b + 60,
-        AxisKind::Y => g > r + 40 && g > b + 20,
-        AxisKind::Z => b > r + 60 && b > g + 30,
-    }
-}
-
-/// How many exterior pixels of the viewport carry each axis's colour, X, Y, Z: the axis
-/// line beyond the part and its label.
-fn axis_pixels(image: &image::RgbaImage, app: &App) -> [usize; 3] {
-    let rect = viewport(app);
-    let ppp = app.ctx.pixels_per_point();
-    let mut counts = [0; 3];
-    let exterior = exterior(app);
-    let (x0, y0, x1, y1) = (rect.left() * ppp, rect.top() * ppp, rect.right() * ppp, rect.bottom() * ppp);
-    for y in (y0 as u32)..(y1 as u32) {
-        for x in (x0 as u32)..(x1 as u32) {
-            let c = image.get_pixel(x, y).0;
-            let c = [c[0] as i32, c[1] as i32, c[2] as i32];
-            for (i, axis) in AxisKind::ALL.into_iter().enumerate() {
-                if axis_coloured(axis, c) && exterior(pos2(x as f32 / ppp, y as f32 / ppp)) {
-                    counts[i] += 1;
+/// The visible label and positive line in the frame's actual egui paint output.
+/// Their positions identify the axis without assuming a particular palette.
+fn axis_marks(app: &App, axis: AxisKind) -> (bool, bool) {
+    fn walk(
+        shape: &egui::Shape,
+        clip: Rect,
+        origin: Pos2,
+        direction: egui::Vec2,
+        label: &str,
+        found: &mut (bool, bool),
+    ) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, clip, origin, direction, label, found);
                 }
             }
+            egui::Shape::Text(text) => {
+                if text.galley.text() == label && clip.contains_rect(text.visual_bounding_rect()) {
+                    found.0 = true;
+                }
+            }
+            egui::Shape::LineSegment { points, stroke } => {
+                let along = points[1] - points[0];
+                if clip.contains(origin)
+                    && points[0].distance(origin) < 1.0
+                    && along.length() > 12.0
+                    && along.normalized().dot(direction) > 0.999
+                    && stroke.width > 0.0
+                    && stroke.color.a() > 0
+                {
+                    found.1 = true;
+                }
+            }
+            _ => {}
         }
     }
-    counts
+    let state = &app.state().state;
+    let rect = viewport(app);
+    let Some(origin) = state.viewport.camera.project(Vec3::ZERO, rect) else { return (false, false) };
+    let Some(tip) = state.viewport.camera.project(axis.direction(), rect) else { return (false, false) };
+    let direction = (tip - origin).normalized();
+    let mut found = (false, false);
+    for clipped in &app.output().shapes {
+        walk(&clipped.shape, clipped.clip_rect.intersect(rect), origin, direction, &axis.label()[..1], &mut found);
+    }
+    found
 }
 
 fn assert_axes(case: &mut Case, app: &mut App, name: &str, shown: &[AxisKind]) {
     pointer_away(app);
-    let image = case.frame(app, name);
-    let counts = axis_pixels(&image, app);
-    case.note(format!("{name}: axis pixels X Y Z {counts:?}, expected shown {shown:?}"));
-    for (i, axis) in AxisKind::ALL.into_iter().enumerate() {
-        if shown.contains(&axis) {
-            let least = detection("axis_pixels_shown_at_least") as usize;
-            assert!(counts[i] >= least, "{name}: {axis:?} line and label are painted, {counts:?}");
-        } else {
-            let most = detection("axis_pixels_hidden_at_most") as usize;
-            assert!(counts[i] <= most, "{name}: {axis:?} is absent, {counts:?}");
-        }
-    }
+    case.frame(app, name);
     for axis in AxisKind::ALL {
-        assert_reported(app, axis.label(), shown.contains(&axis));
+        let expected = shown.contains(&axis);
+        let marks = axis_marks(app, axis);
+        case.note(format!("{name}: {axis:?} label and line {marks:?}, expected shown {expected}"));
+        assert_eq!(marks, (expected, expected), "{name}: {axis:?} painted label and line");
+        assert_reported(app, axis.label(), expected);
     }
 }
 
@@ -830,6 +846,10 @@ fn one_click(window: &str) {
         // 1. Origin opened by its disclosure; the body selected to show its dimensions.
         frame_fixture(case, app);
         open_origin(app);
+        click_empty(case, app);
+        assert_eq!(app.state().state.doc.selection, None);
+        pointer_away(app);
+        let unselected = case.frame(app, "01-unselected");
         click_row_name(app, "Solid body");
         assert_eq!(app.state().state.doc.selection, Some(Selection::Body), "the body row selects the body");
         until(app, "the body shows its dimensions", |app| !app.state().state.viewport.dimensions.is_empty());
@@ -879,11 +899,13 @@ fn one_click(window: &str) {
         assert_reported(app, &solid_name, true);
         pointer_away(app);
         let back = case.frame(app, "03-solid-shown");
-        let covered = body_samples().iter().filter(|p| changed(&back, &hidden, app, project(app, **p), 1.0)).count();
-        assert!(
-            covered as f64 / body_samples().len() as f64 >= detection("covered_sample_fraction"),
-            "the body is painted again: {covered}"
-        );
+        for p in body_samples().into_iter().chain(edge_samples()) {
+            let delta = difference(&back, &unselected, app, project(app, p), 1.0);
+            assert!(
+                delta <= detection("backdrop_channel_tolerance") as i32,
+                "showing the body restores its unselected appearance near {p}: difference {delta}"
+            );
+        }
         rest_on(app, top, true);
         pick_at(app, project(app, top));
         let picked = match app.state().state.doc.selection {
@@ -1342,9 +1364,17 @@ fn view_choices_survive_undo_and_native_reopen() {
         click_eye(case, app, &solid_name);
         assert_b20(case, app, "reopened and shown");
         pointer_away(app);
-        let shown = case.frame(app, "t2-reopened-shown");
-        let covered = body_samples().iter().filter(|p| changed(&shown, &image, app, project(app, **p), 1.0)).count();
-        assert!(covered as f64 / body_samples().len() as f64 >= detection("covered_sample_fraction"), "shown");
+        case.frame(app, "t2-reopened-shown");
+        let top = Vec3::new(0.0, 0.0, f(&manifest()["expected"]["B20"]["bounds_mm"]["max"][2]) as f32);
+        rest_on(app, top, true);
+        pick_at(app, project(app, top));
+        let Some(Selection::Face(picked)) = app.state().state.doc.selection else {
+            panic!("the reopened body's top face is not pickable");
+        };
+        assert!(
+            app.state().state.doc.faces.iter().any(|face| face.id == picked && face.feature == solid),
+            "the displayed face belongs to the reopened extrusion"
+        );
 
         // 4. The old part, by the same menu, keeps the defaults and inherits nothing.
         let old = legacy.file_name().unwrap().to_string_lossy().into_owned();
@@ -1378,8 +1408,10 @@ fn view_choices_survive_undo_and_native_reopen() {
         }
         show_planes(case, app, false);
         pointer_away(app);
-        let image = case.frame(app, "t2-legacy");
-        assert_eq!(axis_pixels_anywhere(&image, app), [0, 0, 0], "no axis is shown in the old part");
+        case.frame(app, "t2-legacy");
+        for axis in AxisKind::ALL {
+            assert_eq!(axis_marks(app, axis), (false, false), "no {axis:?} axis is painted in the old part");
+        }
         assert_eq!(std::fs::read(&legacy).unwrap(), legacy_bytes, "reading the old part left its file as it was");
     });
 }
@@ -1389,25 +1421,6 @@ fn frame_fixture_any(case: &mut Case, app: &mut App) {
     let fit = bounds(app, "Zoom to fit (Z)");
     click_at(app, fit.center());
     case.note("zoom to fit");
-}
-
-/// Axis-coloured pixels anywhere in the viewport, X, Y, Z.
-fn axis_pixels_anywhere(image: &image::RgbaImage, app: &App) -> [usize; 3] {
-    let rect = viewport(app).shrink(2.0);
-    let ppp = app.ctx.pixels_per_point();
-    let mut counts = [0; 3];
-    for y in ((rect.top() * ppp) as u32)..((rect.bottom() * ppp) as u32) {
-        for x in ((rect.left() * ppp) as u32)..((rect.right() * ppp) as u32) {
-            let c = image.get_pixel(x, y).0;
-            let c = [c[0] as i32, c[1] as i32, c[2] as i32];
-            for (i, axis) in AxisKind::ALL.into_iter().enumerate() {
-                if axis_coloured(axis, c) {
-                    counts[i] += 1;
-                }
-            }
-        }
-    }
-    counts
 }
 
 // ---------------------------------------------------------------------------

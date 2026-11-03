@@ -403,8 +403,8 @@ module = ["configs"]
 name = "v3.grid"
 owner = "V3"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/grid/"]
-module = ["grid"]
+paths = ["crates/soliddraft-app/src/grid/", "crates/soliddraft-app/src/values_tab.rs"]
+module = ["grid", "values_tab"]
 
 [[areas]]
 name = "v4.tabs"
@@ -417,8 +417,8 @@ module = ["tabs"]
 name = "model.values"
 owner = "core"
 crate = "soliddraft-model"
-paths = ["crates/soliddraft-model/src/values.rs"]
-module = ["values"]
+paths = ["crates/soliddraft-model/src/values.rs", "crates/soliddraft-model/src/params.rs"]
+module = ["values", "params"]
 
 [[areas]]
 name = "model.value_expr"

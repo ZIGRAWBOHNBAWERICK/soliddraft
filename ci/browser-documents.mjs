@@ -54,6 +54,8 @@ const STORED = `(async () => {
 class Browser {
   constructor(profile) {
     this.profile = profile;
+    // A Chrome that was killed leaves its port file behind; the new one writes its own.
+    fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
     this.process = spawn(chrome, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', `--window-size=${SIZE.width},${SIZE.height}`, ...extra, 'about:blank',
@@ -183,7 +185,7 @@ class Browser {
 
   close() {
     this.ws?.close();
-    this.process.kill();
+    this.process.kill('SIGKILL');
   }
 }
 
@@ -248,6 +250,13 @@ async function main() {
   check(sent.length === 0, `documents never leave the browser: ${JSON.stringify(sent.map(r => [r.method, r.url]))}`);
 }
 
+// A step that hangs says where it was instead of waiting for the job to time out.
+const deadline = setTimeout(() => {
+  console.error('FAIL the documents check took over eight minutes');
+  for (const b of open) b.close();
+  process.exit(1);
+}, 8 * 60 * 1000);
+
 try {
   await main();
   console.log('PASS documents kept per browser, offered after a kill, never shared');
@@ -256,5 +265,7 @@ try {
   for (const b of open) console.error(b.stderr.split('\n').slice(-20).join('\n'));
   process.exitCode = 1;
 } finally {
+  clearTimeout(deadline);
   for (const b of open) b.close();
+  process.exit(process.exitCode ?? 0);
 }

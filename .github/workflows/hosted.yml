@@ -385,6 +385,7 @@ jobs:
           path: ${{ runner.temp }}/browser-preferences
           if-no-files-found: ignore
       - name: Keep documents per browser and recover them after a kill in Chromium
+        timeout-minutes: 10
         env:
           CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
         run: |

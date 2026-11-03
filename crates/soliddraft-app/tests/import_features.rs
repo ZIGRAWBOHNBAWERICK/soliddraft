@@ -225,6 +225,7 @@ fn other_features_on_an_imported_body_build_or_say_coming_soon() {
         ("mirror", json!({"plane":right,"keep_original":true})),
         ("draft", json!({"faces":[right],"neutral":top,"angle":3,"reverse":false})),
         ("lattice", json!({"cell":"cubic","cell_size":5,"radius":1,"accuracy":0.1,"min_detail":0.5})),
+        ("gyroid", json!({"kind":"network","period":10,"level":0,"accuracy":0.1,"min_detail":0.5})),
     ] {
         let depth = part.doc.undo_depth();
         match part.call(tool, input) {

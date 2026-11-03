@@ -90,15 +90,21 @@ fn a_ring_rounds_exports_edits_undoes_and_reopens_and_its_refusals_are_the_ordin
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// A pattern's result records no base for the certificate, so its STEP keeps a typed refusal.
+/// A second, unrounded boss on the same wall leaves an edge the certificate cannot bound, so
+/// the part writes no STEP and the refusal stays typed.
 #[test]
-fn a_patterned_ring_has_no_certificate_and_writes_no_step() {
+fn a_ring_beside_an_unrounded_boss_has_no_certificate_and_writes_no_step() {
     let mut state = tee();
+    accepted(
+        &mut state,
+        "sketch",
+        json!({"plane":"front","shapes":[{"shape":"circle","center":[0,0,33],"diameter":6}]}),
+    );
+    accepted(&mut state, "extrude", json!({"sketch":"Sketch3","depth":20,"flip":false}));
     let edges = json!([ring(&state)]);
     accepted(&mut state, "fillet", json!({"edges":edges,"radius":1}));
-    accepted(&mut state, "linear_pattern", json!({"direction":[0,0,1],"spacing":60,"count":2}));
     assert_eq!(state.doc.features.last().unwrap().status, FeatureStatus::Ok);
-    assert_eq!(bands(&state), 2);
+    assert_eq!(bands(&state), 1);
     let refused = state.doc.model().export(Format::Step).unwrap_err();
     assert!(refused.contains("numbers.geometric-gap-unproven"), "{refused}");
 }

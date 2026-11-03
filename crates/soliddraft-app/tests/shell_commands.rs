@@ -176,3 +176,55 @@ fn closed_stays_empty_list_and_a_lost_pick_never_widens_to_every_face() {
     assert!(!matches!(status, FeatureStatus::Ok), "a lost pick reports itself: {status:?}");
     assert!(state.doc.display_body().is_some(), "the part before the shell stays");
 }
+
+/// The real-use pass asked for a 14 mm and a 20 mm wall on a 12 mm tall tray: each built
+/// with status ok, made no wall and left the block solid. A wall that hollows nothing is
+/// refused, and the part stays as it was.
+#[test]
+fn a_wall_too_thick_to_hollow_anything_is_refused() {
+    let mut state = blank();
+    let caller = Caller::Mcp { client: "shell-test".into() };
+    let solid = volume(&state);
+    let body = state.doc.display_body();
+    let undo_depth = state.doc.undo_depth();
+    for thickness in [12.0, 14.0, 20.0] {
+        let out = call_checked(
+            &mut AppTools { state: &mut state },
+            "shell",
+            json!({"open_faces":["Boss-Extrude1 · End cap"],"thickness":thickness}),
+            &caller,
+        );
+        assert!(out.is_error, "{thickness} mm: {}", out.content);
+        assert!(out.content.contains("too thick"), "{thickness} mm: {}", out.content);
+        assert_eq!(state.doc.display_body(), body, "{thickness} mm changed the body");
+        assert_eq!(state.doc.undo_depth(), undo_depth, "{thickness} mm left an undo step");
+    }
+    // An edit to such a wall is refused the same way and keeps the hollow tray.
+    let out = call_checked(
+        &mut AppTools { state: &mut state },
+        "shell",
+        json!({"open_faces":["Boss-Extrude1 · End cap"],"thickness":2}),
+        &caller,
+    );
+    assert!(!out.is_error, "{}", out.content);
+    let tray = volume(&state);
+    assert!(tray < solid);
+    let out = call_checked(
+        &mut AppTools { state: &mut state },
+        "edit_shell",
+        json!({"feature":"Shell1","thickness":14}),
+        &caller,
+    );
+    assert!(out.is_error && out.content.contains("too thick"), "{}", out.content);
+    assert!((volume(&state) - tray).abs() < 1e-6);
+    // The editor's preview of that wall says so too, instead of drawing the solid block.
+    let FeatureKind::Shell(mut shell) = state.doc.features.last().unwrap().kind.clone() else {
+        panic!("shell feature")
+    };
+    shell.thickness = 14.0;
+    let before = state.doc.body_before(state.doc.features.len() - 1);
+    let refused = state.doc.preview_shell(&shell, before).err().unwrap_or_default();
+    assert!(refused.contains("too thick"), "preview: {refused:?}");
+    shell.thickness = 1.5;
+    assert!(state.doc.preview_shell(&shell, before).is_ok());
+}

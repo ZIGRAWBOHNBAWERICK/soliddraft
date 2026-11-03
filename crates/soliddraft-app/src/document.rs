@@ -2956,6 +2956,10 @@ impl Document {
             .kernel()
             .shell(&OpTag::new("preview"), body, &faces, shell.thickness)
             .map_err(|error| error.to_string())?;
+        if let Some(refusal) = model::shell_refusal(&result) {
+            let _ = self.kernel().release(result.body);
+            return Err(refusal.into());
+        }
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
         Ok(Preview { result: Some(mesh?), tool: None, removes: false })

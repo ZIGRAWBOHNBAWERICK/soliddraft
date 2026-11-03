@@ -893,6 +893,12 @@ impl Document {
             return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
         }
         let result = self.kernel.shell(&OpTag::new(format!("{}.shell", f.id)), body, &faces, s.thickness);
+        if let Ok(r) = &result
+            && let Some(refusal) = shell_refusal(r)
+        {
+            let _ = self.kernel.release(r.body);
+            return Built::failed(current, refusal);
+        }
         self.finish(result, current, |r| {
             let view = self.view_of(body).ok();
             let names = self.name_map();
@@ -1099,6 +1105,14 @@ fn number(mut faces: Vec<(Origin, Generator, usize)>) -> Vec<NamedFace> {
             NamedFace { origin, generator, ordinal }
         })
         .collect()
+}
+
+/// Why a shell's result is refused. A wall at least as thick as the part leaves no hollow:
+/// the solid comes back as it was, with no inner wall, which is not the shell asked for.
+/// The editor's preview and the rebuild refuse it alike.
+pub fn shell_refusal(r: &OpResult) -> Option<&'static str> {
+    let walls = r.record.face_roles.iter().any(|o| matches!(o.role, FaceRole::Offset { .. }));
+    (!walls).then_some("The wall is too thick to hollow this part. Use a thinner wall.")
 }
 
 /// The sketch plane on a planar face: origin at the world origin projected onto the

@@ -20,7 +20,7 @@ fn volume(k: &CatallaxKernel, body: BodyId) -> f64 {
 }
 
 fn roles(r: &OpResult) -> Vec<FaceRole> {
-    r.record.face_roles.iter().map(|o| o.role).collect()
+    r.record.face_roles.iter().map(|o| o.role.clone()).collect()
 }
 
 fn down(point: Vec3) -> HolePlacement {

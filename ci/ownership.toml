@@ -218,6 +218,13 @@ paths = ["crates/soliddraft-app/src/sketcher.rs"]
 module = ["sketcher"]
 
 [[areas]]
+name = "app.sweep_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/sweep_panel.rs"]
+module = ["sweep_panel"]
+
+[[areas]]
 name = "app.state"
 owner = "core"
 crate = "soliddraft-app"

@@ -275,15 +275,14 @@ impl SolidDraftApp {
                             .and_then(|f| f.plane)
                             .map(|p| p.normal)
                             .unwrap_or(soliddraft_kernel_api::Vec3::Z);
+                        // Arcs turn about model axes, so the path starts on the profile.
+                        let start = self.state.doc.sweep_anchor(id).map_or([0.0; 3], |(start, _)| start);
+                        let end = soliddraft_kernel_api::Vec3::from(start) + normal * 10.0;
                         self.open_editor(
                             None,
                             EditorParams::Sweep(soliddraft_model::SweepFeature {
                                 sketch: soliddraft_model::FeatureId(id as u32),
-                                path: soliddraft_kernel_api::Sweep {
-                                    start: [0.0; 3],
-                                    end: (normal * 10.0).into(),
-                                    segment_id: "travel".into(),
-                                },
+                                path: soliddraft_kernel_api::Sweep::line(start, end.into(), "travel"),
                             }),
                         );
                     }

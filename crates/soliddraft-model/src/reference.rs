@@ -35,7 +35,7 @@ use soliddraft_sketch::EntityId;
 use crate::feature::FeatureId;
 
 /// The part of a feature that made a face.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Generator {
     /// An extrusion's cap in the sketch plane.
@@ -46,6 +46,9 @@ pub enum Generator {
     Side {
         /// The sketch line, arc or circle.
         entity: EntityId,
+        /// The saved path piece that carried it, when a sweep's path has several.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<Box<str>>,
     },
     /// A fillet or chamfer face.
     Blend {
@@ -69,6 +72,11 @@ pub enum Generator {
     Other,
     /// An inset wall of a shell, ranked by its source face name.
     ShellWall,
+    /// A profile end left exposed at a join inside a sweep path.
+    PathJoin {
+        /// The saved path piece at that join.
+        path: Box<str>,
+    },
 }
 
 impl fmt::Display for Generator {
@@ -76,12 +84,14 @@ impl fmt::Display for Generator {
         match self {
             Generator::StartCap => f.write_str("Start cap"),
             Generator::EndCap => f.write_str("End cap"),
-            Generator::Side { entity } => write!(f, "Side of {entity}"),
+            Generator::Side { entity, path: None } => write!(f, "Side of {entity}"),
+            Generator::Side { entity, path: Some(path) } => write!(f, "Side of {entity} along {path}"),
             Generator::Blend { edge } => write!(f, "Blend of edge {}", edge + 1),
             Generator::Hole { placement, part } => write!(f, "Hole {} {}", placement + 1, part.label().to_lowercase()),
             Generator::Copy { instance } => write!(f, "Copy {instance} face"),
             Generator::Other => f.write_str("Face"),
             Generator::ShellWall => f.write_str("Inner wall"),
+            Generator::PathJoin { path } => write!(f, "Path join at {path}"),
         }
     }
 }
@@ -559,7 +569,7 @@ fn origin_name(face: FaceId, view: &View, names: &NameMap) -> Result<FaceRef, Na
         if let Some(n) = names[id].iter().find(|n| info.origins.contains(&n.origin)) {
             return Ok(FaceRef {
                 feature: *id,
-                generator: n.generator,
+                generator: n.generator.clone(),
                 ordinal: n.ordinal,
                 fingerprint: FaceFingerprint::of(info),
                 label: String::new(),
@@ -723,7 +733,7 @@ mod tests {
         let merged = topology(vec![face(1, 10.0, vec![plate.clone(), tab.clone()]), face(2, 0.0, vec![])]);
         let view = View { topology: &merged };
         let r = name_face(FaceId::from_raw(1), &view, &names).unwrap();
-        assert_eq!((r.feature, r.generator), (FeatureId(2), Generator::EndCap), "the earliest feature names it");
+        assert_eq!((r.feature, &r.generator), (FeatureId(2), &Generator::EndCap), "the earliest feature names it");
         assert_eq!(resolve_face(&r, &view, &names).unwrap(), FaceId::from_raw(1));
         // A later cut split it into two coplanar pieces: one sketch plane, two faces.
         let split = topology(vec![face(3, 10.0, vec![plate.clone()]), face(4, 10.0, vec![plate.clone(), tab])]);

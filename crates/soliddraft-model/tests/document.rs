@@ -76,7 +76,7 @@ fn features_get_names_and_faces_get_labels() {
     assert_eq!(d.feature(s).unwrap().name, "Sketch1");
     assert_eq!(d.feature(e).unwrap().name, "Boss-Extrude1");
     assert!((volume(&d) - 12000.0).abs() < 1e-6);
-    let generators: Vec<Generator> = d.generated_faces(e).iter().map(|n| n.generator).collect();
+    let generators: Vec<Generator> = d.generated_faces(e).iter().map(|n| n.generator.clone()).collect();
     assert!(generators.contains(&Generator::StartCap) && generators.contains(&Generator::EndCap));
     assert_eq!(generators.iter().filter(|g| matches!(g, Generator::Side { .. })).count(), 4);
     let end = carrier(&d, d.generated_faces(e).iter().find(|n| n.generator == Generator::EndCap).unwrap());
@@ -588,12 +588,12 @@ fn built_in_shapes_extrude_without_a_sketch() {
     assert!(d.status(pin).unwrap().is_ok(), "{:?}", d.status(pin));
     assert!(volume(&d) > 12000.0);
     // The same shape gives the same names after an edit.
-    let before: Vec<Generator> = d.generated_faces(plate).iter().map(|n| n.generator).collect();
+    let before: Vec<Generator> = d.generated_faces(plate).iter().map(|n| n.generator.clone()).collect();
     d.execute(Command::EditFeature {
         id: plate,
         kind: shape(DatumPlane::Top, BuiltinShape::Rectangle { width: 50.0, height: 30.0 }, 10.0),
     })
     .unwrap();
-    let after: Vec<Generator> = d.generated_faces(plate).iter().map(|n| n.generator).collect();
+    let after: Vec<Generator> = d.generated_faces(plate).iter().map(|n| n.generator.clone()).collect();
     assert_eq!(before, after);
 }

@@ -52,7 +52,7 @@ impl AppearanceTarget {
             (AppearanceTarget::Part, AppearanceTarget::Part) => true,
             (AppearanceTarget::Feature { feature: a }, AppearanceTarget::Feature { feature: b }) => a == b,
             (AppearanceTarget::Face { face: a }, AppearanceTarget::Face { face: b }) => {
-                (a.feature, a.generator, a.ordinal) == (b.feature, b.generator, b.ordinal)
+                a.feature == b.feature && a.generator == b.generator && a.ordinal == b.ordinal
             }
             _ => false,
         }

@@ -505,13 +505,14 @@ impl Document {
     fn label_in(&self, face: FaceId, t: &Topology) -> Option<FaceLabel> {
         let (feature, generator, ordinal) = reference::origin_label(face, &View { topology: t }, &self.name_map())?;
         let f = self.feature(feature)?;
-        let what = match generator {
-            Generator::Side { entity } => {
-                let kind = self.profile_sketch(feature).and_then(|s| s.entity(entity).map(|e| e.kind));
+        let what = match &generator {
+            Generator::Side { entity, path } => {
+                let kind = self.profile_sketch(feature).and_then(|s| s.entity(*entity).map(|e| e.kind));
+                let along = path.as_ref().map(|p| format!(" along {p}")).unwrap_or_default();
                 match kind {
-                    Some(EntityKind::Line { .. }) => format!("Side of line {entity}"),
-                    Some(EntityKind::Arc { .. }) => format!("Side of arc {entity}"),
-                    Some(EntityKind::Circle { .. }) => format!("Wall of circle {entity}"),
+                    Some(EntityKind::Line { .. }) => format!("Side of line {entity}{along}"),
+                    Some(EntityKind::Arc { .. }) => format!("Side of arc {entity}{along}"),
+                    Some(EntityKind::Circle { .. }) => format!("Wall of circle {entity}{along}"),
                     _ => generator.to_string(),
                 }
             }

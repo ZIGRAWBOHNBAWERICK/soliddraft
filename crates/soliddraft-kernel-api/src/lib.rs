@@ -39,6 +39,7 @@ mod ids;
 mod iges;
 mod import;
 mod profile;
+mod sweep;
 
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
 pub use field::{
@@ -55,6 +56,7 @@ pub use import::{
     RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
 };
 pub use profile::{Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
+pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
 
 use serde::{Deserialize, Serialize};
 
@@ -100,18 +102,6 @@ pub struct Revolve {
     pub axis_direction: Vec3,
     /// Sweep angle in degrees, in (0, 360].
     pub angle_deg: f64,
-}
-
-/// A single straight path, in model millimetres. The profile keeps its placement.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Sweep {
-    /// Start of the path.
-    pub start: [f64; 3],
-    /// End of the path.
-    pub end: [f64; 3],
-    /// Stable saved identity of the path segment.
-    pub segment_id: String,
 }
 
 /// Where one hole starts and which way it drills.
@@ -811,9 +801,9 @@ pub trait Kernel: Send + Sync {
 
     /// Turns a profile body about an axis into a solid.
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult>;
-    /// Sweeps a polygon profile along one nonzero straight segment.
+    /// Sweeps a polygon profile along a chain of lines and arcs.
     fn sweep(&self, _tag: &OpTag, _profile: BodyId, _params: &Sweep) -> KernelResult<OpResult> {
-        Err(KernelError::Unsupported("Straight-path sweep is unavailable".into()))
+        Err(KernelError::Unsupported("Sweep is coming soon.".into()))
     }
 
     /// Combines two solids. Both inputs stay as they are.

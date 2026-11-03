@@ -94,7 +94,7 @@ fn the_start_page_lists_saved_documents_with_their_pictures_and_opens_one() {
         assert!(docs.iter().all(|d| d.kind == Some(DocKind::Part)));
         let shown = texts(app);
         let location = std::fs::canonicalize(&folder).unwrap().display().to_string();
-        assert!(shown.iter().any(|t| *t == location), "the card says where the file is: {location}");
+        assert!(shown.contains(&location), "the card says where the file is: {location}");
         assert!(shown.iter().any(|t| t.starts_with("Part · Today ")), "and when it was saved: {shown:?}");
         assert!(app.query_by_label("Solid").is_none(), "the ribbon waits for a document");
         assert!(

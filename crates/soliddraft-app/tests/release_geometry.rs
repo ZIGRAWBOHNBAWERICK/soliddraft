@@ -54,6 +54,21 @@ fn round(state: &mut AppState, selected: Vec<String>, radius: f64) {
     accepted(state, "fillet", json!({"edges":selected,"radius":radius}));
 }
 
+fn refused(state: &mut AppState, selected: Vec<String>, radius: f64, expected: &str) {
+    assert!(!selected.is_empty(), "{expected}: no edge selected");
+    let before = state.doc.model().part_json();
+    let body = state.doc.display_body();
+    let out = call_checked(
+        &mut AppTools { state },
+        "fillet",
+        json!({"edges":selected,"radius":radius}),
+        &Caller::Mcp { client: "release-refusal".into() },
+    );
+    assert!(out.is_error && out.content.contains(expected), "{expected}: {}", out.content);
+    assert_eq!(state.doc.model().part_json(), before);
+    assert_eq!(state.doc.display_body(), body);
+}
+
 fn displayed(state: &AppState) {
     let doc = &state.doc;
     let body = doc.display_body().unwrap();
@@ -80,6 +95,8 @@ fn exercise(mut state: AppState, name: &str, tool: &str, edit: Value) {
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-release-{}", std::process::id())))
         .join(name);
     std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("part.dwprt");
+    accepted(&mut state, "save", json!({"path":path}));
     displayed(&state);
     export(&state, &dir, "build");
     accepted(&mut state, tool, edit);
@@ -88,7 +105,6 @@ fn exercise(mut state: AppState, name: &str, tool: &str, edit: Value) {
     accepted(&mut state, "undo", json!({}));
     displayed(&state);
     accepted(&mut state, "redo", json!({}));
-    let path = dir.join("part.dwprt");
     accepted(&mut state, "save", json!({"path":path}));
     accepted(&mut state, "open", json!({"path":path}));
     displayed(&state);
@@ -136,7 +152,10 @@ fn pocket_strips_close_with_concave_spherical_corners() {
     );
     accepted(&mut state, "cut", json!({"sketch":"Sketch2","depth":8,"through_all":false,"flip":false}));
     let selected = edges(&state, |e| {
-        e.curve == CurveKind::Line && e.midpoint.x.abs() <= 10.0 && e.midpoint.y.abs() <= 8.0 && e.midpoint.z < 8.0
+        e.curve == CurveKind::Line
+            && e.midpoint.x.abs() <= 10.0
+            && e.midpoint.y.abs() <= 8.0
+            && e.midpoint.z <= 8.0 + 1e-6
     });
     round(&mut state, selected, 1.0);
     let topology = state.doc.kernel().topology(state.doc.display_body().unwrap()).unwrap();
@@ -147,10 +166,14 @@ fn pocket_strips_close_with_concave_spherical_corners() {
 #[test]
 fn later_top_round_rolls_over_upright_rounds_at_smaller_and_equal_radii() {
     let mut state = block();
-    let selected = edges(&state, |e| (e.midpoint.z - 6.0).abs() < 1e-6);
+    let selected = edges(&state, |e| (e.midpoint.z - 6.0).abs() < 1e-6 && e.midpoint.x > 0.0 && e.midpoint.y > 0.0);
+    assert_eq!(selected.len(), 1);
     round(&mut state, selected, 2.0);
-    let selected = edges(&state, |e| e.curve == CurveKind::Line && (e.midpoint.z - 12.0).abs() < 1e-6);
-    round(&mut state, selected[..1].to_vec(), 1.0);
+    let selected = edges(&state, |e| {
+        e.curve == CurveKind::Line && (e.midpoint.z - 12.0).abs() < 1e-6 && (e.midpoint.y - 15.0).abs() < 1e-6
+    });
+    assert_eq!(selected.len(), 1);
+    round(&mut state, selected, 1.0);
     exercise(state, "fillet-over-fillet", "edit_fillet", json!({"feature":"Fillet2","radius":2}));
 }
 
@@ -166,6 +189,12 @@ fn bore_mouth_and_blind_floor_round_on_the_material_side() {
         let z = if blind { 4.0 } else { 12.0 };
         let selected = edges(&state, |e| e.curve == CurveKind::Circle && (e.midpoint.z - z).abs() < 1e-6);
         round(&mut state, selected, 1.0);
+        // Independent integrals of the R1 torus strips on the R3 bore.
+        let pi = std::f64::consts::PI;
+        let expected =
+            if blind { 14400.0 - 203.0 * pi / 3.0 - pi * pi } else { 14400.0 - 347.0 * pi / 3.0 + 2.0 * pi * pi };
+        let volume = state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap().volume;
+        assert!((volume - expected).abs() < 1e-6, "{volume} != {expected}");
         exercise(
             state,
             if blind { "blind-floor" } else { "bore-mouth" },
@@ -200,36 +229,39 @@ fn nonconvex_shell_builds_displays_edits_and_exports() {
 }
 
 #[test]
-fn tangent_shadow_and_equal_crossing_refuse_with_codes_and_preserve_the_part() {
-    for (equal, expected) in [(false, "fillet.radius-too-large"), (true, "fillet.unsupported-corner")] {
+fn tangent_shadow_and_ambiguous_equal_crossing_preserve_the_part() {
+    for (equal, expected) in [(false, "fillet.radius-too-large"), (true, "recipe.ambiguous-reference")] {
         let mut state = fresh();
-        sketch(&mut state, "top", json!({"shape":"circle","center":[0,0,0],"diameter":20}));
+        accepted(
+            &mut state,
+            "sketch",
+            json!({"plane":"top","offset":0,"shapes":[{
+            "shape":"circle","center":[if equal {0} else {8},0,0],"diameter":if equal {20} else {8}}]}),
+        );
         accepted(&mut state, "extrude", json!({"sketch":"Sketch1","depth":40,"flip":false}));
         accepted(
             &mut state,
             "sketch",
             json!({"plane":"front","offset":-20,"shapes":[{
-            "shape":"circle","center":[if equal {0} else {8},20,20],"diameter":if equal {20} else {8}}]}),
+            "shape":"circle","center":[0,20,20],"diameter":20}]}),
         );
         if equal {
             accepted(&mut state, "extrude", json!({"sketch":"Sketch2","depth":40,"flip":false}));
         } else {
             accepted(&mut state, "cut", json!({"sketch":"Sketch2","depth":40,"through_all":false,"flip":true}));
         }
-        let selected = edges(&state, |e| e.curve == CurveKind::Other);
-        assert!(!selected.is_empty());
-        let before = state.doc.model().part_json();
-        let body = state.doc.display_body();
-        let out = call_checked(
-            &mut AppTools { state: &mut state },
-            "fillet",
-            json!({"edges":selected,"radius":1}),
-            &Caller::Mcp { client: "release-refusal".into() },
-        );
-        assert!(out.is_error && out.content.contains(expected), "{expected}: {}", out.content);
-        assert_eq!(state.doc.model().part_json(), before);
-        assert_eq!(state.doc.display_body(), body);
+        let selected = edges(&state, |e| e.curve == CurveKind::Other || (equal && e.curve == CurveKind::Ellipse));
+        refused(&mut state, selected, 1.0, expected);
     }
+}
+
+#[test]
+fn unequal_radius_mitre_reports_the_typed_corner_refusal() {
+    let mut state = block();
+    let top = edges(&state, |e| (e.midpoint.z - 12.0).abs() < 1e-6);
+    round(&mut state, top, 2.0);
+    let uprights = edges(&state, |e| e.curve == CurveKind::Line && e.bbox.max.z - e.bbox.min.z > 5.0);
+    refused(&mut state, uprights, 1.0, "fillet.unsupported-corner");
 }
 
 #[path = "support/ribbon.rs"]

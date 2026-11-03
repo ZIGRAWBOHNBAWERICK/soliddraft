@@ -30,6 +30,8 @@ fn plain_message(message: &str) -> &str {
         "This selection does not define a supported sharp edge. Choose a different edge."
     } else if message.contains("recipe.ambiguous-reference") {
         "This selection matches more than one edge or face. Pick the intended edge or face again."
+    } else if message.contains("mesh.precision-or-budget") {
+        "This shape could not be displayed. Try suppressing a feature."
     } else if has_code(message, "measure") || has_code(message, "iges") {
         // Measurements and IGES output the kernel does not cover yet.
         "Coming soon"
@@ -42,6 +44,8 @@ fn plain_message(message: &str) -> &str {
         "Coming soon"
     } else if message.contains("fillet.") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
+    } else if message.contains("numbers.operation-budget") {
+        "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
     } else if message.contains("mass_properties") {
         "These properties could not be calculated. Try again or choose another feature."
     } else if message.contains("Catallax")
@@ -132,6 +136,10 @@ mod tests {
             for_user("fillet.unsupported-corner: equal crossing pole"),
             "Fillets meeting at this corner are not supported yet."
         );
+        assert_eq!(
+            for_user("export_step failed: numbers.operation-budget: operation work allowance exhausted"),
+            "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
+        );
     }
 
     #[test]
@@ -145,6 +153,7 @@ mod tests {
             "fillet.unsupported-overflow",
             "fillet.unsupported-topology",
             "recipe.ambiguous-reference",
+            "mesh.precision-or-budget",
             "measure.unsupported-surface",
             "measure.unsupported-pair",
             "measure.nonplanar-face",

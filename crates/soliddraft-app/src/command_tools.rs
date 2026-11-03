@@ -1114,7 +1114,12 @@ fn name_of_edge(doc: &Document, edge: soliddraft_kernel_api::EdgeId) -> Option<S
 fn edge_ref(doc: &Document, name: &str) -> Result<EdgeRef, String> {
     let edge = edge_by_name(doc, name)
         .ok_or_else(|| format!("no edge named `{name}`; `feature` lists each feature's edges by name"))?;
-    doc.edge_ref(edge).ok_or_else(|| format!("`{name}` cannot be referenced"))
+    doc.edge_ref(edge).ok_or_else(|| match doc.model().edge_ref(edge) {
+        Err(soliddraft_model::NamingError::NotUnique(_, why)) => {
+            format!("recipe.ambiguous-reference: `{name}` cannot be referenced uniquely: {why}")
+        }
+        _ => format!("`{name}` cannot be referenced"),
+    })
 }
 
 fn datum_by_name(doc: &Document, name: &str) -> Option<PlaneKind> {

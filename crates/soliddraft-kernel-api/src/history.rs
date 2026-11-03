@@ -223,6 +223,12 @@ pub enum FaceRole {
         /// The input face it copies.
         face: FaceId,
     },
+    /// A face of an imported STEP body.
+    Imported {
+        /// The face's entity name in the source file, such as `#1234`. The saved source
+        /// never changes, so neither does the name.
+        key: String,
+    },
     /// A face the operation made that fits none of the other roles, such as a patch a
     /// boolean added.
     Other,

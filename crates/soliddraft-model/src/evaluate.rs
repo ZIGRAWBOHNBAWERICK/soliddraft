@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use soliddraft_kernel_api::{
-    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FacePoint, FaceRole, Gyroid, Hole,
-    HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult, Lattice, Mirror,
-    OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
+    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FacePoint, FaceRole, Gyroid, HistoryRecord,
+    Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult, Lattice,
+    Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
 };
 
 use crate::feature::{
@@ -1045,12 +1045,13 @@ impl Document {
                     let n = r.bodies.len();
                     return Built::failed(current, format!("the file holds {n} solids; a part holds one body"));
                 }
-                let body = r.bodies.remove(0).result.body;
+                let result = r.bodies.remove(0).result;
+                let body = result.body;
                 Built {
                     status: FeatureStatus::Ok,
                     output: Some(body),
                     owned: Some(body),
-                    names: Vec::new(),
+                    names: imported_names(&result.record),
                     sketch: None,
                     plane: None,
                     version: 0,
@@ -1112,6 +1113,34 @@ fn number(mut faces: Vec<(Origin, Generator, usize)>) -> Vec<NamedFace> {
             let ordinal = *n;
             *n += 1;
             NamedFace { origin, generator, ordinal }
+        })
+        .collect()
+}
+
+/// The faces of an imported body, ranked by their entity names in the source file:
+/// `#17` before `#40` before `#102`. The saved source never changes, so neither do the
+/// ranks, and the faces read "Face 1", "Face 2" and so on.
+fn imported_names(record: &HistoryRecord) -> Vec<NamedFace> {
+    let mut faces: Vec<(u64, &str, &FaceRole)> = record
+        .face_roles
+        .iter()
+        .filter_map(|o| match &o.role {
+            FaceRole::Imported { key } => {
+                let number = key.strip_prefix('#').and_then(|n| n.parse().ok()).unwrap_or(u64::MAX);
+                Some((number, key.as_str(), &o.role))
+            }
+            _ => None,
+        })
+        .collect();
+    faces.sort();
+    faces.dedup();
+    faces
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, (_, _, role))| NamedFace {
+            origin: Origin { tag: record.tag.clone(), role: role.clone() },
+            generator: Generator::Other,
+            ordinal: ordinal as u32,
         })
         .collect()
 }

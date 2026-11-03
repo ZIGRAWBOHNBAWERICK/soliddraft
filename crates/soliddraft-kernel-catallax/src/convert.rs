@@ -266,6 +266,7 @@ fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option
             .iter()
             .find_map(|p| p.origins.iter().find_map(|(id, os)| os.contains(of).then_some(*id)))
             .map(|face| FaceRole::Copy { instance: *instance, face }),
+        Role::Imported { key } => Some(FaceRole::Imported { key: key.clone() }),
         _ => None,
     }
 }

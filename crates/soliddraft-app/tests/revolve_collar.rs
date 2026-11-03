@@ -61,7 +61,7 @@ fn collar_commands_keep_picking_names_through_edit_undo_and_reopen() {
             reference
                 .faces
                 .iter()
-                .any(|face| matches!(face.generator, soliddraft_model::Generator::Side { entity } if entity == 2))
+                .any(|face| matches!(face.generator, soliddraft_model::Generator::Side { entity, .. } if entity == 2))
                 .then(|| format!("Revolve1 · {}", edge.label))
         })
         .collect();

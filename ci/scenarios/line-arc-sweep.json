@@ -1,0 +1,371 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "line-arc-sweep",
+  "max_work": 60000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              1,
+              -1.5,
+              0
+            ],
+            "width": 2,
+            "height": 1
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sweep",
+      "arguments": {
+        "sketch": "Sketch1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "segments": [
+          {
+            "kind": "line",
+            "id": "rise",
+            "to": [
+              0,
+              0,
+              4
+            ]
+          },
+          {
+            "kind": "arc",
+            "id": "bend",
+            "centre": [
+              0,
+              5,
+              4
+            ],
+            "axis": [
+              -1,
+              0,
+              0
+            ],
+            "turn": "quarter"
+          },
+          {
+            "kind": "line",
+            "id": "run",
+            "to": [
+              0,
+              9,
+              9
+            ]
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 36.42035224833366,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/min/1",
+          "approx": -2
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 9
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/2",
+          "approx": 11
+        }
+      ]
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "segments": [
+          {
+            "kind": "line",
+            "id": "rise",
+            "to": [
+              0,
+              0,
+              4
+            ]
+          },
+          {
+            "kind": "arc",
+            "id": "bend",
+            "centre": [
+              0,
+              5,
+              4
+            ],
+            "axis": [
+              -1,
+              0,
+              0
+            ],
+            "turn": "quarter"
+          },
+          {
+            "kind": "line",
+            "id": "run",
+            "to": [
+              0,
+              12,
+              9
+            ]
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 42.42035224833365,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/summary/body/bounding_box/max/1",
+          "approx": 12
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 36.42035224833366,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 2
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 42.42035224833365,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "segments": [
+          {
+            "kind": "line",
+            "to": [
+              0,
+              0,
+              4
+            ]
+          },
+          {
+            "kind": "line",
+            "to": [
+              0,
+              3,
+              7
+            ]
+          }
+        ]
+      },
+      "refused": "This sweep path is coming soon.",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 42.42035224833365,
+          "tolerance": 0.001
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "segments": [
+          {
+            "kind": "line",
+            "to": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      "refused": "Sweep needs two different finite endpoints",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 42.42035224833365,
+          "tolerance": 0.001
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "orientation": "follow_path",
+        "segments": [
+          {
+            "kind": "line",
+            "to": [
+              0,
+              0,
+              4
+            ]
+          },
+          {
+            "kind": "line",
+            "to": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      "refused": "Set a turn axis where the path doubles back",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 42.42035224833365,
+          "tolerance": 0.001
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "measure_entity",
+      "arguments": {
+        "entity": "Sweep1 \u00b7 End cap"
+      },
+      "checks": [
+        {
+          "pointer": "/result/kind",
+          "equals": "face"
+        },
+        {
+          "pointer": "/result/value",
+          "approx": 2,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/line-arc-sweep.dwprt"
+      },
+      "files": [
+        "{bundle}/line-arc-sweep.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/line-arc-sweep.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 3,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 42.42035224833365,
+          "tolerance": 0.001
+        }
+      ],
+      "checked_step_export": "{bundle}/line-arc-sweep.dwprt",
+      "checked_step_max_work": 20000000,
+      "step_oracle": {
+        "surfaces": {
+          "plane": 8,
+          "cylinder": 2
+        },
+        "volume": 42.42035224833365,
+        "floor": 1e-05,
+        "inside": [
+          [
+            1,
+            -1.5,
+            2
+          ],
+          [
+            1,
+            0.4,
+            8.6
+          ],
+          [
+            1,
+            11,
+            10.5
+          ]
+        ],
+        "outside": [
+          [
+            1,
+            0,
+            2
+          ],
+          [
+            5,
+            5,
+            5
+          ],
+          [
+            1,
+            13,
+            10.5
+          ]
+        ]
+      }
+    }
+  ]
+}

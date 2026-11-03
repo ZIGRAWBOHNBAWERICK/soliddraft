@@ -760,13 +760,7 @@ impl Feature {
                 end => end.label().to_lowercase(),
             },
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
-            FeatureKind::Sweep(s) => format!(
-                "{} mm",
-                fmt_mm(
-                    (soliddraft_kernel_api::Vec3::from(s.path.end) - soliddraft_kernel_api::Vec3::from(s.path.start))
-                        .length()
-                )
-            ),
+            FeatureKind::Sweep(s) => format!("{} mm", fmt_mm(s.path.length())),
             FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
             FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
             FeatureKind::Hole(h) => {
@@ -2807,6 +2801,23 @@ impl Document {
         Ok(Preview { result: None, tool: Some(result?), removes: false })
     }
 
+    /// Where a new path starts on a sketch's profiles, and a distance that clears them:
+    /// an arc with at least this radius keeps them on one side of its axis.
+    pub fn sweep_anchor(&self, sketch_id: FeatureId) -> Option<([f64; 3], f64)> {
+        let (profiles, plane) = self.sketch_profiles(sketch_id).ok()?;
+        let points: Vec<_> = profiles
+            .iter()
+            .flat_map(|p| p.outer.0.iter())
+            .flat_map(|s| [s.start(), s.end()])
+            .map(|p| plane.to_world(p))
+            .collect();
+        let mean = points.iter().fold(soliddraft_kernel_api::Vec3::ZERO, |a, p| a + *p) * (1.0 / points.len() as f64);
+        let start = [mean.x, mean.y, mean.z].map(|v| (v * 100.0).round() / 100.0 + 0.0);
+        let centre = soliddraft_kernel_api::Vec3::from(start);
+        let reach = points.iter().map(|p| p.distance(centre)).fold(0.0, f64::max);
+        Some((start, (reach * 1.5).ceil().max(5.0)))
+    }
+
     /// Builds the sweep tool for the editor without changing the document.
     /// Temporary bodies are released on both success and refusal.
     pub fn preview_sweep(&self, params: &model::SweepFeature) -> Result<Preview, String> {
@@ -2815,7 +2826,10 @@ impl Document {
         let failure = |error: soliddraft_kernel_api::KernelError| match error {
             soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
             soliddraft_kernel_api::KernelError::Profile(error) => error.to_string(),
-            _ => "This sweep could not finish. Try a simpler polygon profile".into(),
+            soliddraft_kernel_api::KernelError::Unsupported(message) if message.ends_with(" is coming soon.") => {
+                "Coming soon".into()
+            }
+            _ => "This sweep could not finish. Try a simpler polygon profile or path".into(),
         };
         let mut made = Vec::new();
         let result = (|| -> Result<Arc<DisplayMesh>, String> {

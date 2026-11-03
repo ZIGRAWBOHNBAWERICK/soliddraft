@@ -799,6 +799,20 @@
       "route": "MCP sweep and edit_sweep -> document rebuild -> native path and sweep -> viewport and checked STEP export",
       "supported_limits": "Closed polygon profile on an offset plane; one nonzero straight segment with displacement [2,1,3], edited to [2,1,6]; authored profile placement, picking names, undo/redo, invalid edit preservation, save and fresh-process reopen; loft and curved profiles remain unavailable; post-0.2.0 batch",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent planar-solid volume and point oracle"
+    },
+    {
+      "id": "line-arc-sweep",
+      "file": "ci/scenarios/line-arc-sweep.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "8bc431813630f8f8e066d0174741162066f465b9",
+      "route": "MCP sweep and edit_sweep with segments -> document rebuild -> native path and sweep with exact arc ends -> viewport and checked STEP export",
+      "supported_limits": "Closed polygon profile beside the path; line, quarter arc, line chain with the profile turning along it, edited run length; refused oblique join, zero-length line and reversal without a turn axis leave the part unchanged; face measured by name, undo/redo, save and fresh-process reopen; other path motions and loft remain unavailable",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle over planes and cylinders"
     }
   ]
 }

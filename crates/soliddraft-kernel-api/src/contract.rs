@@ -524,7 +524,7 @@ pub fn created_faces_have_roles(k: &dyn Kernel) {
     let sides =
         [Vec3::new(0.0, -15.0, 5.0), Vec3::new(20.0, 0.0, 5.0), Vec3::new(0.0, 15.0, 5.0), Vec3::new(-20.0, 0.0, 5.0)];
     for (i, want) in sides.iter().enumerate() {
-        let got = face_of(FaceRole::Side { loop_index: 0, segment: i as u32 });
+        let got = face_of(FaceRole::Side { loop_index: 0, segment: i as u32, path: None });
         assert!(near(got, *want, 1e-6), "side {i} at {got:?}, expected {want:?}");
     }
 
@@ -557,9 +557,9 @@ pub fn created_faces_have_roles(k: &dyn Kernel) {
     let role_face = |role: FaceRole| {
         hb.record.face_roles.iter().filter(|o| o.role == role).map(|o| ht.face(o.face).unwrap()).collect::<Vec<_>>()
     };
-    let bite = role_face(FaceRole::Side { loop_index: 0, segment: 3 });
+    let bite = role_face(FaceRole::Side { loop_index: 0, segment: 3, path: None });
     assert!(!bite.is_empty() && bite.iter().all(|f| f.centroid.y < 15.0), "the bite's wall dips below the top edge");
-    let wall = role_face(FaceRole::Side { loop_index: 1, segment: 0 });
+    let wall = role_face(FaceRole::Side { loop_index: 1, segment: 0, path: None });
     assert!(!wall.is_empty(), "the hole wall names loop 1");
     for f in &wall {
         assert!(((f.centroid.x + 10.0).powi(2) + (f.centroid.y + 5.0).powi(2)).sqrt() < 3.0 + 1e-6);
@@ -577,10 +577,10 @@ pub fn created_faces_have_roles(k: &dyn Kernel) {
         )
         .unwrap();
     covered(&r.record);
-    let roles: Vec<FaceRole> = r.record.face_roles.iter().map(|o| o.role).collect();
+    let roles: Vec<FaceRole> = r.record.face_roles.iter().map(|o| o.role.clone()).collect();
     assert!(roles.contains(&FaceRole::StartCap) && roles.contains(&FaceRole::EndCap), "{roles:?}");
     for i in 0..4 {
-        assert!(roles.contains(&FaceRole::Side { loop_index: 0, segment: i }), "side {i} in {roles:?}");
+        assert!(roles.contains(&FaceRole::Side { loop_index: 0, segment: i, path: None }), "side {i} in {roles:?}");
     }
 
     // Fillet faces name the edge they replace; shell walls name their outer face.
@@ -634,7 +634,7 @@ pub fn faces_keep_their_origins(k: &dyn Kernel) {
     assert_eq!(t.faces.len(), 6);
     assert!(t.faces.iter().all(|f| f.origins.len() == 1), "a lone sweep's faces have one origin each");
     let top = origin("plate", FaceRole::EndCap);
-    let side = origin("plate", FaceRole::Side { loop_index: 0, segment: 1 });
+    let side = origin("plate", FaceRole::Side { loop_index: 0, segment: 1, path: None });
     assert!(near(carrying(plate, &top)[0].centroid, Vec3::new(60.0, 45.0, 10.0), 1e-6));
     assert!(near(carrying(plate, &side)[0].centroid, Vec3::new(120.0, 45.0, 5.0), 1e-6));
 

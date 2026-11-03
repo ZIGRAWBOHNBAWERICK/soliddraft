@@ -425,6 +425,7 @@ impl Document {
             Ok(regions) if !regions.is_empty() => regions,
             _ => return Built::failed(current, "Select a closed sketch region"),
         };
+        let chain = matches!(&f.kind, FeatureKind::Sweep(s) if s.path.segments.len() > 1);
         let mut mine = None;
         let mut faces = Vec::new();
         let mut run = || -> KernelResult<Option<BodyId>> {
@@ -437,16 +438,21 @@ impl Document {
                 let _ = k.release(sheet.body);
                 let tool = tool?;
                 for origin in &tool.record.face_roles {
-                    let generator = match origin.role {
+                    let generator = match &origin.role {
                         FaceRole::StartCap => Some(Generator::StartCap),
                         FaceRole::EndCap => Some(Generator::EndCap),
-                        FaceRole::Side { loop_index, segment } => region
-                            .entity(loop_index as usize, segment as usize)
-                            .map(|entity| Generator::Side { entity }),
+                        FaceRole::Side { loop_index, segment, path } => {
+                            // A one-piece path's faces keep the names saved before chains.
+                            let path = path.as_deref().filter(|_| chain).map(Box::from);
+                            region
+                                .entity(*loop_index as usize, *segment as usize)
+                                .map(|entity| Generator::Side { entity, path })
+                        }
+                        FaceRole::Envelope { path } => Some(Generator::PathJoin { path: path.as_str().into() }),
                         _ => None,
                     };
                     if let Some(generator) = generator {
-                        faces.push((Origin { tag: tool.record.tag.clone(), role: origin.role }, generator, i));
+                        faces.push((Origin { tag: tool.record.tag.clone(), role: origin.role.clone() }, generator, i));
                     }
                 }
                 let next = if let Some(previous) = body {
@@ -482,6 +488,11 @@ impl Document {
                     match error {
                         soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
                         soliddraft_kernel_api::KernelError::Profile(error) => error.to_string(),
+                        soliddraft_kernel_api::KernelError::Unsupported(message)
+                            if message.ends_with(" is coming soon.") =>
+                        {
+                            message
+                        }
                         _ => "This sweep could not be built from this profile and path".into(),
                     }
                 } else {
@@ -582,13 +593,13 @@ impl Document {
                     let generator = match o.role {
                         FaceRole::StartCap => Some(Generator::StartCap),
                         FaceRole::EndCap => Some(Generator::EndCap),
-                        FaceRole::Side { loop_index, segment } => region
+                        FaceRole::Side { loop_index, segment, .. } => region
                             .entity(loop_index as usize, segment as usize)
-                            .map(|entity| Generator::Side { entity }),
+                            .map(|entity| Generator::Side { entity, path: None }),
                         _ => None,
                     };
                     if let Some(generator) = generator {
-                        faces.push((Origin { tag: tool.record.tag.clone(), role: o.role }, generator, i));
+                        faces.push((Origin { tag: tool.record.tag.clone(), role: o.role.clone() }, generator, i));
                     }
                 }
                 let next = match (e.operation, body) {
@@ -681,7 +692,11 @@ impl Document {
             .iter()
             .filter_map(|o| match o.role {
                 FaceRole::Blend { edge } => ids.iter().position(|x| *x == edge).map(|i| {
-                    (Origin { tag: result.record.tag.clone(), role: o.role }, Generator::Blend { edge: i as u32 }, 0)
+                    (
+                        Origin { tag: result.record.tag.clone(), role: o.role.clone() },
+                        Generator::Blend { edge: i as u32 },
+                        0,
+                    )
                 }),
                 // Ranked by where its edges sit in the feature's list, which survives a
                 // rebuild where a vertex id may not.
@@ -689,7 +704,7 @@ impl Document {
                     let meets = |edge: &EdgeId| t.edge(*edge).is_some_and(|e| e.vertices.contains(&vertex));
                     let rank = ids.iter().enumerate().filter(|(_, edge)| meets(edge));
                     let rank = rank.fold(0, |rank, (i, _)| rank * (ids.len() + 1) + i + 1);
-                    Some((Origin { tag: result.record.tag.clone(), role: o.role }, Generator::Other, rank))
+                    Some((Origin { tag: result.record.tag.clone(), role: o.role.clone() }, Generator::Other, rank))
                 }
                 _ => None,
             })
@@ -789,7 +804,7 @@ impl Document {
                 .iter()
                 .filter_map(|o| match o.role {
                     FaceRole::Hole { placement, part } => Some((
-                        Origin { tag: r.record.tag.clone(), role: o.role },
+                        Origin { tag: r.record.tag.clone(), role: o.role.clone() },
                         Generator::Hole { placement, part },
                         0,
                     )),
@@ -837,7 +852,7 @@ impl Document {
         for o in &r.record.face_roles {
             if let FaceRole::Copy { instance, face } = o.role {
                 let key = view.as_ref().and_then(|t| reference::origin_label(face, &View { topology: t }, &names));
-                faces.push((instance, key, o.role));
+                faces.push((instance, key, o.role.clone()));
             }
         }
         faces.sort();
@@ -849,7 +864,7 @@ impl Document {
                 ordinal = 0;
             }
             out.push(NamedFace {
-                origin: Origin { tag: r.record.tag.clone(), role: *role },
+                origin: Origin { tag: r.record.tag.clone(), role: role.clone() },
                 generator: Generator::Copy { instance: *instance },
                 ordinal,
             });
@@ -890,7 +905,7 @@ impl Document {
                     // Never rank an unnamed wall by a transient kernel handle.
                     let source =
                         view.as_ref().and_then(|t| reference::origin_label(face, &View { topology: t }, &names))?;
-                    Some((source, o.role))
+                    Some((source, o.role.clone()))
                 })
                 .collect();
             walls.sort();
@@ -1072,12 +1087,12 @@ pub(crate) fn kernel_repair(slot: ReferenceSlot, e: KernelError) -> RepairNeeded
 /// Ordinals: faces with the same generator are ranked by the region that made them. A
 /// region makes each generator once, so the rank never depends on geometry.
 fn number(mut faces: Vec<(Origin, Generator, usize)>) -> Vec<NamedFace> {
-    faces.sort_by_key(|f| (f.1, f.2));
+    faces.sort_by_key(|f| (f.1.clone(), f.2));
     let mut counts: HashMap<Generator, u32> = HashMap::new();
     faces
         .into_iter()
         .map(|(origin, generator, _)| {
-            let n = counts.entry(generator).or_default();
+            let n = counts.entry(generator.clone()).or_default();
             let ordinal = *n;
             *n += 1;
             NamedFace { origin, generator, ordinal }

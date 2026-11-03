@@ -171,7 +171,7 @@ pub struct RevolveFeature {
     pub angle_deg: f64,
 }
 
-/// A polygon sketch translated by the displacement of one saved straight segment.
+/// A polygon sketch swept along a saved chain of lines and arcs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SweepFeature {

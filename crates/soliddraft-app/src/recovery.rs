@@ -567,7 +567,14 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
     let mut open = true;
     let mut later = false;
     let mut actions = Vec::new();
-    egui::Window::new("Recover documents").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
+    // In the middle of the window, clear of the start page's buttons and of the browser's
+    // crash report journals in the corner.
+    let window = egui::Window::new("Recover documents")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))
+        .open(&mut open);
+    window.show(ctx, |ui| {
         if r.offers.is_empty() {
             ui.label("No documents to recover.");
         } else if cfg!(target_arch = "wasm32") {

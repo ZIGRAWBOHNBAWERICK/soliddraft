@@ -1575,7 +1575,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("import_step", "Import STEP", Icon::Import, "Import one STEP body after reviewing its repairs")
             .run(|_| AppAction::ImportStep(None))
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
-            .agents(Agents::Mcp, "Automatic repairs take no answer. Declined gap ids are saved with the source.", crate::import::params)
+            .agents(Agents::Mcp, "Automatic repairs take no answer. Declined gap ids, and each approved repair with its limit and approver, are saved with the source.", crate::import::params)
             .undo(Undo::Step),
         cmd("save", "Save", Icon::Glyph("save"), "Save the part")
             .key(Scope::Part, ctrl, Key::S)

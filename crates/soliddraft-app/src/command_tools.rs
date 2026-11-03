@@ -2863,9 +2863,11 @@ impl ToolHost for CommandTools<'_> {
                         "the STEP source or repair questions changed since review; run preview_import again".into()
                     );
                 }
-                let decline: Vec<String> = serde_json::from_value(input.get("decline").cloned().unwrap_or(json!([])))
+                let decline = serde_json::from_value(input.get("decline").cloned().unwrap_or(json!([])))
                     .map_err(|e| format!("bad decline list: {e}"))?;
-                crate::import::commit(self.doc, &preview, &decline)?;
+                let accept = serde_json::from_value(input.get("accept").cloned().unwrap_or(json!([])))
+                    .map_err(|e| format!("bad accept list: {e}"))?;
+                crate::import::commit(self.doc, &preview, &crate::import::Review { decline, accept })?;
                 Ok(self.summary())
             })(),
             "model_summary" => Ok(self.summary()),

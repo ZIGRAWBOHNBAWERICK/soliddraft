@@ -1,0 +1,253 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "import-repair",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step"
+      },
+      "checks": [
+        {
+          "pointer": "/result/source_sha256",
+          "equals": "a4932ddb236fc377eea49e1ff2c880dfbb36f1548480c07abaadcd0f9a547622"
+        },
+        {
+          "pointer": "/result/proposals",
+          "length": 1
+        },
+        {
+          "pointer": "/result/proposals/0/question",
+          "equals": "repair:a4932ddb236f:g0"
+        },
+        {
+          "pointer": "/result/proposals/0/kind",
+          "equals": "seam_close"
+        },
+        {
+          "pointer": "/result/proposals/0/distance_max_mm",
+          "equals": "0.02"
+        },
+        {
+          "pointer": "/result/proposals/0/disposition",
+          "equals": "ask"
+        },
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "import_step",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step",
+        "decline": []
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ],
+      "refused": "needs an explicit tolerance approval",
+      "arguments_from": {
+        "preview_token": {
+          "step": 1,
+          "pointer": "/result/token"
+        }
+      }
+    },
+    {
+      "tool": "import_step",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step",
+        "accept": [
+          {
+            "id": "g0",
+            "tolerance_mm": "0.01",
+            "approver": "Ana Reviewer"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ],
+      "refused": "at least the measured gap",
+      "arguments_from": {
+        "preview_token": {
+          "step": 1,
+          "pointer": "/result/token"
+        }
+      }
+    },
+    {
+      "tool": "import_step",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step",
+        "accept": [
+          {
+            "id": "g0",
+            "tolerance_mm": "0.03",
+            "approver": ""
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ],
+      "refused": "who approved it",
+      "arguments_from": {
+        "preview_token": {
+          "step": 1,
+          "pointer": "/result/token"
+        }
+      }
+    },
+    {
+      "tool": "import_step",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step",
+        "accept": [
+          {
+            "id": "g0",
+            "tolerance_mm": "0.03",
+            "approver": "Ana Reviewer"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features/0/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/features/0/sha256",
+          "equals": "a4932ddb236fc377eea49e1ff2c880dfbb36f1548480c07abaadcd0f9a547622"
+        },
+        {
+          "pointer": "/summary/features/0/decisions",
+          "equals": {
+            "repair:a4932ddb236f:g0": "accept:0.03:Ana Reviewer"
+          }
+        },
+        {
+          "pointer": "/summary/features/0/record/format",
+          "equals": "catallax-import-repair/2"
+        },
+        {
+          "pointer": "/summary/features/0/record/changes",
+          "length": 1
+        },
+        {
+          "pointer": "/summary/features/0/record/changes/0/approval",
+          "equals": "user"
+        },
+        {
+          "pointer": "/summary/features/0/record/changes/0/approver",
+          "equals": "Ana Reviewer"
+        },
+        {
+          "pointer": "/summary/features/0/record/changes/0/tolerance_mm",
+          "equals": "0.03"
+        },
+        {
+          "pointer": "/summary/features/0/record/changes/0/max_movement_mm",
+          "equals": "0.02"
+        },
+        {
+          "pointer": "/summary/features/0/record/face_tolerances",
+          "length": 4
+        },
+        {
+          "pointer": "/summary/features/0/record/face_tolerances/0/deviation_lower_mm",
+          "equals": "0.02"
+        },
+        {
+          "pointer": "/summary/features/0/record/face_tolerances/0/deviation_upper_mm",
+          "equals": "0.02"
+        },
+        {
+          "pointer": "/summary/features/0/record/face_tolerances/0/approved_tolerance_mm",
+          "equals": "0.03"
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/body/edges",
+          "equals": 12
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 10020,
+          "tolerance": 1e-06
+        }
+      ],
+      "arguments_from": {
+        "preview_token": {
+          "step": 1,
+          "pointer": "/result/token"
+        }
+      }
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/repaired.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/repaired.dwprt"
+      },
+      "fresh_process": true,
+      "checks": [
+        {
+          "pointer": "/summary/features/0",
+          "same_as_step": 5
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/body/edges",
+          "equals": 12
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 10020,
+          "tolerance": 1e-06
+        }
+      ],
+      "same_geometry_as_step": 5,
+      "checked_step_export": "{bundle}/repaired.dwprt",
+      "exports": [
+        {
+          "format": "stl"
+        }
+      ]
+    }
+  ]
+}

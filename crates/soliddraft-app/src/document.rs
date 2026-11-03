@@ -3238,6 +3238,9 @@ impl Document {
                         if let Some(note) = self.model().import_check_note(model_id(id)) {
                             details.push(("Check".to_owned(), note));
                         }
+                        if let Some(record) = self.model().import_record(model_id(id)) {
+                            details.extend(crate::import::record_rows(record));
+                        }
                     }
                 }
                 if !f.is_sketch()

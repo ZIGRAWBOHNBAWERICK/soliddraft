@@ -26,6 +26,7 @@
     "ci/edit_speed.py": ["lint"],
     "ci/fake_mcp_server.py": ["lint", "application-loop"],
     "ci/fixtures/import/block-seam-4um.step": ["lint", "kernel", "test-linux", "application-loop"],
+    "ci/fixtures/import/block-seam-20um.step": ["lint", "kernel", "test-linux", "application-loop"],
     "ci/fixtures/import/two-blocks-5um.step": ["lint", "kernel", "test-linux", "application-loop"],
     "ci/gate-cases.json": ["lint"],
     "ci/known-over-budget.json": ["lint", "application-loop"],

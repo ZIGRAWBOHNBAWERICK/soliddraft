@@ -27,13 +27,26 @@ fn refusal(error: catallax_import::ImportRefusal) -> KernelError {
     use catallax_import::ImportRefusal::*;
     let message = match error {
         Malformed { .. } => "This file could not be read as a STEP solid.".into(),
-        Unsupported { entity, .. } => format!(
-            "This STEP file contains geometry that cannot be imported yet, at {entity}. Try a file with a single closed analytic solid."
-        ),
+        Unsupported { type_name, .. } => return KernelError::Unsupported(format!("STEP import of {type_name}")),
         UnknownUnit { .. } => "This STEP file's length units could not be read.".into(),
         HashMismatch { .. } => "The saved import does not match the original file.".into(),
         NotSolid { .. } => "This STEP file does not contain a supported closed solid.".into(),
+        InvalidDecision { detail, .. } if detail.contains("below the measured") => {
+            "The allowed movement must be at least the measured gap.".into()
+        }
+        InvalidDecision { detail, .. } if detail.contains("not supported") => {
+            return KernelError::Unsupported(format!("STEP import repair: {detail}"));
+        }
         InvalidDecision { .. } => "The saved repair decision does not match this STEP file.".into(),
+        ValidationFailed { detail, .. } if detail.contains("tenth") => {
+            "This repair would move more than a tenth of the nearest feature, so it cannot be applied. Decline it or correct the file.".into()
+        }
+        ValidationFailed { detail, .. } if detail.contains("exceeds") => {
+            "This repair moves the part further than the allowed movement. Raise the limit or decline the repair.".into()
+        }
+        ValidationFailed { detail, .. } if detail.contains("convex planar cover") || detail.contains("not be bounded") => {
+            return KernelError::Unsupported(format!("STEP import repair: {detail}"));
+        }
         ValidationFailed { .. } => "This STEP file could not be imported without an unverified repair.".into(),
         SelfIntersecting { faces, .. } => {
             format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
@@ -120,17 +133,16 @@ impl CatallaxKernel {
         drop(state);
         let mut saved = BTreeMap::new();
         for decision in request.decisions {
-            let Decision::Decline { id } = decision else {
-                return Err(KernelError::InvalidInput(
-                    "explicit STEP repair acceptance is not supported in this batch".into(),
-                ));
+            let (id, answer) = match decision {
+                Decision::Decline { id } => (id, "decline".to_owned()),
+                Decision::Accept { id, tolerance_mm, approver } => (id, format!("accept:{tolerance_mm}:{approver}")),
             };
             let index = id
                 .strip_prefix('g')
                 .and_then(|s| s.parse().ok())
                 .ok_or("invalid gap id")
                 .map_err(|e| KernelError::InvalidInput(e.into()))?;
-            saved.insert(question_id(request.sha256, index), "decline");
+            saved.insert(question_id(request.sha256, index), answer);
         }
         let step = json!({"id":result, "op":"import_step", "file":{"name":request.name,"sha256":request.sha256},
             "pose":{"rotation":["1","0","0","0"],"translation":["0","0","0"]}, "decisions":saved});

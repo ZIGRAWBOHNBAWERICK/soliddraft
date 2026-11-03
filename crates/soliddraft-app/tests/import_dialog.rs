@@ -1,9 +1,13 @@
 //! The reviewed import's visible buttons run the shared command on real Catallax.
 
-use egui_kittest::{Harness, kittest::Queryable};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT, Queryable},
+};
 use soliddraft_app::{document::Document, import::Preview, state::AppState};
 
 const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 
 #[test]
 fn preview_cancel_decline_and_accept() {
@@ -15,9 +19,9 @@ fn preview_cancel_decline_and_accept() {
         .with_size(egui::vec2(1000.0, 700.0))
         .build_ui_state(|ui, state| soliddraft_app::import::window(ui.ctx(), state), state);
     app.run_steps(3);
-    app.get_by_label("g0: seam_close");
-    app.get_by_label("0.004 to 0.004 mm seam; tolerance 0.01 mm");
-    app.get_by_label("automatic");
+    app.get_by_label("Gap 1: seam");
+    app.get_by_label("Measured 0.004 mm");
+    app.get_by_label("Repaired automatically, within 0.01 mm");
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Cancel").click();
     app.run_steps(3);
     assert!(app.state().import_dialog.is_none());
@@ -57,6 +61,93 @@ fn preview_cancel_decline_and_accept() {
     assert_eq!(feature.status, soliddraft_app::document::FeatureStatus::Ok);
     assert!(app.state().doc.display_body().is_some());
     std::fs::remove_file(path).unwrap();
+}
+
+fn button_enabled(app: &Harness<'_, soliddraft_app::state::AppState>, label: &str) -> bool {
+    !app.get_by_role_and_label(egui::accesskit::Role::Button, label).accesskit_node().is_disabled()
+}
+
+/// Replaces a field's text as a person does.
+fn typed(app: &mut Harness<'_, soliddraft_app::state::AppState>, label: &str, text: &str) {
+    app.get_by_role_and_label(egui::accesskit::Role::TextInput, label).click();
+    app.run_steps(2);
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    app.key_press(egui::Key::Delete);
+    app.run_steps(2);
+    if !text.is_empty() {
+        app.get_by_role_and_label(egui::accesskit::Role::TextInput, label).type_text(text);
+    }
+    app.run_steps(3);
+}
+
+#[test]
+fn an_asked_repair_needs_a_limit_and_an_approver_and_is_saved_with_both() {
+    let doc = Document::new("Approval test", soliddraft_app::kernel());
+    let mut state = AppState::new(doc);
+    state.import_dialog = Some(Preview::from_bytes(&state.doc, "block-seam-20um.step", WIDE.to_vec()).unwrap());
+    let mut app = Harness::builder()
+        .with_size(egui::vec2(1000.0, 700.0))
+        .build_ui_state(|ui, state| soliddraft_app::import::window(ui.ctx(), state), state);
+    app.run_steps(3);
+    app.get_by_label("Gap 1: seam");
+    app.get_by_label("Measured 0.02 mm");
+
+    typed(&mut app, "Approved by", "");
+    assert!(!button_enabled(&app, "Accept"), "an approval names who gave it");
+    typed(&mut app, "Approved by", "Ana Reviewer");
+    assert!(button_enabled(&app, "Accept"));
+    typed(&mut app, "Allowed movement", "0.01");
+    app.get_by_label("Enter at least 0.02 mm");
+    assert!(!button_enabled(&app, "Accept"), "a limit below the gap cannot be accepted");
+    typed(&mut app, "Allowed movement", "0.03");
+    assert!(button_enabled(&app, "Accept"));
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    app.run_steps(3);
+
+    let state = app.state();
+    assert!(state.import_dialog.is_none());
+    let feature = &state.doc.features[0];
+    assert_eq!(feature.status, soliddraft_app::document::FeatureStatus::Ok);
+    let soliddraft_app::document::FeatureKind::ImportStep(import) = &feature.kind else { panic!("import feature") };
+    let (question, answer) = import.decisions.iter().next().unwrap();
+    assert_eq!(answer, "accept:0.03:Ana Reviewer");
+    assert!(question.starts_with("repair:") && question.ends_with(":g0"));
+    assert_eq!(import.source, WIDE);
+
+    let details: std::collections::BTreeMap<_, _> = soliddraft_app::import::record_rows(
+        state.doc.model().import_record(soliddraft_model::FeatureId(feature.id as u32)).unwrap(),
+    )
+    .into_iter()
+    .collect();
+    assert_eq!(details["Gap 1"], "Repaired seam, approved by Ana Reviewer");
+    assert_eq!(details["Gap 1 approved limit"], "0.03 mm", "the limit the user approved");
+    assert_eq!(details["Gap 1 vertex movement"], "0.02 mm", "the movement measured on the result");
+    assert_eq!(details["Face #40 from source"], "up to 0.02 mm", "the attained tolerance, apart from the limit");
+    for (label, text) in &details {
+        for internal in ["Catallax", "kernel", "stage", "seam_close", "g0"] {
+            assert!(!label.contains(internal) && !text.contains(internal), "{label}: {text}");
+        }
+    }
+}
+
+#[test]
+fn a_repair_past_the_tenth_of_the_nearest_feature_is_refused_after_approval() {
+    let source = std::str::from_utf8(BLOCK).unwrap().replace("10.004", "0.055001").replace(",10.)", ",0.05)");
+    let mut doc = Document::new("Limit test", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "thin.step", source.into_bytes()).unwrap();
+    let revision = doc.revision();
+    let review = soliddraft_app::import::Review {
+        decline: Vec::new(),
+        accept: vec![soliddraft_app::import::Approved {
+            id: "g0".into(),
+            tolerance_mm: "0.005001".into(),
+            approver: "Ana Reviewer".into(),
+        }],
+    };
+    let error = soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap_err();
+    assert!(error.contains("a tenth of the nearest feature"), "{error}");
+    assert!(doc.features.is_empty());
+    assert_eq!(doc.revision(), revision);
 }
 
 #[test]

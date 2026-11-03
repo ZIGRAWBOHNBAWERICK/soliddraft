@@ -152,6 +152,7 @@ impl SolidDraftApp {
     /// Starts autosave with its session folder under `root`, and opens the Recover
     /// documents window when a session that ended without quitting left copies. The
     /// desktop binary calls it; tests and automated runs leave autosave off.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn start_recovery(&mut self, root: &std::path::Path, policy: soliddraft_document::AutosavePolicy) {
         match crate::recovery::Recovery::start(root, policy) {
             Ok(recovery) => self.state.recovery = Some(recovery),
@@ -470,7 +471,7 @@ impl SolidDraftApp {
         let backend = self.state.doc.kernel().backend();
         let kernel = format!("{} {}", backend.name, backend.version);
         let drawing = self.state.drawing.session.as_ref().map(|s| &s.doc);
-        let wait = recovery.tick(&self.state.doc, drawing, &kernel, std::time::Instant::now());
+        let wait = recovery.tick(&self.state.doc, drawing, &kernel, Instant::now());
         let failures = std::mem::take(&mut recovery.failures);
         if let Some(wait) = wait {
             ctx.request_repaint_after(wait);

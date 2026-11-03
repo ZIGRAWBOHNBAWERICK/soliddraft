@@ -2273,7 +2273,7 @@ fn registry() -> Vec<CommandSpec> {
         .both()
         .run(|_| AppAction::ShowFileLocations(None))
 .app_only("It opens the File locations page; `soliddraft locations` lists and edits them without a window"),
-        cmd("about", "About SolidDraft", Icon::Config, "The version and the kernel")
+        cmd("about", "About SolidDraft", Icon::Config, "The version and build information")
             .both()
             .run(|_| AppAction::ShowAbout)
 .app_only(WINDOW),

@@ -584,7 +584,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             }
             for copy in &r.offers {
                 let record = &copy.record;
-                ui.label(format!("{} · {}", record.name, record.kind.label()));
+                ui.label(format!("{} · {}", record.name, crate::recent::kind_name(Some(record.kind))));
                 ui.label(place(record));
                 ui.label(format!("{} ({})", crate::recent::when_text(record.written_ms), ago(record.written())));
                 if ui.button("Restore").clicked() {

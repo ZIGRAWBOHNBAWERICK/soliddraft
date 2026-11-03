@@ -132,6 +132,16 @@ fn from_browser(stored: crate::documents_browser::Stored) -> RecentDoc {
     }
 }
 
+/// A document kind as the start page and Recover documents name it.
+pub fn kind_name(kind: Option<DocKind>) -> &'static str {
+    match kind {
+        Some(DocKind::Part) => "Part",
+        Some(DocKind::Assembly) => "Assembly",
+        Some(DocKind::Drawing) => "Drawing",
+        None => "Document",
+    }
+}
+
 /// A PNG as an image egui can draw. `None` when it does not decode.
 pub fn picture(png: &[u8]) -> Option<egui::ColorImage> {
     let image = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?.to_rgba8();

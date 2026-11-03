@@ -1106,11 +1106,15 @@ impl SolidDraftApp {
                 #[cfg(target_arch = "wasm32")]
                 crate::journal_browser::show();
             }
-            AppAction::RestoreRecovery(file) => self.restore(&file),
+            AppAction::RestoreRecovery(file) => {
+                self.restore(&file);
+                self.close_recovery_when_done();
+            }
             AppAction::DiscardRecovery(file) => {
                 if let Some(Err(e)) = self.state.recovery.as_mut().map(|r| r.discard(&file)) {
                     self.state.note(e, NoteKind::Error);
                 }
+                self.close_recovery_when_done();
             }
             AppAction::ExportCrashJournal(source) => {
                 if let Some(path) = crate::platform::save_path(

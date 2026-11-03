@@ -97,6 +97,10 @@ fn the_start_page_lists_saved_documents_with_their_pictures_and_opens_one() {
         assert!(shown.iter().any(|t| *t == location), "the card says where the file is: {location}");
         assert!(shown.iter().any(|t| t.starts_with("Part · Today ")), "and when it was saved: {shown:?}");
         assert!(app.query_by_label("Solid").is_none(), "the ribbon waits for a document");
+        assert!(
+            !shown.iter().any(|t| t.ends_with(".dwprt") && !t.starts_with("Bracket") && !t.starts_with("Spacer")),
+            "the title bar names no document: {shown:?}"
+        );
         case.frame(app, "start-page");
 
         click(app, "Bracket.dwprt");
@@ -240,10 +244,11 @@ fn an_app_killed_mid_edit_offers_its_work_at_the_next_start() {
         let shown = texts(app);
         assert!(shown.iter().any(|t| t == "Bracket · Part"), "what: {shown:?}");
         assert!(shown.iter().any(|t| t == "Never saved"), "where");
-        assert!(shown.iter().any(|t| t.starts_with("Today ") && t.ends_with("ago)")), "when: {shown:?}");
+        assert!(shown.iter().any(|t| t.starts_with("Today ") && t.ends_with("(just now)")), "when: {shown:?}");
         case.frame(app, "offered-after-kill");
         click(app, "Discard");
         assert!(app.state().state.recovery.as_ref().unwrap().offers.is_empty());
+        assert!(!app.state().state.recovery.as_ref().unwrap().show, "with nothing left, the window closes");
         assert!(!left[0].exists(), "Discard deletes the copy");
     });
     drop(app);
@@ -264,6 +269,7 @@ fn an_app_killed_mid_edit_offers_its_work_at_the_next_start() {
         assert!(state.doc.dirty, "restored work is still unsaved");
         assert!(!state.doc.features.is_empty(), "with the edits made before the kill");
         assert_eq!(state.doc.path, None);
+        assert!(!state.recovery.as_ref().unwrap().show, "with nothing left, the window closes");
         case.frame(app, "restored-after-kill");
     });
 }

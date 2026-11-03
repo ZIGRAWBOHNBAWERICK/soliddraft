@@ -326,6 +326,10 @@ impl SolidDraftApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(10.0);
+                if st.start.is_some() {
+                    // The start page has no document to name.
+                    return;
+                }
                 let name = match &st.doc.path {
                     Some(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                     None => format!("{}.{}", st.doc.name, file::EXTENSION),
@@ -341,6 +345,14 @@ impl SolidDraftApp {
     /// What the bottom bar says about the active document.
     pub(super) fn status(&self) -> Status {
         let st = &self.state;
+        if st.start.is_some() {
+            return Status {
+                headline: ("No document open".to_owned(), theme::muted()),
+                note: st.note.as_ref().map(StatusNote::of),
+                details: Vec::new(),
+                position: String::new(),
+            };
+        }
         let other = if st.assembly.is_active() {
             crate::assembly::status(st)
         } else if st.drawing.is_active() {

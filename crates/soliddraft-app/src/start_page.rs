@@ -7,7 +7,7 @@
 //! gets its first edit. File > Start page shows it again.
 
 use egui::{Align, Layout, Rect, Sense, Stroke, StrokeKind, vec2};
-use soliddraft_document::{DocKind, DocumentId};
+use soliddraft_document::DocumentId;
 
 use crate::recent::{self, RecentDoc, Source};
 use crate::state::{AppAction, AppState};
@@ -204,7 +204,7 @@ fn picture(
 
 /// A recent document: its picture, name, location and date. The whole card opens it.
 fn card(ui: &mut egui::Ui, doc: &RecentDoc, picture: Option<&egui::TextureHandle>) -> egui::Response {
-    let height = PICTURE_HEIGHT + 70.0;
+    let height = PICTURE_HEIGHT + 78.0;
     let (rect, response) = ui.allocate_exact_size(vec2(CARD_WIDTH, height), Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, doc.name.as_str()));
@@ -232,18 +232,20 @@ fn card(ui: &mut egui::Ui, doc: &RecentDoc, picture: Option<&egui::TextureHandle
             );
         }
         None => {
-            let kind = doc.kind.map_or("Document", DocKind::label);
+            let kind = recent::kind_name(doc.kind);
             painter.text(frame.center(), egui::Align2::CENTER_CENTER, kind, theme::font_medium(13.0), theme::muted());
         }
     }
     let text = Rect::from_min_max(frame.left_bottom() + vec2(2.0, 8.0), rect.right_bottom() - vec2(8.0, 6.0));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(text).layout(Layout::top_down(Align::Min)));
     child.set_clip_rect(text);
+    // The cards sit in a row spaced for cards; their lines sit close together.
+    child.spacing_mut().item_spacing.y = 3.0;
     let line = |child: &mut egui::Ui, s: &str, font: egui::FontId, color: egui::Color32| {
         child.add(egui::Label::new(egui::RichText::new(s).font(font).color(color)).truncate().selectable(false));
     };
     line(&mut child, doc.title(), theme::font_semibold(13.0), theme::ink());
-    let kind = doc.kind.map_or("Document", DocKind::label);
+    let kind = recent::kind_name(doc.kind);
     let when = doc.when_ms.map(recent::when_text).unwrap_or_default();
     let meta = if when.is_empty() { kind.to_owned() } else { format!("{kind} · {when}") };
     line(&mut child, &meta, theme::font(11.5), theme::muted());

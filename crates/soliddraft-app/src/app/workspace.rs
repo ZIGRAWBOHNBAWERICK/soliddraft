@@ -226,6 +226,13 @@ impl SolidDraftApp {
         }
     }
 
+    /// Closes Recover documents once nothing is left in it to decide.
+    pub(super) fn close_recovery_when_done(&mut self) {
+        if let Some(recovery) = self.state.recovery.as_mut().filter(|r| !r.has_offers() && r.problems.is_empty()) {
+            recovery.show = false;
+        }
+    }
+
     /// Opens the document in a recovery copy in place of the open one of its kind.
     pub(super) fn restore(&mut self, file: &std::path::Path) {
         use soliddraft_document::DocKind;

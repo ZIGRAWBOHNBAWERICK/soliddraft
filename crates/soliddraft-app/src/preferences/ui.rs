@@ -1,9 +1,10 @@
 //! The Preferences window's widgets: the search field, the category list, the three
-//! Navigation pages, Viewport > Grid and planes and Interface > Shortcuts.
+//! Navigation pages, Viewport > Grid and planes, Interface > Shortcuts and General and
+//! documents > Autosave and recovery.
 
 use super::{
-    GRID_AND_PLANES, Hit, MOUSE, Message, ORBIT_ZOOM, Preferences, SHORTCUTS, Status, VIEW_KEYS, categories, page,
-    search,
+    AUTOSAVE, GRID_AND_PLANES, Hit, MOUSE, Message, ORBIT_ZOOM, Preferences, SHORTCUTS, Status, VIEW_KEYS, categories,
+    page, search,
 };
 use crate::commands::{self, KeyChord, ShortcutPreset};
 use crate::navigation::view_keys::{self, RowState};
@@ -64,6 +65,14 @@ pub(super) const SHORTCUTS_CONTROLS: [(&str, &str); 3] = [
     ("reset_all_shortcuts", "Reset all shortcuts"),
 ];
 
+/// The Autosave and recovery page's controls, for search.
+pub(super) const AUTOSAVE_CONTROLS: [(&str, &str); 4] = [
+    ("autosave_enabled", "Autosave: keep recovery copies of unsaved work"),
+    ("autosave_interval", "Autosave interval: minutes between recovery copies"),
+    ("autosave_edits", "Autosave after a number of edits"),
+    ("reset_autosave", "Reset autosave"),
+];
+
 pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Search");
@@ -87,6 +96,7 @@ pub(super) fn show(p: &mut Preferences, ui: &mut egui::Ui) {
                         VIEW_KEYS => view_keys_page(p, ui),
                         GRID_AND_PLANES => grid_and_planes_page(p, ui),
                         SHORTCUTS => shortcuts_page(p, ui),
+                        AUTOSAVE => autosave_page(p, ui),
                         id => {
                             if let Some(c) = super::reserved_category(id) {
                                 ui.heading(c.label);
@@ -518,6 +528,82 @@ fn grid_style(p: &mut Preferences, ui: &mut egui::Ui) {
     });
     let settle = !ui.input(|i| i.pointer.any_down());
     p.edit_grid(g, settle);
+}
+
+/// Whether autosave keeps copies, how often, and after how many edits. A change shows at
+/// once; it is saved once no button is held, so a dragged value is saved when let go.
+fn autosave_page(p: &mut Preferences, ui: &mut egui::Ui) {
+    heading(ui, AUTOSAVE);
+    let mut a = p.autosave;
+    ui.label(
+        egui::RichText::new(
+            "While a part or drawing has unsaved changes, SolidDraft keeps a recovery copy of it. \
+             After a crash, the next start offers to restore it. Your own files are only written when you save.",
+        )
+        .color(theme::muted()),
+    );
+    ui.add_space(6.0);
+    control(lit(p, "autosave_enabled"), ui, |ui| ui.checkbox(&mut a.enabled, "Keep recovery copies of unsaved work"));
+    ui.add_enabled_ui(a.enabled, |ui| {
+        ui.indent("autosave", |ui| {
+            control(lit(p, "autosave_interval"), ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Copy every");
+                    let mut minutes = a.interval_seconds as f64 / 60.0;
+                    let response = ui.add(
+                        egui::DragValue::new(&mut minutes)
+                            .range(0.5..=60.0)
+                            // A value set in the settings file stays until the user edits it.
+                            .clamp_existing_to_range(false)
+                            .speed(0.1)
+                            .max_decimals(1)
+                            .suffix(" min"),
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Minutes between recovery copies")
+                    });
+                    if response.changed() {
+                        a.interval_seconds = (minutes * 60.0).round().clamp(30.0, 3600.0) as u64;
+                    }
+                    ui.label("after the first unsaved change");
+                });
+            });
+            control(lit(p, "autosave_edits"), ui, |ui| {
+                ui.horizontal(|ui| {
+                    let mut sooner = a.edits > 0;
+                    if ui.checkbox(&mut sooner, "Sooner, after").changed() {
+                        a.edits = if sooner { soliddraft_document::AutosavePolicy::default().edits } else { 0 };
+                    }
+                    let response = ui.add_enabled(
+                        sooner,
+                        egui::DragValue::new(&mut a.edits)
+                            .range(1..=500)
+                            .clamp_existing_to_range(false)
+                            .suffix(" edits"),
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::DragValue, sooner, "Edits before a recovery copy")
+                    });
+                });
+            });
+        });
+    });
+    if control(lit(p, "reset_autosave"), ui, |ui| ui.button("Reset autosave")).clicked() {
+        a = soliddraft_document::AutosavePolicy::default();
+    }
+    ui.add_space(6.0);
+    let kept = if cfg!(target_arch = "wasm32") {
+        "Recovery copies stay in this browser. They are not sent to the server, and nobody else using this site sees them."
+            .to_owned()
+    } else {
+        match crate::settings::documents().recovery_folder() {
+            Some(folder) => format!("Recovery copies are kept in {}.", folder.display()),
+            None => "There is no folder to keep recovery copies in.".to_owned(),
+        }
+    };
+    ui.label(egui::RichText::new(kept).color(theme::muted()));
+    let settle = !ui.input(|i| i.pointer.any_down());
+    p.edit_autosave(a, settle);
 }
 
 fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {

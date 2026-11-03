@@ -22,7 +22,10 @@
 
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+
+// `std::time::SystemTime` itself on the desktop; the browser's clock on the web.
+use web_time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
@@ -110,9 +113,9 @@ pub fn file_name(id: DocumentId, kind: DocKind) -> String {
     format!("{id}.{}.{EXTENSION}", kind.extension())
 }
 
-/// Writes the recovery copy of `document` (a document file's bytes) into `folder`,
-/// atomically, and returns its path.
-pub fn write(folder: &Path, record: &Record, document: &[u8]) -> Result<PathBuf, RecoveryError> {
+/// The bytes of a recovery copy of `document` (a document file's bytes): what [`write`]
+/// puts in a file and the browser keeps in its own storage.
+pub fn encode(record: &Record, document: &[u8]) -> Result<Vec<u8>, RecoveryError> {
     let deflated = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .last_modified_time(DateTime::default());
@@ -123,7 +126,13 @@ pub fn write(folder: &Path, record: &Record, document: &[u8]) -> Result<PathBuf,
     zip.write_all(serde_json::to_string_pretty(record)?.as_bytes())?;
     zip.start_file(DOCUMENT, stored)?;
     zip.write_all(document)?;
-    let bytes = zip.finish()?.into_inner();
+    Ok(zip.finish()?.into_inner())
+}
+
+/// Writes the recovery copy of `document` (a document file's bytes) into `folder`,
+/// atomically, and returns its path.
+pub fn write(folder: &Path, record: &Record, document: &[u8]) -> Result<PathBuf, RecoveryError> {
+    let bytes = encode(record, document)?;
     let path = folder.join(file_name(record.id, record.kind));
     save_atomic(&path, &bytes)?;
     Ok(path)
@@ -132,7 +141,12 @@ pub fn write(folder: &Path, record: &Record, document: &[u8]) -> Result<PathBuf,
 /// Reads a recovery copy: its record and the document's bytes. The document must be a
 /// document file with the record's id and kind.
 pub fn read(file: &Path) -> Result<(Record, Vec<u8>), RecoveryError> {
-    let mut zip = ZipArchive::new(std::io::BufReader::new(std::fs::File::open(file)?))?;
+    decode(std::io::BufReader::new(std::fs::File::open(file)?))
+}
+
+/// Reads a recovery copy from its bytes, as [`read`] reads one from a file.
+pub fn decode<R: Read + std::io::Seek>(copy: R) -> Result<(Record, Vec<u8>), RecoveryError> {
+    let mut zip = ZipArchive::new(copy)?;
     let record: Record = serde_json::from_slice(&entry(&mut zip, RECORD)?)?;
     if format_major(&record.format, "soliddraft-recovery") != Some(1) {
         return Err(RecoveryError::Invalid(format!("the copy is {}, this version reads {FORMAT}", record.format)));
@@ -199,7 +213,7 @@ impl RecoveryCopy {
         let Ok(meta) = std::fs::metadata(path) else { return Standing::FileMissing };
         match identify_file(path) {
             Ok(saved) if saved.revision == self.record.revision => Standing::Saved,
-            Ok(_) if meta.modified().is_ok_and(|m| millis(m) > self.record.written_ms) => Standing::Older,
+            Ok(_) if file_millis(&meta).is_some_and(|m| m > self.record.written_ms) => Standing::Older,
             _ => Standing::Newer,
         }
     }
@@ -251,6 +265,12 @@ pub fn scan(folder: &Path) -> Scan {
 
 fn millis(t: SystemTime) -> u64 {
     t.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// When a file was last written, in milliseconds since the Unix epoch.
+fn file_millis(meta: &std::fs::Metadata) -> Option<u64> {
+    let modified = meta.modified().ok()?;
+    modified.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
 }
 
 #[cfg(test)]

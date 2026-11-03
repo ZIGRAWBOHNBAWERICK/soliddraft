@@ -5070,6 +5070,7 @@ name = "soliddraft-app"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "chrono",
  "eframe",
  "egui",
  "egui-wgpu",
@@ -5187,6 +5188,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "uuid",
+ "web-time",
  "zip",
 ]
 

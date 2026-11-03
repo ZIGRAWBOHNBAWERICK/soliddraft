@@ -22,6 +22,11 @@ pub fn set_context(ctx: &egui::Context) {
     CONTEXT.with(|c| *c.borrow_mut() = Some(ctx.clone()));
 }
 
+/// Draws a frame soon, for work that finished in the background.
+pub fn wake() {
+    repaint();
+}
+
 fn repaint() {
     CONTEXT.with(|c| {
         if let Some(ctx) = c.borrow().as_ref() {

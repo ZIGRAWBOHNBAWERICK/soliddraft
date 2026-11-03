@@ -118,7 +118,25 @@ fn preferences_window_opens_with_search_and_categories() {
 #[test]
 fn reserved_categories_are_not_finished_pages() {
     let (_guard, _dir) = config_dir("reserved");
+    let ids: Vec<&str> = preferences::available_pages().iter().map(|p| p.id).collect();
+    assert_eq!(
+        ids,
+        [
+            "navigation.mouse",
+            "navigation.orbit_zoom",
+            "navigation.view_keys",
+            "viewport.grid_and_planes",
+            "interface.shortcuts",
+            "general_documents.autosave"
+        ]
+    );
     let reserved = preferences::reserved_categories();
+    let labels: Vec<&str> = reserved.iter().map(|c| c.label).collect();
+    assert!(!labels.contains(&"General and documents"), "General and documents has its Autosave page");
+    for label in ["Selection and editing", "Appearance and graphics", "Assistant"] {
+        assert!(labels.contains(&label), "{label} is reserved: {labels:?}");
+    }
+    assert!(preferences::reserved_categories().iter().all(|c| c.status == preferences::Status::Reserved));
     let mut w = window();
     w.run_steps(2);
     let saves_before = saves();

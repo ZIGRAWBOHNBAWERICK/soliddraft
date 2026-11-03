@@ -45,7 +45,7 @@ pub fn save_with(doc: &mut Document, path: &Path, extras: &Extras<'_>) -> Result
 /// Writes the file of a document the user saved: atomically, keeping backups of the
 /// previous version as the settings say (`settings::documents`). A backup that cannot
 /// be made does not stop the save; the warning returned says so. The browser downloads
-/// the file instead.
+/// the file instead, and keeps a part or drawing for its recent list.
 pub fn write_document(path: &Path, bytes: &[u8]) -> Result<Option<String>, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -59,7 +59,12 @@ pub fn write_document(path: &Path, bytes: &[u8]) -> Result<Option<String>, Strin
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::platform::write_file(path, bytes).map(|()| None)
+        crate::platform::write_file(path, bytes)?;
+        if let Some(kind @ (DocKind::Part | DocKind::Drawing)) = DocKind::of_path(path) {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            crate::documents_browser::remember(&name, kind, bytes);
+        }
+        Ok(None)
     }
 }
 

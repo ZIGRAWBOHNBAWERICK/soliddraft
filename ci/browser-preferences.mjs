@@ -32,6 +32,8 @@ const AT = {
   solidworks: [468, 152], onshape: [575, 152],
   orbitAndZoom: [80, 156], gridAndPlanes: [80, 227],
   showGrid: [245, 133], wheelInvert: [244, 242], close: [977, 35],
+  // The start page's New part tile; tests/documents_start.rs checks it is there.
+  newPart: [124, 143],
 };
 // Floor with nothing but the grid on it, right of the origin planes, in the first view.
 const FLOOR = { x: 1200, y: 520, width: 190, height: 220 };
@@ -115,6 +117,8 @@ async function main() {
             await sleep(3000);
             const size = await v.eval('[innerWidth, innerHeight]');
             check(size[0] === SIZE.width && size[1] === SIZE.height, `${name}: the page is ${size}, the clicks need ${SIZE.width} x ${SIZE.height}`);
+            // The page opens on the start page; New part shows the empty part and its grid.
+            await v.click(AT.newPart);
             return;
           }
         }

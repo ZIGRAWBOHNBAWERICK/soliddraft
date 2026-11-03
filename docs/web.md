@@ -6,13 +6,16 @@ A small Rust server serves the web build and relays assistant requests. The assi
 
 Preferences are kept in the browser, in the site's localStorage under `soliddraft-settings`, as the same JSON the desktop app writes to `settings.json`. That storage belongs to one browser profile: the server has no route that receives settings, so two visitors, two browsers or a private window never see each other's choices. When the browser blocks or fills site storage, a change still applies until the page is reloaded or closed, and Preferences says so.
 
+Documents stay in the browser too, in the site's IndexedDB database `soliddraft-documents`. The page opens on the start page, whose recent list holds the last eight parts and drawings this browser opened or saved, with their file bytes, because a page cannot open a file again by its path. Autosave keeps recovery copies of unsaved work there, under a session id the tab holds a Web Lock on. A copy whose tab was closed or crashed is offered at the next visit, in the same Recover documents window as the desktop's. Like the settings, this storage belongs to one browser profile and the server never receives it: two people on the site never see each other's files. `ci/browser-documents.mjs` checks this in Chromium, killing the browser in the middle of an edit.
+
 ## Pieces
 
 | Crate or file | What it does |
 |---|---|
 | `soliddraft-kernel-catallax` | The Catallax application entry, compiled into the desktop and browser app. |
-| `soliddraft-web` | The WebAssembly entry point and `index.html`, built with trunk. `?demo` opens the sample part. |
+| `soliddraft-web` | The WebAssembly entry point and `index.html`, built with trunk. `?demo` opens the sample part instead of the start page. |
 | `soliddraft-app/src/web.rs` | Assistant relay client, upload and download. |
+| `soliddraft-app/src/documents_browser.rs` | Recovery copies and the recent list in the browser's IndexedDB. |
 | `soliddraft-assistant/src/relay.rs` | Provider-neutral stream events, followed by the response or error. |
 | `soliddraft-server` | Static files and the assistant relay. |
 | `deploy/web/` | Docker image, compose configuration and release deployment timer. |

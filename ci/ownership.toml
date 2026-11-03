@@ -64,6 +64,13 @@ paths = ["crates/soliddraft-app/src/document.rs"]
 module = ["document"]
 
 [[areas]]
+name = "app.documents_browser"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/documents_browser.rs"]
+module = ["documents_browser"]
+
+[[areas]]
 name = "app.drag"
 owner = "core"
 crate = "soliddraft-app"
@@ -183,6 +190,13 @@ paths = ["crates/soliddraft-app/src/properties.rs"]
 module = ["properties"]
 
 [[areas]]
+name = "app.recent"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/recent.rs"]
+module = ["recent"]
+
+[[areas]]
 name = "app.recovery"
 owner = "core"
 crate = "soliddraft-app"
@@ -216,6 +230,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/sketcher.rs"]
 module = ["sketcher"]
+
+[[areas]]
+name = "app.start_page"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/start_page.rs"]
+module = ["start_page"]
 
 [[areas]]
 name = "app.sweep_panel"

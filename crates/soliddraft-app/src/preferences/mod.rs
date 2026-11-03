@@ -1,13 +1,14 @@
 //! The Preferences window: a searchable list of categories on the left and the chosen
 //! page on the right. It fills Navigation > Mouse, Navigation > Orbit and zoom,
-//! Navigation > View keys, Viewport > Grid and planes and Interface > Shortcuts; the
-//! other categories are selectable and searchable, with a Coming soon page until their
-//! controls work.
+//! Navigation > View keys, Viewport > Grid and planes, Interface > Shortcuts and General
+//! and documents > Autosave and recovery; the other categories are selectable and
+//! searchable, with a Coming soon page until their controls work.
 //!
 //! [`Preferences`] holds the window's state and a draft of the settings it edits. Every
 //! accepted change is handed back as a [`Change`]; the app saves it
 //! (`AppState::set_navigation`, `AppState::set_reference_display`,
-//! `AppState::set_grid_style`, `AppState::set_shortcuts`) and the tests can do the same
+//! `AppState::set_grid_style`, `AppState::set_shortcuts`,
+//! `AppState::set_autosave`) and the tests can do the same
 //! without a GPU.
 
 mod ui;
@@ -16,6 +17,8 @@ use crate::commands::{self, KeyChord, ShortcutConflict, ShortcutPreset, Shortcut
 use crate::navigation::view_keys::{self, ViewKeys};
 use crate::navigation::{Chord, NavigationSettings, Refusal, Router, SchemaError, presets};
 use crate::settings::{GridStyle, NotKept, ReferenceDisplay};
+use soliddraft_document::AutosavePolicy;
+
 /// A page of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -38,13 +41,15 @@ pub const ORBIT_ZOOM: &str = "navigation.orbit_zoom";
 pub const VIEW_KEYS: &str = "navigation.view_keys";
 pub const GRID_AND_PLANES: &str = "viewport.grid_and_planes";
 pub const SHORTCUTS: &str = "interface.shortcuts";
+pub const AUTOSAVE: &str = "general_documents.autosave";
 
-const PAGES: [Page; 5] = [
+const PAGES: [Page; 6] = [
     Page { id: MOUSE, category: "navigation", title: "Mouse" },
     Page { id: ORBIT_ZOOM, category: "navigation", title: "Orbit and zoom" },
     Page { id: VIEW_KEYS, category: "navigation", title: "View keys" },
     Page { id: GRID_AND_PLANES, category: "viewport", title: "Grid and planes" },
     Page { id: SHORTCUTS, category: "interface", title: "Shortcuts" },
+    Page { id: AUTOSAVE, category: "general_documents", title: "Autosave and recovery" },
 ];
 
 /// The pages with controls, in the order the list shows them.
@@ -83,7 +88,7 @@ const CATEGORIES: [Category; 7] = [
     Category { id: "selection_editing", label: "Selection and editing", status: Status::Reserved },
     Category { id: "interface", label: "Interface", status: Status::Available },
     Category { id: "appearance_graphics", label: "Appearance and graphics", status: Status::Reserved },
-    Category { id: "general_documents", label: "General and documents", status: Status::Reserved },
+    Category { id: "general_documents", label: "General and documents", status: Status::Available },
     Category { id: "assistant", label: "Assistant", status: Status::Reserved },
 ];
 
@@ -168,6 +173,9 @@ fn index() -> Vec<Hit> {
         };
         all.push(hit(SHORTCUTS, Some(format!("command.{}", c.id)), label));
     }
+    for (control, label) in ui::AUTOSAVE_CONTROLS {
+        all.push(hit(AUTOSAVE, Some(control.to_owned()), label.to_owned()));
+    }
     all
 }
 
@@ -192,6 +200,8 @@ pub enum Change {
     Grid { style: GridStyle, keep: bool },
     /// Save and use these command shortcuts.
     Shortcuts(Shortcuts),
+    /// Save and use these autosave settings.
+    Autosave(AutosavePolicy),
 }
 
 /// A line the window shows under its page.
@@ -223,6 +233,10 @@ pub struct Preferences {
     pub shortcut_capture: Option<&'static str>,
     /// A shortcut assignment waiting for the user to confirm a swap.
     pub shortcut_conflict: Option<ShortcutConflict>,
+    /// The autosave settings as the window shows them.
+    pub autosave: AutosavePolicy,
+    /// The autosave settings were changed and not saved yet.
+    autosave_pending: bool,
     pub message: Option<Message>,
     /// The row waiting for a new gesture from the practice area.
     pub capture: Option<&'static str>,
@@ -249,6 +263,8 @@ impl Preferences {
             shortcut_search: String::new(),
             shortcut_capture: None,
             shortcut_conflict: None,
+            autosave: AutosavePolicy::default(),
+            autosave_pending: false,
             message: None,
             capture: None,
             practice_label: "Try a gesture here".to_owned(),
@@ -267,6 +283,26 @@ impl Preferences {
     /// Whether the Shortcuts page is waiting for the next key press.
     pub fn is_capturing_key(&self) -> bool {
         self.page == SHORTCUTS && self.search.trim().is_empty() && self.shortcut_capture.is_some()
+    }
+
+    /// The window showing `policy` as the autosave settings.
+    pub fn with_autosave(mut self, policy: AutosavePolicy) -> Self {
+        self.autosave = policy;
+        self
+    }
+
+    /// Shows `policy` as the autosave settings, and hands it to the app to save once
+    /// `settle` is true, so a value being dragged is saved when it is let go.
+    pub fn edit_autosave(&mut self, policy: AutosavePolicy, settle: bool) {
+        if policy != self.autosave {
+            self.autosave = policy;
+            self.autosave_pending = true;
+            self.message = None;
+        }
+        if self.autosave_pending && settle {
+            self.changes.push(Change::Autosave(self.autosave));
+            self.autosave_pending = false;
+        }
     }
 
     /// The changes made since the last call, for the app to save.
@@ -568,6 +604,11 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
             }
             Change::Shortcuts(s) => {
                 if let Err(why) = state.set_shortcuts(s) {
+                    p.not_kept(&why);
+                }
+            }
+            Change::Autosave(policy) => {
+                if let Err(why) = state.set_autosave(policy) {
                     p.not_kept(&why);
                 }
             }

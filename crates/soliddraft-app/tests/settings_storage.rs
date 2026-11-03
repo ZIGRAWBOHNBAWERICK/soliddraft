@@ -269,7 +269,7 @@ fn shortcuts_survive_a_restart(store: Store) {
         let mut app = launch();
         app.get_by_label("Shortcuts").click();
         app.run_steps(3);
-        app.get_by_label("Search commands").type_text("extrude");
+        app.get_by_role_and_label(Role::TextInput, "Search commands").type_text("extrude");
         app.run_steps(3);
         app.get_by_label("Assign Extrude").click();
         app.run_steps(2);

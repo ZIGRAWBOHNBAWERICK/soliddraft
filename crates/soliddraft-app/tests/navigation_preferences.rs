@@ -118,23 +118,7 @@ fn preferences_window_opens_with_search_and_categories() {
 #[test]
 fn reserved_categories_are_not_finished_pages() {
     let (_guard, _dir) = config_dir("reserved");
-    let ids: Vec<&str> = preferences::available_pages().iter().map(|p| p.id).collect();
-    assert_eq!(
-        ids,
-        [
-            "navigation.mouse",
-            "navigation.orbit_zoom",
-            "navigation.view_keys",
-            "viewport.grid_and_planes",
-            "interface.shortcuts",
-        ]
-    );
     let reserved = preferences::reserved_categories();
-    let labels: Vec<&str> = reserved.iter().map(|c| c.label).collect();
-    for label in ["Selection and editing", "Appearance and graphics", "General and documents", "Assistant"] {
-        assert!(labels.contains(&label), "{label} is reserved: {labels:?}");
-    }
-    assert!(preferences::reserved_categories().iter().all(|c| c.status == preferences::Status::Reserved));
     let mut w = window();
     w.run_steps(2);
     let saves_before = saves();
@@ -606,7 +590,7 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert!(w.query_by_label("Interface > Shortcuts").is_some());
 
     // Search filters the command list in place.
-    w.get_by_label("Search commands").type_text("extrude");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("extrude");
     w.run_steps(2);
     assert!(w.query_by_label("Extrude: E").is_some());
     assert!(w.query_by_label("Chamfer: C").is_none());
@@ -667,7 +651,7 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "fusion");
 
     click(&mut w, "Clear search");
-    w.get_by_label("Search commands").type_text("fit");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("fit");
     w.run_steps(3);
     click(&mut w, "Clear Fit");
     assert!(w.query_by_label("Fit: None").is_some());

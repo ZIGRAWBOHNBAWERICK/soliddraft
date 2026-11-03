@@ -2,10 +2,10 @@
 
 pub(crate) fn for_user(message: &str) -> String {
     if message.contains("fillet.radius-too-large") {
-        if let Some(limit) = message.split("; radius limit ").nth(1).and_then(|s| s.split_once(" mm").map(|(n, _)| n)) {
-            if limit.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0) {
-                return format!("The radius is too large for this edge. Try a radius under {limit} mm.");
-            }
+        if let Some(limit) = message.split("; radius limit ").nth(1).and_then(|s| s.split_once(" mm").map(|(n, _)| n))
+            && limit.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0)
+        {
+            return format!("The radius is too large for this edge. Try a radius under {limit} mm.");
         }
         return "The radius is too large for this edge. Try a smaller radius.".into();
     }

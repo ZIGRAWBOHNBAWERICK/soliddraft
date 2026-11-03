@@ -137,6 +137,8 @@ pub fn plain(message: &str) -> String {
         "This needs an angle, such as 30 or 30 deg".into()
     } else if message.contains("needs a count") {
         "This needs a whole number".into()
+    } else if message.contains("needs a plain number") {
+        "This needs a plain number, such as 0.3".into()
     } else if message.contains("finite number") {
         "The result is not a usable number".into()
     } else if message.contains("unsupported character") {

@@ -4,7 +4,7 @@
 //! `Depth` or `D2`. The table names it after its feature, as in `BossExtrude1.Depth`.
 
 use serde::{Deserialize, Serialize};
-use soliddraft_kernel_api::HoleDepth;
+use soliddraft_kernel_api::{Grade, HoleDepth, HoleHead};
 use soliddraft_sketch::ConstraintKind;
 
 use crate::values::Input;
@@ -20,10 +20,38 @@ pub enum Parameter {
     Height,
     /// A built-in circle's or a hole's diameter.
     Diameter,
+    /// A counterbore's or countersink's diameter at the entry.
+    HeadDiameter,
+    /// A counterbore's depth.
+    HeadDepth,
+    /// A countersink's full angle.
+    HeadAngle,
     /// A revolve's sweep, a draft's tilt, or the angle between circular pattern copies.
     Angle,
-    /// A fillet's radius.
+    /// A fillet's radius, or a lattice's constant beam radius.
     Radius,
+    /// A graded lattice's beam radius where the grade starts.
+    RadiusStart,
+    /// A graded lattice's beam radius where the grade ends.
+    RadiusEnd,
+    /// Where a graded lattice's radius starts, along its axis.
+    RadiusStartAt,
+    /// Where a graded lattice's radius ends, along its axis.
+    RadiusEndAt,
+    /// A gyroid's constant level.
+    Level,
+    /// A graded gyroid's level where the grade starts.
+    LevelStart,
+    /// A graded gyroid's level where the grade ends.
+    LevelEnd,
+    /// Where a graded gyroid's level starts, along its axis.
+    LevelStartAt,
+    /// Where a graded gyroid's level ends, along its axis.
+    LevelEndAt,
+    /// The accuracy a lattice or gyroid is proven to.
+    Accuracy,
+    /// The smallest detail a lattice or gyroid keeps.
+    MinDetail,
     /// A chamfer's distance.
     Distance,
     /// A blind hole's depth.
@@ -49,8 +77,22 @@ impl Parameter {
             Parameter::Width => "Width",
             Parameter::Height => "Height",
             Parameter::Diameter => "Diameter",
+            Parameter::HeadDiameter => "HeadDiameter",
+            Parameter::HeadDepth => "HeadDepth",
+            Parameter::HeadAngle => "HeadAngle",
             Parameter::Angle => "Angle",
             Parameter::Radius => "Radius",
+            Parameter::RadiusStart => "RadiusStart",
+            Parameter::RadiusEnd => "RadiusEnd",
+            Parameter::RadiusStartAt => "RadiusStartAt",
+            Parameter::RadiusEndAt => "RadiusEndAt",
+            Parameter::Level => "Level",
+            Parameter::LevelStart => "LevelStart",
+            Parameter::LevelEnd => "LevelEnd",
+            Parameter::LevelStartAt => "LevelStartAt",
+            Parameter::LevelEndAt => "LevelEndAt",
+            Parameter::Accuracy => "Accuracy",
+            Parameter::MinDetail => "MinDetail",
             Parameter::Distance => "Distance",
             Parameter::Depth => "Depth",
             Parameter::Spacing => "Spacing",
@@ -62,23 +104,16 @@ impl Parameter {
         }
     }
 
-    /// The key a feature summary lists its expression under.
-    pub fn key(self) -> &'static str {
-        match self {
-            Parameter::Width => "width",
-            Parameter::Height => "height",
-            Parameter::Diameter => "diameter",
-            Parameter::Angle => "angle",
-            Parameter::Radius => "radius",
-            Parameter::Distance => "distance",
-            Parameter::Depth => "depth",
-            Parameter::Spacing => "spacing",
-            Parameter::Count => "count",
-            Parameter::Thickness => "thickness",
-            Parameter::Offset => "offset",
-            Parameter::CellSize => "cell_size",
-            Parameter::Period => "period",
+    /// The key a feature summary lists its expression under: the label in snake case.
+    pub fn key(self) -> String {
+        let mut out = String::new();
+        for (i, c) in self.label().chars().enumerate() {
+            if c.is_ascii_uppercase() && i > 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
         }
+        out
     }
 }
 
@@ -92,6 +127,8 @@ pub enum Unit {
     Angle,
     /// A whole number.
     Count,
+    /// A plain number, such as a gyroid's level.
+    Number,
 }
 
 impl Unit {
@@ -100,7 +137,7 @@ impl Unit {
         match self {
             Unit::Length => "mm",
             Unit::Angle => "deg",
-            Unit::Count => "",
+            Unit::Count | Unit::Number => "",
         }
     }
 
@@ -108,7 +145,7 @@ impl Unit {
         match self {
             Unit::Length => (1, 0),
             Unit::Angle => (0, 1),
-            Unit::Count => (0, 0),
+            Unit::Count | Unit::Number => (0, 0),
         }
     }
 }
@@ -142,8 +179,8 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
         }
         FeatureKind::ReferencePlane(_) => {}
         FeatureKind::Sketch(sketch) => {
-            if let SketchPlane::FaceOffset { offset, .. } = sketch.plane {
-                out.push(param(Parameter::Offset, Unit::Length, offset));
+            if !matches!(sketch.plane, SketchPlane::Face { .. }) {
+                out.push(param(Parameter::Offset, Unit::Length, sketch.plane.offset()));
             }
             let dimensions = sketch.sketch.constraints.iter().filter_map(|c| Some((c, c.value()?)));
             for (n, (c, value)) in dimensions.enumerate() {
@@ -180,6 +217,17 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
             if let HoleDepth::Blind { depth } = h.depth {
                 out.push(param(Parameter::Depth, Unit::Length, depth));
             }
+            match h.head {
+                Some(HoleHead::Counterbore { diameter, depth }) => {
+                    out.push(param(Parameter::HeadDiameter, Unit::Length, diameter));
+                    out.push(param(Parameter::HeadDepth, Unit::Length, depth));
+                }
+                Some(HoleHead::Countersink { diameter, angle_deg }) => {
+                    out.push(param(Parameter::HeadDiameter, Unit::Length, diameter));
+                    out.push(param(Parameter::HeadAngle, Unit::Angle, angle_deg));
+                }
+                None => {}
+            }
         }
         FeatureKind::Pattern(p) => match p.layout {
             PatternSpec::Linear { spacing, count, .. } => {
@@ -197,8 +245,24 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
             if let Some(size) = l.cell_size_mm {
                 out.push(param(Parameter::CellSize, Unit::Length, size));
             }
+            if let Some(grade) = &l.radius_mm {
+                for (parameter, value) in grade_values(grade, RADIUS) {
+                    let unit = Unit::Length;
+                    out.push(param(parameter, unit, value));
+                }
+            }
+            out.push(param(Parameter::Accuracy, Unit::Length, l.accuracy_mm));
+            out.push(param(Parameter::MinDetail, Unit::Length, l.min_detail_mm));
         }
-        FeatureKind::Gyroid(g) => out.push(param(Parameter::Period, Unit::Length, g.period_mm)),
+        FeatureKind::Gyroid(g) => {
+            out.push(param(Parameter::Period, Unit::Length, g.period_mm));
+            for (parameter, value) in grade_values(&g.level, LEVEL) {
+                let at = matches!(parameter, Parameter::LevelStartAt | Parameter::LevelEndAt);
+                out.push(param(parameter, if at { Unit::Length } else { Unit::Number }, value));
+            }
+            out.push(param(Parameter::Accuracy, Unit::Length, g.accuracy_mm));
+            out.push(param(Parameter::MinDetail, Unit::Length, g.min_detail_mm));
+        }
         FeatureKind::Sweep(_) | FeatureKind::Mirror(_) | FeatureKind::ImportStep(_) => {}
     }
     out
@@ -255,8 +319,10 @@ fn write_parameter(
             SketchPlane::Face { .. } => return missing(),
         },
         (FeatureKind::Sketch(s), Parameter::Offset) => match &mut s.plane {
-            SketchPlane::FaceOffset { offset, .. } => *offset = value,
-            _ => return missing(),
+            SketchPlane::Feature { offset, .. }
+            | SketchPlane::Datum { offset, .. }
+            | SketchPlane::FaceOffset { offset, .. } => *offset = value,
+            SketchPlane::Face { .. } => return missing(),
         },
         (FeatureKind::Extrude(e), Parameter::Width | Parameter::Height | Parameter::Diameter) => {
             let ProfileSource::Shape { shape, .. } = &mut e.profile else { return missing() };
@@ -280,6 +346,56 @@ fn write_parameter(
             HoleDepth::Blind { depth } => *depth = positive("depth")?,
             HoleDepth::Through => return missing(),
         },
+        (FeatureKind::Hole(h), Parameter::HeadDiameter) => match &mut h.head {
+            Some(HoleHead::Counterbore { diameter, .. } | HoleHead::Countersink { diameter, .. }) => {
+                *diameter = positive("head diameter")?
+            }
+            None => return missing(),
+        },
+        (FeatureKind::Hole(h), Parameter::HeadDepth) => match &mut h.head {
+            Some(HoleHead::Counterbore { depth, .. }) => *depth = positive("head depth")?,
+            _ => return missing(),
+        },
+        (FeatureKind::Hole(h), Parameter::HeadAngle) => match &mut h.head {
+            Some(HoleHead::Countersink { angle_deg, .. }) => {
+                if !(value > 0.0 && value < 180.0) {
+                    return Err("a countersink's angle must be more than 0 and less than 180 degrees".into());
+                }
+                *angle_deg = value
+            }
+            _ => return missing(),
+        },
+        (
+            FeatureKind::Lattice(l),
+            p @ (Parameter::Radius
+            | Parameter::RadiusStart
+            | Parameter::RadiusEnd
+            | Parameter::RadiusStartAt
+            | Parameter::RadiusEndAt),
+        ) => {
+            let Some(grade) = &mut l.radius_mm else { return missing() };
+            let at = matches!(p, Parameter::RadiusStartAt | Parameter::RadiusEndAt);
+            let value = if at { value } else { positive("beam radius")? };
+            if !write_grade(grade, RADIUS, p, value) {
+                return missing();
+            }
+        }
+        (
+            FeatureKind::Gyroid(g),
+            p @ (Parameter::Level
+            | Parameter::LevelStart
+            | Parameter::LevelEnd
+            | Parameter::LevelStartAt
+            | Parameter::LevelEndAt),
+        ) => {
+            if !write_grade(&mut g.level, LEVEL, p, value) {
+                return missing();
+            }
+        }
+        (FeatureKind::Lattice(l), Parameter::Accuracy) => l.accuracy_mm = positive("accuracy")?,
+        (FeatureKind::Lattice(l), Parameter::MinDetail) => l.min_detail_mm = positive("smallest detail")?,
+        (FeatureKind::Gyroid(g), Parameter::Accuracy) => g.accuracy_mm = positive("accuracy")?,
+        (FeatureKind::Gyroid(g), Parameter::MinDetail) => g.min_detail_mm = positive("smallest detail")?,
         (FeatureKind::Pattern(p), Parameter::Count) => {
             if value.fract() != 0.0 || !(2.0..=10_000.0).contains(&value) {
                 return Err("a pattern's count must be a whole number of at least 2".into());
@@ -317,4 +433,32 @@ pub(crate) fn name_part(feature: &Feature) -> String {
         out.truncate(100);
     }
     out
+}
+
+/// A grade's parameters: the constant, or the start and end values and where they apply.
+type GradeNames = [Parameter; 5];
+const RADIUS: GradeNames =
+    [Parameter::Radius, Parameter::RadiusStart, Parameter::RadiusEnd, Parameter::RadiusStartAt, Parameter::RadiusEndAt];
+const LEVEL: GradeNames =
+    [Parameter::Level, Parameter::LevelStart, Parameter::LevelEnd, Parameter::LevelStartAt, Parameter::LevelEndAt];
+
+fn grade_values(grade: &Grade, names: GradeNames) -> Vec<(Parameter, f64)> {
+    match grade {
+        Grade::Constant(v) => vec![(names[0], *v)],
+        Grade::Linear(l) => vec![(names[1], l.start), (names[2], l.end), (names[3], l.from), (names[4], l.to)],
+    }
+}
+
+/// Sets one of a grade's numbers; false when the grade has no such number.
+fn write_grade(grade: &mut Grade, names: GradeNames, parameter: Parameter, value: f64) -> bool {
+    let slot = match grade {
+        Grade::Constant(v) if parameter == names[0] => v,
+        Grade::Linear(l) if parameter == names[1] => &mut l.start,
+        Grade::Linear(l) if parameter == names[2] => &mut l.end,
+        Grade::Linear(l) if parameter == names[3] => &mut l.from,
+        Grade::Linear(l) if parameter == names[4] => &mut l.to,
+        _ => return false,
+    };
+    *slot = value;
+    true
 }

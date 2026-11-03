@@ -207,10 +207,10 @@ impl Resolver<'_> {
 }
 
 /// A driven input's quantity in its own unit. A bare number takes the input's unit; a
-/// count also takes a number in document units.
+/// count or a plain number also takes a number in document units.
 fn coerce(mut q: Quantity, unit: Unit, bare: bool) -> Result<Quantity, String> {
     let wanted = unit.dimensions();
-    if bare || unit == Unit::Count && (q.length, q.angle) == (1, 0) {
+    if bare || matches!(unit, Unit::Count | Unit::Number) && (q.length, q.angle) == (1, 0) {
         (q.length, q.angle) = wanted;
     }
     if (q.length, q.angle) != wanted {
@@ -218,6 +218,7 @@ fn coerce(mut q: Quantity, unit: Unit, bare: bool) -> Result<Quantity, String> {
             Unit::Length => "the input needs a length".into(),
             Unit::Angle => "the input needs an angle".into(),
             Unit::Count => "the input needs a count".into(),
+            Unit::Number => "the input needs a plain number".into(),
         });
     }
     Ok(q)
@@ -558,7 +559,7 @@ impl Values {
             .filter_map(|b| {
                 let key = match b.input {
                     Input::Depth { .. } => "depth".into(),
-                    Input::Parameter { parameter, .. } => parameter.key().into(),
+                    Input::Parameter { parameter, .. } => parameter.key(),
                     Input::Dimension { constraint, .. } => {
                         let FeatureKind::Sketch(sketch) = &feature.kind else {
                             return None;

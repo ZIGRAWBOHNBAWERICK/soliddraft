@@ -3,9 +3,14 @@
 
 use std::sync::Arc;
 
+use soliddraft_kernel_api::{Grade, GradeAxis, HoleDepth, HoleHead, HoleTip, LinearGrade, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::configs::{ValueRow, ValuesTable};
-use soliddraft_model::{Command, Document, EndCondition, FeatureKind};
+use soliddraft_model::sketch::{P2, Sketch, solve::solve};
+use soliddraft_model::{
+    Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureId, FeatureKind, GyroidFeature,
+    HoleFeature, LatticeFeature, ProfileSource, SketchFeature, SketchPlane,
+};
 
 /// An old file with three sketches and extrusions, saved before parameters had names.
 fn bracket() -> Document {
@@ -50,7 +55,8 @@ fn an_old_file_lists_every_typed_number_under_a_default_name() {
     assert_eq!(extrude.values, [Some(10.0)]);
     let first = &table.groups[0];
     assert_eq!(first.name, "Sketch1");
-    assert!(first.rows.iter().all(|r| r.name.starts_with("Sketch1.D")), "{:?}", first.rows);
+    assert_eq!(first.rows[0].name, "Sketch1.Offset", "a sketch on a datum plane lists its offset");
+    assert!(first.rows[1..].iter().all(|r| r.name.starts_with("Sketch1.D")), "{:?}", first.rows);
     // Listing names nothing in the file.
     assert!(doc.values().is_empty());
 }
@@ -164,4 +170,122 @@ fn each_configuration_column_overrides_globals_and_parameters() {
     let checked = doc.check_configuration_grid(&grid).unwrap();
     doc.execute(Command::SetConfigurationGrid { grid: Box::new(checked) }).unwrap();
     assert_eq!(depth(&doc, "Boss-Extrude2"), 40.0);
+}
+
+fn add(doc: &mut Document, kind: FeatureKind) -> FeatureId {
+    let command = Command::AddFeature { kind, name: None, position: None, via_assistant: false };
+    doc.execute(command).unwrap().created.unwrap()
+}
+
+/// A 60 by 40 by 10 block on the Top plane, built.
+fn block() -> Document {
+    let mut doc = Document::new("Fields", Arc::new(CatallaxKernel::new()));
+    let mut s = Sketch::new();
+    s.rectangle(P2::new(0.0, 0.0), 60.0, 40.0).unwrap();
+    solve(&mut s, None, true);
+    let plane = SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 };
+    let sketch = add(&mut doc, FeatureKind::Sketch(SketchFeature { plane, sketch: s }));
+    let profile = ProfileSource::Sketch { feature: sketch };
+    let end = EndCondition::Blind { depth: 10.0 };
+    add(&mut doc, FeatureKind::Extrude(ExtrudeFeature { profile, operation: ExtrudeOp::Boss, end, reverse: false }));
+    doc
+}
+
+fn deferred(doc: &mut Document, command: Command) -> Result<(), String> {
+    doc.execute_deferred(command).map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn cell_later(doc: &mut Document, name: &str, text: &str) -> Result<(), String> {
+    let expression = Some(text.to_owned());
+    deferred(doc, Command::SetValueCell { configuration: "Default".into(), name: name.into(), expression })
+}
+
+fn last_kind(doc: &Document) -> FeatureKind {
+    doc.features().last().unwrap().kind.clone()
+}
+
+#[test]
+fn a_sketch_on_a_datum_plane_takes_its_offset_from_a_global() {
+    let mut doc = block();
+    doc.execute(Command::SetValue { name: "Lift".into(), expression: "5".into() }).unwrap();
+    cell(&mut doc, "Default", "Sketch1.Offset", Some("Lift * 2")).unwrap();
+    let FeatureKind::Sketch(s) = &doc.features()[0].kind else { panic!("a sketch") };
+    assert_eq!(s.plane.offset(), 10.0);
+    assert_eq!(value(&doc, "Sketch1.Offset", 0), 10.0);
+}
+
+#[test]
+fn a_hole_head_takes_globals_and_formulas() {
+    let mut doc = block();
+    let t = doc.kernel().topology(doc.body().unwrap()).unwrap();
+    let top = t.faces.iter().find(|f| f.normal.is_some_and(|n| n.dot(Vec3::Z) > 0.999) && f.centroid.z > 9.9).unwrap();
+    let face = doc.face_ref(top.id).unwrap();
+    let head = Some(HoleHead::Counterbore { diameter: 8.0, depth: 2.0 });
+    let points = vec![P2::new(0.0, 0.0)];
+    let hole =
+        HoleFeature { face, points, diameter: 4.0, depth: HoleDepth::Blind { depth: 6.0 }, tip: HoleTip::Flat, head };
+    add(&mut doc, FeatureKind::Hole(hole));
+    let table = doc.values_table();
+    assert_eq!(row(&table, "Hole1.HeadDiameter").values, [Some(8.0)]);
+    assert_eq!(row(&table, "Hole1.HeadDepth").unit, "mm");
+    doc.execute(Command::SetValue { name: "Bore".into(), expression: "3".into() }).unwrap();
+    cell(&mut doc, "Default", "Hole1.HeadDepth", Some("Bore")).unwrap();
+    cell(&mut doc, "Default", "Hole1.HeadDiameter", Some("Hole1.Diameter * 2.5")).unwrap();
+    let FeatureKind::Hole(h) = last_kind(&doc) else { panic!("a hole") };
+    assert_eq!(h.head, Some(HoleHead::Counterbore { diameter: 10.0, depth: 3.0 }));
+    refused(&mut doc, "Hole1.HeadDepth", "0", "greater than 0");
+}
+
+#[test]
+fn a_graded_lattice_lists_its_beam_radius_and_takes_formulas() {
+    let mut doc = block();
+    let radius = Grade::Linear(LinearGrade { axis: GradeAxis::Z, from: 0.0, to: 10.0, start: 1.0, end: 2.0 });
+    let lattice = LatticeFeature { cell_size_mm: Some(20.0), radius_mm: Some(radius), ..Default::default() };
+    deferred(
+        &mut doc,
+        Command::AddFeature { kind: FeatureKind::Lattice(lattice), name: None, position: None, via_assistant: false },
+    )
+    .unwrap();
+    let table = doc.values_table();
+    let names: Vec<_> = table.groups.last().unwrap().rows.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(
+        names,
+        [
+            "Lattice1.CellSize",
+            "Lattice1.RadiusStart",
+            "Lattice1.RadiusEnd",
+            "Lattice1.RadiusStartAt",
+            "Lattice1.RadiusEndAt",
+            "Lattice1.Accuracy",
+            "Lattice1.MinDetail"
+        ]
+    );
+    deferred(&mut doc, Command::SetValue { name: "Beam".into(), expression: "0.75".into() }).unwrap();
+    cell_later(&mut doc, "Lattice1.RadiusStart", "Beam").unwrap();
+    cell_later(&mut doc, "Lattice1.RadiusEnd", "Lattice1.RadiusStart * 2").unwrap();
+    let FeatureKind::Lattice(l) = last_kind(&doc) else { panic!("a lattice") };
+    let Some(Grade::Linear(g)) = l.radius_mm else { panic!("a graded radius") };
+    assert_eq!((g.start, g.end, g.from, g.to), (0.75, 1.5, 0.0, 10.0));
+    let error = cell_later(&mut doc, "Lattice1.RadiusEnd", "Beam - 1").unwrap_err();
+    assert!(error.contains("greater than 0"), "{error}");
+}
+
+#[test]
+fn a_gyroid_level_is_a_plain_number_a_global_can_drive() {
+    let mut doc = block();
+    let gyroid = GyroidFeature { level: Grade::Constant(0.0), ..Default::default() };
+    deferred(
+        &mut doc,
+        Command::AddFeature { kind: FeatureKind::Gyroid(gyroid), name: None, position: None, via_assistant: false },
+    )
+    .unwrap();
+    let level = row(&doc.values_table(), "Gyroid1.Level").clone();
+    assert_eq!((level.unit.as_str(), level.values.as_slice()), ("", &[Some(0.0)][..]));
+    cell_later(&mut doc, "Gyroid1.Level", "-0.2").unwrap();
+    deferred(&mut doc, Command::SetValue { name: "Bias".into(), expression: "0.3".into() }).unwrap();
+    cell_later(&mut doc, "Gyroid1.Level", "Bias / 2").unwrap();
+    let FeatureKind::Gyroid(g) = last_kind(&doc) else { panic!("a gyroid") };
+    assert_eq!(g.level, Grade::Constant(0.15));
+    let error = cell_later(&mut doc, "Gyroid1.Level", "30 deg").unwrap_err();
+    assert!(error.contains("plain number"), "{error}");
 }

@@ -200,7 +200,7 @@ module = ["ribbon"]
 name = "app.settings"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/settings.rs"]
+paths = ["crates/soliddraft-app/src/settings/"]
 module = ["settings"]
 
 [[areas]]

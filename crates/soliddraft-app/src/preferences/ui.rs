@@ -8,6 +8,7 @@ use crate::navigation::view_keys::{self, RowState};
 use crate::navigation::{
     Action, Binding, Capability, EventKind, LimitKind, Outcome, Pivot, ZoomAnchor, gather, presets,
 };
+use crate::settings::GridStyle;
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, vec2};
 
@@ -43,8 +44,13 @@ pub(super) const VIEW_KEY_CONTROLS: [(&str, &str); 5] = [
 ];
 
 /// The Grid and planes page's controls, for search.
-pub(super) const GRID_AND_PLANES_CONTROLS: [(&str, &str); 3] = [
+pub(super) const GRID_AND_PLANES_CONTROLS: [(&str, &str); 8] = [
     ("show_grid", "Show grid"),
+    ("grid_strength", "Grid strength"),
+    ("grid_spacing", "Grid spacing: follow the zoom or fixed"),
+    ("grid_major", "Grid major line every"),
+    ("grid_color", "Grid colour"),
+    ("reset_grid", "Reset grid"),
     ("show_origin_planes", "Show origin planes"),
     ("always_show_origin_axes", "Always show origin axes"),
 ];
@@ -424,6 +430,8 @@ fn grid_and_planes_page(p: &mut Preferences, ui: &mut egui::Ui) {
     heading(ui, GRID_AND_PLANES);
     let mut d = p.display;
     control(lit(p, "show_grid"), ui, |ui| ui.checkbox(&mut d.show_grid, "Show grid"));
+    grid_style(p, ui);
+    ui.add_space(8.0);
     control(lit(p, "show_origin_planes"), ui, |ui| ui.checkbox(&mut d.show_origin_planes, "Show origin planes"));
     control(lit(p, "always_show_origin_axes"), ui, |ui| {
         ui.checkbox(&mut d.always_show_origin_axes, "Always show origin axes")
@@ -433,6 +441,73 @@ fn grid_and_planes_page(p: &mut Preferences, ui: &mut egui::Ui) {
             .color(theme::muted()),
     );
     p.edit_display(|display| *display = d);
+}
+
+/// The grid's strength, spacing and colour. A change shows at once; it is saved once no
+/// button is held, so a slider drag is saved when it is let go.
+fn grid_style(p: &mut Preferences, ui: &mut egui::Ui) {
+    let mut g = p.grid;
+    ui.indent("grid_style", |ui| {
+        let mut percent = g.strength * 100.0;
+        let range = GridStyle::STRENGTH.start() * 100.0..=GridStyle::STRENGTH.end() * 100.0;
+        let strength = control(lit(p, "grid_strength"), ui, |ui| {
+            ui.add(egui::Slider::new(&mut percent, range).suffix("%").fixed_decimals(0).text("Strength"))
+        });
+        if strength.changed() {
+            g.strength = (percent / 100.0).clamp(*GridStyle::STRENGTH.start(), *GridStyle::STRENGTH.end());
+        }
+        control(lit(p, "grid_spacing"), ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Spacing");
+                ui.radio_value(&mut g.follow_zoom, true, "Follow the zoom");
+                ui.radio_value(&mut g.follow_zoom, false, "Fixed");
+            });
+            if g.follow_zoom {
+                ui.add(
+                    egui::Slider::new(&mut g.gap, GridStyle::GAP)
+                        .suffix(" px")
+                        .fixed_decimals(0)
+                        .text("Smallest gap between lines"),
+                );
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label("Lines every");
+                    ui.add(
+                        egui::DragValue::new(&mut g.fixed_mm)
+                            .range(GridStyle::FIXED_MM)
+                            .speed(0.1)
+                            .max_decimals(2)
+                            .suffix(" mm"),
+                    );
+                });
+            }
+        });
+        control(lit(p, "grid_major"), ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Major line every");
+                ui.add(egui::DragValue::new(&mut g.major_every).range(GridStyle::MAJOR_EVERY).suffix(" lines"));
+            });
+        });
+        control(lit(p, "grid_color"), ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Colour");
+                let mut custom = g.color.is_some();
+                ui.radio_value(&mut custom, false, "Follow the theme");
+                ui.radio_value(&mut custom, true, "Custom");
+                let [red, green, blue, _] = g.color.unwrap_or_else(theme::ink).to_array();
+                let mut rgb = [red, green, blue];
+                let picked =
+                    ui.add_enabled_ui(custom, |ui| egui::color_picker::color_edit_button_srgb(ui, &mut rgb)).inner;
+                picked.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, custom, "Grid colour"));
+                g.color = custom.then(|| egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+            });
+        });
+        if control(lit(p, "reset_grid"), ui, |ui| ui.button("Reset grid")).clicked() {
+            g = GridStyle::default();
+        }
+    });
+    let settle = !ui.input(|i| i.pointer.any_down());
+    p.edit_grid(g, settle);
 }
 
 fn view_keys_page(p: &mut Preferences, ui: &mut egui::Ui) {

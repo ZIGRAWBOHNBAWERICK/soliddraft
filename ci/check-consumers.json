@@ -2,6 +2,7 @@
   "format": "soliddraft-check-consumers/1",
   "files": {
     "ci/browser-journal.js": ["web"],
+    "ci/browser-preferences.mjs": ["web"],
     "ci/cargo-cache.sh": [],
     "ci/bootstrap": ["lint", "test-linux", "test-macos"],
     "ci/hooks/pre-push": ["lint"],

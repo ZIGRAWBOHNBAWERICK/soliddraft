@@ -1055,7 +1055,11 @@ impl SolidDraftApp {
             }
             AppAction::ShowPreferences => {
                 self.preferences.get_or_insert_with(|| {
-                    crate::preferences::Preferences::new(&self.state.navigation, self.state.viewport.references)
+                    crate::preferences::Preferences::new(
+                        &self.state.navigation,
+                        self.state.viewport.references,
+                        self.state.viewport.grid_style,
+                    )
                 });
             }
             AppAction::ShowShortcuts => self.state.show_shortcuts = true,

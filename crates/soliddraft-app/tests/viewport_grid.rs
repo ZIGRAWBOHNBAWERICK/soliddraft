@@ -422,3 +422,57 @@ fn grid_off_keeps_sketch_drawing_and_a_line_lands_where_it_was_clicked() {
     found(want_b);
     case.note("line endpoints landed on the clicked plane points");
 }
+
+/// Strength, colour and spacing are the user's: each is drawn as chosen, and a restart
+/// reads it back from the settings.
+#[test]
+fn the_grid_style_is_drawn_as_chosen_and_kept() {
+    let mut case = Case::gpu("grid_style");
+    let top = |case: &mut Case, name: &str| {
+        let mut app = launch_for_frames(empty(), SIZE, 1.0);
+        to_top_orthographic(&mut app);
+        let (on, off) = grid_frames(case, &mut app, name);
+        let (x, y, spacing) = assert_top_view_grid(&app, (&on, &off), name);
+        case.note(format!(
+            "{name}: readout {spacing:?}, contrast {}/{} and {}/{}",
+            x.minor_contrast, x.major_contrast, y.minor_contrast, y.major_contrast
+        ));
+        (app, on, off, x, spacing)
+    };
+
+    case.seed_settings(r#"{"view":{"preset":"fast"}}"#);
+    let (_, _, _, light, _) = top(&mut case, "default");
+    // The dark theme draws the default in light ink; it reads as a grid there too.
+    case.seed_settings(r#"{"appearance":{"theme":"dark"},"view":{"preset":"fast"}}"#);
+    let (app, _, _, dark, _) = top(&mut case, "default-dark");
+    assert!(dark.minor_contrast >= 4.0, "{dark:?}");
+    drop(app);
+    case.seed_settings(r#"{"view":{"preset":"fast","grid":{"strength":1.0}}}"#);
+    let (app, _, _, full, _) = top(&mut case, "full-strength");
+    assert_eq!(app.state().state.viewport.grid_style.strength, 1.0, "the start read the strength");
+    assert!(
+        full.major_contrast > light.major_contrast * 2.0 && full.minor_contrast > light.minor_contrast * 2.0,
+        "full strength draws darker lines: {light:?} then {full:?}"
+    );
+    drop(app);
+
+    case.seed_settings(r##"{"view":{"preset":"fast","grid":{"strength":1.0,"color":"#d42020"}}}"##);
+    let (app, on, off, red, _) = top(&mut case, "red");
+    let line = red.majors.first().expect("a major line").at;
+    let rect = viewport(&app);
+    let point = |y: f32| (line.round() as u32, (rect.top() + y) as u32);
+    let (x, y) = point(rect.height() / 3.0);
+    let on = on.get_pixel(x, y).0.map(i32::from);
+    let off = off.get_pixel(x, y).0.map(i32::from);
+    // Red ink darkens green and blue far more than red.
+    let (dr, dg, db) = (off[0] - on[0], off[1] - on[1], off[2] - on[2]);
+    assert!(dg > 30 && db > 30 && dg > dr * 2 && db > dr * 2, "a red line: {on:?} over {off:?}");
+    drop(app);
+
+    case.seed_settings(r#"{"view":{"preset":"fast","grid":{"follow_zoom":false,"fixed_mm":10,"major_every":4}}}"#);
+    let (mut app, on, off, _, spacing) = top(&mut case, "fixed-10mm");
+    assert_eq!(spacing, (10.0, 40.0), "the readout names the fixed spacing");
+    assert_lattice(&on, &off, &app, lattice_on_ground(10.0), "a fixed 10 mm lattice");
+    wheel(&mut app, 300.0);
+    assert_eq!(readout(&app), Some((10.0, 40.0)), "a fixed spacing stays when zooming");
+}

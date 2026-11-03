@@ -126,7 +126,7 @@ fn fit_end(ui: &egui::Ui, text: &str, width: f32) -> String {
 
 /// Saves the page's setting and tells the app what changed.
 fn save(state: &mut AppState, locations: &FileLocations) -> Result<(), String> {
-    crate::settings::save_file_locations(locations)?;
+    crate::settings::save_file_locations(locations).map_err(|e| e.to_string())?;
     state.locations_epoch += 1;
     Ok(())
 }

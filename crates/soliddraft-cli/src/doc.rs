@@ -401,7 +401,7 @@ fn change_location(verb: &str, kind: &str, path: &str) -> Result<bool, String> {
         let why = if verb == "add" { "already listed" } else { "not listed" };
         return Err(format!("{} is {why} under {}", path.display(), kind.key()));
     }
-    soliddraft_app::settings::save_file_locations(&locations)?;
+    soliddraft_app::settings::save_file_locations(&locations).map_err(|e| e.to_string())?;
     println!(
         "{}: {}",
         kind.label(),

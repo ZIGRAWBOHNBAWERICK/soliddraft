@@ -1152,6 +1152,7 @@ impl ViewportRenderer {
             major: 1.0,
             pull: 0.0,
             ink: egui::Color32::TRANSPARENT,
+            opacity: (0.0, 0.0),
         });
         let plane_ink = |plane: usize| {
             input.planes.map_or([0.0; 4], |p| {
@@ -1193,10 +1194,10 @@ impl ViewportRenderer {
                 grid_v: [grid.v.x, grid.v.y, grid.v.z, grid.major],
                 grid_ink: egui::Rgba::from(grid.ink).to_array(),
                 grid_lines: [
-                    grid::MINOR_LINE.0,
-                    grid::MAJOR_LINE.0,
-                    grid::MINOR_LINE.1 * input.pixels_per_point,
-                    grid::MAJOR_LINE.1 * input.pixels_per_point,
+                    grid.opacity.0,
+                    grid.opacity.1,
+                    grid::LINE_WIDTH.0 * input.pixels_per_point,
+                    grid::LINE_WIDTH.1 * input.pixels_per_point,
                 ],
                 plane_size: [
                     input.planes.map_or(0.0, |p| p.half),

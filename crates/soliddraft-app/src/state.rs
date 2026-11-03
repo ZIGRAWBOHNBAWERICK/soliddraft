@@ -780,16 +780,27 @@ impl AppState {
         }
     }
 
-    /// Saves what the viewport shows of the reference geometry and uses it. It is the
-    /// user's choice, not the document's: the part, its undo steps and its selection are
-    /// untouched. When the save is refused nothing changes and the note says why.
-    pub fn set_reference_display(&mut self, references: crate::settings::ReferenceDisplay) -> Result<(), String> {
-        if let Err(e) = crate::settings::save_reference_display(&references) {
-            self.note(format!("Viewport settings not saved: {e}"), NoteKind::Error);
-            return Err(e);
-        }
+    /// Uses new choices of what the viewport shows of the reference geometry and saves
+    /// them. They are the user's, not the document's: the part, its undo steps and its
+    /// selection are untouched. When they cannot be kept they still apply until the app
+    /// closes, and the note says why.
+    pub fn set_reference_display(
+        &mut self,
+        references: crate::settings::ReferenceDisplay,
+    ) -> Result<(), crate::settings::NotKept> {
         self.viewport.references = references;
-        Ok(())
+        crate::settings::save_reference_display(&references).inspect_err(|why| self.not_kept("Viewport settings", why))
+    }
+
+    /// Uses a new grid style and saves it, as [`AppState::set_reference_display`] does.
+    pub fn set_grid_style(&mut self, style: crate::settings::GridStyle) -> Result<(), crate::settings::NotKept> {
+        self.viewport.grid_style = style;
+        crate::settings::save_grid_style(&style).inspect_err(|why| self.not_kept("Grid settings", why))
+    }
+
+    /// Says that `what` applies but was not kept, and for how long it lasts.
+    fn not_kept(&mut self, what: &str, why: &crate::settings::NotKept) {
+        self.note(format!("{what} not saved: {why}. {}", crate::settings::store::lasts()), NoteKind::Error);
     }
 
     /// Hands the revision store the part as it is now, after it was opened or saved.
@@ -801,18 +812,29 @@ impl AppState {
     }
 
     /// Saves new navigation settings and uses them. They are the user's, not the
-    /// document's: the part, its undo steps and its selection are untouched. When the
-    /// save is refused nothing changes and the note says why.
+    /// document's: the part, its undo steps and its selection are untouched. Settings
+    /// from a newer SolidDraft are refused: nothing changes and the note says why. When
+    /// there is nowhere to keep them, or the write fails, they still apply until the app
+    /// closes, and the note says so.
     pub fn set_navigation(
         &mut self,
         settings: crate::navigation::NavigationSettings,
     ) -> Result<(), crate::navigation::SaveError> {
-        if let Err(e) = crate::settings::save_navigation(&settings) {
-            self.note(format!("Navigation settings not saved: {e}"), NoteKind::Error);
-            return Err(e);
+        match crate::settings::save_navigation(&settings) {
+            Ok(()) => {
+                self.navigation = settings;
+                Ok(())
+            }
+            Err(crate::navigation::SaveError::NotKept(why)) => {
+                self.navigation = settings;
+                self.not_kept("Navigation settings", &why);
+                Err(crate::navigation::SaveError::NotKept(why))
+            }
+            Err(e) => {
+                self.note(format!("Navigation settings not saved: {e}"), NoteKind::Error);
+                Err(e)
+            }
         }
-        self.navigation = settings;
-        Ok(())
     }
 
     pub fn push(&mut self, action: AppAction) {

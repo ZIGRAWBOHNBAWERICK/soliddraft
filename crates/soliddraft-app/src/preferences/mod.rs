@@ -5,14 +5,14 @@
 //!
 //! [`Preferences`] holds the window's state and a draft of the settings it edits. Every
 //! accepted change is handed back as a [`Change`]; the app saves it
-//! (`AppState::set_navigation`, `AppState::set_reference_display`) and the tests can do
-//! the same without a GPU.
+//! (`AppState::set_navigation`, `AppState::set_reference_display`,
+//! `AppState::set_grid_style`) and the tests can do the same without a GPU.
 
 mod ui;
 
 use crate::navigation::view_keys::{self, ViewKeys};
 use crate::navigation::{Chord, NavigationSettings, Refusal, Router, SchemaError, presets};
-use crate::settings::ReferenceDisplay;
+use crate::settings::{GridStyle, NotKept, ReferenceDisplay};
 
 /// A page of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,6 +160,9 @@ pub enum Change {
     Navigation(NavigationSettings),
     /// Save and use these display choices.
     Display(ReferenceDisplay),
+    /// Use this grid style, and save it when `keep`. A slider being dragged shows its
+    /// value at once and is saved when it is let go.
+    Grid { style: GridStyle, keep: bool },
 }
 
 /// A line the window shows under its page.
@@ -179,6 +182,10 @@ pub struct Preferences {
     pub draft: NavigationSettings,
     /// The display choices as the window shows them.
     pub display: ReferenceDisplay,
+    /// The grid style as the window shows it.
+    pub grid: GridStyle,
+    /// The grid style was changed and not saved yet.
+    grid_pending: bool,
     pub message: Option<Message>,
     /// The row waiting for a new gesture from the practice area.
     pub capture: Option<&'static str>,
@@ -190,8 +197,8 @@ pub struct Preferences {
 }
 
 impl Preferences {
-    /// The window on Navigation > Mouse with `settings` and `display`.
-    pub fn new(settings: &NavigationSettings, display: ReferenceDisplay) -> Self {
+    /// The window on Navigation > Mouse with `settings`, `display` and `grid`.
+    pub fn new(settings: &NavigationSettings, display: ReferenceDisplay, grid: GridStyle) -> Self {
         let mac = cfg!(target_os = "macos");
         Self {
             page: MOUSE,
@@ -199,6 +206,8 @@ impl Preferences {
             highlight: None,
             draft: settings.clone(),
             display,
+            grid,
+            grid_pending: false,
             message: None,
             capture: None,
             practice_label: "Try a gesture here".to_owned(),
@@ -262,6 +271,27 @@ impl Preferences {
             self.message = None;
             self.changes.push(Change::Display(self.display));
         }
+    }
+
+    /// Shows `style` as the grid's, and hands it to the app: to use while `settle` is
+    /// false, as during a drag, and to save once it is true.
+    pub fn edit_grid(&mut self, style: GridStyle, settle: bool) {
+        let changed = style != self.grid;
+        if changed {
+            self.grid = style;
+            self.grid_pending = true;
+            self.message = None;
+        }
+        if self.grid_pending && (changed || settle) {
+            self.changes.push(Change::Grid { style, keep: settle });
+            self.grid_pending = !settle;
+        }
+    }
+
+    /// Says a change applies but was not kept.
+    pub fn not_kept(&mut self, why: &NotKept) {
+        let text = format!("Not saved: {why}. {}", crate::settings::store::lasts());
+        self.message = Some(Message { text, error: true });
     }
 
     /// Changes the draft with `edit` and hands it to the app.
@@ -356,15 +386,20 @@ pub fn window(ctx: &egui::Context, prefs: &mut Option<Preferences>, state: &mut 
         .show(ctx, |ui| p.ui(ui));
     for change in p.take_changes() {
         match change {
-            Change::Navigation(s) => {
-                if let Err(e) = state.set_navigation(s) {
-                    p.revert(&state.navigation, format!("Not saved: {e}"));
+            Change::Navigation(s) => match state.set_navigation(s) {
+                Ok(()) => {}
+                Err(crate::navigation::SaveError::NotKept(why)) => p.not_kept(&why),
+                Err(e) => p.revert(&state.navigation, format!("Not saved: {e}")),
+            },
+            Change::Display(d) => {
+                if let Err(why) = state.set_reference_display(d) {
+                    p.not_kept(&why);
                 }
             }
-            Change::Display(d) => {
-                if let Err(e) = state.set_reference_display(d) {
-                    p.display = state.viewport.references;
-                    p.message = Some(Message { text: format!("Not saved: {e}"), error: true });
+            Change::Grid { style, keep: false } => state.viewport.grid_style = style,
+            Change::Grid { style, keep: true } => {
+                if let Err(why) = state.set_grid_style(style) {
+                    p.not_kept(&why);
                 }
             }
         }

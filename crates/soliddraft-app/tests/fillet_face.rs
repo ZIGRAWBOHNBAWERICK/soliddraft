@@ -743,8 +743,8 @@ fn fillet_refusal_then_retry_rounds_the_box_top() {
         assert_eq!(editor.edges().len(), 4, "the face pick expands into its boundary edges: {:?}", editor.error);
     }
 
-    // r = 10 on a 20 mm plate: the round cannot fit, and the kernel says why.
-    type_field(&mut app, "Radius value", "10");
+    // R25 extends beyond the 20 mm wall. R10 now fits with finite strip ends.
+    type_field(&mut app, "Radius value", "25");
     let expected_reason = {
         let state = &app.state().state;
         let editor = state.editor.as_ref().expect("the panel stays open while typing");
@@ -773,7 +773,7 @@ fn fillet_refusal_then_retry_rounds_the_box_top() {
         assert_eq!(editor.edges().len(), 4, "the retry collects the face's boundary edges: {:?}", editor.error);
         rounding_size(editor)
     };
-    assert!(radius < 10.0, "the retry uses a smaller radius than the refused one: {radius}");
+    assert!(radius < 25.0, "the retry uses a smaller radius than the refused one: {radius}");
     ok(&mut app);
     let state = &app.state().state;
     let note = state.note.as_ref().expect("committing leaves a note");

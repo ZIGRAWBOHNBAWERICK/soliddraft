@@ -118,10 +118,10 @@ fn analytic_tray_has_inward_walls_edits_and_exports_without_changing_blank() {
 }
 
 #[test]
-fn unsupported_nonconvex_shell_refuses_without_mutating_input() {
+fn nonconvex_shell_builds_without_mutating_input() {
     use soliddraft_kernel_api::{Loop, Segment};
     let k = CatallaxKernel::new();
-    let vertices = [[0.0, 0.0], [30.0, 0.0], [30.0, 10.0], [10.0, 10.0], [10.0, 30.0], [0.0, 30.0]];
+    let vertices = [[0.0, 0.0], [8.0, 0.0], [8.0, 3.0], [3.0, 3.0], [3.0, 8.0], [0.0, 8.0]];
     let outer = Loop(
         (0..vertices.len())
             .map(|i| {
@@ -131,14 +131,14 @@ fn unsupported_nonconvex_shell_refuses_without_mutating_input() {
             })
             .collect(),
     );
-    let blank = extruded(&k, Profile { plane: Plane::XY, outer, holes: vec![] }, 12.0);
+    let blank = extruded(&k, Profile { plane: Plane::XY, outer, holes: vec![] }, 4.0);
     let history = k.history(blank).unwrap();
     let before = k.mass_properties(blank).unwrap();
-    let error = k.shell(&OpTag::new("unsupported"), blank, &[], 2.0).unwrap_err();
-    assert!(
-        matches!(&error, KernelError::Failed { op: soliddraft_kernel_api::OpKind::Shell, message, .. } if message.starts_with("distance.unsupported-envelope:")),
-        "{error:?}"
-    );
+    let top = k.topology(blank).unwrap().faces.iter().find(|f| f.normal == Some(Vec3::Z)).unwrap().id;
+    let tray = k.shell(&OpTag::new("tray"), blank, &[top], 1.0).unwrap().body;
+    assert!(k.validate(tray).unwrap().valid);
+    assert!((k.mass_properties(tray).unwrap().volume - (120.0 + 0.75 * std::f64::consts::PI)).abs() < 1e-6);
+    assert!(k.export_step(tray, &StepOptions::default()).unwrap().report.within_tolerance);
     assert_eq!(k.history(blank).unwrap(), history);
     assert_eq!(k.mass_properties(blank).unwrap(), before);
     assert!(k.validate(blank).unwrap().valid);

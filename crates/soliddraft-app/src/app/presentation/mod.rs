@@ -589,7 +589,7 @@ fn part_status(st: &AppState) -> Status {
             .doc
             .display_failure()
             .map(|text| StatusNote {
-                text: crate::geometry_message::for_user(text).to_owned(),
+                text: crate::geometry_message::for_user(text),
                 color: theme::error(),
                 fresh: true,
             })

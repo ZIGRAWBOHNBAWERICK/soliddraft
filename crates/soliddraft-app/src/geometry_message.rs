@@ -1,22 +1,42 @@
 //! Geometry refusals in the interface. Diagnostics retain the original reason.
 
-pub(crate) fn for_user(message: &str) -> &str {
+pub(crate) fn for_user(message: &str) -> String {
+    if message.contains("fillet.radius-too-large") {
+        if let Some(limit) = message.split("; radius limit ").nth(1).and_then(|s| s.split_once(" mm").map(|(n, _)| n))
+            && limit.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0)
+        {
+            return format!("The radius is too large for this edge. Try a radius under {limit} mm.");
+        }
+        return "The radius is too large for this edge. Try a smaller radius.".into();
+    }
+    plain_message(message).to_owned()
+}
+
+fn plain_message(message: &str) -> &str {
     if message.trim_end().ends_with("is coming soon.") {
         // Unfinished work says only Coming soon, not which part of it is unfinished.
         "Coming soon"
+    } else if message.contains("fillet.unsupported-end") {
+        "Fillets ending here are not supported yet."
+    } else if message.contains("fillet.unsupported-corner") {
+        "Fillets meeting at this corner are not supported yet."
+    } else if message.contains("fillet.contact-off-face") {
+        "The fillet would leave the selected faces. Reduce the radius or choose different edges."
     } else if message.contains("fillet.unsupported-overflow") {
         "This fillet reaches another face. Reduce the radius or round fewer edges."
     } else if message.contains("fillet.unsupported-contact") {
         "This edge and radius cannot be rounded together. Try a smaller radius or a different edge."
     } else if message.contains("fillet.unsupported-topology") {
-        "This fillet needs a closed edge without corners. Choose a different edge."
+        "This selection does not define a supported sharp edge. Choose a different edge."
     } else if message.contains("recipe.ambiguous-reference") {
         "This selection matches more than one edge or face. Pick the intended edge or face again."
+    } else if message.contains("mesh.precision-or-budget") {
+        "This shape could not be displayed. Try suppressing a feature."
     } else if has_code(message, "measure") || has_code(message, "iges") {
         // Measurements and IGES output the kernel does not cover yet.
         "Coming soon"
     } else if message.contains("distance.unsupported-envelope") || message.contains("distance.cylinder-domain") {
-        "This shape cannot be shelled. Use a convex tray with separated through bores and open its top or bottom face."
+        "This shell arrangement is not supported yet. Try different openings or a smaller wall thickness."
     } else if message.contains("step.unsupported-geometry")
         || message.contains("numbers.geometric-gap-unproven")
         || (message.contains("export_step") && message.contains("unsupported"))
@@ -24,6 +44,8 @@ pub(crate) fn for_user(message: &str) -> &str {
         "Coming soon"
     } else if message.contains("fillet.") {
         "This fillet cannot be made on the selected edges. Reduce the radius or select different edges."
+    } else if message.contains("numbers.operation-budget") {
+        "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
     } else if message.contains("mass_properties") {
         "These properties could not be calculated. Try again or choose another feature."
     } else if message.contains("Catallax")
@@ -101,12 +123,37 @@ mod tests {
     }
 
     #[test]
+    fn radius_refusal_keeps_the_proved_limit_and_strict_advice() {
+        assert_eq!(
+            for_user("fillet.radius-too-large: contact limit; radius limit 1 mm"),
+            "The radius is too large for this edge. Try a radius under 1 mm."
+        );
+        for limit in ["NaN", "inf", "-1", "0", "no limit"] {
+            let shown = for_user(&format!("fillet.radius-too-large: contact limit; radius limit {limit} mm"));
+            assert_eq!(shown, "The radius is too large for this edge. Try a smaller radius.");
+        }
+        assert_eq!(
+            for_user("fillet.unsupported-corner: equal crossing pole"),
+            "Fillets meeting at this corner are not supported yet."
+        );
+        assert_eq!(
+            for_user("export_step failed: numbers.operation-budget: operation work allowance exhausted"),
+            "This operation reached its calculation limit. Try a simpler shape or suppress a feature."
+        );
+    }
+
+    #[test]
     fn refusals_explain_the_next_action_without_internal_names() {
         for code in [
+            "fillet.radius-too-large",
+            "fillet.unsupported-end",
+            "fillet.unsupported-corner",
+            "fillet.contact-off-face",
             "fillet.unsupported-contact",
             "fillet.unsupported-overflow",
             "fillet.unsupported-topology",
             "recipe.ambiguous-reference",
+            "mesh.precision-or-budget",
             "measure.unsupported-surface",
             "measure.unsupported-pair",
             "measure.nonplanar-face",

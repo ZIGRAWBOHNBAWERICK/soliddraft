@@ -31,7 +31,7 @@ and a fresh process.
 | Inner-wall history | `Other` role | `Role::Inner` maps to `FaceRole::Offset` |
 | Planar tray | No application shell tool | Kernel checks and rendered create/edit/save/reopen/select/export path pass |
 | Circular-extrusion shell | Generic stage-3 refusal | Exact `distance.cylinder-domain` refusal retained; unsupported in this slice |
-| Nonconvex planar shell | Generic stage-3 refusal | Exact `distance.unsupported-envelope` refusal retained; input unchanged |
+| Nonconvex planar shell | `distance.unsupported-envelope` refusal | L-shaped tray builds with rounded inner corners; build, edit, display, reopen and raw-valid STEP are covered by `release_geometry` |
 | Full P4 intersection/edit | Outside this tool's completed evidence | Not run or claimed complete |
 
 ## Validation

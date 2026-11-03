@@ -263,7 +263,8 @@ fn a_part_that_cannot_roll_back_keeps_its_model_and_says_why() {
 fn assert_failed(lines: &[String], added: bool) {
     assert!(!lines.iter().any(|line| line.contains("Rebuild OK")), "{lines:?}");
     assert!(lines.iter().any(|line| line == "Display failed"), "{lines:?}");
-    assert!(lines.iter().any(|line| line.contains(REASON)), "{lines:?}");
+    assert!(lines.iter().any(|line| line.contains("could not be displayed") && line.contains("feature")), "{lines:?}");
+    assert!(!lines.iter().any(|line| line.contains(REASON)), "diagnostic codes stay behind the explanation: {lines:?}");
     assert_eq!(lines.iter().any(|line| line == "Feature added"), added, "{lines:?}");
 }
 

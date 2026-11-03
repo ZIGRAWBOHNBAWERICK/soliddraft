@@ -1416,7 +1416,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         {
             dimension_field(ui, state, id, &f.kind);
             if let Some(message) = state.mass.message(&state.doc, id) {
-                hint(ui, crate::geometry_message::for_user(message));
+                hint(ui, &crate::geometry_message::for_user(message));
             }
         }
         if let Some(FeatureStatus::NeedsRepair(items)) = &status

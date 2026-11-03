@@ -456,9 +456,8 @@ impl Preferences {
                 Ok(())
             }
             Err(conflict) => {
-                let text = conflict.message();
                 self.shortcut_conflict = Some(conflict.clone());
-                self.message = Some(Message { text, error: true });
+                self.message = None;
                 Err(conflict)
             }
         }

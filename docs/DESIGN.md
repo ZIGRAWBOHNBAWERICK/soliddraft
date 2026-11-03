@@ -80,11 +80,26 @@ Search finds working controls, navigation presets, bindings and planned categori
 Selecting a planned category shows its name and Coming soon. Browsing writes no settings.
 The category list and content scroll separately. The mouse gestures and practice area
 sit side by side when there is room and stack in a narrower window. Changes to working
-controls save immediately; a failed save restores the saved choice and shows the error.
+controls save immediately. When storage refuses a change, the choice still applies for
+the session and the window says it was not saved.
 
 ## Shortcuts
 
-F, T, R, I views, N normal to the sketch plane or the selected face. Z zoom to fit. S sketch, E extrude, X cut, F or C fillet or chamfer the selected edge. Enter and Esc apply or cancel the open feature and leave a sketch. Delete removes the selected feature or sketch entity, F2 renames. Ctrl+Z and Ctrl+Y undo and redo, Ctrl+S and Ctrl+O save and open, Ctrl+N new part, Ctrl+Q quit. In a sketch, L R C A S P D pick the line, rectangle, circle, arc, slot, point and smart dimension tools and X toggles construction. / opens the assistant session at its prompt, ? opens the shortcut list, Ctrl+Shift+P opens the command palette. F9 hides or shows the feature tree, Shift+F9 opens or closes the assistant session. Preferences > Interface > Shortcuts lists the command registry with each command's current key, searches and edits shortcuts with conflict warnings and swapping, resets all to SolidDraft, SolidWorks or Fusion, and saves under `shortcuts` in the settings.
+F, T, R, I views, N normal to the sketch plane or the selected face. Z zoom to fit. S sketch, E extrude, X cut, F or C fillet or chamfer the selected edge. Enter and Esc apply or cancel the open feature and leave a sketch. Delete removes the selected feature or sketch entity, F2 renames. Ctrl+Z and Ctrl+Y undo and redo, Ctrl+S and Ctrl+O save and open, Ctrl+N new part, Ctrl+Q quit. In a sketch, L R C A S P D pick the line, rectangle, circle, arc, slot, point and smart dimension tools and X toggles construction. / opens the assistant session at its prompt, ? opens the shortcut list, Ctrl+Shift+P opens the command palette. F9 hides or shows the feature tree, Shift+F9 opens or closes the assistant session.
+
+Preferences > Interface > Shortcuts lists the shared command registry, with each app
+command's current key and scope. Search filters by name, description, scope or key.
+Automation-only commands are listed without keyboard controls; unavailable app commands
+show Coming soon. Assign captures the next key press, with Esc to cancel. Clear removes
+a binding, Reset restores that command's preset default, and a conflict offers Swap or
+Cancel before either command changes.
+
+Choosing SolidDraft, SolidWorks or Fusion restores that preset and clears custom keys.
+Reset all restores the currently chosen preset. Mouse gestures are unchanged. Command
+edits take precedence over navigation view-key aliases, and assigned keys work
+immediately. Menus, command search, the palette and shortcut help show the edited keys.
+The `shortcuts` section uses the same settings store as the other preferences:
+`settings.json` on desktop and the site's localStorage in each browser profile.
 
 ## Automation
 

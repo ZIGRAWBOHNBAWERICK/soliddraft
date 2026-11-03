@@ -128,6 +128,13 @@ impl SolidDraftApp {
                 menu_command(ui, st, "make_drawing", "New drawing from part…");
                 menu_command(ui, st, "new_assembly", "New assembly");
                 menu_command(ui, st, "make_assembly", "Make assembly from part");
+                if ui.add_enabled(st.start.is_none(), egui::Button::new("Start page")).clicked() {
+                    st.push(AppAction::ShowStartPage);
+                    ui.close();
+                }
+                // The browser keeps its recent documents for the start page; it cannot
+                // open a file again by its path.
+                #[cfg(not(target_arch = "wasm32"))]
                 ui.menu_button("Open recent", |ui| {
                     if st.recent.is_empty() {
                         ui.add_enabled(false, egui::Button::new("No recent files"));

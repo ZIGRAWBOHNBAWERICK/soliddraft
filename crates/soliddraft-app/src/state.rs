@@ -103,8 +103,18 @@ pub enum AppAction {
     /// Opens the File locations page, on one kind of reference file or the first.
     ShowFileLocations(Option<soliddraft_document::LocationKind>),
     NewPart,
+    /// Makes a drawing of the open part, or asks for a part file first when the part has
+    /// no body.
+    NewDrawing,
     /// `None` asks with a file dialog.
     Open(Option<PathBuf>),
+    /// Opens a document file from its bytes, such as one the browser keeps.
+    OpenBytes {
+        name: String,
+        bytes: Vec<u8>,
+    },
+    /// Shows the start page.
+    ShowStartPage,
     ImportStep(Option<PathBuf>),
     Save,
     SaveAs(Option<PathBuf>),
@@ -735,6 +745,10 @@ pub struct AppState {
     /// Autosave and the copies found after a crash. `None` until the app starts it, and
     /// in tests and automated runs that do not.
     pub recovery: Option<crate::recovery::Recovery>,
+    /// The start page, while it shows instead of the documents.
+    pub start: Option<crate::start_page::StartPage>,
+    /// New drawing asked for a part file: once it opens, the drawing setup starts.
+    pub drawing_after_open: bool,
     actions: Vec<AppAction>,
 }
 
@@ -782,6 +796,8 @@ impl AppState {
             navigation: crate::settings::navigation(crate::settings::install_kind()),
             shortcuts: crate::settings::shortcuts(),
             recovery: None,
+            start: None,
+            drawing_after_open: false,
             actions: Vec::new(),
         }
     }
@@ -802,6 +818,26 @@ impl AppState {
     pub fn set_grid_style(&mut self, style: crate::settings::GridStyle) -> Result<(), crate::settings::NotKept> {
         self.viewport.grid_style = style;
         crate::settings::save_grid_style(&style).inspect_err(|why| self.not_kept("Grid settings", why))
+    }
+
+    /// The autosave settings in use: the running autosave's, or the saved ones.
+    pub fn autosave_policy(&self) -> soliddraft_document::AutosavePolicy {
+        self.recovery.as_ref().map_or_else(|| crate::settings::documents().autosave, |r| r.policy)
+    }
+
+    /// Uses new autosave settings and saves them. The next copy follows them; copies
+    /// already written stay. When they cannot be kept they still apply until the app
+    /// closes, and the note says why.
+    pub fn set_autosave(
+        &mut self,
+        policy: soliddraft_document::AutosavePolicy,
+    ) -> Result<(), crate::settings::NotKept> {
+        if let Some(r) = self.recovery.as_mut() {
+            r.policy = policy;
+        }
+        let mut documents = crate::settings::documents();
+        documents.autosave = policy;
+        crate::settings::save_documents(&documents).inspect_err(|why| self.not_kept("Autosave settings", why))
     }
 
     /// Says that `what` applies but was not kept, and for how long it lasts.

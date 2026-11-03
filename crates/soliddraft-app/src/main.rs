@@ -13,6 +13,7 @@ const USAGE: &str =
   FILE.dwprt        open a saved part (.dwpart still opens)
   FILE.dwasm        open a saved assembly in a tab beside the part
   FILE.dwdrw        open a saved drawing, and its part when it is found
+                    (with no file and no --demo, the window opens on the start page)
   --demo            start with a sample part (three extrudes)
   --bench [SECONDS] load a 10,000+ triangle body, orbit with vsync off, print frame-time statistics and exit
   --screenshot PATH save the window to a PNG after a few frames and exit (use --stay to keep running)
@@ -131,6 +132,8 @@ fn main() -> eframe::Result {
         .transpose()
         .map_err(|e| eframe::Error::AppCreation(Box::new(e)))?;
 
+    // With no document asked for, the window opens on the start page.
+    let start_page = open.is_none() && !demo && !automation.bench;
     let doc = if automation.bench {
         soliddraft_app::bench_document()
     } else if demo {
@@ -170,6 +173,8 @@ fn main() -> eframe::Result {
             }
             if let Some(path) = open {
                 soliddraft_app::app::open_at_start(&mut app, path);
+            } else if start_page {
+                app.show_start_page(&cc.egui_ctx);
             }
             Ok(Box::new(app))
         }),

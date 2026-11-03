@@ -57,7 +57,9 @@ pub use id::{ConfigScope, ConfigurationId, DisplayStateId, DocumentId};
 pub use index::{FolderIndex, IndexEntry};
 pub use kind::{DRAWING_EXTENSION, DocKind, LEGACY_DRAWING_EXTENSION, LEGACY_PART_EXTENSION, PART_EXTENSION};
 pub use locations::{FileLocations, LocationKind};
-pub use manifest::{EnvelopeError, Identity, Manifest, Package, Section, identify, identify_file, thumbnail};
+pub use manifest::{
+    EnvelopeError, Identity, Manifest, Package, Section, identify, identify_file, thumbnail, thumbnail_of,
+};
 pub use recovery::{RecoveryCopy, Standing};
 pub use reference::DocRef;
 pub use resolve::{Location, OpenDocument, RefStatus, Resolution, Resolver, Target, Via};

@@ -942,6 +942,8 @@ impl SolidDraftApp {
                 self.state.provider_dialog = Some(crate::chat::ProviderDialog::new(&crate::settings::assistant()))
             }
             AppAction::NewPart => {
+                self.state.start = None;
+                self.state.drawing_after_open = false;
                 self.close_editor();
                 self.state.sketch = None;
                 self.state.chat.preview = None;
@@ -979,6 +981,25 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::NewDrawing => {
+                if self.state.doc.display_body().is_some() {
+                    self.apply(ctx, AppAction::Drawing(crate::drawing::DrawingAction::MakeDrawing));
+                    return;
+                }
+                // A drawing shows a part: ask for one, and start the drawing once it opens.
+                self.state.drawing_after_open = true;
+                let parts = [file::EXTENSION, file::LEGACY_EXTENSION];
+                match crate::platform::open_path("Open the part to draw", "SolidDraft part", &parts) {
+                    Some(path) => self.apply(ctx, AppAction::Open(Some(path))),
+                    // The browser's upload arrives later; on the desktop nothing was chosen.
+                    None => self.state.drawing_after_open = cfg!(target_arch = "wasm32"),
+                }
+            }
+            AppAction::OpenBytes { name, bytes } => self.open_bytes(&name, &bytes),
+            AppAction::ShowStartPage => {
+                let ctx = ctx.clone();
+                self.state.start = Some(crate::start_page::StartPage::new(&self.state, move || ctx.request_repaint()));
+            }
             AppAction::Save => match self.state.doc.path.clone() {
                 Some(p) => self.apply(ctx, AppAction::SaveAs(Some(p))),
                 None => self.apply(ctx, AppAction::SaveAs(None)),
@@ -996,6 +1017,12 @@ impl SolidDraftApp {
                     Ok(warning) => {
                         self.state.remember_revision();
                         self.state.recent = file::recent();
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let id = self.state.doc.model().id();
+                            let key = crate::documents_browser::key(id, soliddraft_document::DocKind::Part);
+                            self.picture_for_recent(ctx, key);
+                        }
                         match warning {
                             Some(w) => self.state.note(format!("Saved {} · {w}", path.display()), NoteKind::Error),
                             None => self.state.note(format!("Saved {}", path.display()), NoteKind::Ok),
@@ -1026,7 +1053,12 @@ impl SolidDraftApp {
             }
             AppAction::ClearRecent => {
                 file::forget_all();
+                #[cfg(target_arch = "wasm32")]
+                crate::documents_browser::forget_recent();
                 self.state.recent.clear();
+                if let Some(page) = self.state.start.as_mut() {
+                    page.docs = Some(Vec::new());
+                }
             }
             AppAction::ResetLayout => {
                 let drawing_open = self.dock.find_tab(&Tab::Drawing).is_some();
@@ -1061,6 +1093,7 @@ impl SolidDraftApp {
                         self.state.viewport.grid_style,
                     )
                     .with_shortcuts(&self.state.shortcuts)
+                    .with_autosave(self.state.autosave_policy())
                 });
             }
             AppAction::ShowShortcuts => self.state.show_shortcuts = true,

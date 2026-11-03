@@ -39,6 +39,8 @@ egui_dock.workspace = true
 wgpu.workspace = true
 glam.workspace = true
 half = "2.7.1"
+# Dates in local time for the start page and Recover documents; the browser's clock on the web.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "wasmbind"] }
 bytemuck.workspace = true
 log.workspace = true
 image.workspace = true

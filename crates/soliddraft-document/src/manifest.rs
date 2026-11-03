@@ -317,6 +317,11 @@ pub fn thumbnail(path: &Path) -> Result<Option<Vec<u8>>, EnvelopeError> {
     Package::new(std::io::BufReader::new(std::fs::File::open(path)?))?.read(THUMBNAIL)
 }
 
+/// The thumbnail PNG of a document file's bytes, such as a file the browser keeps.
+pub fn thumbnail_of(bytes: &[u8]) -> Result<Option<Vec<u8>>, EnvelopeError> {
+    Package::new(std::io::Cursor::new(bytes))?.read(THUMBNAIL)
+}
+
 /// The truth entry of a part file from before the envelope.
 pub const LEGACY_PART_TRUTH: &str = "recipe.json";
 

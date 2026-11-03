@@ -62,7 +62,15 @@ pub struct SolidDraftApp {
     offscreen: Option<crate::viewport::offscreen::Offscreen>,
     /// The open Preferences window.
     pub preferences: Option<crate::preferences::Preferences>,
+    /// The recent-list key of a part the browser just saved, waiting for the screenshot
+    /// its picture is cut from.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) web_thumbnail: Option<String>,
 }
+
+/// Marks the screenshot a browser save asks for.
+#[cfg(target_arch = "wasm32")]
+struct WebThumbnail;
 
 impl SolidDraftApp {
     fn focus_tool_document(&mut self) {
@@ -136,6 +144,8 @@ impl SolidDraftApp {
             render_state: None,
             offscreen: None,
             preferences: None,
+            #[cfg(target_arch = "wasm32")]
+            web_thumbnail: None,
         }
     }
 
@@ -146,6 +156,51 @@ impl SolidDraftApp {
         match crate::recovery::Recovery::start(root, policy) {
             Ok(recovery) => self.state.recovery = Some(recovery),
             Err(e) => self.state.note(format!("Autosave is off: {e}"), NoteKind::Error),
+        }
+    }
+
+    /// Starts autosave into the browser's storage for this site, and opens the Recover
+    /// documents window once the browser says an earlier visit left unsaved work.
+    #[cfg(target_arch = "wasm32")]
+    pub fn start_recovery_in_browser(&mut self, policy: soliddraft_document::AutosavePolicy) {
+        self.state.recovery = Some(crate::recovery::Recovery::start_in_browser(policy));
+    }
+
+    /// Shows the start page instead of the empty part, as the app does at launch when no
+    /// document was asked for.
+    pub fn show_start_page(&mut self, ctx: &egui::Context) {
+        let ctx = ctx.clone();
+        self.state.start = Some(crate::start_page::StartPage::new(&self.state, move || ctx.request_repaint()));
+    }
+
+    /// Opens a document file from its bytes: an upload in the browser, or a document the
+    /// browser keeps for the recent list.
+    pub(super) fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+        use soliddraft_document::DocKind;
+        match DocKind::of_path(std::path::Path::new(name)) {
+            Some(DocKind::Drawing) => match crate::drawing::document::DrawingDoc::from_bytes(bytes) {
+                Ok(mut doc) => {
+                    doc.path = Some(PathBuf::from(name));
+                    crate::drawing::restore(&mut self.state, &mut self.dock, doc);
+                    self.state.note(format!("Opened {name}"), NoteKind::Ok);
+                    #[cfg(target_arch = "wasm32")]
+                    crate::documents_browser::remember(name, DocKind::Drawing, bytes);
+                }
+                Err(e) => self.state.note(format!("{name}: {e}"), NoteKind::Error),
+            },
+            Some(DocKind::Assembly) => self.state.note(
+                format!("{name}: assemblies open from their folder, with their parts, in the desktop app"),
+                NoteKind::Error,
+            ),
+            _ => {
+                let opened =
+                    file::open_bytes(name, bytes, self.state.doc.kernel().clone(), Some(self.state.doc.model()));
+                #[cfg(target_arch = "wasm32")]
+                if opened.is_ok() {
+                    crate::documents_browser::remember(name, DocKind::Part, bytes);
+                }
+                self.opened(opened);
+            }
         }
     }
 
@@ -227,6 +282,9 @@ impl SolidDraftApp {
                 self.state.viewport.camera.fit(self.state.doc.bounds());
                 self.state.recent = file::recent();
                 let problems = self.state.doc.error_count() + self.state.doc.repair_count();
+                if std::mem::take(&mut self.state.drawing_after_open) {
+                    self.state.push(AppAction::Drawing(crate::drawing::DrawingAction::MakeDrawing));
+                }
                 if problems == 0 {
                     self.state.note(format!("Opened {} · {n} features rebuilt", self.state.doc.name), NoteKind::Ok);
                 } else {
@@ -240,7 +298,10 @@ impl SolidDraftApp {
                     );
                 }
             }
-            Err(e) => self.state.note(e, NoteKind::Error),
+            Err(e) => {
+                self.state.drawing_after_open = false;
+                self.state.note(e, NoteKind::Error);
+            }
         }
     }
 
@@ -338,6 +399,63 @@ impl SolidDraftApp {
         }
     }
 
+    /// Asks for a screenshot to cut the picture of the part saved under `key` from. The
+    /// browser cannot read a texture back while a frame waits, so it uses the window's
+    /// own pixels, a frame later.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn picture_for_recent(&mut self, ctx: &egui::Context, key: String) {
+        self.web_thumbnail = Some(key);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(WebThumbnail)));
+    }
+
+    /// Cuts the viewport out of the screenshot [`Self::picture_for_recent`] asked for and
+    /// keeps it with the recent document.
+    #[cfg(target_arch = "wasm32")]
+    fn keep_recent_picture(&mut self, ctx: &egui::Context) {
+        if self.web_thumbnail.is_none() {
+            return;
+        }
+        let shot = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, user_data, .. }
+                    if user_data.data.as_ref().is_some_and(|d| d.is::<WebThumbnail>()) =>
+                {
+                    Some(image.clone())
+                }
+                _ => None,
+            })
+        });
+        let (Some(image), Some(key)) = (shot, self.web_thumbnail.clone()) else { return };
+        self.web_thumbnail = None;
+        let ppp = ctx.pixels_per_point();
+        let rect = self.state.viewport.rect;
+        let pixels: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+        let Some(whole) = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, pixels) else {
+            return;
+        };
+        let (x, y) = ((rect.left() * ppp).max(0.0) as u32, (rect.top() * ppp).max(0.0) as u32);
+        let (w, h) = ((rect.width() * ppp) as u32, (rect.height() * ppp) as u32);
+        if w == 0 || h == 0 {
+            return;
+        }
+        let cut = image::imageops::crop_imm(&whole, x, y, w, h).to_image();
+        let small = image::imageops::thumbnail(&cut, 512, (512 * h / w).max(1));
+        let mut png = Vec::new();
+        match small.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png) {
+            Ok(()) => crate::documents_browser::set_thumbnail(&key, &png),
+            Err(e) => log::warn!("no picture for the recent list: {e}"),
+        }
+    }
+
+    /// Closes the start page once a document was opened, made or edited.
+    fn leave_start_page(&mut self) {
+        if self.state.start.as_ref().is_some_and(|page| !page.still_wanted(&self.state)) {
+            self.state.start = None;
+            // A New drawing whose part never arrived does not start one later.
+            self.state.drawing_after_open = false;
+        }
+    }
+
     /// Hands autosave the documents as this frame left them, notes any copy that failed,
     /// and wakes the app when the next copy is due.
     fn autosave(&mut self, ctx: &egui::Context) {
@@ -391,8 +509,7 @@ impl eframe::App for SolidDraftApp {
         self.focus_tool_document();
         // In the browser an opened file arrives as an upload, frames after the request.
         if let Some((name, bytes)) = crate::platform::take_upload() {
-            let opened = file::open_bytes(&name, &bytes, self.state.doc.kernel().clone(), Some(self.state.doc.model()));
-            self.opened(opened);
+            self.open_bytes(&name, &bytes);
         }
 
         if let Some(e) = self.state.editor.as_mut() {
@@ -423,22 +540,33 @@ impl eframe::App for SolidDraftApp {
             .frame(chrome_frame)
             .show_separator_line(true)
             .show(root, |ui| self.menu_bar(ui));
-        egui::Panel::top("ribbon")
-            .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
-            .frame(panel_frame)
-            .show_separator_line(false)
-            .show(root, |ui| ribbon::show(ui, &mut self.state));
+        self.leave_start_page();
+        let start = self.state.start.is_some();
+        if !start {
+            egui::Panel::top("ribbon")
+                .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
+                .frame(panel_frame)
+                .show_separator_line(false)
+                .show(root, |ui| ribbon::show(ui, &mut self.state));
+        }
         let status = self.status();
         crate::command_line::panel(root, &mut self.state, &status);
         let window_width = root.available_width();
-        self.side_panel(root, Side::Tree, window_width);
+        if !start {
+            self.side_panel(root, Side::Tree, window_width);
+        }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
-            let mut panels = Panels { state: &mut self.state };
-            show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
+            if start {
+                crate::start_page::show(ui, &mut self.state);
+            } else {
+                let mut panels = Panels { state: &mut self.state };
+                show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
+            }
         });
         self.dialogs(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);
         self.apply_actions(ctx);
+        self.leave_start_page();
         // Panel choices are written once they settle, never in the middle of a drag.
         if self.state.commands != self.saved_commands {
             if let Err(e) = crate::settings::save_command_history(&self.state.commands) {
@@ -457,11 +585,17 @@ impl eframe::App for SolidDraftApp {
             self.saved_bar = self.state.command_line.settings.clone();
         }
         self.autosave(ctx);
+        #[cfg(target_arch = "wasm32")]
+        self.keep_recent_picture(ctx);
         self.automation_step(ctx, frame);
         if self.state.note.as_ref().is_some_and(|n| n.at.elapsed() < crate::command_line::NOTE_ON_BAR) {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
-        let title = format!("{}{} - SolidDraft", self.state.doc.name, if self.state.doc.dirty { " •" } else { "" });
+        let title = if self.state.start.is_some() {
+            "SolidDraft".to_owned()
+        } else {
+            format!("{}{} - SolidDraft", self.state.doc.name, if self.state.doc.dirty { " •" } else { "" })
+        };
         if title != self.title {
             self.title = title.clone();
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));

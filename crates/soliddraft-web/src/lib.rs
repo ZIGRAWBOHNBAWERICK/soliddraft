@@ -1,9 +1,9 @@
 //! The web build of SolidDraft: the app compiled to WebAssembly and drawn into the page's
 //! canvas. `trunk build` in this directory makes it; docs/web.md has the rest.
 //!
-//! Add `?demo` to the page's address to start with the sample part, `?preset=fast`,
-//! `studio` or `realistic` to start in that look, and `?theme=dark` for the dark
-//! interface.
+//! The page opens on the start page. Add `?demo` to the page's address to start with the
+//! sample part instead, `?preset=fast`, `studio` or `realistic` to start in that look,
+//! and `?theme=dark` for the dark interface.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -45,7 +45,13 @@ pub fn start() {
                 Box::new(move |cc| {
                     let doc = if demo { soliddraft_app::demo_document() } else { soliddraft_app::new_document() };
                     let automation = Automation { connect_assistant: true, preset, theme, ..Default::default() };
-                    Ok(Box::new(SolidDraftApp::new(cc, doc, automation)))
+                    let mut app = SolidDraftApp::new(cc, doc, automation);
+                    // Unsaved work and the recent list stay in this browser's storage.
+                    app.start_recovery_in_browser(soliddraft_app::settings::documents().autosave);
+                    if !demo {
+                        app.show_start_page(&cc.egui_ctx);
+                    }
+                    Ok(Box::new(app))
                 }),
             )
             .await;

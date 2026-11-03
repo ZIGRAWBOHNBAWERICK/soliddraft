@@ -304,7 +304,25 @@ The settings file holds the policy under `documents`:
 ```
 
 Every key is optional. `edits: 0` waits for the interval only, and `count: 0` keeps no
-backups. The browser build has no autosave or backups: its files are downloads.
+backups. Preferences > General and documents > Autosave and recovery sets the autosave
+keys: on or off, the minutes between copies, and the edits that write one sooner. The
+running autosave follows a change at once.
+
+The browser build keeps no backups: its files are downloads. Its autosave keeps the same
+recovery copies in the browser's own storage (`docs/web.md`), and closing the tab with
+unsaved work keeps them for the next visit.
+
+## Start page
+
+With no document asked for, the app opens on the start page instead of an empty part:
+New part, New assembly, New drawing and Open, then the recent documents as cards with
+the file's thumbnail, its name, kind, the date it was last written and its folder. A
+click opens one. When a session ended without quitting, the page also points at Recover
+documents. The desktop reads the recent list (`recent.json` in the config directory) and
+the files' thumbnails on a worker; the browser lists the files it keeps itself. The page
+gives way as soon as a document is opened, made or restored, or the empty part is
+edited; File > Start page shows it again. New drawing on a part without a body asks for a
+part file first and starts the drawing's setup once it opens.
 
 ## Command line
 

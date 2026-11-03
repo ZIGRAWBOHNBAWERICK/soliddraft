@@ -5,7 +5,10 @@
 //! is due, and says when one was written or the document was saved. It reads no clock
 //! of its own, so it runs the same in tests.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `std::time::Instant` itself on the desktop; the browser's clock on the web.
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 

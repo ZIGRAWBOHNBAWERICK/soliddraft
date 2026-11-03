@@ -106,9 +106,13 @@ fn kind_name(kind: &str) -> &'static str {
 
 /// True for a plain decimal that covers the measured gap. The kernel checks it exactly.
 fn covers_gap(allowed: &str, proposal: &Proposal) -> bool {
-    let plain = !allowed.is_empty() && allowed.bytes().all(|b| b.is_ascii_digit() || b == b'.');
     let reaches = |gap: f64| allowed.parse::<f64>().is_ok_and(|value| value >= gap);
-    plain && proposal.distance_max_mm.parse().is_ok_and(reaches)
+    plain_mm(allowed) && proposal.distance_max_mm.parse().is_ok_and(reaches)
+}
+
+/// A plain decimal number of millimetres, such as `0.03`, as an approval is saved.
+fn plain_mm(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'.') && text.parse::<f64>().is_ok()
 }
 
 impl Preview {
@@ -172,6 +176,9 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
         }
         if approver.is_empty() {
             return Err("an approved repair needs the name of who approved it".into());
+        }
+        if !plain_mm(approved.tolerance_mm.trim()) {
+            return Err("The allowed movement must be a number of millimetres, such as 0.03.".into());
         }
         feature = feature.accepted(&proposal.question, approved.tolerance_mm.trim(), approver);
     }

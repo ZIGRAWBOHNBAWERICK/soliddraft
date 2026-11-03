@@ -128,8 +128,12 @@ impl Report {
             Report::Step(r) => {
                 // A fitted surface's distance from its exact definition adds to the file's own.
                 let bound = if r.fit_mm > 0.0 { (r.max_deviation_mm + r.fit_mm).next_up() } else { r.max_deviation_mm };
-                let mut s =
-                    format!("{} faces, {} edges; within {bound} mm of the exact part (proven)", r.faces, r.edges);
+                let mut s = format!(
+                    "{} faces, {} edges; within {} mm of the exact part (proven)",
+                    r.faces,
+                    r.edges,
+                    bound_mm(bound)
+                );
                 if !r.within_tolerance {
                     s += "; over the requested tolerance";
                 }
@@ -137,10 +141,16 @@ impl Report {
             }
             Report::Iges(r) => format!(
                 "{} faces, {} edges; within {} mm of the exact part (proven)",
-                r.faces, r.edges, r.max_deviation_mm
+                r.faces,
+                r.edges,
+                bound_mm(r.max_deviation_mm)
             ),
             Report::FieldMesh(r) => {
-                format!("{} triangles; approximate field mesh, proven within {} mm", r.triangles, r.deviation_bound_mm)
+                format!(
+                    "{} triangles; approximate field mesh, proven within {} mm",
+                    r.triangles,
+                    bound_mm(r.deviation_bound_mm)
+                )
             }
             Report::StandIn(r) => format!(
                 "{} unit-density proxy solids and the massless source envelope; {}, within the field's proven moments",
@@ -226,5 +236,62 @@ pub fn export(
             };
             Ok(Export { bytes, report: Report::Mesh(report) })
         }
+    }
+}
+
+/// A proven bound for people: rounded up to the micrometre's thousandth, so the shown
+/// figure is never smaller than the proof. A bound below that reads as the smallest step.
+fn bound_mm(bound: f64) -> String {
+    const STEPS_PER_MM: f64 = 1e6;
+    if !bound.is_finite() || bound <= 0.0 {
+        return if bound == 0.0 { "0".into() } else { bound.to_string() };
+    }
+    let scaled = bound * STEPS_PER_MM;
+    // A bound such as 0.01 scales to 10000.000000000002 in binary64: that is 0.01, not
+    // one step more.
+    let steps = if (scaled - scaled.round()).abs() <= scaled * 1e-12 { scaled.round() } else { scaled.ceil() };
+    let text = format!("{:.6}", steps.max(1.0) / STEPS_PER_MM);
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(max_deviation_mm: f64, fit_mm: f64) -> Report {
+        Report::Step(StepReport {
+            max_deviation: max_deviation_mm.to_string(),
+            max_deviation_mm,
+            fit_mm,
+            within_tolerance: true,
+            solids: 1,
+            faces: 7,
+            edges: 15,
+            vertices: 10,
+            fitted_curves: 0,
+            added_vertices: 0,
+            added_edges: 0,
+            removed_faces: 0,
+            removed_edges: 0,
+            warnings: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn a_proven_bound_reads_as_a_short_number_never_below_the_proof() {
+        // The tray of the real-use pass printed every digit of its binary64 bound.
+        assert_eq!(
+            step(1.3844827940065006e-16, 0.0).summary(),
+            "7 faces, 15 edges; within 0.000001 mm of the exact part (proven)"
+        );
+        // The ring fillet's fitted band: 0.0000188... rounds up, not to the nearest.
+        assert_eq!(
+            step(0.0, 0.000018850358009776183).summary(),
+            "7 faces, 15 edges; within 0.000019 mm of the exact part (proven)"
+        );
+        assert!(step(0.0, 0.0).summary().contains("within 0 mm"));
+        assert_eq!(bound_mm(0.01), "0.01");
+        assert_eq!(bound_mm(0.0123451), "0.012346");
+        assert_eq!(bound_mm(2.5), "2.5");
     }
 }

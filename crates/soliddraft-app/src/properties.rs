@@ -922,7 +922,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     error_row(ui, err);
                 }
                 ui.add_space(8.0);
-                hint(ui, "Catallax drafts planar faces and cylinders parallel to the pull.");
+                hint(ui, "Draft tapers planar faces, and cylinders parallel to the pull.");
             }
             EditorParams::PickPlane => {
                 theme::section_label(ui, "Sketch plane");
@@ -1190,12 +1190,15 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                                         let mut v = con.value().unwrap_or(0.0);
                                         let unit =
                                             if matches!(con.kind, ConstraintKind::Angle { .. }) { "°" } else { "mm" };
-                                        let r = ui.add(
-                                            egui::DragValue::new(&mut v)
-                                                .speed(0.5)
-                                                .fixed_decimals(2)
-                                                .suffix(format!(" {unit}")),
-                                        );
+                                        let mut field = egui::DragValue::new(&mut v)
+                                            .speed(0.5)
+                                            .fixed_decimals(2)
+                                            .suffix(format!(" {unit}"));
+                                        // A length is a size: a drag past zero stops at the smallest one.
+                                        if !matches!(con.kind, ConstraintKind::Angle { .. }) {
+                                            field = field.range(0.01..=100_000.0);
+                                        }
+                                        let r = ui.add(field);
                                         if r.changed() {
                                             value_change = Some((con.id, v));
                                         }

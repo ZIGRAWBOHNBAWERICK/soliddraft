@@ -548,7 +548,7 @@ fn view_panel(
                         }
                     });
             });
-            hint(ui, "Tangent edges and seams remake the view's line work through the kernel; hidden lines only change what is drawn.");
+            hint(ui, "Tangent edges and seams redraw the view's lines from the part; hidden lines only change what is drawn.");
             section_gap(ui);
             properties_d3::view_extras(ui, s, &v, actions);
             theme::section_label(ui, "Alignment and children");

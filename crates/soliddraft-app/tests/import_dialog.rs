@@ -217,3 +217,114 @@ fn mcp_refuses_source_substitution_after_preview() {
         "neither decline nor acceptance can commit a substituted source"
     );
 }
+
+/// The real-use pass answered an approval with "abc" through import_step: the refusal
+/// was "the import made no feature", which says nothing about the answer.
+#[test]
+fn an_allowed_movement_that_is_not_a_number_says_so() {
+    let mut doc = Document::new("Wide seam", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "wide.step", WIDE.to_vec()).unwrap();
+    let revision = doc.revision();
+    for tolerance in ["abc", "", "0.0.3", "-0.03"] {
+        let review = soliddraft_app::import::Review {
+            decline: Vec::new(),
+            accept: vec![soliddraft_app::import::Approved {
+                id: "g0".into(),
+                tolerance_mm: tolerance.into(),
+                approver: "Ana Reviewer".into(),
+            }],
+        };
+        let error = soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap_err();
+        assert!(error.contains("must be a number of millimetres"), "{tolerance:?}: {error}");
+        assert!(doc.features.is_empty());
+        assert_eq!(doc.revision(), revision);
+    }
+}
+
+/// A declined repair names the unbuilt solid. A file that gives the solid no name left
+/// its STEP entity number in the tree, "#178 not imported until the gap is resolved".
+#[test]
+fn a_declined_import_names_no_entity_number() {
+    let mut doc = Document::new("Declined", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "block.step", BLOCK.to_vec()).unwrap();
+    let review = soliddraft_app::import::Review { decline: vec!["g0".into()], accept: Vec::new() };
+    soliddraft_app::import::commit(&mut doc, &preview, &review).unwrap();
+    let soliddraft_app::document::FeatureStatus::Error(message) = &doc.features[0].status else {
+        panic!("a declined import is an error: {:?}", doc.features[0].status)
+    };
+    assert!(!message.contains('#'), "{message}");
+    assert!(message.starts_with("The solid is not imported until the gap is resolved"), "{message}");
+}
+
+/// The real-use pass could not measure, sketch on or round anything of an imported body:
+/// its faces were listed as `Body · Face N`, a name no command took, and every edge
+/// "cannot be referenced". Imported faces now carry names by their order in the source
+/// file, and an operation the backend cannot run on an imported body yet says Coming soon
+/// and leaves the part as it was.
+#[test]
+fn an_imported_body_has_faces_to_measure_and_sketch_on() {
+    use serde_json::{Value, json};
+    use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
+    use soliddraft_assistant::{Caller, ToolHost};
+
+    fn call(doc: &mut Document, book: &mut ProposalBook, name: &str, input: Value) -> soliddraft_assistant::ToolOutput {
+        CommandTools { doc, book, surface: Surface::Mcp, drawing: None }.call(
+            name,
+            input,
+            &Caller::Mcp { client: "imported faces".into() },
+        )
+    }
+
+    let dir = std::env::temp_dir().join(format!("soliddraft-import-faces-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("block.step");
+    std::fs::write(&source, BLOCK).unwrap();
+    let mut doc = Document::new("Imported faces", soliddraft_app::kernel());
+    let mut book = ProposalBook::default();
+    let preview = call(&mut doc, &mut book, "preview_import", json!({"path":source}));
+    let token = serde_json::from_str::<Value>(&preview.content).unwrap()["token"].clone();
+    let out = call(&mut doc, &mut book, "import_step", json!({"path":source,"preview_token":token,"decline":[]}));
+    assert!(!out.is_error, "{}", out.content);
+
+    let feature: Value =
+        serde_json::from_str(&call(&mut doc, &mut book, "feature", json!({"name":"Import1"})).content).unwrap();
+    let faces: Vec<&str> = feature["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(faces.len(), 6, "{feature}");
+    assert!(faces.iter().all(|f| f.starts_with("Import1 · Face ")), "{faces:?}");
+    for edge in feature["edges"].as_array().unwrap() {
+        for face in edge["faces"].as_array().unwrap() {
+            assert!(faces.contains(&face.as_str().unwrap()), "{edge}");
+        }
+    }
+    let top = feature["faces"].as_array().unwrap().iter().find(|f| f["normal"] == json!([0.0, 0.0, 1.0])).unwrap();
+    let top = top["name"].as_str().unwrap().to_owned();
+    let area = call(&mut doc, &mut book, "measure_entity", json!({"entity":top}));
+    assert!(!area.is_error, "{}", area.content);
+    assert_eq!(serde_json::from_str::<Value>(&area.content).unwrap()["value"], 1000.0);
+    let length = call(&mut doc, &mut book, "measure_entity", json!({"entity":"Import1 · Edge 1"}));
+    assert!(!length.is_error, "{}", length.content);
+
+    let circle = json!({"shape":"circle","center":[10,10,10.004],"diameter":4});
+    let sketch = call(&mut doc, &mut book, "sketch", json!({"plane":top,"shapes":[circle]}));
+    assert!(!sketch.is_error, "{}", sketch.content);
+    let depth = doc.undo_depth();
+    for (tool, input) in [
+        ("fillet", json!({"edges":["Import1 · Edge 2"],"radius":1})),
+        ("extrude", json!({"sketch":"Sketch1","depth":5,"flip":false})),
+        ("shell", json!({"open_faces":[top],"thickness":1})),
+    ] {
+        let out = call(&mut doc, &mut book, tool, input);
+        assert!(out.is_error && out.content.contains("coming soon"), "{tool}: {}", out.content);
+        assert!(!out.content.contains("import_step"), "{tool}: {}", out.content);
+        assert_eq!(doc.undo_depth(), depth, "{tool} changed the part");
+    }
+
+    let saved = dir.join("imported.dwprt");
+    soliddraft_app::file::save(&mut doc, &saved).unwrap();
+    let mut reopened = soliddraft_app::file::open(&saved, soliddraft_app::kernel(), None).unwrap();
+    let sketch: Value =
+        serde_json::from_str(&call(&mut reopened, &mut book, "feature", json!({"name":"Sketch1"})).content).unwrap();
+    assert_eq!(sketch["status"], "ok", "{sketch}");
+    assert_eq!(sketch["plane"], top, "{sketch}");
+    std::fs::remove_dir_all(dir).unwrap();
+}

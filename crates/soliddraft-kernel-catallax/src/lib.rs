@@ -465,6 +465,10 @@ fn gap(what: &str) -> KernelError {
 
 /// Converts retained application definitions, preserving native steps and frames.
 fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::soliddraft::Converted> {
+    // The shared converter has no imported step, so no operation reads an imported body yet.
+    if input["steps"].as_array().is_some_and(|steps| steps.iter().any(|step| step["op"] == "import_step")) {
+        return Err(gap("Building on an imported body"));
+    }
     // The shared converter reads `soliddraft-recipe/1` only. Replace unsupported
     // steps during conversion, then restore their native definitions before building.
     let mut legacy = input.clone();

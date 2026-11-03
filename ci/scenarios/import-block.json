@@ -140,7 +140,7 @@
         },
         {
           "pointer": "/summary/features/0/status",
-          "contains": "#178 not imported until the gap is resolved"
+          "contains": "The solid is not imported until the gap is resolved"
         },
         {
           "pointer": "/summary/features/0/status",

@@ -2800,7 +2800,12 @@ impl CommandTools<'_> {
             .nth(number.wrapping_sub(1))
             .map(|c| c.id)
             .ok_or_else(|| format!("`{name}` has {} dimensions; number them from 1", dimensions(&sketch).count()))?;
-        sketch.constraint_mut(target).expect("listed by dimensions").set_value(value);
+        let constraint = sketch.constraint_mut(target).expect("listed by dimensions");
+        // Lengths are sizes: the sketch would build -4 as 4 and keep showing -4.
+        if !matches!(constraint.kind, ConstraintKind::Angle { .. }) && value <= 0.0 {
+            return Err(format!("a length must be greater than 0, got {value}"));
+        }
+        constraint.set_value(value);
         self.doc.apply(Command::EditSketch { id, sketch })?;
         Ok(json!({ "sketch": name, "dimension": number, "value": value }))
     }
@@ -3372,5 +3377,40 @@ mod tests {
         let feature = call_checked(&mut tools, "feature", json!({ "name": "Boss-Extrude1" }), &mcp);
         let v: Value = serde_json::from_str(&feature.content).unwrap();
         assert!(v["estimates"].as_str().is_some_and(|s| s.contains("display mesh")), "{v}");
+    }
+
+    /// The real-use pass typed -4 for a boss's diameter: the boss built at 4 while the
+    /// sketch showed -4.
+    #[test]
+    fn a_negative_or_zero_length_is_refused_and_changes_nothing() {
+        let mut doc = Document::new("Part1", crate::kernel());
+        let mut book = ProposalBook::default();
+        let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
+        let mcp = Caller::Mcp { client: "test".into() };
+        let circle = json!({ "shape": "circle", "center": [0, 0, 0], "diameter": 12 });
+        assert!(!call_checked(&mut tools, "sketch", json!({ "plane": "top", "shapes": [circle] }), &mcp).is_error);
+        let out = call_checked(&mut tools, "extrude", json!({ "sketch": "Sketch1", "depth": 5, "flip": false }), &mcp);
+        assert!(!out.is_error, "{}", out.content);
+        let depth = tools.doc.undo_depth();
+        for value in [-4.0, 0.0] {
+            let out = call_checked(
+                &mut tools,
+                "edit_dimension",
+                json!({ "sketch": "Sketch1", "dimension": 1, "value": value }),
+                &mcp,
+            );
+            assert!(out.is_error && out.content.contains("must be greater than 0"), "{value}: {}", out.content);
+            assert_eq!(tools.doc.undo_depth(), depth, "{value} changed the part");
+        }
+        let sketch = call_checked(&mut tools, "feature", json!({ "name": "Sketch1" }), &mcp);
+        let v: Value = serde_json::from_str(&sketch.content).unwrap();
+        assert_eq!(v["dimensions"][0]["value"], 12.0, "{v}");
+        let out = call_checked(
+            &mut tools,
+            "edit_dimension",
+            json!({ "sketch": "Sketch1", "dimension": 1, "value": 8 }),
+            &mcp,
+        );
+        assert!(!out.is_error, "{}", out.content);
     }
 }

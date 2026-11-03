@@ -590,6 +590,8 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert!(w.query_by_label("Interface > Shortcuts").is_some());
 
     // Search filters the command list in place.
+    w.get_by_role_and_label(Role::TextInput, "Search commands").click();
+    w.run_steps(2);
     w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("extrude");
     w.run_steps(2);
     assert!(w.query_by_label("Extrude: E").is_some());
@@ -651,6 +653,8 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "fusion");
 
     click(&mut w, "Clear search");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").click();
+    w.run_steps(2);
     w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("fit");
     w.run_steps(3);
     click(&mut w, "Clear Fit");
@@ -675,6 +679,8 @@ fn reset_warns_for_secondary_workspace_aliases_and_restores_all_of_them() {
     let mut w = window();
     w.run_steps(2);
     click(&mut w, "Shortcuts");
+    w.get_by_role_and_label(Role::TextInput, "Search commands").click();
+    w.run_steps(2);
     w.get_by_role_and_label(Role::TextInput, "Search commands").type_text("fit");
     w.run_steps(3);
     click(&mut w, "Reset Fit");

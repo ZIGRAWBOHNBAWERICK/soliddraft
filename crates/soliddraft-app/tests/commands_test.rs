@@ -263,6 +263,8 @@ fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
     if let Some(proof) = &proof {
         harness.render().unwrap().save(proof.join("shortcuts-editor.png")).unwrap();
     }
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").click();
+    harness.run_steps(2);
     harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").type_text("extrude");
     harness.run_steps(3);
     harness.get_by_label("Assign Extrude").click();
@@ -275,6 +277,8 @@ fn assigned_shortcuts_run_immediately_in_the_app_without_a_restart() {
 
     harness.get_by_label("Clear search").click();
     harness.run_steps(3);
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").click();
+    harness.run_steps(2);
     harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands").type_text("chamfer");
     harness.run_steps(3);
     harness.get_by_label("Assign Chamfer").click();

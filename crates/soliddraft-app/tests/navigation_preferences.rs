@@ -45,7 +45,8 @@ type Window = Harness<'static, Preferences>;
 /// The window on the saved settings; changes are saved as the app saves them, and
 /// counted.
 fn window() -> Window {
-    let prefs = Preferences::new(&settings::navigation(InstallKind::Existing), settings::view().references);
+    let view = settings::view();
+    let prefs = Preferences::new(&settings::navigation(InstallKind::Existing), view.references, view.grid);
     Harness::builder().with_size(vec2(1100.0, 760.0)).build_ui_state(
         |ui, p: &mut Preferences| {
             p.ui(ui);

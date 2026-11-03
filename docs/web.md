@@ -4,6 +4,8 @@ The application and Catallax compile into one `wasm32-unknown-unknown` module. T
 
 A small Rust server serves the web build and relays assistant requests. The assistant's API key stays on the server. Tools execute in the browser against the part there. Files open by upload and save by download; the server stores no parts.
 
+Preferences are kept in the browser, in the site's localStorage under `soliddraft-settings`, as the same JSON the desktop app writes to `settings.json`. That storage belongs to one browser profile: the server has no route that receives settings, so two visitors, two browsers or a private window never see each other's choices. When the browser blocks or fills site storage, a change still applies until the page is reloaded or closed, and Preferences says so.
+
 ## Pieces
 
 | Crate or file | What it does |

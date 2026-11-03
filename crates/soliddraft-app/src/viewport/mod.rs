@@ -25,7 +25,7 @@ use crate::tree_visibility::Visible;
 use camera::{Camera, StandardView};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 use glam::Vec3;
-use grid::{GridFrame, GridPlane, Spacing};
+use grid::{GridFrame, GridPlane, GridStyle, Spacing};
 use look::Preset;
 use planes::ReferenceScene;
 use render::{DisplayMode, FrameInput, PickSample, PickView, Picked, ViewportCallback};
@@ -76,6 +76,8 @@ pub struct ViewportState {
     pub preset: Preset,
     /// What the viewport shows of the part's reference geometry without being asked.
     pub references: ReferenceDisplay,
+    /// How the grid looks, as the user chose.
+    pub grid_style: GridStyle,
     pub hover: Option<Picked>,
     /// The reference under the pointer, when no model is.
     pub hover_reference: Option<Reference>,
@@ -96,6 +98,7 @@ impl Default for ViewportState {
             display: DisplayMode::default(),
             preset: Preset::default(),
             references: ReferenceDisplay::default(),
+            grid_style: GridStyle::default(),
             hover: None,
             hover_reference: None,
             hover_point: None,
@@ -393,11 +396,14 @@ impl ViewportState {
 
     /// The grid's spacing at this frame's zoom, when the grid shows.
     fn grid_spacing(&self, rect: Rect) -> Option<Spacing> {
-        Spacing::for_scale(self.camera.mm_per_point(rect.height())).filter(|_| self.references.show_grid)
+        Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style)
+            .filter(|_| self.references.show_grid)
     }
 
     fn grid(&self, rect: Rect, plane: &GridPlane) -> Option<GridFrame> {
-        GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, theme::ink())
+        let ink = self.grid_style.color.unwrap_or_else(theme::ink);
+        let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
+        GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
     }
 
     /// A copy of the latest id-buffer sample.

@@ -39,6 +39,18 @@ origin in an isolated `chrome-devtools-axi` session, then run
 session's origin storage when seeding each case; never use a profile with user
 documents.
 
+`ci/browser-preferences.mjs` runs the same application as two visitors, each in a
+browser context with its own storage. It starts Chrome itself and sends keys and clicks
+through the DevTools protocol, because the canvas takes only trusted input. Visitor A
+chooses the SOLIDWORKS preset and hides the grid; both land in A's localStorage under
+`soliddraft-settings`, and a reload reads them back. Visitor B starts with empty
+storage and the grid shown, and its choice leaves A's alone. The check also fails if
+the page sends anything but GET requests for its own files. Its frames land in the
+`browser-preferences` artifact. The clicks go to fixed points of a 1400 x 813 page, so a
+change to the Preferences window's layout means moving them; the frames show where the
+controls went. To rerun it locally, serve the packaged app and run
+`node ci/browser-preferences.mjs CHROME URL OUTDIR`.
+
 After a deliberate Catallax pin change, manually dispatch Hosted CI with `refresh_catallax_views` enabled to run only the three view and drawing baseline generators. This skips adapter tests, workspace tests, scenarios, web builds and packaging. Its gate is named `Baseline refresh gate`, so it cannot supply the required `Merge gate` result for a pull request. Download the `catallax-view-baseline` artifact, review its diff and commit the generated JSON and SVG files. Require a normal run against that committed baseline before merging.
 
 `edit-speed.yml` times the five ordinary edits on a pull request that touches the kernel interface, the Catallax adapter or the model. `ci/edit_speed.py` builds the fork point and the head, alternates them on one CPU with one warmup pair and nine measured pairs, and writes click and topology medians to the run summary and the `edit-speed` artifact. A difference in a part file, recipe, kernel question, view or command answer fails the job. Timing never does, and kernel work may differ between the two revisions. The job sits outside the merge gate. A pull request that moves the Catallax pin runs two kernels, whose answers may rightly differ, so each revision is compared only with its own runs and the summary labels the medians as a pin move, not a same-kernel comparison.
@@ -84,6 +96,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 | Path | Jobs beyond lint | Reader |
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
+| `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |
 | `ci/check-gate.py` | all | Merge gate, and the gate tests in lint; it controls mandatory checks |
 | `ci/check-registry.json` | all | Merge gate, and the wiring tests in lint; it controls mandatory checks |

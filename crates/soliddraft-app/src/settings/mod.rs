@@ -1,131 +1,139 @@
-//! The app's settings file, `settings.json` in the config directory next to the
-//! recent-files list. It holds the assistant's provider and model, whether the side area is
+//! The app's settings: the assistant's provider and model, whether the side area is
 //! shown and how wide, the command line's chips and session height, the pinned and recent
 //! commands, File locations: the folders and
 //! files where reference files are found (`soliddraft_document::locations`), the
-//! viewport's default look and [`ReferenceDisplay`], the interface's light or dark
-//! [`Appearance`], and autosave,
+//! viewport's default look, [`ReferenceDisplay`] and the grid's [`GridStyle`], the
+//! interface's light or dark [`Appearance`], and autosave,
 //! recovery and backups ([`DocumentSettings`]), and navigation: the mouse preset, the
 //! wheel, the view keys and the camera ([`NavigationSettings`]). The user's own
-//! material library sits beside it ([`user_library_path`]).
+//! material library sits beside them ([`user_library_path`]).
 //!
-//! Saving rewrites only the sections the app knows and keeps every other key, so a
-//! file written by a newer build survives an older one.
+//! The desktop keeps them in `settings.json` in the config directory next to the
+//! recent-files list; the browser keeps the same text in its own storage for the site
+//! ([`store`]).
+//!
+//! Saving rewrites only the sections the app knows and keeps every other key, so
+//! settings written by a newer build survive an older one.
+
+pub mod store;
 
 use crate::command_line::BarSettings;
 use crate::commands::History;
 use crate::navigation::SaveError;
 use crate::panels::Layout;
+pub use crate::viewport::grid::GridStyle;
 use crate::viewport::look::Preset;
 use serde_json::Value;
 use soliddraft_assistant::AssistantSettings;
 use soliddraft_document::{AutosavePolicy, Backups, FileLocations};
 use soliddraft_materials::{Catalog, Library, Origin};
 use std::path::{Path, PathBuf};
+pub use store::{NotKept, Store};
 
-fn settings_file() -> Option<PathBuf> {
+pub(crate) fn settings_file() -> Option<PathBuf> {
     crate::file::config_dir().map(|d| d.join("settings.json"))
 }
 
-fn read(file: &Path) -> Value {
-    std::fs::read_to_string(file)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| Value::Object(Default::default()))
+/// The settings as stored now: an empty object when there are none, they cannot be read,
+/// or there is nowhere to keep them.
+fn stored() -> Value {
+    store::current().map(|s| s.load()).unwrap_or_else(|_| Value::Object(Default::default()))
 }
 
-/// The assistant settings, or the defaults when the file is missing or unreadable.
+/// The assistant settings, or the defaults when there are none or they are unreadable.
 pub fn assistant() -> AssistantSettings {
-    crate::file::config_read_file("settings.json").map(|f| assistant_in(&f)).unwrap_or_default()
+    assistant_from(&stored())
 }
 
 /// Saves the assistant settings.
-pub fn save_assistant(settings: &AssistantSettings) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_assistant_in(&file, settings)
+pub fn save_assistant(settings: &AssistantSettings) -> Result<(), NotKept> {
+    save_section("assistant", settings)
 }
 
-fn assistant_in(file: &Path) -> AssistantSettings {
-    serde_json::from_value(read(file)["assistant"].clone()).unwrap_or_default()
+fn assistant_from(all: &Value) -> AssistantSettings {
+    serde_json::from_value(all["assistant"].clone()).unwrap_or_default()
 }
 
-fn save_assistant_in(file: &Path, settings: &AssistantSettings) -> Result<(), String> {
-    save_section_in(file, "assistant", settings)
-}
-
-/// The panel layout, or the default when the file is missing or unreadable.
+/// The panel layout, or the default when there is none or it is unreadable.
 pub fn layout() -> Layout {
-    crate::file::config_read_file("settings.json").map(|f| layout_in(&f)).unwrap_or_default()
+    layout_from(&stored())
 }
 
 /// Saves the panel layout.
-pub fn save_layout(layout: &Layout) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_layout_in(&file, layout)
+pub fn save_layout(layout: &Layout) -> Result<(), NotKept> {
+    save_section("layout", layout)
 }
 
+fn layout_from(all: &Value) -> Layout {
+    serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped()
+}
+
+/// The panel layout in the settings file at `file`.
+#[cfg(test)]
 pub(crate) fn layout_in(file: &Path) -> Layout {
-    serde_json::from_value::<Layout>(read(file)["layout"].clone()).unwrap_or_default().clamped()
+    layout_from(&Store::File(file.to_owned()).load())
 }
 
-pub(crate) fn save_layout_in(file: &Path, layout: &Layout) -> Result<(), String> {
-    save_section_in(file, "layout", layout)
+/// Saves the panel layout into the settings file at `file`, keeping its other keys.
+#[cfg(test)]
+pub(crate) fn save_layout_in(file: &Path, layout: &Layout) -> Result<(), NotKept> {
+    save_section_to(&Store::File(file.to_owned()), "layout", layout)
 }
 
-/// The command line's chips and session height, or the defaults when the file is missing
-/// or unreadable. Ids no command has any more are dropped.
+/// The command line's chips and session height, or the defaults when there are none or
+/// they are unreadable. Ids no command has any more are dropped.
 pub fn command_line() -> BarSettings {
-    crate::file::config_read_file("settings.json").map(|f| command_line_in(&f)).unwrap_or_default()
+    command_line_from(&stored())
 }
 
 /// Saves the command line's chips and session height.
-pub fn save_command_line(bar: &BarSettings) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_section_in(&file, "command_line", bar)
+pub fn save_command_line(bar: &BarSettings) -> Result<(), NotKept> {
+    save_section("command_line", bar)
 }
 
-fn command_line_in(file: &Path) -> BarSettings {
-    serde_json::from_value::<BarSettings>(read(file)["command_line"].clone()).unwrap_or_default().cleaned()
+fn command_line_from(all: &Value) -> BarSettings {
+    serde_json::from_value::<BarSettings>(all["command_line"].clone()).unwrap_or_default().cleaned()
 }
 
-/// The pinned and recent commands, or none when the file is missing or unreadable.
+/// The pinned and recent commands, or none when there are none or they are unreadable.
 /// Ids no command has any more are dropped.
 pub fn command_history() -> History {
-    crate::file::config_read_file("settings.json").map(|f| command_history_in(&f)).unwrap_or_default()
+    command_history_from(&stored())
 }
 
 /// Saves the pinned and recent commands.
-pub fn save_command_history(history: &History) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_section_in(&file, "commands", history)
+pub fn save_command_history(history: &History) -> Result<(), NotKept> {
+    save_section("commands", history)
 }
 
-fn command_history_in(file: &Path) -> History {
-    let mut history: History = serde_json::from_value(read(file)["commands"].clone()).unwrap_or_default();
+fn command_history_from(all: &Value) -> History {
+    let mut history: History = serde_json::from_value(all["commands"].clone()).unwrap_or_default();
     history.retain_known();
     history
 }
 
-/// File locations, or none when the file is missing or unreadable.
+/// File locations, or none when there are none or they are unreadable.
 pub fn file_locations() -> FileLocations {
-    crate::file::config_read_file("settings.json").map(|f| file_locations_in(&f)).unwrap_or_default()
+    file_locations_from(&stored())
 }
 
 /// Saves File locations.
-pub fn save_file_locations(locations: &FileLocations) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_file_locations_in(&file, locations)
+pub fn save_file_locations(locations: &FileLocations) -> Result<(), NotKept> {
+    save_section("file_locations", locations)
+}
+
+fn file_locations_from(all: &Value) -> FileLocations {
+    serde_json::from_value(all["file_locations"].clone()).unwrap_or_default()
 }
 
 /// File locations from the settings file at `file`.
 pub fn file_locations_in(file: &Path) -> FileLocations {
-    serde_json::from_value(read(file)["file_locations"].clone()).unwrap_or_default()
+    file_locations_from(&Store::File(file.to_owned()).load())
 }
 
 /// Saves File locations into the settings file at `file`, keeping its other keys.
-pub fn save_file_locations_in(file: &Path, locations: &FileLocations) -> Result<(), String> {
-    save_section_in(file, "file_locations", locations)
+pub fn save_file_locations_in(file: &Path, locations: &FileLocations) -> Result<(), NotKept> {
+    save_section_to(&Store::File(file.to_owned()), "file_locations", locations)
 }
 
 /// The user's own material and appearance library, "My library":
@@ -144,7 +152,7 @@ pub fn material_catalog() -> Catalog {
 /// The user's own library, loaded, or a new empty one at its path when it does not
 /// exist yet.
 pub fn user_library() -> Result<Library, String> {
-    let path = user_library_path().ok_or("no config directory")?;
+    let path = user_library_path().ok_or("SolidDraft cannot find a folder to keep your library in")?;
     if let Some(source) = crate::file::config_read_file("libraries/my-library.toml")
         && source.exists()
     {
@@ -174,40 +182,42 @@ impl Default for ReferenceDisplay {
     }
 }
 
-/// Viewport settings: the look the viewport starts in and the reference geometry it
-/// shows. Each key of the `view` section falls back on its own, so a value this build
-/// cannot read costs only that value.
-#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
+/// Viewport settings: the look the viewport starts in, the reference geometry it shows
+/// and how the grid looks. Each key of the `view` section falls back on its own, so a
+/// value this build cannot read costs only that value.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ViewSettings {
     pub preset: Preset,
-    #[serde(flatten)]
     pub references: ReferenceDisplay,
+    pub grid: GridStyle,
 }
 
-/// The viewport settings, or the defaults when the file is missing or unreadable.
+/// The viewport settings, or the defaults when there are none or they are unreadable.
 pub fn view() -> ViewSettings {
-    crate::file::config_read_file("settings.json").map(|f| view_in(&f)).unwrap_or_default()
+    view_from(&stored())
 }
 
-/// The look the viewport starts in, Studio when the file does not say.
+/// The look the viewport starts in, Studio when the settings do not say.
 pub fn default_preset() -> Preset {
     view().preset
 }
 
 /// Saves the look the viewport starts in.
-pub fn save_default_preset(preset: Preset) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_view_keys_in(&file, serde_json::json!({ "preset": preset }))
+pub fn save_default_preset(preset: Preset) -> Result<(), NotKept> {
+    save_view_keys(serde_json::json!({ "preset": preset }))
 }
 
 /// Saves what the viewport shows of the reference geometry.
-pub fn save_reference_display(references: &ReferenceDisplay) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_view_keys_in(&file, references)
+pub fn save_reference_display(references: &ReferenceDisplay) -> Result<(), NotKept> {
+    save_view_keys(references)
 }
 
-fn view_in(file: &Path) -> ViewSettings {
-    let all = read(file);
+/// Saves how the grid looks.
+pub fn save_grid_style(style: &GridStyle) -> Result<(), NotKept> {
+    save_view_keys(serde_json::json!({ "grid": style.to_json() }))
+}
+
+fn view_from(all: &Value) -> ViewSettings {
     let view = &all["view"];
     let shown = ReferenceDisplay::default();
     let flag = |key: &str, default| view[key].as_bool().unwrap_or(default);
@@ -218,47 +228,51 @@ fn view_in(file: &Path) -> ViewSettings {
             show_origin_planes: flag("show_origin_planes", shown.show_origin_planes),
             always_show_origin_axes: flag("always_show_origin_axes", shown.always_show_origin_axes),
         },
+        grid: GridStyle::from_json(&view["grid"]),
     }
 }
 
 /// Rewrites `keys` of the `view` section and keeps the section's other keys, so saving the
 /// look cannot drop a display choice, or a key a newer build wrote.
-fn save_view_keys_in(file: &Path, keys: impl serde::Serialize) -> Result<(), String> {
-    let mut view = match read(&readable(file)).get("view") {
+fn save_view_keys(keys: impl serde::Serialize) -> Result<(), NotKept> {
+    save_view_keys_to(&store::current()?, keys)
+}
+
+fn save_view_keys_to(store: &Store, keys: impl serde::Serialize) -> Result<(), NotKept> {
+    let mut view = match store.load().get("view") {
         Some(Value::Object(section)) => section.clone(),
         _ => Default::default(),
     };
-    if let Value::Object(keys) = serde_json::to_value(keys).map_err(|e| e.to_string())? {
+    if let Value::Object(keys) = serde_json::to_value(keys).map_err(|e| NotKept::Write(e.to_string()))? {
         view.extend(keys);
     }
-    save_section_in(file, "view", &view)
+    save_section_to(store, "view", &view)
 }
 
-/// Appearance: light or dark interface. The `appearance` key of the settings file.
+/// Appearance: light or dark interface. The `appearance` key of the settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Appearance {
     pub theme: crate::theme::Mode,
 }
 
-/// The appearance, light when the file does not say.
+/// The appearance, light when the settings do not say.
 pub fn appearance() -> Appearance {
-    crate::file::config_read_file("settings.json").map(|f| appearance_in(&f)).unwrap_or_default()
+    appearance_from(&stored())
 }
 
 /// Saves the appearance.
-pub fn save_appearance(appearance: &Appearance) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_section_in(&file, "appearance", appearance)
+pub fn save_appearance(appearance: &Appearance) -> Result<(), NotKept> {
+    save_section("appearance", appearance)
 }
 
-fn appearance_in(file: &Path) -> Appearance {
-    serde_json::from_value(read(file)["appearance"].clone()).unwrap_or_default()
+fn appearance_from(all: &Value) -> Appearance {
+    serde_json::from_value(all["appearance"].clone()).unwrap_or_default()
 }
 
 /// How documents are protected: autosave's interval and edit count, where recovery
 /// copies go, and how many backups a save keeps and where. The `documents` key of the
-/// settings file.
+/// settings.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct DocumentSettings {
@@ -276,19 +290,18 @@ impl DocumentSettings {
     }
 }
 
-/// The document settings, or the defaults when the file is missing or unreadable.
+/// The document settings, or the defaults when there are none or they are unreadable.
 pub fn documents() -> DocumentSettings {
-    crate::file::config_read_file("settings.json").map(|f| documents_in(&f)).unwrap_or_default()
+    documents_from(&stored())
 }
 
 /// Saves the document settings.
-pub fn save_documents(documents: &DocumentSettings) -> Result<(), String> {
-    let Some(file) = settings_file() else { return Err("no config directory".into()) };
-    save_section_in(&file, "documents", documents)
+pub fn save_documents(documents: &DocumentSettings) -> Result<(), NotKept> {
+    save_section("documents", documents)
 }
 
-fn documents_in(file: &Path) -> DocumentSettings {
-    serde_json::from_value(read(file)["documents"].clone()).unwrap_or_default()
+fn documents_from(all: &Value) -> DocumentSettings {
+    serde_json::from_value(all["documents"].clone()).unwrap_or_default()
 }
 
 pub use crate::navigation::NavigationSettings;
@@ -303,72 +316,70 @@ pub enum InstallKind {
 }
 
 impl InstallKind {
-    /// Existing when the config directory holds a settings file or a recent-files list,
-    /// this version's or the old name's.
+    /// Existing when settings were stored before, or, for a settings file, when the
+    /// config directory holds a recent-files list, this version's or the old name's.
     pub fn detect() -> Self {
-        let exists = |name| crate::file::config_read_file(name).is_some_and(|f| f.exists());
-        if exists("settings.json") || exists("recent.json") { InstallKind::Existing } else { InstallKind::New }
+        let used = match store::current() {
+            Ok(store @ Store::File(_)) => {
+                store.exists() || crate::file::config_read_file("recent.json").is_some_and(|f| f.exists())
+            }
+            Ok(store) => store.exists(),
+            Err(_) => false,
+        };
+        if used { InstallKind::Existing } else { InstallKind::New }
     }
 }
 
-/// The kind captured at startup and the config directory it was captured for.
-static INSTALL: std::sync::Mutex<Option<(Option<PathBuf>, InstallKind)>> = std::sync::Mutex::new(None);
+/// The kind captured at startup and the store it was captured for.
+static INSTALL: std::sync::Mutex<Option<(Option<Store>, InstallKind)>> = std::sync::Mutex::new(None);
 
-/// The kind captured for the config directory in use; none when nothing captured it or
-/// the directory has changed since.
+/// The kind captured for the store in use; none when nothing captured it or the store has
+/// changed since.
 fn captured_install_kind() -> Option<InstallKind> {
-    let dir = crate::file::config_dir();
-    INSTALL.lock().unwrap().as_ref().filter(|(d, _)| *d == dir).map(|(_, kind)| *kind)
+    let current = store::current().ok();
+    INSTALL.lock().unwrap().as_ref().filter(|(s, _)| *s == current).map(|(_, kind)| *kind)
 }
 
-/// Decides at startup, before anything writes the settings file, whether this is a new
-/// installation. From then on every save of the settings file also records the preset
-/// that decision gave, so writing some other setting first cannot make a new
-/// installation look like an old one at the next start.
+/// Decides at startup, before anything writes the settings, whether this is a new
+/// installation. From then on every save of the settings also records the preset that
+/// decision gave, so writing some other setting first cannot make a new installation look
+/// like an old one at the next start.
 pub fn capture_install_kind() -> InstallKind {
     let kind = InstallKind::detect();
-    *INSTALL.lock().unwrap() = Some((crate::file::config_dir(), kind));
+    *INSTALL.lock().unwrap() = Some((store::current().ok(), kind));
     kind
 }
 
-/// The kind captured at startup for the config directory in use, or found now when
-/// nothing captured it there.
+/// The kind captured at startup for the store in use, or found now when nothing captured
+/// it there.
 pub fn install_kind() -> InstallKind {
     captured_install_kind().unwrap_or_else(InstallKind::detect)
 }
 
-/// The navigation settings, or the defaults for `install` when the file has none.
-/// Reading never writes the file.
+/// The navigation settings, or the defaults for `install` when there are none.
+/// Reading never writes the settings.
 pub fn navigation(install: InstallKind) -> NavigationSettings {
-    match crate::file::config_read_file("settings.json") {
-        Some(f) => navigation_in(&f, install),
-        None => NavigationSettings::new(install),
-    }
+    NavigationSettings::from_json(&stored()["navigation"], install)
 }
 
-/// Saves the navigation settings. Refused when they, or the file's, come from a newer
-/// SolidDraft.
+/// Saves the navigation settings. Refused when they, or the stored ones, come from a
+/// newer SolidDraft.
 pub fn save_navigation(settings: &NavigationSettings) -> Result<(), SaveError> {
-    let Some(file) = settings_file() else { return Err(SaveError::NoConfigDir) };
-    save_navigation_in(&file, settings)
+    save_navigation_to(&store::current().map_err(SaveError::NotKept)?, settings)
 }
 
-fn navigation_in(file: &Path, install: InstallKind) -> NavigationSettings {
-    NavigationSettings::from_json(&read(file)["navigation"], install)
-}
-
-fn save_navigation_in(file: &Path, settings: &NavigationSettings) -> Result<(), SaveError> {
+fn save_navigation_to(store: &Store, settings: &NavigationSettings) -> Result<(), SaveError> {
     if settings.read_only {
         return Err(SaveError::NewerVersion { found: settings.version });
     }
-    let on_disk = read(&readable(file))["navigation"]["version"].as_u64().unwrap_or(0);
-    if on_disk > crate::navigation::VERSION {
-        return Err(SaveError::NewerVersion { found: on_disk });
+    let stored = store.load()["navigation"]["version"].as_u64().unwrap_or(0);
+    if stored > crate::navigation::VERSION {
+        return Err(SaveError::NewerVersion { found: stored });
     }
-    save_section_in(file, "navigation", &settings.to_json()).map_err(SaveError::Write)
+    save_section_to(store, "navigation", &settings.to_json()).map_err(SaveError::NotKept)
 }
 
-/// Records the captured installation's preset in a file that has none yet.
+/// Records the captured installation's preset in settings that have none yet.
 fn record_install_preset(all: &mut Value) {
     let Some(kind) = captured_install_kind() else { return };
     let preset = crate::navigation::default_preset(kind);
@@ -385,7 +396,7 @@ fn record_install_preset(all: &mut Value) {
 
 /// The file to read `file`'s current contents from: the old name's when this is the
 /// settings file and only the old one exists.
-fn readable(file: &Path) -> PathBuf {
+pub(crate) fn readable(file: &Path) -> PathBuf {
     if settings_file().as_deref() == Some(file) {
         crate::file::config_read_file("settings.json").unwrap_or_else(|| file.to_owned())
     } else {
@@ -393,15 +404,20 @@ fn readable(file: &Path) -> PathBuf {
     }
 }
 
-/// Rewrites one section atomically and keeps the others as they are.
-fn save_section_in(file: &Path, key: &str, value: &impl serde::Serialize) -> Result<(), String> {
-    let mut all = read(&readable(file));
-    all[key] = serde_json::to_value(value).map_err(|e| e.to_string())?;
+/// Rewrites one section of the settings in use and keeps the others as they are.
+fn save_section(key: &str, value: &impl serde::Serialize) -> Result<(), NotKept> {
+    save_section_to(&store::current()?, key, value)
+}
+
+/// Rewrites one section of `store` and keeps the others as they are. A file is written
+/// atomically.
+fn save_section_to(store: &Store, key: &str, value: &impl serde::Serialize) -> Result<(), NotKept> {
+    let mut all = store.load();
+    all[key] = serde_json::to_value(value).map_err(|e| NotKept::Write(e.to_string()))?;
     if key != "navigation" {
         record_install_preset(&mut all);
     }
-    let text = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
-    soliddraft_document::save_atomic(file, text.as_bytes()).map_err(|e| format!("cannot write {}: {e}", file.display()))
+    store.save(&all)
 }
 
 #[cfg(test)]
@@ -409,18 +425,23 @@ mod tests {
     use super::*;
     use soliddraft_assistant::ProviderKind;
 
+    fn file_store(file: &Path) -> Store {
+        Store::File(file.to_owned())
+    }
+
     #[test]
     fn command_history_persists_beside_other_keys() {
         let dir = std::env::temp_dir().join(format!("soliddraft-commands-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("settings.json");
         std::fs::write(&file, r#"{"theme":"dark","commands":{"pinned":["fillet","not_a_command"]}}"#).unwrap();
-        let mut h = command_history_in(&file);
+        let store = file_store(&file);
+        let mut h = command_history_from(&store.load());
         assert_eq!(h.pinned, ["fillet"]);
         assert!(h.recent.is_empty());
         h.record("extrude");
-        save_section_in(&file, "commands", &h).unwrap();
-        assert_eq!(command_history_in(&file), h);
+        save_section_to(&store, "commands", &h).unwrap();
+        assert_eq!(command_history_from(&store.load()), h);
         let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(all["theme"], "dark");
         std::fs::remove_dir_all(&dir).ok();
@@ -432,14 +453,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("settings.json");
         std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
-        assert_eq!(command_line_in(&file), BarSettings::default());
+        let store = file_store(&file);
+        assert_eq!(command_line_from(&store.load()), BarSettings::default());
         let mut bar = BarSettings::default();
         bar.place("fillet", Some(0));
         bar.session_height = 410.0;
-        save_section_in(&file, "command_line", &bar).unwrap();
-        assert_eq!(command_line_in(&file), bar);
+        save_section_to(&store, "command_line", &bar).unwrap();
+        assert_eq!(command_line_from(&store.load()), bar);
         std::fs::write(&file, r#"{"command_line":{"tools":["gone","fillet"],"session_height":5}}"#).unwrap();
-        let back = command_line_in(&file);
+        let back = command_line_from(&store.load());
         assert_eq!(back.tools, ["fillet"]);
         assert_eq!(back.session_height, crate::command_line::SESSION_MIN_HEIGHT);
         let _ = std::fs::remove_dir_all(dir);
@@ -450,13 +472,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("soliddraft-settings-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("settings.json");
-        assert_eq!(assistant_in(&file), AssistantSettings::default());
+        let store = file_store(&file);
+        assert_eq!(assistant_from(&store.load()), AssistantSettings::default());
         std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
-        assert_eq!(assistant_in(&file), AssistantSettings::default());
+        assert_eq!(assistant_from(&store.load()), AssistantSettings::default());
         let mut s = AssistantSettings { provider: Some(ProviderKind::OpenRouter), ..Default::default() };
         s.set_model(ProviderKind::OpenRouter, "anthropic/claude-fable-5.1");
-        save_assistant_in(&file, &s).unwrap();
-        assert_eq!(assistant_in(&file), s);
+        save_section_to(&store, "assistant", &s).unwrap();
+        assert_eq!(assistant_from(&store.load()), s);
         let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(all["theme"], "dark");
         assert_eq!(all["assistant"]["provider"], "openrouter");
@@ -468,11 +491,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("soliddraft-view-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("settings.json");
-        assert_eq!(view_in(&file).preset, Preset::Studio);
+        let store = file_store(&file);
+        assert_eq!(view_from(&store.load()).preset, Preset::Studio);
         std::fs::write(&file, r#"{"view":{"preset":"cinema"},"theme":"dark"}"#).unwrap();
-        assert_eq!(view_in(&file).preset, Preset::Studio, "an unknown look falls back to the default");
-        save_section_in(&file, "view", &ViewSettings { preset: Preset::Realistic, ..Default::default() }).unwrap();
-        assert_eq!(view_in(&file).preset, Preset::Realistic);
+        assert_eq!(view_from(&store.load()).preset, Preset::Studio, "an unknown look falls back to the default");
+        save_view_keys_to(&store, serde_json::json!({ "preset": Preset::Realistic })).unwrap();
+        assert_eq!(view_from(&store.load()).preset, Preset::Realistic);
         let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(all["view"]["preset"], "realistic");
         assert_eq!(all["theme"], "dark");
@@ -485,11 +509,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("soliddraft-appearance-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("settings.json");
-        assert_eq!(appearance_in(&file).theme, Mode::Light);
+        let store = file_store(&file);
+        assert_eq!(appearance_from(&store.load()).theme, Mode::Light);
         std::fs::write(&file, r#"{"appearance":{"theme":"sepia"},"theme":"dark"}"#).unwrap();
-        assert_eq!(appearance_in(&file).theme, Mode::Light, "an unknown theme falls back to light");
-        save_section_in(&file, "appearance", &Appearance { theme: Mode::Dark }).unwrap();
-        assert_eq!(appearance_in(&file).theme, Mode::Dark);
+        assert_eq!(appearance_from(&store.load()).theme, Mode::Light, "an unknown theme falls back to light");
+        save_section_to(&store, "appearance", &Appearance { theme: Mode::Dark }).unwrap();
+        assert_eq!(appearance_from(&store.load()).theme, Mode::Dark);
         let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(all["appearance"]["theme"], "dark");
         assert_eq!(all["theme"], "dark", "a foreign key is kept");
@@ -502,13 +527,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("settings.json");
         std::fs::write(&file, r#"{"documents":{"autosave":{"interval_seconds":30}},"theme":"dark"}"#).unwrap();
-        let mut d = documents_in(&file);
+        let store = file_store(&file);
+        let mut d = documents_from(&store.load());
         assert_eq!(d.autosave, AutosavePolicy { interval_seconds: 30, ..Default::default() }, "missing keys default");
         assert_eq!(d.backups, Backups::default());
         d.backups = Backups { count: 3, folder: Some(dir.join("backups")) };
         d.recovery_folder = Some(dir.join("recovery"));
-        save_section_in(&file, "documents", &d).unwrap();
-        assert_eq!(documents_in(&file), d);
+        save_section_to(&store, "documents", &d).unwrap();
+        assert_eq!(documents_from(&store.load()), d);
         assert_eq!(d.recovery_folder(), Some(dir.join("recovery")));
         let all: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(all["theme"], "dark");
@@ -528,7 +554,11 @@ mod tests {
         f.add(LocationKind::ReferencedDocuments, "/shared/parts");
         save_file_locations_in(&file, &f).unwrap();
         assert_eq!(file_locations_in(&file), f);
-        assert_eq!(assistant_in(&file).provider, Some(ProviderKind::OpenRouter), "the assistant section is kept");
+        assert_eq!(
+            assistant_from(&file_store(&file).load()).provider,
+            Some(ProviderKind::OpenRouter),
+            "the assistant section is kept"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

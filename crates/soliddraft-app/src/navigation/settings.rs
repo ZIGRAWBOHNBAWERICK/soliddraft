@@ -236,12 +236,10 @@ pub fn default_preset(install: InstallKind) -> &'static str {
 /// Why the navigation settings were not saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveError {
-    /// The file's navigation section is from a newer SolidDraft.
-    NewerVersion {
-        found: u64,
-    },
-    NoConfigDir,
-    Write(String),
+    /// The stored navigation section is from a newer SolidDraft.
+    NewerVersion { found: u64 },
+    /// There was nowhere to keep them, or the write failed.
+    NotKept(crate::settings::NotKept),
 }
 
 impl std::fmt::Display for SaveError {
@@ -251,8 +249,7 @@ impl std::fmt::Display for SaveError {
                 f,
                 "the navigation settings were written by a newer SolidDraft (version {found}) and are kept as they are"
             ),
-            SaveError::NoConfigDir => write!(f, "no config directory"),
-            SaveError::Write(e) => write!(f, "{e}"),
+            SaveError::NotKept(why) => write!(f, "{why}"),
         }
     }
 }

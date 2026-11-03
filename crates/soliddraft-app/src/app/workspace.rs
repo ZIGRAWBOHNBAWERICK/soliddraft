@@ -91,6 +91,7 @@ impl SolidDraftApp {
         let preset = automation.preset.unwrap_or(view.preset);
         state.viewport.preset = preset;
         state.viewport.references = view.references;
+        state.viewport.grid_style = view.grid;
         if !preset.shows_edges() {
             state.viewport.display = DisplayMode::Shaded;
         }

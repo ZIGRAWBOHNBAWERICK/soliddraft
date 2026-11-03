@@ -75,6 +75,7 @@ web-sys = { workspace = true, features = [
     "ReadableStreamDefaultReader",
     "RequestInit",
     "Response",
+    "Storage",
     "Url",
     "Window",
     "XmlHttpRequest",

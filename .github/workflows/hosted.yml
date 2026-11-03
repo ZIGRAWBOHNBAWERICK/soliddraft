@@ -369,6 +369,20 @@ jobs:
           trap 'chrome-devtools-axi stop; kill "$server"' EXIT
           chrome-devtools-axi open http://127.0.0.1:8766/
           chrome-devtools-axi run < ci/browser-journal.js
+      - name: Keep preferences per browser in Chromium
+        env:
+          CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          python3 -m http.server 8767 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/preferences-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          node ci/browser-preferences.mjs /usr/bin/google-chrome http://127.0.0.1:8767/ "$RUNNER_TEMP/browser-preferences"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-preferences
+          path: ${{ runner.temp }}/browser-preferences
+          if-no-files-found: ignore
 
   msrv:
     needs: select

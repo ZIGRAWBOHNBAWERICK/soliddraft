@@ -58,7 +58,7 @@ pub enum FeatureKind {
     Extrude(ExtrudeFeature),
     /// A sketch swept around a model-space axis.
     Revolve(RevolveFeature),
-    /// A polygon sketch translated along a straight path.
+    /// A polygon sketch swept along a chain of lines and arcs.
     Sweep(SweepFeature),
     /// Rounds edges.
     Fillet(BlendFeature),

@@ -3168,7 +3168,7 @@ impl Document {
                             "Profile".into(),
                             self.feature(app_id(s.sketch)).map(|f| f.name.clone()).unwrap_or("Missing sketch".into()),
                         ));
-                        details.push(("Straight path".into(), f.summary()));
+                        details.push(("Path".into(), f.summary()));
                     }
                     FeatureKind::Revolve(r) => {
                         details.push((

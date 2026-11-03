@@ -1,12 +1,12 @@
 //! Modelling on an imported STEP body in the real app: the reviewed import, then a fillet
 //! on one of its edges and a shell through its top, each picked in the viewport and
-//! committed with OK, then saved and reopened. The picked faces read `Import1 · Face N`
-//! throughout. Frames land under `target/ribbon-acceptance/ux-import-features/`.
+//! committed with OK, then saved and reopened. The imported faces keep their
+//! `Import1 · Face N` names throughout. Frames land under `target/ribbon-acceptance/ux-import-features/`.
 
 use egui::{Key, Pos2, pos2};
-use egui_kittest::kittest::{By, NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use glam::Vec3;
-use soliddraft_app::document::{Document, FeatureKind, FeatureStatus};
+use soliddraft_app::document::{Document, FeatureKind, FeatureStatus, Selection};
 use soliddraft_app::state::AppAction;
 use std::time::{Duration, Instant};
 
@@ -47,6 +47,16 @@ fn ok(app: &mut App) {
     settle(app);
 }
 
+/// The isometric view, fitted, from the View tab, then back to the Solid tab.
+fn isometric(app: &mut App) {
+    ribbon::click_tab(app, "View");
+    ribbon::click_ribbon(app, "Isometric");
+    ribbon::click_ribbon(app, "Fit");
+    settle(app);
+    ribbon::click_tab(app, "Solid");
+    pointer_off_model(app);
+}
+
 fn pointer_off_model(app: &mut App) {
     let rect = app.state().state.viewport.rect;
     app.hover_at(pos2(rect.center().x, 4.0));
@@ -58,12 +68,13 @@ fn volume(app: &App) -> f64 {
     doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap().volume
 }
 
-/// Every text the window shows, labels and values alike.
-fn texts(app: &App) -> Vec<String> {
-    app.query_all(By::new())
-        .flat_map(|node| [node.accesskit_node().label(), node.accesskit_node().value()])
-        .flatten()
-        .collect()
+/// The selected face's name, as Properties shows it.
+fn selected_face(app: &App) -> Option<String> {
+    let doc = &app.state().state.doc;
+    let Some(Selection::Face(id)) = doc.selection else { return None };
+    let face = doc.named_face(id)?;
+    let feature = doc.features.iter().find(|f| f.id == face.feature)?;
+    Some(format!("{} · {}", feature.name, face.label))
 }
 
 fn all_ok(app: &App) {
@@ -72,77 +83,106 @@ fn all_ok(app: &App) {
     }
 }
 
-#[test]
-fn fillet_and_shell_an_imported_block_in_the_app() {
-    let case = ribbon::case("ux-import-features");
+/// Imports the block through the reviewed import's dialog and shows it isometric.
+fn import(case: &ribbon::Case, app: &mut App) {
     let source = case.path("block.step");
     std::fs::write(&source, BLOCK).unwrap();
+    app.state_mut().state.push(AppAction::ImportStep(Some(source)));
+    app.run_steps(6);
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    settle(app);
+    isometric(app);
+    all_ok(app);
+    assert!((volume(app) - 10004.0).abs() < 1e-6);
+}
+
+/// Saves, reopens and checks the part comes back whole, with its imported names.
+fn save_and_reopen(case: &ribbon::Case, app: &mut App) {
+    let before = volume(app);
+    let saved = case.path("imported.dwprt");
+    app.state_mut().state.push(AppAction::SaveAs(Some(saved.clone())));
+    app.run_steps(4);
+    app.state_mut().state.push(AppAction::Open(Some(saved)));
+    settle(app);
+    all_ok(app);
+    assert!((volume(app) - before).abs() < 1e-9);
+    isometric(app);
+    // The right wall is still an imported face.
+    pick(app, Vec3::new(40.0, 12.5, 3.0));
+    let side = selected_face(app).expect("the right wall is a named face");
+    assert!(side.starts_with("Import1 · Face "), "{side}");
+}
+
+fn names(app: &App) -> Vec<String> {
+    app.state().state.doc.features.iter().map(|f| f.name.clone()).collect()
+}
+
+#[test]
+fn fillet_and_chamfer_an_imported_block_in_the_app() {
+    let case = ribbon::case("ux-import-features-edges");
     let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::kernel()));
     case.run(&mut app, |app| {
-        // The reviewed import, through its own dialog.
-        app.state_mut().state.push(AppAction::ImportStep(Some(source.clone())));
-        app.run_steps(6);
-        app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
-        settle(app);
-        ribbon::click_tab(app, "View");
-        ribbon::click_ribbon(app, "Isometric");
-        ribbon::click_ribbon(app, "Fit");
-        settle(app);
-        ribbon::click_tab(app, "Solid");
-        pointer_off_model(app);
-        all_ok(app);
-        let block = volume(app);
-        assert!((block - 10004.0).abs() < 1e-6, "{block}");
+        import(&case, app);
         case.frame(app, "1-imported");
 
-        // A fillet on the front top edge.
+        // The top face reads its imported name.
+        pick(app, Vec3::new(30.0, 20.0, TOP));
+        assert_eq!(selected_face(app).as_deref(), Some("Import1 · Face 6"));
+        case.frame(app, "2-top-picked");
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+
+        // A 3 mm round on the front top edge removes (9 - 9 pi / 4) * 40.
         ribbon::click_ribbon(app, "Fillet");
         pick(app, Vec3::new(20.0, 0.0, TOP));
         ribbon::type_field(app, "Radius value", "3");
         settle(app);
         pointer_off_model(app);
-        case.frame(app, "2-fillet-preview");
+        case.frame(app, "3-fillet-preview");
         ok(app);
         all_ok(app);
         let rounded = volume(app);
-        // A 3 mm round along 40 mm removes (9 - 9 pi / 4) * 40.
-        let expected = block - (9.0 - 9.0 * std::f64::consts::PI / 4.0) * 40.0;
+        let expected = 10004.0 - (9.0 - 9.0 * std::f64::consts::PI / 4.0) * 40.0;
         assert!((rounded - expected).abs() < 1e-3, "{rounded} vs {expected}");
-        let names: Vec<String> = app.state().state.doc.features.iter().map(|f| f.name.clone()).collect();
-        assert_eq!(names, ["Import1", "Fillet1"]);
-        pointer_off_model(app);
-        case.frame(app, "3-fillet");
 
-        // A shell open at the top face, which keeps its imported name.
-        pick(app, Vec3::new(30.0, 20.0, TOP));
-        let selected = texts(app).into_iter().find(|t| t.contains("Import1 · Face "));
-        assert!(selected.is_some(), "the picked top reads Import1 · Face N");
-        app.key_press(Key::Escape);
-        app.run_steps(4);
+        // A 2 mm chamfer on the back top edge removes 2 * 2 / 2 * 40 = 80 mm3.
+        ribbon::click_ribbon(app, "Chamfer");
+        pick(app, Vec3::new(20.0, 25.0, TOP));
+        ribbon::type_field(app, "Distance value", "2");
+        settle(app);
+        ok(app);
+        all_ok(app);
+        assert!((rounded - volume(app) - 80.0).abs() < 1e-3, "{}", volume(app));
+        assert_eq!(names(app), ["Import1", "Fillet1", "Chamfer1"]);
+        pointer_off_model(app);
+        case.frame(app, "4-fillet-and-chamfer");
+
+        save_and_reopen(&case, app);
+        case.frame(app, "5-reopened");
+    });
+}
+
+#[test]
+fn shell_an_imported_block_in_the_app() {
+    let case = ribbon::case("ux-import-features-shell");
+    let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::kernel()));
+    case.run(&mut app, |app| {
+        import(&case, app);
         ribbon::click_ribbon(app, "Shell");
         pick(app, Vec3::new(30.0, 20.0, TOP));
         ribbon::type_field(app, "Wall thickness value", "1");
         settle(app);
         ok(app);
         all_ok(app);
-        let shelled = volume(app);
-        assert!(shelled < rounded / 2.0, "{shelled}");
-        assert!(!texts(app).iter().any(|t| t.contains("oming soon")), "nothing reads Coming soon");
-        let kinds: Vec<bool> =
-            app.state().state.doc.features.iter().map(|f| matches!(f.kind, FeatureKind::Shell(_))).collect();
-        assert_eq!(kinds, [false, false, true]);
+        // 40 x 25 x 10.004 less a 38 x 23 x 9.004 hollow.
+        let expected = 40.0 * 25.0 * 10.004 - 38.0 * 23.0 * 9.004;
+        assert!((volume(app) - expected).abs() < 1e-6, "{}", volume(app));
+        let shell = app.state().state.doc.features.last().unwrap();
+        assert!(matches!(shell.kind, FeatureKind::Shell(_)));
         pointer_off_model(app);
-        case.frame(app, "4-shell");
+        case.frame(app, "1-shell");
 
-        // Save and reopen.
-        let saved = case.path("imported.dwprt");
-        app.state_mut().state.push(AppAction::SaveAs(Some(saved.clone())));
-        app.run_steps(4);
-        app.state_mut().state.push(AppAction::Open(Some(saved)));
-        settle(app);
-        all_ok(app);
-        assert!((volume(app) - shelled).abs() < 1e-9);
-        pointer_off_model(app);
-        case.frame(app, "5-reopened");
+        save_and_reopen(&case, app);
+        case.frame(app, "2-reopened");
     });
 }

@@ -89,29 +89,122 @@ fn export(state: &AppState, dir: &std::path::Path, name: &str) {
     std::fs::write(dir.join(format!("{name}.step")), output.bytes).unwrap();
 }
 
-fn exercise(mut state: AppState, name: &str, tool: &str, edit: Value) {
-    let dir = std::env::var_os("SOLIDDRAFT_RELEASE_PROOF_DIR")
+/// What a stage of the release loop must keep or change: the measured volume, the
+/// topology counts and the persistent names of the displayed faces.
+#[derive(Clone, Debug)]
+struct Fingerprint {
+    volume: f64,
+    faces: usize,
+    edges: usize,
+    names: std::collections::BTreeSet<String>,
+}
+
+/// Volume agreement for the same part rebuilt by the kernel, as in the closed-form checks above.
+const VOLUME_TOLERANCE: f64 = 1e-6;
+
+impl Fingerprint {
+    fn of(state: &AppState) -> Fingerprint {
+        let doc = &state.doc;
+        let body = doc.display_body().unwrap();
+        let topology = doc.kernel().topology(body).unwrap();
+        let names = topology
+            .faces
+            .iter()
+            .map(|face| {
+                let named = doc.named_face(face.id).expect("the face has a persistent name");
+                // The interface names a face without a tree feature after the body, as here.
+                let feature = doc.feature(named.feature).map_or("Body", |f| f.name.as_str());
+                format!("{feature} · {}", named.label)
+            })
+            .collect();
+        Fingerprint {
+            volume: doc.kernel().mass_properties(body).unwrap().volume,
+            faces: topology.faces.len(),
+            edges: topology.edges.len(),
+            names,
+        }
+    }
+
+    fn assert_matches(&self, expected: &Fingerprint, stage: &str) {
+        assert_eq!(
+            (self.faces, self.edges, &self.names),
+            (expected.faces, expected.edges, &expected.names),
+            "{stage} changed the topology or face names"
+        );
+        assert!(
+            (self.volume - expected.volume).abs() <= VOLUME_TOLERANCE,
+            "{stage} volume {} != {}",
+            self.volume,
+            expected.volume
+        );
+    }
+}
+
+/// Which way the edit must move the volume. A larger convex round or a thinner wall removes
+/// material; a larger concave round adds it. A smaller round does the reverse.
+#[derive(Clone, Copy, Debug)]
+enum Volume {
+    Less,
+    More,
+}
+
+fn exercise(state: AppState, name: &str, tool: &str, edit: Value, volume: Volume) {
+    let proof = std::env::var_os("SOLIDDRAFT_RELEASE_PROOF_DIR");
+    let dir = proof
+        .clone()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-release-{}", std::process::id())))
         .join(name);
-    std::fs::create_dir_all(&dir).unwrap();
+    exercise_in(state, &dir, tool, edit, volume);
+    if proof.is_none() {
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+fn exercise_in(mut state: AppState, dir: &std::path::Path, tool: &str, edit: Value, volume: Volume) {
+    std::fs::create_dir_all(dir).unwrap();
     let path = dir.join("part.dwprt");
     accepted(&mut state, "save", json!({"path":path}));
     displayed(&state);
-    export(&state, &dir, "build");
+    export(&state, dir, "build");
+    let built = Fingerprint::of(&state);
     accepted(&mut state, tool, edit);
     displayed(&state);
-    export(&state, &dir, "edit");
+    export(&state, dir, "edit");
+    let edited = Fingerprint::of(&state);
+    eprintln!("{tool}: {built:?} -> {edited:?}");
+    let change = edited.volume - built.volume;
+    let moved = match volume {
+        Volume::Less => change < -VOLUME_TOLERANCE,
+        Volume::More => change > VOLUME_TOLERANCE,
+    };
+    assert!(moved, "{tool} did not change the volume as expected ({volume:?}): {} -> {}", built.volume, edited.volume);
     accepted(&mut state, "undo", json!({}));
     displayed(&state);
+    Fingerprint::of(&state).assert_matches(&built, "undo");
     accepted(&mut state, "redo", json!({}));
+    Fingerprint::of(&state).assert_matches(&edited, "redo");
+    let saved = Fingerprint::of(&state);
     accepted(&mut state, "save", json!({"path":path}));
     accepted(&mut state, "open", json!({"path":path}));
     displayed(&state);
-    export(&state, &dir, "reopen");
-    if std::env::var_os("SOLIDDRAFT_RELEASE_PROOF_DIR").is_none() {
-        std::fs::remove_dir_all(dir).unwrap();
-    }
+    Fingerprint::of(&state).assert_matches(&saved, "reopen");
+    export(&state, dir, "reopen");
+}
+
+#[test]
+fn an_edit_that_leaves_the_part_unchanged_fails_the_release_check() {
+    let mut state = block();
+    let top = edges(&state, |e| (e.midpoint.z - 12.0).abs() < 1e-6 && (e.midpoint.y - 15.0).abs() < 1e-6);
+    round(&mut state, top, 1.0);
+    let dir = std::env::temp_dir().join(format!("soliddraft-release-noop-{}", std::process::id()));
+    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        exercise_in(state, &dir, "edit_fillet", json!({"feature":"Fillet1","radius":1}), Volume::Less)
+    }));
+    std::fs::remove_dir_all(&dir).unwrap();
+    let message = failed.expect_err("a no-op edit passed the release check");
+    let message = message.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(message.contains("edit_fillet did not change the volume"), "{message}");
 }
 
 #[test]
@@ -127,7 +220,7 @@ fn crossing_cylinder_loop_builds_displays_edits_and_exports() {
     accepted(&mut state, "extrude", json!({"sketch":"Sketch2","depth":40,"flip":false}));
     let selected = edges(&state, |e| e.curve == CurveKind::Other);
     round(&mut state, selected, 0.5);
-    exercise(state, "loop", "edit_fillet", json!({"feature":"Fillet1","radius":0.75}));
+    exercise(state, "loop", "edit_fillet", json!({"feature":"Fillet1","radius":0.75}), Volume::More);
 }
 
 #[test]
@@ -139,7 +232,7 @@ fn chamfered_cylinder_rim_rounds_between_curved_supports() {
     accepted(&mut state, "chamfer", json!({"edges":rim,"distance":3}));
     let rim = edges(&state, |e| e.curve == CurveKind::Circle && (e.midpoint.z - 20.0).abs() < 1e-6);
     round(&mut state, rim, 0.5);
-    exercise(state, "curved-rim", "edit_fillet", json!({"feature":"Fillet1","radius":0.75}));
+    exercise(state, "curved-rim", "edit_fillet", json!({"feature":"Fillet1","radius":0.75}), Volume::Less);
 }
 
 #[test]
@@ -160,7 +253,7 @@ fn pocket_strips_close_with_concave_spherical_corners() {
     round(&mut state, selected, 1.0);
     let topology = state.doc.kernel().topology(state.doc.display_body().unwrap()).unwrap();
     assert_eq!(topology.faces.iter().filter(|f| f.surface == SurfaceKind::Sphere).count(), 4);
-    exercise(state, "pocket-corners", "edit_fillet", json!({"feature":"Fillet1","radius":0.75}));
+    exercise(state, "pocket-corners", "edit_fillet", json!({"feature":"Fillet1","radius":0.75}), Volume::Less);
 }
 
 #[test]
@@ -174,7 +267,7 @@ fn later_top_round_rolls_over_upright_rounds_at_smaller_and_equal_radii() {
     });
     assert_eq!(selected.len(), 1);
     round(&mut state, selected, 1.0);
-    exercise(state, "fillet-over-fillet", "edit_fillet", json!({"feature":"Fillet2","radius":2}));
+    exercise(state, "fillet-over-fillet", "edit_fillet", json!({"feature":"Fillet2","radius":2}), Volume::Less);
 }
 
 #[test]
@@ -200,6 +293,7 @@ fn bore_mouth_and_blind_floor_round_on_the_material_side() {
             if blind { "blind-floor" } else { "bore-mouth" },
             "edit_fillet",
             json!({"feature":"Fillet1","radius":0.75}),
+            if blind { Volume::Less } else { Volume::More },
         );
     }
 }
@@ -209,7 +303,7 @@ fn through_bore_shell_builds_displays_edits_and_exports() {
     let mut state = block();
     accepted(&mut state, "hole", json!({"face":"Boss-Extrude1 · End cap","points":[[0,0,12]],"diameter":6}));
     accepted(&mut state, "shell", json!({"open_faces":["Boss-Extrude1 · End cap"],"thickness":2}));
-    exercise(state, "bored-shell", "edit_shell", json!({"feature":"Shell1","thickness":1.5}));
+    exercise(state, "bored-shell", "edit_shell", json!({"feature":"Shell1","thickness":1.5}), Volume::Less);
 }
 
 #[test]
@@ -225,7 +319,7 @@ fn nonconvex_shell_builds_displays_edits_and_exports() {
     accepted(&mut state, "shell", json!({"open_faces":["Boss-Extrude1 · End cap"],"thickness":1}));
     let mass = state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap();
     assert!((mass.volume - (120.0 + 0.75 * std::f64::consts::PI)).abs() < 1e-6, "{mass:?}");
-    exercise(state, "nonconvex-shell", "edit_shell", json!({"feature":"Shell1","thickness":0.75}));
+    exercise(state, "nonconvex-shell", "edit_shell", json!({"feature":"Shell1","thickness":0.75}), Volume::Less);
 }
 
 #[test]

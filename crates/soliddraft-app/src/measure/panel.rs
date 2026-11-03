@@ -178,7 +178,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.label(format!("Midpoint {}, {how}", super::hover::format([c(0), c(1), c(2)])));
                 }
                 Some(Err(error)) => {
-                    ui.colored_label(theme::error(), error);
+                    ui.colored_label(theme::error(), crate::geometry_message::for_user(error));
                 }
                 None => {}
             }
@@ -198,7 +198,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
                 Some(Err(error)) => {
-                    ui.colored_label(theme::error(), error);
+                    ui.colored_label(theme::error(), crate::geometry_message::for_user(error));
                 }
                 None => {}
             }
@@ -206,7 +206,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.label("Pick an edge or a face to measure, or a second one for a distance or angle.");
         }
         if let Some(error) = &state.measure.error {
-            ui.colored_label(theme::error(), error);
+            ui.colored_label(theme::error(), crate::geometry_message::for_user(error));
         }
         ui.separator();
     }

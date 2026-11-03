@@ -9,7 +9,8 @@ pub(crate) fn for_user(message: &str) -> &str {
         "This fillet needs a closed edge without corners. Choose a different edge."
     } else if message.contains("recipe.ambiguous-reference") {
         "This selection matches more than one edge or face. Pick the intended edge or face again."
-    } else if message.contains("measure.unsupported-surface") {
+    } else if has_code(message, "measure") || has_code(message, "iges") {
+        // Measurements and IGES output the kernel does not cover yet.
         "Coming soon"
     } else if message.contains("distance.unsupported-envelope") || message.contains("distance.cylinder-domain") {
         "This shape cannot be shelled. Use a convex tray with separated through bores and open its top or bottom face."
@@ -33,6 +34,18 @@ pub(crate) fn for_user(message: &str) -> &str {
     }
 }
 
+/// Whether `message` carries a diagnostic code of `family`, such as
+/// `measure.nonplanar-face`: the family, a dot and hyphenated lowercase words. A file
+/// name such as `measure.step` is not one.
+fn has_code(message: &str, family: &str) -> bool {
+    message.match_indices(family).any(|(at, _)| {
+        let before = message[..at].chars().next_back();
+        let code = message[at + family.len()..].strip_prefix('.').unwrap_or("");
+        let word: String = code.chars().take_while(|c| c.is_ascii_lowercase() || *c == '-').collect();
+        !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') && word.contains('-') && !word.starts_with('-')
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::for_user;
@@ -45,6 +58,10 @@ mod tests {
             "fillet.unsupported-topology",
             "recipe.ambiguous-reference",
             "measure.unsupported-surface",
+            "measure.unsupported-pair",
+            "measure.nonplanar-face",
+            "measure.unsupported-curve",
+            "iges.uncertified-model",
             "distance.unsupported-envelope",
             "export_step: unsupported surface",
             "step.unsupported-geometry",
@@ -62,5 +79,18 @@ mod tests {
             assert!(!shown.is_empty());
         }
         assert_eq!(for_user("The radius must be more than 0 mm"), "The radius must be more than 0 mm");
+        // Texts the real-use pass saw in the Measure panel and the status bar.
+        for seen in [
+            "Hole1 · Hole 1 wall and Hole2 · Hole 1 wall could not be measured: parallel_face_to_face failed \
+             (status 0): measure.nonplanar-face: face #94 is not planar",
+            "Fillet1 · Edge 1 and Boss-Extrude2 · End cap could not be measured: unsupported: \
+             measure.unsupported-pair: minimum_distance is not supported between Edge(EdgeId(29)) and Face(FaceId(15))",
+            "Export: export_iges failed (status 0): iges.uncertified-model: the model lacks the \
+             exact-definition correspondence the writer needs",
+        ] {
+            assert_eq!(for_user(seen), "Coming soon", "{seen}");
+        }
+        let file = "cannot read /parts/measure.step: No such file or directory (os error 2)";
+        assert_eq!(for_user(file), file);
     }
 }

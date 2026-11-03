@@ -236,3 +236,64 @@ fn hover_pick_pair_track_edit_and_reopen_in_window() {
     window::hover(&mut h, at);
     assert!(window::shows(&h, midpoint), "the midpoint moved with the camera");
 }
+
+/// The real-use pass picked the walls of two holes. The panel printed the kernel query,
+/// its status and its error code, such as `parallel_face_to_face failed (status 0):
+/// measure.nonplanar-face: face #94 is not planar`. An unfinished pair says only Coming soon.
+#[test]
+fn an_unfinished_pair_says_only_coming_soon() {
+    use egui_kittest::kittest::{NodeT, by};
+    use serde_json::json;
+    use soliddraft_app::{app_tools::AppTools, command_tools::find_entity, measure::hover::Pick};
+    use soliddraft_assistant::{Caller, tools::call_checked};
+
+    // Every text on screen: egui gives a label's words as its value.
+    fn texts(h: &App<'_>) -> Vec<String> {
+        h.query_all(by())
+            .flat_map(|n| {
+                let node = n.accesskit_node();
+                [node.label(), node.value()]
+            })
+            .flatten()
+            .collect()
+    }
+
+    let doc = Document::new("Two holes", Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
+    let Some(mut h) = window::window(doc, "measure-unfinished") else { return };
+    let caller = Caller::Mcp { client: "test".into() };
+    for (tool, arguments) in [
+        (
+            "sketch",
+            json!({"plane": "top", "shapes": [{"shape": "rectangle", "center": [0, 0, 0], "width": 40, "height": 30}]}),
+        ),
+        ("extrude", json!({"sketch": "Sketch1", "depth": 10, "flip": false})),
+        ("hole", json!({"face": "Boss-Extrude1 · End cap", "points": [[-10, 0, 10]], "diameter": 6})),
+        ("hole", json!({"face": "Boss-Extrude1 · End cap", "points": [[10, 0, 10]], "diameter": 6})),
+    ] {
+        let out = call_checked(&mut AppTools { state: &mut h.state_mut().state }, tool, arguments, &caller);
+        assert!(!out.is_error, "{tool}: {}", out.content);
+        window::settle(&mut h);
+    }
+    window::button(&mut h, "Inspect tab");
+    window::button(&mut h, "Measure");
+    let coming_soon = |h: &App<'_>| texts(h).iter().filter(|t| *t == "Coming soon").count();
+    let before = coming_soon(&h);
+    for name in ["Hole1 · Hole 1 wall", "Hole2 · Hole 1 wall"] {
+        let selection = find_entity(&h.state().state.doc, name).unwrap();
+        h.state_mut().state.measure.pick(Pick { selection, midpoint: false });
+    }
+    window::settle(&mut h);
+    for quantity in ["Minimum distance", "Direction angle"] {
+        window::button(&mut h, quantity);
+        window::settle(&mut h);
+        window::snapshot(&mut h, &format!("unfinished-{}", quantity.to_lowercase().replace(' ', "-")));
+        let leaked: Vec<_> = texts(&h)
+            .into_iter()
+            .filter(|t| {
+                ["measure.", "(status", "FaceId", "face #", "_face"].iter().any(|internal| t.contains(internal))
+            })
+            .collect();
+        assert!(leaked.is_empty(), "{quantity}: the panel shows {leaked:?}");
+        assert_eq!(coming_soon(&h), before + 1, "{quantity}: the panel does not say Coming soon");
+    }
+}

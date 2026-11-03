@@ -51,6 +51,11 @@ in-plane paths without changing the body, saves, reopens in a fresh process and
 exports checked STEP. The profile stays on its authored offset plane. This scenario
 belongs to the feature batch after 0.2.0.
 
+`line-arc-sweep.json` turns a profile along a line, a quarter arc and a line. It
+edits the run, undoes and redoes, refuses an oblique join, a zero-length line and a
+reversal with no turn axis without changing the body, measures a face by name, saves,
+reopens in a fresh process and exports checked STEP.
+
 `sphere-revolve.json` and `torus-revolve.json` retain their construction, drawing
 and independent STEP checks, then edit the sphere's angle or the torus's tube
 diameter. They check undo, redo, rename, suppress and restore, reuse of the exact

@@ -145,17 +145,21 @@ impl Ids {
             parents.iter().flat_map(|p| p.vertex_keys.keys().copied()),
             |_, _| false,
         );
+        // A merged face keeps every origin this step gave it, so each one keeps its name.
         let face_roles = faces
             .created
             .iter()
-            .map(|face| {
-                let role = self.origins[face]
+            .flat_map(|face| {
+                let mut roles: Vec<_> = self.origins[face]
                     .iter()
-                    .find(|origin| origin.step.as_str() == step)
-                    .and_then(|origin| self.named.iter().find(|(source, _)| source == origin))
-                    .map(|(_, origin)| origin.role)
-                    .unwrap_or(FaceRole::Other);
-                FaceOrigin { face: *face, role }
+                    .filter(|origin| origin.step.as_str() == step)
+                    .filter_map(|origin| self.named.iter().find(|(source, _)| source == origin))
+                    .map(|(_, origin)| origin.role.clone())
+                    .collect();
+                if roles.is_empty() {
+                    roles.push(FaceRole::Other);
+                }
+                roles.into_iter().map(|role| FaceOrigin { face: *face, role })
             })
             .collect();
         HistoryRecord { seq, tag: tag.clone(), op, faces, edges, vertices, face_roles }
@@ -216,11 +220,16 @@ fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option
     match role {
         Role::Start => Some(FaceRole::StartCap),
         Role::End => Some(FaceRole::EndCap),
-        Role::Side { segment, .. } => segment
-            .as_str()
-            .strip_prefix('l')
-            .and_then(|s| s.split_once('s'))
-            .and_then(|(a, b)| Some(FaceRole::Side { loop_index: a.parse().ok()?, segment: b.parse().ok()? })),
+        Role::Side { segment, path } => {
+            segment.as_str().strip_prefix('l').and_then(|s| s.split_once('s')).and_then(|(a, b)| {
+                Some(FaceRole::Side {
+                    loop_index: a.parse().ok()?,
+                    segment: b.parse().ok()?,
+                    path: path.as_ref().map(|p| p.as_str().to_owned()),
+                })
+            })
+        }
+        Role::Envelope { path } => Some(FaceRole::Envelope { path: path.as_str().to_owned() }),
         Role::Hole { at, part } => at
             .as_str()
             .strip_prefix('h')

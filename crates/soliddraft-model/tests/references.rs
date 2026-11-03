@@ -94,7 +94,7 @@ fn check(doc: &Document, origins: &mut BTreeMap<FeatureId, FaceRef>, repair: &[F
             continue;
         };
         let was = origins.entry(f.id).or_insert_with(|| face.clone());
-        assert_eq!((was.feature, was.generator, was.ordinal), (face.feature, face.generator, face.ordinal));
+        assert_eq!((was.feature, &was.generator, was.ordinal), (face.feature, &face.generator, face.ordinal));
         if repair.contains(&f.id) {
             let FeatureStatus::RepairNeeded(items) = status else {
                 panic!("{step}: {} should raise the repair prompt, it is {status:?}\n{}", f.name, report(doc))

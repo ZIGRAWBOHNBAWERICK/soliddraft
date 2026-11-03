@@ -463,6 +463,10 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
         .filter(|f| matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
         .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
         .collect();
+    let sweep_radius = match state.editor.as_ref().map(|e| &e.params) {
+        Some(EditorParams::Sweep(s)) => state.doc.sweep_anchor(s.sketch.0 as u64).map_or(10.0, |(_, radius)| radius),
+        _ => 0.0,
+    };
     let mut actions = Vec::new();
     let Some(editor) = state.editor.as_mut() else { return };
     egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
@@ -476,19 +480,12 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                         .map(|(_, name)| name.as_str())
                         .unwrap_or("Missing sketch"),
                 );
-                theme::section_label(ui, "Straight path start");
-                ui.horizontal(|ui| {
-                    for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
-                        coord(ui, &format!("sweep start {label}"), label, &mut s.path.start[i]);
-                    }
-                });
-                theme::section_label(ui, "Straight path end");
-                ui.horizontal(|ui| {
-                    for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
-                        coord(ui, &format!("sweep end {label}"), label, &mut s.path.end[i]);
-                    }
-                });
-                ui.label("The profile stays in place and follows the path's displacement.");
+                crate::sweep_panel::page(ui, &mut s.path, sweep_radius, coord);
+                if let Some(err) = &editor.error {
+                    error_row(ui, err);
+                }
+                ui.add_space(8.0);
+                hint(ui, "The profile stays where it was sketched, so start the path on it.");
             }
             EditorParams::Revolve(r) => {
                 theme::section_label(ui, "Meridian sketch");

@@ -34,10 +34,10 @@ pub enum GeneratorChoice {
 }
 
 impl GeneratorChoice {
-    fn matches(self, generator: Generator) -> bool {
+    fn matches(self, generator: &Generator) -> bool {
         match self {
-            GeneratorChoice::StartCap => generator == Generator::StartCap,
-            GeneratorChoice::EndCap => generator == Generator::EndCap,
+            GeneratorChoice::StartCap => *generator == Generator::StartCap,
+            GeneratorChoice::EndCap => *generator == Generator::EndCap,
             GeneratorChoice::Side => matches!(generator, Generator::Side { .. }),
         }
     }
@@ -159,7 +159,7 @@ impl AssemblyDocument {
     /// The proof of `face`'s plane at the revision `r` pins.
     pub(crate) fn prove(&mut self, r: &DocRef, face: &FaceRef) -> Result<PlaneProof, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
-        let key = (id, r.pinned.clone(), face.feature, face.generator, face.ordinal);
+        let key = (id, r.pinned.clone(), face.feature, face.generator.clone(), face.ordinal);
         if let Some(proof) = self.proofs.planes.get(&key) {
             return Ok(proof.clone());
         }
@@ -203,7 +203,7 @@ impl AssemblyDocument {
                 labels
                     .iter()
                     .filter(|(_, l)| {
-                        l.as_ref().is_some_and(|l| Some(l.feature) == wanted && generator.matches(l.generator))
+                        l.as_ref().is_some_and(|l| Some(l.feature) == wanted && generator.matches(&l.generator))
                     })
                     .map(|(f, _)| *f)
                     .filter(|f| {

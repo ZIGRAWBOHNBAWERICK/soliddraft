@@ -169,7 +169,7 @@ impl<Id: Copy + PartialEq> EntityChanges<Id> {
 }
 
 /// What part of an operation made a face it created.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum FaceRole {
     /// The planar region of a profile body.
@@ -184,6 +184,14 @@ pub enum FaceRole {
         loop_index: u32,
         /// The segment within that loop.
         segment: u32,
+        /// The path piece that carried it, for a face of a sweep along a path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
+    /// A profile end left exposed at a join inside a sweep path.
+    Envelope {
+        /// The path piece at that join.
+        path: String,
     },
     /// A face of a fillet or chamfer.
     Blend {
@@ -233,7 +241,7 @@ pub struct Origin {
 }
 
 /// The role of one created face.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FaceOrigin {
     /// A face listed in the record's `faces.created`.
     pub face: FaceId,
@@ -265,6 +273,6 @@ pub struct HistoryRecord {
 impl HistoryRecord {
     /// The role of a face this operation created, if it created it.
     pub fn role_of(&self, face: FaceId) -> Option<FaceRole> {
-        self.face_roles.iter().find(|o| o.face == face).map(|o| o.role)
+        self.face_roles.iter().find(|o| o.face == face).map(|o| o.role.clone())
     }
 }

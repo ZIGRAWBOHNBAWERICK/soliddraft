@@ -23,10 +23,10 @@ use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use soliddraft_assistant::tools::schema::{
-    any_of, array, boolean, constant, integer, non_empty_array, number, object, optional, string,
+    any_of, array, boolean, constant, integer, non_empty_array, number, object, one_of, optional, string,
 };
 use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
-use soliddraft_kernel_api::{FaceId, Plane, SurfaceKind};
+use soliddraft_kernel_api::{ArcTurn, FaceId, PathSegment, Plane, SurfaceKind, Sweep, SweepOrientation};
 use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip};
 use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef, ShellOpenings};
 
@@ -64,7 +64,101 @@ pub enum Shape {
     },
 }
 
-/// A polygon sketch and one straight path segment.
+/// One piece of a sweep path. Without an `id`, a piece keeps the saved identity at its
+/// position, or takes a new one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SweepSegment {
+    /// A straight line.
+    Line {
+        /// Saved identity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// End in model millimetres.
+        to: [f64; 3],
+        /// The turn axis where this piece doubles back along the previous one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        corner_axis: Option<[f64; 3]>,
+    },
+    /// A circular arc from the previous piece's end, counterclockwise about `axis`.
+    Arc {
+        /// Saved identity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// Centre in model millimetres.
+        centre: [f64; 3],
+        /// Normal of the arc's plane.
+        axis: [f64; 3],
+        /// `quarter`, `half` or `three_quarter`.
+        turn: ArcTurn,
+        /// The turn axis where this piece doubles back along the previous one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        corner_axis: Option<[f64; 3]>,
+    },
+}
+
+/// The path as a sweep verb spells it: one `end`, or a chain of `segments`.
+struct SweepInput<'a> {
+    start: [f64; 3],
+    end: Option<[f64; 3]>,
+    segments: Option<&'a [SweepSegment]>,
+    orientation: Option<SweepOrientation>,
+}
+
+impl SweepInput<'_> {
+    /// The path, keeping the saved identities of the path it replaces.
+    fn path(&self, saved: Option<&Sweep>) -> Result<Sweep, String> {
+        let kept = |index: usize| saved.and_then(|s| s.segments.get(index)).map(|s| s.id().to_owned());
+        let segments = match (self.end, self.segments) {
+            (Some(end), None) => {
+                let mut path = Sweep::line(self.start, end, kept(0).unwrap_or_else(|| "travel".into()));
+                path.orientation = self.orientation.or(saved.map(|s| s.orientation)).unwrap_or_default();
+                return Ok(path);
+            }
+            (None, Some(segments)) => segments,
+            _ => return Err("Give the path as `end` or as `segments`".into()),
+        };
+        let mut taken: Vec<String> = segments
+            .iter()
+            .enumerate()
+            .filter_map(|(index, segment)| {
+                let (SweepSegment::Line { id, .. } | SweepSegment::Arc { id, .. }) = segment;
+                id.clone().or_else(|| kept(index))
+            })
+            .collect();
+        let mut chain = Vec::with_capacity(segments.len());
+        for (index, segment) in segments.iter().enumerate() {
+            let (SweepSegment::Line { id, .. } | SweepSegment::Arc { id, .. }) = segment;
+            let id = id.clone().or_else(|| kept(index)).unwrap_or_else(|| {
+                let id = (1..).map(|n| format!("segment{n}")).find(|c| !taken.contains(c)).expect("a free name");
+                taken.push(id.clone());
+                id
+            });
+            chain.push(match segment {
+                SweepSegment::Line { to, corner_axis, .. } => {
+                    PathSegment::Line { id, to: *to, corner_axis: *corner_axis }
+                }
+                SweepSegment::Arc { centre, axis, turn, corner_axis, .. } => {
+                    PathSegment::Arc { id, centre: *centre, axis: *axis, turn: *turn, corner_axis: *corner_axis }
+                }
+            });
+        }
+        let arcs = segments.iter().any(|s| matches!(s, SweepSegment::Arc { .. }));
+        let fallback = saved.map(|s| s.orientation).unwrap_or_default();
+        let orientation = self.orientation.unwrap_or(if arcs { SweepOrientation::FollowPath } else { fallback });
+        Ok(Sweep { start: self.start, segments: chain, orientation })
+    }
+
+    fn text(&self) -> String {
+        match (self.end, self.segments) {
+            (Some(end), _) => format!("{:?} to {end:?}", self.start),
+            (_, Some(segments)) => format!("{:?}, {} path segments", self.start, segments.len()),
+            _ => format!("{:?}", self.start),
+        }
+    }
+}
+
+/// A polygon sketch and its path.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SweepLine {
@@ -72,11 +166,29 @@ pub struct SweepLine {
     pub sketch: String,
     /// Path start in model millimetres.
     pub start: [f64; 3],
-    /// Path end in model millimetres.
-    pub end: [f64; 3],
+    /// End of a one-line path in model millimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[f64; 3]>,
+    /// The pieces of a chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Vec<SweepSegment>>,
+    /// How the profile turns. Without it, arcs turn the profile and lines keep it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<SweepOrientation>,
 }
 
-/// New endpoints for an existing straight sweep.
+impl SweepLine {
+    fn input(&self) -> SweepInput<'_> {
+        SweepInput {
+            start: self.start,
+            end: self.end,
+            segments: self.segments.as_deref(),
+            orientation: self.orientation,
+        }
+    }
+}
+
+/// A new path for an existing sweep.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EditSweepLine {
@@ -84,8 +196,26 @@ pub struct EditSweepLine {
     pub feature: String,
     /// Path start in model millimetres.
     pub start: [f64; 3],
-    /// Path end in model millimetres.
-    pub end: [f64; 3],
+    /// End of a one-line path in model millimetres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[f64; 3]>,
+    /// The pieces of a chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Vec<SweepSegment>>,
+    /// How the profile turns. Without it, the saved orientation stays, and arcs turn it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<SweepOrientation>,
+}
+
+impl EditSweepLine {
+    fn input(&self) -> SweepInput<'_> {
+        SweepInput {
+            start: self.start,
+            end: self.end,
+            segments: self.segments.as_deref(),
+            orientation: self.orientation,
+        }
+    }
 }
 
 /// One recipe line: a command-layer verb with every reference by name.
@@ -172,7 +302,7 @@ pub enum Line {
     Revolve { sketch: String, axis_origin: [f64; 3], axis_direction: [f64; 3], angle_deg: f64 },
     /// Changes a revolution angle without changing its sketch or axis.
     EditRevolve { feature: String, angle_deg: f64 },
-    /// Sweeps a closed polygon along a single straight segment.
+    /// Sweeps a closed polygon along a chain of lines and arcs.
     Sweep(SweepLine),
     /// Changes endpoints while retaining the path segment's identity.
     EditSweep(EditSweepLine),
@@ -533,22 +663,51 @@ pub fn edit_revolve_params() -> Vec<(&'static str, Value)> {
     vec![feature_param(), ("angle_deg", number("Angle in degrees, greater than 0 and at most 360"))]
 }
 
+fn sweep_segment_schema() -> Value {
+    let corner = || optional(array(number("component"), "Turn axis where this piece doubles back along the last one"));
+    let id = || optional(string("Saved identity: lowercase letters, digits, `_` and `-`"));
+    any_of(vec![
+        object(&[
+            ("kind", constant("line")),
+            ("id", id()),
+            ("to", array(number("component"), "End [x, y, z], mm")),
+            ("corner_axis", corner()),
+        ]),
+        object(&[
+            ("kind", constant("arc")),
+            ("id", id()),
+            ("centre", array(number("component"), "Centre [x, y, z], mm")),
+            ("axis", array(number("component"), "Normal of the arc's plane; the arc turns counterclockwise about it")),
+            ("turn", one_of(&["quarter", "half", "three_quarter"], "How far the arc turns")),
+            ("corner_axis", corner()),
+        ]),
+    ])
+}
+
+fn sweep_path_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("start", array(number("component"), "Path start [x, y, z], mm")),
+        ("end", optional(array(number("component"), "End of a one-line path [x, y, z], mm"))),
+        ("segments", optional(non_empty_array(sweep_segment_schema(), "Lines and arcs in order, instead of `end`"))),
+        (
+            "orientation",
+            optional(one_of(&["fixed", "follow_path"], "`fixed` keeps the profile's direction and takes lines only")),
+        ),
+    ]
+}
+
 /// The `sweep` verb's parameters.
 pub fn sweep_params() -> Vec<(&'static str, Value)> {
-    vec![
-        sketch_param(),
-        ("start", array(number("component"), "Straight path start [x, y, z], mm")),
-        ("end", array(number("component"), "Different straight path end [x, y, z], mm")),
-    ]
+    let mut params = vec![sketch_param()];
+    params.extend(sweep_path_params());
+    params
 }
 
 /// The `edit_sweep` verb's parameters.
 pub fn edit_sweep_params() -> Vec<(&'static str, Value)> {
-    vec![
-        feature_param(),
-        ("start", array(number("component"), "Straight path start [x, y, z], mm")),
-        ("end", array(number("component"), "Different straight path end [x, y, z], mm")),
-    ]
+    let mut params = vec![feature_param()];
+    params.extend(sweep_path_params());
+    params
 }
 
 /// The `cut` verb's parameters.
@@ -1271,20 +1430,20 @@ impl Line {
                 };
                 run.apply(doc, Command::AddExtrude { params, via_assistant: true })?;
             }
-            Line::Sweep(SweepLine { sketch, start, end }) => {
+            Line::Sweep(line) => {
                 let s = soliddraft_model::SweepFeature {
-                    sketch: soliddraft_model::FeatureId(run.sketch(doc, sketch)? as u32),
-                    path: soliddraft_kernel_api::Sweep { start: *start, end: *end, segment_id: "travel".into() },
+                    sketch: soliddraft_model::FeatureId(run.sketch(doc, &line.sketch)? as u32),
+                    path: line.input().path(None)?,
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Sweep(s)))?;
             }
-            Line::EditSweep(EditSweepLine { feature, start, end }) => {
+            Line::EditSweep(line) => {
+                let feature = &line.feature;
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Sweep(mut s)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a sweep"));
                 };
-                s.path.start = *start;
-                s.path.end = *end;
+                s.path = line.input().path(Some(&s.path))?;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Sweep(s) })?;
             }
             Line::Revolve { sketch, axis_origin, axis_direction, angle_deg } => {
@@ -1728,12 +1887,8 @@ impl Line {
                 };
                 (title, format!("{} tool operations", operations.len()))
             }
-            Line::Sweep(SweepLine { sketch, start, end }) => {
-                ("Sweep".into(), format!("{sketch}, {start:?} to {end:?}"))
-            }
-            Line::EditSweep(EditSweepLine { feature, start, end }) => {
-                (format!("Edit {feature}"), format!("{start:?} to {end:?}"))
-            }
+            Line::Sweep(line) => ("Sweep".into(), format!("{}, {}", line.sketch, line.input().text())),
+            Line::EditSweep(line) => (format!("Edit {}", line.feature), line.input().text()),
             Line::Revolve { sketch, angle_deg, .. } => ("Revolve".into(), format!("{sketch}, {}°", fmt_mm(*angle_deg))),
             Line::EditRevolve { feature, angle_deg } => (format!("Edit {feature}"), format!("{}°", fmt_mm(*angle_deg))),
             Line::Extrude { sketch, depth, flip, up_to_next, up_to_face } => {

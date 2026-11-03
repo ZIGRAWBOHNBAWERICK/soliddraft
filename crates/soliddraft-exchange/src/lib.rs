@@ -241,17 +241,46 @@ pub fn export(
 
 /// A proven bound for people: rounded up to the micrometre's thousandth, so the shown
 /// figure is never smaller than the proof. A bound below that reads as the smallest step.
+///
+/// The rounding works on the bound's exact decimal value, so a binary64 that sits just above
+/// a step, such as `0.01` itself, reads as the next step rather than as the step below it.
 fn bound_mm(bound: f64) -> String {
-    const STEPS_PER_MM: f64 = 1e6;
+    const DECIMALS: usize = 6;
     if !bound.is_finite() || bound <= 0.0 {
         return if bound == 0.0 { "0".into() } else { bound.to_string() };
     }
-    let scaled = bound * STEPS_PER_MM;
-    // A bound such as 0.01 scales to 10000.000000000002 in binary64: that is 0.01, not
-    // one step more.
-    let steps = if (scaled - scaled.round()).abs() <= scaled * 1e-12 { scaled.round() } else { scaled.ceil() };
-    let text = format!("{:.6}", steps.max(1.0) / STEPS_PER_MM);
-    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    let (whole, fraction) = exact_decimal(bound);
+    let (kept, rest) = fraction.split_at(DECIMALS);
+    let mut digits: Vec<u8> = whole.bytes().chain(kept.bytes()).map(|b| b - b'0').collect();
+    if rest.bytes().any(|b| b != b'0') {
+        let mut i = digits.len();
+        loop {
+            if i == 0 {
+                digits.insert(0, 1);
+                break;
+            }
+            i -= 1;
+            if digits[i] == 9 {
+                digits[i] = 0;
+            } else {
+                digits[i] += 1;
+                break;
+            }
+        }
+    }
+    let digits: String = digits.iter().map(|d| char::from(b'0' + d)).collect();
+    let (whole, fraction) = digits.split_at(digits.len() - DECIMALS);
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.is_empty() { whole.to_owned() } else { format!("{whole}.{fraction}") }
+}
+
+/// The exact decimal value of a finite, non-negative `value`: its whole part and every
+/// fractional digit. A binary64 has at most 1074 fractional digits, and Rust prints the
+/// requested precision exactly, so nothing here is rounded.
+fn exact_decimal(value: f64) -> (String, String) {
+    let text = format!("{value:.1074}");
+    let (whole, fraction) = text.split_once('.').expect("a fixed-precision float has a point");
+    (whole.to_owned(), fraction.to_owned())
 }
 
 #[cfg(test)]
@@ -290,8 +319,70 @@ mod tests {
             "7 faces, 15 edges; within 0.000019 mm of the exact part (proven)"
         );
         assert!(step(0.0, 0.0).summary().contains("within 0 mm"));
-        assert_eq!(bound_mm(0.01), "0.01");
+        // The binary64 nearest 0.01 is a little above it, so it reads as the next step.
+        assert_eq!(bound_mm(0.01), "0.010001");
         assert_eq!(bound_mm(0.0123451), "0.012346");
         assert_eq!(bound_mm(2.5), "2.5");
+    }
+
+    /// Whether the decimal `shown` is at or above the exact value of `bound`.
+    fn not_below(shown: &str, bound: f64) -> bool {
+        let (whole, fraction) = shown.split_once('.').unwrap_or((shown, ""));
+        let (bound_whole, bound_fraction) = exact_decimal(bound);
+        let fraction = format!("{fraction:0<1074}");
+        (whole.len(), whole, fraction.as_str()) >= (bound_whole.len(), bound_whole.as_str(), bound_fraction.as_str())
+    }
+
+    #[test]
+    fn a_shown_bound_is_never_below_the_exact_binary_value() {
+        let cases: &[(f64, &str)] = &[
+            // The review's case: within 1e-12 of 0.01 relatively, but above it.
+            (0.010000000000005, "0.010001"),
+            // Exact binary fractions with six decimals or fewer read as themselves.
+            (0.5, "0.5"),
+            (0.015625, "0.015625"),
+            (3.0, "3"),
+            // Either side of a step: 0.000002 in binary64 is just below 2e-6, so it reads as
+            // 2e-6; one ulp up reads as the next step.
+            (0.000002, "0.000002"),
+            (0.000002f64.next_up(), "0.000003"),
+            (0.000002f64.next_down(), "0.000002"),
+            (0.123456, "0.123456"),
+            (0.123456f64.next_up(), "0.123457"),
+            (0.123456f64.next_down(), "0.123456"),
+            (0.1234565, "0.123457"),
+            // A carry runs through every digit.
+            (0.9999995, "1"),
+            (9.9999999, "10"),
+            // Very small bounds read as the smallest step.
+            (f64::MIN_POSITIVE, "0.000001"),
+            (5e-324, "0.000001"),
+            (1e-7, "0.000001"),
+            // Very large bounds keep their whole digits.
+            (1e15, "1000000000000000"),
+            (123456789.123, "123456789.123"),
+            (123456789.125, "123456789.125"),
+        ];
+        for &(bound, expected) in cases {
+            let shown = bound_mm(bound);
+            assert_eq!(shown, expected, "{bound:e}");
+            assert!(not_below(&shown, bound), "{shown} is below {bound:e}");
+        }
+        let huge = bound_mm(f64::MAX);
+        assert!(not_below(&huge, f64::MAX) && huge.len() == 309, "{huge}");
+    }
+
+    #[test]
+    fn a_fitted_step_bound_keeps_its_margin_when_shown() {
+        // The sum is rounded and then moved one ulp up; that ulp must survive the display.
+        for (deviation, fit) in [(0.005_f64, 0.005_f64), (0.0000005, 0.0000005), (0.25, 0.25), (1e-17, 0.000018)] {
+            let bound = (deviation + fit).next_up();
+            let summary = step(deviation, fit).summary();
+            let shown = summary.split("within ").nth(1).and_then(|s| s.split(' ').next()).unwrap();
+            assert!(not_below(shown, bound), "{shown} is below {bound:e}");
+            assert!(not_below(shown, deviation) && not_below(shown, fit), "{summary}");
+        }
+        assert!(step(0.005, 0.005).summary().contains("within 0.010001 mm"));
+        assert!(step(0.25, 0.25).summary().contains("within 0.500001 mm"));
     }
 }

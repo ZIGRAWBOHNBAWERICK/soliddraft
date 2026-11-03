@@ -294,6 +294,21 @@
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; declined.dwprt and imported.dwprt; step 12 part.step, step-report.json, check-step.stdout and check-step.stderr; geometry-info.stdout recipe hashes"
     },
     {
+      "id": "import-features",
+      "file": "ci/scenarios/import-features.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "8f1a7a3cd8a256bf782a9e1b910233caca3797bb",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Fillet, chamfer, boss, pocket and hole on the imported planar block, with an edit before and after a save and reopen; imported faces keep their Import1 · Face N names; a lattice on an imported body is refused as coming soon",
+      "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; imported-features.dwprt"
+    },
+    {
       "id": "import-repair",
       "file": "ci/scenarios/import-repair.json",
       "acceptance": true,

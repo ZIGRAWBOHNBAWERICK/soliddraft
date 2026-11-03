@@ -1,0 +1,290 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "import-features",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-4um.step"
+      },
+      "checks": [
+        {
+          "pointer": "/result/proposals/0/disposition",
+          "equals": "auto"
+        }
+      ]
+    },
+    {
+      "tool": "import_step",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-4um.step",
+        "decline": []
+      },
+      "arguments_from": {
+        "preview_token": {
+          "step": 1,
+          "pointer": "/result/token"
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features/0/name",
+          "equals": "Import1"
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 10004.0,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Import1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 6
+        },
+        {
+          "pointer": "/result/faces/5/name",
+          "equals": "Import1 \u00b7 Face 6"
+        },
+        {
+          "pointer": "/result/faces/5/normal",
+          "equals": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Import1 \u00b7 Edge 10"
+        ],
+        "radius": 2
+      },
+      "label": "fillet on an imported edge",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9969.663706,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "chamfer",
+      "arguments": {
+        "edges": [
+          "Import1 \u00b7 Edge 11"
+        ],
+        "distance": 1.5
+      },
+      "label": "chamfer on an imported edge",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9924.663706,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "Import1 \u00b7 Face 6",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              12.5,
+              10.004
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 5,
+        "flip": false
+      },
+      "label": "boss on an imported face",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 10066.035376,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "Import1 \u00b7 Face 6",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              25,
+              12.5,
+              10.004
+            ],
+            "width": 8,
+            "height": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": false,
+        "depth": 3,
+        "flip": false
+      },
+      "label": "pocket in an imported face",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9970.035376,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Import1 \u00b7 Face 6",
+        "points": [
+          [
+            35,
+            6,
+            10.004
+          ]
+        ],
+        "diameter": 3,
+        "depth": 4
+      },
+      "label": "hole in an imported face",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9941.761042,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 3
+      },
+      "label": "edit the fillet after the import",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9898.840674,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9941.761042,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "lattice",
+      "arguments": {
+        "cell": "cubic",
+        "cell_size": 5,
+        "radius": 1,
+        "accuracy": 0.1,
+        "min_detail": 0.5
+      },
+      "refused": "A lattice on an imported body is coming soon.",
+      "checks": [
+        {
+          "pointer": "/revision",
+          "same_as_step": 12
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/imported-features.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/imported-features.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "length": 8
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9941.761042,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Import1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/faces",
+          "length": 6
+        },
+        {
+          "pointer": "/result/faces/5/name",
+          "equals": "Import1 \u00b7 Face 6"
+        }
+      ]
+    },
+    {
+      "tool": "edit_hole",
+      "arguments": {
+        "feature": "Hole1",
+        "diameter": 2,
+        "depth": 4
+      },
+      "label": "edit the hole after reopening",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9957.469005,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

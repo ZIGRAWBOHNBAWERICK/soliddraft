@@ -80,27 +80,31 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Component>, BinaryError> {
         Some(v) => return Err(bad(&format!("version {v} needs a newer SolidDraft"))),
         None => return Err(bad("cut short")),
     }
-    let count = r.u32().ok_or_else(|| bad("cut short"))? as usize;
+    let count =
+        usize::try_from(r.u32().ok_or_else(|| bad("cut short"))?).map_err(|_| bad("record count is too large"))?;
     let size = r.u32().ok_or_else(|| bad("cut short"))?;
     if size < RECORD {
         return Err(bad(&format!("records of {size} bytes are too small")));
     }
-    if r.remaining() != count * size as usize {
+    let size = usize::try_from(size).map_err(|_| bad("record size is too large"))?;
+    let length = count.checked_mul(size).ok_or_else(|| bad("record payload is too large"))?;
+    if r.remaining() != length {
         return Err(bad("its length does not match its record count"));
     }
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
-        let rec = r.take(size as usize).expect("length checked");
+        let rec = r.take(size).expect("length checked");
         let mut f = Reader::new(rec);
         let (id, source, flags) = (f.u32().unwrap(), f.u32().unwrap(), f.u32().unwrap());
         f.u32();
         let t = [f.f64().unwrap(), f.f64().unwrap(), f.f64().unwrap()];
         let q = [f.f64().unwrap(), f.f64().unwrap(), f.f64().unwrap(), f.f64().unwrap()];
-        if !t.iter().chain(&q).all(|v| v.is_finite()) || DQuat::from_array(q).length() < 1e-12 {
+        let rotation = DQuat::from_array(q);
+        let length = rotation.length();
+        if !t.iter().chain(&q).all(|v| v.is_finite()) || !length.is_finite() || length < 1e-12 {
             return Err(bad(&format!("component {id} has an invalid placement")));
         }
-        let rotation = DQuat::from_array(q);
-        let rotation = if (rotation.length() - 1.0).abs() < 1e-12 { rotation } else { rotation.normalize() };
+        let rotation = if (length - 1.0).abs() < 1e-12 { rotation } else { rotation.normalize() };
         out.push(Component {
             id: ComponentId(id),
             name: None,
@@ -134,6 +138,43 @@ mod tests {
         assert!(!geometry[0].hidden && geometry[1].suppressed, "the geometry form drops only hidden");
         assert!(decode(&bytes[..bytes.len() - 1]).is_err());
         assert!(decode(b"nope").is_err());
+    }
+
+    #[test]
+    fn oversized_header_is_rejected() {
+        let mut w = Writer::with_capacity(16);
+        w.raw(MAGIC);
+        w.u32(VERSION);
+        w.u32(2);
+        w.u32(0x8000_0000);
+        assert!(decode(&w.bytes).is_err());
+
+        // No 32-bit target is needed to exercise the header's 32-bit arithmetic.
+        let count = u32::from_le_bytes(w.bytes[8..12].try_into().unwrap());
+        let size = u32::from_le_bytes(w.bytes[12..16].try_into().unwrap());
+        assert_eq!(count.checked_mul(size), None);
+        #[cfg(debug_assertions)]
+        assert!(std::panic::catch_unwind(|| count * size).is_err());
+        assert_eq!(count.wrapping_mul(size), 0);
+    }
+
+    #[test]
+    fn large_payload_round_trips_and_truncation_is_rejected() {
+        let components: Vec<_> =
+            (0..4096).map(|id| Component::new(ComponentId(id), SourceId(1), Placement::IDENTITY)).collect();
+        let bytes = encode(components.iter(), false);
+        assert_eq!(decode(&bytes).unwrap(), components);
+        assert!(decode(&bytes[..bytes.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn overflowing_quaternion_length_is_rejected() {
+        let c = Component::new(
+            ComponentId(1),
+            SourceId(1),
+            Placement { rotation: DQuat::from_xyzw(1e308, 0.0, 0.0, 0.0), translation: DVec3::ZERO },
+        );
+        assert!(decode(&encode([&c].into_iter(), false)).is_err());
     }
 
     #[test]

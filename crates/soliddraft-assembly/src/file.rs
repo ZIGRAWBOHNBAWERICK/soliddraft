@@ -381,7 +381,12 @@ impl AssemblyPackage {
             .ok_or_else(|| EnvelopeError::Unsupported("not a SolidDraft assembly: no manifest".into()))?;
         manifest.check(DocKind::Assembly, &[ASSEMBLY, PLACEMENTS])?;
         let json = package.read(ASSEMBLY)?.ok_or_else(|| EnvelopeError::Unsupported("no assembly.json".into()))?;
-        let bulk = package.read(PLACEMENTS)?;
+        let bulk = package
+            .read(PLACEMENTS)
+            .map_err(|e| BinaryError { entry: PLACEMENTS, what: format!("could not read it: {e}") })?;
+        if bulk.is_none() && manifest.sections.iter().any(|s| s.name == PLACEMENTS && s.required) {
+            return Err(BinaryError { entry: PLACEMENTS, what: "required entry is missing".into() }.into());
+        }
         let mut assembly = Assembly::from_truth(&json, bulk.as_deref())?;
         // Optional: settings this version cannot read open as the defaults.
         if let Ok(Some(text)) = package.read_text(settings::ENTRY) {
@@ -605,6 +610,44 @@ mod tests {
         assert!(p.manifest().sections.iter().any(|s| s.name == PLACEMENTS && s.required));
         let back = Assembly::from_truth(&truth.json, truth.bulk.as_deref()).unwrap();
         assert_eq!(back, a);
+    }
+
+    #[test]
+    fn missing_required_placements_are_rejected() {
+        let (mut a, ..) = sample(bulk::BULK_THRESHOLD + 5);
+        a.components[0].name = None;
+        a.patterns.clear();
+        let bytes = a.to_bytes(DocumentId::new(), None, &[]).unwrap();
+        let mut package = Package::from_bytes(&bytes).unwrap();
+        assert!(package.read(PLACEMENTS).unwrap().is_some());
+        let manifest = package.manifest().unwrap().clone();
+        assert!(manifest.sections.iter().any(|s| s.name == PLACEMENTS && s.required));
+        let json = package.read(ASSEMBLY).unwrap().unwrap();
+        let damaged = manifest::write_package(&manifest, &[Entry::new(ASSEMBLY, json)]).unwrap();
+        let path = std::env::temp_dir().join(format!("missing-placements-{}.dwasm", manifest.id));
+        std::fs::write(&path, damaged).unwrap();
+        let opened = AssemblyPackage::open(&path);
+        std::fs::remove_file(path).unwrap();
+        let error = opened.err().expect("missing required placements must not open an empty assembly");
+        assert!(error.to_string().contains("placements.bin"), "{error}");
+        assert!(error.to_string().contains("required entry is missing"), "{error}");
+    }
+
+    #[test]
+    fn unreadable_required_placements_are_rejected() {
+        let (a, ..) = sample(bulk::BULK_THRESHOLD + 5);
+        let manifest = a.manifest(DocumentId::new(), None, false);
+        let truth = a.truth_entries();
+        let mut bytes = manifest::write_package(
+            &manifest,
+            &[Entry::new(ASSEMBLY, &*truth.json), Entry::stored(PLACEMENTS, &**truth.bulk.as_ref().unwrap())],
+        )
+        .unwrap();
+        let start = bytes.windows(4).position(|w| w == b"DWPL").unwrap();
+        bytes[start] ^= 0xff;
+        let error = AssemblyPackage::from_bytes(bytes).err().expect("corrupt placements must not open");
+        assert!(error.to_string().contains("placements.bin"), "{error}");
+        assert!(error.to_string().contains("could not read it"), "{error}");
     }
 
     #[test]

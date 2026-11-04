@@ -112,9 +112,12 @@ impl Fingerprint {
             .iter()
             .map(|face| {
                 let named = doc.named_face(face.id).expect("the face has a persistent name");
-                // The interface names a face without a tree feature after the body, as here.
-                let feature = doc.feature(named.feature).map_or("Body", |f| f.name.as_str());
-                format!("{feature} · {}", named.label)
+                // The interface names a face without a tree feature after the body, as
+                // "Body · Face N". Every face of a released part has a feature that made it.
+                let feature = doc
+                    .feature(named.feature)
+                    .unwrap_or_else(|| panic!("face {:?} has no feature and shows as Body · {}", face.id, named.label));
+                format!("{} · {}", feature.name, named.label)
             })
             .collect();
         Fingerprint {
@@ -319,6 +322,9 @@ fn nonconvex_shell_builds_displays_edits_and_exports() {
     accepted(&mut state, "shell", json!({"open_faces":["Boss-Extrude1 · End cap"],"thickness":1}));
     let mass = state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap();
     assert!((mass.volume - (120.0 + 0.75 * std::f64::consts::PI)).abs() < 1e-6, "{mass:?}");
+    // The wall turns round the reentrant edge on a cylinder the shell made, not a fillet.
+    let names = Fingerprint::of(&state).names;
+    assert!(names.contains("Shell1 · Inner round"), "{names:?}");
     exercise(state, "nonconvex-shell", "edit_shell", json!({"feature":"Shell1","thickness":0.75}), Volume::Less);
 }
 

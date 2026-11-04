@@ -251,13 +251,21 @@ fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option
             };
             edge.map(|edge| FaceRole::Blend { edge })
         }
-        Role::Corner { vertex } => {
-            let name = serde_json::to_string(vertex).expect("vertex name serializes");
-            parents
+        Role::Corner { vertex } => parent_vertex(vertex, parents).map(|vertex| FaceRole::Corner { vertex }),
+        // A shell keeps its wall thickness round a concave edge or vertex with these.
+        // They are offsets of the input, never blends.
+        Role::Round { edge } => {
+            let name = serde_json::to_string(edge).expect("edge name serializes");
+            let candidates: BTreeSet<_> = parents
                 .iter()
-                .find_map(|p| p.vertex_names.iter().find_map(|(id, n)| (*n == name).then_some(*id)))
-                .map(|vertex| FaceRole::Corner { vertex })
+                .flat_map(|p| p.edge_names.iter().filter_map(|(id, n)| (*n == name).then_some(*id)))
+                .collect();
+            match candidates.len() {
+                1 => candidates.first().map(|edge| FaceRole::ShellRound { edge: *edge }),
+                _ => None,
+            }
         }
+        Role::RoundCorner { vertex } => parent_vertex(vertex, parents).map(|vertex| FaceRole::ShellCorner { vertex }),
         Role::Inner { of } => parents
             .iter()
             .find_map(|p| p.origins.iter().find_map(|(id, os)| os.contains(of).then_some(*id)))
@@ -269,6 +277,12 @@ fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option
         Role::Imported { key } => Some(FaceRole::Imported { key: key.clone() }),
         _ => None,
     }
+}
+
+/// The input vertex a Catallax vertex name stands for.
+fn parent_vertex(vertex: &catallax_recipe::VertexName, parents: &[&Ids]) -> Option<VertexId> {
+    let name = serde_json::to_string(vertex).expect("vertex name serializes");
+    parents.iter().find_map(|p| p.vertex_names.iter().find_map(|(id, n)| (*n == name).then_some(*id)))
 }
 
 fn hole_part(part: catallax_recipe::HolePart) -> HolePart {

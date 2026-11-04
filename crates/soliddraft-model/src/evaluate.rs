@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use soliddraft_kernel_api::{
-    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FacePoint, FaceRole, Gyroid, HistoryRecord,
-    Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult, Lattice,
-    Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
+    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, Gyroid,
+    HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult,
+    Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
 };
 
 use crate::feature::{
@@ -902,26 +902,46 @@ impl Document {
         self.finish(result, current, |r| {
             let view = self.view_of(body).ok();
             let names = self.name_map();
-            let mut walls: Vec<_> = r
+            // Never rank an unnamed face by a transient kernel handle: every source face
+            // must have a name, or the shell face stays unnamed.
+            let labels = |faces: Vec<FaceId>| -> Option<Vec<_>> {
+                let t = view.as_ref()?;
+                let mut labels: Vec<_> = faces
+                    .into_iter()
+                    .map(|face| reference::origin_label(face, &View { topology: t }, &names))
+                    .collect::<Option<_>>()?;
+                labels.sort();
+                labels.dedup();
+                Some(labels)
+            };
+            let edge_faces = |edge: EdgeId| view.as_ref().and_then(|t| t.edge(edge)).map(|e| e.faces.clone());
+            let mut faces: Vec<_> = r
                 .record
                 .face_roles
                 .iter()
                 .filter_map(|o| {
-                    let FaceRole::Offset { face } = o.role else { return None };
-                    // Never rank an unnamed wall by a transient kernel handle.
-                    let source =
-                        view.as_ref().and_then(|t| reference::origin_label(face, &View { topology: t }, &names))?;
-                    Some((source, o.role.clone()))
+                    let (generator, sources) = match o.role {
+                        FaceRole::Offset { face } => (Generator::ShellWall, vec![face]),
+                        FaceRole::ShellRound { edge } => (Generator::ShellRound, edge_faces(edge)?),
+                        FaceRole::ShellCorner { vertex } => {
+                            let edges = view.as_ref().and_then(|t| t.vertex(vertex))?.edges.clone();
+                            let faces = edges.into_iter().map(edge_faces).collect::<Option<Vec<_>>>()?;
+                            (Generator::ShellCorner, faces.concat())
+                        }
+                        _ => return None,
+                    };
+                    Some((generator, labels(sources)?, o.role.clone()))
                 })
                 .collect();
-            walls.sort();
-            walls
+            faces.sort();
+            let mut counts: HashMap<Generator, u32> = HashMap::new();
+            faces
                 .into_iter()
-                .enumerate()
-                .map(|(ordinal, (_, role))| NamedFace {
-                    origin: Origin { tag: r.record.tag.clone(), role },
-                    generator: Generator::ShellWall,
-                    ordinal: ordinal as u32,
+                .map(|(generator, _, role)| {
+                    let n = counts.entry(generator.clone()).or_default();
+                    let ordinal = *n;
+                    *n += 1;
+                    NamedFace { origin: Origin { tag: r.record.tag.clone(), role }, generator, ordinal }
                 })
                 .collect()
         })

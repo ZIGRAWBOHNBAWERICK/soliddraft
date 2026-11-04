@@ -209,6 +209,18 @@ pub enum FaceRole {
         /// The input face it is offset from.
         face: FaceId,
     },
+    /// A rounded face of a shell, at the wall thickness from an input edge. The shell
+    /// makes it where the wall turns round a concave edge; it is not a fillet.
+    ShellRound {
+        /// The input edge it keeps the wall thickness from.
+        edge: EdgeId,
+    },
+    /// A spherical face of a shell, at the wall thickness from an input vertex where
+    /// concave edges meet. It is not a fillet corner.
+    ShellCorner {
+        /// The input vertex it keeps the wall thickness from.
+        vertex: VertexId,
+    },
     /// A face of a drilled hole.
     Hole {
         /// The placement, as an index into the operation's placements.

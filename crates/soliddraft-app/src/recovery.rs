@@ -146,7 +146,7 @@ pub struct Recovery {
     pub offers: Vec<RecoveryCopy>,
     /// Journals from sessions that ended without quitting. Only redacted copies may be shared.
     pub journals: Vec<PathBuf>,
-    /// Damaged copies found at start, as sentences.
+    /// Damaged copies and recovery errors found at start, as sentences.
     pub problems: Vec<String>,
     /// Copies that could not be made or written since the app last looked, as sentences.
     pub failures: Vec<String>,
@@ -334,6 +334,7 @@ impl Recovery {
             if lock.try_lock().is_err() {
                 continue; // That app is still running.
             }
+            let mut keep_session = false;
             for sub in [folder.join(OFFERED), folder.clone()] {
                 let scan = recovery::scan(&sub);
                 for damaged in scan.damaged {
@@ -346,12 +347,21 @@ impl Recovery {
                 }
                 for copy in scan.copies {
                     if copy.standing().offered() {
-                        let _ = std::fs::create_dir_all(&offered);
                         let to = offered.join(copy.file.file_name().unwrap_or_default());
                         // Two ended sessions with the same document: the newer copy wins.
                         let newer = recovery::read(&to).is_ok_and(|(r, _)| r.written_ms > copy.record.written_ms);
-                        if newer || std::fs::rename(&copy.file, &to).is_err() {
+                        if newer {
                             let _ = std::fs::remove_file(&copy.file);
+                        } else if let Err(error) =
+                            std::fs::create_dir_all(&offered).and_then(|()| std::fs::rename(&copy.file, &to))
+                        {
+                            keep_session = true;
+                            let problem = format!(
+                                "Could not move recovery copy {}: {error}. It was kept for the next start.",
+                                copy.file.display()
+                            );
+                            log::warn!("{problem}");
+                            self.problems.push(problem);
                         }
                     } else {
                         let _ = std::fs::remove_file(&copy.file);
@@ -359,7 +369,9 @@ impl Recovery {
                 }
             }
             drop(lock);
-            let _ = std::fs::remove_dir_all(&folder);
+            if !keep_session {
+                let _ = std::fs::remove_dir_all(&folder);
+            }
         }
         // Offers kept from an earlier start are weighed again: the file may have been saved since.
         for copy in recovery::scan(&offered).copies {
@@ -634,6 +646,90 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
     }
     for action in actions {
         state.push(action);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use soliddraft_document::hash::ContentHash;
+    use soliddraft_document::manifest::{Entry, Manifest, Section, write_package};
+
+    #[test]
+    fn superseded_copy_is_deleted_and_newer_offer_is_unchanged() {
+        let root = std::env::temp_dir().join(format!("soliddraft-adoption-superseded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut session = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        let ended = root.join("session-ended");
+        std::fs::create_dir(&ended).unwrap();
+        File::create(ended.join(LOCK)).unwrap();
+        let id = DocumentId::new();
+        let revision = ContentHash::of_bytes(b"work");
+        let mut manifest = Manifest::new(id, DocKind::Part, revision.clone());
+        manifest.sections = vec![Section::required("part.json")];
+        let document = write_package(&manifest, &[Entry::new("part.json", b"work")]).unwrap();
+        let mut record = Record::new(id, DocKind::Part, "Older", None, revision);
+        record.written_ms = 1;
+        let source = recovery::write(&ended.join(OFFERED), &record, &document).unwrap();
+        record.written_ms = 2;
+        record.name = "Newer".into();
+        let destination = recovery::write(&session.folder().join(OFFERED), &record, &document).unwrap();
+        let bytes = std::fs::read(&destination).unwrap();
+
+        session.adopt_ended_sessions();
+
+        assert!(!source.exists());
+        assert!(!ended.exists());
+        assert!(session.problems.is_empty());
+        assert_eq!(session.offers.len(), 1);
+        assert_eq!(session.offers[0].record, record);
+        assert_eq!(std::fs::read(destination).unwrap(), bytes);
+        session.close();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_adoption_keeps_source_bytes_and_session_for_retry() {
+        let root = std::env::temp_dir().join(format!("soliddraft-adoption-failure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut session = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        let ended = root.join("session-ended");
+        std::fs::create_dir(&ended).unwrap();
+        File::create(ended.join(LOCK)).unwrap();
+        let id = DocumentId::new();
+        let revision = ContentHash::of_bytes(b"unsaved work");
+        let mut manifest = Manifest::new(id, DocKind::Part, revision.clone());
+        manifest.sections = vec![Section::required("part.json")];
+        let document = write_package(&manifest, &[Entry::new("part.json", b"unsaved work")]).unwrap();
+        let record = Record::new(id, DocKind::Part, "Unsaved", None, revision);
+        let source = recovery::write(&ended, &record, &document).unwrap();
+        let bytes = std::fs::read(&source).unwrap();
+        // A directory at the destination forces rename to fail, even when run as root.
+        let destination = session.folder().join(OFFERED).join(source.file_name().unwrap());
+        std::fs::create_dir_all(&destination).unwrap();
+        assert!(std::fs::rename(&source, &destination).is_err());
+
+        session.adopt_ended_sessions();
+
+        assert!(source.exists(), "failed adoption deleted the only unsaved copy");
+        assert_eq!(std::fs::read(&source).unwrap(), bytes);
+        assert!(ended.is_dir(), "failed adoption must retain the ended session");
+        assert!(ended.join(LOCK).is_file(), "the next start must be able to claim the session");
+        assert_eq!(session.problems.len(), 1);
+        assert!(session.problems[0].contains(&source.display().to_string()));
+        assert!(session.problems[0].contains("next start"));
+        assert!(session.offers.is_empty());
+
+        std::fs::remove_dir(&destination).unwrap();
+        session.close();
+        let next = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        assert!(next.problems.is_empty());
+        assert!(next.show);
+        assert_eq!(next.offers.len(), 1);
+        assert_eq!(std::fs::read(&next.offers[0].file).unwrap(), bytes);
+        assert!(!ended.exists());
+        next.close();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 

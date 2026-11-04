@@ -135,13 +135,60 @@ fn nonconvex_shell_builds_without_mutating_input() {
     let history = k.history(blank).unwrap();
     let before = k.mass_properties(blank).unwrap();
     let top = k.topology(blank).unwrap().faces.iter().find(|f| f.normal == Some(Vec3::Z)).unwrap().id;
-    let tray = k.shell(&OpTag::new("tray"), blank, &[top], 1.0).unwrap().body;
+    let shelled = k.shell(&OpTag::new("tray"), blank, &[top], 1.0).unwrap();
+    let tray = shelled.body;
     assert!(k.validate(tray).unwrap().valid);
     assert!((k.mass_properties(tray).unwrap().volume - (120.0 + 0.75 * std::f64::consts::PI)).abs() < 1e-6);
     assert!(k.export_step(tray, &StepOptions::default()).unwrap().report.within_tolerance);
     assert_eq!(k.history(blank).unwrap(), history);
     assert_eq!(k.mass_properties(blank).unwrap(), before);
     assert!(k.validate(blank).unwrap().valid);
+    k.release(tray).unwrap();
+}
+
+/// The wall turns round the L's reentrant edge on a cylinder. That face is an offset of
+/// the edge made by the shell, named after the edge, and never a fillet's blend.
+#[test]
+fn nonconvex_shell_names_its_round_after_the_reentrant_edge() {
+    use soliddraft_kernel_api::{Loop, OpKind, Segment, SurfaceKind};
+    let k = CatallaxKernel::new();
+    let vertices = [[0.0, 0.0], [8.0, 0.0], [8.0, 3.0], [3.0, 3.0], [3.0, 8.0], [0.0, 8.0]];
+    let outer = Loop(
+        (0..vertices.len())
+            .map(|i| {
+                let (a, b) = (vertices[i], vertices[(i + 1) % vertices.len()]);
+                Segment::Line { from: Point2::new(a[0], a[1]), to: Point2::new(b[0], b[1]) }
+            })
+            .collect(),
+    );
+    let blank = extruded(&k, Profile { plane: Plane::XY, outer, holes: vec![] }, 4.0);
+    let topology = k.topology(blank).unwrap();
+    let top = topology.faces.iter().find(|f| f.normal == Some(Vec3::Z)).unwrap().id;
+    let reentrant = topology
+        .edges
+        .iter()
+        .find(|e| (e.midpoint - Vec3::new(3.0, 3.0, 2.0)).length() < 1e-9)
+        .expect("the vertical edge at the inside corner")
+        .id;
+    for thickness in [1.0, 0.75] {
+        let tray = k.shell(&OpTag::new("tray"), blank, &[top], thickness).unwrap();
+        assert_eq!((tray.record.op, tray.record.tag.as_str()), (OpKind::Shell, "tray"));
+        let rounds: Vec<_> =
+            tray.record.face_roles.iter().filter(|o| matches!(o.role, FaceRole::ShellRound { .. })).collect();
+        assert_eq!(rounds.len(), 1, "{:?}", tray.record.face_roles);
+        assert_eq!(rounds[0].role, FaceRole::ShellRound { edge: reentrant });
+        let face = k.topology(tray.body).unwrap().face(rounds[0].face).cloned().unwrap();
+        assert_eq!(face.surface, SurfaceKind::Cylinder);
+        assert!(face.origins.iter().any(|o| o.tag.as_str() == "tray" && o.role == rounds[0].role));
+        for o in &tray.record.face_roles {
+            assert!(
+                matches!(o.role, FaceRole::Offset { .. } | FaceRole::ShellRound { .. }),
+                "a shell face is a wall or a round, not {:?}",
+                o.role
+            );
+        }
+        k.release(tray.body).unwrap();
+    }
 }
 
 #[test]

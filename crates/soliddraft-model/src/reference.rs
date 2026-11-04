@@ -72,6 +72,12 @@ pub enum Generator {
     Other,
     /// An inset wall of a shell, ranked by its source face name.
     ShellWall,
+    /// A rounded face where a shell's wall turns round a concave edge, ranked by the
+    /// names of the edge's faces. A shell makes it; it is not a fillet.
+    ShellRound,
+    /// A spherical face where a shell's wall turns round a concave vertex, ranked by
+    /// the names of the vertex's faces.
+    ShellCorner,
     /// A profile end left exposed at a join inside a sweep path.
     PathJoin {
         /// The saved path piece at that join.
@@ -91,6 +97,8 @@ impl fmt::Display for Generator {
             Generator::Copy { instance } => write!(f, "Copy {instance} face"),
             Generator::Other => f.write_str("Face"),
             Generator::ShellWall => f.write_str("Inner wall"),
+            Generator::ShellRound => f.write_str("Inner round"),
+            Generator::ShellCorner => f.write_str("Inner corner"),
             Generator::PathJoin { path } => write!(f, "Path join at {path}"),
         }
     }

@@ -366,9 +366,13 @@ jobs:
           export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
           python3 -m http.server 8766 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/browser-server.log" 2>&1 &
           server=$!
-          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          python3 -m http.server 8768 --bind 127.0.0.1 --directory . > "$RUNNER_TEMP/recovery-storage-server.log" 2>&1 &
+          storage_server=$!
+          trap 'chrome-devtools-axi stop; kill "$server" "$storage_server"' EXIT
           chrome-devtools-axi open http://127.0.0.1:8766/
           chrome-devtools-axi run < ci/browser-journal.js
+          chrome-devtools-axi open http://127.0.0.1:8768/
+          chrome-devtools-axi run < ci/browser-recovery-storage.js
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

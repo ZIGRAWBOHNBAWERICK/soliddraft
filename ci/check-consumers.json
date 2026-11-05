@@ -4,6 +4,7 @@
     "ci/browser-documents.mjs": ["web"],
     "ci/browser-journal.js": ["web"],
     "ci/browser-preferences.mjs": ["web"],
+    "ci/browser-recovery-storage.js": ["web"],
     "ci/cargo-cache.sh": [],
     "ci/bootstrap": ["lint", "test-linux", "test-macos"],
     "ci/hooks/pre-push": ["lint"],

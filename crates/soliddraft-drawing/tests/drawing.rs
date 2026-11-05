@@ -304,7 +304,8 @@ fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
     let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
     let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
     apply(&mut d, &Command::SetSheetScale { sheet: 0, scale: Scale::new(1, 2) }).unwrap();
-    let bytes = export::dxf(&layout_sheet(&d, 0)).unwrap();
+    let list = layout_sheet(&d, 0);
+    let bytes = export::dxf(&list).unwrap();
     let back = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
     let mut count = 0;
     for e in back.entities() {
@@ -315,8 +316,10 @@ fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
             let measurement = ((dim.definition_point_3.x - dim.definition_point_2.x) * angle.cos()
                 + (dim.definition_point_3.y - dim.definition_point_2.y) * angle.sin())
             .abs();
+            assert!((base.actual_measurement - measurement).abs() < 1e-6);
             assert!(
-                (measurement * style.dimension_linear_measurement_scale_factor - base.actual_measurement).abs() < 1e-6
+                (measurement * style.dimension_linear_measurement_scale_factor - list.dimensions[count].value).abs()
+                    < 1e-6
             );
             assert!(base.text.is_empty() || base.text.contains("<>"), "{} freezes the measurement", base.text);
             count += 1;

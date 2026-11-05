@@ -4,7 +4,7 @@
 //! splines.
 //!
 //! Dimensions are DIMENSION entities: rotated, diameter, radius and ordinate dimensions
-//! with their definition points, measured value and text, each drawing the display
+//! with sheet-space definition points, raw measurements and editable text, each drawing the display
 //! list's own lines, arrows and text from an anonymous block, so a CAD program shows
 //! exactly what the sheet shows and can still edit them as dimensions. Section hatching
 //! is HATCH entities with the pattern's angle and spacing over the cut regions.
@@ -144,7 +144,7 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
                 version: dxf::enums::Version::R2010,
                 block_name: name,
                 text_mid_point: at(r.text_mid),
-                actual_measurement: r.value,
+                actual_measurement: raw_measurement(r.geometry),
                 // shortcut: coincident anchors keep true lengths literal until 3D definition points are exported.
                 text: control_codes(&if scale.is_some() {
                     r.format.text.replace(Dimension::VALUE_TEXT, "<>")
@@ -214,7 +214,12 @@ fn measurement_scale(r: &crate::display::DimensionRecord) -> Option<f64> {
     if r.format.dim_type != DimType::True {
         return Some(r.measurement_scale);
     }
-    let distance = match r.geometry {
+    let distance = raw_measurement(r.geometry);
+    (distance > 1e-9).then(|| r.value / distance)
+}
+
+fn raw_measurement(geometry: DimensionGeometry) -> f64 {
+    match geometry {
         DimensionGeometry::Linear { p1, p2, angle, .. } => {
             let angle = angle.to_radians();
             ((p2.u - p1.u) * angle.cos() + (p2.v - p1.v) * angle.sin()).abs()
@@ -222,9 +227,10 @@ fn measurement_scale(r: &crate::display::DimensionRecord) -> Option<f64> {
         DimensionGeometry::Ordinate { origin, feature, along_x, .. } => {
             (if along_x { feature.u - origin.u } else { feature.v - origin.v }).abs()
         }
-        _ => return Some(r.measurement_scale),
-    };
-    (distance.abs() > 1e-9).then(|| r.value / distance)
+        DimensionGeometry::Diameter { near, far } | DimensionGeometry::Radius { centre: near, on: far } => {
+            (far.u - near.u).hypot(far.v - near.v)
+        }
+    }
 }
 
 /// The DXF entities of one display item.
@@ -574,6 +580,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(dim.dimension_base.text, control_codes(&text));
+        assert_eq!(dim.dimension_base.actual_measurement, 0.0);
     }
 
     #[test]

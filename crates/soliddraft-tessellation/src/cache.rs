@@ -136,6 +136,13 @@ impl<K: Clone + Eq + Hash, M: Weigh + PartialEq> DisplayCache<K, M> {
     /// Adds `mesh`, made for `definition` at `level` with `key`. A mesh equal to one the
     /// definition already holds shares it. Replaces an entry with the same key.
     pub fn insert(&mut self, definition: K, level: Level, key: ParamsKey, mesh: M) -> Arc<M> {
+        let level = if key.level_invariant() {
+            Level::Coarse
+        } else {
+            self.definitions.get(&definition)
+                .and_then(|entries| entries.iter().find(|e| e.key == key))
+                .map_or(level, |entry| entry.level.min(level))
+        };
         self.remove_entry(&definition, key);
         let clock = self.clock;
         let entries = self.definitions.entry(definition).or_default();
@@ -290,6 +297,24 @@ mod tests {
         assert_eq!(c.best(&1, &l, Level::Standard).unwrap().0, Level::Coarse, "coarser first while loading");
         c.remove_entry(&1, l.key(Level::Coarse));
         assert_eq!(c.best(&1, &l, Level::Coarse).unwrap().0, Level::Fine);
+    }
+
+    #[test]
+    fn angle_only_keys_keep_coarse_eligibility_in_any_insert_order() {
+        let l = Levels::new(&Quality::Custom(crate::quality::Advanced {
+            chord_height: 0.0, angle_deg: 15.0, max_edge_length: 0.0, max_aspect_ratio: 0.0,
+        }), 100.0);
+        assert_eq!(l.key(Level::Coarse), l.key(Level::Fine));
+        for order in [vec![Level::Standard], Level::ALL.to_vec(), vec![Level::Fine, Level::Standard, Level::Coarse]] {
+            let mut cache = DisplayCache::new(DeviceBudget { triangles: 0, bytes: 0 });
+            for level in order {
+                cache.insert("bolt", level, l.key(level), Fake(10, "a"));
+            }
+            cache.tick();
+            cache.trim();
+            assert!(cache.contains(&"bolt", l.key(Level::Coarse)));
+            assert_eq!(cache.usage().triangles, 10);
+        }
     }
 
     #[test]

@@ -73,8 +73,7 @@ impl Backups {
         Ok(outcome)
     }
 
-    /// Copies the file at `document` to backup 1 when `bytes` differ from it, after
-    /// moving the older backups up and deleting those past the count.
+    /// Stages and syncs the previous bytes before rotating the older backups.
     fn keep(&self, document: &Path, bytes: &[u8]) -> std::io::Result<Option<PathBuf>> {
         if self.count == 0 {
             return Ok(None);
@@ -87,27 +86,60 @@ impl Backups {
         if previous == bytes {
             return Ok(None);
         }
-        // Backups past the count, including any left from a larger count, go first.
-        let mut n = self.count;
-        while self.path(document, n).is_file() {
-            n += 1;
-        }
-        for stale in (self.count..n).rev() {
-            std::fs::remove_file(self.path(document, stale))?;
-        }
-        for k in (1..self.count).rev() {
-            let from = self.path(document, k);
-            if from.is_file() {
-                std::fs::rename(&from, self.path(document, k + 1))?;
-            }
-        }
         let first = self.path(document, 1);
-        save_atomic(&first, &previous)?;
+        let staged = crate::save::temporary_name(&first);
+        save_atomic(&staged, &previous)?;
+        let rotated = (|| {
+            let mut n = self.count + 1;
+            while self.path(document, n).is_file() {
+                n += 1;
+            }
+            for stale in (self.count + 1..n).rev() {
+                std::fs::remove_file(self.path(document, stale))?;
+            }
+            for k in (1..self.count).rev() {
+                let from = self.path(document, k);
+                if from.is_file() {
+                    std::fs::rename(&from, self.path(document, k + 1))?;
+                }
+            }
+            std::fs::rename(&staged, &first)
+        })();
+        if let Err(error) = rotated {
+            let _ = std::fs::remove_file(&staged);
+            return Err(error);
+        }
+        #[cfg(unix)]
+        if let Some(parent) = first.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
+        }
         Ok(Some(first))
     }
 }
 
 /// Eight hex digits of the BLAKE3 hash of the document's folder, made absolute.
+#[cfg(all(test, unix))]
+mod retention_tests {
+    use super::*;
+
+    #[test]
+    fn failed_replacement_write_keeps_the_last_backup() {
+        let dir = std::env::temp_dir().join(format!("soliddraft-backup-stage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let document = dir.join("x".repeat(245));
+        std::fs::write(&document, b"current").unwrap();
+        let backups = Backups::default();
+        let previous = backups.path(&document, 1);
+        std::fs::write(&previous, b"history").unwrap();
+        assert!(backups.keep(&document, b"replacement").is_err());
+        assert_eq!(std::fs::read(&previous).unwrap(), b"history");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 fn folder_tag(document: &Path) -> String {
     let folder = document.parent().unwrap_or(Path::new(""));
     let folder = std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf());

@@ -92,6 +92,10 @@ impl ParamsKey {
         )
     }
 
+    pub(crate) fn level_invariant(self) -> bool {
+        self.0[0] == 0 && self.0[3] == 0
+    }
+
     /// The key as text for a cache entry's header, such as "c0.2 a15 s15 e0 r0".
     pub fn describe(&self) -> String {
         let [c, a, s, e, r] = self.0.map(f64::from_bits);

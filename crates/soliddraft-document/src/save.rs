@@ -84,7 +84,7 @@ fn publish_new(
 }
 
 /// A hidden name beside `path` that no other save in this process uses at the same time.
-fn temporary_name(path: &Path) -> PathBuf {
+pub(crate) fn temporary_name(path: &Path) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let n = NEXT.fetch_add(1, Ordering::Relaxed);

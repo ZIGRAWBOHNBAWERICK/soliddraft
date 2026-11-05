@@ -8,7 +8,7 @@
 //! An index is a scan of folders and their subfolders, reading only each file's
 //! manifest. Hidden folders (a leading dot) are skipped.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::id::DocumentId;
@@ -34,6 +34,7 @@ pub struct FolderIndex {
     entries: Vec<IndexEntry>,
     unreadable: Vec<(PathBuf, String)>,
     seen: HashSet<PathBuf>,
+    directories: HashMap<PathBuf, usize>,
 }
 
 impl FolderIndex {
@@ -65,6 +66,11 @@ impl FolderIndex {
         if depth > MAX_DEPTH {
             return;
         }
+        let key = canonical(dir);
+        if self.directories.get(&key).is_some_and(|seen| *seen <= depth) {
+            return;
+        }
+        self.directories.insert(key, depth);
         let Ok(read) = std::fs::read_dir(dir) else { return };
         let mut paths: Vec<PathBuf> = read.filter_map(|e| e.ok().map(|e| e.path())).collect();
         paths.sort();
@@ -135,6 +141,24 @@ impl FolderIndex {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symlink_cycles_do_not_expand_document_paths() {
+        let root = std::env::temp_dir().join(format!("soliddraft-index-cycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("a-loop")).unwrap();
+        std::fs::write(root.join("z.dwprt"), b"unreadable").unwrap();
+        let index = FolderIndex::scan([&root]);
+        assert_eq!(index.unreadable().len(), 1);
+        assert_eq!(index.unreadable()[0].0, root.join("z.dwprt"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 

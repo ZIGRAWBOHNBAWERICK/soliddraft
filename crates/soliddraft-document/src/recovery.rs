@@ -212,6 +212,7 @@ impl RecoveryCopy {
         let Some(path) = &self.record.path else { return Standing::NeverSaved };
         let Ok(meta) = std::fs::metadata(path) else { return Standing::FileMissing };
         match identify_file(path) {
+            Ok(saved) if saved.id != self.record.id || saved.kind != self.record.kind => Standing::Newer,
             Ok(saved) if saved.revision == self.record.revision => Standing::Saved,
             Ok(_) if file_millis(&meta).is_some_and(|m| m > self.record.written_ms) => Standing::Older,
             _ => Standing::Newer,
@@ -291,6 +292,28 @@ mod tests {
         let mut m = Manifest::new(id, DocKind::Part, revision.clone());
         m.sections = vec![Section::required("part.json")];
         (write_package(&m, &[Entry::new("part.json", truth)]).unwrap(), revision)
+    }
+
+    #[test]
+    fn replaced_path_does_not_supersede_another_documents_recovery() {
+        let dir = folder("replaced-path");
+        let id = DocumentId::new();
+        let (bytes, revision) = part(id, b"unsaved");
+        let path = dir.join("part.dwprt");
+        let mut record = Record::new(id, DocKind::Part, "Unsaved", Some(&path), revision.clone());
+        record.written_ms = 1;
+        let file = write(&dir, &record, &bytes).unwrap();
+        let copy = RecoveryCopy { record, file };
+        for truth in [b"other".as_slice(), b"unsaved".as_slice()] {
+            let (replacement, _) = part(DocumentId::new(), truth);
+            save_atomic(&path, &replacement).unwrap();
+            assert!(copy.standing().offered(), "path reuse must not delete unsaved work");
+        }
+        let mut manifest = Manifest::new(id, DocKind::Assembly, revision);
+        manifest.sections = vec![Section::required("assembly.json")];
+        save_atomic(&path, &write_package(&manifest, &[Entry::new("assembly.json", b"unsaved")]).unwrap()).unwrap();
+        assert!(copy.standing().offered(), "kind must match too");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

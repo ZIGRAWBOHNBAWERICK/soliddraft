@@ -115,6 +115,8 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
             let name = format!("*D{n}");
             let style_name = format!("{DIMSTYLE}{n}");
             let scale = measurement_scale(r);
+            let measured_text =
+                scale.is_some() && (r.format.text.is_empty() || r.format.text.contains(Dimension::VALUE_TEXT));
             let (upper, lower, tolerances, limits) = match r.format.tolerance {
                 Tolerance::None => (0.0, 0.0, false, false),
                 Tolerance::Symmetric { value } => (value, value, true, false),
@@ -128,8 +130,8 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
                 dimension_tolerace_decimal_places: i16::from(r.format.precision.max(1)),
                 dimension_plus_tolerance: upper,
                 dimension_minus_tolerance: lower,
-                generate_dimension_tolerances: tolerances,
-                generate_dimension_limits: limits,
+                generate_dimension_tolerances: tolerances && measured_text,
+                generate_dimension_limits: limits && measured_text,
                 ..dimension_style.clone()
             });
             let entities = if first { blocks.remove(owner).unwrap_or_default() } else { Vec::new() };
@@ -540,6 +542,8 @@ mod tests {
             let back = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
             assert!(back.entities().any(|e| matches!(&e.specific,
                 EntityType::RotatedDimension(d) if d.dimension_base.text == "INSPECT")));
+            let style = back.dim_styles().find(|s| s.name == "SOLIDDRAFT1").unwrap();
+            assert!(!style.generate_dimension_tolerances && !style.generate_dimension_limits);
         }
     }
 

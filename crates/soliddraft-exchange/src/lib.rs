@@ -161,6 +161,9 @@ impl Report {
                 if !r.closed {
                     s += "; the mesh is not closed";
                 }
+                if !r.unavailable_controls.is_empty() {
+                    s += &format!("; unavailable controls: {}", r.unavailable_controls.join("; "));
+                }
                 s
             }
         }
@@ -286,6 +289,29 @@ fn exact_decimal(value: f64) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mesh_summary_distinguishes_unavailable_controls_from_open_geometry() {
+        for closed in [true, false] {
+            for unavailable_controls in [vec![], vec!["curve angle".into(), "per-face aspect ratio".into()]] {
+                let report = Report::Mesh(MeshReport {
+                    triangles: 12,
+                    vertices: 8,
+                    chord_height: 0.1,
+                    closed,
+                    unavailable_controls: unavailable_controls.clone(),
+                });
+                let mut expected = "12 triangles; within 0.1 mm of the exact part".to_owned();
+                if !closed {
+                    expected += "; the mesh is not closed";
+                }
+                if !unavailable_controls.is_empty() {
+                    expected += "; unavailable controls: curve angle; per-face aspect ratio";
+                }
+                assert_eq!(report.summary(), expected);
+            }
+        }
+    }
 
     fn step(max_deviation_mm: f64, fit_mm: f64) -> Report {
         Report::Step(StepReport {

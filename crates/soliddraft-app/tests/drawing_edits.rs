@@ -135,6 +135,40 @@ fn same_scale_model_update_restores_picking_metadata_with_drawing_history() {
 }
 
 #[test]
+fn transferring_a_sheet_scale_circle_keeps_geometry_picking_and_history_together() {
+    let doc = part(ProfileKind::Circle { diameter: 10.0 });
+    let mut d = drawing(&doc);
+    let top = ViewId(2);
+    d.apply(Command::SetViewScale { view: top, scale: ViewScale::Sheet }, None).unwrap();
+    d.apply(Command::AddSheet { name: "Half scale".into(), template: "iso-a3".into() }, None).unwrap();
+    d.apply(Command::SetSheetScale { sheet: 1, scale: Scale::new(1, 2) }, None).unwrap();
+    assert!(!d.circles[&top].is_empty());
+    for (sheet, scale) in [(1, 0.5), (0, 1.0)] {
+        let before = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
+        d.apply(Command::MoveViewToSheet { view: top, sheet, to: Point2::new(200.0, 150.0) }, None).unwrap();
+        let after = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
+        let view = d.drawing.view(top).unwrap();
+        let mut expected = before.0.view(top).unwrap().clone();
+        project::rescale_view(&mut expected, scale / project::view_scale(&before.0, top).unwrap());
+        assert!(view.geometry == expected.geometry, "transferred geometry must follow the effective scale");
+        assert!((view.geometry.bbox[2] - view.geometry.bbox[0] - 10.0 * scale).abs() < 1e-6);
+        assert_eq!(d.transforms[&top].scale, scale);
+        for circle in &d.circles[&top] {
+            let curve =
+                view.geometry.curves.iter().position(|c| c.source.kernel_hint == circle.entity.kernel_hint).unwrap();
+            let proposal = propose(view, &[Pick { view: top, curve, end: None }], &d.circles[&top]).unwrap();
+            assert_eq!(proposal.kind, DimensionKind::Diameter);
+            assert!((proposal.radius * 2.0 / scale - 10.0).abs() < 1e-6);
+            assert_eq!(circle.centre, d.transforms[&top].point(circle.model_centre));
+        }
+        d.undo().unwrap();
+        assert_eq!((&d.drawing, &d.transforms, &d.circles), (&before.0, &before.1, &before.2));
+        d.redo().unwrap();
+        assert_eq!((&d.drawing, &d.transforms, &d.circles), (&after.0, &after.1, &after.2));
+    }
+}
+
+#[test]
 fn a_section_frame_follows_undo_redo_and_a_new_history_branch() {
     let doc = part(ProfileKind::Rectangle { width: 40.0, height: 30.0 });
     let ctx = PartContext::new(&doc).unwrap();

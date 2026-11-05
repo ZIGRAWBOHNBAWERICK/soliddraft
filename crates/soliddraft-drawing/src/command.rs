@@ -683,6 +683,7 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     if from == to_sheet {
         return move_view(drawing, view, to);
     }
+    let before = scale_followers(drawing, view)?;
     let s = &mut drawing.sheets[from];
     let i = s.views.iter().position(|v| v.id == view).expect("found");
     let mut v = s.views.remove(i);
@@ -701,7 +702,7 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     let target = &mut drawing.sheets[to_sheet];
     target.views.push(v);
     target.annotations.extend(annotations);
-    Ok(())
+    rescale_changed(drawing, before)
 }
 
 /// Applies any command, reading the part for those that need it. Returns the update's
@@ -873,6 +874,13 @@ fn move_view(drawing: &mut Drawing, id: ViewId, to: Point2) -> Result<(), Drawin
 /// Changes a view's scale. Its line work and annotations, and those of children that use
 /// the parent's scale, scale about each view's origin.
 fn set_view_scale(drawing: &mut Drawing, id: ViewId, scale: ViewScale) -> Result<(), DrawingError> {
+    let before = scale_followers(drawing, id)?;
+    drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.scale = scale;
+    rescale_changed(drawing, before)
+}
+
+/// Captures the effective scales of a view and descendants that inherit its scale.
+fn scale_followers(drawing: &Drawing, id: ViewId) -> Result<Vec<(ViewId, f64)>, DrawingError> {
     let mut followers = vec![id];
     let mut i = 0;
     while i < followers.len() {
@@ -887,9 +895,11 @@ fn set_view_scale(drawing: &mut Drawing, id: ViewId, scale: ViewScale) -> Result
         followers.extend(children);
         i += 1;
     }
-    let before: Vec<f64> = followers.iter().map(|v| project::view_scale(drawing, *v)).collect::<Result<_, _>>()?;
-    drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.scale = scale;
-    for (v, old) in followers.into_iter().zip(before) {
+    followers.into_iter().map(|v| project::view_scale(drawing, v).map(|scale| (v, scale))).collect()
+}
+
+fn rescale_changed(drawing: &mut Drawing, before: Vec<(ViewId, f64)>) -> Result<(), DrawingError> {
+    for (v, old) in before {
         let ratio = project::view_scale(drawing, v)? / old;
         if (ratio - 1.0).abs() >= 1e-12 {
             rescale(drawing, v, ratio);

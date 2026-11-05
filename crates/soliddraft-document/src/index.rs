@@ -55,6 +55,8 @@ impl FolderIndex {
 
     /// Adds a folder (with its subfolders) or a single file to the index.
     pub fn add(&mut self, root: &Path) {
+        // A later add must discover files created since the previous walk.
+        self.directories.clear();
         if root.is_file() {
             self.add_file(root);
         } else {
@@ -149,6 +151,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn adding_a_folder_again_discovers_new_files() {
+        let root = std::env::temp_dir().join(format!("soliddraft-index-add-again-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut index = FolderIndex::new();
+        std::fs::write(root.join("first.dwprt"), b"unreadable").unwrap();
+        index.add(&root);
+        assert_eq!(index.unreadable().len(), 1);
+        std::fs::write(root.join("second.dwprt"), b"unreadable").unwrap();
+        index.add(&root);
+        assert_eq!(index.unreadable().len(), 2, "a completed walk must not suppress a later add");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_shallower_alias_still_discovers_descendants() {
         let root = std::env::temp_dir().join(format!("soliddraft-index-shallow-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -157,7 +174,7 @@ mod tests {
         let mut index = FolderIndex::new();
         index.walk(&root, MAX_DEPTH);
         assert!(index.unreadable().is_empty());
-        index.add(&root);
+        index.walk(&root, 0);
         assert_eq!(index.unreadable().len(), 1);
         std::fs::remove_dir_all(root).unwrap();
     }

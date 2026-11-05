@@ -1,0 +1,262 @@
+# Sketch feature inventory
+
+This is a planning inventory, not a parity claim. It compares public SOLIDWORKS Help with SolidDraft at `ea9d2b7b649553f29190d577df53a4537fe38c6b`. Descriptions are original summaries. No vendor prose, icons, screenshots or private material are included.
+
+## How to read the list
+
+- **SolidDraft** means an end-user command exists, not merely that the solver could express it. `yes` means the listed operation is implemented; `partial` names its limit; `no` names the inspected code boundary where support is absent. These are source-audit findings, not fresh interactive acceptance results.
+- **Makes sense** is a recommendation. `yes` rows are ordered by value for the current 2D sketch workflow, with relations first and trim second as requested. Already complete rows are retention checks, not requests to rebuild them. `later` needs another capability or a separate product decision. `no` is outside this work's scope, not a permanent rejection.
+- **Size** estimates the remaining change, including validation: `0` retain and regression-check; `S` local interaction or display change; `M` tool logic plus UI and tests; `L` solver/model or persistent-reference work across layers; `XL` a new geometry family or reusable-sketch model. These are relative scope, not time estimates. A group can contain several sizes.
+- Code links below point to the current implementation or, for missing features, the relevant enum, dispatcher or model. A missing command does not necessarily mean a new solver is needed.
+- Source labels link to public vendor help. Indexed editions differ, so each link keeps its actual edition. This is not an exhaustive certification of one SOLIDWORKS release. Geometry support in SolidDraft's sketch editor also does not imply that every downstream kernel operation accepts it.
+
+## Recommended work, in value order
+
+| Order | Capability and public source | What it does | SolidDraft, with code location | Makes sense | Size |
+|---|---|---|---|---|---|
+| 1 | Relations command [SW-rel] | Offers a discoverable list of relation types and applies a compatible choice to the selected geometry. | partial; the ribbon tile has no action in [commands]; selection-specific buttons already use `applicable_relations` in [relation-ui]. | yes | M |
+| 2 | Show/hide all relations [SW-rel-display] | Hides or reveals relation glyphs without removing constraints or hiding dimensions. | partial; [glyphs] already draws and picks glyphs, but [session] has no relation-visibility switch. | yes | S |
+| 3 | Existing relation inspection and deletion [SW-rel-manager] | Lists relations on selected geometry, highlights their owners and removes a chosen relation. | partial; [properties] selects and deletes constraints, but [sketch-paint] does not highlight their owning entities when a relation is selected. | yes | M |
+| 4 | Trim to closest [SW-trim-closest] | Removes the picked interval bounded by the closest intersections. | partial; [tool-model] `Trim` and `trim_preview` cover lines/arcs, with click input in [sketch-input]; circle targets and reported failures still need investigation. | yes | M |
+| 5 | Power trim [SW-power-trim] | Trims successive crossed entities while the user drags a pointer trail. | no; [sketch-input] handles trim only on a primary click, not a swept drag. | yes | L |
+| 6 | Extend while trimming [SW-power-extend] | Lengthens an entity along its natural path without leaving the trim workflow. | partial; [tool-model] has a separate `Extend` operation and [modify-ui] exposes a separate tool; no power-trim gesture. | yes | M |
+| 7 | Trim corner [SW-trim-corner] | Trims or extends two entities to their intersection. | no; [tool-model] has no paired corner operation. | yes | M |
+| 8 | Trim away inside [SW-trim-inside] | Removes portions between two chosen bounding entities. | no; [tool-model] has only a single picked interval. | yes | M |
+| 9 | Trim away outside [SW-trim-tools] | Removes portions outside two chosen bounding entities. | no; [tool-model] has no inside/outside boundary selection mode. | yes | M |
+| 10 | Keep trimmed pieces as construction [SW-trim-tools] | Retains removed portions as non-profile guides. | no; `Trim` in [tool-model] has no keep-construction option. | yes | M |
+| 11 | Ignore construction when trimming [SW-trim-tools] | Protects guide entities from removal during trim. | no; `Trim` in [tool-model] has no construction filter option. | yes | S |
+| 12 | Conflicting-relation feedback [SW-xpert] | Identifies relations or dimensions that cannot be satisfied together. | partial; [solver] records conflicting IDs, [entity-color] marks affected entities, and [properties] names conflicts; there is no dedicated conflict filter. | yes | M |
+| 13 | Fully/under-defined colouring [SW-defined] | Shows which entities still have freedom and which are constrained. | yes; [solver] computes free entities and [entity-color] uses theme colours for free, constrained and conflicting geometry. It does not copy vendor colours. | yes | 0 |
+| 14 | Fully defined/under-defined status [SW-defined] | Reports the sketch's constraint state while editing. | yes; `SolveStatus` in [sketch-model] and [properties] report the state. | yes | 0 |
+| 15 | Repair sketch diagnostics [SW-repair] | Locates gaps, overlaps and branching junctions before a sketch is used. | partial; [profiles] rejects open/branched profiles, but no repair inspector locates or steps through faults. | yes | L |
+| 16 | Check sketch for intended feature [SW-tools] | Tests whether geometry meets the requirements of the planned operation. | partial; [profiles] extracts closed regions and [properties] disables Extrude/Cut without a profile; no selectable feature-specific checker. | yes | M |
+| 17 | Driven/reference dimensions [SW-driven] | Measures geometry without adding a solver equation, and can switch to driving when valid. | no; numeric variants in [constraints] are driving only; `Constraint` stores no driven flag. | yes | L |
+| 18 | Smart dimension [SW-dim] | Chooses a dimension from the picked entities and label placement. | yes; `dimension_click` and `dimension_kind` in [dimensions] implement this for supported entities. | yes | 0 |
+| 19 | Horizontal and vertical dimensions [SW-dim] | Controls projected point separation along either sketch axis. | yes; [constraints] has `DistanceKind` and [dimensions] chooses the axis from label placement. | yes | 0 |
+| 20 | Aligned length and point-to-point dimensions [SW-dim] | Controls true distance between two points or a line's endpoints. | yes; `Distance` in [constraints] and [dimensions]. | yes | 0 |
+| 21 | Point-to-line and parallel-line distance [SW-dim] | Controls perpendicular separation from a point to a line. | yes; [dimensions] emits `PointLineDistance`, which [solver] solves. Edge cases still belong in acceptance tests. | yes | 0 |
+| 22 | Angular dimensions [SW-dim] | Controls the angle between two lines. | yes; `Angle` in [constraints], [dimensions] and [solver]. | yes | 0 |
+| 23 | Radius and diameter dimensions [SW-dim] | Controls arc radius or circle diameter. | yes; [dimensions] chooses radius for arcs and diameter for circles; [constraints] stores the diameter flag. | yes | 0 |
+| 24 | Edit and reposition dimension labels [SW-dim] | Changes a numeric value and moves its annotation without moving geometry unnecessarily. | yes; [selection-input] drags labels and [dimension-editor] edits values on double-click. | yes | 0 |
+| 25 | Equations and global values for sketch dimensions [SW-values] | Drives dimensions from named expressions shared with the document. | yes; `Input::Dimension` and bindings in [values], with sketch re-solve in [params] and editing in [values-ui]. | yes | 0 |
+| 26 | Linked dimension values [SW-linked] | Gives several dimensions the same shared value. | partial; [values] can bind dimensions to one named expression; there is no dedicated Link values command in [commands]. | yes | S |
+| 27 | Automatic relations switch [SW-snaps] | Enables or disables inferred relations while drawing. | yes; [guides] exposes Auto relations and suppresses inferred snaps when off. This is distinct from glyph visibility. | yes | 0 |
+| 28 | Endpoint, centre and origin snaps [SW-snaps] | Places new points on existing entity points. | yes; `infer` in [inference] scans entity points, including centres and the fixed origin, and `apply_snaps` adds coincidence. | yes | 0 |
+| 29 | Midpoint snap [SW-snaps] | Places a point at the middle of a line and keeps that relation. | yes; [inference] detects line midpoints and adds `Midpoint`. | yes | 0 |
+| 30 | On-entity snap [SW-snaps] | Places a new point on the nearest line, arc or circle. | yes; [inference] projects to curves and adds `PointOn`. | yes | 0 |
+| 31 | Horizontal/vertical inference [SW-snaps] | Aligns a new segment with the previous point and adds the corresponding relation. | yes; [inference] offers horizontal/vertical snaps and `apply_snaps` adds them for a new line. | yes | 0 |
+| 32 | Intersection snap [SW-snaps] | Offers the crossing of two curves as a snap target. | no; [inference] has no pairwise intersection candidates, although [tool-model] computes intersections for trim. | yes | M |
+| 33 | Tangent/perpendicular/parallel inference [SW-snaps] | Offers design-intent cues relative to existing geometry while drawing. | no; [inference] offers point, midpoint, axis alignment and on-entity snaps only. Manual relations already exist. | yes | M |
+| 34 | Quick snap filters [SW-quick-snaps] | Restricts the next placement to a chosen snap class. | no; [session] has a single auto-relations boolean, not per-class or one-shot snap choices. | yes | M |
+| 35 | Horizontal and vertical relations [SW-rel] | Aligns one line or a pair of points with a sketch axis. | yes; `Horizontal`/`Vertical` in [constraints] and [relation-ui]. | yes | 0 |
+| 36 | Parallel relation [SW-rel] | Keeps two lines parallel. | yes; `Parallel` in [constraints], [relation-ui] and [solver]. | yes | 0 |
+| 37 | Perpendicular relation [SW-rel] | Keeps two lines at a right angle. | yes; `Perpendicular` in [constraints], [relation-ui] and [solver]. | yes | 0 |
+| 38 | Coincident / merge points [SW-rel] | Makes two entity points share a location. | yes; `Coincident` in [constraints] and [relation-ui]. Points retain their entity ownership rather than sharing one stored vertex. | yes | 0 |
+| 39 | Point on line or curve [SW-rel] | Keeps a point on the supporting line or circular curve. | yes; `PointOn` in [constraints], exposed as On line / On curve in [relation-ui]. | yes | 0 |
+| 40 | Tangent relation [SW-rel] | Keeps a line and circular curve, or two circular curves, touching tangentially. | yes; [relation-ui] offers supported pairs and [solver] handles both shared-end and general tangency. No spline tangency claim. | yes | 0 |
+| 41 | Equal length / equal radius [SW-rel] | Matches two line lengths or two circular radii. | yes; `Equal` in [constraints] and [relation-ui]; [solver] distinguishes lengths from radii. | yes | 0 |
+| 42 | Concentric relation [SW-rel] | Makes circular entities share a centre. | yes; `Concentric` in [constraints] and [relation-ui]. | yes | 0 |
+| 43 | Midpoint relation [SW-rel] | Keeps a point halfway along a line. | yes; `Midpoint` in [constraints] and [relation-ui]. | yes | 0 |
+| 44 | Fix and release geometry [SW-rel] | Holds selected geometry in place until its fixing relation is removed. | partial; [relation-ui] fixes one selected point and [properties] can delete the relation; no whole-entity fix command. | yes | M |
+| 45 | Collinear relation [SW-rel] | Keeps two lines on the same infinite line. | no; [constraints] has no collinear kind, and [relation-ui] does not compose an equivalent set. | yes | M |
+| 46 | Symmetric relation [SW-rel] | Keeps paired geometry symmetric about a selected line. | no; [constraints] has no symmetry kind; mirror copies in [tool-model] are independent. | yes | L |
+| 47 | Coradial relation [SW-rel] | Gives circular curves both the same centre and the same radius. | partial; [constraints] can express `Concentric` plus `Equal`, but [relation-ui] has no single coradial choice. | yes | S |
+| 48 | Intersection relation [SW-rel] | Keeps a point at the intersection of two selected lines. | partial; two `PointOn` constraints can represent it in [constraints]; [relation-ui] has no three-item shortcut. | yes | S |
+| 49 | Relation list filters [SW-rel-manager] | Narrows relation inspection to selected, conflicting, dangling or external references. | partial; [properties] lists selected entities' relations and conflict names separately, without status filters or a whole-sketch list. | yes | M |
+| 50 | Sketch fillet [SW-fillet] | Inserts a tangent radius between sketch entities, adjusting their ends. | no; [tool-model] has no sketch fillet. Solid-body fillets are a different operation and are not included here. | yes | L |
+| 51 | Sketch chamfer [SW-chamfer] | Replaces a corner with a straight segment set by distances or distance/angle. | no; [tool-model] has no sketch chamfer. | yes | M |
+| 52 | Split entities [SW-tools] | Divides a curve at a selected point without trimming away an interval. | no; [tool-model] has no split operation exposed to users. | yes | M |
+| 53 | Extend entities [SW-tools] | Lengthens a chosen line or arc end to a boundary. | yes; [tool-model] `Extend`/`extend_boundary`, [modify-ui] and [sketch-input]. | yes | 0 |
+| 54 | Offset entities [SW-offset] | Makes a parallel curve or chain at a signed distance. | partial; [tool-model] accepts an ordered connected line/arc chain or a lone circle, producing independent copies rather than an associative offset. | yes | L |
+| 55 | Offset chain selection [SW-offset] | Finds connected curves from a seed so the user need not pick them in walking order. | no; [modify-ui] explicitly requires ordered selection. | yes | M |
+| 56 | Reverse / bidirectional offset [SW-offset] | Chooses the side or offsets both sides of a seed. | partial; [modify-ui] accepts signed distance, but [tool-model] has no both-sides operation. | yes | M |
+| 57 | Offset end caps [SW-offset] | Joins the ends of open offset chains with lines or arcs. | no; [tool-model] `Offset` has no cap setting. | yes | M |
+| 58 | Mirror existing entities [SW-mirror] | Copies a selection across a line while preserving symmetric design intent. | partial; [tool-model] reflects copies about two axis points, but stores no symmetry relation or link to a picked axis entity. | yes | L |
+| 59 | Dynamic mirror [SW-mirror] | Mirrors newly drawn entities as the user sketches. | no; [session] and [sketch-input] have no dynamic-mirror mode. Requires persistent symmetry, not just duplicate geometry. | yes | L |
+| 60 | Linear sketch pattern [SW-linear-pattern] | Repeats sketch entities with controlled spacing and count. | partial; [tool-model] creates independent translations in one direction; [modify-ui] supplies step and count. | yes | L |
+| 61 | Two-direction linear pattern [SW-linear-pattern] | Adds a second spacing/count direction to make an array. | no; `LinearPattern` in [tool-model] stores one step and one count. | yes | M |
+| 62 | Circular sketch pattern [SW-circular-pattern] | Repeats entities about a centre with angular spacing and count. | partial; [tool-model] creates independent rotations; [modify-ui] sets centre, angle per step and count, not a persistent pattern definition. | yes | L |
+| 63 | Pattern total-angle/equal-spacing mode [SW-circular-pattern] | Distributes a count of instances across a chosen angular span. | partial; [modify-ui] accepts an angle per step only; the user can calculate it, but there is no total-span control. | yes | S |
+| 64 | Skip sketch-pattern instances [SW-circular-pattern] | Omits chosen instances without destroying the pattern definition. | no; pattern operations in [tool-model] have no skipped-instance list or editable definition. | yes | L |
+| 65 | Move selected geometry [SW-move] | Translates a selection while respecting its constraints. | partial; [selection-input] supports entity/point dragging, not a numeric multi-entity Move command. | yes | M |
+| 66 | Copy selected geometry [SW-move] | Duplicates a selection using a base point and displacement. | partial; a two-instance linear pattern in [tool-model] produces a translated copy; no dedicated Copy interaction. | yes | M |
+| 67 | Rotate selected geometry [SW-move] | Rotates or copies a selection about a chosen point. | partial; a two-instance circular pattern in [tool-model] can copy a rotation; no in-place Rotate command. | yes | M |
+| 68 | Scale selected geometry [SW-scale] | Resizes selected entities about a base point. | no; [tool-model] has no scale operation. Must define how driving dimensions constrain or reject the transform. | yes | M |
+| 69 | Construction geometry [SW-tools] | Excludes guides from profiles while retaining their constraints. | yes; `Entity::construction` in [sketch-model], dashed rendering in [sketch-paint], `X` in [commands], exclusion in [profiles]. | yes | 0 |
+| 70 | Dedicated centreline command [SW-tools] | Starts a construction line without changing ordinary line drawing mode. | partial; construction lines are possible through [commands] and [session], but no dedicated centreline tool. | yes | S |
+| 71 | Line chains [SW-entities-overview] | Draws successive connected segments and ends a chain without leaving the tool. | yes; `Tool::Line` in [entity-input] connects segments and ends on double-click or an existing point. | yes | 0 |
+| 72 | Corner rectangle [SW-rect] | Makes an axis-aligned four-line rectangle from opposite corners. | yes; `Tool::Rectangle` in [entity-input] adds coincidence and horizontal/vertical relations. | yes | 0 |
+| 73 | Centre rectangle [SW-rect] | Makes a rectangle around a picked centre. | no; [entity-input] has only the opposite-corner rectangle path. | yes | M |
+| 74 | Three-point corner/centre rectangles [SW-rect] | Places a rotated rectangle from a side or centre reference. | no; [entity-input] has no rotated rectangle variant. | yes | M |
+| 75 | Parallelogram [SW-rect] | Draws a skew four-sided figure with opposite sides parallel. | no; [entity-input] has no parallelogram tool. | yes | M |
+| 76 | Centrepoint circle [SW-circles] | Creates a circle from centre and radius. | yes; `Tool::Circle` in [entity-input]. | yes | 0 |
+| 77 | Perimeter circle [SW-circles] | Fits a circle through three picked points. | no; [entity-input] creates circles only from centre and radius. | yes | M |
+| 78 | Centrepoint arc [SW-arcs] | Creates an arc from centre, start and end. | partial; [entity-input] uses those picks but chooses the shorter sweep, so it is not a general major-arc interaction. | yes | M |
+| 79 | Three-point arc [SW-arcs] | Creates an arc through start, end and an intermediate point. | no; [entity-input] has only a centre-first arc path. | yes | M |
+| 80 | Tangent arc [SW-arcs] | Continues a line or arc with a tangent arc. | no; [entity-input] has no tangent-arc creation mode; a manual tangent relation can be added later. | yes | M |
+| 81 | Straight slot [SW-slots] | Creates two parallel sides and equal-radius tangent ends. | yes; `Tool::Slot` in [entity-input] creates lines, arcs, a construction axis and their relations. | yes | 0 |
+| 82 | Centrepoint straight slot [SW-slots] | Defines a straight slot symmetrically from its midpoint. | no; [entity-input] takes the two end centres and width instead. | yes | M |
+| 83 | Three-point / centrepoint arc slots [SW-slots] | Makes a constant-width slot along a circular path. | no; [entity-input] has no curved-slot path. | yes | L |
+| 84 | Regular polygon [SW-polygon] | Creates a chosen number of sides about a centre. | partial; [tool-model] and [modify-ui] create a regular polygon from a vertex, but do not retain a parametric polygon object or inscribed/circumscribed mode. | yes | M |
+| 85 | Sketch point [SW-entities-overview] | Adds a reference or construction point for relations and dimensions. | yes; `Tool::Point` in [entity-input], with point relations in [relation-ui]. | yes | 0 |
+| 86 | Closed-contour shading [SW-shading] | Fills closed regions so missing closure is easier to notice. | partial; `paint_regions` in [sketch-paint] fills valid regions, but [session] has no shading toggle. | yes | S |
+| 87 | Show/hide sketch dimensions [SW-dim] | Reduces annotation clutter without deleting driving values. | partial; [sketch-input] always paints active-sketch dimensions; closed-sketch display has a separate path in [closed-dimensions]. | yes | S |
+| 88 | Show/hide sketches outside edit mode [SW-tools] | Controls reference geometry visibility independently of editing. | yes; [tree-visibility] handles sketch visibility and [passive-paint] draws passive geometry. | yes | 0 |
+| 89 | Grid display and settings [SW-snaps] | Shows a spacing reference in the sketch workspace. | yes; [grid-settings] persists grid style and [grid-paint] draws the viewport grid. This does not imply snap-to-grid. | yes | 0 |
+| 90 | Grid snapping [SW-snaps] | Places geometry at grid increments rather than only using the grid as a visual aid. | no; [inference] does not consult grid spacing. | yes | M |
+
+## Useful later, with dependencies
+
+These rows are deliberately outside the first relations and trim groups. Their order is not a delivery commitment.
+
+| ID | Capability and public source | What it does | SolidDraft, with code location | Makes sense | Size |
+|---|---|---|---|---|---|
+| L1 | Fully define sketch automatically [SW-fully-define] | Adds dimensions and relations to remove remaining freedoms. | no; [solver] analyses freedom but does not author a defining constraint set. Requires predictable dimension placement and conflict handling. | later | L |
+| L2 | SketchXpert-style solution choices [SW-xpert] | Proposes alternative conflicting relations to remove rather than deciding silently. | partial; [solver] supplies unsatisfied IDs and [properties] supports manual deletion, not solution-set search. | later | L |
+| L3 | Automatic repair [SW-repair] | Merges overlaps or closes small gaps within a user-chosen tolerance. | no; [profiles] validates but does not offer a previewable repair command. Diagnostics should come first; never silently change geometry. | later | L |
+| L4 | Suppress relations by configuration [SW-rel-manager] | Disables selected relations in specific configurations without deleting them. | no; `Constraint` in [constraints] has no suppression state. Document configurations are not per-constraint suppression. | later | L |
+| L5 | Equal slots [SW-rel] | Keeps slot lengths and widths equal as slot geometry changes. | partial; [entity-input] makes a slot from ordinary entities, but [sketch-model] stores no slot identity or equal-slot relation. | later | L |
+| L6 | Doubled-distance relation [SW-rel] | Expresses symmetric spacing relative to a centreline. | no; [constraints] lacks this kind. Needs a clear selection contract and dimension semantics. | later | L |
+| L7 | Arc-length dimension [SW-arc-dim] | Controls length along a circular arc rather than its chord or radius. | no; [constraints] has no arc-length or sweep-angle dimension. | later | L |
+| L8 | Path-length dimension [SW-path-dim] | Controls total length along a connected curve chain. | no; [constraints] has no aggregate-chain dimension. Requires persistent chain references. | later | L |
+| L9 | Ordinate sketch dimensions [SW-dim] | Dimensions several points from a shared zero reference. | no; [constraints] stores pairwise distances, not an ordinate set; drawing dimensions are separate. | later | L |
+| L10 | Stretch entities [SW-stretch] | Moves selected portions of geometry while leaving other portions anchored. | partial; point dragging in [selection-input] allows some edits, but [tool-model] has no window-based stretch operation. | later | M |
+| L11 | Convert entities [SW-convert] | Projects selected model edges or contours into a sketch with source associations. | no; [tool-model] and [sketch-model] have no associative projected-curve entity. A face-attached sketch plane is not converted geometry. | later | L |
+| L12 | On edge external relation [SW-convert] | Updates converted geometry when its source model edge changes. | no; [constraints] has only intra-sketch entity IDs, not external edge references. | later | L |
+| L13 | Intersection curve [SW-intersection] | Builds sketch curves where a plane or surface crosses model geometry. | no; [tool-model] has no body/plane intersection command. Needs supported kernel curves, outside this implementation scope. | later | XL |
+| L14 | Silhouette entities [SW-silhouette] | Projects a body's outline onto the sketch plane. | no; [tool-model] has no silhouette-to-sketch command. Drawing silhouettes do not supply an associative sketch. | later | XL |
+| L15 | Derived sketch and underive [SW-derived] | Reuses a linked parent sketch on another plane, with an explicit way to break the link. | no; [feature-model] `SketchFeature` stores its own sketch, not a parent-sketch derivation. | later | XL |
+| L16 | Make/edit sketch block [SW-blocks] | Groups reusable entities under one local definition and coordinate frame. | no; [sketch-model] stores flat entities and constraints, not block definitions. | later | XL |
+| L17 | Insert/save linked blocks [SW-blocks] | Places scaled/rotated instances of a stored definition and updates them together. | no; [sketch-model] has no block instances or definition links. Needs file/version and external-reference rules. | later | XL |
+| L18 | Explode block [SW-blocks] | Turns one instance into ordinary editable entities. | no; [tool-model] has no blocks to explode. Preserve unrelated instances and constraints when added. | later | M |
+| L19 | Ellipse and partial ellipse [SW-entities-overview] | Creates full or partial elliptical curves. | no; [entities] supports points, lines, circular arcs and circles only. Requires downstream profile support too. | later | XL |
+| L20 | Parabola and conic [SW-conic] | Creates non-circular conics with endpoint/tangency or shape controls. | no; [entities] has no conic kind. | later | XL |
+| L21 | Interpolating spline [SW-splines] | Fits a smooth curve through picked points with end controls. | no; [entities] and [solver] have no spline entity/datum. | later | XL |
+| L22 | Style spline [SW-style-spline] | Shapes a spline using a control polygon rather than interpolation points. | no; [entities] has no control-point curve representation. | later | XL |
+| L23 | Equal curvature relation [SW-rel] | Matches curvature and tangent direction at a curve join. | no; [constraints] has no curvature relation and [entities] has no splines. | later | L |
+| L24 | Spline handles and curvature display [SW-splines] | Edits tangent/curvature handles and shows curvature variation. | no; [sketch-paint] has no spline handle or curvature-comb display. | later | L |
+| L25 | Fit spline [SW-fit-spline] | Replaces a selected chain with one spline within a chosen tolerance. | no; [tool-model] and [entities] have no spline fitting or spline output. | later | XL |
+| L26 | Equation-driven curve [SW-equation-curve] | Creates a curve from explicit or parametric equations over a chosen interval. | no; [entities] has no equation-curve representation; scalar expressions in [values] are not curves. | later | XL |
+| L27 | Sketch text [SW-text] | Makes font outlines usable as sketch profiles, including text along a path. | no; [entities] has no text or outline-conversion entity. Font rendering in the UI is not sketch text. | later | XL |
+| L28 | Sketch picture underlay [SW-picture] | Places a scaled, positioned image behind sketch geometry. | no; [session] and [sketch-paint] have no sketch image object or underlay. | later | L |
+| L29 | Raster autotrace [SW-picture] | Converts image boundaries into editable curves for review. | no; [tool-model] has no tracing operation. Requires picture calibration and supported output curves first. | later | XL |
+
+## Recorded but outside this work
+
+| ID | Capability and public source | What it does | SolidDraft, with code location | Makes sense | Size |
+|---|---|---|---|---|---|
+| N1 | 3D sketch entities and planes [SW-tools] | Places sketch geometry in space rather than in one planar coordinate system. | no; [entities] uses `P2` and [feature-model] attaches each sketch to one plane. | no; separate 3D sketch project | XL |
+| N2 | Along X/Y/Z, parallel YZ/ZX and normal relations [SW-rel] | Constrains directions relative to 3D axes or planes. | no; [constraints] supports two in-plane axes only. | no; 3D relations | XL |
+| N3 | Pierce / on surface / on plane relations [SW-rel] | Connects sketch points to out-of-plane curves or supporting geometry. | no; [constraints] has no external spatial curve/surface targets. | no; spatial reference work | XL |
+| N4 | Spline on surface [SW-surface-spline] | Keeps a spline attached to a selected model surface. | no; [entities] has neither spatial splines nor surface-bound points. | no; kernel and 3D work | XL |
+| N5 | 3D sketch dimensions [SW-dim] | Drives distances and angles for spatial sketch entities. | no; [constraints] and [dimensions] operate in a 2D sketch plane. | no; explicitly excluded | XL |
+
+## Delivery groups and acceptance evidence
+
+1. **Relations, orders 1-3.** Reuse `ConstraintKind` from `soliddraft-sketch`, `applicable_relations`, the property-panel mutation path and existing glyph painters. The requested ribbon button must list every currently supported non-dimensional relation type, keep incompatible choices visible with a reason, and apply a valid choice to the selection as one undo step. Horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, coincident, point-on, midpoint and fix already have representations. Collinear and symmetry are backlog items, not solver capabilities to pretend exist. Show/hide must affect both painting and picking, leave dimension labels alone, retain constraints, and remain stable across selection changes and redraws. Keep the existing ribbon/panel style.
+2. **Trim, orders 4-11.** Start by driving the real pointer workflow, recording the reported failures as concrete inputs. Neither this audit nor the existing tests proves those failures reproduced. For each observed failure, add a failing regression before changing the shared operation. Compare power-trim and trim-to-closest behavior against the public descriptions. Cover lines/arcs/circles, zero/one/two crossings, tangent and coincident boundaries, endpoint clicks, arc wrap, construction geometry, stale constraints, cancellation, undo/redo and save/reopen. Power-trim should detect entities crossed between pointer samples, not just those underneath a sampled pointer position. A drag should be one undo step. A refusal must leave the sketch unchanged.
+3. **Remaining yes rows.** Work in value order, skip already complete capabilities, and keep each coherent group in its own PR from accepted main. Diagnostics precede automatic repair; persistent symmetry precedes dynamic mirror; persistent pattern definitions precede skipped-instance editing. Keep CI green before proceeding. Do not fold kernel work, 3D dimensions or a panel redesign into these groups.
+
+Existing evidence to extend, not a substitute for new acceptance runs:
+
+- [Sketch tests] cover relation families, dimension side retention, free/fixed points, inconsistent constraints, profile closure and serialization.
+- [Tool tests] cover line/arc interval trim, bounded extension, offset, reflection, patterns, rejected operations and serialization. Trim tests currently demonstrate picked-interval behavior, not power trim.
+- [Modify UI tests] drive polygon, trim, extend, preview, undo and reopen through the app.
+- [Copy UI tests] drive offset, mirror and patterns through the app.
+- [Sketch pattern model tests] check model-level pattern behavior.
+
+This first change is documentation only. It does not reproduce or fix trim, enable the Relations tile, or certify interactive parity.
+
+## Public references
+
+Only the public help pages below inform the SOLIDWORKS side. Search-index excerpts were used where the publisher blocked direct HTML retrieval. Edition-specific details and unsupported selection combinations must be checked again when each tool is implemented.
+
+[SW-rel]: https://help.solidworks.com/2018/english/Solidworks/sldworks/c_Description_of_Sketch_Relations.htm
+[SW-rel-display]: https://help.solidworks.com/2027/english/SolidWorks/sldworks/c_areas_reliant_sketch_relations.htm
+[SW-rel-manager]: https://help.solidworks.com/2013/english/Solidworks/sldworks/HIDD_DVE_SK_EDIT_RELATIONS.htm
+[SW-tools]: https://help.solidworks.com/2021/english/solidworks/sldworks/c_sketch_tools_top.htm
+[SW-entities-overview]: https://help.solidworks.com/2027/english/SolidWorks/acadhelp/t_moving2d3d_sketching_overview.htm
+[SW-circles]: https://help.solidworks.com/2026/English/SolidWorks/sldworks/c_Circles.htm
+[SW-arcs]: https://help.solidworks.com/2024/English/SolidWorks/sldworks/c_Arcs.htm
+[SW-slots]: https://help.solidworks.com/2020/english/SWConnected/swdotworks/c_slots.htm?id=23.14.19
+[SW-polygon]: https://help.solidworks.com/2021/english/solidworks/sldworks/t_Sketching_Polygons.htm
+[SW-splines]: https://help.solidworks.com/2026/english/solidworks/sldworks/c_splines.htm
+[SW-equation-curve]: https://help.solidworks.com/2022/english/solidworks/sldworks/c_equation_driven_curves.htm
+[SW-text]: https://help.solidworks.com/2016/english/solidworks/sldworks/hidd_dve_sketch_text.htm
+[SW-power-trim]: https://help.solidworks.com/2025/english/solidworks/sldworks/t_Trimming_with_Power_Trim.htm
+[SW-power-extend]: https://help.solidworks.com/2026/english/solidworks/sldworks/t_Extending_with_Power_Trim.htm
+[SW-trim-closest]: https://help.solidworks.com/2023/English/solidworks/sldworks/t_Trimming_with_Trim_to_Closest.htm
+[SW-trim-corner]: https://help.solidworks.com/2022/english/SolidWorks/Sldworks/t_Trimming_with_Corner.htm
+[SW-trim-inside]: https://help.solidworks.com/2026/english/solidworks/sldworks/t_Trimming_with_Trim_Away_Inside.htm
+[SW-trim-tools]: https://help.solidworks.com/2026/English/api/swconst/ToolsSketchToolsTrim.htm
+[SW-fillet]: https://help.solidworks.com/2025/English/api/sldworksapi/SOLIDWORKS.Interop.sldworks~SOLIDWORKS.Interop.sldworks.ISketchManager~CreateFillet.html
+[SW-chamfer]: https://help.solidworks.com/2024/English/SolidWorks/sldworks/c_Sketch_Chamfers.htm
+[SW-offset]: https://help.solidworks.com/2025/english/solidworks/sldworks/c_Offset_Entities.htm
+[SW-mirror]: https://help.solidworks.com/2021/english/solidworks/sldworks/c_Mirror_Entities.htm
+[SW-linear-pattern]: https://help.solidworks.com/2023/English/SolidWorks/sldworks/hidd_dve_sketch_pattern_linear.htm
+[SW-circular-pattern]: https://help.solidworks.com/2014/english/solidworks/Sldworks/HIDD_DVE_SKETCH_PATTERN_CIRCULAR.htm
+[SW-move]: https://help.solidworks.com/2024/English/SolidWorks/sldworks/t_Moving_or_Copying_Sketch_Entities.htm
+[SW-scale]: https://help.solidworks.com/2023/english/SolidWorks/sldworks/r_Scale_PropertyManager.htm
+[SW-stretch]: https://help.solidworks.com/2013/english/solidworks/sldworks/r_Stretch_PropertyManager.htm
+[SW-snaps]: https://help.solidworks.com/2019/english/SolidWorks/sldworks/c_sketch_snaps.htm
+[SW-quick-snaps]: https://help.solidworks.com/2026/English/SolidWorks/sldworks/c_Quick_Snaps.htm
+[SW-dim]: https://help.solidworks.com/2026/english/SolidWorks/sldworks/t_Dimensioning_a_2D_Sketch.htm
+[SW-driven]: https://help.solidworks.com/2014/english/solidworks/Sldworks/HIDD_MAKE_DRIVEN.htm
+[SW-arc-dim]: https://help.solidworks.com/2026/english/solidworks/sldworks/t_creating_arc_dimensions.htm
+[SW-path-dim]: https://help.solidworks.com/2020/English/solidworks/sldworks/t_create_path_length_dimensions.htm
+[SW-values]: https://help.solidworks.com/2019/english/SolidWorks/sldworks/t_link_dimensions_use_global_variables.htm
+[SW-linked]: https://help.solidworks.com/2027/english/SolidWorks/sldworks/c_shared_values.htm
+[SW-defined]: https://help.solidworks.com/2024/English/SolidWorks/sldworks/c_Fully_Defined_Sketches.htm
+[SW-fully-define]: https://help.solidworks.com/2023/English/solidworks/sldworks/HIDD_FULLY_DEFINE_SKETCH.htm
+[SW-repair]: https://help.solidworks.com/2021/english/solidworks/sldworks/HIDD_SKETCH_GEOM_DIAGNOSTICS_impexp.htm
+[SW-xpert]: https://help.solidworks.com/2025/english/solidworks/sldworks/HIDD_DVE_SKETCH_XPERT.htm
+[SW-rect]: https://help.solidworks.com/2023/English/solidworks/sldworks/c_Rectangles.htm
+[SW-shading]: https://help.solidworks.com/2024/English/SolidWorks/sldworks/c_Shaded_Sketch_Contour.htm
+[SW-convert]: https://help.solidworks.com/2022/english/solidworks/sldworks/c_Convert_Entities.htm
+[SW-intersection]: https://help.solidworks.com/2018/english/Solidworks/sldworks/c_Intersection_Curves.htm
+[SW-silhouette]: https://help.solidworks.com/2025/english/solidworks/sldworks/c_silhouette_entities.htm
+[SW-derived]: https://help.solidworks.com/2018/english/solidworks/sldworks/c_derived_sketches.htm
+[SW-blocks]: https://help.solidworks.com/2025/english/solidworks/sldworks/c_Blocks_in_Parts_and_Assemblies.htm
+[SW-conic]: https://help.solidworks.com/2025/english/solidworks/sldworks/t_Sketching_Conics.htm
+[SW-style-spline]: https://help.solidworks.com/2021/english/SolidWorks/sldworks/hidd_styled_curves.htm
+[SW-fit-spline]: https://help.solidworks.com/2019/english/SolidWorks/sldworks/c_fit_splines.htm
+[SW-surface-spline]: https://help.solidworks.com/2025/english/solidworks/sldworks/c_Splines_on_Surfaces.htm
+[SW-picture]: https://help.solidworks.com/2025/english/solidworks/sldworks/r_sketch_picture_pm.htm
+
+## SolidDraft code and test references
+
+[commands]: ../crates/soliddraft-app/src/commands.rs#L1465-L1581
+[session]: ../crates/soliddraft-app/src/state.rs#L538-L618
+[relation-ui]: ../crates/soliddraft-app/src/sketcher.rs#L1840-L1895
+[properties]: ../crates/soliddraft-app/src/properties.rs#L1030-L1335
+[constraints]: ../crates/soliddraft-sketch/src/lib.rs#L373-L526
+[entities]: ../crates/soliddraft-sketch/src/lib.rs#L131-L160
+[sketch-model]: ../crates/soliddraft-sketch/src/lib.rs
+[solver]: ../crates/soliddraft-sketch/src/solve.rs
+[glyphs]: ../crates/soliddraft-app/src/sketcher.rs#L1096-L1220
+[sketch-input]: ../crates/soliddraft-app/src/sketcher.rs#L249-L372
+[selection-input]: ../crates/soliddraft-app/src/sketcher.rs#L492-L590
+[entity-input]: ../crates/soliddraft-app/src/sketcher.rs#L635-L822
+[inference]: ../crates/soliddraft-app/src/sketcher.rs#L137-L241
+[dimensions]: ../crates/soliddraft-app/src/sketcher.rs#L825-L950
+[closed-dimensions]: ../crates/soliddraft-app/src/sketcher.rs#L1436-L1468
+[dimension-editor]: ../crates/soliddraft-app/src/sketcher.rs#L1673-L1752
+[entity-color]: ../crates/soliddraft-app/src/sketcher.rs#L953-L968
+[sketch-paint]: ../crates/soliddraft-app/src/sketcher.rs#L970-L1094
+[passive-paint]: ../crates/soliddraft-app/src/sketcher.rs#L1813-L1837
+[tool-model]: ../crates/soliddraft-sketch/src/tools.rs
+[modify-ui]: ../crates/soliddraft-app/src/sketch_tools.rs#L121-L193
+[profiles]: ../crates/soliddraft-sketch/src/profile.rs
+[guides]: ../crates/soliddraft-app/src/measure/guides.rs
+[values]: ../crates/soliddraft-model/src/values.rs
+[params]: ../crates/soliddraft-model/src/params.rs#L181-L191
+[values-ui]: ../crates/soliddraft-app/src/values_tab.rs
+[feature-model]: ../crates/soliddraft-model/src/feature.rs
+[tree-visibility]: ../crates/soliddraft-app/src/tree_visibility.rs
+[grid-settings]: ../crates/soliddraft-app/src/settings/mod.rs
+[grid-paint]: ../crates/soliddraft-app/src/viewport/grid.rs
+[Sketch tests]: ../crates/soliddraft-sketch/src/tests.rs
+[Tool tests]: ../crates/soliddraft-sketch/src/tools_tests.rs
+[Modify UI tests]: ../crates/soliddraft-app/tests/ux_sketch_modify.rs
+[Copy UI tests]: ../crates/soliddraft-app/tests/ux_sketch_copy.rs
+[Sketch pattern model tests]: ../crates/soliddraft-model/tests/sketch_pattern.rs

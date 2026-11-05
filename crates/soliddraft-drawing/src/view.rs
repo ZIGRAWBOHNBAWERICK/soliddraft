@@ -81,9 +81,12 @@ pub enum ViewKind {
     Projected {
         /// The view it is folded from.
         parent: ViewId,
-        /// Which side of the parent it sits on. The sheet's projection angle decides
-        /// which face of the model that side shows.
+        /// Which side of the parent it sits on.
         direction: FoldDirection,
+        /// The projection angle at placement. Older files inherit the sheet's angle
+        /// until it changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projection: Option<crate::Projection>,
     },
     /// A section through a parent view along a cutting line.
     ///

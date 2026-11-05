@@ -192,6 +192,143 @@ fn views_move_along_their_alignment_and_rescale_with_their_parent() {
 }
 
 #[test]
+fn changing_projection_preserves_existing_views_through_rebuild_and_reopen() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
+    // Files saved before per-view projection angles inherit their sheet's angle.
+    for v in &mut d.sheets[0].views {
+        if let ViewKind::Projected { projection, .. } = &mut v.kind {
+            *projection = None;
+        }
+    }
+    let before = d.clone();
+    let specs: Vec<_> =
+        d.sheets[0].views.iter().map(|v| soliddraft_drawing::project::spec_of(&d.sheets[0], v)).collect();
+    let labels: Vec<_> =
+        d.sheets[0].views.iter().map(|v| soliddraft_drawing::project::view_label(&d.sheets[0], v)).collect();
+    let mut stack = UndoStack::new();
+    stack.run(&mut d, &Command::SetSheetProjection { sheet: 0, projection: Projection::ThirdAngle }, None).unwrap();
+    for (i, v) in d.sheets[0].views.iter().enumerate() {
+        assert_eq!(soliddraft_drawing::project::spec_of(&d.sheets[0], v), specs[i]);
+        assert_eq!(soliddraft_drawing::project::view_label(&d.sheets[0], v), labels[i]);
+    }
+    let mut placed = d.view(ViewId(3)).unwrap().clone();
+    placed.id = d.next_view_id();
+    if let ViewKind::Projected { projection, .. } = &mut placed.kind {
+        *projection = None;
+    }
+    assert_eq!(soliddraft_drawing::project::view_label(&d.sheets[0], &placed), "Right view");
+    let mut with_new = d.clone();
+    apply(&mut with_new, &Command::PlaceView { sheet: 0, view: placed.clone() }).unwrap();
+    assert!(matches!(
+        with_new.view(placed.id).unwrap().kind,
+        ViewKind::Projected { projection: Some(Projection::ThirdAngle), .. }
+    ));
+    let changed = d.clone();
+    stack.undo(&mut d);
+    assert_eq!(d, before);
+    stack.redo(&mut d);
+    assert_eq!(d, changed);
+    let bytes = file::to_bytes(&d, &FileMeta::new("boxes test", d.meta.units)).unwrap();
+    let (mut d, _) = file::from_bytes(&bytes).unwrap();
+    let thicker = box_part(&k, "block", Vec3::new(40.0, 30.0, 12.0));
+    update_from_model(&mut d, &thicker).unwrap();
+    for (i, v) in d.sheets[0].views.iter().enumerate() {
+        assert_eq!(soliddraft_drawing::project::spec_of(&d.sheets[0], v), specs[i]);
+    }
+}
+
+#[test]
+fn an_excluded_parent_keeps_its_annotations_when_an_included_child_updates() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
+    let front = ViewId(1);
+    apply(&mut d, &Command::SetViewExcluded { view: front, excluded: true }).unwrap();
+    let before = d.clone();
+    let annotations: Vec<_> = d.sheets[0].annotations.iter().filter(|a| a.view == front).cloned().collect();
+    assert!(!annotations.is_empty());
+    let thicker = box_part(&k, "block", Vec3::new(40.0, 30.0, 12.0));
+    let mut stack = UndoStack::new();
+    let report = stack.run(&mut d, &Command::UpdateFromModel, Some(&thicker)).unwrap().unwrap();
+    assert!(report.views_updated > 0, "included children still update");
+    assert_eq!(d.view(front).unwrap().geometry, before.view(front).unwrap().geometry);
+    assert_eq!(d.sheets[0].annotations.iter().filter(|a| a.view == front).cloned().collect::<Vec<_>>(), annotations);
+    let after = d.clone();
+    stack.undo(&mut d);
+    assert_eq!(d, before);
+    stack.redo(&mut d);
+    assert_eq!(d, after);
+    let bytes = file::to_bytes(&d, &FileMeta::new("boxes test", d.meta.units)).unwrap();
+    assert_eq!(file::from_bytes(&bytes).unwrap().0, after);
+    apply(&mut d, &Command::SetViewExcluded { view: front, excluded: false }).unwrap();
+    assert_eq!(update_from_model(&mut d, &thicker).unwrap().changed.len(), 1);
+}
+
+#[test]
+fn round_dimension_repairs_reject_straight_edges_without_losing_the_warning() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    for kind in [soliddraft_drawing::DimensionKind::Diameter, soliddraft_drawing::DimensionKind::Radius] {
+        let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
+        let a = &mut d.sheets[0].annotations[0];
+        a.body = AnnotationKind::Dimension(soliddraft_drawing::Dimension::measured(kind, 10.0, 0));
+        a.anchors.truncate(1);
+        let target = a.anchors[0].entity.clone();
+        a.anchors[0].entity.feature = "deleted_hole".into();
+        a.state = AnnotationState::Dangling { lost: vec![0], cause: "hole was deleted".into() };
+        let id = a.id;
+        let before = d.clone();
+        let result = soliddraft_drawing::apply_with(
+            &mut d,
+            &Command::Reattach { annotation: id, end: 0, entity: target.clone() },
+            &part,
+        );
+        assert!(result.is_err(), "{kind:?} must not attach to a straight edge");
+        assert_eq!(d, before, "a failed repair keeps its recoverable state");
+        update_from_model(&mut d, &part).unwrap();
+        assert!(matches!(d.annotation(id).unwrap().state, AnnotationState::Dangling { .. }));
+        // A saved incompatible reference must not become healthy on an ordinary update either.
+        d.annotation_mut(id).unwrap().anchors[0].entity = target;
+        update_from_model(&mut d, &part).unwrap();
+        assert!(matches!(d.annotation(id).unwrap().state, AnnotationState::Dangling { .. }));
+        let bytes = file::to_bytes(&d, &FileMeta::new("boxes test", d.meta.units)).unwrap();
+        assert_eq!(file::from_bytes(&bytes).unwrap().0, d);
+    }
+}
+
+#[test]
+fn scaled_dxf_dimensions_remeasure_from_their_definition_points() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
+    let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
+    apply(&mut d, &Command::SetSheetScale { sheet: 0, scale: Scale::new(1, 2) }).unwrap();
+    let list = layout_sheet(&d, 0);
+    let bytes = export::dxf(&list).unwrap();
+    let back = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
+    let mut count = 0;
+    for e in back.entities() {
+        if let dxf::entities::EntityType::RotatedDimension(dim) = &e.specific {
+            let base = &dim.dimension_base;
+            let style = back.dim_styles().find(|s| s.name == base.dimension_style_name).unwrap();
+            let angle = dim.rotation_angle.to_radians();
+            let measurement = ((dim.definition_point_3.x - dim.definition_point_2.x) * angle.cos()
+                + (dim.definition_point_3.y - dim.definition_point_2.y) * angle.sin())
+            .abs();
+            assert!((base.actual_measurement - measurement).abs() < 1e-6);
+            assert!(
+                (measurement * style.dimension_linear_measurement_scale_factor - list.dimensions[count].value).abs()
+                    < 1e-6
+            );
+            assert!(base.text.is_empty() || base.text.contains("<>"), "{} freezes the measurement", base.text);
+            count += 1;
+        }
+    }
+    assert_eq!(count, 3);
+}
+
+#[test]
 fn the_file_and_the_exports_carry_the_drawing() {
     let k = BoxKernel::new();
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));

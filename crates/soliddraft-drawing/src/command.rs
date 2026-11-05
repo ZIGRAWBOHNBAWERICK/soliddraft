@@ -396,7 +396,11 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
                 drawing.next_view_label = next_letter(&drawing.next_view_label);
             }
             let sheet = drawing.sheets.get_mut(*sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))?;
-            sheet.views.push(view.clone());
+            let mut view = view.clone();
+            if let ViewKind::Projected { projection, .. } = &mut view.kind {
+                projection.get_or_insert(sheet.projection);
+            }
+            sheet.views.push(view);
             Ok(())
         }
         Command::MoveView { view, to } => move_view(drawing, *view, *to),
@@ -495,7 +499,13 @@ pub fn apply(drawing: &mut Drawing, command: &Command) -> Result<(), DrawingErro
         }
         Command::SetSheetScale { sheet, scale } => set_sheet_scale(drawing, *sheet, *scale),
         Command::SetSheetProjection { sheet, projection } => {
-            sheet_mut(drawing, *sheet)?.projection = *projection;
+            let s = sheet_mut(drawing, *sheet)?;
+            for v in &mut s.views {
+                if let ViewKind::Projected { projection, .. } = &mut v.kind {
+                    projection.get_or_insert(s.projection);
+                }
+            }
+            s.projection = *projection;
             Ok(())
         }
         Command::SetAutomaticUpdate { on } => {
@@ -676,6 +686,9 @@ fn move_view_to_sheet(drawing: &mut Drawing, view: ViewId, to_sheet: usize, to: 
     let s = &mut drawing.sheets[from];
     let i = s.views.iter().position(|v| v.id == view).expect("found");
     let mut v = s.views.remove(i);
+    if let ViewKind::Projected { projection, .. } = &mut v.kind {
+        projection.get_or_insert(s.projection);
+    }
     let annotations: Vec<Annotation> = s.annotations.iter().filter(|a| a.view == view).cloned().collect();
     s.annotations.retain(|a| a.view != view);
     for other in &mut s.views {

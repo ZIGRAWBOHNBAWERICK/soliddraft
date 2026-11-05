@@ -140,7 +140,7 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         let symbols = library::template(sheet.template.as_str()).style_file().symbols.clone();
         for a in &mut sheet.annotations {
             let Some(ctx) = contexts.get(&a.view) else { continue };
-            if failed.contains(&a.view) {
+            if failed.contains(&a.view) || sheet.views.iter().any(|v| v.id == a.view && v.excluded_from_update) {
                 continue;
             }
             if let Some(change) = re_resolve(a, &index, ctx, &symbols) {
@@ -209,7 +209,8 @@ pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: Ent
     regenerate_view(drawing, part, id)
 }
 
-/// Remakes one view's line work from the part, keeping everything else about it.
+/// Remakes one view's line work and re-resolves its annotations, keeping placement
+/// and the last accepted dimension values.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let mut contexts = Contexts::new();
@@ -217,6 +218,12 @@ pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result
     follow_parent(drawing, id, &contexts);
     let geometry = contexts[&id].projected.geometry.clone();
     drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.geometry = geometry;
+    for sheet in &mut drawing.sheets {
+        let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
+        for a in sheet.annotations.iter_mut().filter(|a| a.view == id) {
+            re_resolve(a, &index, &contexts[&id], symbols);
+        }
+    }
     Ok(())
 }
 
@@ -294,14 +301,20 @@ pub(crate) fn remeasure(
     let (before_state, mut change) = (a.state.clone(), None);
     match &mut a.body {
         AnnotationKind::Dimension(d) => {
+            let measured = measure(&d.kind, d.dim_type, &geometry, &ctx.xf);
+            if matches!(d.value, DimValue::Measured { .. }) && measured.is_none() {
+                a.state = AnnotationState::Dangling {
+                    lost: (0..a.anchors.len()).collect(),
+                    cause: "The references cannot measure this dimension".into(),
+                };
+                return None;
+            }
             let across = extension_direction(&d.kind, Default::default(), Default::default());
             for (anchor, g) in a.anchors.iter_mut().zip(&geometry) {
                 anchor.cached = ctx.xf.point(anchor_point(g, &ctx.xf, across));
             }
             let old = value_text(d);
-            if let (DimValue::Measured { value }, Some(new)) =
-                (&mut d.value, measure(&d.kind, d.dim_type, &geometry, &ctx.xf))
-            {
+            if let (DimValue::Measured { value }, Some(new)) = (&mut d.value, measured) {
                 *value = crate::model_items::round_value(new);
             }
             let now = value_text(d);
@@ -419,7 +432,8 @@ pub fn reattach(
     let ctx = ViewContext::compute(drawing, part, &index, view)?;
     let template = drawing.sheet_of(view).map(|s| s.template.as_str()).unwrap_or("");
     let symbols = library::template(template).style_file().symbols.clone();
-    let a = drawing.annotation_mut(id).ok_or(DrawingError::UnknownAnnotation(id))?;
+    let mut repaired = drawing.annotation(id).ok_or(DrawingError::UnknownAnnotation(id))?.clone();
+    let a = &mut repaired;
     let anchor = a.anchors.get_mut(end).ok_or(DrawingError::BadRequest(format!("{id} has no end {end}")))?;
     anchor.entity = entity;
     // A round takes its centre, a line its middle, unless the end picks a side.
@@ -450,6 +464,7 @@ pub fn reattach(
         let lost: Vec<usize> = lost.iter().copied().filter(|i| *i != end && resolved[*i].is_none()).collect();
         if !lost.is_empty() {
             a.state = AnnotationState::Dangling { lost, cause: cause.clone() };
+            *drawing.annotation_mut(id).expect("found") = repaired;
             return Ok(());
         }
     }
@@ -460,11 +475,15 @@ pub fn reattach(
             a.state = AnnotationState::Ok;
         }
         remeasure(a, &index, &ctx, &entities, &symbols);
+        if let AnnotationState::Dangling { cause, .. } = &a.state {
+            return Err(DrawingError::BadRequest(cause.clone()));
+        }
         // Reattaching is a deliberate edit: the value it gives is the accepted one.
         if let AnnotationState::Changed { .. } = a.state {
             a.state = AnnotationState::Ok;
         }
     }
+    *drawing.annotation_mut(id).expect("found") = repaired;
     Ok(())
 }
 

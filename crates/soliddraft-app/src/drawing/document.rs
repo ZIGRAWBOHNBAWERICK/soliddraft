@@ -31,6 +31,11 @@ pub struct UpdateReport {
     pub dismissed: bool,
 }
 
+struct PickingCache {
+    transforms: HashMap<ViewId, ViewTransform>,
+    circles: HashMap<ViewId, Vec<CircleInfo>>,
+}
+
 /// The open drawing document.
 pub struct DrawingDoc {
     /// The drawing's id, kept in its file's manifest.
@@ -41,6 +46,8 @@ pub struct DrawingDoc {
     /// Counts every change, so autosave can tell edits apart from redraws.
     pub edits: u64,
     stack: UndoStack,
+    undo_picking: Vec<PickingCache>,
+    redo_picking: Vec<PickingCache>,
     /// Model-to-view transforms of the views, from the last projection. Not saved.
     pub transforms: HashMap<ViewId, ViewTransform>,
     /// Circles seen face-on per view, from the last projection. Not saved.
@@ -95,6 +102,8 @@ impl DrawingDoc {
             dirty: false,
             edits: 0,
             stack: UndoStack::new(),
+            undo_picking: Vec::new(),
+            redo_picking: Vec::new(),
             transforms: HashMap::new(),
             circles: HashMap::new(),
             last_update: None,
@@ -137,6 +146,9 @@ impl DrawingDoc {
         let journal = self.journal_command(|| serde_json::json!({"op":"undo"}));
         let result = (|| {
             let name = self.stack.undo(&mut self.drawing)?;
+            let before = self.undo_picking.pop().expect("picking history follows drawing history");
+            let after = self.swap_picking(before);
+            self.redo_picking.push(after);
             self.touch();
             Some(name.to_owned())
         })();
@@ -148,6 +160,9 @@ impl DrawingDoc {
         let journal = self.journal_command(|| serde_json::json!({"op":"redo"}));
         let result = (|| {
             let name = self.stack.redo(&mut self.drawing)?;
+            let after = self.redo_picking.pop().expect("picking history follows drawing history");
+            let before = self.swap_picking(after);
+            self.undo_picking.push(before);
             self.touch();
             Some(name.to_owned())
         })();
@@ -207,6 +222,9 @@ impl DrawingDoc {
                 _ => None,
             };
             let report = self.stack.run(&mut self.drawing, &cmd, p.as_ref()).map_err(|e| e.to_string())?;
+            self.undo_picking.push(PickingCache { transforms: self.transforms.clone(), circles: self.circles.clone() });
+            self.redo_picking.clear();
+            self.rescale_picking();
             self.touch();
             if let (Some(id), Some(p)) = (remade, p.as_ref())
                 && let Ok(index) = soliddraft_drawing::PartIndex::build(p)
@@ -237,6 +255,30 @@ impl DrawingDoc {
             }
             Ok(())
         })())
+    }
+
+    fn swap_picking(&mut self, mut cache: PickingCache) -> PickingCache {
+        std::mem::swap(&mut self.transforms, &mut cache.transforms);
+        std::mem::swap(&mut self.circles, &mut cache.circles);
+        cache
+    }
+
+    fn rescale_picking(&mut self) {
+        for (id, xf) in &mut self.transforms {
+            let Ok(scale) = project::view_scale(&self.drawing, *id) else { continue };
+            let ratio = scale / xf.scale;
+            if (ratio - 1.0).abs() < 1e-12 {
+                continue;
+            }
+            xf.centre = Point2::new(xf.centre.u * ratio, xf.centre.v * ratio);
+            xf.scale = scale;
+            if let Some(circles) = self.circles.get_mut(id) {
+                for c in circles {
+                    c.centre = xf.point(c.model_centre);
+                    c.radius = c.model_radius * scale;
+                }
+            }
+        }
     }
 
     /// The last projection of a view, rebuilt from the cached geometry.

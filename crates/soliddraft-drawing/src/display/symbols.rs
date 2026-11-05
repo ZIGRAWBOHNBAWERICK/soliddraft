@@ -12,8 +12,8 @@ use super::{
     arrow, line, linear, polyline, rect, sub, text_width,
 };
 use crate::annotation::{
-    Annotation, AnnotationKind, DimensionSet, GdtCharacteristic, LinearOrientation, MaterialCondition, SetKind,
-    SurfaceProcess,
+    Annotation, AnnotationKind, Dimension, DimensionKind, DimensionSet, GdtCharacteristic, LinearOrientation,
+    MaterialCondition, SetKind, SurfaceProcess,
 };
 use crate::library::{Align, Weight};
 use crate::measure::format_value;
@@ -341,6 +341,7 @@ pub(super) fn set_items(
     set: &DimensionSet,
     place: Point2,
     anchors: &[Point2],
+    view_scale: f64,
     ctx: &Context<'_>,
     role: Role,
     text_role: Role,
@@ -418,6 +419,11 @@ pub(super) fn set_items(
                         text: text(value),
                         value,
                         text_mid: mid,
+                        measurement_scale: 1.0 / view_scale,
+                        format: Dimension {
+                            dim_type: set.dim_type,
+                            ..Dimension::measured(DimensionKind::Ordinate, value, set.precision)
+                        },
                     });
                 }
             }
@@ -446,6 +452,11 @@ pub(super) fn set_items(
                     text: text(value),
                     value,
                     text_mid: at.0,
+                    measurement_scale: 1.0 / view_scale,
+                    format: Dimension {
+                        dim_type: set.dim_type,
+                        ..Dimension::measured(DimensionKind::Linear { orientation }, value, set.precision)
+                    },
                 });
             }
         }

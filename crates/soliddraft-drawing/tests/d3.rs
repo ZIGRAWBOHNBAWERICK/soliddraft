@@ -372,6 +372,11 @@ fn the_dxf_keeps_dimensions_and_hatches_as_such() {
     });
     let ordinate = ordinate.expect("the ordinate dimension");
     assert!(ordinate.dimension_base.is_ordinate_x_type);
-    assert!((ordinate.dimension_base.actual_measurement - 40.0).abs() < 1e-9);
+    let style = back.dim_styles().find(|s| s.name == ordinate.dimension_base.dimension_style_name).unwrap();
+    assert!((ordinate.dimension_base.actual_measurement - 40.0 * ctx.xf.scale).abs() < 1e-9);
+    assert!(
+        (ordinate.dimension_base.actual_measurement * style.dimension_linear_measurement_scale_factor - 40.0).abs()
+            < 1e-9
+    );
     assert!(back.blocks().any(|b| b.name == ordinate.dimension_base.block_name));
 }

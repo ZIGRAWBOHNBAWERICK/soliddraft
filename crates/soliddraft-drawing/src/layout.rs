@@ -243,7 +243,7 @@ pub fn make_drawing(part: &Part, new: &NewDrawing) -> Result<MadeDrawing, Drawin
                 let axis = if *cy == 0 { AlignAxis::Horizontal } else { AlignAxis::Vertical };
                 let position = Point2::new(col_x[(cx + 1) as usize], row_y[(1 - cy) as usize]);
                 (
-                    ViewKind::Projected { parent: ViewId(1), direction: *f },
+                    ViewKind::Projected { parent: ViewId(1), direction: *f, projection: Some(t.projection) },
                     Some(Alignment { parent: ViewId(1), axis }),
                     ViewScale::Parent,
                     position,

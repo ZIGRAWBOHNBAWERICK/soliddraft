@@ -868,7 +868,7 @@ fn place_tool(
                     s.set_tool(DrawingTool::Select);
                     return;
                 };
-                let kind = ViewKind::Projected { parent: *parent, direction };
+                let kind = ViewKind::Projected { parent: *parent, direction, projection: Some(s.sheet().projection) };
                 let display = if direction.is_diagonal() { ViewDisplay::PICTORIAL } else { parent_view.display };
                 match s.doc.project_new(&ctx, sheet_i, &kind, display, ViewScale::Parent) {
                     Ok(pair) => {

@@ -11,7 +11,9 @@
 use kurbo::{Affine, BezPath, Shape, Vec2};
 use soliddraft_kernel_api::Point2;
 
-use crate::annotation::{Annotation, AnnotationKind, AnnotationState, Attach, DimensionKind, LinearOrientation};
+use crate::annotation::{
+    Annotation, AnnotationKind, AnnotationState, Attach, Dimension, DimensionKind, LinearOrientation,
+};
 use crate::ids::{AnnotationId, SHEET, ViewId};
 use crate::library::{Align, FieldDef, StyleFile, TemplateFile, Weight};
 use crate::measure::{CurveShape, display_text, shape_of};
@@ -194,6 +196,10 @@ pub struct DimensionRecord {
     pub value: f64,
     /// The middle of the text.
     pub text_mid: Point2,
+    /// Model millimetres per sheet millimetre, for editable measurements.
+    pub measurement_scale: f64,
+    /// The dimension's formatting, before its value is rendered into text.
+    pub format: Dimension,
 }
 
 /// The definition points of a dimension.
@@ -821,6 +827,15 @@ pub fn text_width(text: &str, height: f64) -> f64 {
     crate::text::text_width(text, height / CAP_HEIGHT)
 }
 
+fn editable_dimension(d: &Dimension, symbols: &crate::library::Symbols) -> Dimension {
+    let mut format = d.clone();
+    if symbols.reference_parentheses && matches!(d.value, crate::DimValue::Measured { .. }) {
+        let text = if d.text.is_empty() { Dimension::VALUE_TEXT } else { &d.text };
+        format.text = format!("({text})");
+    }
+    format
+}
+
 /// A dimension, note, callout, symbol or centre mark as items.
 fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut DisplayList) {
     let items = &mut list.items;
@@ -853,6 +868,8 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
                         text: text.clone(),
                         value: dim_value(d),
                         text_mid: at.0,
+                        measurement_scale: 1.0 / view_scale,
+                        format: editable_dimension(d, &style.symbols),
                     });
                     text_at = Some((at.0, at.1, text, Align::Centre, at.2));
                 }
@@ -894,6 +911,8 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
                         text: text.clone(),
                         value: dim_value(d),
                         text_mid: mid,
+                        measurement_scale: 1.0 / view_scale,
+                        format: editable_dimension(d, &style.symbols),
                     });
                     text_at = Some((pos, 0.0, text, halign, VAlign::Centre));
                 }
@@ -1007,7 +1026,7 @@ fn annotation_items(sheet: &Sheet, a: &Annotation, ctx: &Context<'_>, list: &mut
             symbols::symbol_items(a, place, &anchors, ctx, role, text_role, items);
         }
         AnnotationKind::DimensionSet(set) => {
-            symbols::set_items(a, set, place, &anchors, ctx, role, text_role, list);
+            symbols::set_items(a, set, place, &anchors, view_scale, ctx, role, text_role, list);
         }
     }
     let items = &mut list.items;

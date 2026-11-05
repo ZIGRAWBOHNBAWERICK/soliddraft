@@ -1285,10 +1285,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         }
                     });
                     if let Some(kind) = add {
-                        s.sketch.constrain(kind);
-                        solve::solve(&mut s.sketch, None, true);
-                        actions
-                            .push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
+                        actions.push(sketcher::add_relation(s, kind));
                     }
                 }
                 let mut changed = false;

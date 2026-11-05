@@ -257,7 +257,7 @@ pub fn run(
     let mut actions = Vec::new();
     let frame = Frame { plane: s.plane, camera, rect };
     let painter = ui.painter().with_clip_rect(rect);
-    let glyphs = glyph_rects(&frame, &s.sketch);
+    let glyphs = if s.show_relations { glyph_rects(&frame, &s.sketch) } else { Vec::new() };
     let hover_pos = resp.hover_pos().filter(|_| !resp.dragged());
     s.cursor = hover_pos.and_then(|p| frame.plane_at(p));
 
@@ -1122,7 +1122,7 @@ fn glyph_anchors(sketch: &Sketch, c: &Constraint) -> Vec<(P2, egui::Vec2)> {
     };
     let at_point = |r: PointRef| sketch.point(r).map(|p| (p, vec2(10.0, -10.0)));
     match c.kind {
-        ConstraintKind::Coincident { .. } => Vec::new(),
+        ConstraintKind::Coincident { a, .. } => at_point(a).into_iter().collect(),
         ConstraintKind::PointOn { point, .. }
         | ConstraintKind::Midpoint { point, .. }
         | ConstraintKind::Fix { point, .. } => at_point(point).into_iter().collect(),
@@ -1170,6 +1170,10 @@ fn paint_glyphs(painter: &egui::Painter, s: &SketchSession, glyphs: &[(Constrain
         let (l, t, rr, b) = (g.left(), g.top(), g.right(), g.bottom());
         let (cx, cy) = (g.center().x, g.center().y);
         match c.kind {
+            ConstraintKind::Coincident { .. } => {
+                painter.circle_stroke(pos2(cx - 2.0, cy), 2.5, st);
+                painter.circle_stroke(pos2(cx + 2.0, cy), 2.5, st);
+            }
             ConstraintKind::Horizontal { .. } => {
                 painter.text(g.center(), Align2::CENTER_CENTER, "H", theme::font_semibold(9.5), fg);
             }
@@ -1834,6 +1838,54 @@ pub fn paint_passive(
             }
         }
     }
+}
+
+/// Adds one relation through the same solve and undo path in both sketch controls.
+pub fn add_relation(s: &mut SketchSession, kind: ConstraintKind) -> AppAction {
+    s.sketch.constrain(kind);
+    solve::solve(&mut s.sketch, None, true);
+    AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() })
+}
+
+/// The supported relation types, including choices unavailable for the current selection.
+pub fn relations_menu(ui: &mut egui::Ui, s: &mut SketchSession) -> Option<AppAction> {
+    if ui.checkbox(&mut s.show_relations, "Show all relations").changed() && !s.show_relations {
+        s.selection.retain(|sel| match sel {
+            SketchSel::Constraint(id) => s.sketch.constraint(*id).is_some_and(|c| c.is_dimension()),
+            _ => true,
+        });
+    }
+    ui.separator();
+    ui.label("Add relation to selection");
+    let applicable = applicable_relations(&s.sketch, &s.selection);
+    let mut chosen = None;
+    for (name, hint) in [
+        ("Horizontal", "Select one line or two points"),
+        ("Vertical", "Select one line or two points"),
+        ("Parallel", "Select two lines"),
+        ("Perpendicular", "Select two lines"),
+        ("Coincident", "Select two points"),
+        ("On line", "Select one point and one line"),
+        ("On curve", "Select one point and one arc or circle"),
+        ("Tangent", "Select a line and an arc or circle, or two arcs or circles"),
+        ("Equal", "Select two lines or two arcs or circles"),
+        ("Concentric", "Select two arcs or circles"),
+        ("Midpoint", "Select one point and one line"),
+        ("Fix", "Select one point other than the origin"),
+    ] {
+        let kind = applicable.iter().find(|(label, _)| *label == name).map(|(_, kind)| *kind);
+        let already_applied = kind.is_some_and(|kind| s.sketch.constraints.iter().any(|c| c.kind == kind));
+        if ui
+            .add_enabled(kind.is_some() && !already_applied, egui::Button::new(name))
+            .on_hover_text(hint)
+            .on_disabled_hover_text(if already_applied { "Already applied" } else { hint })
+            .clicked()
+        {
+            chosen = kind;
+            ui.close();
+        }
+    }
+    chosen.map(|kind| add_relation(s, kind))
 }
 
 /// Relations that can be added to the current selection, for the property panel.

@@ -64,6 +64,8 @@ pub enum AppAction {
     StartRepair(FeatureId),
     EditFeature(FeatureId),
     SketchTool(Tool),
+    /// Opens or closes the sketch relation list.
+    SketchRelations(bool),
     /// Toggles construction on the sketch selection.
     ToggleConstruction,
     /// Deletes the sketch selection, or the selected feature.
@@ -557,6 +559,10 @@ pub struct SketchSession {
     pub message: Option<(String, Instant)>,
     /// Whether the pointer infers relations; see [`crate::measure::guides`].
     pub auto_relations: bool,
+    /// Whether the ribbon's relation list is open.
+    pub relations_open: bool,
+    /// Shows relation glyphs without changing the constraints or dimensions.
+    pub show_relations: bool,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
     /// The Modify tools' numeric and pointer-placed values.
@@ -606,6 +612,8 @@ impl SketchSession {
             was_orthographic,
             message: None,
             auto_relations: true,
+            relations_open: false,
+            show_relations: true,
             construction: false,
             modify: ModifyInputs::default(),
             preview: None,

@@ -240,6 +240,10 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         let current = now["commands"].get(id).unwrap_or_else(|| panic!("{id} is gone"));
         let mut current = configuration_registry::before_configurations(id, current, plain);
         before_all_faces(id, &mut current);
+        if id == "relations" {
+            assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
+            current["agents"] = row["agents"].clone();
+        }
         if id == "sweep" {
             assert_eq!(current["agents"], "verb");
             assert_eq!(current["undo"], "step");

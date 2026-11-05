@@ -183,15 +183,22 @@ pub fn body(ui: &mut egui::Ui, state: &mut AppState, tab: commands::Tab) {
     let caption_y = body.bottom() - 10.0;
     let mut x = body.left() + BODY_MARGIN;
     let mut pending: Option<&'static CommandSpec> = None;
+    let mut relations_anchor = body;
     for (gi, group) in groups.iter().enumerate() {
         let width = if collapsed[gi] {
             let width = compact_width(ui, group);
             let button = Rect::from_min_max(pos2(x, top), pos2(x + width, body.bottom() - 2.0));
+            if group.items.iter().any(|item| item.command.id == "relations") {
+                relations_anchor = button;
+            }
             pending = collapsed_group(ui, group, gi, tab, button, caption_y).or(pending);
             width
         } else {
             let width = group_width(ui, group);
             let tiles = row(ui, group, gi, x + (width - row_width(ui, group)) / 2.0, top, tile_h);
+            if let Some((_, resp)) = tiles.iter().find(|(c, _)| c.id == "relations") {
+                relations_anchor = resp.rect;
+            }
             pending = tiles.into_iter().find(|(_, resp)| resp.clicked()).map(|(c, _)| c).or(pending);
             caption(ui, group.label, pos2(x + width / 2.0, caption_y));
             width
@@ -202,6 +209,27 @@ pub fn body(ui: &mut egui::Ui, state: &mut AppState, tab: commands::Tab) {
     }
     if let Some(c) = pending {
         state.run_command(c);
+    }
+    if let Some(s) = state.sketch.as_mut() {
+        if tab != commands::Tab::Part(RibbonTab::Sketch) {
+            s.relations_open = false;
+            return;
+        }
+        let mut open = s.relations_open;
+        let action =
+            egui::Popup::new(ui.id().with("sketch_relations"), ui.ctx().clone(), relations_anchor, ui.layer_id())
+                .kind(egui::PopupKind::Menu)
+                .open_bool(&mut open)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .layout(egui::Layout::top_down_justified(Align::Min))
+                .width(220.0)
+                .gap(ROW_GAP)
+                .show(|ui| crate::sketcher::relations_menu(ui, s))
+                .and_then(|shown| shown.inner);
+        s.relations_open = open;
+        if let Some(action) = action {
+            state.push(action);
+        }
     }
 }
 

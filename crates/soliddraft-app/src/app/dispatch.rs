@@ -825,6 +825,14 @@ impl SolidDraftApp {
                     s.set_tool(tool);
                 }
             }
+            AppAction::SketchRelations(open) => {
+                if let Some(s) = self.state.sketch.as_mut() {
+                    s.relations_open = open;
+                    if open {
+                        self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                    }
+                }
+            }
             AppAction::ToggleConstruction => {
                 if let Some(s) = self.state.sketch.as_mut() {
                     let ids = s.selected_entities();

@@ -1578,7 +1578,10 @@ fn registry() -> Vec<CommandSpec> {
 .app_only(SKETCHER),
         cmd("relations", "Relations", Icon::Cad("relations"), "Relations between sketch entities")
             .on(Sketch, "Constrain", Small)
-            .hint(|_| Some("Relations for the selection are in the property panel".into())),
+            .run(|s| AppAction::SketchRelations(!s.sketch.as_ref().is_some_and(|s| s.relations_open)))
+            .when(AppState::in_sketch)
+            .lit(|s| s.sketch.as_ref().is_some_and(|s| s.relations_open))
+.app_only(SKETCHER),
         // Boss.
         cmd("extrude", "Extrude", Icon::Cad("extrude"), "Add material: extrude a sketch and join it to the part")
             .on(Solid, "Create", Large)
@@ -2222,7 +2225,9 @@ fn registry() -> Vec<CommandSpec> {
         )
         .key(Scope::Part, none, Key::Escape)
         .run(|s| {
-            if s.dimension_edit.is_some() {
+            if s.sketch.as_ref().is_some_and(|s| s.relations_open) {
+                AppAction::SketchRelations(false)
+            } else if s.dimension_edit.is_some() {
                 // Escape takes the keyboard from a text field before the shortcuts run.
                 AppAction::Dimension(crate::dimension_edit::DimensionAction::Cancel)
             } else if s.drawing.new.is_some() {

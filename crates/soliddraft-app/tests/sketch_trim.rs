@@ -63,6 +63,18 @@ fn lines() -> Sketch {
     sketch
 }
 
+fn density_lines() -> Sketch {
+    let mut sketch = Sketch::new();
+    for y in [-30.0, -10.0, 10.0] {
+        sketch.add(EntityKind::Line { a: P2::new(-30.0, y), b: P2::new(30.0, y) }, false);
+    }
+    for x in [-15.0, 15.0] {
+        sketch.add(EntityKind::Line { a: P2::new(x, -50.0), b: P2::new(x, 50.0) }, true);
+    }
+    solve::solve(&mut sketch, None, true);
+    sketch
+}
+
 fn press(app: &mut App, at: P2) {
     let at = screen(app, at);
     app.hover_at(at);
@@ -145,6 +157,60 @@ fn retracing_and_undo_restore_each_cut_without_undoing_prior_geometry() {
     release(&mut app, P2::new(0.0, 20.0));
     assert_eq!(session(&app).sketch, before);
     soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn retracing_trim_does_not_depend_on_pointer_sample_density() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let before = density_lines();
+    let mut results = Vec::new();
+    let paths: &[&[f64]] = &[&[-40.0], &[-20.0, -40.0], &[10.5, 0.0, -9.5, -20.0, -40.0], &[10.0, -10.0, -40.0]];
+    for stops in paths {
+        let (mut app, _) = launch(before.clone());
+        press(&mut app, P2::new(0.0, -20.0));
+        move_to(&mut app, P2::new(0.0, 20.0));
+        for &y in *stops {
+            move_to(&mut app, P2::new(0.0, y));
+        }
+        release(&mut app, P2::new(0.0, -40.0));
+        results.push(session(&app).sketch.clone());
+        drop(app);
+        soliddraft_app::file::set_config_dir(None);
+    }
+    assert_eq!(
+        results[0].drawn().count(),
+        results[1].drawn().count(),
+        "sparse and dense reversal must both trim the new crossing after restoring the old cuts"
+    );
+    assert_eq!(results[0].drawn().count(), 6);
+    for result in &results[1..] {
+        assert_eq!(&results[0], result);
+    }
+}
+
+#[test]
+fn a_new_crossing_before_an_older_marker_keeps_trim_traversal_order() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut before = density_lines();
+    let short = before.add(EntityKind::Line { a: P2::new(4.0, 15.0), b: P2::new(6.0, 15.0) }, false);
+    solve::solve(&mut before, None, true);
+    let mut results = Vec::new();
+    for dense in [false, true] {
+        let (mut app, _) = launch(before.clone());
+        press(&mut app, P2::new(0.0, -20.0));
+        move_to(&mut app, P2::new(0.0, 20.0));
+        move_to(&mut app, P2::new(10.0, 20.0));
+        if dense {
+            move_to(&mut app, P2::new(4.0, 14.0));
+        }
+        move_to(&mut app, P2::new(-10.0, 0.0));
+        release(&mut app, P2::new(-10.0, 0.0));
+        assert!(session(&app).sketch.entity(short).is_none(), "the new crossing occurs before the old undo marker");
+        results.push(session(&app).sketch.clone());
+        drop(app);
+        soliddraft_app::file::set_config_dir(None);
+    }
+    assert_eq!(results[0], results[1]);
 }
 
 #[test]

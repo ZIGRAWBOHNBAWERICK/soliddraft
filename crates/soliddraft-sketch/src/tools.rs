@@ -614,6 +614,7 @@ impl Sketch {
     }
 
     /// Trims every curve crossed between pointer samples, in stroke order.
+    /// The open start avoids recutting a curve just restored at a trail marker.
     /// Returns a checkpoint before each cut. A refusal leaves the sketch unchanged.
     pub fn trim_stroke(&mut self, from: P2, to: P2) -> Result<Vec<TrimCheckpoint>> {
         let stroke = EntityKind::Line { a: from, b: to };
@@ -627,6 +628,7 @@ impl Sketch {
                 let tangent = circle(target.kind)
                     .is_some_and(|(center, _)| direction.dot(at - center).abs() <= EPS * direction.len());
                 if !tangent
+                    && from.dist(at) > EPS
                     && on_curve(stroke, at)
                     && on_curve(target.kind, at)
                     && self.trim_preview(target.id, at).is_ok()

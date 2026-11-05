@@ -122,6 +122,15 @@ fn power_trim_checks_the_segment_and_keeps_per_cut_checkpoints() {
 }
 
 #[test]
+fn a_trim_stroke_excludes_its_start_to_avoid_recutting_restored_geometry() {
+    let mut s = Sketch::new();
+    line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let before = s.clone();
+    assert!(s.trim_stroke(P2::ZERO, p(0.0, 5.0)).unwrap().is_empty());
+    assert_eq!(s, before);
+}
+
+#[test]
 fn trim_checkpoint_restores_constraint_order_without_copying_unrelated_geometry() {
     let mut s = Sketch::new();
     let target = line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);

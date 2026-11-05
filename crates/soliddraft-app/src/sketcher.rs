@@ -15,7 +15,7 @@ use crate::sketch::{
     tools::{End, Operation, polygon_corners},
 };
 use crate::sketch_tools;
-use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool, ToolPreview};
+use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool, ToolPreview, TrimDrag};
 use crate::theme;
 use crate::viewport::camera::Camera;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
@@ -500,6 +500,44 @@ fn copy_input(
     }
 }
 
+fn trim_segment(s: &mut SketchSession, drag: &mut TrimDrag, frame: &Frame<'_>, mut from: P2, to: P2) {
+    while from.dist(to) > 1e-6 {
+        let undo_at = drag.checkpoints.last().and_then(|cut| {
+            let delta = to - from;
+            if delta.dot(cut.direction) >= 0.0 {
+                return None;
+            }
+            let t = (cut.at - from).dot(delta) / delta.dot(delta);
+            let tolerance = 1e-6 / delta.len();
+            // Undo at the marker's projection, not when a sample first enters its hit radius.
+            if !(-tolerance..=1.0 + tolerance).contains(&t) {
+                return None;
+            }
+            let p = from.lerp(to, t.clamp(0.0, 1.0));
+            match (frame.screen(cut.at), frame.screen(p)) {
+                (Some(a), Some(b)) if a.distance(b) <= 6.0 => Some(p),
+                _ => None,
+            }
+        });
+        let end = undo_at.unwrap_or(to);
+        let result = if from.dist(end) > 1e-6 { s.sketch.trim_stroke(from, end) } else { Ok(Vec::new()) };
+        match result {
+            Ok(cuts) if cuts.is_empty() && undo_at.is_some() => {
+                drag.checkpoints.pop().expect("last checkpoint exists").restore(&mut s.sketch);
+            }
+            Ok(cuts) => drag.checkpoints.extend(cuts),
+            Err(why) => {
+                s.say(why.to_string());
+                break;
+            }
+        }
+        if undo_at.is_none() {
+            break;
+        }
+        from = end;
+    }
+}
+
 fn trim_input(
     ui: &egui::Ui,
     s: &mut SketchSession,
@@ -513,12 +551,7 @@ fn trim_input(
     {
         let extend = hit_curve(frame, &s.sketch, origin)
             .filter(|id| s.sketch.entity(*id).is_some_and(|e| e.is_line() || matches!(e.kind, EntityKind::Arc { .. })));
-        s.trim_drag = Some(crate::state::TrimDrag {
-            before: s.sketch.clone(),
-            extend,
-            path: vec![from],
-            checkpoints: Vec::new(),
-        });
+        s.trim_drag = Some(TrimDrag { before: s.sketch.clone(), extend, path: vec![from], checkpoints: Vec::new() });
     }
     let stopped = resp.drag_stopped_by(egui::PointerButton::Primary);
     if !resp.dragged_by(egui::PointerButton::Primary) && !stopped {
@@ -535,25 +568,7 @@ fn trim_input(
                     s.say(why.to_string());
                 }
             } else {
-                let mut restored = false;
-                while let Some(cut) = drag.checkpoints.last() {
-                    let crosses = (at - last).dot(cut.direction) < 0.0
-                        && match (frame.screen(cut.at), frame.screen(last), frame.screen(at)) {
-                            (Some(p), Some(a), Some(b)) => dist_to_segment(p, a, b) <= 6.0,
-                            _ => false,
-                        };
-                    if !crosses {
-                        break;
-                    }
-                    drag.checkpoints.pop().expect("last checkpoint exists").restore(&mut s.sketch);
-                    restored = true;
-                }
-                if !restored {
-                    match s.sketch.trim_stroke(last, at) {
-                        Ok(cuts) => drag.checkpoints.extend(cuts),
-                        Err(why) => s.say(why.to_string()),
-                    }
-                }
+                trim_segment(s, &mut drag, frame, last, at);
             }
             drag.path.push(at);
         }

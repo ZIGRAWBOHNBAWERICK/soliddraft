@@ -627,12 +627,7 @@ impl Sketch {
             for at in intersections(stroke, target.kind) {
                 let tangent = circle(target.kind)
                     .is_some_and(|(center, _)| direction.dot(at - center).abs() <= EPS * direction.len());
-                if !tangent
-                    && from.dist(at) > EPS
-                    && on_curve(stroke, at)
-                    && on_curve(target.kind, at)
-                    && self.trim_preview(target.id, at).is_ok()
-                {
+                if !tangent && from.dist(at) > EPS && on_curve(stroke, at) && on_curve(target.kind, at) {
                     hits.push((from.dist(at), target.id, at));
                 }
             }
@@ -646,6 +641,7 @@ impl Sketch {
         let mut checkpoints = Vec::new();
         for (_, original, at) in hits {
             let family = families.entry(original).or_insert_with(|| vec![original]);
+            // Earlier cuts can remove boundaries, so check eligibility against the evolving sketch.
             let target = family.iter().copied().find(|id| {
                 trial.entity(*id).is_some_and(|e| on_curve(e.kind, at)) && trial.trim_preview(*id, at).is_ok()
             });

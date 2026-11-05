@@ -214,6 +214,40 @@ fn a_new_crossing_before_an_older_marker_keeps_trim_traversal_order() {
 }
 
 #[test]
+fn removing_a_circle_makes_its_tangent_line_trimmable_in_the_same_pointer_sample() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut before = Sketch::new();
+    before.add(EntityKind::Circle { center: P2::new(0.0, 10.0), radius: 10.0 }, false);
+    before.add(EntityKind::Line { a: P2::new(-10.0, 0.0), b: P2::new(10.0, 0.0) }, false);
+    for x in [-30.0, 30.0] {
+        before.add(EntityKind::Line { a: P2::new(x, -20.0), b: P2::new(x, 40.0) }, true);
+    }
+    solve::solve(&mut before, None, true);
+    let mut results = Vec::new();
+    for split in [false, true] {
+        let (mut app, _) = launch(before.clone());
+        let from = P2::new(0.0, 30.0);
+        assert!(app.state().state.viewport.rect.contains(screen(&app, from)));
+        press(&mut app, from);
+        if split {
+            move_to(&mut app, P2::new(0.0, 5.0));
+        }
+        move_to(&mut app, P2::new(0.0, -5.0));
+        release(&mut app, P2::new(0.0, -5.0));
+        results.push(session(&app).sketch.clone());
+        drop(app);
+        soliddraft_app::file::set_config_dir(None);
+    }
+    assert_eq!(
+        results[0].drawn().count(),
+        results[1].drawn().count(),
+        "splitting the stroke must not change which curves trim"
+    );
+    assert!(results[0].drawn().all(|e| e.construction));
+    assert_eq!(results[0], results[1]);
+}
+
+#[test]
 fn live_trim_undo_works_in_a_reopened_part_without_document_history() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (mut app, id) = launch(lines());

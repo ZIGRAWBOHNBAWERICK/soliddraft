@@ -122,6 +122,21 @@ fn power_trim_checks_the_segment_and_keeps_per_cut_checkpoints() {
 }
 
 #[test]
+fn power_trim_rechecks_later_crossings_after_removing_a_boundary() {
+    let mut before = Sketch::new();
+    before.add(EntityKind::Circle { center: p(0.0, 10.0), radius: 10.0 }, false);
+    line(&mut before, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let mut whole = before.clone();
+    whole.trim_stroke(p(0.0, 30.0), p(0.0, -5.0)).unwrap();
+    let mut split = before;
+    split.trim_stroke(p(0.0, 30.0), p(0.0, 5.0)).unwrap();
+    split.trim_stroke(p(0.0, 5.0), p(0.0, -5.0)).unwrap();
+    assert_eq!(whole.drawn().count(), split.drawn().count(), "earlier cuts can make a later crossing trimmable");
+    assert_eq!(whole.drawn().count(), 0);
+    assert_eq!(whole, split);
+}
+
+#[test]
 fn a_trim_stroke_excludes_its_start_to_avoid_recutting_restored_geometry() {
     let mut s = Sketch::new();
     line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);

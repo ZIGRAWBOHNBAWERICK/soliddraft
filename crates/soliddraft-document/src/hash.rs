@@ -64,7 +64,7 @@ impl ContentHash {
     /// The first eight digits, for display: "3f2a9c1b".
     pub fn short(&self) -> &str {
         let digits = self.0.split_once(':').map(|(_, d)| d).unwrap_or(&self.0);
-        &digits[..digits.len().min(8)]
+        &digits[..digits.char_indices().nth(8).map_or(digits.len(), |(i, _)| i)]
     }
 }
 
@@ -135,6 +135,13 @@ mod tests {
         assert_eq!(canonical_json(&a), r#"{"a":"é\n","b":[1,2.5,{"x":null,"y":true}]}"#);
         assert_eq!(ContentHash::of_json(&a), ContentHash::of_json(&b));
         assert_ne!(ContentHash::of_json(&a), ContentHash::of_json(&json!({"a": "é\n"})));
+    }
+
+    #[test]
+    fn short_accepts_non_ascii_revision_metadata() {
+        let hash: ContentHash = serde_json::from_str(r#""blake3:1234567é""#).unwrap();
+        assert_eq!(hash.short(), "1234567é");
+        assert_eq!(ContentHash::foreign("", "ééééééééé").short(), "éééééééé");
     }
 
     #[test]

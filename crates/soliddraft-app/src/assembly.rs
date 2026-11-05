@@ -426,6 +426,7 @@ pub fn replace(state: &mut AppState, doc: AssemblyDocument, scene: Scene) {
 /// Puts a session in place of the open assembly. A Form subassembly panel belongs to the
 /// assembly it was opened on, so it closes.
 fn install(state: &mut AppState, session: AssemblySession) {
+    state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
     state.assembly.session = Some(session);

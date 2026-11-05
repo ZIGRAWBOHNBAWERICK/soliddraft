@@ -285,8 +285,9 @@ written, its revision) and `document`, the document file's bytes.
 Each running app holds a lock on its session folder's `session.lock`. At start, a session
 folder whose lock is free belonged to an app that ended without quitting. Its copies are
 offered for restore when the document was never saved, its file is gone or unreadable,
-or the file has another revision and was saved before the copy was written. Copies whose
-work the file already holds are deleted. Damaged copies are reported once and moved to
+or the file has another identity, kind or revision. A later file timestamp does not prove
+that a divergent unsaved branch was saved. Copies matching the file's identity, kind
+and revision need no recovery and are deleted. Damaged copies are reported once and moved to
 `recovery/damaged/`. A restored document opens with unsaved changes at its old path, and
 its copy stays protected until it is saved. Offers left undecided stay for the next
 start.

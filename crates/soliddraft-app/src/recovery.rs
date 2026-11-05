@@ -11,7 +11,7 @@
 //!   entries (display meshes, the drawing's thumbnail); the interface only hands over an
 //!   immutable snapshot. Quitting deletes the session folder. At start, a session folder
 //!   whose lock is free belonged to an app that ended without quitting. Its copies that
-//!   are newer than their documents ([`soliddraft_document::Standing::offered`]) move
+//!   hold unsaved revisions ([`soliddraft_document::Standing::offered`]) move
 //!   into this session's `offered/` folder and are listed for restore; the others are
 //!   deleted. Damaged copies move to `<recovery folder>/damaged/` and are reported once.
 //!   An offer still undecided at quit stays in `offered/`, so the next start finds it.
@@ -21,6 +21,9 @@
 //!   stored in the background. Closing the tab keeps the copies of unsaved work: the
 //!   next visit offers them, as the desktop does after a crash. Nothing is sent to the
 //!   server, so two people on the site never see each other's copies.
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) mod offers;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::{File, OpenOptions};
@@ -50,6 +53,8 @@ const SESSION_PREFIX: &str = "session-";
 
 enum Job {
     Part {
+        id: DocumentId,
+        edits: u64,
         snapshot: Box<soliddraft_model::file::Snapshot>,
         name: String,
         path: Option<PathBuf>,
@@ -57,6 +62,7 @@ enum Job {
     Drawing {
         drawing: Box<soliddraft_drawing::Drawing>,
         id: DocumentId,
+        edits: u64,
         path: Option<PathBuf>,
         kernel: String,
     },
@@ -65,17 +71,33 @@ enum Job {
     Flush(Sender<()>),
 }
 
+impl Job {
+    fn copy_token(&self) -> Option<(DocumentId, DocKind, u64)> {
+        match self {
+            Job::Part { id, edits, .. } => Some((*id, DocKind::Part, *edits)),
+            Job::Drawing { id, edits, .. } => Some((*id, DocKind::Drawing, *edits)),
+            _ => None,
+        }
+    }
+}
+
+/// A completed autosave write or failure, with its document generation.
+pub struct Report {
+    pub(crate) message: Option<String>,
+    pub(crate) copy: Option<(DocumentId, DocKind, u64)>,
+}
+
 /// Where a job's copy goes: a session folder, or the browser's storage.
 trait Shelf {
     fn put(&self, record: &Record, document: &[u8]) -> Result<(), String>;
     fn remove(&self, id: DocumentId, kind: DocKind) -> Result<(), String>;
 }
 
-/// Makes the copy a job asks for and hands it to `shelf`. Returns what went wrong, as a
-/// sentence.
-fn perform(job: Job, shelf: &impl Shelf) -> Option<String> {
-    match job {
-        Job::Part { snapshot, name, path } => snapshot
+/// Makes and stores a job's copy and reports its completion.
+fn perform(job: Job, shelf: &impl Shelf) -> Option<Report> {
+    let copy = job.copy_token();
+    let message = match job {
+        Job::Part { snapshot, name, path, .. } => snapshot
             .encode()
             .map_err(|e| e.to_string())
             .and_then(|(manifest, bytes)| {
@@ -84,7 +106,7 @@ fn perform(job: Job, shelf: &impl Shelf) -> Option<String> {
             })
             .err()
             .map(|e| format!("Autosave could not copy {name}: {e}")),
-        Job::Drawing { drawing, id, path, kernel } => {
+        Job::Drawing { drawing, id, path, kernel, .. } => {
             let name = &drawing.meta.title;
             let meta = soliddraft_drawing::file::FileMeta {
                 id,
@@ -107,17 +129,19 @@ fn perform(job: Job, shelf: &impl Shelf) -> Option<String> {
             let _ = done.send(());
             None
         }
-    }
+    };
+    if copy.is_some() || message.is_some() { Some(Report { message, copy }) } else { None }
 }
 
-/// One document autosave watches: which it is, the edit count last seen and whether a
-/// copy of it is on disk.
+/// One document autosave watches: its identity, edit count and whether a copy was queued.
 #[derive(Default)]
 struct Watch {
     id: Option<DocumentId>,
     edits: u64,
     trigger: Trigger,
     written: bool,
+    retry: Option<Instant>,
+    pending: Option<u64>,
 }
 
 /// The desktop's session folder and its writer thread.
@@ -127,7 +151,7 @@ struct Folder {
     dir: PathBuf,
     _lock: File,
     jobs: Option<Sender<Job>>,
-    reports: Receiver<String>,
+    reports: Receiver<Report>,
     writer: Option<JoinHandle<()>>,
 }
 
@@ -165,7 +189,7 @@ impl Recovery {
         kernel: &str,
         now: Instant,
     ) -> Option<Duration> {
-        self.collect_failures();
+        self.collect_reports(now);
         if let Some(error) = soliddraft_document::journal::take_failure() {
             self.failures.push(error);
         }
@@ -174,6 +198,8 @@ impl Recovery {
         let id = part.model().id();
         if watch(&mut self.part, DocKind::Part, Some((id, part.edits, part.dirty)), &policy, now, &mut jobs) {
             jobs.push(Job::Part {
+                id,
+                edits: part.edits,
                 snapshot: Box::new(part.model().snapshot()),
                 name: part.name.clone(),
                 path: part.path.clone(),
@@ -186,6 +212,7 @@ impl Recovery {
             jobs.push(Job::Drawing {
                 drawing: Box::new(d.drawing.clone()),
                 id: d.id,
+                edits: d.edits,
                 path: d.path.clone(),
                 kernel: kernel.to_owned(),
             });
@@ -193,7 +220,14 @@ impl Recovery {
         for job in jobs {
             self.send(job);
         }
-        [&self.part, &self.drawing].into_iter().filter_map(|w| w.trigger.wait(&policy, now)).min()
+        [&self.part, &self.drawing]
+            .into_iter()
+            .filter_map(|w| {
+                let retry = w.retry.filter(|_| policy.enabled).map(|at| at.saturating_duration_since(now));
+                let pending = w.pending.map(|_| Duration::from_secs(1));
+                w.trigger.wait(&policy, now).into_iter().chain(retry).chain(pending).min()
+            })
+            .min()
     }
 
     /// The restored document is open with `edits` edits counted; its copy is on disk.
@@ -203,7 +237,23 @@ impl Recovery {
             self.send(Job::Remove(old, kind));
         }
         let watch = if kind == DocKind::Drawing { &mut self.drawing } else { &mut self.part };
-        *watch = Watch { id: Some(id), edits, trigger: Trigger::default(), written: true };
+        *watch = Watch { id: Some(id), edits, written: true, ..Watch::default() };
+    }
+
+    fn record_report(&mut self, report: Report, now: Instant) {
+        if let Some((id, kind, edits)) = report.copy {
+            let watch = if kind == DocKind::Drawing { &mut self.drawing } else { &mut self.part };
+            if watch.id == Some(id) && watch.pending == Some(edits) {
+                watch.pending = None;
+                if report.message.is_some() && watch.edits == edits {
+                    watch.retry = Some(now + self.policy.interval().min(Duration::from_secs(30)));
+                }
+            }
+        }
+        if let Some(message) = report.message {
+            log::warn!("{message}");
+            self.failures.push(message);
+        }
     }
 
     /// Whether anything waits for the user: copies to restore or journals to keep.
@@ -280,7 +330,7 @@ impl Recovery {
         let (done, wait) = channel();
         self.send(Job::Flush(done));
         let _ = wait.recv();
-        self.collect_failures();
+        self.collect_reports(Instant::now());
     }
 
     /// The app is quitting: finishes the writes, then deletes this session's copies and
@@ -308,10 +358,9 @@ impl Recovery {
         }
     }
 
-    fn collect_failures(&mut self) {
-        while let Ok(failure) = self.folder.reports.try_recv() {
-            log::warn!("{failure}");
-            self.failures.push(failure);
+    fn collect_reports(&mut self, now: Instant) {
+        while let Ok(report) = self.folder.reports.try_recv() {
+            self.record_report(report, now);
         }
     }
 
@@ -339,22 +388,22 @@ impl Recovery {
                 let scan = recovery::scan(&sub);
                 for damaged in scan.damaged {
                     let name = damaged.file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.problems
-                        .push(format!("A recovery copy is damaged and was skipped: {name} ({})", damaged.error));
+                    self.problems.push(format!("A recovery copy could not be read: {name} ({})", damaged.error));
                     let kept = root.join(DAMAGED);
-                    let _ = std::fs::create_dir_all(&kept);
-                    let _ = std::fs::rename(&damaged.file, kept.join(name));
+                    let destination = kept.join(format!("{}.recovery", DocumentId::new()));
+                    if let Err(error) =
+                        std::fs::create_dir_all(&kept).and_then(|()| std::fs::rename(&damaged.file, destination))
+                    {
+                        keep_session = true;
+                        self.problems.push(format!(
+                            "Could not quarantine {}: {error}. It was kept for the next start.",
+                            damaged.file.display()
+                        ));
+                    }
                 }
                 for copy in scan.copies {
                     if copy.standing().offered() {
-                        let to = offered.join(copy.file.file_name().unwrap_or_default());
-                        // Two ended sessions with the same document: the newer copy wins.
-                        let newer = recovery::read(&to).is_ok_and(|(r, _)| r.written_ms > copy.record.written_ms);
-                        if newer {
-                            let _ = std::fs::remove_file(&copy.file);
-                        } else if let Err(error) =
-                            std::fs::create_dir_all(&offered).and_then(|()| std::fs::rename(&copy.file, &to))
-                        {
+                        if let Err(error) = move_offer(&copy, &offered) {
                             keep_session = true;
                             let problem = format!(
                                 "Could not move recovery copy {}: {error}. It was kept for the next start.",
@@ -363,8 +412,8 @@ impl Recovery {
                             log::warn!("{problem}");
                             self.problems.push(problem);
                         }
-                    } else {
-                        let _ = std::fs::remove_file(&copy.file);
+                    } else if std::fs::remove_file(&copy.file).is_err() {
+                        keep_session = true;
                     }
                 }
             }
@@ -382,6 +431,40 @@ impl Recovery {
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn move_offer(copy: &RecoveryCopy, offered: &Path) -> std::io::Result<()> {
+    let existing = |path: &Path| match recovery::read(path) {
+        Ok((record, _)) => Ok(Some(record)),
+        Err(recovery::RecoveryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(std::io::Error::other(error.to_string())),
+    };
+    let same = |record: &Record| {
+        record.id == copy.record.id && record.kind == copy.record.kind && record.revision == copy.record.revision
+    };
+    let mut to = offered.join(copy.file.file_name().unwrap_or_default());
+    let mut there = existing(&to)?;
+    if there.as_ref().is_some_and(|record| !same(record)) {
+        let revision = soliddraft_document::ContentHash::of_bytes(copy.record.revision.as_str().as_bytes());
+        to = offered.join(format!(
+            "{}-{}.{}.recovery",
+            copy.record.id,
+            revision.as_str().replace(':', "-"),
+            copy.record.kind.extension()
+        ));
+        there = existing(&to)?;
+    }
+    if let Some(record) = there {
+        if !same(&record) {
+            return Err(std::io::Error::other("a different recovery copy already occupies the destination"));
+        }
+        if record.written_ms >= copy.record.written_ms {
+            return std::fs::remove_file(&copy.file);
+        }
+    }
+    std::fs::create_dir_all(offered)?;
+    std::fs::rename(&copy.file, to)
 }
 
 /// A session folder as a shelf, for the writer thread.
@@ -423,7 +506,7 @@ fn claim(root: &Path) -> std::io::Result<(PathBuf, File)> {
 
 /// Starts the writer thread for the session folder `dir`.
 #[cfg(not(target_arch = "wasm32"))]
-fn writer(dir: PathBuf) -> (Sender<Job>, Receiver<String>, JoinHandle<()>) {
+fn writer(dir: PathBuf) -> (Sender<Job>, Receiver<Report>, JoinHandle<()>) {
     let (jobs, inbox) = channel::<Job>();
     let (report, failures) = channel();
     let thread = std::thread::Builder::new()
@@ -485,12 +568,13 @@ impl Recovery {
     pub fn close(self) {}
 
     fn send(&self, job: Job) {
-        if let Some(failed) = perform(job, &crate::documents_browser::RecoveryShelf) {
-            crate::documents_browser::fail(failed);
+        let shelf = crate::documents_browser::RecoveryShelf(job.copy_token());
+        if let Some(report) = perform(job, &shelf).filter(|report| report.message.is_some()) {
+            crate::documents_browser::report_copy(report);
         }
     }
 
-    fn collect_failures(&mut self) {
+    fn collect_reports(&mut self, now: Instant) {
         if self.starting
             && let Some(found) = crate::documents_browser::take_found()
         {
@@ -504,9 +588,8 @@ impl Recovery {
                 Err(e) => self.failures.push(format!("Autosave is off: {e}")),
             }
         }
-        for failure in crate::documents_browser::take_failures() {
-            log::warn!("{failure}");
-            self.failures.push(failure);
+        for report in crate::documents_browser::take_reports() {
+            self.record_report(report, now);
         }
     }
 }
@@ -515,7 +598,7 @@ impl Recovery {
 impl Shelf for crate::documents_browser::RecoveryShelf {
     fn put(&self, record: &Record, document: &[u8]) -> Result<(), String> {
         let bytes = recovery::encode(record, document).map_err(|e| e.to_string())?;
-        crate::documents_browser::put(&recovery::file_name(record.id, record.kind), bytes, record.written_ms);
+        crate::documents_browser::put(&recovery::file_name(record.id, record.kind), bytes, record.written_ms, self.0);
         Ok(())
     }
 
@@ -555,6 +638,8 @@ fn watch(
             w.written = false;
         }
         w.trigger.reset();
+        w.retry = None;
+        w.pending = None;
         w.edits = edits;
         return false;
     }
@@ -562,10 +647,13 @@ fn watch(
         // A frame can carry several edits, such as a script's batch of commands.
         w.trigger.edited(now, u32::try_from(edits.abs_diff(w.edits)).unwrap_or(u32::MAX));
         w.edits = edits;
+        w.retry = None;
     }
-    if w.trigger.due(policy, now) {
+    if w.trigger.due(policy, now) || (policy.enabled && w.retry.is_some_and(|at| now >= at)) {
         w.trigger.reset();
+        w.retry = None;
         w.written = true;
+        w.pending = Some(edits);
         return true;
     }
     false
@@ -654,6 +742,89 @@ mod tests {
     use super::*;
     use soliddraft_document::hash::ContentHash;
     use soliddraft_document::manifest::{Entry, Manifest, Section, write_package};
+
+    #[test]
+    fn retries_ignore_superseded_snapshots_and_wait_for_the_next_result() {
+        let root = std::env::temp_dir().join(format!("soliddraft-retry-generation-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let policy = AutosavePolicy { enabled: true, interval_seconds: 10, edits: 1 };
+        let mut session = Recovery::start(&root, policy).unwrap();
+        let id = DocumentId::new();
+        session.part = Watch { id: Some(id), edits: 2, written: true, pending: Some(2), ..Watch::default() };
+        let now = Instant::now();
+        for retry in [(id, DocKind::Part, 1), (DocumentId::new(), DocKind::Part, 2)] {
+            session.record_report(Report { message: Some("old write failed".into()), copy: Some(retry) }, now);
+            assert!(session.part.retry.is_none());
+        }
+        session.record_report(Report { message: Some("write failed".into()), copy: Some((id, DocKind::Part, 2)) }, now);
+        let mut jobs = Vec::new();
+        let seen = Some((id, 2, true));
+        assert!(!watch(&mut session.part, DocKind::Part, seen, &policy, now + Duration::from_secs(1), &mut jobs));
+        assert!(watch(&mut session.part, DocKind::Part, seen, &policy, now + Duration::from_secs(10), &mut jobs));
+        assert!(!watch(&mut session.part, DocKind::Part, seen, &policy, now + Duration::from_secs(60), &mut jobs));
+        session.close();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn write_test_copy(folder: &Path, id: DocumentId, truth: &[u8]) -> PathBuf {
+        let revision = ContentHash::of_bytes(truth);
+        let mut manifest = Manifest::new(id, DocKind::Part, revision.clone());
+        manifest.sections = vec![Section::required("part.json")];
+        let document = write_package(&manifest, &[Entry::new("part.json", truth)]).unwrap();
+        let record = Record::new(id, DocKind::Part, "Work", None, revision);
+        recovery::write(folder, &record, &document).unwrap()
+    }
+
+    #[test]
+    fn divergent_session_copies_both_survive_adoption_and_restart() {
+        let root = std::env::temp_dir().join(format!("soliddraft-divergent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut session = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        let id = DocumentId::new();
+        for (name, truth) in [("session-one", b"one"), ("session-two", b"two")] {
+            let ended = root.join(name);
+            std::fs::create_dir(&ended).unwrap();
+            File::create(ended.join(LOCK)).unwrap();
+            write_test_copy(&ended, id, truth);
+        }
+        session.adopt_ended_sessions();
+        assert_eq!(session.offers.len(), 2, "divergent unsaved revisions must not overwrite each other");
+        let mut revisions: Vec<_> = session.offers.iter().map(|c| c.record.revision.clone()).collect();
+        revisions.sort();
+        session.close();
+        let next = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        let mut reopened: Vec<_> = next.offers.iter().map(|c| c.record.revision.clone()).collect();
+        reopened.sort();
+        assert_eq!(reopened, revisions);
+        next.close();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn quarantine_failure_keeps_unreadable_bytes_and_session_for_retry() {
+        let root = std::env::temp_dir().join(format!("soliddraft-quarantine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut session = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        let ended = root.join("session-ended");
+        std::fs::create_dir(&ended).unwrap();
+        File::create(ended.join(LOCK)).unwrap();
+        let source = ended.join("newer.dwprt.recovery");
+        std::fs::write(&source, b"unreadable future copy").unwrap();
+        std::fs::write(root.join(DAMAGED), b"blocked").unwrap();
+        session.adopt_ended_sessions();
+        assert_eq!(std::fs::read(&source).unwrap(), b"unreadable future copy");
+        assert!(ended.join(LOCK).is_file());
+        assert!(session.problems.iter().any(|p| p.contains("next start")));
+        std::fs::remove_file(root.join(DAMAGED)).unwrap();
+        session.close();
+        let next = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+        assert!(!ended.exists());
+        let quarantined: Vec<_> = std::fs::read_dir(root.join(DAMAGED)).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(quarantined.len(), 1);
+        assert_eq!(std::fs::read(&quarantined[0]).unwrap(), b"unreadable future copy");
+        next.close();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn superseded_copy_is_deleted_and_newer_offer_is_unchanged() {

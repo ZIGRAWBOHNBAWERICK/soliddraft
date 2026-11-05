@@ -1227,15 +1227,38 @@ impl AssemblyDocument {
         // assembly saved for the first time holds them as they were given: absolute, or
         // relative to the working folder.
         let old = self.path.clone().unwrap_or_default();
-        if self.path.is_none() || old.parent() != path.parent() {
-            for s in self.assembly.sources.iter_mut().filter(|s| !s.document.path.is_empty()) {
+        let rebasing = self.path.is_none() || old.parent() != path.parent();
+        let original = rebasing.then(|| self.assembly.sources.clone());
+        let rebase = |s: &mut Source| {
+            if !s.document.path.is_empty() {
                 let target = s.document.stored_path(&old);
                 s.document.set_path(&path, &target);
+            }
+        };
+        if rebasing {
+            for source in &mut self.assembly.sources {
+                rebase(source);
             }
         }
         self.finish_loading();
         let copies = self.copies();
-        self.assembly.save(&path, self.id, None, &copies)?;
+        if let Err(error) = self.assembly.save(&path, self.id, None, &copies) {
+            if let Some(sources) = original {
+                self.assembly.sources = sources;
+            }
+            return Err(error);
+        }
+        if rebasing {
+            for record in self.undo.iter_mut().chain(&mut self.redo) {
+                for image in [&mut record.before, &mut record.after] {
+                    for (_, source) in &mut image.sources {
+                        if let Some(source) = source {
+                            rebase(source);
+                        }
+                    }
+                }
+            }
+        }
         self.saved = self.revision();
         self.saved_settings = self.assembly.settings.clone();
         self.path = Some(path.clone());
@@ -1280,16 +1303,20 @@ impl AssemblyDocument {
             _ => None,
         };
         // An open document's revision can be one its file does not hold yet.
-        let matches =
-            |b: &Vec<u8>| soliddraft_document::identify(std::io::Cursor::new(b)).is_ok_and(|i| i.revision == r.pinned);
-        if let Some(bytes) = on_disk.filter(matches) {
+        if let Some(bytes) = on_disk.filter(|bytes| load::matches_reference(bytes, r)) {
             if let Some(store) = &self.options.revisions {
                 store.record(id, &r.pinned, &bytes);
             }
             return Ok(bytes);
         }
         match &self.options.revisions {
-            Some(store) => store.fetch(id, &r.pinned).map_err(|e| e.to_string()),
+            Some(store) => {
+                let bytes = store.fetch(id, &r.pinned).map_err(|e| e.to_string())?;
+                if !load::matches_reference(&bytes, r) {
+                    return Err("the stored revision is not the referenced document".into());
+                }
+                Ok(bytes)
+            }
             None => Err(format!(
                 "revision {} of {} is not available; Rebuild to use the current version",
                 r.pinned.short(),

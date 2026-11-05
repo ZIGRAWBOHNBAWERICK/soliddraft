@@ -67,6 +67,31 @@ fn sessions(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn unchanged_dirty_document_retries_after_a_failed_recovery_write() {
+    let root = folder("retry");
+    let policy = AutosavePolicy { enabled: true, interval_seconds: 10, edits: 1 };
+    let mut session = Recovery::start(&root, policy).unwrap();
+    let doc = part();
+    let copy = session.folder().join(file_name(doc.model().id(), DocKind::Part));
+    std::fs::create_dir(&copy).unwrap();
+    let t0 = Instant::now();
+    assert_eq!(session.tick(&doc, None, KERNEL, t0), Some(Duration::from_secs(1)), "wake for the pending write result");
+    session.flush();
+    std::fs::remove_dir(&copy).unwrap();
+    session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(1));
+    session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(11));
+    session.flush();
+    assert!(copy.is_file(), "the same dirty revision needs a retry without an edit");
+    assert_eq!(
+        session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(12)),
+        None,
+        "a persisted unchanged document should stop polling"
+    );
+    session.close();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_crash_leaves_copies_that_the_next_start_restores() {
     let root = folder("crash");
     let policy = AutosavePolicy { enabled: true, interval_seconds: 60, edits: 0 };
@@ -171,6 +196,45 @@ fn copies_follow_saves_and_only_newer_ones_are_offered() {
 }
 
 #[test]
+fn a_newer_saved_branch_does_not_discard_divergent_recovery_on_restart() {
+    let root = folder("newer-divergent-file");
+    let user_folder = folder("newer-divergent-user");
+    let user = user_folder.join("bracket.dwprt");
+    let policy = AutosavePolicy { enabled: true, interval_seconds: 60, edits: 1 };
+    let mut a = part();
+    file::save(&mut a, &user).unwrap();
+    let mut b = file::open(&user, soliddraft_app::kernel(), None).unwrap();
+    assert_eq!(a.model().id(), b.model().id());
+    let mut first = Recovery::start(&root, policy).unwrap();
+    let other = Recovery::start(&root, policy).unwrap();
+    a.apply(block(5.0)).unwrap();
+    first.tick(&a, None, KERNEL, Instant::now());
+    first.flush();
+    let source = first.folder().join(file_name(a.model().id(), DocKind::Part));
+    let bytes = std::fs::read(&source).unwrap();
+    let revision = a.model().semantic_hash();
+    drop(first);
+
+    b.apply(block(9.0)).unwrap();
+    file::save(&mut b, &user).unwrap();
+    assert_ne!(b.model().semantic_hash(), revision);
+    let written = soliddraft_document::recovery::read(&source).unwrap().0.written_ms;
+    let later = std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(written + 60_000);
+    std::fs::OpenOptions::new().write(true).open(&user).unwrap().set_modified(later).unwrap();
+    other.close();
+
+    for _ in 0..2 {
+        let next = Recovery::start(&root, policy).unwrap();
+        assert_eq!(next.offers.len(), 1, "a later save of branch B must not delete unsaved branch A");
+        assert_eq!(next.offers[0].record.revision, revision);
+        assert_eq!(std::fs::read(&next.offers[0].file).unwrap(), bytes);
+        next.close();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(user_folder).unwrap();
+}
+
+#[test]
 fn queued_recovery_keeps_the_part_and_drawing_at_the_enqueued_revision() {
     let root = folder("snapshot");
     let policy = AutosavePolicy { enabled: true, interval_seconds: 3600, edits: 1 };
@@ -219,7 +283,9 @@ fn damaged_copies_are_reported_and_skipped_and_running_sessions_are_left_alone()
     assert_eq!(running.problems.len(), 1, "{:?}", running.problems);
     assert!(running.problems[0].contains("damaged"), "{}", running.problems[0]);
     assert!(running.offers.is_empty() && running.show);
-    assert!(root.join("damaged/3f0c2a4e-7b1d-4c55-9a0e-2d6f8e1b9c47.dwprt.recovery").exists(), "kept aside");
+    let kept: Vec<_> = std::fs::read_dir(root.join("damaged")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(kept.len(), 1, "kept aside");
+    assert_eq!(std::fs::read(&kept[0]).unwrap(), b"PK\x03\x04cut");
     let doc = part();
     running.tick(&doc, None, KERNEL, Instant::now());
     running.flush();

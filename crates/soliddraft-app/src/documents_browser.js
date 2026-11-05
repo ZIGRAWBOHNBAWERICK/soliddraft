@@ -76,10 +76,18 @@ async function adoptSession(d, other) {
   const keys = await request(store.getAllKeys(range(other + "/")));
   for (const key of keys) {
     const value = await request(store.get(key));
-    const to = `${session}/offered/${key.split("/").pop()}`;
-    const there = await request(store.get(to));
-    // Two ended sessions with the same document: the newer copy wins.
-    if (!there || there.written < value.written) store.put(value, to);
+    let to = `${session}/offered/${key.split("/").pop()}`;
+    let there = await request(store.get(to));
+    const same = there && there.bytes.length === value.bytes.length &&
+      there.bytes.every((byte, i) => byte === value.bytes[i]);
+    if (!same) {
+      // Different sessions can hold independent edits of the same document.
+      while (there) {
+        to = `${session}/offered/${crypto.randomUUID()}-${key.split("/").pop()}`;
+        there = await request(store.get(to));
+      }
+      store.put(value, to);
+    }
     store.delete(key);
   }
   await done(tx);

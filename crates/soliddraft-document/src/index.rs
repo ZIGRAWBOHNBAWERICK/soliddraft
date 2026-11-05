@@ -8,7 +8,7 @@
 //! An index is a scan of folders and their subfolders, reading only each file's
 //! manifest. Hidden folders (a leading dot) are skipped.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::id::DocumentId;
@@ -34,6 +34,7 @@ pub struct FolderIndex {
     entries: Vec<IndexEntry>,
     unreadable: Vec<(PathBuf, String)>,
     seen: HashSet<PathBuf>,
+    directories: HashMap<PathBuf, usize>,
 }
 
 impl FolderIndex {
@@ -54,6 +55,8 @@ impl FolderIndex {
 
     /// Adds a folder (with its subfolders) or a single file to the index.
     pub fn add(&mut self, root: &Path) {
+        // A later add must discover files created since the previous walk.
+        self.directories.clear();
         if root.is_file() {
             self.add_file(root);
         } else {
@@ -65,6 +68,11 @@ impl FolderIndex {
         if depth > MAX_DEPTH {
             return;
         }
+        let key = canonical(dir);
+        if self.directories.get(&key).is_some_and(|seen| *seen <= depth) {
+            return;
+        }
+        self.directories.insert(key, depth);
         let Ok(read) = std::fs::read_dir(dir) else { return };
         let mut paths: Vec<PathBuf> = read.filter_map(|e| e.ok().map(|e| e.path())).collect();
         paths.sort();
@@ -135,6 +143,53 @@ impl FolderIndex {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adding_a_folder_again_discovers_new_files() {
+        let root = std::env::temp_dir().join(format!("soliddraft-index-add-again-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut index = FolderIndex::new();
+        std::fs::write(root.join("first.dwprt"), b"unreadable").unwrap();
+        index.add(&root);
+        assert_eq!(index.unreadable().len(), 1);
+        std::fs::write(root.join("second.dwprt"), b"unreadable").unwrap();
+        index.add(&root);
+        assert_eq!(index.unreadable().len(), 2, "a completed walk must not suppress a later add");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_shallower_alias_still_discovers_descendants() {
+        let root = std::env::temp_dir().join(format!("soliddraft-index-shallow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("child")).unwrap();
+        std::fs::write(root.join("child/part.dwprt"), b"unreadable").unwrap();
+        let mut index = FolderIndex::new();
+        index.walk(&root, MAX_DEPTH);
+        assert!(index.unreadable().is_empty());
+        index.walk(&root, 0);
+        assert_eq!(index.unreadable().len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn symlink_cycles_do_not_expand_document_paths() {
+        let root = std::env::temp_dir().join(format!("soliddraft-index-cycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("a-loop")).unwrap();
+        std::fs::write(root.join("z.dwprt"), b"unreadable").unwrap();
+        let index = FolderIndex::scan([&root]);
+        assert_eq!(index.unreadable().len(), 1);
+        assert_eq!(index.unreadable()[0].0, root.join("z.dwprt"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 

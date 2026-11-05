@@ -137,6 +137,7 @@ impl DrawingDoc {
         let journal = self.journal_command(|| serde_json::json!({"op":"undo"}));
         let result = (|| {
             let name = self.stack.undo(&mut self.drawing)?;
+            self.rescale_picking();
             self.touch();
             Some(name.to_owned())
         })();
@@ -148,6 +149,7 @@ impl DrawingDoc {
         let journal = self.journal_command(|| serde_json::json!({"op":"redo"}));
         let result = (|| {
             let name = self.stack.redo(&mut self.drawing)?;
+            self.rescale_picking();
             self.touch();
             Some(name.to_owned())
         })();
@@ -207,6 +209,7 @@ impl DrawingDoc {
                 _ => None,
             };
             let report = self.stack.run(&mut self.drawing, &cmd, p.as_ref()).map_err(|e| e.to_string())?;
+            self.rescale_picking();
             self.touch();
             if let (Some(id), Some(p)) = (remade, p.as_ref())
                 && let Ok(index) = soliddraft_drawing::PartIndex::build(p)
@@ -237,6 +240,24 @@ impl DrawingDoc {
             }
             Ok(())
         })())
+    }
+
+    fn rescale_picking(&mut self) {
+        for (id, xf) in &mut self.transforms {
+            let Ok(scale) = project::view_scale(&self.drawing, *id) else { continue };
+            let ratio = scale / xf.scale;
+            if (ratio - 1.0).abs() < 1e-12 {
+                continue;
+            }
+            xf.centre = Point2::new(xf.centre.u * ratio, xf.centre.v * ratio);
+            xf.scale = scale;
+            if let Some(circles) = self.circles.get_mut(id) {
+                for c in circles {
+                    c.centre = xf.point(c.model_centre);
+                    c.radius = c.model_radius * scale;
+                }
+            }
+        }
     }
 
     /// The last projection of a view, rebuilt from the cached geometry.

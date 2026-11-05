@@ -21,9 +21,9 @@ use std::collections::BTreeMap;
 
 use super::arcs::{Piece, lines_and_arcs};
 use super::{LAYERS, baseline, layer};
-use crate::DrawingError;
 use crate::display::{DimensionGeometry, DisplayList, HatchRecord, Item, Owner, Role};
 use crate::ids::AnnotationId;
+use crate::{DimType, Dimension, DrawingError, Tolerance};
 
 /// How far converted curves may stray from the display list's, in millimetres.
 pub const ARC_TOLERANCE: f64 = 0.01;
@@ -31,7 +31,7 @@ pub const ARC_TOLERANCE: f64 = 0.01;
 /// The text style every TEXT entity uses.
 const STYLE: &str = "SOLIDDRAFT";
 
-/// The dimension style every DIMENSION entity uses.
+/// Prefix for dimension styles, one per editable measurement.
 const DIMSTYLE: &str = "SOLIDDRAFT";
 
 /// Writes the display list as a DXF R2000 drawing.
@@ -79,16 +79,16 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
             _ => None,
         })
         .unwrap_or(3.5);
-    d.add_dim_style(DimStyle {
-        name: DIMSTYLE.to_owned(),
+    let dimension_style = DimStyle {
         dimensioning_text_height: text_height,
         dimensioning_arrow_size: text_height,
         dimension_extension_line_offset: 1.0,
         dimension_extension_line_extension: 2.0,
         dimension_line_gap: 0.8,
         dimension_text_style: STYLE.to_owned(),
+        dimension_non_angular_units: dxf::enums::NonAngularUnits::Decimal,
         ..Default::default()
-    });
+    };
     let mut blocks: BTreeMap<AnnotationId, Vec<Entity>> = owners.iter().map(|o| (*o, Vec::new())).collect();
     for item in list.printable() {
         let entities = item_entities(item);
@@ -113,6 +113,25 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
         for r in list.dimensions.iter().filter(|r| r.owner == *owner) {
             n += 1;
             let name = format!("*D{n}");
+            let style_name = format!("{DIMSTYLE}{n}");
+            let scale = measurement_scale(r);
+            let (upper, lower, tolerances, limits) = match r.format.tolerance {
+                Tolerance::None => (0.0, 0.0, false, false),
+                Tolerance::Symmetric { value } => (value, value, true, false),
+                Tolerance::Deviation { upper, lower } => (upper, -lower, true, false),
+                Tolerance::Limits { upper, lower } => (upper, -lower, false, true),
+            };
+            d.add_dim_style(DimStyle {
+                name: style_name.clone(),
+                dimension_linear_measurement_scale_factor: scale.unwrap_or(r.measurement_scale),
+                dimension_unit_tolerance_decimal_places: i16::from(r.format.precision),
+                dimension_tolerace_decimal_places: i16::from(r.format.precision.max(1)),
+                dimension_plus_tolerance: upper,
+                dimension_minus_tolerance: lower,
+                generate_dimension_tolerances: tolerances,
+                generate_dimension_limits: limits,
+                ..dimension_style.clone()
+            });
             let entities = if first { blocks.remove(owner).unwrap_or_default() } else { Vec::new() };
             first = false;
             let mut block = Block { name: name.clone(), entities, ..Default::default() };
@@ -124,8 +143,13 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
                 block_name: name,
                 text_mid_point: at(r.text_mid),
                 actual_measurement: r.value,
-                text: control_codes(&r.text),
-                dimension_style_name: DIMSTYLE.to_owned(),
+                // shortcut: coincident anchors keep true lengths literal until 3D definition points are exported.
+                text: control_codes(&if scale.is_some() {
+                    r.format.text.replace(Dimension::VALUE_TEXT, "<>")
+                } else {
+                    r.text.clone()
+                }),
+                dimension_style_name: style_name,
                 is_block_reference_referenced_by_this_block_only: true,
                 is_at_user_defined_location: true,
                 ..Default::default()
@@ -181,6 +205,24 @@ pub fn dxf(list: &DisplayList) -> Result<Vec<u8>, DrawingError> {
     let mut out = Vec::new();
     d.save(&mut out).map_err(|e| DrawingError::Io(format!("DXF: {e}")))?;
     finish(&out, &list.hatches)
+}
+
+/// True lengths on pictorial views need the foreshortening factor as well as scale.
+fn measurement_scale(r: &crate::display::DimensionRecord) -> Option<f64> {
+    if r.format.dim_type != DimType::True {
+        return Some(r.measurement_scale);
+    }
+    let distance = match r.geometry {
+        DimensionGeometry::Linear { p1, p2, angle, .. } => {
+            let angle = angle.to_radians();
+            ((p2.u - p1.u) * angle.cos() + (p2.v - p1.v) * angle.sin()).abs()
+        }
+        DimensionGeometry::Ordinate { origin, feature, along_x, .. } => {
+            (if along_x { feature.u - origin.u } else { feature.v - origin.v }).abs()
+        }
+        _ => return Some(r.measurement_scale),
+    };
+    (distance.abs() > 1e-9).then(|| r.value / distance)
 }
 
 /// The DXF entities of one display item.
@@ -470,6 +512,67 @@ mod tests {
     use crate::fixture::bracket_a3;
 
     #[test]
+    fn editable_dimensions_keep_precision_tolerances_and_literal_overrides() {
+        for (tolerance, upper, lower, tol, limits) in [
+            (Tolerance::None, 0.0, 0.0, false, false),
+            (Tolerance::Symmetric { value: 0.1 }, 0.1, 0.1, true, false),
+            (Tolerance::Deviation { upper: 0.2, lower: -0.1 }, 0.2, 0.1, true, false),
+            (Tolerance::Limits { upper: 0.2, lower: -0.1 }, 0.2, 0.1, false, true),
+        ] {
+            let mut list = layout_sheet(&bracket_a3(), 0);
+            list.dimensions.truncate(1);
+            let r = &mut list.dimensions[0];
+            r.format.precision = 2;
+            r.format.tolerance = tolerance;
+            r.format.text = "check <DIM> mm".into();
+            let bytes = dxf(&list).unwrap();
+            let back = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
+            let style = back.dim_styles().find(|s| s.name == "SOLIDDRAFT1").unwrap();
+            assert_eq!(style.dimension_unit_tolerance_decimal_places, 2);
+            assert_eq!(style.dimension_plus_tolerance, upper);
+            assert_eq!(style.dimension_minus_tolerance, lower);
+            assert_eq!(style.generate_dimension_tolerances, tol);
+            assert_eq!(style.generate_dimension_limits, limits);
+            assert!(back.entities().any(|e| matches!(&e.specific,
+                EntityType::RotatedDimension(d) if d.dimension_base.text == "check <> mm")));
+            list.dimensions[0].format.text = "INSPECT".into();
+            let bytes = dxf(&list).unwrap();
+            let back = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
+            assert!(back.entities().any(|e| matches!(&e.specific,
+                EntityType::RotatedDimension(d) if d.dimension_base.text == "INSPECT")));
+        }
+    }
+
+    #[test]
+    fn true_lengths_keep_their_foreshortening_and_degenerate_lengths_stay_literal() {
+        let mut list = layout_sheet(&bracket_a3(), 0);
+        list.dimensions.truncate(1);
+        let r = &mut list.dimensions[0];
+        r.format.dim_type = DimType::True;
+        r.value = 100.0;
+        r.geometry = DimensionGeometry::Linear {
+            p1: soliddraft_kernel_api::Point2::new(0.0, 0.0),
+            p2: soliddraft_kernel_api::Point2::new(25.0, 0.0),
+            line: r.text_mid,
+            angle: 0.0,
+        };
+        assert_eq!(measurement_scale(r), Some(4.0));
+        r.geometry = DimensionGeometry::Linear { p1: r.text_mid, p2: r.text_mid, line: r.text_mid, angle: 0.0 };
+        let text = r.text.clone();
+        assert_eq!(measurement_scale(r), None);
+        let bytes = dxf(&list).unwrap();
+        let back = dxf::Drawing::load(&mut bytes.as_slice()).unwrap();
+        let dim = back
+            .entities()
+            .find_map(|e| match &e.specific {
+                EntityType::RotatedDimension(d) => Some(d),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(dim.dimension_base.text, control_codes(&text));
+    }
+
+    #[test]
     fn the_fixture_re_reads_with_entities_on_its_layers_and_no_splines() {
         let bytes = dxf(&layout_sheet(&bracket_a3(), 0)).unwrap();
         let counts = count_entities(&bytes).unwrap();
@@ -492,11 +595,13 @@ mod tests {
         let diameter = back
             .entities()
             .find_map(|e| match &e.specific {
-                EntityType::DiameterDimension(d) if d.dimension_base.text == "%%c24" => Some(d),
+                EntityType::DiameterDimension(d) if (d.dimension_base.actual_measurement - 24.0).abs() < 1e-9 => {
+                    Some(d)
+                }
                 _ => None,
             })
             .expect("the boss diameter is a DIMENSION");
-        assert!((diameter.dimension_base.actual_measurement - 24.0).abs() < 1e-9);
+        assert_eq!(diameter.dimension_base.text, "<>");
         let block = back.blocks().find(|b| b.name == diameter.dimension_base.block_name).expect("its block");
         assert!(block.entities.iter().any(|e| matches!(&e.specific, EntityType::Text(t) if t.value == "%%c24")));
         assert!(counts.get("DIMENSION/DIMENSION").is_some_and(|n| *n >= 4), "{counts:?}");

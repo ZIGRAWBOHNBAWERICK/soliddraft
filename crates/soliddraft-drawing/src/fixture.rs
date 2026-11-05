@@ -77,7 +77,7 @@ pub fn bracket_a3() -> Drawing {
         },
         View {
             id: TOP,
-            kind: ViewKind::Projected { parent: FRONT, direction: FoldDirection::Down },
+            kind: ViewKind::Projected { parent: FRONT, direction: FoldDirection::Down, projection: None },
             position: Point2::new(100.0, 93.0),
             alignment: Some(Alignment { parent: FRONT, axis: AlignAxis::Vertical }),
             scale: ViewScale::Parent,
@@ -90,7 +90,7 @@ pub fn bracket_a3() -> Drawing {
         },
         View {
             id: LEFT,
-            kind: ViewKind::Projected { parent: FRONT, direction: FoldDirection::Right },
+            kind: ViewKind::Projected { parent: FRONT, direction: FoldDirection::Right, projection: None },
             position: Point2::new(250.0, 190.0),
             alignment: Some(Alignment { parent: FRONT, axis: AlignAxis::Horizontal }),
             scale: ViewScale::Parent,

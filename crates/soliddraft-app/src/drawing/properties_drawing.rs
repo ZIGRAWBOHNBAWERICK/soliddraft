@@ -449,7 +449,7 @@ fn view_panel(
             value_row(ui, "Model", &format!("{part} (rev {}, {state_text})", s.doc.drawing.model.pinned.short()));
             let orientation = match &v.kind {
                 soliddraft_drawing::ViewKind::Base { .. } => name.trim_end_matches(" view").to_owned(),
-                soliddraft_drawing::ViewKind::Projected { parent, direction } => {
+                soliddraft_drawing::ViewKind::Projected { parent, direction, .. } => {
                     let parent_name = sheet.view(*parent).map(|p| view_label(&sheet, p)).unwrap_or_default();
                     format!("{:?} of {parent_name}", direction).to_lowercase()
                 }

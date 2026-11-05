@@ -2,7 +2,7 @@
 //! the kernel's 3D curves to the view's 2D line work.
 //!
 //! A base view's orientation is stored; a projected view's comes from its parent's,
-//! folded towards the side it sits on, with the sheet's projection angle deciding which
+//! folded towards the side it sits on, with its placement projection angle deciding which
 //! face that side shows. A section view turns its parent's frame a quarter turn about
 //! the cutting line, and an auxiliary view about its reference edge; a detail view keeps
 //! its parent's frame and magnifies it. Scales chain the same way. Curves are projected
@@ -473,10 +473,10 @@ fn view_axes<'a>(find: &Find<'a>, view: &View, projection: Projection, depth: u8
             let s = orientation.spec(&view.display);
             Some((s.direction, s.up))
         }
-        ViewKind::Projected { parent: p, direction } => {
+        ViewKind::Projected { parent: p, direction, projection: placed } => {
             let (pd, pu) = parent(*p)?;
             let frame = ViewSpec::new(pd, pu).frame()?;
-            Some(fold(&frame, *direction, projection))
+            Some(fold(&frame, *direction, placed.unwrap_or(projection)))
         }
         ViewKind::Section { parent: p, line, flip, .. } => {
             let (pd, pu) = parent(*p)?;

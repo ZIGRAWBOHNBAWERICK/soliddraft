@@ -11,7 +11,7 @@
 //!   entries (display meshes, the drawing's thumbnail); the interface only hands over an
 //!   immutable snapshot. Quitting deletes the session folder. At start, a session folder
 //!   whose lock is free belonged to an app that ended without quitting. Its copies that
-//!   are newer than their documents ([`soliddraft_document::Standing::offered`]) move
+//!   hold unsaved revisions ([`soliddraft_document::Standing::offered`]) move
 //!   into this session's `offered/` folder and are listed for restore; the others are
 //!   deleted. Damaged copies move to `<recovery folder>/damaged/` and are reported once.
 //!   An offer still undecided at quit stays in `offered/`, so the next start finds it.

@@ -15,10 +15,10 @@
 //! from before atomic saves, a full disk, a file from a newer SolidDraft) is reported
 //! by [`scan`] and skipped, never opened.
 //!
-//! Which copies to offer after a crash is [`RecoveryCopy::standing`]: a copy of a
-//! document never saved, or whose file is gone, or whose file has another revision and
-//! was last written before the copy. The app keeps one recovery folder per running
-//! session and decides which sessions ended without closing.
+//! [`RecoveryCopy::standing`] offers copies whose documents were never saved, whose
+//! files are gone, or whose revisions differ from their files. Modification times do
+//! not establish which branch superseded another. The app keeps one recovery folder
+//! per running session and decides which sessions ended without closing.
 
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
@@ -190,12 +190,12 @@ pub enum Standing {
     NeverSaved,
     /// The document's file is no longer where it was.
     FileMissing,
-    /// The copy has changes the file does not: another revision, written after the
-    /// file was last saved, or the file cannot be read.
+    /// The copy has another revision, or its file cannot be read. Its timestamp need
+    /// not be newer than the file's.
     Newer,
     /// The file has the copy's revision: nothing to recover.
     Saved,
-    /// The file has another revision and was saved after the copy was written.
+    /// Retained for API compatibility. `RecoveryCopy::standing` no longer returns this.
     Older,
 }
 
@@ -210,11 +210,17 @@ impl RecoveryCopy {
     /// Where the copy stands against the user's file now.
     pub fn standing(&self) -> Standing {
         let Some(path) = &self.record.path else { return Standing::NeverSaved };
-        let Ok(meta) = std::fs::metadata(path) else { return Standing::FileMissing };
+        if std::fs::metadata(path).is_err() {
+            return Standing::FileMissing;
+        }
         match identify_file(path) {
-            Ok(saved) if saved.id != self.record.id || saved.kind != self.record.kind => Standing::Newer,
-            Ok(saved) if saved.revision == self.record.revision => Standing::Saved,
-            Ok(_) if file_millis(&meta).is_some_and(|m| m > self.record.written_ms) => Standing::Older,
+            Ok(saved)
+                if saved.id == self.record.id
+                    && saved.kind == self.record.kind
+                    && saved.revision == self.record.revision =>
+            {
+                Standing::Saved
+            }
             _ => Standing::Newer,
         }
     }
@@ -266,12 +272,6 @@ pub fn scan(folder: &Path) -> Scan {
 
 fn millis(t: SystemTime) -> u64 {
     t.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
-/// When a file was last written, in milliseconds since the Unix epoch.
-fn file_millis(meta: &std::fs::Metadata) -> Option<u64> {
-    let modified = meta.modified().ok()?;
-    modified.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
 }
 
 #[cfg(test)]
@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_is_offered_only_when_it_is_newer_than_the_file() {
+    fn a_copy_is_offered_unless_its_revision_is_saved() {
         let dir = folder("standing");
         let id = DocumentId::new();
         let user = dir.join("user/bracket.dwprt");
@@ -355,7 +355,7 @@ mod tests {
         let earlier = SystemTime::now() - Duration::from_secs(3600);
         assert_eq!(standing(&edited_revision, later), Standing::Newer);
         assert_eq!(standing(&saved_revision, later), Standing::Saved, "the file holds it already");
-        assert_eq!(standing(&edited_revision, earlier), Standing::Older, "the file was saved since");
+        assert_eq!(standing(&edited_revision, earlier), Standing::Newer, "a later save can belong to another branch");
         std::fs::write(&user, b"not a zip").unwrap();
         assert_eq!(standing(&edited_revision, earlier), Standing::Newer, "an unreadable file loses to the copy");
         std::fs::remove_file(&user).unwrap();

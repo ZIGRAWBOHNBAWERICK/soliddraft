@@ -196,6 +196,45 @@ fn copies_follow_saves_and_only_newer_ones_are_offered() {
 }
 
 #[test]
+fn a_newer_saved_branch_does_not_discard_divergent_recovery_on_restart() {
+    let root = folder("newer-divergent-file");
+    let user_folder = folder("newer-divergent-user");
+    let user = user_folder.join("bracket.dwprt");
+    let policy = AutosavePolicy { enabled: true, interval_seconds: 60, edits: 1 };
+    let mut a = part();
+    file::save(&mut a, &user).unwrap();
+    let mut b = file::open(&user, soliddraft_app::kernel(), None).unwrap();
+    assert_eq!(a.model().id(), b.model().id());
+    let mut first = Recovery::start(&root, policy).unwrap();
+    let other = Recovery::start(&root, policy).unwrap();
+    a.apply(block(5.0)).unwrap();
+    first.tick(&a, None, KERNEL, Instant::now());
+    first.flush();
+    let source = first.folder().join(file_name(a.model().id(), DocKind::Part));
+    let bytes = std::fs::read(&source).unwrap();
+    let revision = a.model().semantic_hash();
+    drop(first);
+
+    b.apply(block(9.0)).unwrap();
+    file::save(&mut b, &user).unwrap();
+    assert_ne!(b.model().semantic_hash(), revision);
+    let written = soliddraft_document::recovery::read(&source).unwrap().0.written_ms;
+    let later = std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(written + 60_000);
+    std::fs::OpenOptions::new().write(true).open(&user).unwrap().set_modified(later).unwrap();
+    other.close();
+
+    for _ in 0..2 {
+        let next = Recovery::start(&root, policy).unwrap();
+        assert_eq!(next.offers.len(), 1, "a later save of branch B must not delete unsaved branch A");
+        assert_eq!(next.offers[0].record.revision, revision);
+        assert_eq!(std::fs::read(&next.offers[0].file).unwrap(), bytes);
+        next.close();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(user_folder).unwrap();
+}
+
+#[test]
 fn queued_recovery_keeps_the_part_and_drawing_at_the_enqueued_revision() {
     let root = folder("snapshot");
     let policy = AutosavePolicy { enabled: true, interval_seconds: 3600, edits: 1 };

@@ -67,6 +67,31 @@ fn sessions(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn unchanged_dirty_document_retries_after_a_failed_recovery_write() {
+    let root = folder("retry");
+    let policy = AutosavePolicy { enabled: true, interval_seconds: 10, edits: 1 };
+    let mut session = Recovery::start(&root, policy).unwrap();
+    let doc = part();
+    let copy = session.folder().join(file_name(doc.model().id(), DocKind::Part));
+    std::fs::create_dir(&copy).unwrap();
+    let t0 = Instant::now();
+    assert_eq!(session.tick(&doc, None, KERNEL, t0), Some(Duration::from_secs(1)), "wake for the pending write result");
+    session.flush();
+    std::fs::remove_dir(&copy).unwrap();
+    session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(1));
+    session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(11));
+    session.flush();
+    assert!(copy.is_file(), "the same dirty revision needs a retry without an edit");
+    assert_eq!(
+        session.tick(&doc, None, KERNEL, t0 + Duration::from_secs(12)),
+        None,
+        "a persisted unchanged document should stop polling"
+    );
+    session.close();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_crash_leaves_copies_that_the_next_start_restores() {
     let root = folder("crash");
     let policy = AutosavePolicy { enabled: true, interval_seconds: 60, edits: 0 };
@@ -219,7 +244,9 @@ fn damaged_copies_are_reported_and_skipped_and_running_sessions_are_left_alone()
     assert_eq!(running.problems.len(), 1, "{:?}", running.problems);
     assert!(running.problems[0].contains("damaged"), "{}", running.problems[0]);
     assert!(running.offers.is_empty() && running.show);
-    assert!(root.join("damaged/3f0c2a4e-7b1d-4c55-9a0e-2d6f8e1b9c47.dwprt.recovery").exists(), "kept aside");
+    let kept: Vec<_> = std::fs::read_dir(root.join("damaged")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(kept.len(), 1, "kept aside");
+    assert_eq!(std::fs::read(&kept[0]).unwrap(), b"PK\x03\x04cut");
     let doc = part();
     running.tick(&doc, None, KERNEL, Instant::now());
     running.flush();

@@ -37,6 +37,9 @@ use crate::source::DisplaySource;
 use crate::store::{DefinitionIndex, DefinitionKey, DefinitionStore, Freshness};
 use soliddraft_tessellation::{Level, Quality};
 
+#[cfg(test)]
+mod regression_tests;
+
 /// Why an assembly could not be opened at all.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
@@ -110,6 +113,22 @@ impl Lookup {
         let resolver = self.resolver.lock().ok()?;
         found(resolver.resolve(r))
     }
+
+    fn current(&self, r: &DocRef) -> Result<Option<(Vec<u8>, ContentHash)>, String> {
+        let Some((path, _)) = self.resolve(r) else { return Ok(None) };
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let identity = soliddraft_document::identify(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
+        if Some(identity.id) != r.id || identity.kind != r.kind {
+            return Ok(None);
+        }
+        Ok(Some((bytes, identity.revision)))
+    }
+}
+
+pub(crate) fn matches_reference(bytes: &[u8], reference: &DocRef) -> bool {
+    soliddraft_document::identify(std::io::Cursor::new(bytes)).is_ok_and(|identity| {
+        Some(identity.id) == reference.id && identity.kind == reference.kind && identity.revision == reference.pinned
+    })
 }
 
 /// Where a resolution found its target, with the target's revision now.
@@ -149,24 +168,25 @@ impl Lookup {
                 return Ok(Fetched { assembly: Arc::new(a), stale: None, package: None });
             }
         }
-        let found = self.resolve(r);
         let opened = |p: AssemblyPackage, stale| Fetched { assembly: p.assembly().clone(), stale, package: Some(p) };
-        if let Some((path, Some(now))) = &found
-            && *now == r.pinned
-        {
-            return Ok(opened(AssemblyPackage::open(path).map_err(|e| e.to_string())?, None));
-        }
+        let found = match self.current(r) {
+            Ok(Some((bytes, now))) if now == r.pinned => {
+                return Ok(opened(AssemblyPackage::from_bytes(bytes).map_err(|e| e.to_string())?, None));
+            }
+            found => found,
+        };
         if let Some(store) = &self.revisions
             && let Ok(bytes) = store.fetch(id, &r.pinned)
+            && matches_reference(&bytes, r)
         {
             return Ok(opened(AssemblyPackage::from_bytes(bytes).map_err(|e| e.to_string())?, None));
         }
-        match found {
-            Some((path, now)) => {
-                let now = now.map(|h| h.short().to_owned()).unwrap_or_default();
+        match found? {
+            Some((bytes, now)) => {
+                let now = now.short();
                 let stale =
                     format!("revision {} has no copy here; showing the current revision {now}", r.pinned.short());
-                Ok(opened(AssemblyPackage::open(&path).map_err(|e| e.to_string())?, Some(stale)))
+                Ok(opened(AssemblyPackage::from_bytes(bytes).map_err(|e| e.to_string())?, Some(stale)))
             }
             None => Err(format!(
                 "no copy of revision {} and {} cannot be found; Rebuild or repair the reference",
@@ -197,23 +217,22 @@ impl Lookup {
         let display = self.display.as_ref().ok_or_else(|| {
             format!("the file has no display copy of revision {}; Rebuild to make one", r.pinned.short())
         })?;
-        let found = self.resolve(r);
-        if let Some((path, Some(now))) = &found
+        let found = self.current(r);
+        if let Ok(Some((bytes, now))) = &found
             && *now == r.pinned
         {
-            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-            return made(display.as_ref(), &bytes).map(|(m, _)| (m, None));
+            return made(display.as_ref(), bytes).map(|(m, _)| (m, None));
         }
         if let Some(store) = &self.revisions
             && let Ok(bytes) = store.fetch(id, &r.pinned)
+            && matches_reference(&bytes, r)
         {
             return made(display.as_ref(), &bytes).map(|(m, _)| (m, None));
         }
-        match found {
-            Some((path, now)) => {
-                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        match found? {
+            Some((bytes, now)) => {
                 let (m, _) = made(display.as_ref(), &bytes)?;
-                let now = now.map(|h| h.short().to_owned()).unwrap_or_default();
+                let now = now.short();
                 Ok((
                     m,
                     Some(format!("revision {} has no copy here; showing the current revision {now}", r.pinned.short())),
@@ -245,17 +264,19 @@ impl Lookup {
             }
         }
         let display = self.display.as_ref().ok_or("no display source can make other levels")?;
-        if let Some((path, Some(now))) = self.resolve(r)
-            && now == r.pinned
+        let found = self.current(r);
+        if let Ok(Some((bytes, now))) = &found
+            && *now == r.pinned
         {
-            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-            return display.part_mesh_level(&bytes, quality, level).map(|(m, _)| m);
+            return display.part_mesh_level(bytes, quality, level).map(|(m, _)| m);
         }
         if let Some(store) = &self.revisions
             && let Ok(bytes) = store.fetch(id, &r.pinned)
+            && matches_reference(&bytes, r)
         {
             return display.part_mesh_level(&bytes, quality, level).map(|(m, _)| m);
         }
+        found?;
         Err(format!("revision {} of {} is not available", r.pinned.short(), r.path))
     }
 }
@@ -357,6 +378,7 @@ pub(crate) fn structure(
     store.set_assembly(root, assembly);
     let mut refs: HashMap<DefinitionIndex, DocRef> = HashMap::new();
     let mut parents: HashMap<DefinitionIndex, DefinitionIndex> = HashMap::new();
+    let mut locations = HashMap::from([(root, lookup.path.clone())]);
     // Level by level, so the sub-assemblies of one level are read on every core.
     let mut level = vec![root];
     let mut seen = HashSet::from([root]);
@@ -368,17 +390,29 @@ pub(crate) fn structure(
                 let Some(doc) = s.document.id else { continue };
                 let key = DefinitionKey::new(doc, s.document.configuration.clone(), s.document.pinned.clone());
                 let i = store.intern(key, s.document.kind, label_of(&s.document));
-                refs.entry(i).or_insert_with(|| s.document.clone());
+                let mut reference = s.document.clone();
+                if !reference.path.is_empty()
+                    && let Some(holder) = locations.get(&a).and_then(|path| path.as_deref())
+                {
+                    let target = reference.stored_path(holder);
+                    reference.path = std::path::absolute(&target).unwrap_or(target).to_string_lossy().into_owned();
+                }
+                refs.entry(i).or_insert_with(|| reference.clone());
                 parents.entry(i).or_insert(a);
                 if s.document.kind == DocKind::Assembly && seen.insert(i) {
-                    wanted.push((i, s.document.clone()));
+                    wanted.push((i, reference));
                 }
             }
         }
         let fetched = fetch_all(lookup, &wanted);
-        for ((i, _), f) in wanted.into_iter().zip(fetched) {
+        for ((i, reference), f) in wanted.into_iter().zip(fetched) {
             match f {
                 Ok(f) => {
+                    let location = lookup
+                        .resolve(&reference)
+                        .map(|(path, _)| path)
+                        .or_else(|| (!reference.path.is_empty()).then(|| PathBuf::from(&reference.path)));
+                    locations.insert(i, location);
                     store.set_assembly(i, f.assembly);
                     if let Some(p) = f.stale {
                         let d = store.get_mut(i);

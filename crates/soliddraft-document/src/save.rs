@@ -15,28 +15,37 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Writes `bytes` to `path` atomically, making its folder first.
 pub fn save_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().filter(|d| !d.as_os_str().is_empty());
-    if let Some(dir) = dir {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = temporary_name(path);
-    let written = (|| {
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, path)
-    })();
-    if let Err(e) = written {
+    let tmp = stage(path, bytes)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
+    #[cfg(unix)]
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty());
     // Make the rename itself durable. Folders cannot be opened for this on Windows.
     #[cfg(unix)]
     if let Ok(d) = std::fs::File::open(dir.unwrap_or(Path::new("."))) {
         let _ = d.sync_all();
     }
     Ok(())
+}
+
+/// Writes and syncs a temporary replacement beside `path`, without publishing it.
+pub(crate) fn stage(path: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = temporary_name(path);
+    let written = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    Ok(tmp)
 }
 
 /// Writes `bytes` to `path`, which must not exist, making its folder first. The file
@@ -84,7 +93,7 @@ fn publish_new(
 }
 
 /// A hidden name beside `path` that no other save in this process uses at the same time.
-pub(crate) fn temporary_name(path: &Path) -> PathBuf {
+fn temporary_name(path: &Path) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let n = NEXT.fetch_add(1, Ordering::Relaxed);

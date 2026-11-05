@@ -200,7 +200,7 @@ module = ["recent"]
 name = "app.recovery"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/recovery.rs"]
+paths = ["crates/soliddraft-app/src/recovery.rs", "crates/soliddraft-app/src/recovery/"]
 module = ["recovery"]
 
 [[areas]]
@@ -465,6 +465,7 @@ paths = [
   "crates/soliddraft-assembly/src/schema.rs",
   "crates/soliddraft-assembly/src/file.rs",
   "crates/soliddraft-assembly/src/load.rs",
+  "crates/soliddraft-assembly/src/load/",
   "crates/soliddraft-assembly/src/store.rs",
   "crates/soliddraft-assembly/src/occurrence.rs",
   "crates/soliddraft-assembly/src/placement.rs",

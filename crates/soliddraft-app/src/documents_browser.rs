@@ -6,12 +6,10 @@
 //! other's files. The browser answers in the background: each call here starts the work
 //! and returns, and what comes back waits in this module until a frame takes it.
 
+use crate::recovery::Report;
+use soliddraft_document::{DocKind, DocumentId};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
-
-use soliddraft_document::DocKind;
-use soliddraft_document::recovery::{self, RecoveryCopy};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -39,13 +37,7 @@ extern "C" {
     fn js_forget() -> js_sys::Promise;
 }
 
-/// What the browser held from earlier visits when autosave started.
-pub struct Found {
-    /// The copies to offer, newest first; each `file` is the copy's key.
-    pub offers: Vec<RecoveryCopy>,
-    /// Damaged copies, as sentences. They are deleted.
-    pub problems: Vec<String>,
-}
+pub use crate::recovery::offers::Found;
 
 /// A document the browser keeps for the recent list.
 #[derive(Clone)]
@@ -64,7 +56,7 @@ struct Shared {
     found: Option<Result<Found, String>>,
     /// The offered copies' bytes, by key, so a restore needs no wait.
     offered: HashMap<String, Vec<u8>>,
-    failures: Vec<String>,
+    reports: Vec<Report>,
     recent: Option<Result<Vec<Stored>, String>>,
 }
 
@@ -104,12 +96,16 @@ fn spawn(what: &'static str, promise: js_sys::Promise) {
 
 /// Records a failure for the app to show.
 pub fn fail(sentence: String) {
-    SHARED.with(|s| s.borrow_mut().failures.push(sentence));
+    report_copy(Report { message: Some(sentence), copy: None });
 }
 
-/// The failures since the last call.
-pub fn take_failures() -> Vec<String> {
-    SHARED.with(|s| std::mem::take(&mut s.borrow_mut().failures))
+pub(crate) fn report_copy(report: Report) {
+    SHARED.with(|s| s.borrow_mut().reports.push(report));
+}
+
+/// Completed writes and failures since the last call.
+pub fn take_reports() -> Vec<Report> {
+    SHARED.with(|s| std::mem::take(&mut s.borrow_mut().reports))
 }
 
 /// Claims a new session and looks for the copies of sessions that ended.
@@ -129,22 +125,16 @@ pub fn start_recovery() {
 }
 
 fn read_offers(list: &JsValue) -> Found {
-    let mut found = Found { offers: Vec::new(), problems: Vec::new() };
-    for item in js_sys::Array::from(list).iter() {
-        let key = field(&item, "key").as_string().unwrap_or_default();
-        let copy = bytes(&field(&item, "bytes"));
-        match recovery::decode(std::io::Cursor::new(&copy)) {
-            Ok((record, _)) => {
-                found.offers.push(RecoveryCopy { record, file: PathBuf::from(&key) });
-                SHARED.with(|s| s.borrow_mut().offered.insert(key, copy));
-            }
-            Err(e) => {
-                found.problems.push(format!("A recovery copy is damaged and was skipped ({e})"));
-                spawn("Recovery", js_discard(&key));
-            }
-        }
+    let entries: Vec<_> = js_sys::Array::from(list)
+        .iter()
+        .map(|item| (field(&item, "key").as_string().unwrap_or_default(), bytes(&field(&item, "bytes"))))
+        .collect();
+    let keys: Vec<_> = entries.iter().map(|(key, _)| key.clone()).collect();
+    let mut found = crate::recovery::offers::read(entries);
+    for key in keys.into_iter().filter(|key| !found.bytes.contains_key(key)) {
+        spawn("Recovery", js_discard(&key));
     }
-    found.offers.sort_by_key(|c| std::cmp::Reverse(c.record.written_ms));
+    SHARED.with(|s| s.borrow_mut().offered.extend(std::mem::take(&mut found.bytes)));
     found
 }
 
@@ -159,12 +149,20 @@ pub fn offered(key: &str) -> Option<Vec<u8>> {
 }
 
 /// Where autosave's jobs put copies in the browser.
-pub struct RecoveryShelf;
+pub struct RecoveryShelf(pub(crate) Option<(DocumentId, DocKind, u64)>);
 
 /// Keeps this session's copy `file`.
-pub fn put(file: &str, copy: Vec<u8>, written_ms: u64) {
-    let copy = js_sys::Uint8Array::from(copy.as_slice());
-    spawn("Autosave could not keep a recovery copy", js_put(file, &copy, written_ms as f64));
+pub fn put(file: &str, bytes: Vec<u8>, written_ms: u64, copy: Option<(DocumentId, DocKind, u64)>) {
+    let bytes = js_sys::Uint8Array::from(bytes.as_slice());
+    let pending = js_put(file, &bytes, written_ms as f64);
+    wasm_bindgen_futures::spawn_local(async move {
+        let message = JsFuture::from(pending)
+            .await
+            .err()
+            .map(|e| format!("Autosave could not keep a recovery copy: {}", error(e)));
+        report_copy(Report { message, copy });
+        crate::web::wake();
+    });
 }
 
 /// Deletes this session's copy `file`.

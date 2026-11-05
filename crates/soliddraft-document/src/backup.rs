@@ -87,8 +87,13 @@ impl Backups {
             return Ok(None);
         }
         let first = self.path(document, 1);
-        let staged = crate::save::temporary_name(&first);
-        save_atomic(&staged, &previous)?;
+        let staged = crate::save::stage(&first, &previous)?;
+        #[cfg(unix)]
+        if let Some(parent) = first.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
+        }
         let rotated = (|| {
             let mut n = self.count + 1;
             while self.path(document, n).is_file() {
@@ -129,13 +134,24 @@ mod retention_tests {
         let dir = std::env::temp_dir().join(format!("soliddraft-backup-stage-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let document = dir.join("x".repeat(245));
-        std::fs::write(&document, b"current").unwrap();
-        let backups = Backups::default();
-        let previous = backups.path(&document, 1);
-        std::fs::write(&previous, b"history").unwrap();
-        assert!(backups.keep(&document, b"replacement").is_err());
-        assert_eq!(std::fs::read(&previous).unwrap(), b"history");
+        for length in [220, 245] {
+            let document = dir.join("x".repeat(length));
+            std::fs::write(&document, b"current").unwrap();
+            let backups = Backups::default();
+            let previous = backups.path(&document, 1);
+            std::fs::write(&previous, b"history").unwrap();
+            if length == 220 {
+                assert!(matches!(backups.save(&document, b"replacement"), Ok(BackupOutcome::Kept(_))));
+                assert_eq!(std::fs::read(&document).unwrap(), b"replacement");
+                assert_eq!(std::fs::read(previous).unwrap(), b"current");
+            } else {
+                assert!(backups.keep(&document, b"replacement").is_err());
+                assert_eq!(std::fs::read(&previous).unwrap(), b"history");
+                assert!(backups.save(&document, b"replacement").is_err());
+                assert_eq!(std::fs::read(&document).unwrap(), b"current");
+                assert_eq!(std::fs::read(previous).unwrap(), b"history");
+            }
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

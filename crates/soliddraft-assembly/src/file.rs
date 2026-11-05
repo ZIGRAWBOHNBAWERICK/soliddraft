@@ -484,6 +484,10 @@ impl CopyReader {
             return Ok(None);
         };
         let bulk = self.package.read(&format!("{folder}{PLACEMENTS}"))?;
+        let truth: Value = serde_json::from_slice(&json)?;
+        if hash_truth(without_format(&truth), bulk.as_deref()) != *revision {
+            return Ok(None);
+        }
         Ok(Some(TruthEntries { json: json.into(), bulk: bulk.map(Into::into) }))
     }
 

@@ -149,6 +149,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_shallower_alias_still_discovers_descendants() {
+        let root = std::env::temp_dir().join(format!("soliddraft-index-shallow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("child")).unwrap();
+        std::fs::write(root.join("child/part.dwprt"), b"unreadable").unwrap();
+        let mut index = FolderIndex::new();
+        index.walk(&root, MAX_DEPTH);
+        assert!(index.unreadable().is_empty());
+        index.add(&root);
+        assert_eq!(index.unreadable().len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn symlink_cycles_do_not_expand_document_paths() {
         let root = std::env::temp_dir().join(format!("soliddraft-index-cycle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);

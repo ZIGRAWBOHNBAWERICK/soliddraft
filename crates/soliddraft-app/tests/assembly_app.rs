@@ -83,6 +83,29 @@ fn close(a: Placement, b: Placement) -> bool {
 }
 
 #[test]
+fn new_assembly_supersedes_an_uncollected_open_without_losing_edits_or_undo() {
+    let _turn = turn();
+    let dir = folder("superseded-open");
+    let old = dir.join("a.dwasm");
+    soliddraft_assembly::AssemblyDocument::new("A").save(Some(&old)).unwrap();
+    let block = part(&dir.join("parts/block.dwprt"), 10.0, 10.0, 10.0);
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut dock = DockState::new(vec![Tab::Viewport]);
+    let ctx = egui::Context::default();
+    assembly::apply(&mut state, &mut dock, AssemblyAction::Open(old));
+    assembly::apply(&mut state, &mut dock, AssemblyAction::New);
+    let id = session(&mut state).doc.id();
+    assembly::apply(&mut state, &mut dock, AssemblyAction::Insert(Some(vec![block])));
+    wait_open(&mut state, &mut dock, &ctx);
+    let current = session(&mut state);
+    assert_eq!(current.doc.id(), id);
+    assert_eq!(current.doc.assembly().components.len(), 1);
+    assert!(current.doc.undo(), "B's undo history must survive A's completion");
+    assert!(current.doc.assembly().components.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn an_assembly_is_made_from_two_parts_saved_and_reopened() {
     let _turn = turn();
     let dir = folder("flow");

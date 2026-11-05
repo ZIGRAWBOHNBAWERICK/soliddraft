@@ -139,7 +139,8 @@ impl<K: Clone + Eq + Hash, M: Weigh + PartialEq> DisplayCache<K, M> {
         let level = if key.level_invariant() {
             Level::Coarse
         } else {
-            self.definitions.get(&definition)
+            self.definitions
+                .get(&definition)
                 .and_then(|entries| entries.iter().find(|e| e.key == key))
                 .map_or(level, |entry| entry.level.min(level))
         };
@@ -301,9 +302,15 @@ mod tests {
 
     #[test]
     fn angle_only_keys_keep_coarse_eligibility_in_any_insert_order() {
-        let l = Levels::new(&Quality::Custom(crate::quality::Advanced {
-            chord_height: 0.0, angle_deg: 15.0, max_edge_length: 0.0, max_aspect_ratio: 0.0,
-        }), 100.0);
+        let l = Levels::new(
+            &Quality::Custom(crate::quality::Advanced {
+                chord_height: 0.0,
+                angle_deg: 15.0,
+                max_edge_length: 0.0,
+                max_aspect_ratio: 0.0,
+            }),
+            100.0,
+        );
         assert_eq!(l.key(Level::Coarse), l.key(Level::Fine));
         for order in [vec![Level::Standard], Level::ALL.to_vec(), vec![Level::Fine, Level::Standard, Level::Coarse]] {
             let mut cache = DisplayCache::new(DeviceBudget { triangles: 0, bytes: 0 });

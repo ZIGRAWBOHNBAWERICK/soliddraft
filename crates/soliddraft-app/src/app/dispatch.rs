@@ -147,6 +147,16 @@ impl SolidDraftApp {
             }
             AppAction::Assembly(a) => crate::assembly::apply(&mut self.state, &mut self.dock, a),
             AppAction::Undo => {
+                if let Some(s) = self.state.sketch.as_mut()
+                    && let Some(drag) = s.trim_drag.as_mut()
+                {
+                    if drag.extend.is_some() {
+                        s.sketch = drag.before.clone();
+                    } else if let Some(cut) = drag.checkpoints.pop() {
+                        cut.restore(&mut s.sketch);
+                    }
+                    return;
+                }
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);
                 }
@@ -158,6 +168,12 @@ impl SolidDraftApp {
                 self.sync_sketch_session();
             }
             AppAction::Redo => {
+                if let Some(s) = self.state.sketch.as_mut()
+                    && s.trim_drag.is_some()
+                {
+                    s.say("Finish or cancel the trim drag before redoing");
+                    return;
+                }
                 if let Some(drag) = self.state.drag_preview.take() {
                     drag.cancel(&mut self.state.doc);
                 }
@@ -1148,6 +1164,7 @@ impl SolidDraftApp {
     /// the session takes the document's copy so both agree.
     pub(super) fn sync_sketch_session(&mut self) {
         let Some(s) = self.state.sketch.as_mut() else { return };
+        s.cancel_trim();
         match self.state.doc.feature(s.feature).and_then(|f| f.sketch()) {
             Some(sk) => {
                 if sk.sketch != s.sketch {

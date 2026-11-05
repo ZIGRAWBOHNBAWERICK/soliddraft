@@ -1,6 +1,6 @@
-//! The Modify tools of the sketcher: polygon, trim, extend, offset, mirror and the two
-//! patterns, all through [`Operation`]. The pointer places geometry and copy values in
-//! `sketcher.rs`; the panel also accepts numeric values for the copies. Every
+//! Click and copy operations for the sketcher's Modify tools through [`Operation`].
+//! Pointer placement and power-trim gestures live in `sketcher.rs`; the panel also
+//! accepts numeric values for the copies. Every
 //! tool previews what it will do before it does it, and a refused operation changes
 //! nothing. The MCP `sketch_geometry` verb runs the same operations headlessly.
 
@@ -130,7 +130,10 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             ui.add(egui::DragValue::new(&mut s.modify.sides).range(3..=1000).prefix("Sides "));
         }
         Tool::Trim => {
-            hint(ui, "Point at the piece of a line or arc to remove, between its crossings, and click.");
+            hint(
+                ui,
+                "Click a piece to trim to its closest crossings. Drag from empty space to power trim, or grab a line or arc to extend it. Retrace a red marker to undo a cut. Esc cancels a drag.",
+            );
         }
         Tool::Extend => {
             hint(ui, "Point at the end of a line or arc and click. It lengthens to the nearest curve in its way.");

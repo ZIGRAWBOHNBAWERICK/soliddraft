@@ -2,6 +2,13 @@
 
 This is a planning inventory, not a parity claim. It compares public SOLIDWORKS Help with SolidDraft at `ea9d2b7b649553f29190d577df53a4537fe38c6b`. Descriptions are original summaries. No vendor prose, icons, screenshots or private material are included.
 
+## Implementation progress
+
+The tables below retain their original source-audit baseline. Later work has added:
+
+- Orders 1-2: the full supported Relations menu and Show all relations, with glyph painting and picking disabled together. Coincidence now has a glyph. See [the ribbon](../crates/soliddraft-app/src/ribbon.rs) and [sketcher](../crates/soliddraft-app/src/sketcher.rs).
+- Orders 4-6: circle trim-to-closest, continuous power trim between pointer samples, natural-path extension of a grabbed line or arc, a reversible per-cut trail, cancellation, and one document undo step per drag. See [the shared trim operations](../crates/soliddraft-sketch/src/tools.rs) and [pointer acceptance tests](../crates/soliddraft-app/tests/sketch_trim.rs). Corner, inside/outside and construction options remain open.
+
 ## How to read the list
 
 - **SolidDraft** means an end-user command exists, not merely that the solver could express it. `yes` means the listed operation is implemented; `partial` names its limit; `no` names the inspected code boundary where support is absent. These are source-audit findings, not fresh interactive acceptance results.

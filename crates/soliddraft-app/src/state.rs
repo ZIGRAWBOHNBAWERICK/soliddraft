@@ -551,6 +551,8 @@ pub struct SketchSession {
     pub cursor: Option<P2>,
     pub snaps: Vec<Snap>,
     pub drag: Option<SketchDrag>,
+    /// Live power-trim edits, committed together on release.
+    pub trim_drag: Option<TrimDrag>,
     pub dim_edit: Option<DimEdit>,
     /// Smart dimension: the first picked item, waiting for a second or a placement.
     pub dim_first: Option<SketchSel>,
@@ -569,6 +571,19 @@ pub struct SketchSession {
     pub modify: ModifyInputs,
     /// What the active Modify tool would do now, redrawn every frame.
     pub preview: Option<ToolPreview>,
+}
+
+/// One power-trim gesture and the checkpoints its trail can undo.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrimDrag {
+    /// The committed sketch before the gesture.
+    pub before: Sketch,
+    /// A line or arc grabbed at the press, for natural-path extension.
+    pub extend: Option<EntityId>,
+    /// The pointer trail in sketch coordinates.
+    pub path: Vec<P2>,
+    /// Cuts that retracing can restore, newest last.
+    pub checkpoints: Vec<crate::sketch::tools::TrimCheckpoint>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -606,6 +621,7 @@ impl SketchSession {
             cursor: None,
             snaps: Vec::new(),
             drag: None,
+            trim_drag: None,
             dim_edit: None,
             dim_first: None,
             dim_second: None,
@@ -623,6 +639,7 @@ impl SketchSession {
     /// Picks a tool. Whatever the old tool had started is dropped. A tool that works on
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
+        self.cancel_trim();
         self.tool = tool;
         self.pending.clear();
         self.chain_from = None;
@@ -633,6 +650,13 @@ impl SketchSession {
         self.drag = None;
         if !tool.selects() {
             self.selection.clear();
+        }
+    }
+
+    /// Drops an uncommitted trim gesture without changing document history.
+    pub fn cancel_trim(&mut self) {
+        if let Some(drag) = self.trim_drag.take() {
+            self.sketch = drag.before;
         }
     }
 

@@ -93,6 +93,85 @@ fn circle_picks_follow_sheet_view_and_inherited_scales_through_history() {
 }
 
 #[test]
+fn same_scale_model_update_restores_picking_metadata_with_drawing_history() {
+    let mut doc = Document::new("Circle history", Arc::new(CatallaxKernel::new()));
+    let mut params = ExtrudeParams { profile: ProfileKind::Circle { diameter: 10.0 }, ..Default::default() };
+    let id = doc.apply(PartCommand::AddExtrude { params: params.clone(), via_assistant: false }).unwrap().unwrap();
+    let mut d = drawing(&doc);
+    let before = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
+    let top = ViewId(2);
+    let circle = &d.circles[&top][0];
+    let curve = d
+        .drawing
+        .view(top)
+        .unwrap()
+        .geometry
+        .curves
+        .iter()
+        .position(|c| c.source.kernel_hint == circle.entity.kernel_hint)
+        .unwrap();
+    params.profile = ProfileKind::Circle { diameter: 20.0 };
+    doc.apply(PartCommand::EditExtrude { id, params }).unwrap();
+    let ctx = PartContext::new(&doc).unwrap();
+    d.apply(Command::UpdateFromModel, Some(&ctx)).unwrap();
+    let after = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
+    let diameter = |d: &DrawingDoc| {
+        let view = d.drawing.view(top).unwrap();
+        let pick = Pick { view: top, curve, end: None };
+        let proposal = propose(view, &[pick], &d.circles[&top]).unwrap();
+        assert_eq!(proposal.kind, DimensionKind::Diameter, "circle picking lost its exact metadata");
+        proposal.radius * 2.0 / project::view_scale(&d.drawing, top).unwrap()
+    };
+    assert!((diameter(&d) - 20.0).abs() < 1e-6);
+    d.undo().unwrap();
+    let undone_diameter = diameter(&d);
+    assert!((undone_diameter - 10.0).abs() < 1e-6, "undo proposes diameter {undone_diameter} on the 10 mm circle");
+    assert_eq!((&d.transforms, &d.circles), (&before.1, &before.2));
+    assert!(d.drawing == before.0);
+    d.redo().unwrap();
+    assert!((diameter(&d) - 20.0).abs() < 1e-6);
+    assert_eq!((d.transforms, d.circles), (after.1, after.2));
+    assert!(d.drawing == after.0);
+}
+
+#[test]
+fn a_section_frame_follows_undo_redo_and_a_new_history_branch() {
+    let doc = part(ProfileKind::Rectangle { width: 40.0, height: 30.0 });
+    let ctx = PartContext::new(&doc).unwrap();
+    let part = ctx.certified_part();
+    let index = PartIndex::build(&part).unwrap();
+    let mut d = drawing(&doc);
+    let top = ViewId(2);
+    let line = derived::cutting_line(&d.drawing, &part, &index, top, Vec3::ZERO, true).unwrap();
+    let (view, section) = derived::new_section(&d.drawing, &part, &index, 0, top, line, false, None).unwrap();
+    let id = view.id;
+    d.apply(Command::PlaceView { sheet: 0, view }, Some(&ctx)).unwrap();
+    d.remember(id, &section.projected);
+    let before = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
+    let mut kind = d.drawing.view(id).unwrap().kind.clone();
+    let ViewKind::Section { flip, .. } = &mut kind else { panic!() };
+    *flip = !*flip;
+    d.apply(Command::EditView { view: id, kind }, Some(&ctx)).unwrap();
+    let after = (d.drawing.clone(), d.transforms.clone(), d.circles.clone());
+    assert_ne!(before.1[&id].frame, after.1[&id].frame);
+    d.undo().unwrap();
+    assert_eq!((&d.transforms, &d.circles), (&before.1, &before.2));
+    assert!(d.drawing == before.0);
+    assert!(d.apply(Command::SetViewScale { view: ViewId(u32::MAX), scale: ViewScale::Sheet }, None).is_err());
+    assert!(d.can_redo(), "a rejected command keeps redo history");
+    d.redo().unwrap();
+    assert_eq!((&d.transforms, &d.circles), (&after.1, &after.2));
+    assert!(d.drawing == after.0);
+    d.undo().unwrap();
+    d.apply(Command::RenameView { view: id, name: "Section check".into() }, None).unwrap();
+    assert!(!d.can_redo());
+    assert_eq!(d.transforms, before.1);
+    d.undo().unwrap();
+    assert_eq!((d.transforms, d.circles), (before.1, before.2));
+    assert!(d.drawing == before.0);
+}
+
+#[test]
 fn round_dimension_repairs_accept_circles_and_remeasure_the_value() {
     let doc = part(ProfileKind::Circle { diameter: 10.0 });
     let ctx = PartContext::new(&doc).unwrap();

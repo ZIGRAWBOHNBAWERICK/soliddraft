@@ -5,7 +5,7 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, P2, PointRef, Sketch};
+use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, P2, PointRef, Sketch};
 
 const EPS: f64 = 1e-6;
 
@@ -43,7 +43,7 @@ pub enum Operation {
     },
     /// Remove the picked interval between intersections with other sketch curves.
     Trim {
-        /// Line or arc to trim.
+        /// Line, arc or circle to trim.
         entity: EntityId,
         /// A point identifying the interval to remove.
         at: P2,
@@ -110,6 +110,31 @@ pub struct TrimPreview {
     pub removed: EntityKind,
     /// The pieces of the target that remain, from its start to its end.
     pub kept: Vec<EntityKind>,
+}
+
+/// One power-trim cut, retained until the gesture ends so retracing can restore it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrimCheckpoint {
+    /// Where the stroke crossed the curve.
+    pub at: P2,
+    /// Stroke direction at the crossing.
+    pub direction: P2,
+    entity: Entity,
+    entity_index: usize,
+    next_entity: EntityId,
+    constraints: Vec<(usize, Constraint)>,
+}
+
+impl TrimCheckpoint {
+    /// Restores this cut after all later checkpoints have been restored.
+    pub fn restore(self, sketch: &mut Sketch) {
+        sketch.entities.retain(|e| e.id < self.next_entity && e.id != self.entity.id);
+        sketch.entities.insert(self.entity_index, self.entity);
+        for (index, constraint) in self.constraints {
+            sketch.constraints.insert(index, constraint);
+        }
+        sketch.next_entity = self.next_entity;
+    }
 }
 
 /// The corners of a regular polygon, counter-clockwise from `vertex` about `center`.
@@ -494,17 +519,42 @@ impl Sketch {
     /// What trimming `id` at `at` removes and keeps, without changing the sketch.
     pub fn trim_preview(&self, id: EntityId, at: P2) -> Result<TrimPreview> {
         let target = self.tool_entity(id)?;
-        if !finite(at) || ends(target.kind).is_none() {
-            return refuse("trim needs a line or arc and a finite pick point");
+        if !finite(at) || target.is_point() {
+            return refuse("trim needs a line, arc or circle and a finite pick point");
+        }
+        let crossings: Vec<P2> = self
+            .drawn()
+            .filter(|e| e.id != id)
+            .flat_map(|other| {
+                intersections(target.kind, other.kind)
+                    .into_iter()
+                    .filter(move |p| on_curve(target.kind, *p) && on_curve(other.kind, *p))
+            })
+            .collect();
+        if let EntityKind::Circle { center, .. } = target.kind {
+            let angle = |p: P2| (p - center).angle().rem_euclid(TAU);
+            let mut cuts = crossings;
+            cuts.sort_by(|a, b| angle(*a).total_cmp(&angle(*b)));
+            cuts.dedup_by(|a, b| a.dist(*b) <= EPS);
+            if cuts.len() > 1 && cuts[0].dist(*cuts.last().unwrap()) <= EPS {
+                cuts.pop();
+            }
+            let pick = target.nearest(at).0;
+            if cuts.iter().any(|p| p.dist(pick) <= EPS) {
+                return refuse("pick inside a trim interval, not at an intersection");
+            }
+            if cuts.len() < 2 {
+                return Ok(TrimPreview { removed: target.kind, kept: Vec::new() });
+            }
+            let next = cuts.iter().position(|p| angle(*p) > angle(pick)).unwrap_or(0);
+            let previous = (next + cuts.len() - 1) % cuts.len();
+            return Ok(TrimPreview {
+                removed: EntityKind::Arc { center, start: cuts[previous], end: cuts[next] },
+                kept: vec![EntityKind::Arc { center, start: cuts[next], end: cuts[previous] }],
+            });
         }
         let mut cuts = vec![0.0, 1.0];
-        for other in self.drawn().filter(|e| e.id != id) {
-            for p in intersections(target.kind, other.kind) {
-                if on_curve(target.kind, p) && on_curve(other.kind, p) {
-                    cuts.push(parameter(target.kind, p).expect("line or arc").clamp(0.0, 1.0));
-                }
-            }
-        }
+        cuts.extend(crossings.into_iter().map(|p| parameter(target.kind, p).expect("line or arc").clamp(0.0, 1.0)));
         cuts.sort_by(f64::total_cmp);
         cuts.dedup_by(|a, b| point_at(target.kind, *a).dist(point_at(target.kind, *b)) <= EPS);
         let p = target.nearest(at).0;
@@ -527,6 +577,99 @@ impl Sketch {
             .map(|(a, b)| piece(a, b))
             .collect();
         Ok(TrimPreview { removed: piece(pair[0], pair[1]), kept })
+    }
+
+    /// Freely extends a line or arc along its supporting curve toward a pointer.
+    /// Picks within the current span do nothing; refusals leave the sketch unchanged.
+    pub fn extend_drag(&mut self, id: EntityId, at: P2) -> Result<bool> {
+        let target = self.tool_entity(id)?;
+        if !finite(at) {
+            return refuse("extension needs a finite pointer position");
+        }
+        let mut kind = target.kind;
+        match kind {
+            EntityKind::Line { a, b } => {
+                let t = parameter(kind, at).expect("line");
+                if (0.0..=1.0).contains(&t) {
+                    return Ok(false);
+                }
+                set_end(&mut kind, if t < 0.0 { End::Start } else { End::End }, a.lerp(b, t));
+            }
+            EntityKind::Arc { center, start, end } => {
+                if center.dist(at) <= EPS {
+                    return refuse("move away from the arc centre to choose an extension direction");
+                }
+                let p = center + (at - center).normalized().scale(center.dist(start));
+                if on_curve(kind, p) {
+                    return Ok(false);
+                }
+                let before = ((start - center).angle() - (p - center).angle()).rem_euclid(TAU);
+                let after = ((p - center).angle() - (end - center).angle()).rem_euclid(TAU);
+                set_end(&mut kind, if before < after { End::Start } else { End::End }, p);
+            }
+            _ => return refuse("only lines and arcs have endpoints to extend"),
+        }
+        self.replace_tool_entity(id, vec![kind])?;
+        Ok(true)
+    }
+
+    /// Trims every curve crossed between pointer samples, in stroke order.
+    /// The open start avoids recutting a curve just restored at a trail marker.
+    /// Returns a checkpoint before each cut. A refusal leaves the sketch unchanged.
+    pub fn trim_stroke(&mut self, from: P2, to: P2) -> Result<Vec<TrimCheckpoint>> {
+        let stroke = EntityKind::Line { a: from, b: to };
+        if !valid(stroke) {
+            return refuse("a trim stroke needs a finite nonzero length");
+        }
+        let direction = to - from;
+        let mut hits = Vec::new();
+        for target in self.drawn().filter(|e| !e.is_point() && valid(e.kind)) {
+            for at in intersections(stroke, target.kind) {
+                let tangent = circle(target.kind)
+                    .is_some_and(|(center, _)| direction.dot(at - center).abs() <= EPS * direction.len());
+                if !tangent && from.dist(at) > EPS && on_curve(stroke, at) && on_curve(target.kind, at) {
+                    hits.push((from.dist(at), target.id, at));
+                }
+            }
+        }
+        if hits.is_empty() {
+            return Ok(Vec::new());
+        }
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut trial = self.clone();
+        let mut families = std::collections::HashMap::<EntityId, Vec<EntityId>>::new();
+        let mut checkpoints = Vec::new();
+        for (_, original, at) in hits {
+            let family = families.entry(original).or_insert_with(|| vec![original]);
+            // Earlier cuts can remove boundaries, so check eligibility against the evolving sketch.
+            let target = family.iter().copied().find(|id| {
+                trial.entity(*id).is_some_and(|e| on_curve(e.kind, at)) && trial.trim_preview(*id, at).is_ok()
+            });
+            let Some(target) = target else { continue };
+            let entity_index = trial.entities.iter().position(|e| e.id == target).expect("trim target exists");
+            let checkpoint = TrimCheckpoint {
+                at,
+                direction,
+                entity: trial.entities[entity_index],
+                entity_index,
+                next_entity: trial.next_entity,
+                constraints: trial
+                    .constraints
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.entities().contains(&target))
+                    .map(|(index, c)| (index, *c))
+                    .collect(),
+            };
+            let kept = trial.trim_interval(target, at)?;
+            family.retain(|id| *id != target);
+            family.extend(kept);
+            checkpoints.push(checkpoint);
+        }
+        if !checkpoints.is_empty() {
+            *self = trial;
+        }
+        Ok(checkpoints)
     }
 
     fn trim_interval(&mut self, id: EntityId, at: P2) -> Result<Vec<EntityId>> {

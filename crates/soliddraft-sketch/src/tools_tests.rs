@@ -46,6 +46,156 @@ fn trim_splits_only_the_picked_interval_and_drops_stale_relations() {
 }
 
 #[test]
+fn trim_circle_between_two_crossings_leaves_an_arc() {
+    let mut s = Sketch::new();
+    let target = s.add(EntityKind::Circle { center: P2::ZERO, radius: 20.0 }, false);
+    line(&mut s, p(-30.0, 0.0), p(30.0, 0.0), true);
+    s.apply_operation(&Operation::Trim { entity: target, at: p(0.0, 20.0) }).unwrap();
+    let EntityKind::Arc { center, start, end } = s.entity(target).unwrap().kind else {
+        panic!("expected remaining arc")
+    };
+    assert_eq!(center, P2::ZERO);
+    close(start.u, -20.0);
+    close(start.v, 0.0);
+    close(end.u, 20.0);
+    close(end.v, 0.0);
+}
+
+#[test]
+fn circle_trim_wraps_without_inventing_a_cut_at_the_angle_seam() {
+    let mut s = Sketch::new();
+    let target = s.add(EntityKind::Circle { center: P2::ZERO, radius: 20.0 }, false);
+    line(&mut s, p(0.0, -30.0), p(0.0, 30.0), true);
+    s.apply_operation(&Operation::Trim { entity: target, at: p(20.0, 0.0) }).unwrap();
+    let EntityKind::Arc { center, start, end } = s.entity(target).unwrap().kind else { panic!() };
+    assert_eq!(center, P2::ZERO);
+    assert!(start.dist(p(0.0, 20.0)) < 1e-6 && end.dist(p(0.0, -20.0)) < 1e-6);
+    let before = s.clone();
+    assert!(s.apply_operation(&Operation::Trim { entity: target, at: start }).is_err());
+    assert_eq!(s, before, "an ambiguous endpoint refuses without changing anything");
+}
+
+#[test]
+fn circle_trim_with_circle_boundaries_keeps_the_major_arc() {
+    let mut s = Sketch::new();
+    let target = s.add(EntityKind::Circle { center: P2::ZERO, radius: 10.0 }, false);
+    s.add(EntityKind::Circle { center: p(10.0, 0.0), radius: 10.0 }, true);
+    s.apply_operation(&Operation::Trim { entity: target, at: p(10.0, 0.0) }).unwrap();
+    let arc = s.entity(target).unwrap();
+    let EntityKind::Arc { center, start, end } = arc.kind else { panic!() };
+    close(center.dist(start), 10.0);
+    close(center.dist(end), 10.0);
+    assert!(start.v > 0.0 && end.v < 0.0 && arc.arc_angles().unwrap().1 > std::f64::consts::PI);
+}
+
+#[test]
+fn unbounded_circle_trim_removes_the_whole_circle() {
+    let mut s = Sketch::new();
+    let target = s.add(EntityKind::Circle { center: P2::ZERO, radius: 10.0 }, false);
+    assert!(s.apply_operation(&Operation::Trim { entity: target, at: p(0.0, 10.0) }).unwrap().is_empty());
+    assert!(s.entity(target).is_none());
+}
+
+#[test]
+fn power_trim_checks_the_segment_and_keeps_per_cut_checkpoints() {
+    let mut s = Sketch::new();
+    for y in [-10.0, 10.0] {
+        line(&mut s, p(-30.0, y), p(30.0, y), false);
+    }
+    for x in [-15.0, 15.0] {
+        line(&mut s, p(x, -25.0), p(x, 25.0), true);
+    }
+    let before = s.clone();
+    let cuts = s.trim_stroke(p(0.0, -20.0), p(0.0, 20.0)).unwrap();
+    assert_eq!(cuts.len(), 2);
+    assert_eq!(s.drawn().count(), 6);
+    assert_eq!(cuts[0].at, p(0.0, -10.0));
+    assert_eq!(cuts[1].at, p(0.0, 10.0));
+    let edited = s.clone();
+    assert!(s.trim_stroke(p(f64::NAN, 0.0), P2::ZERO).is_err());
+    assert_eq!(s, edited);
+    let mut cuts = cuts;
+    cuts.pop().unwrap().restore(&mut s);
+    assert_eq!(s.drawn().count(), 5);
+    cuts.pop().unwrap().restore(&mut s);
+    assert_eq!(s, before);
+}
+
+#[test]
+fn power_trim_rechecks_later_crossings_after_removing_a_boundary() {
+    let mut before = Sketch::new();
+    before.add(EntityKind::Circle { center: p(0.0, 10.0), radius: 10.0 }, false);
+    line(&mut before, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let mut whole = before.clone();
+    whole.trim_stroke(p(0.0, 30.0), p(0.0, -5.0)).unwrap();
+    let mut split = before;
+    split.trim_stroke(p(0.0, 30.0), p(0.0, 5.0)).unwrap();
+    split.trim_stroke(p(0.0, 5.0), p(0.0, -5.0)).unwrap();
+    assert_eq!(whole.drawn().count(), split.drawn().count(), "earlier cuts can make a later crossing trimmable");
+    assert_eq!(whole.drawn().count(), 0);
+    assert_eq!(whole, split);
+}
+
+#[test]
+fn a_trim_stroke_excludes_its_start_to_avoid_recutting_restored_geometry() {
+    let mut s = Sketch::new();
+    line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let before = s.clone();
+    assert!(s.trim_stroke(P2::ZERO, p(0.0, 5.0)).unwrap().is_empty());
+    assert_eq!(s, before);
+}
+
+#[test]
+fn trim_checkpoint_restores_constraint_order_without_copying_unrelated_geometry() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let other = line(&mut s, p(-10.0, 10.0), p(10.0, 10.0), false);
+    for i in 0..1000 {
+        s.add(EntityKind::Point { p: p(f64::from(i), 50.0) }, true);
+    }
+    s.constrain(ConstraintKind::Fix { point: PointRef::new(target, 0), at: p(-10.0, 0.0) });
+    s.constrain(ConstraintKind::Horizontal { target: crate::Align::Line(other) });
+    s.constrain(ConstraintKind::Equal { a: target, b: other });
+    s.constrain(ConstraintKind::Fix { point: PointRef::new(other, 0), at: p(-10.0, 10.0) });
+    s.constrain(ConstraintKind::Fix { point: PointRef::new(target, 1), at: p(10.0, 0.0) });
+    let before = s.clone();
+    let mut cuts = s.trim_stroke(p(0.0, -5.0), p(0.0, 5.0)).unwrap();
+    assert_eq!(cuts.len(), 1);
+    let cut = cuts.pop().unwrap();
+    assert!(format!("{cut:?}").len() < 2048, "a checkpoint must not retain unrelated geometry");
+    assert_eq!(s.constraints.len(), 2);
+    cut.restore(&mut s);
+    assert_eq!(s, before, "entity order, relation order and allocation counters all restore");
+}
+
+#[test]
+fn power_trim_follows_a_split_arc_into_its_new_entity_id() {
+    let mut s = Sketch::new();
+    s.add(EntityKind::Arc { center: P2::ZERO, start: p(10.0, 0.0), end: p(0.0, -10.0) }, false);
+    for y in [-5.0, 5.0] {
+        line(&mut s, p(-20.0, y), p(20.0, y), true);
+    }
+    s.trim_stroke(p(-5.0, 15.0), p(-5.0, -15.0)).unwrap();
+    let lower = p(-5.0, -75.0_f64.sqrt());
+    assert!(s.drawn().filter(|e| matches!(e.kind, EntityKind::Arc { .. })).all(|e| e.nearest(lower).1 > 1e-6));
+    assert_eq!(s.drawn().filter(|e| matches!(e.kind, EntityKind::Arc { .. })).count(), 2);
+}
+
+#[test]
+fn power_trim_ignores_tangent_touches_and_ambiguous_endpoints() {
+    let mut s = Sketch::new();
+    s.add(EntityKind::Circle { center: P2::ZERO, radius: 10.0 }, false);
+    let before = s.clone();
+    assert!(s.trim_stroke(p(-20.0, 10.0), p(20.0, 10.0)).unwrap().is_empty());
+    assert_eq!(s, before);
+    let mut s = Sketch::new();
+    line(&mut s, P2::ZERO, p(10.0, 0.0), false);
+    let before = s.clone();
+    assert!(s.trim_stroke(p(0.0, -5.0), p(0.0, 5.0)).unwrap().is_empty());
+    assert_eq!(s, before);
+}
+
+#[test]
 fn trim_arc_uses_true_circle_intersections() {
     let mut s = Sketch::new();
     let ids = semicircle(&mut s);
@@ -56,6 +206,26 @@ fn trim_arc_uses_true_circle_intersections() {
     close(start.u, 0.0);
     close(start.v, 5.0);
     assert_eq!(end, p(-5.0, 0.0));
+}
+
+#[test]
+fn free_extension_projects_to_the_line_or_arc_without_changing_radius() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, P2::ZERO, p(10.0, 0.0), false);
+    assert!(s.extend_drag(target, p(-5.0, 3.0)).unwrap());
+    assert_eq!(s.entity(target).unwrap().kind, EntityKind::Line { a: p(-5.0, 0.0), b: p(10.0, 0.0) });
+    let before = s.clone();
+    assert!(!s.extend_drag(target, p(5.0, 10.0)).unwrap());
+    assert_eq!(s, before);
+    assert!(s.extend_drag(target, p(f64::NAN, 0.0)).is_err());
+    assert_eq!(s, before);
+    let arc = s.add(EntityKind::Arc { center: P2::ZERO, start: p(20.0, 0.0), end: p(0.0, 20.0) }, false);
+    assert!(s.extend_drag(arc, p(-30.0, 0.0)).unwrap());
+    let EntityKind::Arc { center, start, end } = s.entity(arc).unwrap().kind else { panic!() };
+    assert_eq!((center, start, end), (P2::ZERO, p(20.0, 0.0), p(-20.0, 0.0)));
+    let before = s.clone();
+    assert!(s.extend_drag(arc, P2::ZERO).is_err());
+    assert_eq!(s, before);
 }
 
 #[test]

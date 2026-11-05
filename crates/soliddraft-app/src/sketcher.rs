@@ -15,7 +15,7 @@ use crate::sketch::{
     tools::{End, Operation, polygon_corners},
 };
 use crate::sketch_tools;
-use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool, ToolPreview};
+use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool, ToolPreview, TrimDrag};
 use crate::theme;
 use crate::viewport::camera::Camera;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
@@ -120,11 +120,10 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
     best.map(|(_, id)| SketchSel::Entity(id))
 }
 
-/// The line or arc under the pointer, for the tools that change one. Points, circles and
-/// relation glyphs are not candidates, and a point of a curve counts as the curve.
+/// The curve under the pointer, ignoring points and relation glyphs.
 fn hit_curve(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2) -> Option<EntityId> {
     let mut best: Option<(f32, EntityId)> = None;
-    for e in sketch.drawn().filter(|e| e.is_line() || matches!(e.kind, EntityKind::Arc { .. })) {
+    for e in sketch.drawn().filter(|e| !e.is_point()) {
         let d = entity_distance(frame, e, pos);
         if d <= POINT_REACH && best.is_none_or(|(bd, _)| d < bd) {
             best = Some((d, e.id));
@@ -323,14 +322,15 @@ pub fn run(
             }
         }
         Tool::Trim | Tool::Extend => {
-            if clicked {
+            let dragging = s.tool == Tool::Trim && trim_input(ui, s, &frame, resp, &mut actions);
+            if clicked && !dragging {
                 match s.preview.as_ref().and_then(|p| p.operation.clone()) {
                     Some(operation) => {
                         sketch_tools::apply(s, &operation, &mut actions);
                     }
                     None => {
                         let why = s.preview.as_ref().and_then(|p| p.refused.clone());
-                        s.say(why.unwrap_or_else(|| "Point at a line or arc".to_owned()));
+                        s.say(why.unwrap_or_else(|| "Point at a curve".to_owned()));
                     }
                 }
             }
@@ -364,6 +364,19 @@ pub fn run(
     paint_dimensions(&painter, &frame, s);
     paint_rubber_band(&painter, &frame, s, snapped);
     paint_tool_preview(&painter, &frame, s);
+    if let Some(drag) = &s.trim_drag
+        && drag.extend.is_none()
+    {
+        let trail: Vec<Pos2> = drag.path.iter().filter_map(|p| frame.screen(*p)).collect();
+        if trail.len() > 1 {
+            painter.add(egui::Shape::line(trail, Stroke::new(1.5, theme::accent())));
+        }
+        for cut in &drag.checkpoints {
+            if let Some(at) = frame.screen(cut.at) {
+                painter.rect_filled(Rect::from_center_size(at, vec2(6.0, 6.0)), CornerRadius::ZERO, theme::error());
+            }
+        }
+    }
     paint_snaps(&painter, &frame, s, hover_pos, snapped);
     dim_editor(ui, s, &frame, &mut actions);
     paint_status(ui, s, rect);
@@ -487,6 +500,90 @@ fn copy_input(
     }
 }
 
+fn trim_segment(s: &mut SketchSession, drag: &mut TrimDrag, frame: &Frame<'_>, mut from: P2, to: P2) {
+    while from.dist(to) > 1e-6 {
+        let undo_at = drag.checkpoints.last().and_then(|cut| {
+            let delta = to - from;
+            if delta.dot(cut.direction) >= 0.0 {
+                return None;
+            }
+            let t = (cut.at - from).dot(delta) / delta.dot(delta);
+            let tolerance = 1e-6 / delta.len();
+            // Undo at the marker's projection, not when a sample first enters its hit radius.
+            if !(-tolerance..=1.0 + tolerance).contains(&t) {
+                return None;
+            }
+            let p = from.lerp(to, t.clamp(0.0, 1.0));
+            match (frame.screen(cut.at), frame.screen(p)) {
+                (Some(a), Some(b)) if a.distance(b) <= 6.0 => Some(p),
+                _ => None,
+            }
+        });
+        let end = undo_at.unwrap_or(to);
+        let result = if from.dist(end) > 1e-6 { s.sketch.trim_stroke(from, end) } else { Ok(Vec::new()) };
+        match result {
+            Ok(cuts) if cuts.is_empty() && undo_at.is_some() => {
+                drag.checkpoints.pop().expect("last checkpoint exists").restore(&mut s.sketch);
+            }
+            Ok(cuts) => drag.checkpoints.extend(cuts),
+            Err(why) => {
+                s.say(why.to_string());
+                break;
+            }
+        }
+        if undo_at.is_none() {
+            break;
+        }
+        from = end;
+    }
+}
+
+fn trim_input(
+    ui: &egui::Ui,
+    s: &mut SketchSession,
+    frame: &Frame<'_>,
+    resp: &egui::Response,
+    actions: &mut Vec<AppAction>,
+) -> bool {
+    if resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && let Some(from) = frame.plane_at(origin)
+    {
+        let extend = hit_curve(frame, &s.sketch, origin)
+            .filter(|id| s.sketch.entity(*id).is_some_and(|e| e.is_line() || matches!(e.kind, EntityKind::Arc { .. })));
+        s.trim_drag = Some(TrimDrag { before: s.sketch.clone(), extend, path: vec![from], checkpoints: Vec::new() });
+    }
+    let stopped = resp.drag_stopped_by(egui::PointerButton::Primary);
+    if !resp.dragged_by(egui::PointerButton::Primary) && !stopped {
+        return false;
+    }
+    let Some(mut drag) = s.trim_drag.take() else { return false };
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    if let Some(at) = resp.interact_pointer_pos().and_then(|p| frame.plane_at(p)) {
+        let last = *drag.path.last().expect("trim trail starts at the press");
+        if at.dist(last) > 1e-6 {
+            if let Some(id) = drag.extend {
+                s.sketch = drag.before.clone();
+                if let Err(why) = s.sketch.extend_drag(id, at) {
+                    s.say(why.to_string());
+                }
+            } else {
+                trim_segment(s, &mut drag, frame, last, at);
+            }
+            drag.path.push(at);
+        }
+    }
+    if stopped {
+        if s.sketch != drag.before {
+            solve::solve(&mut s.sketch, None, true);
+            commit(s, actions);
+        }
+    } else {
+        s.trim_drag = Some(drag);
+    }
+    true
+}
+
 /// Pointer input for the select tool: clicks pick, drags move, double-clicks edit.
 #[allow(clippy::too_many_arguments)]
 fn select_input(
@@ -585,7 +682,7 @@ fn select_input(
     }
 }
 
-/// What Trim or Extend would do to the line or arc under the pointer. Extend lengthens
+/// What Trim or Extend would do to the curve under the pointer. Extend lengthens
 /// the end nearer the pointer to the nearest curve beyond it; Trim removes the interval
 /// under the pointer. The preview carries the operation a click applies.
 fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<ToolPreview> {
@@ -607,7 +704,13 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
             let (a, b) = match entity.kind {
                 EntityKind::Line { a, b } => (a, b),
                 EntityKind::Arc { start, end, .. } => (start, end),
-                _ => return None,
+                _ => {
+                    return Some(ToolPreview {
+                        target: Some(id),
+                        refused: Some("A circle has no endpoint to extend".into()),
+                        ..Default::default()
+                    });
+                }
             };
             let nearer = |p: P2| frame.screen(p).map(|sp| (sp - pos).length()).unwrap_or(f32::INFINITY);
             let end = if nearer(a) <= nearer(b) { End::Start } else { End::End };
@@ -1790,7 +1893,7 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         }
         (Tool::Polygon, 0) => "Polygon: click the centre",
         (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
-        (Tool::Trim, _) => "Trim: click the piece of a line or arc to remove; Esc or right-click ends",
+        (Tool::Trim, _) => "Trim: click or drag",
         (Tool::Extend, _) => "Extend: click the end of a line or arc to lengthen; Esc or right-click ends",
         (Tool::Offset, _) => "Offset: drag a selected curve to set distance and side, then Apply",
         (Tool::Mirror, 0) => "Mirror: click the axis start; Ctrl-click selects entities",

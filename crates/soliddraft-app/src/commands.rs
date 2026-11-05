@@ -1302,6 +1302,13 @@ fn undo_labels(s: &AppState) -> (Option<String>, Option<String>) {
     if let Some(a) = s.assembly.session.as_ref().filter(|_| s.assembly.is_active()) {
         return (a.doc.undo_label().map(str::to_owned), a.doc.redo_label().map(str::to_owned));
     }
+    if !s.drawing.is_active()
+        && let Some(k) = s.sketch.as_ref()
+        && let Some(drag) = k.trim_drag.as_ref()
+    {
+        let undo = if drag.extend.is_some() { k.sketch != drag.before } else { !drag.checkpoints.is_empty() };
+        return (undo.then(|| "trim".to_owned()), None);
+    }
     match session(s).filter(|_| s.drawing.is_active()) {
         Some(d) => (d.doc.undo_label().map(str::to_owned), d.doc.redo_label().map(str::to_owned)),
         None => (s.doc.undo_label().map(str::to_owned), s.doc.redo_label().map(str::to_owned)),
@@ -1516,7 +1523,7 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Polygon))
 .app_only(SKETCHER),
-        cmd("sketch_trim", "Trim", Icon::Trim, "Trim: click the piece of a line or arc to remove")
+        cmd("sketch_trim", "Trim", Icon::Trim, "Click to trim a line, arc or circle; drag to power trim or extend")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Trim))
             .when(AppState::in_sketch)

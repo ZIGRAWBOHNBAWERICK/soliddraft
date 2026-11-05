@@ -1236,39 +1236,45 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                             delete_entities = true;
                         }
                     });
-                    // Relations on the selected entities.
-                    let rels: Vec<crate::sketch::Constraint> = entities
-                        .iter()
-                        .flat_map(|e| s.sketch.constraints_of(*e).copied().collect::<Vec<_>>())
-                        .collect::<Vec<_>>();
-                    let mut seen = std::collections::HashSet::new();
-                    let rels: Vec<_> = rels.into_iter().filter(|c| seen.insert(c.id)).collect();
-                    if !rels.is_empty() {
-                        ui.add_space(6.0);
-                        theme::section_label(ui, "Existing relations");
-                        for c in rels {
-                            ui.horizontal(|ui| {
-                                let text = match c.value() {
-                                    Some(v) => format!("{} {}", c.name(), fmt_value(v)),
-                                    None => c.name().to_owned(),
-                                };
+                }
+                // Inspect owners without making them geometry-deletion targets.
+                let inspected: std::collections::HashSet<_> = selection
+                    .iter()
+                    .flat_map(|sel| match sel {
+                        SketchSel::Entity(id) => vec![*id],
+                        SketchSel::Point(p) => vec![p.entity],
+                        SketchSel::Constraint(id) => s.sketch.constraint(*id).map(|c| c.entities()).unwrap_or_default(),
+                    })
+                    .collect();
+                let rels: Vec<_> = s
+                    .sketch
+                    .constraints
+                    .iter()
+                    .filter(|c| c.entities().iter().any(|id| inspected.contains(id)))
+                    .copied()
+                    .collect();
+                if !rels.is_empty() {
+                    ui.add_space(6.0);
+                    theme::section_label(ui, "Existing relations");
+                    for c in rels {
+                        ui.horizontal(|ui| {
+                            let text = match c.value() {
+                                Some(v) => format!("{} {}", c.name(), fmt_value(v)),
+                                None => c.name().to_owned(),
+                            };
+                            if ui.selectable_label(s.selection.contains(&SketchSel::Constraint(c.id)), text).clicked() {
+                                s.selection = vec![SketchSel::Constraint(c.id)];
+                            }
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
-                                    .selectable_label(s.selection.contains(&SketchSel::Constraint(c.id)), text)
+                                    .add(egui::Button::new("×").small().frame(false))
+                                    .on_hover_text("Delete relation")
                                     .clicked()
                                 {
-                                    s.selection = vec![SketchSel::Constraint(c.id)];
+                                    remove_constraint = Some(c.id);
                                 }
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui
-                                        .add(egui::Button::new("×").small().frame(false))
-                                        .on_hover_text("Delete relation")
-                                        .clicked()
-                                    {
-                                        remove_constraint = Some(c.id);
-                                    }
-                                });
                             });
-                        }
+                        });
                     }
                 }
                 // Relations that can be added.

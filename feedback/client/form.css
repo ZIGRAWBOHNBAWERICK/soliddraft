@@ -1,0 +1,96 @@
+.feedback-form {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 44rem;
+  font: 400 1rem/1.5 var(--sans, system-ui, sans-serif);
+  color: var(--ink, #3a3f47);
+}
+.feedback-form [hidden] {
+  display: none !important;
+}
+.feedback-fields,
+.feedback-confirm {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.feedback-form label {
+  display: grid;
+  gap: 0.4rem;
+}
+.feedback-form input:not([type="checkbox"]),
+.feedback-form select,
+.feedback-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--mute, #6b7280);
+  border-radius: 4px;
+  background: var(--bg, #f7f8fa);
+  color: inherit;
+  padding: 0.75rem;
+  font: inherit;
+}
+.feedback-form textarea {
+  resize: vertical;
+  min-height: 8rem;
+}
+.feedback-form input::placeholder,
+.feedback-form textarea::placeholder {
+  color: var(--mute, #6b7280);
+  opacity: 1;
+}
+.feedback-form .feedback-check {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.feedback-check input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+.feedback-form pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--line, #6b7280);
+  font: 0.85rem/1.5 var(--mono, monospace);
+}
+.feedback-form p {
+  margin: 0;
+}
+.feedback-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.feedback-form button {
+  width: fit-content;
+  min-height: 44px;
+  padding: 0.7rem 1.2rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.feedback-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.feedback-form button:not(:disabled):hover {
+  background: var(--glass, #e5e7eb);
+}
+.feedback-form :focus-visible {
+  outline: 2px solid var(--accent, #2457b3);
+  outline-offset: 3px;
+}
+.feedback-status {
+  overflow-wrap: anywhere;
+}

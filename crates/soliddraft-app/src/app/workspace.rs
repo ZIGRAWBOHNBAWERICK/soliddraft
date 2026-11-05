@@ -575,6 +575,8 @@ impl eframe::App for SolidDraftApp {
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);
         self.apply_actions(ctx);
         self.leave_start_page();
+        #[cfg(target_arch = "wasm32")]
+        crate::web::feedback_document(&self.state);
         // Panel choices are written once they settle, never in the middle of a drag.
         if self.state.commands != self.saved_commands {
             if let Err(e) = crate::settings::save_command_history(&self.state.commands) {

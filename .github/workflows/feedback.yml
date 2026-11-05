@@ -1,0 +1,28 @@
+name: Feedback checks
+
+on:
+  push:
+    branches: [main]
+    paths: ['feedback/**', '.github/workflows/feedback.yml']
+  pull_request:
+    paths: ['feedback/**', '.github/workflows/feedback.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  feedback:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test feedback/tests/*.test.mjs
+      - run: python3 -m unittest discover -s feedback/tests -p 'test_*.py'
+      - name: Install the browser test tool
+        run: |
+          npm install --prefix "$RUNNER_TEMP/feedback-browser" playwright@1.56.1
+          "$RUNNER_TEMP/feedback-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Check review and failed-send recovery
+        run: NODE_PATH="$RUNNER_TEMP/feedback-browser/node_modules" node feedback/tests/form.browser.mjs

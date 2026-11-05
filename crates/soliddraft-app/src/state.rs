@@ -897,6 +897,8 @@ impl AppState {
     pub fn run_command(&mut self, command: &crate::commands::CommandSpec) {
         match command.action_now(self) {
             Some(action) => {
+                #[cfg(target_arch = "wasm32")]
+                crate::web::feedback_event(serde_json::json!({"type": "action", "command": command.id}));
                 if !matches!(&action, AppAction::ShowPreferences) {
                     self.commands.record(command.id);
                 }
@@ -915,6 +917,12 @@ impl AppState {
     }
 
     pub fn note(&mut self, text: impl Into<String>, kind: NoteKind) {
+        #[cfg(target_arch = "wasm32")]
+        if matches!(kind, NoteKind::Error) {
+            crate::web::feedback_event(
+                serde_json::json!({"type": "diagnostic", "code": "app-error", "level": "error"}),
+            );
+        }
         self.note = Some(Note { text: text.into(), kind, at: Instant::now() });
     }
 

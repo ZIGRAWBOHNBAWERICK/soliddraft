@@ -15,6 +15,41 @@ use wasm_bindgen_futures::JsFuture;
 thread_local! {
     static CONTEXT: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
     static UPLOAD: RefCell<Option<(String, Vec<u8>)>> = const { RefCell::new(None) };
+    static FEEDBACK_DOCUMENT: RefCell<Option<(&'static str, usize)>> = const { RefCell::new(None) };
+}
+
+/// Sends only allowlisted diagnostic metadata to the page, never authored content.
+pub fn feedback_event(value: serde_json::Value) {
+    let init = web_sys::CustomEventInit::new();
+    init.set_detail(&JsValue::from_str(&value.to_string()));
+    if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("soliddraft-feedback", &init)
+        && let Some(document) = window().document()
+    {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// Publishes the active document's extension and item count, not its data or name.
+pub fn feedback_document(state: &crate::state::AppState) {
+    let summary = if state.start.is_some() {
+        ("none", 0)
+    } else if state.drawing.is_active() {
+        let count =
+            state.drawing.session.as_ref().map_or(0, |s| {
+                s.doc.drawing.sheets.iter().map(|sheet| sheet.views.len() + sheet.annotations.len()).sum()
+            });
+        (".dwdrw", count)
+    } else if state.assembly.is_active() {
+        (".dwasm", state.assembly.session.as_ref().map_or(0, |s| s.doc.table().len()))
+    } else {
+        (".dwprt", state.doc.features.len())
+    };
+    FEEDBACK_DOCUMENT.with(|last| {
+        if *last.borrow() != Some(summary) {
+            *last.borrow_mut() = Some(summary);
+            feedback_event(serde_json::json!({"type": "document", "extension": summary.0, "count": summary.1}));
+        }
+    });
 }
 
 /// Lets background work (an upload, an assistant reply) wake the interface.

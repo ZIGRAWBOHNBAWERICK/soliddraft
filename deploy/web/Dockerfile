@@ -20,6 +20,8 @@ WORKDIR /src
 COPY . .
 ARG BUILD_JOBS=4
 ENV CARGO_BUILD_JOBS=${BUILD_JOBS}
+ARG SOLIDDRAFT_COMMIT=unknown
+ENV SOLIDDRAFT_COMMIT=${SOLIDDRAFT_COMMIT}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p soliddraft-server \
@@ -38,7 +40,7 @@ USER nobody
 EXPOSE 8766
 ENV SOLIDDRAFT_NO_KEYCHAIN=1
 # The commit the image was built from: GET /version reports it and image inspection reads the
-# label. Only this stage takes it, so the build stages above do not depend on it.
+# label. The build stage also embeds it in the browser's feedback metadata.
 ARG SOLIDDRAFT_COMMIT=
 LABEL org.opencontainers.image.revision=${SOLIDDRAFT_COMMIT}
 ENV SOLIDDRAFT_COMMIT=${SOLIDDRAFT_COMMIT}

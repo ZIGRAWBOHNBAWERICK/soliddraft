@@ -5347,6 +5347,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "log",
+ "serde_json",
  "soliddraft-app",
  "wasm-bindgen",
  "wasm-bindgen-futures",

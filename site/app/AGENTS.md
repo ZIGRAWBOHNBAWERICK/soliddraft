@@ -42,7 +42,7 @@ the workspace `Cargo.toml`.
 - `public/assets/drawing/`: the ISO A3 drawing `soliddraft draw` made of the bracket, as SVG, PNG and WebP.
 - `public/assets/work/`: card posters and Blender turntable loops (`preload="none"`).
 - `public/assets/world/`, `brand/`: hero poster, social card, 404 image, all Blender renders of real parts.
-- `public/assets/fonts/`: self-hosted Satoshi and JetBrains Mono. No third-party requests anywhere.
+- `public/assets/fonts/`: self-hosted Satoshi and JetBrains Mono. The feedback form loads Cloudflare Turnstile only on review.
 
 ## Checks
 

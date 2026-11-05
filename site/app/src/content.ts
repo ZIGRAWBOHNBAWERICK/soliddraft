@@ -36,6 +36,17 @@ export const site = {
   credit: "Made by Zigrawbohnbawerick Pty Ltd. MIT licence.",
 };
 
+export const feedback = {
+  title: "Contact us / Give feedback",
+  line: "Found a bug? Have an idea? Tell us what happened or what you would change.",
+  email: "support@zigrawbohnbawerick.org",
+  privacy:
+    "Feedback is saved privately in our Cloudflare inbox and GitHub issue tracker; optional app diagnostics never include file contents or paths.",
+  spam: "Cloudflare Turnstile checks for spam when you review your message.",
+  version: releasedVersion,
+  commit: (import.meta.env.VITE_SOLIDDRAFT_COMMIT as string | undefined) || "unknown",
+};
+
 export const accents = {
   oxide: "#ff5b1f",
   emerald: "#35c27c",
@@ -77,6 +88,7 @@ export const sections: Section[] = [
   { id: "statement", nav: "Desktop and browser", span: 110, veil: true },
   { id: "features", nav: "What works", chapter: "light", span: 260, theme: "light" },
   { id: "get", nav: "Get it", chapter: "smoke", flow: true },
+  { id: "feedback", nav: "Feedback", chapter: "smoke", flow: true },
   { id: "about", nav: "About", chapter: "smoke", flow: true },
 ];
 
@@ -246,7 +258,8 @@ export const get: GetItem[] = [
     href: site.links.app,
     poster: asset("assets/app/browser-bracket.webp"),
     alt: "SolidDraft running in a web browser with the bracket open",
-    blurb: "The kernel runs inside your tab. Files open by upload and save by download. The public browser app has no AI assistant or API key.",
+    blurb:
+      "The kernel runs inside your tab. Files open by upload and save by download. The public browser app has no AI assistant or API key.",
     status: site.version,
   },
   {
@@ -256,7 +269,8 @@ export const get: GetItem[] = [
     href: site.links.releases,
     poster: asset("assets/app/desktop-bracket-dark.webp"),
     alt: "The SolidDraft desktop app with a bracket open and its feature tree",
-    blurb: "AppImage, Debian package, portable Linux archive and macOS disk image on the GitHub releases page, unsigned for now, with checksums and build attestations. Windows downloads are deferred.",
+    blurb:
+      "AppImage, Debian package, portable Linux archive and macOS disk image on the GitHub releases page, unsigned for now, with checksums and build attestations. Windows downloads are deferred.",
     status: site.version,
   },
   {
@@ -267,7 +281,8 @@ export const get: GetItem[] = [
     poster: asset("assets/work/bracket.jpg"),
     alt: "A rendered bracket exported from SolidDraft",
     video: asset("assets/work/bracket.mp4"),
-    blurb: "Pull requests are welcome. Agent-written code is fine and expected; say so in the pull request and stay accountable for what it does.",
+    blurb:
+      "Pull requests are welcome. Agent-written code is fine and expected; say so in the pull request and stay accountable for what it does.",
   },
   {
     id: "kernel",
@@ -277,7 +292,8 @@ export const get: GetItem[] = [
     poster: asset("assets/work/lattice.jpg"),
     alt: "A rendered lattice block exported from SolidDraft",
     video: asset("assets/work/lattice.mp4"),
-    blurb: "Exact B-rep and signed distance fields on one recipe. SolidDraft and Catallax are one project in two repositories.",
+    blurb:
+      "Exact B-rep and signed distance fields on one recipe. SolidDraft and Catallax are one project in two repositories.",
   },
 ];
 

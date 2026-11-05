@@ -66,6 +66,8 @@ web-sys = { workspace = true, features = [
     "AbortSignal",
     "Blob",
     "Crypto",
+    "CustomEvent",
+    "CustomEventInit",
     "Document",
     "File",
     "FileList",

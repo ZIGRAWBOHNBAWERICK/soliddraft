@@ -42,6 +42,7 @@ started it gets one footer line.
 | statement | (veil) | 110vh | Text only over the dimmed monitor: "Free parametric CAD on an exact kernel." Button to the app. |
 | features | light | 260vh | Page goes bone white. Eight real parts drift as a field. The works-today list, with one "In design" row. |
 | get | smoke | flow | Slow smoke. Four cards: browser, desktop downloads, source, kernel. Real screenshots and Blender turntables with `preload="none"`. |
+| feedback | smoke | flow | Contact address, private feedback form and privacy text. |
 | about | smoke | flow | Licence and credit, six links, one footer line. Nothing after it. |
 
 Captions (title in caps, one line under, bottom left) live in `src/content.ts`. Chapters do not

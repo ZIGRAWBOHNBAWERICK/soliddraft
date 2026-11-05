@@ -1131,15 +1131,26 @@ fn dashed(painter: &egui::Painter, pts: &[Pos2], stroke: Stroke) {
 
 fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
     let selected = |sel: SketchSel| s.selection.contains(&sel);
+    let mut relation_entities = std::collections::HashSet::new();
+    let mut relation_points = std::collections::HashSet::new();
+    for sel in &s.selection {
+        if let SketchSel::Constraint(id) = sel
+            && let Some(c) = s.sketch.constraint(*id)
+        {
+            relation_entities.extend(c.entities());
+            relation_points.extend(c.points());
+        }
+    }
     for e in s.sketch.drawn() {
         let color = entity_color(s, e);
         let is_sel = selected(SketchSel::Entity(e.id));
+        let is_related = relation_entities.contains(&e.id);
         let is_hover = s.hover == Some(SketchSel::Entity(e.id));
         let pts: Vec<Pos2> = e.polyline(96).into_iter().filter_map(|p| frame.screen(p)).collect();
-        if is_sel || is_hover {
+        if is_sel || is_related || is_hover {
             let halo = Stroke::new(
-                if is_sel { 6.0 } else { 5.0 },
-                theme::selection_bg().gamma_multiply(if is_sel { 1.0 } else { 0.7 }),
+                if is_sel || is_related { 6.0 } else { 5.0 },
+                theme::selection_bg().gamma_multiply(if is_sel || is_related { 1.0 } else { 0.7 }),
             );
             if pts.len() >= 2 {
                 painter.add(egui::Shape::line(pts.clone(), halo));
@@ -1165,16 +1176,18 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             let Some(sp) = e.point(i).and_then(|p| frame.screen(p)) else { continue };
             let is_center = matches!(e.kind, EntityKind::Arc { .. } | EntityKind::Circle { .. }) && i == 0;
             let is_sel = selected(SketchSel::Point(r));
+            let is_related = relation_points.contains(&r) || (e.is_point() && relation_entities.contains(&e.id));
             let is_hover = s.hover == Some(SketchSel::Point(r));
             let joined = s.sketch.constraints.iter().any(|c| c.points().contains(&r));
-            if e.id == crate::sketch::ORIGIN {
-                painter.line_segment([sp + vec2(-6.0, 0.0), sp + vec2(6.0, 0.0)], Stroke::new(1.2, theme::muted()));
-                painter.line_segment([sp + vec2(0.0, -6.0), sp + vec2(0.0, 6.0)], Stroke::new(1.2, theme::muted()));
-                painter.circle_stroke(sp, 3.0, Stroke::new(1.2, theme::muted()));
-                continue;
-            }
-            if is_sel || is_hover {
+            if is_sel || is_related || is_hover {
                 painter.circle_filled(sp, 7.0, theme::selection_bg());
+            }
+            if e.id == crate::sketch::ORIGIN {
+                let stroke = Stroke::new(1.2, if is_sel { theme::accent() } else { theme::muted() });
+                painter.line_segment([sp + vec2(-6.0, 0.0), sp + vec2(6.0, 0.0)], stroke);
+                painter.line_segment([sp + vec2(0.0, -6.0), sp + vec2(0.0, 6.0)], stroke);
+                painter.circle_stroke(sp, 3.0, stroke);
+                continue;
             }
             let fill = if is_sel { theme::accent() } else { color };
             if is_center {

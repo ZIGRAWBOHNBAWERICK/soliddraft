@@ -11,18 +11,61 @@ use soliddraft_app::app::{Automation, SolidDraftApp};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
+struct FeedbackLogger;
+
+impl log::Log for FeedbackLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let message = format!("{}: {}", record.level(), record.args());
+        match record.level() {
+            log::Level::Error | log::Level::Warn => {
+                let (code, level) = if record.level() == log::Level::Error {
+                    ("app-error", "error")
+                } else {
+                    ("app-warning", "warning")
+                };
+                soliddraft_app::web::feedback_event(
+                    serde_json::json!({"type": "diagnostic", "code": code, "level": level}),
+                );
+                if record.level() == log::Level::Error {
+                    web_sys::console::error_1(&message.into());
+                } else {
+                    web_sys::console::warn_1(&message.into());
+                }
+            }
+            _ => web_sys::console::log_1(&message.into()),
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 /// Starts the app when the page loads the module.
 #[wasm_bindgen(start)]
 pub fn start() {
-    let _ = eframe::WebLogger::init(log::LevelFilter::Info);
+    let _ = log::set_logger(&FeedbackLogger);
+    log::set_max_level(log::LevelFilter::Info);
     std::panic::set_hook(Box::new(|info| {
         soliddraft_app::journal_browser::mark_crashed();
         let message = format!("SolidDraft stopped: {info}");
         web_sys::console::error_1(&message.clone().into());
+        soliddraft_app::web::feedback_event(
+            serde_json::json!({"type": "diagnostic", "code": "crash", "level": "error"}),
+        );
         show_status(&message);
     }));
     let window = web_sys::window().expect("a browser window");
     let document = window.document().expect("a document");
+    if let Some(root) = document.document_element() {
+        let _ = root.set_attribute("data-feedback-version", env!("CARGO_PKG_VERSION"));
+        let _ = root.set_attribute("data-feedback-commit", env!("SOLIDDRAFT_COMMIT"));
+    }
     let canvas: web_sys::HtmlCanvasElement =
         document.get_element_by_id("soliddraft").expect("the page's canvas").unchecked_into();
     let query = window.location().search().unwrap_or_default();
@@ -67,6 +110,9 @@ fn status() -> Option<web_sys::Element> {
 }
 
 fn show_status(text: &str) {
+    soliddraft_app::web::feedback_event(
+        serde_json::json!({"type": "diagnostic", "code": "startup-error", "level": "error"}),
+    );
     if let Some(el) = status() {
         el.set_text_content(Some(text));
         let _ = el.set_attribute("class", "shown");

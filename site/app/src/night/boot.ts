@@ -82,7 +82,14 @@ export function boot(root: HTMLElement): () => void {
     scroll.destroy();
     stage.dispose();
     sound.dispose();
-    html.classList.remove("is-live", "is-loading", "is-light", "is-veiled", "is-end");
+    html.classList.remove(
+      "is-live",
+      "is-loading",
+      "is-light",
+      "is-veiled",
+      "is-end",
+      "is-feedback",
+    );
     html.style.removeProperty("--accent");
   };
 }

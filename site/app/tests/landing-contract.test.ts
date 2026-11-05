@@ -11,10 +11,23 @@ describe("SolidDraft landing contract", () => {
     const html = renderToStaticMarkup(createElement(Component));
 
     expect(html).toContain('aria-label="SolidDraft home"');
-    for (const id of ["intro", "kernel", "model", "drawings", "anywhere", "features", "get", "about"]) {
+    for (const id of [
+      "intro",
+      "kernel",
+      "model",
+      "drawings",
+      "anywhere",
+      "features",
+      "get",
+      "feedback",
+      "about",
+    ]) {
       expect(html).toContain(`id="${id}"`);
     }
     expect(html).toContain("SolidDraft");
+    expect(html).toContain("Contact us / Give feedback");
+    expect(html).toContain('href="#feedback"');
+    expect(html).toContain("support@zigrawbohnbawerick.org");
     expect(html).toContain("Catallax");
     // The clear button to the app, the downloads and the repository.
     expect(html).toContain(`href="${site.links.app}"`);

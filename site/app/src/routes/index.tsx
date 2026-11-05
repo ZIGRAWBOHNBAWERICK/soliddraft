@@ -1,7 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-import { about, asset, captions, features, get, hero, rail, sections, site, statement } from "@/content";
+import {
+  about,
+  asset,
+  captions,
+  features,
+  feedback,
+  get,
+  hero,
+  rail,
+  sections,
+  site,
+  statement,
+} from "@/content";
+import { FeedbackForm } from "@/feedback";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -18,7 +31,12 @@ function Monogram() {
         strokeLinejoin="round"
         strokeWidth="4"
       />
-      <path d="M32 32 54 20M32 32v24M32 32 10 20" fill="none" stroke="currentColor" strokeWidth="4" />
+      <path
+        d="M32 32 54 20M32 32v24M32 32 10 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
       <circle className="monogram__dot" cx="32" cy="32" r="4.2" />
     </svg>
   );
@@ -84,6 +102,9 @@ function Index() {
           <Monogram />
           <span>{site.name}</span>
         </a>
+        <a className="topbar__feedback" href="#feedback">
+          Give feedback
+        </a>
         <a className="pill" href={site.links.app} rel="noreferrer" target="_blank">
           <span>Open the app</span>
         </a>
@@ -103,14 +124,25 @@ function Index() {
       </nav>
 
       <div className="hud">
-        <div className="caption caption--hero" data-caption data-chapter="hero" data-from="0" data-to="0.55">
+        <div
+          className="caption caption--hero"
+          data-caption
+          data-chapter="hero"
+          data-from="0"
+          data-to="0.55"
+        >
           <p className="kicker">{hero.kicker}</p>
           <h1 className="display">{hero.title}</h1>
           <p className="caption__line">{hero.line}</p>
           <ul className="hero__actions">
             {hero.actions.map((a) => (
               <li key={a.href}>
-                <a className={a.primary ? "pill pill--solid" : "pill"} href={a.href} rel="noreferrer" target="_blank">
+                <a
+                  className={a.primary ? "pill pill--solid" : "pill"}
+                  href={a.href}
+                  rel="noreferrer"
+                  target="_blank"
+                >
                   <span>{a.label}</span>
                 </a>
               </li>
@@ -185,7 +217,12 @@ function Index() {
                       <span key={line}>{line}</span>
                     ))}
                   </h2>
-                  <a className="pill pill--big" href={statement.cta.href} rel="noreferrer" target="_blank">
+                  <a
+                    className="pill pill--big"
+                    href={statement.cta.href}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
                     <span>{statement.cta.label}</span>
                     <i aria-hidden="true" className="control__arrow" />
                   </a>
@@ -205,7 +242,9 @@ function Index() {
                     {features.items.map((item) => (
                       <li key={item.name}>
                         <a href={item.href} rel="noreferrer" target="_blank">
-                          <span className={item.inDesign ? "kicker what__status" : "kicker"}>{item.kind}</span>
+                          <span className={item.inDesign ? "kicker what__status" : "kicker"}>
+                            {item.kind}
+                          </span>
                           <span className="what__name">{item.name}</span>
                           <span className="what__line">{item.line}</span>
                         </a>
@@ -227,7 +266,14 @@ function Index() {
                         <a className="card" href={item.href} rel="noreferrer" target="_blank">
                           <span className="card__media">
                             {item.video ? (
-                              <video loop muted playsInline poster={item.poster} preload="none" src={item.video} />
+                              <video
+                                loop
+                                muted
+                                playsInline
+                                poster={item.poster}
+                                preload="none"
+                                src={item.video}
+                              />
                             ) : (
                               <img alt={item.alt} loading="lazy" src={item.poster} />
                             )}
@@ -248,6 +294,29 @@ function Index() {
               </section>
             );
           }
+          if (s.id === "feedback") {
+            return (
+              <section
+                className="section section--feedback"
+                key={s.id}
+                {...common}
+                aria-labelledby="feedback-title"
+              >
+                <div className="feedback-intro">
+                  <h2 className="display" id="feedback-title">
+                    {feedback.title}
+                  </h2>
+                  <p>{feedback.line}</p>
+                  <p>
+                    <a href={`mailto:${feedback.email}`}>{feedback.email}</a>
+                  </p>
+                  <p>{feedback.privacy}</p>
+                  <p>{feedback.spam}</p>
+                </div>
+                <FeedbackForm />
+              </section>
+            );
+          }
           if (s.id === "about") {
             return (
               <section className="section section--contact" key={s.id} {...common}>
@@ -257,7 +326,12 @@ function Index() {
                   <ul className="support">
                     {about.support.map((b) => (
                       <li key={b.href}>
-                        <a className={b.primary ? "pill pill--big pill--solid" : "pill pill--big"} href={b.href} rel="noreferrer" target="_blank">
+                        <a
+                          className={b.primary ? "pill pill--big pill--solid" : "pill pill--big"}
+                          href={b.href}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
                           <span>{b.label}</span>
                           <i aria-hidden="true" className="control__arrow" />
                         </a>

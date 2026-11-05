@@ -325,9 +325,9 @@ pub fn abandoned(root: &Path) -> Vec<PathBuf> {
             if path.extension()?.to_str()? != "jsonl" {
                 return None;
             }
-            let file = OpenOptions::new().read(true).write(true).open(&path).ok()?;
+            let _file = OpenOptions::new().read(true).write(true).open(&path).ok()?;
             #[cfg(not(target_arch = "wasm32"))]
-            fs2::FileExt::try_lock_exclusive(&file).ok()?;
+            fs2::FileExt::try_lock_exclusive(&_file).ok()?;
             Some(path)
         })
         .collect();

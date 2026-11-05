@@ -1,3 +1,5 @@
+@import "../../../feedback/client/form.css";
+
 @font-face {
   font-family: "Satoshi";
   src: url("/assets/fonts/satoshi-regular.woff2") format("woff2");
@@ -219,6 +221,42 @@ main {
 
 .topbar > * {
   pointer-events: auto;
+}
+
+.topbar__feedback {
+  margin-left: auto;
+  margin-right: 1rem;
+  padding: 0.75rem 0;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.section--feedback {
+  padding: 16vh var(--gutter) 10vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: clamp(2rem, 5vw, 5rem);
+  scroll-margin-top: 5rem;
+}
+
+.feedback-intro {
+  display: grid;
+  gap: 1.25rem;
+  align-content: start;
+}
+.feedback-intro a {
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.feedback-intro p {
+  max-width: 44ch;
+}
+
+@media (max-width: 900px) {
+  .section--feedback {
+    grid-template-columns: 1fr;
+  }
 }
 
 .wordmark {
@@ -485,12 +523,15 @@ html.is-live .controls {
   opacity: 1;
 }
 
-/* The last section has the footer where the controls sit, and nothing left to scroll to. */
+/* Keep the fixed scroll controls off the feedback form and footer. */
+html.is-feedback .controls,
 html.is-end .controls {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
 }
 
+html.is-feedback .control,
 html.is-end .control {
   pointer-events: none;
 }
@@ -1013,6 +1054,14 @@ html.is-static .section--what .what {
 
   .wordmark span {
     display: none;
+  }
+
+  .topbar__feedback {
+    font-size: 0.8rem;
+    margin-right: 0.5rem;
+  }
+  .topbar > .pill {
+    padding-inline: 0.65rem;
   }
 
   .controls {

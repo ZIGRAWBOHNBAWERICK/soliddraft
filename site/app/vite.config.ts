@@ -8,6 +8,7 @@ import {
 import svgr from "vite-plugin-svgr";
 import { defaultServerConditions, defineConfig } from "vite";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // The page is served under the repository path on GitHub Pages. The same base applies in
@@ -20,6 +21,17 @@ if (!process.env.VITE_SOLIDDRAFT_VERSION) {
   const cargo = readFileSync(new URL("../../Cargo.toml", import.meta.url), "utf8");
   const match = cargo.match(/\[workspace\.package\][^[]*?version\s*=\s*"([^"]+)"/);
   if (match) process.env.VITE_SOLIDDRAFT_VERSION = match[1];
+}
+
+if (!process.env.VITE_SOLIDDRAFT_COMMIT) {
+  try {
+    process.env.VITE_SOLIDDRAFT_COMMIT = execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    process.env.VITE_SOLIDDRAFT_COMMIT = "unknown";
+  }
 }
 
 // The vendored @higgsfield/quanta components import their glyphs from the private

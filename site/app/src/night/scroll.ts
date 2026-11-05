@@ -79,6 +79,7 @@ export function initScroll({ root, stage, onSection }: ScrollOptions): ScrollHan
     html.classList.toggle("is-light", section.dataset.theme === "light");
     html.classList.toggle("is-veiled", section.dataset.veil === "true");
     html.classList.toggle("is-end", section === sections[sections.length - 1]);
+    html.classList.toggle("is-feedback", section.id === "feedback");
     onSection?.(section.id);
     apply(section, progress);
   };
@@ -146,11 +147,23 @@ export function initScroll({ root, stage, onSection }: ScrollOptions): ScrollHan
   };
   root.addEventListener("click", onClick);
 
+  // The feedback review changes the page height after the initial scroll measurements.
+  let refreshFrame = 0;
+  const resize = new ResizeObserver(() => {
+    cancelAnimationFrame(refreshFrame);
+    refreshFrame = requestAnimationFrame(() => {
+      lenis.resize();
+      ScrollTrigger.refresh();
+    });
+  });
+  resize.observe(root);
+
   // First paint: pick the section under the top of the viewport.
   requestAnimationFrame(() => {
     ScrollTrigger.refresh();
     const top = window.scrollY;
-    const hit = sections.find((s) => s.offsetTop <= top && s.offsetTop + s.offsetHeight > top) ?? sections[0];
+    const hit =
+      sections.find((s) => s.offsetTop <= top && s.offsetTop + s.offsetHeight > top) ?? sections[0];
     if (hit && !current) {
       const span = Math.max(1, hit.offsetHeight - window.innerHeight);
       activate(hit, Math.min(1, Math.max(0, (top - hit.offsetTop) / span)));
@@ -162,6 +175,8 @@ export function initScroll({ root, stage, onSection }: ScrollOptions): ScrollHan
       lenis.scrollTo(target, { duration, offset: 0 });
     },
     destroy() {
+      resize.disconnect();
+      cancelAnimationFrame(refreshFrame);
       root.removeEventListener("click", onClick);
       gsap.ticker.remove(tickCaptions);
       gsap.ticker.remove(raf);

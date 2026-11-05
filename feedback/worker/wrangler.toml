@@ -1,0 +1,21 @@
+name = "soliddraft-feedback"
+main = "index.mjs"
+compatibility_date = "2026-11-01"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
+
+[vars]
+ALLOWED_ORIGINS = "https://zigrawbohnbawerick.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "soliddraft-feedback"
+database_id = "5ae63829-aaee-4b48-8f58-0381bccb6636"
+
+[[ratelimits]]
+name = "IP_LIMIT"
+namespace_id = "1793880466"
+simple = { limit = 5, period = 60 }

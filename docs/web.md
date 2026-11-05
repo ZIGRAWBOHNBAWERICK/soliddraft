@@ -8,6 +8,8 @@ Preferences are kept in the browser, in the site's localStorage under `soliddraf
 
 Documents stay in the browser too, in the site's IndexedDB database `soliddraft-documents`. The page opens on the start page, whose recent list holds the last eight parts and drawings this browser opened or saved, with their file bytes, because a page cannot open a file again by its path. Autosave keeps recovery copies of unsaved work there, under a session id the tab holds a Web Lock on. A copy whose tab was closed or crashed is offered at the next visit, in the same Recover documents window as the desktop's. Like the settings, this storage belongs to one browser profile and the server never receives it: two people on the site never see each other's files. `ci/browser-documents.mjs` checks this in Chromium, killing the browser in the middle of an edit.
 
+Feedback is saved privately in our Cloudflare inbox and GitHub issue tracker; optional diagnostics never include file contents or paths.
+
 ## Pieces
 
 | Crate or file | What it does |

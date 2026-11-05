@@ -84,6 +84,105 @@ fn a_drawing_places_aligned_views_and_dimensions_each_once() {
 }
 
 #[test]
+fn moving_a_sheet_scale_view_rescales_geometry_annotations_and_descendants() {
+    use soliddraft_drawing::{LinearOrientation, PartIndex, derived, measure, project};
+
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
+    let mut new = new_drawing("iso-a3");
+    new.scale = Some(Scale::FULL);
+    let (mut d, _) = make_drawing(&part, &new).unwrap();
+    apply(&mut d, &Command::AddSheet { name: "Half scale".into(), template: "iso-a3".into() }).unwrap();
+    apply(&mut d, &Command::SetSheetScale { sheet: 1, scale: Scale::new(1, 2) }).unwrap();
+    let front = ViewId(1);
+    let top = ViewId(2);
+    let custom = ViewId(3);
+    apply(&mut d, &Command::SetViewScale { view: custom, scale: ViewScale::Custom { factor: 0.75 } }).unwrap();
+    let index = PartIndex::build(&part).unwrap();
+    let (detail, _) =
+        derived::new_detail(&d, &part, &index, 1, top, Point2::new(10.0, 5.0), 5.0, Vec::new(), 2.0, None).unwrap();
+    let detail_id = detail.id;
+    apply(&mut d, &Command::PlaceView { sheet: 1, view: detail }).unwrap();
+    let before = d.clone();
+    let curve = d
+        .view(front)
+        .unwrap()
+        .geometry
+        .curves
+        .iter()
+        .position(|c| {
+            let shape = measure::shape_of(&c.path);
+            (shape.end().u - shape.start().u).abs() == 100.0
+        })
+        .unwrap();
+    let mut stack = UndoStack::new();
+    for (sheet, scale) in [(1, 0.5), (0, 1.0)] {
+        let previous = d.clone();
+        stack
+            .run(&mut d, &Command::MoveViewToSheet { view: front, sheet, to: Point2::new(250.0, 170.0) }, None)
+            .unwrap();
+        let after = d.clone();
+        let view = d.view(front).unwrap();
+        let proposal = measure::propose(view, &[measure::Pick { view: front, curve, end: None }], &[]).unwrap();
+        let value = measure::linear_value(
+            LinearOrientation::Horizontal,
+            proposal.points[0],
+            proposal.points[1],
+            project::view_scale(&d, front).unwrap(),
+        );
+        assert_eq!(value, 100.0, "Smart dimension must still measure the 100 mm edge");
+        assert_eq!(view.geometry.bbox[2] - view.geometry.bbox[0], 100.0 * scale);
+        for id in [front, top, detail_id] {
+            let mut expected = before.view(id).unwrap().clone();
+            project::rescale_view(&mut expected, scale);
+            assert_eq!(d.view(id).unwrap().geometry, expected.geometry, "{id}");
+        }
+        assert_eq!(d.view(custom).unwrap().geometry, before.view(custom).unwrap().geometry);
+        let ViewKind::Detail { center, radius, .. } = &d.view(detail_id).unwrap().kind else { panic!() };
+        assert_eq!(*center, Point2::new(10.0 * scale, 5.0 * scale));
+        assert_eq!(*radius, 5.0 * scale);
+        for old in before.sheets.iter().flat_map(|s| &s.annotations) {
+            let now = d.annotation(old.id).unwrap();
+            let ratio = if [front, top, detail_id].contains(&old.view) { scale } else { 1.0 };
+            assert_eq!(now.body, old.body);
+            assert_eq!(now.state, old.state);
+            assert_eq!(now.placement, Point2::new(old.placement.u * ratio, old.placement.v * ratio));
+            for (a, b) in now.anchors.iter().zip(&old.anchors) {
+                assert_eq!(a.cached, Point2::new(b.cached.u * ratio, b.cached.v * ratio));
+            }
+        }
+        assert_eq!(project::sheet_of(&d, front), Some(sheet));
+        stack.undo(&mut d).unwrap();
+        assert_eq!(d, previous);
+        stack.redo(&mut d).unwrap();
+        assert_eq!(d, after);
+    }
+}
+
+#[test]
+fn transferring_a_parent_or_custom_scale_view_does_not_adopt_the_sheet_scale() {
+    use soliddraft_drawing::project;
+
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
+    let (mut d, _) = make_drawing(&part, &new_drawing("iso-a3")).unwrap();
+    apply(&mut d, &Command::AddSheet { name: "Half scale".into(), template: "iso-a3".into() }).unwrap();
+    apply(&mut d, &Command::SetSheetScale { sheet: 1, scale: Scale::new(1, 2) }).unwrap();
+    let top = ViewId(2);
+    for scale in [ViewScale::Parent, ViewScale::Custom { factor: 0.75 }] {
+        apply(&mut d, &Command::SetViewScale { view: top, scale }).unwrap();
+        let before = d.view(top).unwrap().clone();
+        let effective = project::view_scale(&d, top).unwrap();
+        for sheet in [1, 1, 0] {
+            apply(&mut d, &Command::MoveViewToSheet { view: top, sheet, to: Point2::new(250.0, 170.0) }).unwrap();
+            assert_eq!(project::view_scale(&d, top).unwrap(), effective);
+            assert_eq!(d.view(top).unwrap().geometry, before.geometry);
+            assert_eq!(d.view(top).unwrap().scale, scale);
+        }
+    }
+}
+
+#[test]
 fn third_angle_puts_the_top_view_above_and_the_right_view_right() {
     let k = BoxKernel::new();
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));

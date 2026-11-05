@@ -106,6 +106,10 @@ fn meshes_are_closed_and_within_their_chord_height() {
     assert!(r.closed, "the bracket's mesh is closed");
     assert_eq!(r.chord_height, tolerance.chord_height);
     assert!(!r.unavailable_controls.is_empty(), "Catallax cannot guarantee the angle; the report says so");
+    let summary = stl.report.summary();
+    for control in &r.unavailable_controls {
+        assert!(summary.contains(control), "unavailable control {control:?} missing from {summary:?}");
+    }
     assert_eq!(stl.bytes.len(), 84 + 50 * r.triangles);
     assert_eq!(u32::from_le_bytes(stl.bytes[80..84].try_into().unwrap()) as usize, r.triangles);
 

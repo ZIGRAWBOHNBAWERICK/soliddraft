@@ -27,6 +27,17 @@ fn obj_from_recipe_and_saved_part_records_the_mesh_and_export_tolerance() {
     assert_eq!(report["report"]["chord_height"], 0.01);
     assert_eq!(report["report"]["triangles"], 12);
     assert_eq!(report["report"]["closed"], true);
+    let unavailable = report["report"]["unavailable_controls"].as_array().unwrap();
+    assert!(!unavailable.is_empty());
+    let plain = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .args(["export", recipe.to_str().unwrap(), "--out", recipe_obj.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(plain.status.success(), "{}", String::from_utf8_lossy(&plain.stderr));
+    let summary = String::from_utf8(plain.stdout).unwrap();
+    for control in unavailable {
+        assert!(summary.contains(control.as_str().unwrap()), "{summary}");
+    }
     let text = std::fs::read_to_string(&recipe_obj).unwrap();
     assert_eq!(text.lines().filter(|l| l.starts_with("f ")).count(), 12);
     assert_eq!(text.lines().filter(|l| l.starts_with("g face_")).count(), 6);

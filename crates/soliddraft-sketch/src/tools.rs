@@ -226,7 +226,7 @@ fn entity(kind: EntityKind) -> Entity {
     Entity { id: 0, kind, construction: false }
 }
 
-fn valid(kind: EntityKind) -> bool {
+pub(crate) fn valid(kind: EntityKind) -> bool {
     match kind {
         EntityKind::Point { p } => finite(p),
         EntityKind::Line { a, b } => finite(a) && finite(b) && a.dist(b).is_finite() && a.dist(b) > EPS,
@@ -256,7 +256,7 @@ fn rotation_sin_cos(degrees: f64) -> (f64, f64) {
     }
 }
 
-fn ends(kind: EntityKind) -> Option<[P2; 2]> {
+pub(crate) fn ends(kind: EntityKind) -> Option<[P2; 2]> {
     match kind {
         EntityKind::Line { a, b } => Some([a, b]),
         EntityKind::Arc { start, end, .. } => Some([start, end]),
@@ -297,11 +297,11 @@ fn parameter(kind: EntityKind, p: P2) -> Option<f64> {
     }
 }
 
-fn on_curve(kind: EntityKind, p: P2) -> bool {
+pub(crate) fn on_curve(kind: EntityKind, p: P2) -> bool {
     entity(kind).nearest(p).1 <= EPS
 }
 
-fn circle(kind: EntityKind) -> Option<(P2, f64)> {
+pub(crate) fn circle(kind: EntityKind) -> Option<(P2, f64)> {
     match kind {
         EntityKind::Arc { center, start, .. } => Some((center, center.dist(start))),
         EntityKind::Circle { center, radius } => Some((center, radius)),
@@ -310,7 +310,7 @@ fn circle(kind: EntityKind) -> Option<(P2, f64)> {
 }
 
 /// Intersections of the infinite supporting lines/circles, never tessellated curves.
-fn intersections(a: EntityKind, b: EntityKind) -> Vec<P2> {
+pub(crate) fn intersections(a: EntityKind, b: EntityKind) -> Vec<P2> {
     if let (EntityKind::Line { a: p, b: q }, EntityKind::Line { a: r, b: s }) = (a, b) {
         let (d, e) = (q - p, s - r);
         let den = d.cross(e);

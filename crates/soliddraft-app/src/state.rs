@@ -69,6 +69,10 @@ pub enum AppAction {
     SketchTool(Tool),
     /// Opens or closes the sketch relation list.
     SketchRelations(bool),
+    /// Open or close a read-only report of sketch profile warnings.
+    SketchDiagnostics(bool),
+    /// Focus the current, still-valid diagnostic locations.
+    LocateSketchDiagnostic,
     /// Toggles construction on the sketch selection.
     ToggleConstruction,
     /// Deletes the sketch selection, or the selected feature.
@@ -620,6 +624,8 @@ pub struct SketchSession {
     pub show_relations: bool,
     /// Scope of the Existing relations property list for this session.
     pub relations_filter: RelationFilter,
+    /// A read-only profile report, cached until refresh or closed.
+    pub diagnostics: Option<crate::sketch_diagnostics::Inspection>,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
     /// The Modify tools' numeric and pointer-placed values.
@@ -689,6 +695,7 @@ impl SketchSession {
             relations_open: false,
             show_relations: true,
             relations_filter: RelationFilter::default(),
+            diagnostics: None,
             construction: false,
             modify: ModifyInputs::default(),
             preview: None,

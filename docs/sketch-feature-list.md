@@ -17,6 +17,9 @@ The tables below retain their original source-audit baseline. Later work has add
 
 - Orders 12 and 49: Existing relations now offers Selected, All, Conflicting and Dangling scopes with no geometry selection required. Inspect conflicts opens the solver-reported set. Missing entity and point references can be found and removed after reopen. Row selection retains owner highlights and safe deletion. [Native inspection tests](../crates/soliddraft-app/tests/sketch_relation_inspection.rs) cover filters, compact empty states, hidden glyphs, popup Escape, undo/redo and persistence. External-reference filtering and automatic conflict repair remain unsupported.
 
+- Orders 13-14: existing rendered definition/status coverage remains a retention check, not another implementation.
+- Order 15: read-only Sketch diagnostics locates open ends using the profile join tolerance, analytic overlaps, endpoint/interior branches and invalid curves. The [shared report](../crates/soliddraft-sketch/src/profile/diagnostics.rs) also identifies missing and wrong-kind relation references without rewriting them. [Native tests](../crates/soliddraft-app/tests/sketch_diagnostics.rs) drive navigation, markers, camera locate, stale refresh, safe explicit relation deletion, cancellation and reopen. [Model tests](../crates/soliddraft-sketch/tests/diagnostics.rs) cover topology, curve families, reference kinds and nonmutation. Configurable vendor-style gap thresholds, automatic merging/deletion and kernel validation remain outside this group.
+
 ## How to read the list
 
 - **SolidDraft** means an end-user command exists, not merely that the solver could express it. `yes` means the listed operation is implemented; `partial` names its limit; `no` names the inspected code boundary where support is absent. These are source-audit findings, not fresh interactive acceptance results.

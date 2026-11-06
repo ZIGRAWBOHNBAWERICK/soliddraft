@@ -1,13 +1,14 @@
-//! Reference dimensions through native sketch input and the existing property panel.
+//! Dimension placement and reference annotations through native sketch input.
 
 #[path = "support/ribbon.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, pos2, vec2};
+use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, FeatureId, PlaneKind, SketchPlane},
-    sketch::{ConstraintKind, EntityKind, P2, PointRef, Sketch, SolveStatus, solve},
+    sketch::{ConstraintKind, DistanceKind, EntityKind, P2, PointRef, Sketch, SolveStatus, solve},
     sketcher::Frame,
     state::{AppAction, SketchSel, SketchSession},
 };
@@ -85,6 +86,268 @@ fn circle() -> (Sketch, u32) {
     let dim =
         sketch.constrain(ConstraintKind::Radius { entity, value: 10.0, diameter: true, label: P2::new(9.0, 7.0) });
     (sketch, dim)
+}
+
+#[test]
+fn accepting_a_measured_dimension_without_typing_keeps_its_full_precision() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    sketch.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 6.0) }, false);
+    let (mut app, feature) = launch(sketch);
+    let before = session(&app).sketch.entities.clone();
+    app.key_press(Key::D);
+    app.run_steps(6);
+    for at in [P2::new(5.0, 3.0), P2::new(3.0, 4.0)] {
+        let at = screen(&app, at);
+        ribbon::click_at(&mut app, at);
+    }
+    let id = session(&app).sketch.constraints.iter().find(|c| c.is_dimension()).unwrap().id;
+    let value = session(&app).sketch.constraint(id).unwrap().value();
+    assert_eq!(session(&app).sketch.entities, before);
+    assert!(session(&app).dim_edit.is_some());
+    frame(&mut app, "dimension-precision-before-accept");
+    let history = app.state().state.doc.model().undo_depth();
+    app.key_press(Key::Enter);
+    app.run_steps(10);
+    assert!(session(&app).dim_edit.is_none());
+    assert_eq!(
+        session(&app).sketch.constraint(id).unwrap().value(),
+        value,
+        "Enter without typing must not round the stored dimension"
+    );
+    assert_eq!(session(&app).sketch.entities, before);
+    assert_eq!(app.state().state.doc.model().undo_depth(), history);
+    app.key_press(Key::Escape);
+    app.run_steps(30);
+    for command in [false, true] {
+        if command {
+            app.state_mut().state.push(AppAction::EditDimension(
+                soliddraft_app::viewport::dimensions::DimensionTarget::Sketch { sketch: feature, constraint: id },
+            ));
+            app.run_steps(6);
+        } else {
+            let at = screen(&app, session(&app).sketch.constraint(id).unwrap().label().unwrap());
+            ribbon::click_at(&mut app, at);
+            ribbon::click_at(&mut app, at);
+        }
+        let edit = session(&app).dim_edit.as_ref().expect("existing dimension opens for editing");
+        assert_eq!(edit.text, soliddraft_app::sketch::fmt_value(value.unwrap()));
+        if command {
+            let away = app.state().state.viewport.rect.center() + vec2(0.0, -100.0);
+            ribbon::click_at(&mut app, away);
+        } else {
+            let ok = ribbon::painted(&app).into_iter().find(|p| p.text == "OK").unwrap().rect.center();
+            ribbon::click_at(&mut app, ok);
+        }
+        app.run_steps(10);
+        assert!(session(&app).dim_edit.is_none());
+        assert_eq!(app.state().state.doc.model().undo_depth(), history);
+        assert_eq!(session(&app).sketch.constraint(id).unwrap().value(), value);
+        assert_eq!(session(&app).sketch.entities, before);
+    }
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn smart_distance_placement_selects_axis_or_aligned_without_moving_geometry() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (line, swap) in [(false, false), (false, true), (true, false)] {
+        for (kind, label, value) in [
+            (DistanceKind::Aligned, P2::new(-2.0, 1.0), 136.0_f64.sqrt()),
+            (DistanceKind::Horizontal, P2::new(0.0, -5.0), 10.0),
+            (DistanceKind::Vertical, P2::new(8.0, 0.0), 6.0),
+        ] {
+            let mut sketch = Sketch::new();
+            let (a, b) = (P2::new(-5.0, -3.0), P2::new(5.0, 3.0));
+            if line {
+                sketch.add(EntityKind::Line { a, b }, false);
+            } else {
+                sketch.add(EntityKind::Point { p: a }, false);
+                sketch.add(EntityKind::Point { p: b }, false);
+            }
+            let (mut app, _) = launch(sketch);
+            if line && kind == DistanceKind::Vertical {
+                app.set_size(vec2(960.0, 600.0));
+                soliddraft_app::theme::set_mode(&app.ctx, soliddraft_app::theme::Mode::Dark);
+                app.run_steps(60);
+            }
+            let before = session(&app).sketch.entities.clone();
+            app.key_press(Key::D);
+            app.run_steps(6);
+            let picks = if line {
+                vec![a.lerp(b, 0.6)]
+            } else if swap {
+                vec![b, a]
+            } else {
+                vec![a, b]
+            };
+            for at in picks {
+                let at = screen(&app, at);
+                ribbon::click_at(&mut app, at);
+            }
+            let at = screen(&app, label);
+            ribbon::click_at(&mut app, at);
+            let dimension =
+                session(&app).sketch.constraints.iter().find(|c| c.is_dimension()).copied().expect("distance placed");
+            let ConstraintKind::Distance { kind: actual, .. } = dimension.kind else {
+                panic!("distance family");
+            };
+            assert_eq!(actual, kind);
+            assert!((dimension.value().unwrap() - value).abs() < 1e-9);
+            assert_eq!(session(&app).sketch.entities, before);
+            assert_eq!(session(&app).dim_edit.as_ref().unwrap().constraint, dimension.id);
+            frame(&mut app, &format!("distance-{kind:?}-line-{line}-swap-{swap}"));
+            drop(app);
+            soliddraft_app::file::set_config_dir(None);
+        }
+    }
+}
+
+#[test]
+fn smart_radius_defaults_preserve_arc_and_circle_geometry() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for arc in [false, true] {
+        let mut sketch = Sketch::new();
+        sketch.add(
+            if arc {
+                EntityKind::Arc { center: P2::ZERO, start: P2::new(5.0, 0.0), end: P2::new(0.0, 5.0) }
+            } else {
+                EntityKind::Circle { center: P2::ZERO, radius: 5.0 }
+            },
+            false,
+        );
+        let (mut app, _) = launch(sketch);
+        let before = session(&app).sketch.entities.clone();
+        app.key_press(Key::D);
+        app.run_steps(6);
+        let picks = if arc {
+            [P2::new(5.0 / 2.0_f64.sqrt(), 5.0 / 2.0_f64.sqrt()), P2::new(6.0, 2.0)]
+        } else {
+            [P2::new(-5.0, 0.0), P2::new(7.0, 3.0)]
+        };
+        for at in picks {
+            let at = screen(&app, at);
+            ribbon::click_at(&mut app, at);
+        }
+        let dimension = session(&app)
+            .sketch
+            .constraints
+            .iter()
+            .find(|c| c.is_dimension())
+            .copied()
+            .expect("circular dimension placed");
+        let ConstraintKind::Radius { diameter, .. } = dimension.kind else {
+            panic!("circular dimension family");
+        };
+        assert_eq!(diameter, !arc);
+        assert_eq!(dimension.value(), Some(if arc { 5.0 } else { 10.0 }));
+        assert_eq!(session(&app).sketch.entities, before);
+        assert_eq!(session(&app).dim_edit.as_ref().unwrap().constraint, dimension.id);
+        frame(&mut app, &format!("circular-dimension-arc-{arc}"));
+        drop(app);
+        soliddraft_app::file::set_config_dir(None);
+    }
+}
+
+#[test]
+fn the_values_tab_drives_a_sketch_dimension_from_a_global_and_reopens_it() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (sketch, dimension) = circle();
+    let (mut app, feature) = launch(sketch);
+    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.run_steps(12);
+    ribbon::document_tab(&mut app, "Values");
+    app.run_steps(6);
+    for (label, text) in [
+        ("New global name", "Span"),
+        ("New global formula", "12"),
+        ("Default Sketch1.D1", "=Span"),
+        ("Default Span", "18"),
+    ] {
+        app.get_by_label(label).focus();
+        app.run_steps(2);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.get_by_label(label).type_text(text);
+        app.run_steps(2);
+        app.key_press(Key::Enter);
+        app.run_steps(8);
+    }
+    let s = app.state().state.doc.feature(feature).unwrap().sketch().unwrap();
+    assert_eq!(s.sketch.constraint(dimension).unwrap().value(), Some(18.0));
+    assert!(matches!(s.sketch.entities[1].kind, EntityKind::Circle { radius: 9.0, .. }));
+    assert_eq!(app.get_by_label("Default Sketch1.D1").value().as_deref(), Some("=Span"));
+    frame(&mut app, "global-sketch-dimension");
+    let path = dir().join("global-sketch-dimension.dwprt");
+    app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+    app.run_steps(8);
+    app.state_mut().state.push(AppAction::Open(Some(path)));
+    app.run_steps(12);
+    ribbon::document_tab(&mut app, "Values");
+    app.run_steps(6);
+    assert_eq!(app.get_by_label("Default Sketch1.D1").value().as_deref(), Some("=Span"));
+    assert_eq!(app.get_by_label("Default Span").value().as_deref(), Some("18"));
+    let s = app.state().state.doc.feature(feature).unwrap().sketch().unwrap();
+    assert_eq!(s.sketch.constraint(dimension).unwrap().value(), Some(18.0));
+    assert!(matches!(s.sketch.entities[1].kind, EntityKind::Circle { radius: 9.0, .. }));
+    frame(&mut app, "global-sketch-dimension-reopened");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn smart_angle_defaults_preserve_geometry_in_every_quadrant_and_pick_order() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for degrees in [315.0_f64, 45.0, 135.0, 225.0] {
+        for swap in [false, true] {
+            let mut sketch = Sketch::new();
+            let a = sketch.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 0.0) }, false);
+            let direction = P2::from_angle(degrees.to_radians());
+            let b = sketch.add(EntityKind::Line { a: P2::ZERO, b: direction.scale(10.0) }, false);
+            let expected = ConstraintKind::Angle {
+                a: if swap { b } else { a },
+                b: if swap { a } else { b },
+                value: 0.0,
+                label: P2::ZERO,
+            };
+            let measurement =
+                soliddraft_app::sketch::Constraint { id: 0, kind: expected }.measured_value(&sketch).unwrap();
+            let (mut app, _) = launch(sketch);
+            let before = session(&app).sketch.entities.clone();
+            app.key_press(Key::D);
+            app.run_steps(6);
+            let picks = if swap {
+                [direction.scale(5.0), P2::new(5.0, 0.0)]
+            } else {
+                [P2::new(5.0, 0.0), direction.scale(5.0)]
+            };
+            for at in picks {
+                let at = screen(&app, at);
+                ribbon::click_at(&mut app, at);
+            }
+            let label = app.state().state.viewport.rect.center() + vec2(0.0, 80.0);
+            ribbon::click_at(&mut app, label);
+            let dimension = session(&app)
+                .sketch
+                .constraints
+                .iter()
+                .find(|c| matches!(c.kind, ConstraintKind::Angle { .. }))
+                .copied()
+                .expect("angle dimension placed");
+            frame(&mut app, &format!("angle-{degrees}-swap-{swap}"));
+            assert!(
+                (dimension.value().unwrap() - measurement).abs() < 1e-9,
+                "{degrees}, swap {swap}: default must measure existing geometry"
+            );
+            assert_eq!(
+                session(&app).sketch.entities,
+                before,
+                "{degrees}, swap {swap}: placing a measured angle must not move geometry"
+            );
+            drop(app);
+            soliddraft_app::file::set_config_dir(None);
+        }
+    }
 }
 
 #[test]

@@ -139,17 +139,48 @@ fn sample(segments: &[Segment]) -> Vec<P2> {
     out
 }
 
-/// Even-odd point in polygon test.
-fn contains(poly: &[P2], p: P2) -> bool {
+/// Even-odd containment against the curves, not their display chords.
+fn contains(segments: &[Segment], p: P2) -> bool {
     let mut inside = false;
-    let n = poly.len();
-    let mut j = n - 1;
-    for i in 0..n {
-        let (a, b) = (poly[i], poly[j]);
-        if (a.v > p.v) != (b.v > p.v) && p.u < (b.u - a.u) * (p.v - a.v) / (b.v - a.v) + a.u {
-            inside = !inside;
+    for segment in segments {
+        match *segment {
+            Segment::Line { from: a, to: b } => {
+                if (a.v > p.v) != (b.v > p.v) && p.u < (b.u - a.u) * (p.v - a.v) / (b.v - a.v) + a.u {
+                    inside = !inside;
+                }
+            }
+            Segment::Circle { center, radius } => {
+                if (p.u - center.u).hypot(p.v - center.v) < radius {
+                    inside = !inside;
+                }
+            }
+            Segment::Arc { center, from, to, clockwise } => {
+                let radius = (from.u - center.u).hypot(from.v - center.v);
+                let start = (from.v - center.v).atan2(from.u - center.u);
+                let sweep = arc_sweep(center, from, to, clockwise);
+                let mut cuts = vec![(0.0, from), (sweep.abs(), to)];
+                for (angle, y) in [(PI / 2.0, center.v + radius), (3.0 * PI / 2.0, center.v - radius)] {
+                    let offset =
+                        if clockwise { (start - angle).rem_euclid(TAU) } else { (angle - start).rem_euclid(TAU) };
+                    if offset > 0.0 && offset < sweep.abs() {
+                        cuts.push((offset, Point2::new(center.u, y)));
+                    }
+                }
+                cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+                // Monotone pieces share the line test's half-open endpoint rule.
+                for ends in cuts.windows(2) {
+                    let ((t0, a), (t1, b)) = (ends[0], ends[1]);
+                    if (a.v > p.v) != (b.v > p.v) {
+                        let dy = (p.v - center.v).abs();
+                        let dx = ((radius - dy) * (radius + dy)).max(0.0).sqrt();
+                        let middle = start + sweep.signum() * (t0 + t1) / 2.0;
+                        if p.u < center.u + middle.cos().signum() * dx {
+                            inside = !inside;
+                        }
+                    }
+                }
+            }
         }
-        j = i;
     }
     inside
 }
@@ -479,11 +510,17 @@ pub fn regions(sketch: &Sketch) -> Result<Vec<Region>, ProfileError> {
     if loops.is_empty() {
         return Err(first_error.unwrap_or(ProfileError::NoLoop));
     }
-    let polygons: Vec<Vec<P2>> = loops.iter().map(|l| sample(&l.segments)).collect();
+    let starts: Vec<P2> = loops
+        .iter()
+        .map(|l| match l.segments[0] {
+            Segment::Line { from, .. } | Segment::Arc { from, .. } => p2(from),
+            Segment::Circle { center, radius } => P2::new(center.u + radius, center.v),
+        })
+        .collect();
     let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
     let n = loops.len();
     let inside = |outer: usize, inner: usize| {
-        outer != inner && areas[outer] > areas[inner] && contains(&polygons[outer], polygons[inner][0])
+        outer != inner && areas[outer] > areas[inner] && contains(&loops[outer].segments, starts[inner])
     };
     let depth: Vec<usize> = (0..n).map(|i| (0..n).filter(|&j| inside(j, i)).count()).collect();
     let parent: Vec<Option<usize>> =

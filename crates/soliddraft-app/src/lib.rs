@@ -43,6 +43,7 @@ pub mod recent;
 pub mod recovery;
 pub mod ribbon;
 pub mod settings;
+pub mod sketch_diagnostics;
 pub mod sketch_tools;
 pub mod sketcher;
 pub mod start_page;

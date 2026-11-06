@@ -1071,6 +1071,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             }
             section_gap(ui);
 
+            crate::sketch_diagnostics::panel(ui, s, &mut actions);
+
             // Exit into a feature.
             theme::section_label(ui, "Use the sketch");
             ui.horizontal(|ui| {
@@ -1140,6 +1142,13 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     if resp.on_hover_text(tip).clicked() {
                         s.set_tool(tool);
                     }
+                }
+                if ui
+                    .add(egui::Button::new("Sketch diagnostics").min_size(vec2(0.0, 26.0)))
+                    .on_hover_text("Locate profile faults and invalid relation references")
+                    .clicked()
+                {
+                    actions.push(AppAction::SketchDiagnostics(true));
                 }
             });
             if s.tool.modifies() {

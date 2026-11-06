@@ -1583,6 +1583,10 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::ToggleConstruction)
             .when(AppState::in_sketch)
 .app_only(SKETCHER),
+        cmd("sketch_diagnostics", "Sketch diagnostics", Icon::Cad("check"), "Inspect profile warnings without repairing geometry")
+            .run(|_| AppAction::SketchDiagnostics(true))
+            .when(AppState::in_sketch)
+.app_only(SKETCHER),
         cmd("relations", "Relations", Icon::Cad("relations"), "Relations between sketch entities")
             .on(Sketch, "Constrain", Small)
             .run(|s| AppAction::SketchRelations(!s.sketch.as_ref().is_some_and(|s| s.relations_open)))
@@ -2244,6 +2248,8 @@ fn registry() -> Vec<CommandSpec> {
             } else if s.sketch.as_ref().is_some_and(|k| k.tool_in_progress()) {
                 // The first Escape drops the tool and what it started; the next leaves the sketch.
                 AppAction::SketchTool(Tool::Select)
+            } else if s.sketch.as_ref().is_some_and(|s| s.diagnostics.is_some()) {
+                AppAction::SketchDiagnostics(false)
             } else if s.in_sketch() {
                 AppAction::ExitSketch(None)
             } else if s.drag_preview.is_some() {

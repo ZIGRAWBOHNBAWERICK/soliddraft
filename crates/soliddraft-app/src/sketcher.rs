@@ -378,6 +378,7 @@ pub fn run(
     paint_dimensions(&painter, &frame, s);
     paint_rubber_band(&painter, &frame, s, snapped);
     paint_tool_preview(&painter, &frame, s);
+    paint_diagnostics(&painter, &frame, s);
     if let Some(drag) = &s.trim_drag
         && drag.extend.is_none()
     {
@@ -1254,6 +1255,9 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             relation_points.extend(c.points());
         }
     }
+    if let Some(issue) = crate::sketch_diagnostics::selected(s) {
+        relation_entities.extend(issue.entities.iter().copied());
+    }
     let replacing = s.preview.as_ref().and_then(|p| p.operation.as_ref()).and_then(|op| match op {
         Operation::Trim { entity, options, .. } | Operation::TrimBounded { entity, options, .. }
             if options.keep_as_construction =>
@@ -1856,6 +1860,17 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
         && let Some(e) = s.sketch.entity(boundary)
     {
         curve(e.kind, Stroke::new(3.0, theme::selection_bg()), false);
+    }
+}
+
+fn paint_diagnostics(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
+    let Some(issue) = crate::sketch_diagnostics::selected(s) else { return };
+    for point in &issue.locations {
+        if let Some(at) = frame.screen(*point).filter(|p| p.is_finite()) {
+            painter.circle_stroke(at, 8.0, Stroke::new(2.0, theme::error()));
+            painter.line_segment([at - vec2(3.0, 0.0), at + vec2(3.0, 0.0)], Stroke::new(1.5, theme::error()));
+            painter.line_segment([at - vec2(0.0, 3.0), at + vec2(0.0, 3.0)], Stroke::new(1.5, theme::error()));
+        }
     }
 }
 

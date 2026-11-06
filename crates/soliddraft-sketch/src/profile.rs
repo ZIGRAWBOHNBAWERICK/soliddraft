@@ -12,6 +12,9 @@ use crate::{Entity, EntityId, EntityKind, P2, PointRef, Sketch};
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::{Loop, Plane, Point2, Profile, Segment};
 
+pub mod diagnostics;
+use diagnostics::{Diagnostic, DiagnosticKind};
+
 /// Two ends closer than this join even when no coincident constraint joins them.
 const JOIN_TOLERANCE: f64 = 1e-6;
 
@@ -212,6 +215,7 @@ struct Loops {
     /// Loops that are made of lines and arcs, so they can be turned around.
     reversible: Vec<bool>,
     first_error: Option<ProfileError>,
+    issues: Vec<Diagnostic>,
 }
 
 /// The point on the perpendicular bisector of `from`-`to` closest to `c`. Ends that
@@ -253,7 +257,7 @@ fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
 /// Every closed loop among the non-construction lines, arcs and circles, in
 /// entity order. Pieces that do not close are skipped and the first one is
 /// remembered.
-fn loops(sketch: &Sketch) -> Loops {
+fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
     // Reopened sketches retain references even when their saved coordinates have residuals.
     let mut resolved = sketch.clone();
     crate::references::resolve(&mut resolved);
@@ -261,11 +265,16 @@ fn loops(sketch: &Sketch) -> Loops {
     let mut drawn: Vec<&Entity> = sketch.drawn().filter(|e| !e.construction).collect();
     drawn.sort_by_key(|e| e.id);
     let mut first_error: Option<ProfileError> = None;
+    let mut issues = Vec::new();
     let mut chains: Vec<Chain> = Vec::new();
 
     // Ends of usable lines and arcs; degenerate ones are reported and left out.
     let mut curves: Vec<(&Entity, PointRef, PointRef)> = Vec::new();
     for e in &drawn {
+        if diagnose && !e.is_point() && !crate::tools::valid(e.kind) {
+            issues.push(Diagnostic::new(DiagnosticKind::Degenerate, vec![e.id], e.points()));
+            continue;
+        }
         match e.kind {
             EntityKind::Circle { center, radius } => {
                 if radius.is_finite() && radius > JOIN_TOLERANCE {
@@ -336,6 +345,9 @@ fn loops(sketch: &Sketch) -> Loops {
     for (k, &(e, _, _)) in curves.iter().enumerate() {
         let ends = [node[2 * k], node[2 * k + 1]];
         if ends[0] == ends[1] {
+            if diagnose {
+                issues.push(Diagnostic::new(DiagnosticKind::Degenerate, vec![e.id], vec![nodes[ends[0]]]));
+            }
             first_error.get_or_insert(ProfileError::Degenerate(name(e)));
             continue;
         }
@@ -346,6 +358,18 @@ fn loops(sketch: &Sketch) -> Loops {
         incident[ends[0]].push(edges.len());
         incident[ends[1]].push(edges.len());
         edges.push(Edge { entity: e.id, center, ends });
+    }
+
+    if diagnose {
+        for (node, incident) in incident.iter().enumerate() {
+            let kind = match incident.len() {
+                1 => DiagnosticKind::OpenEnd,
+                3.. => DiagnosticKind::Branch,
+                _ => continue,
+            };
+            issues.push(Diagnostic::new(kind, incident.iter().map(|i| edges[*i].entity).collect(), vec![nodes[node]]));
+        }
+        diagnostics::append_pairs(&drawn, &mut issues);
     }
 
     // Connected pieces of edges: a piece is a loop when every node in it has two edges.
@@ -396,10 +420,17 @@ fn loops(sketch: &Sketch) -> Loops {
         chains.push(Chain::Edges(walk));
     }
 
-    let mut out = Loops { loops: Vec::new(), reversible: Vec::new(), first_error };
+    let mut out = Loops { loops: Vec::new(), reversible: Vec::new(), first_error, issues };
     for chain in &chains {
         let lp = segments(&edges, &nodes, chain);
         if lp.signed_area().abs() <= JOIN_TOLERANCE * JOIN_TOLERANCE {
+            if diagnose {
+                out.issues.push(Diagnostic::new(
+                    DiagnosticKind::Degenerate,
+                    lp.entities.clone(),
+                    lp.entities.iter().filter_map(|id| sketch.entity(*id)).flat_map(|e| e.points()).collect(),
+                ));
+            }
             let first = lp.entities.iter().min().and_then(|&id| sketch.entity(id)).map(name).unwrap_or_default();
             out.first_error.get_or_insert(ProfileError::Degenerate(first));
             continue;
@@ -444,7 +475,7 @@ fn oriented(lp: &RegionLoop, reversible: bool, ccw: bool) -> RegionLoop {
 /// Overlapping loops are not detected. Regions are ordered by the smallest entity
 /// of their outer loop, holes likewise, and each loop starts at its smallest entity.
 pub fn regions(sketch: &Sketch) -> Result<Vec<Region>, ProfileError> {
-    let Loops { loops, reversible, first_error } = loops(sketch);
+    let Loops { loops, reversible, first_error, .. } = loops(sketch, false);
     if loops.is_empty() {
         return Err(first_error.unwrap_or(ProfileError::NoLoop));
     }
@@ -487,7 +518,7 @@ pub fn profiles(sketch: &Sketch, plane: Plane) -> Result<Vec<Profile>, ProfileEr
 
 /// Outlines of the closed loops, for shading in the sketcher. Empty when nothing closes.
 pub fn region_outlines(sketch: &Sketch) -> Vec<Vec<P2>> {
-    loops(sketch).loops.iter().map(|l| sample(&l.segments)).collect()
+    loops(sketch, false).loops.iter().map(|l| sample(&l.segments)).collect()
 }
 
 impl Sketch {

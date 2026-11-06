@@ -849,6 +849,45 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::SketchDiagnostics(open) => {
+                if let Some(s) = self.state.sketch.as_mut() {
+                    if open {
+                        s.set_tool(crate::state::Tool::Select);
+                        s.selection.clear();
+                        s.diagnostics = Some(crate::sketch_diagnostics::Inspection::new(&s.sketch));
+                        self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                    } else {
+                        s.diagnostics = None;
+                    }
+                }
+            }
+            AppAction::LocateSketchDiagnostic => {
+                let bounds = self.state.sketch.as_ref().and_then(|s| {
+                    let issue = crate::sketch_diagnostics::selected(s)?;
+                    let frame = crate::sketcher::Frame {
+                        plane: s.plane,
+                        camera: &self.state.viewport.camera,
+                        rect: self.state.viewport.rect,
+                    };
+                    let owners = issue
+                        .relation
+                        .into_iter()
+                        .flat_map(|_| issue.entities.iter())
+                        .filter_map(|id| s.sketch.entity(*id))
+                        .flat_map(|e| e.polyline(8));
+                    let mut points =
+                        issue.locations.iter().copied().chain(owners).map(|p| frame.world(p)).filter(|p| p.is_finite());
+                    let first = points.next()?;
+                    Some(points.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p))))
+                });
+                if let Some((lo, hi)) =
+                    bounds.filter(|(lo, hi)| (*lo + *hi).is_finite() && (*hi - *lo).length().is_finite())
+                {
+                    self.state.viewport.camera.fit(Some((lo, hi)));
+                } else if let Some(s) = self.state.sketch.as_mut() {
+                    s.say("Fault coordinates cannot be displayed at this scale");
+                }
+            }
             AppAction::ToggleConstruction => {
                 if let Some(s) = self.state.sketch.as_mut() {
                     let ids = s.selected_entities();

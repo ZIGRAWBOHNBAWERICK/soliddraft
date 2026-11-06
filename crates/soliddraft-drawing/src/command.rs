@@ -780,19 +780,18 @@ fn sheet_mut(drawing: &mut Drawing, sheet: usize) -> Result<&mut crate::Sheet, D
     drawing.sheets.get_mut(sheet).ok_or(DrawingError::BadRequest(format!("no sheet {sheet}")))
 }
 
-/// Changes a sheet's scale; views that follow it, and their children that follow
-/// them, rescale.
+/// Changes a sheet's scale, rescaling every view that inherits it across all sheets.
 fn set_sheet_scale(drawing: &mut Drawing, sheet: usize, scale: Scale) -> Result<(), DrawingError> {
-    let s = sheet_mut(drawing, sheet)?;
-    let before: Vec<(ViewId, f64)> = s.views.iter().map(|v| (v.id, project::effective_scale(s, v))).collect();
-    s.scale = scale;
-    for (id, was) in before {
-        let now = project::view_scale(drawing, id)?;
-        if (now / was - 1.0).abs() > 1e-12 {
-            rescale(drawing, id, now / was);
-        }
-    }
-    Ok(())
+    sheet_mut(drawing, sheet)?;
+    let before = drawing
+        .sheets
+        .iter()
+        .enumerate()
+        .flat_map(|(si, s)| s.views.iter().map(move |v| (si, v)))
+        .map(|(si, v)| (v.id, project::scale_in(drawing, si, v)))
+        .collect();
+    drawing.sheets[sheet].scale = scale;
+    rescale_changed(drawing, before)
 }
 
 /// Deletes a view with its annotations, once nothing is derived from it.

@@ -178,7 +178,7 @@ A drawing is its own document that opens as a tab beside the part.
 
 - Views fold off a selected view: eight direction dots around the parent, the orthographic four give folded views (the sheet's projection angle decides which face: in first angle, right of Front gives the Left view) and the diagonals give pictorials. The ghost of the view follows the pointer, dashed accent guides show the alignment that will be kept, a hover card names the resulting orientation and says to hold Ctrl to break alignment. The projection for each direction is computed once per direction and cached while the tool is active.
 - An aligned view slides only along its guide; dragging a parent drags its aligned children; Break alignment and Align are in the Arrange group, the context menu and the view's PropertyManager.
-- Scale per view: sheet, parent or custom; changing the sheet scale rescales the views that follow it without going back to the kernel (an affine on the cached paths and annotations). "SCALE 1:2" is captioned under views whose scale differs from the sheet.
+- Scale per view: sheet, parent or custom. Changing the sheet scale rescales every view that inherits it, including Parent-scale descendants on other sheets, by transforming cached paths and annotation points without going back to the kernel. Custom-scale views keep their scale. "SCALE 1:2" is captioned under views whose scale differs from the sheet.
 - Hidden lines are kept in the cached geometry and switched on and off per view by the display style, so no re-projection is needed. Tangent edges are passed to the kernel as a request; the backend does not yet tell smooth edges apart in its output, so they draw like other edges.
 
 ### Dimensions and annotations

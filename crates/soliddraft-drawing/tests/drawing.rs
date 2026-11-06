@@ -183,6 +183,80 @@ fn transferring_a_parent_or_custom_scale_view_does_not_adopt_the_sheet_scale() {
 }
 
 #[test]
+fn sheet_scale_changes_follow_parent_scale_views_across_sheets() {
+    use soliddraft_drawing::{LinearOrientation, PartIndex, derived, measure, project};
+
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(100.0, 30.0, 10.0));
+    let mut new = new_drawing("iso-a3");
+    new.scale = Some(Scale::FULL);
+    let (mut d, _) = make_drawing(&part, &new).unwrap();
+    apply(&mut d, &Command::AddSheet { name: "Other sheet".into(), template: "iso-a3".into() }).unwrap();
+    let top = ViewId(2);
+    let custom = ViewId(3);
+    let sheet_scale = ViewId(4);
+    apply(&mut d, &Command::SetViewScale { view: top, scale: ViewScale::Parent }).unwrap();
+    apply(&mut d, &Command::SetViewScale { view: custom, scale: ViewScale::Custom { factor: 0.75 } }).unwrap();
+    apply(&mut d, &Command::SetViewScale { view: sheet_scale, scale: ViewScale::Sheet }).unwrap();
+    apply(&mut d, &Command::MoveViewToSheet { view: top, sheet: 1, to: Point2::new(200.0, 150.0) }).unwrap();
+    let index = PartIndex::build(&part).unwrap();
+    let (detail, _) =
+        derived::new_detail(&d, &part, &index, 1, top, Point2::new(10.0, 5.0), 5.0, Vec::new(), 2.0, None).unwrap();
+    apply(&mut d, &Command::PlaceView { sheet: 1, view: detail }).unwrap();
+    let curve = d
+        .view(top)
+        .unwrap()
+        .geometry
+        .curves
+        .iter()
+        .position(|c| {
+            let shape = measure::shape_of(&c.path);
+            (shape.end().u - shape.start().u).abs() == 100.0
+        })
+        .unwrap();
+    let mut stack = UndoStack::new();
+    for (sheet, scale) in [(0, Scale::new(1, 2)), (1, Scale::new(1, 4)), (0, Scale::FULL)] {
+        let before = d.clone();
+        stack.run(&mut d, &Command::SetSheetScale { sheet, scale }, None).unwrap();
+        let after = d.clone();
+        let view = d.view(top).unwrap();
+        let proposal = measure::propose(view, &[measure::Pick { view: top, curve, end: None }], &[]).unwrap();
+        let value = measure::linear_value(
+            LinearOrientation::Horizontal,
+            proposal.points[0],
+            proposal.points[1],
+            project::view_scale(&d, top).unwrap(),
+        );
+        assert_eq!(value, 100.0, "Smart dimension must still measure the cross-sheet child's 100 mm edge");
+        for old in before.sheets.iter().flat_map(|s| &s.views) {
+            let ratio = project::view_scale(&d, old.id).unwrap() / project::view_scale(&before, old.id).unwrap();
+            let mut expected = old.clone();
+            project::rescale_view(&mut expected, ratio);
+            assert_eq!(d.view(old.id).unwrap().geometry, expected.geometry, "{}", old.id);
+        }
+        assert_eq!(d.view(custom).unwrap().geometry, before.view(custom).unwrap().geometry);
+        for old in before.sheets.iter().flat_map(|s| &s.annotations) {
+            let now = d.annotation(old.id).unwrap();
+            let ratio = if old.view == soliddraft_drawing::SHEET {
+                1.0
+            } else {
+                project::view_scale(&d, old.view).unwrap() / project::view_scale(&before, old.view).unwrap()
+            };
+            assert_eq!(now.body, old.body);
+            assert_eq!(now.state, old.state);
+            assert_eq!(now.placement, Point2::new(old.placement.u * ratio, old.placement.v * ratio));
+            for (a, b) in now.anchors.iter().zip(&old.anchors) {
+                assert_eq!(a.cached, Point2::new(b.cached.u * ratio, b.cached.v * ratio));
+            }
+        }
+        stack.undo(&mut d).unwrap();
+        assert_eq!(d, before);
+        stack.redo(&mut d).unwrap();
+        assert_eq!(d, after);
+    }
+}
+
+#[test]
 fn third_angle_puts_the_top_view_above_and_the_right_view_right() {
     let k = BoxKernel::new();
     let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));

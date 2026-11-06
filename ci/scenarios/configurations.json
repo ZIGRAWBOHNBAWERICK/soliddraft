@@ -788,7 +788,7 @@
       "tool": "set_configuration_value",
       "arguments": {
         "configuration": "Zero",
-        "name": "plate_w",
+        "name": "flange_d",
         "expression": "0"
       },
       "checks": [

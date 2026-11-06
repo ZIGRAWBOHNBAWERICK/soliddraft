@@ -48,6 +48,17 @@ pub enum Operation {
         /// A point identifying the interval to remove.
         at: P2,
     },
+    /// Trim or extend two lines/arcs to a corner while retaining the picked portions.
+    TrimCorner {
+        /// First line or arc.
+        a: EntityId,
+        /// Second line or arc, distinct from the first.
+        b: EntityId,
+        /// A point on the portion of the first curve to keep.
+        keep_a: P2,
+        /// A point on the portion of the second curve to keep.
+        keep_b: P2,
+    },
     /// Extend one endpoint to the nearest intersection with a bounded entity.
     Extend {
         /// Line or arc to extend.
@@ -110,6 +121,16 @@ pub struct TrimPreview {
     pub removed: EntityKind,
     /// The pieces of the target that remain, from its start to its end.
     pub kept: Vec<EntityKind>,
+}
+
+/// The resulting curves and removed pieces of a two-entity corner.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CornerPreview {
+    /// New geometry in first/second entity order.
+    pub kept: [EntityKind; 2],
+    /// Only the portions that disappear, not the retained geometry.
+    pub removed: Vec<EntityKind>,
+    joint: [PointRef; 2],
 }
 
 /// One power-trim cut, retained until the gesture ends so retracing can restore it.
@@ -350,6 +371,54 @@ fn extension(target: &Entity, end: End, limit: &Entity) -> Option<(f64, P2)> {
     candidates.first().copied()
 }
 
+fn corner_piece(kind: EntityKind, keep: P2, corner: P2) -> Result<(EntityKind, End)> {
+    let [start, end] = ends(kind).ok_or_else(|| ToolError("corner trim needs two lines or arcs".into()))?;
+    let keep = entity(kind).nearest(keep).0;
+    let pick = parameter(kind, keep).expect("line or arc");
+    let hit = parameter(kind, corner).expect("line or arc");
+    let side = if corner.dist(start) <= EPS {
+        End::Start
+    } else if corner.dist(end) <= EPS {
+        End::End
+    } else if matches!(kind, EntityKind::Line { .. }) || on_curve(kind, corner) {
+        if keep.dist(corner) <= EPS {
+            return refuse("pick a portion to keep, away from the corner");
+        }
+        if pick < hit { End::End } else { End::Start }
+    } else {
+        let EntityKind::Arc { center, .. } = kind else { unreachable!() };
+        let before = ((start - center).angle() - (corner - center).angle()).rem_euclid(TAU);
+        let after = ((corner - center).angle() - (end - center).angle()).rem_euclid(TAU);
+        if (before - after).abs() * center.dist(start) <= EPS {
+            if (pick - 0.5).abs() <= EPS {
+                return refuse("pick nearer an arc end to choose its extension direction");
+            }
+            if pick < 0.5 { End::End } else { End::Start }
+        } else if before < after {
+            End::Start
+        } else {
+            End::End
+        }
+    };
+    let mut changed = kind;
+    set_end(&mut changed, side, corner);
+    if !valid(changed) {
+        return refuse("the corner would collapse a curve or create an invalid arc");
+    }
+    Ok((changed, side))
+}
+
+fn corner_removed(kind: EntityKind, changed: EntityKind, side: End) -> Option<EntityKind> {
+    let index = usize::from(side == End::End);
+    let at = ends(changed)?[index];
+    if ends(kind)?[index].dist(at) <= EPS || !on_curve(kind, at) {
+        return None;
+    }
+    let mut removed = kind;
+    set_end(&mut removed, if side == End::Start { End::End } else { End::Start }, at);
+    valid(removed).then_some(removed)
+}
+
 impl Sketch {
     fn tool_entity(&self, id: EntityId) -> Result<Entity> {
         self.entity(id)
@@ -414,6 +483,7 @@ impl Sketch {
                 )
             }
             Operation::Trim { entity: id, at } => self.trim_interval(*id, *at),
+            Operation::TrimCorner { a, b, keep_a, keep_b } => self.trim_corner(*a, *b, *keep_a, *keep_b),
             Operation::Extend { entity: id, end, boundary } => self.extend_to(*id, *end, *boundary),
             Operation::Offset { entities, distance } => self.offset_chain(entities, *distance),
             Operation::Mirror { entities, axis_start, axis_end } => {
@@ -670,6 +740,72 @@ impl Sketch {
             *self = trial;
         }
         Ok(checkpoints)
+    }
+
+    /// Previews a corner from two lines/arcs and the portions the user wants to keep.
+    /// Multiple intersections use the nearest combined pick distance; ties are refused.
+    pub fn corner_preview(&self, a: EntityId, b: EntityId, keep_a: P2, keep_b: P2) -> Result<CornerPreview> {
+        if a == b || !finite(keep_a) || !finite(keep_b) {
+            return refuse("corner trim needs two distinct curves and finite keep points");
+        }
+        let first = self.tool_entity(a)?;
+        let second = self.tool_entity(b)?;
+        if ends(first.kind).is_none() || ends(second.kind).is_none() {
+            return refuse("corner trim needs two lines or arcs; a closed circle has no endpoint");
+        }
+        let keep_a = first.nearest(keep_a).0;
+        let keep_b = second.nearest(keep_b).0;
+        let mut hits = intersections(first.kind, second.kind);
+        hits.dedup_by(|a, b| a.dist(*b) <= EPS);
+        let mut choices: Vec<_> = hits
+            .into_iter()
+            .map(|at| (at.dist(keep_a) + at.dist(keep_b), at))
+            .filter(|(score, _)| score.is_finite())
+            .collect();
+        choices.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let Some(&(score, at)) = choices.first() else {
+            return refuse("the curves have no unique corner; parallel or coincident curves cannot join this way");
+        };
+        if choices.get(1).is_some_and(|(other, _)| (other - score).abs() <= EPS) {
+            return refuse("two corners match these picks; pick closer to the intended corner");
+        }
+        // Keep existing endpoints exact rather than moving them by intersection round-off.
+        let at = ends(first.kind)
+            .expect("line or arc")
+            .into_iter()
+            .chain(ends(second.kind).expect("line or arc"))
+            .find(|p| p.dist(at) <= EPS)
+            .unwrap_or(at);
+        let (ka, end_a) = corner_piece(first.kind, keep_a, at)?;
+        let (kb, end_b) = corner_piece(second.kind, keep_b, at)?;
+        let pa = PointRef::new(a, u8::from(first.is_curve()) + u8::from(end_a == End::End));
+        let pb = PointRef::new(b, u8::from(second.is_curve()) + u8::from(end_b == End::End));
+        let joined = |c: &Constraint| matches!(c.kind, ConstraintKind::Coincident { a, b } if (a == pa && b == pb) || (a == pb && b == pa));
+        if ka == first.kind && kb == second.kind && self.constraints.iter().any(joined) {
+            return refuse("these curves already share this corner");
+        }
+        Ok(CornerPreview {
+            kept: [ka, kb],
+            removed: [corner_removed(first.kind, ka, end_a), corner_removed(second.kind, kb, end_b)]
+                .into_iter()
+                .flatten()
+                .collect(),
+            joint: [pa, pb],
+        })
+    }
+
+    fn trim_corner(&mut self, a: EntityId, b: EntityId, keep_a: P2, keep_b: P2) -> Result<Vec<EntityId>> {
+        let preview = self.corner_preview(a, b, keep_a, keep_b)?;
+        let mut trial = self.clone();
+        for (id, kind) in [(a, preview.kept[0]), (b, preview.kept[1])] {
+            if trial.entity(id).expect("corner target validated").kind != kind {
+                trial.replace_tool_entity(id, vec![kind])?;
+            }
+        }
+        // Changed targets lose their old joint; unchanged joined pairs were refused above.
+        trial.constrain(ConstraintKind::Coincident { a: preview.joint[0], b: preview.joint[1] });
+        *self = trial;
+        Ok(vec![a, b])
     }
 
     fn trim_interval(&mut self, id: EntityId, at: P2) -> Result<Vec<EntityId>> {

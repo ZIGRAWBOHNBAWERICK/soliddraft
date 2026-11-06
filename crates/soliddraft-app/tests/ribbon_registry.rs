@@ -125,6 +125,37 @@ fn before_all_faces(id: &str, current: &mut Value) {
     assert_eq!(added["type"], "boolean", "all_faces is one optional flag");
 }
 
+fn before_corner(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let index =
+        variants.iter().position(|v| v["properties"]["tool"]["const"] == "trim_corner").expect("corner operation");
+    let added = variants.remove(index);
+    let point = json!({"type":"object", "properties":{"u":{"type":"number"}, "v":{"type":"number"}}, "required":["u","v"], "additionalProperties":false});
+    assert_eq!(
+        added,
+        json!({
+            "type":"object", "additionalProperties":false,
+            "properties": {
+                "tool":{"type":"string","const":"trim_corner"},
+                "a":{"type":"integer"}, "b":{"type":"integer"},
+                "keep_a":point.clone(), "keep_b":point,
+            },
+            "required":["tool","a","b","keep_a","keep_b"]
+        }),
+        "only the declared corner operation extends the frozen schema"
+    );
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -240,6 +271,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         let current = now["commands"].get(id).unwrap_or_else(|| panic!("{id} is gone"));
         let mut current = configuration_registry::before_configurations(id, current, plain);
         before_all_faces(id, &mut current);
+        before_corner(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

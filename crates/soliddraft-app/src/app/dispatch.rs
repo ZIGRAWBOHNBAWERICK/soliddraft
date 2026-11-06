@@ -1165,6 +1165,9 @@ impl SolidDraftApp {
     pub(super) fn sync_sketch_session(&mut self) {
         let Some(s) = self.state.sketch.as_mut() else { return };
         s.cancel_trim();
+        if s.corner_first.take().is_some() {
+            s.selection.clear();
+        }
         match self.state.doc.feature(s.feature).and_then(|f| f.sketch()) {
             Some(sk) => {
                 if sk.sketch != s.sketch {

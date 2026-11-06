@@ -85,10 +85,15 @@ Application work for a feature, such as its PropertyManager page, ribbon command
 | Draft | 4 | Works for planar faces and cylinders parallel to the pull |
 | Line and arc sweep | 5 | Works for closed polygons along lines and quarter, half and three-quarter arcs, within the backend domain in [the backend gaps](needs-catallax.md); after 0.2.0 |
 | Other path motions, loft; spline, ellipse and text profiles | 5 | Waits |
+| OpenUSD import from NVIDIA Omniverse (.usd, .usda, .usdc, .usdz); sand3d output import (USDA, GLB, URDF, OBJ, STL) | Application-side scene and mesh import, independent of stage 6 | Planned; does not wait for Catallax's importers; exit checks below |
 | STEP import, then IGES import | 6 | Waits for Catallax's importers |
 | Lattice, gyroid, graded density, field-driven thickness | Field-only track, after stage 3 | One cubic lattice or one network gyroid works as the last feature, its radius or level constant or graded linearly along a part axis, with proven field moments and an explicit mass stand-in; other grades and field-driven thickness wait |
 
 Reference geometry (planes, axes, points) is application-side work and can come at any time.
+
+OpenUSD and [sand3d](https://github.com/Sandflow-ai/sand3d) imports come in clean when SolidDraft preserves the named part and assembly tree, handles units and up-axis correctly, and keeps transforms, materials and joints where the format carries them. Mesh bodies arrive as mesh or reference bodies, not editable solids. Reading USD, GLB and URDF scene trees and meshes, plus OBJ and STL meshes, is application-side work and does not wait for Catallax. Any mesh-to-solid conversion, or support for USD NURBS or exact geometry, waits for Catallax.
+
+Exit: round-trip a sand3d sample object, such as its bracket or washer, by exporting it to .usda, .glb and .urdf and opening each in SolidDraft. Open one Omniverse sample USD too. The application loop checks the imported tree, names, scale and orientation against the source, plus transforms, materials and joints where present.
 
 The export set is STEP, IGES, STL, 3MF and OBJ. STEP AP242, STL and 3MF are complete; OBJ is complete with this change. IGES export now uses Catallax's strict exact-surface writer through the app, CLI and MCP; coverage follows the writer's explicit refusals. It does not depend on STEP import or IGES import.
 

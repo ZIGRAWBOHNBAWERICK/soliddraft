@@ -3,14 +3,14 @@
 #[path = "support/ribbon.rs"]
 mod ribbon;
 
-use egui::{Key, Modifiers, PointerButton, Pos2};
+use egui::{Key, Modifiers, PointerButton, Pos2, pos2, vec2};
 use std::sync::Mutex;
 
 static SERIAL: Mutex<()> = Mutex::new(());
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, Document, FeatureId, PlaneKind, SketchPlane},
-    sketch::{EntityKind, P2, Sketch, solve},
+    sketch::{ConstraintKind, EntityKind, P2, PointRef, Sketch, solve},
     sketcher::Frame,
     state::{AppAction, SketchSession},
 };
@@ -47,6 +47,215 @@ fn frame(app: &mut App, name: &str) {
         std::fs::create_dir_all(&dir).unwrap();
         app.render().unwrap().save(dir.join(format!("{name}.png"))).unwrap();
     }
+}
+
+fn option(app: &mut App, label: &str) {
+    for _ in 0..6 {
+        if let Some(p) = ribbon::painted(app).into_iter().find(|p| p.text == label && p.rect.contains_rect(p.full)) {
+            ribbon::click_at(app, p.rect.center());
+            return;
+        }
+        let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
+        app.hover_at(pos2(
+            app.state().state.viewport.rect.left() - 15.0,
+            (head.bottom() + ribbon::band(app).top()) / 2.0,
+        ));
+        app.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -180.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.run_steps(12);
+    }
+    panic!("Trim must expose the {label} checkbox");
+}
+
+#[test]
+fn trim_can_keep_removed_pieces_as_non_profile_guides() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let target = sketch.add(EntityKind::Line { a: P2::new(-10.0, 0.0), b: P2::new(10.0, 0.0) }, false);
+    for x in [-3.0, 3.0] {
+        sketch.add(EntityKind::Line { a: P2::new(x, -6.0), b: P2::new(x, 6.0) }, true);
+    }
+    let (mut app, id) = launch(sketch);
+    let before = session(&app).sketch.clone();
+    let revision = app.state().state.doc.revision();
+    option(&mut app, "Keep trimmed pieces as construction");
+    assert!(session(&app).trim_options.keep_as_construction);
+    let at = screen(&app, P2::ZERO);
+    app.hover_at(at);
+    app.run_steps(6);
+    frame(&mut app, "keep-construction-preview");
+    assert_eq!(session(&app).sketch, before);
+    assert_eq!(app.state().state.doc.revision(), revision);
+    let samples: Vec<_> = (0..64).map(|i| P2::new(-2.5 + 5.0 * i as f64 / 63.0, 0.0)).collect();
+    let count = stroke_samples(&mut app, &samples, soliddraft_app::theme::accent());
+    assert!((10..55).contains(&count), "the guide preview needs visible dashes, got {count}/64");
+    ribbon::click_at(&mut app, at);
+    assert!(session(&app).sketch.entity(target).is_some());
+    assert_eq!(session(&app).sketch.drawn().filter(|e| !e.construction).count(), 2);
+    assert!(
+        session(&app)
+            .sketch
+            .drawn()
+            .any(|e| e.construction && e.kind == EntityKind::Line { a: P2::new(-3.0, 0.0), b: P2::new(3.0, 0.0) })
+    );
+    frame(&mut app, "keep-construction-after");
+    let after = session(&app).sketch.clone();
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, before);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, after);
+    let path = std::env::temp_dir().join(format!("soliddraft-keep-{}.dwprt", std::process::id()));
+    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.run_steps(6);
+    app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+    app.run_steps(6);
+    app.state_mut().state.push(AppAction::Open(Some(path)));
+    app.run_steps(10);
+    assert_eq!(app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, after);
+    app.state_mut().state.push(AppAction::EditSketch(id));
+    app.run_steps(6);
+    assert!(!session(&app).trim_options.keep_as_construction, "options are session-local, guide flags are saved");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+fn stroke_samples(app: &mut App, points: &[P2], color: egui::Color32) -> usize {
+    let image = app.render().unwrap();
+    let scale = app.ctx.pixels_per_point();
+    let expected = color.to_array();
+    assert!(points.len() > 2);
+    (0..points.len())
+        .filter(|&i| {
+            let p = screen(app, points[i]);
+            assert!(app.state().state.viewport.rect.contains(p));
+            let previous = screen(app, points[(i + points.len() - 1) % points.len()]);
+            let next = screen(app, points[(i + 1) % points.len()]);
+            let tangent = next - previous;
+            let normal = vec2(-tangent.y, tangent.x).normalized();
+            // Sample across the stroke, not along it, so nearby dashes cannot fill a gap.
+            [-1.0, 0.0, 1.0].into_iter().any(|offset| {
+                let at = (p + normal * offset) * scale;
+                let (x, y) = (at.x.round() as i32, at.y.round() as i32);
+                x >= 0 && y >= 0 && x < image.width() as i32 && y < image.height() as i32 && {
+                    let pixel = image.get_pixel(x as u32, y as u32).0;
+                    (0..3).all(|i| pixel[i].abs_diff(expected[i]) <= 75)
+                }
+            })
+        })
+        .count()
+}
+
+#[test]
+fn small_kept_circles_have_visible_construction_dashes() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let target = sketch.add(EntityKind::Circle { center: P2::new(5.0, 5.0), radius: 2.0 }, false);
+    let (mut app, _) = launch(sketch);
+    option(&mut app, "Keep trimmed pieces as construction");
+    let at = screen(&app, P2::new(7.0, 5.0));
+    ribbon::click_at(&mut app, at);
+    assert!(session(&app).sketch.entity(target).unwrap().construction);
+    let at = screen(&app, P2::new(5.0, 5.0));
+    app.hover_at(at);
+    app.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, -14.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    app.run_steps(12);
+    let radius = screen(&app, P2::new(7.0, 5.0)).distance(screen(&app, P2::new(5.0, 5.0)));
+    assert!((35.0..75.0).contains(&radius), "prove the zoomed-out fixture, radius {radius}");
+    frame(&mut app, "keep-small-circle");
+    let points: Vec<_> = (0..100)
+        .map(|i| P2::new(5.0, 5.0) + P2::from_angle((i as f64 + 0.25) * std::f64::consts::TAU / 100.0).scale(2.0))
+        .collect();
+    let count = stroke_samples(&mut app, &points, soliddraft_app::theme::muted());
+    assert!((10..85).contains(&count), "a construction circle needs visible strokes and gaps, got {count}/100");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn ignored_guides_still_bound_profile_trimming_and_cannot_be_grabbed() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let guide = sketch.add(EntityKind::Line { a: P2::new(-10.0, 0.0), b: P2::new(10.0, 0.0) }, true);
+    sketch.add(EntityKind::Line { a: P2::new(-10.0, 5.0), b: P2::new(10.0, 5.0) }, false);
+    for x in [-3.0, 3.0] {
+        sketch.add(EntityKind::Line { a: P2::new(x, -6.0), b: P2::new(x, 10.0) }, true);
+    }
+    let (mut app, _) = launch(sketch);
+    let before = session(&app).sketch.clone();
+    let revision = app.state().state.doc.revision();
+    app.set_size(vec2(960.0, 600.0));
+    soliddraft_app::theme::set_mode(&app.ctx, soliddraft_app::theme::Mode::Dark);
+    app.run_steps(12);
+    option(&mut app, "Ignore construction targets");
+    assert!(session(&app).trim_options.ignore_construction);
+    let at = screen(&app, P2::new(-5.0, 0.0));
+    ribbon::click_at(&mut app, at);
+    assert_eq!(session(&app).sketch, before);
+    assert_eq!(app.state().state.doc.revision(), revision);
+    press(&mut app, P2::ZERO);
+    move_to(&mut app, P2::new(0.0, 8.0));
+    assert_eq!(session(&app).sketch.entity(guide), before.entity(guide));
+    assert_eq!(session(&app).sketch.drawn().filter(|e| !e.construction).count(), 2);
+    release(&mut app, P2::new(0.0, 8.0));
+    let after = session(&app).sketch.clone();
+    frame(&mut app, "ignore-construction-after");
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, before);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, after);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn kept_power_trim_restores_whole_entities_and_relations_without_duplicates() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let target = sketch.add(EntityKind::Line { a: P2::new(-10.0, 0.0), b: P2::new(10.0, 0.0) }, false);
+    sketch.constrain(ConstraintKind::Fix { point: PointRef::new(target, 0), at: P2::new(-10.0, 0.0) });
+    let (mut app, _) = launch(sketch);
+    option(&mut app, "Keep trimmed pieces as construction");
+    option(&mut app, "Ignore construction targets");
+    let before = session(&app).sketch.clone();
+    let revision = app.state().state.doc.revision();
+    press(&mut app, P2::new(0.0, -4.0));
+    move_to(&mut app, P2::new(0.0, 4.0));
+    assert!(session(&app).sketch.entity(target).unwrap().construction);
+    assert_eq!(session(&app).sketch.constraints.len(), before.constraints.len());
+    frame(&mut app, "keep-power-live");
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, before);
+    release(&mut app, P2::new(0.0, 4.0));
+    assert_eq!(app.state().state.doc.revision(), revision);
+    press(&mut app, P2::new(0.0, -4.0));
+    move_to(&mut app, P2::new(0.0, 4.0));
+    move_to(&mut app, P2::new(0.0, -4.0));
+    release(&mut app, P2::new(0.0, -4.0));
+    assert_eq!(session(&app).sketch, before, "retracing restores flags, identities and relations exactly");
+    assert_eq!(app.state().state.doc.revision(), revision);
+    press(&mut app, P2::new(0.0, -4.0));
+    move_to(&mut app, P2::new(0.0, 4.0));
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    release(&mut app, P2::new(0.0, 4.0));
+    assert_eq!(session(&app).sketch, before);
+    assert_eq!(app.state().state.doc.revision(), revision);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
 }
 
 fn lines() -> Sketch {

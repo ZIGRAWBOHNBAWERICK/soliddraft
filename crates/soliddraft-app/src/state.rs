@@ -9,7 +9,10 @@ use crate::document::{
 };
 use crate::document::{EdgeRef, EntityRef};
 use crate::drag::{Dimension, DragPreview, Finish};
-use crate::sketch::{ConstraintId, EntityId, EntityKind, P2, PointRef, Sketch, tools::Operation};
+use crate::sketch::{
+    ConstraintId, EntityId, EntityKind, P2, PointRef, Sketch,
+    tools::{Operation, TrimOptions},
+};
 use crate::viewport::ViewportState;
 use crate::viewport::camera::StandardView;
 use crate::viewport::look::Preset;
@@ -576,6 +579,8 @@ pub struct SketchSession {
     pub corner_first: Option<(EntityId, P2)>,
     /// Up to two bounding curves, retained across inside/outside target edits.
     pub trim_bounds: Vec<EntityId>,
+    /// Construction choices shared by every mode of Trim for this sketch session.
+    pub trim_options: TrimOptions,
     pub dim_edit: Option<DimEdit>,
     /// Smart dimension: the first picked item, waiting for a second or a placement.
     pub dim_first: Option<SketchSel>,
@@ -647,6 +652,7 @@ impl SketchSession {
             trim_drag: None,
             corner_first: None,
             trim_bounds: Vec::new(),
+            trim_options: TrimOptions::default(),
             dim_edit: None,
             dim_first: None,
             dim_second: None,

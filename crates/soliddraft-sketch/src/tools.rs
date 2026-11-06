@@ -9,6 +9,22 @@ use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, P2
 
 const EPS: f64 = 1e-6;
 
+/// Session or per-operation choices for trimming construction geometry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TrimOptions {
+    /// Retain removed portions as non-profile construction geometry.
+    pub keep_as_construction: bool,
+    /// Protect construction targets, while still using them as boundaries.
+    pub ignore_construction: bool,
+}
+
+impl TrimOptions {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The endpoint to extend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +63,9 @@ pub enum Operation {
         entity: EntityId,
         /// A point identifying the interval to remove.
         at: P2,
+        /// Optional construction handling. Omission preserves ordinary trim behavior.
+        #[serde(default, skip_serializing_if = "TrimOptions::is_default")]
+        options: TrimOptions,
     },
     /// Trim or extend two lines/arcs to a corner while retaining the picked portions.
     TrimCorner {
@@ -58,6 +77,9 @@ pub enum Operation {
         keep_a: P2,
         /// A point on the portion of the second curve to keep.
         keep_b: P2,
+        /// Optional construction handling.
+        #[serde(default, skip_serializing_if = "TrimOptions::is_default")]
+        options: TrimOptions,
     },
     /// Remove the inside or outside portions between two selected boundary crossings.
     TrimBounded {
@@ -69,6 +91,9 @@ pub enum Operation {
         b: EntityId,
         /// Remove the outside portions when true, otherwise remove the inside interval.
         outside: bool,
+        /// Optional construction handling.
+        #[serde(default, skip_serializing_if = "TrimOptions::is_default")]
+        options: TrimOptions,
     },
     /// Extend one endpoint to the nearest intersection with a bounded entity.
     Extend {
@@ -162,6 +187,7 @@ impl TrimCheckpoint {
     pub fn restore(self, sketch: &mut Sketch) {
         sketch.entities.retain(|e| e.id < self.next_entity && e.id != self.entity.id);
         sketch.entities.insert(self.entity_index, self.entity);
+        sketch.constraints.retain(|c| !self.constraints.iter().any(|(_, original)| original.id == c.id));
         for (index, constraint) in self.constraints {
             sketch.constraints.insert(index, constraint);
         }
@@ -493,11 +519,13 @@ impl Sketch {
                         .collect(),
                 )
             }
-            Operation::Trim { entity: id, at } => self.trim_interval(*id, *at),
-            Operation::TrimCorner { a, b, keep_a, keep_b } => self.trim_corner(*a, *b, *keep_a, *keep_b),
-            Operation::TrimBounded { entity, a, b, outside } => {
-                let preview = self.trim_bounded_preview(*entity, *a, *b, *outside)?;
-                self.replace_tool_entity(*entity, preview.kept)
+            Operation::Trim { entity: id, at, options } => self.trim_interval(*id, *at, *options),
+            Operation::TrimCorner { a, b, keep_a, keep_b, options } => {
+                self.trim_corner(*a, *b, *keep_a, *keep_b, *options)
+            }
+            Operation::TrimBounded { entity, a, b, outside, options } => {
+                let preview = self.trim_bounded_preview(*entity, *a, *b, *outside, *options)?;
+                self.replace_trim_entity(*entity, preview, *options)
             }
             Operation::Extend { entity: id, end, boundary } => self.extend_to(*id, *end, *boundary),
             Operation::Offset { entities, distance } => self.offset_chain(entities, *distance),
@@ -601,9 +629,17 @@ impl Sketch {
         Ok(ids)
     }
 
-    /// What trimming `id` at `at` removes and keeps, without changing the sketch.
-    pub fn trim_preview(&self, id: EntityId, at: P2) -> Result<TrimPreview> {
+    fn trim_target(&self, id: EntityId, options: TrimOptions) -> Result<Entity> {
         let target = self.tool_entity(id)?;
+        if target.construction && (options.ignore_construction || options.keep_as_construction) {
+            return refuse("construction targets are kept by the current trim options");
+        }
+        Ok(target)
+    }
+
+    /// What trimming `id` at `at` removes and keeps, without changing the sketch.
+    pub fn trim_preview(&self, id: EntityId, at: P2, options: TrimOptions) -> Result<TrimPreview> {
+        let target = self.trim_target(id, options)?;
         if !finite(at) || target.is_point() {
             return refuse("trim needs a line, arc or circle and a finite pick point");
         }
@@ -666,7 +702,10 @@ impl Sketch {
 
     /// Freely extends a line or arc along its supporting curve toward a pointer.
     /// Picks within the current span do nothing; refusals leave the sketch unchanged.
-    pub fn extend_drag(&mut self, id: EntityId, at: P2) -> Result<bool> {
+    pub fn extend_drag(&mut self, id: EntityId, at: P2, options: TrimOptions) -> Result<bool> {
+        if options.ignore_construction && self.tool_entity(id)?.construction {
+            return refuse("construction targets are protected from trim extension");
+        }
         let target = self.tool_entity(id)?;
         if !finite(at) {
             return refuse("extension needs a finite pointer position");
@@ -701,14 +740,18 @@ impl Sketch {
     /// Trims every curve crossed between pointer samples, in stroke order.
     /// The open start avoids recutting a curve just restored at a trail marker.
     /// Returns a checkpoint before each cut. A refusal leaves the sketch unchanged.
-    pub fn trim_stroke(&mut self, from: P2, to: P2) -> Result<Vec<TrimCheckpoint>> {
+    pub fn trim_stroke(&mut self, from: P2, to: P2, options: TrimOptions) -> Result<Vec<TrimCheckpoint>> {
         let stroke = EntityKind::Line { a: from, b: to };
         if !valid(stroke) {
             return refuse("a trim stroke needs a finite nonzero length");
         }
         let direction = to - from;
         let mut hits = Vec::new();
-        for target in self.drawn().filter(|e| !e.is_point() && valid(e.kind)) {
+        for target in self.drawn().filter(|e| {
+            !e.is_point()
+                && valid(e.kind)
+                && !(e.construction && (options.ignore_construction || options.keep_as_construction))
+        }) {
             for at in intersections(stroke, target.kind) {
                 let tangent = circle(target.kind)
                     .is_some_and(|(center, _)| direction.dot(at - center).abs() <= EPS * direction.len());
@@ -728,7 +771,7 @@ impl Sketch {
             let family = families.entry(original).or_insert_with(|| vec![original]);
             // Earlier cuts can remove boundaries, so check eligibility against the evolving sketch.
             let target = family.iter().copied().find(|id| {
-                trial.entity(*id).is_some_and(|e| on_curve(e.kind, at)) && trial.trim_preview(*id, at).is_ok()
+                trial.entity(*id).is_some_and(|e| on_curve(e.kind, at)) && trial.trim_preview(*id, at, options).is_ok()
             });
             let Some(target) = target else { continue };
             let entity_index = trial.entities.iter().position(|e| e.id == target).expect("trim target exists");
@@ -746,7 +789,7 @@ impl Sketch {
                     .map(|(index, c)| (index, *c))
                     .collect(),
             };
-            let kept = trial.trim_interval(target, at)?;
+            let kept = trial.trim_interval(target, at, options)?;
             family.retain(|id| *id != target);
             family.extend(kept);
             checkpoints.push(checkpoint);
@@ -759,7 +802,14 @@ impl Sketch {
 
     /// Previews a corner from two lines/arcs and the portions the user wants to keep.
     /// Multiple intersections use the nearest combined pick distance; ties are refused.
-    pub fn corner_preview(&self, a: EntityId, b: EntityId, keep_a: P2, keep_b: P2) -> Result<CornerPreview> {
+    pub fn corner_preview(
+        &self,
+        a: EntityId,
+        b: EntityId,
+        keep_a: P2,
+        keep_b: P2,
+        options: TrimOptions,
+    ) -> Result<CornerPreview> {
         if a == b || !finite(keep_a) || !finite(keep_b) {
             return refuse("corner trim needs two distinct curves and finite keep points");
         }
@@ -793,6 +843,11 @@ impl Sketch {
             .unwrap_or(at);
         let (ka, end_a) = corner_piece(first.kind, keep_a, at)?;
         let (kb, end_b) = corner_piece(second.kind, keep_b, at)?;
+        if options.ignore_construction
+            && ((first.construction && ka != first.kind) || (second.construction && kb != second.kind))
+        {
+            return refuse("a corner cannot change a protected construction target");
+        }
         let pa = PointRef::new(a, u8::from(first.is_curve()) + u8::from(end_a == End::End));
         let pb = PointRef::new(b, u8::from(second.is_curve()) + u8::from(end_b == End::End));
         let joined = |c: &Constraint| matches!(c.kind, ConstraintKind::Coincident { a, b } if (a == pa && b == pb) || (a == pb && b == pa));
@@ -809,8 +864,15 @@ impl Sketch {
         })
     }
 
-    fn trim_corner(&mut self, a: EntityId, b: EntityId, keep_a: P2, keep_b: P2) -> Result<Vec<EntityId>> {
-        let preview = self.corner_preview(a, b, keep_a, keep_b)?;
+    fn trim_corner(
+        &mut self,
+        a: EntityId,
+        b: EntityId,
+        keep_a: P2,
+        keep_b: P2,
+        options: TrimOptions,
+    ) -> Result<Vec<EntityId>> {
+        let preview = self.corner_preview(a, b, keep_a, keep_b, options)?;
         let mut trial = self.clone();
         for (id, kind) in [(a, preview.kept[0]), (b, preview.kept[1])] {
             if trial.entity(id).expect("corner target validated").kind != kind {
@@ -819,17 +881,30 @@ impl Sketch {
         }
         // Changed targets lose their old joint; unchanged joined pairs were refused above.
         trial.constrain(ConstraintKind::Coincident { a: preview.joint[0], b: preview.joint[1] });
+        let mut ids = vec![a, b];
+        if options.keep_as_construction {
+            for kind in preview.removed {
+                ids.push(trial.add(kind, true));
+            }
+        }
         *self = trial;
-        Ok(vec![a, b])
+        Ok(ids)
     }
 
     /// Trims an open target between two distinct, transverse boundary crossings.
     /// Other curves do not contribute cuts. Zero/multiple crossings are refused.
-    pub fn trim_bounded_preview(&self, id: EntityId, a: EntityId, b: EntityId, outside: bool) -> Result<TrimPreview> {
+    pub fn trim_bounded_preview(
+        &self,
+        id: EntityId,
+        a: EntityId,
+        b: EntityId,
+        outside: bool,
+        options: TrimOptions,
+    ) -> Result<TrimPreview> {
         if id == a || id == b || a == b {
             return refuse("pick two distinct bounds and a different target");
         }
-        let target = self.tool_entity(id)?;
+        let target = self.trim_target(id, options)?;
         let Some([start, end]) = ends(target.kind) else {
             return refuse("inside/outside trim needs an open line or arc");
         };
@@ -887,9 +962,31 @@ impl Sketch {
         Ok(TrimPreview { removed, kept })
     }
 
-    fn trim_interval(&mut self, id: EntityId, at: P2) -> Result<Vec<EntityId>> {
-        let preview = self.trim_preview(id, at)?;
-        self.replace_tool_entity(id, preview.kept)
+    fn replace_trim_entity(
+        &mut self,
+        id: EntityId,
+        preview: TrimPreview,
+        options: TrimOptions,
+    ) -> Result<Vec<EntityId>> {
+        if options.keep_as_construction && preview.removed.iter().any(|kind| !valid(*kind)) {
+            return refuse("the trim would create degenerate construction geometry");
+        }
+        if options.keep_as_construction && preview.kept.is_empty() {
+            self.entity_mut(id).expect("trim target validated").construction = true;
+            return Ok(vec![id]);
+        }
+        let mut ids = self.replace_tool_entity(id, preview.kept)?;
+        if options.keep_as_construction {
+            for kind in preview.removed {
+                ids.push(self.add(kind, true));
+            }
+        }
+        Ok(ids)
+    }
+
+    fn trim_interval(&mut self, id: EntityId, at: P2, options: TrimOptions) -> Result<Vec<EntityId>> {
+        let preview = self.trim_preview(id, at, options)?;
+        self.replace_trim_entity(id, preview, options)
     }
 
     /// The bounded entity a pointer extend of `id` meets first beyond `end`: the nearest

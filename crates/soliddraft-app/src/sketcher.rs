@@ -121,9 +121,13 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
 }
 
 /// The curve under the pointer, ignoring points and relation glyphs.
-fn hit_curve(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2) -> Option<EntityId> {
+fn ignore_guide_targets(s: &SketchSession) -> bool {
+    s.trim_options.ignore_construction && (s.tool == Tool::Trim || (s.tool.bounded_trim() && s.trim_bounds.len() == 2))
+}
+
+fn hit_curve(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, ignore_construction: bool) -> Option<EntityId> {
     let mut best: Option<(f32, EntityId)> = None;
-    for e in sketch.drawn().filter(|e| !e.is_point()) {
+    for e in sketch.drawn().filter(|e| !e.is_point() && !(ignore_construction && e.construction)) {
         let d = entity_distance(frame, e, pos);
         if d <= POINT_REACH && best.is_none_or(|(bd, _)| d < bd) {
             best = Some((d, e.id));
@@ -281,7 +285,7 @@ pub fn run(
                 s.snaps = snaps;
             }
         } else if picks {
-            s.hover = hit_curve(&frame, &s.sketch, pos).map(SketchSel::Entity);
+            s.hover = hit_curve(&frame, &s.sketch, pos, ignore_guide_targets(s)).map(SketchSel::Entity);
             s.preview = curve_preview(s, &frame, pos);
         } else {
             s.hover = hit_test(&frame, &s.sketch, pos, &glyphs);
@@ -512,7 +516,7 @@ fn copy_input(
 
 fn corner_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &mut Vec<AppAction>) {
     if s.corner_first.is_none() {
-        let first = hit_curve(frame, &s.sketch, pos).filter(|id| {
+        let first = hit_curve(frame, &s.sketch, pos, false).filter(|id| {
             s.sketch.entity(*id).is_some_and(|e| matches!(e.kind, EntityKind::Line { .. } | EntityKind::Arc { .. }))
         });
         if let (Some(id), Some(at)) = (first, frame.plane_at(pos)) {
@@ -538,7 +542,7 @@ fn corner_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &m
 
 fn bounded_trim_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &mut Vec<AppAction>) {
     if s.trim_bounds.len() < 2 {
-        if let Some(id) = hit_curve(frame, &s.sketch, pos) {
+        if let Some(id) = hit_curve(frame, &s.sketch, pos, false) {
             if s.trim_bounds.contains(&id) {
                 s.say("Choose a different bounding curve");
             } else {
@@ -584,7 +588,8 @@ fn trim_segment(s: &mut SketchSession, drag: &mut TrimDrag, frame: &Frame<'_>, m
             }
         });
         let end = undo_at.unwrap_or(to);
-        let result = if from.dist(end) > 1e-6 { s.sketch.trim_stroke(from, end) } else { Ok(Vec::new()) };
+        let result =
+            if from.dist(end) > 1e-6 { s.sketch.trim_stroke(from, end, s.trim_options) } else { Ok(Vec::new()) };
         match result {
             Ok(cuts) if cuts.is_empty() && undo_at.is_some() => {
                 drag.checkpoints.pop().expect("last checkpoint exists").restore(&mut s.sketch);
@@ -613,7 +618,7 @@ fn trim_input(
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && let Some(from) = frame.plane_at(origin)
     {
-        let extend = hit_curve(frame, &s.sketch, origin)
+        let extend = hit_curve(frame, &s.sketch, origin, s.trim_options.ignore_construction)
             .filter(|id| s.sketch.entity(*id).is_some_and(|e| e.is_line() || matches!(e.kind, EntityKind::Arc { .. })));
         s.trim_drag = Some(TrimDrag { before: s.sketch.clone(), extend, path: vec![from], checkpoints: Vec::new() });
     }
@@ -628,7 +633,7 @@ fn trim_input(
         if at.dist(last) > 1e-6 {
             if let Some(id) = drag.extend {
                 s.sketch = drag.before.clone();
-                if let Err(why) = s.sketch.extend_drag(id, at) {
+                if let Err(why) = s.sketch.extend_drag(id, at, s.trim_options) {
                     s.say(why.to_string());
                 }
             } else {
@@ -750,14 +755,16 @@ fn select_input(
 /// the end nearer the pointer to the nearest curve beyond it; Trim removes the interval
 /// under the pointer. The preview carries the operation a click applies.
 fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<ToolPreview> {
-    let id = hit_curve(frame, &s.sketch, pos)?;
+    let id = hit_curve(frame, &s.sketch, pos, ignore_guide_targets(s))?;
     let at = frame.plane_at(pos)?;
     let entity = *s.sketch.entity(id)?;
     let preview = match s.tool {
         Tool::TrimCorner => {
             if let Some((a, keep_a)) = s.corner_first {
-                let mut preview =
-                    sketch_tools::try_operation(s, Operation::TrimCorner { a, b: id, keep_a, keep_b: at });
+                let mut preview = sketch_tools::try_operation(
+                    s,
+                    Operation::TrimCorner { a, b: id, keep_a, keep_b: at, options: s.trim_options },
+                );
                 preview.target = Some(id);
                 preview
             } else {
@@ -776,7 +783,13 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
             if let [a, b] = s.trim_bounds.as_slice() {
                 let mut preview = sketch_tools::try_operation(
                     s,
-                    Operation::TrimBounded { entity: id, a: *a, b: *b, outside: s.tool == Tool::TrimOutside },
+                    Operation::TrimBounded {
+                        entity: id,
+                        a: *a,
+                        b: *b,
+                        outside: s.tool == Tool::TrimOutside,
+                        options: s.trim_options,
+                    },
                 );
                 preview.target = Some(id);
                 preview
@@ -788,11 +801,12 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
                 }
             }
         }
-        Tool::Trim => match s.sketch.trim_preview(id, at) {
+        Tool::Trim => match s.sketch.trim_preview(id, at, s.trim_options) {
             Ok(trim) => ToolPreview {
+                added: if s.trim_options.keep_as_construction { trim.kept } else { Vec::new() },
                 removed: trim.removed,
                 target: Some(id),
-                operation: Some(Operation::Trim { entity: id, at }),
+                operation: Some(Operation::Trim { entity: id, at, options: s.trim_options }),
                 ..Default::default()
             },
             Err(e) => ToolPreview { target: Some(id), refused: Some(e.0), ..Default::default() },
@@ -1225,9 +1239,7 @@ fn polygon_fill(pts: &[Pos2], color: Color32) -> egui::Shape {
 }
 
 fn dashed(painter: &egui::Painter, pts: &[Pos2], stroke: Stroke) {
-    for w in pts.windows(2) {
-        painter.add(egui::Shape::dashed_line(&[w[0], w[1]], stroke, 5.0, 4.0));
-    }
+    painter.add(egui::Shape::dashed_line(pts, stroke, 5.0, 4.0));
 }
 
 fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
@@ -1242,7 +1254,19 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             relation_points.extend(c.points());
         }
     }
+    let replacing = s.preview.as_ref().and_then(|p| p.operation.as_ref()).and_then(|op| match op {
+        Operation::Trim { entity, options, .. } | Operation::TrimBounded { entity, options, .. }
+            if options.keep_as_construction =>
+        {
+            Some([*entity, *entity])
+        }
+        Operation::TrimCorner { a, b, options, .. } if options.keep_as_construction => Some([*a, *b]),
+        _ => None,
+    });
     for e in s.sketch.drawn() {
+        if replacing.is_some_and(|ids| ids.contains(&e.id)) {
+            continue;
+        }
         let color = entity_color(s, e);
         let is_sel = selected(SketchSel::Entity(e.id));
         let is_related = relation_entities.contains(&e.id);
@@ -1799,7 +1823,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
             painter.circle_stroke(p, 4.0, stroke);
         }
     }
-    let curve = |kind: EntityKind, stroke: Stroke| {
+    let curve = |kind: EntityKind, stroke: Stroke, construction: bool| {
         let e = Entity { id: 0, kind, construction: false };
         let pts: Vec<Pos2> = e.polyline(96).into_iter().filter_map(|q| frame.screen(q)).collect();
         if e.is_point() {
@@ -1807,19 +1831,31 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
                 painter.rect_filled(Rect::from_center_size(*p, vec2(5.0, 5.0)), CornerRadius::ZERO, stroke.color);
             }
         } else if pts.len() >= 2 {
-            painter.add(egui::Shape::line(pts, stroke));
+            if construction {
+                dashed(painter, &pts, stroke);
+            } else {
+                painter.add(egui::Shape::line(pts, stroke));
+            }
         }
     };
     for kind in &preview.removed {
-        curve(*kind, Stroke::new(4.0, theme::error().gamma_multiply(0.9)));
+        let keep = s.tool.trims() && s.trim_options.keep_as_construction;
+        let stroke =
+            if keep { Stroke::new(1.5, theme::accent()) } else { Stroke::new(4.0, theme::error().gamma_multiply(0.9)) };
+        curve(*kind, stroke, keep);
     }
-    for kind in &preview.added {
-        curve(*kind, Stroke::new(2.0, theme::accent()));
+    for (index, kind) in preview.added.iter().enumerate() {
+        let guide = if let Some(Operation::TrimCorner { a, b, .. }) = &preview.operation {
+            [a, b].get(index).and_then(|id| s.sketch.entity(**id)).is_some_and(|e| e.construction)
+        } else {
+            false
+        };
+        curve(*kind, Stroke::new(2.0, theme::accent()), guide);
     }
     if let Some(boundary) = preview.boundary
         && let Some(e) = s.sketch.entity(boundary)
     {
-        curve(e.kind, Stroke::new(3.0, theme::selection_bg()));
+        curve(e.kind, Stroke::new(3.0, theme::selection_bg()), false);
     }
 }
 

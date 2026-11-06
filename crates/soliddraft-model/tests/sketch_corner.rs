@@ -17,14 +17,26 @@ fn trimmed_line_and_arc_corners_extrude_through_catallax() {
     rectangle.add(EntityKind::Line { a: P2::new(10.0, 20.0), b: P2::new(-20.0, 20.0) }, false);
     rectangle.add(EntityKind::Line { a: P2::new(-20.0, 20.0), b: P2::new(-20.0, 0.0) }, false);
     rectangle
-        .apply_operation(&Operation::TrimCorner { a, b, keep_a: P2::new(-10.0, 0.0), keep_b: P2::new(10.0, 10.0) })
+        .apply_operation(&Operation::TrimCorner {
+            options: Default::default(),
+            a,
+            b,
+            keep_a: P2::new(-10.0, 0.0),
+            keep_b: P2::new(10.0, 10.0),
+        })
         .unwrap();
     let mut sector = Sketch::new();
     let a = sector.add(EntityKind::Arc { center: P2::ZERO, start: P2::new(10.0, 0.0), end: P2::new(0.0, 10.0) }, false);
     let b = sector.add(EntityKind::Line { a: P2::new(0.0, 15.0), b: P2::ZERO }, false);
     sector.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 0.0) }, false);
     sector
-        .apply_operation(&Operation::TrimCorner { a, b, keep_a: P2::new(7.0, 7.0), keep_b: P2::new(0.0, 5.0) })
+        .apply_operation(&Operation::TrimCorner {
+            options: Default::default(),
+            a,
+            b,
+            keep_a: P2::new(7.0, 7.0),
+            keep_b: P2::new(0.0, 5.0),
+        })
         .unwrap();
     for (name, mut sketch, expected) in
         [("Line corner", rectangle, 1200.0), ("Arc corner", sector, 50.0 * std::f64::consts::PI)]

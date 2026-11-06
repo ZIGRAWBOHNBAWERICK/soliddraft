@@ -137,6 +137,19 @@ fn before_trim_modes(id: &str, current: &mut Value) {
     }
     .and_then(Value::as_array_mut)
     .expect("sketch operation variants");
+    for tool in ["trim", "trim_corner", "trim_bounded"] {
+        let variant = variants.iter_mut().find(|v| v["properties"]["tool"]["const"] == tool).unwrap();
+        assert!(!variant["required"].as_array().unwrap().contains(&json!("options")), "trim options remain optional");
+        let options =
+            variant["properties"].as_object_mut().unwrap().remove("options").expect("trim construction options");
+        assert_eq!(
+            options,
+            json!({
+                "type":"object", "additionalProperties":false, "required":[],
+                "properties": {"keep_as_construction":{"type":"boolean"}, "ignore_construction":{"type":"boolean"}},
+            })
+        );
+    }
     let index =
         variants.iter().position(|v| v["properties"]["tool"]["const"] == "trim_corner").expect("corner operation");
     let added = variants.remove(index);

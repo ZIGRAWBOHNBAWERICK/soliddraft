@@ -141,6 +141,11 @@ fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
     assert_eq!(session(&app).selection, ids.iter().copied().map(SketchSel::Constraint).collect::<Vec<_>>());
     let history = app.state().state.doc.model().undo_depth();
     control(&mut app, "Link values");
+    assert!(
+        ribbon::painted(&app)
+            .iter()
+            .any(|p| p.text.contains("Default bindings and values") && p.rect.contains_rect(p.full))
+    );
     shared_field(&mut app, "Shared value name", "Span");
     frame(&mut app, "link-values-new-group");
     control(&mut app, "Link selected");

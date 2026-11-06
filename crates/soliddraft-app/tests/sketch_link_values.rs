@@ -174,7 +174,44 @@ fn a_late_binding_cycle_rolls_back_earlier_members_and_preserves_formulas() {
 }
 
 #[test]
-fn linking_and_unlinking_are_isolated_to_the_active_configuration() {
+fn default_links_follow_sparse_configuration_inheritance() {
+    let (mut doc, id, ids) = fixture();
+    for name in ["Thin", "Own"] {
+        doc.apply(Command::AddConfiguration { name: name.into() }).unwrap();
+    }
+    doc.apply(link(id, ids.to_vec(), "Span", None)).unwrap();
+    for name in ["Thin", "Own"] {
+        doc.apply(Command::ActivateConfiguration { name: name.into() }).unwrap();
+        assert_eq!(values(&doc, id, ids), [10.0, 10.0]);
+    }
+    doc.apply(Command::SetValueCell {
+        configuration: "Own".into(),
+        name: "Span".into(),
+        expression: Some("20 mm".into()),
+    })
+    .unwrap();
+    doc.apply(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
+    doc.apply(link(id, vec![ids[0]], "Span", Some(12.0))).unwrap();
+    for (name, expected) in [("Thin", [12.0, 12.0]), ("Own", [20.0, 20.0])] {
+        doc.apply(Command::ActivateConfiguration { name: name.into() }).unwrap();
+        assert_eq!(values(&doc, id, ids), expected);
+    }
+    doc.apply(Command::ActivateConfiguration { name: "Default".into() }).unwrap();
+    let depth = doc.model().undo_depth();
+    doc.apply(Command::UnlinkSketchValues { id, constraints: vec![ids[1]] }).unwrap();
+    let unlinked = doc.model().part_json();
+    assert_eq!(doc.model().undo_depth(), depth + 1);
+    doc.undo().unwrap();
+    doc.redo().unwrap();
+    assert_eq!(doc.model().part_json(), unlinked);
+    for (name, expected) in [("Thin", [12.0, 12.0]), ("Own", [20.0, 12.0])] {
+        doc.apply(Command::ActivateConfiguration { name: name.into() }).unwrap();
+        assert_eq!(values(&doc, id, ids), expected);
+    }
+}
+
+#[test]
+fn named_configuration_links_and_unlinks_use_local_overrides() {
     let (mut doc, id, ids) = fixture();
     doc.apply(Command::AddConfiguration { name: "Thin".into() }).unwrap();
     doc.apply(Command::ActivateConfiguration { name: "Thin".into() }).unwrap();

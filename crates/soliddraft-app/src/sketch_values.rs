@@ -292,6 +292,11 @@ pub fn popup(ui: &mut egui::Ui, state: &mut AppState) {
         .show(|ui| {
             ui.strong("Link values");
             ui.label(format!("Active configuration: {}", table.columns[table.active]));
+            ui.label(if table.active == 0 {
+                "Default bindings and values are inherited by other configurations unless overridden."
+            } else {
+                "Bindings and value edits override only this configuration."
+            });
             let name_label = ui.label("Shared value name");
             let response = ui
                 .add(egui::TextEdit::singleline(&mut form.name).desired_width(ui.available_width()))

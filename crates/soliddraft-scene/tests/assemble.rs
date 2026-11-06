@@ -249,6 +249,10 @@ def Xform "World"
 
 const NOTCH_OBJ: &str = "# notch, millimetres, Z up\no NotchedQuad\nv 0 0 0\nv 1 1 0\nv 3 0 0\nv 0 3 0\nf 1 2 3 4\n";
 
+/// The same quad 10 km from the origin, at coordinates a binary32 holds exactly.
+const FAR_NOTCH_OBJ: &str = "# far notch, millimetres, Z up\no NotchedQuad\nv 10000000 10000000 0\n\
+    v 10000001 10000001 0\nv 10000003 10000000 0\nv 10000000 10000003 0\nf 1 2 3 4\n";
+
 /// Each triangle's signed area about +Z, and whether any covers `p`.
 fn coverage(scene: &soliddraft_scene::Scene, p: DVec3) -> (Vec<f64>, bool) {
     let m = &scene.meshes[0];
@@ -265,11 +269,21 @@ fn coverage(scene: &soliddraft_scene::Scene, p: DVec3) -> (Vec<f64>, bool) {
 #[test]
 fn concave_polygons_keep_their_notch_from_usd_and_obj() {
     let dir = scratch("notch");
-    for (name, text) in [("notch.usda", NOTCH_USD), ("notch.obj", NOTCH_OBJ)] {
+    let far_usd = NOTCH_USD.replace(
+        "[(0, 0, 0), (1, 1, 0), (3, 0, 0), (0, 3, 0)]",
+        "[(10000000, 10000000, 0), (10000001, 10000001, 0), (10000003, 10000000, 0), (10000000, 10000003, 0)]",
+    );
+    let far = DVec3::new(1.0e7, 1.0e7, 0.0);
+    for (name, text, at) in [
+        ("notch.usda", NOTCH_USD, DVec3::ZERO),
+        ("notch.obj", NOTCH_OBJ, DVec3::ZERO),
+        ("far-notch.usda", far_usd.as_str(), far),
+        ("far-notch.obj", FAR_NOTCH_OBJ, far),
+    ] {
         let source = dir.join(name);
         std::fs::write(&source, text).unwrap();
         let scene = read(&source, &Options::default()).unwrap();
-        let (areas, inside) = coverage(&scene, DVec3::new(1.0, 0.25, 0.0));
+        let (areas, inside) = coverage(&scene, at + DVec3::new(1.0, 0.25, 0.0));
         assert_eq!(areas.len(), 2, "{name}");
         assert!(
             areas.iter().all(|a| (a - 1.5).abs() < 1e-9),
@@ -311,5 +325,112 @@ fn a_default_prim_that_is_a_mesh_is_the_root_body() {
     assert_eq!(t.keys().map(String::as_str).collect::<Vec<_>>(), ["Tri"]);
     let [lo, hi] = t["Tri"].1;
     assert!(near(lo, DVec3::ZERO) && near(hi, DVec3::new(1.0, 1.0, 0.0)), "{lo} {hi}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A root moved 100 mm along X and turned a quarter turn about Z, a body under it, and
+/// two revolute joints about X that move the body: `Anchored` names no body0, so its
+/// frame is the stage's world frame; `Rooted` names the root as body0, so its frame is
+/// the root's.
+const ANCHORS_USD: &str = r#"#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 0.001
+    upAxis = "Z"
+)
+def Xform "World"
+{
+    double3 xformOp:translate = (100, 0, 0)
+    float xformOp:rotateZ = 90
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
+
+    def Cube "Body"
+    {
+        double size = 10
+    }
+
+    def PhysicsRevoluteJoint "Anchored"
+    {
+        rel physics:body1 = </World/Body>
+        point3f physics:localPos0 = (0, 0, 0)
+        quatf physics:localRot0 = (1, 0, 0, 0)
+        point3f physics:localPos1 = (0, 100, 0)
+        quatf physics:localRot1 = (1, 0, 0, 0)
+        uniform token physics:axis = "X"
+    }
+
+    def PhysicsRevoluteJoint "Rooted"
+    {
+        rel physics:body0 = </World>
+        rel physics:body1 = </World/Body>
+        point3f physics:localPos0 = (0, 0, 0)
+        quatf physics:localRot0 = (1, 0, 0, 0)
+        point3f physics:localPos1 = (0, 0, 0)
+        quatf physics:localRot1 = (1, 0, 0, 0)
+        uniform token physics:axis = "X"
+    }
+}
+"#;
+
+#[test]
+fn a_joint_with_no_body0_is_anchored_to_the_world_not_the_root() {
+    let dir = scratch("anchors");
+    let source = dir.join("anchors.usda");
+    std::fs::write(&source, ANCHORS_USD).unwrap();
+    let scene = read(&source, &Options::default()).unwrap();
+    let out = dir.join("anchors.dwasm");
+    assemble::write(&scene, &source, &out).unwrap();
+    let doc = AssemblyPackage::open(&out).unwrap();
+    let record: serde_json::Value = serde_json::from_str(doc.assembly().import.as_deref().unwrap()).unwrap();
+    let joint = |name: &str| {
+        let j = record["joints"].as_array().unwrap().iter().find(|j| j["name"] == name).unwrap().clone();
+        let v = |k: &str| DVec3::from_array([0, 1, 2].map(|i| j[k][i].as_f64().unwrap()));
+        (v("origin"), v("axis"))
+    };
+    // The world anchor stays at the stage's origin, about the stage's X.
+    let (origin, axis) = joint("Anchored");
+    assert!(near(origin, DVec3::ZERO) && near(axis, DVec3::X), "Anchored: {origin} {axis}");
+    // A joint on the root moves and turns with it.
+    let (origin, axis) = joint("Rooted");
+    assert!(near(origin, DVec3::new(100.0, 0.0, 0.0)) && near(axis, DVec3::Y), "Rooted: {origin} {axis}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// One triangle facing +Z, `orientation` and `indices` as given, with or without an
+/// authored constant normal of +Z.
+fn handed_triangle(orientation: &str, indices: &str, normals: bool) -> String {
+    let normals = if normals {
+        "    normal3f[] normals = [(0, 0, 1)] (\n        interpolation = \"constant\"\n    )\n"
+    } else {
+        ""
+    };
+    format!(
+        "#usda 1.0\n(\n    defaultPrim = \"Tri\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n)\n\
+         def Mesh \"Tri\"\n{{\n    uniform token orientation = \"{orientation}\"\n    \
+         uniform token subdivisionScheme = \"none\"\n    int[] faceVertexCounts = [3]\n    \
+         int[] faceVertexIndices = {indices}\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]\n{normals}}}\n"
+    )
+}
+
+#[test]
+fn authored_normals_keep_their_direction_on_left_handed_meshes() {
+    let dir = scratch("handed");
+    for (name, orientation, indices, normals) in [
+        ("right-authored", "rightHanded", "[0, 1, 2]", true),
+        ("left-authored", "leftHanded", "[0, 2, 1]", true),
+        ("left-derived", "leftHanded", "[0, 2, 1]", false),
+    ] {
+        let source = dir.join(format!("{name}.usda"));
+        std::fs::write(&source, handed_triangle(orientation, indices, normals)).unwrap();
+        let scene = read(&source, &Options::default()).unwrap();
+        let m = &scene.meshes[0];
+        let [a, b, c] = m.triangles[0].map(|i| m.positions[i as usize]);
+        assert!((b - a).cross(c - a).normalize().abs_diff_eq(DVec3::Z, 1e-12), "{name}: the triangle faces +Z");
+        if let Some(ns) = &m.corner_normals {
+            assert!(ns.iter().all(|n| n.abs_diff_eq(DVec3::Z, 1e-12)), "{name}: authored normals {ns:?}");
+        }
+        let shown = assemble::display_mesh(m, &glam::DMat4::IDENTITY).unwrap();
+        assert!(shown.normals.iter().all(|n| *n == [0.0, 0.0, 1.0]), "{name}: shown normals {:?}", shown.normals);
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

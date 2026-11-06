@@ -4,7 +4,8 @@
 //! instancing). Every imageable prim under the default prim is a node at its local
 //! transform; meshes and the cube, sphere and cylinder shapes are bodies. Material
 //! bindings resolve to UsdPreviewSurface or OmniPBR constants. UsdPhysics joints become
-//! joints between the nodes of their two bodies. Stage units and up axis come from the
+//! joints between the nodes of their two bodies; one with no body0 hangs from the root
+//! at its frame in the stage's world. Stage units and up axis come from the
 //! root layer's `metersPerUnit` and `upAxis`, or USD's fallbacks of centimetres and Y up.
 
 use std::collections::HashMap;
@@ -251,6 +252,11 @@ impl Reader<'_> {
             };
             let pos = attr_value(&prim, "physics:localPos0").as_ref().and_then(vec3).unwrap_or(DVec3::ZERO);
             let rot = attr_value(&prim, "physics:localRot0").as_ref().and_then(quat).unwrap_or(DQuat::IDENTITY);
+            let frame = DMat4::from_rotation_translation(rot.normalize(), pos);
+            // With no body0 the joint is anchored to the stage's world frame, which the
+            // root's own placement does not move; with the root as body0 it is the root's.
+            let root = scene.world(0);
+            let frame = if b0.is_none() && root.determinant() != 0.0 { root.inverse() * frame } else { frame };
             let axis = match attr_token(&prim, "physics:axis").as_deref() {
                 Some("Y") => DVec3::Y,
                 Some("Z") => DVec3::Z,
@@ -277,16 +283,7 @@ impl Reader<'_> {
                 },
             );
             by_name.insert(path.to_string(), name.clone());
-            scene.joints.push(Joint {
-                name,
-                kind,
-                parent,
-                child,
-                frame: DMat4::from_rotation_translation(rot.normalize(), pos),
-                axis,
-                limits,
-                mimic,
-            });
+            scene.joints.push(Joint { name, kind, parent, child, frame, axis, limits, mimic });
         }
         Ok(())
     }
@@ -368,7 +365,9 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
                     "constant" => at(0),
                     _ => None,
                 }?;
-                out.push(if left { -v } else { v });
+                // An authored normal is a direction in the mesh's frame: the orientation
+                // turns the winding, not the normals.
+                out.push(v);
             }
         }
         Some(out)

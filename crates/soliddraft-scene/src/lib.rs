@@ -616,7 +616,16 @@ fn ear_clip(corner: &[usize], point: &dyn Fn(usize) -> DVec3) -> Option<Vec<[usi
     let w = normal.normalize();
     let u = w.any_orthonormal_vector();
     let v = w.cross(u);
-    let flat: Vec<glam::DVec2> = corner.iter().map(|&c| glam::DVec2::new(point(c).dot(u), point(c).dot(v))).collect();
+    // Measured from the polygon's own centre, so the tolerance follows its size and not
+    // how far it sits from the origin.
+    let centre = corner.iter().map(|&c| point(c)).sum::<DVec3>() / corner.len() as f64;
+    let flat: Vec<glam::DVec2> = corner
+        .iter()
+        .map(|&c| {
+            let p = point(c) - centre;
+            glam::DVec2::new(p.dot(u), p.dot(v))
+        })
+        .collect();
     // Twice the area of the triangle a, b, c: positive when it turns left.
     let turn = |a: usize, b: usize, c: usize| (flat[b] - flat[a]).perp_dot(flat[c] - flat[a]);
     let scale = flat.iter().fold(0.0f64, |m, p| m.max(p.abs().max_element()));
@@ -733,6 +742,20 @@ mod tests {
         // Wound clockwise in the file, it stays clockwise.
         let (t, ..) = triangulate(&p, &[4], &[3, 2, 1, 0], false).unwrap();
         assert!(areas(&p, &t).iter().all(|x| (*x + 1.5).abs() < 1e-12), "{:?}", areas(&p, &t));
+    }
+
+    #[test]
+    fn a_polygon_far_from_the_origin_keeps_its_notch() {
+        // The notched quad moved 10 km along X and Y: the cut cannot depend on where the
+        // polygon sits.
+        let far = DVec3::new(1.0e7, 1.0e7, 0.0);
+        let p = [DVec3::ZERO, DVec3::new(1.0, 1.0, 0.0), DVec3::new(3.0, 0.0, 0.0), DVec3::new(0.0, 3.0, 0.0)]
+            .map(|q| q + far);
+        let (t, _, crossed) = triangulate(&p, &[4], &[0, 1, 2, 3], false).unwrap();
+        assert_eq!(crossed, 0);
+        let a = areas(&p, &t);
+        assert!(a.iter().all(|x| (*x - 1.5).abs() < 1e-9), "{t:?} {a:?}");
+        assert!(t.iter().all(|tri| tri.contains(&1) && tri.contains(&3)), "cut along the diagonal 1-3: {t:?}");
     }
 
     #[test]

@@ -219,3 +219,36 @@ fn urdf_meshes_it_cannot_read_are_left_out_not_fatal() {
     let _ = std::fs::remove_dir_all(dir);
     let _ = DVec3::ZERO;
 }
+
+#[test]
+fn gltf_masked_and_blended_materials_name_their_meshes() {
+    let dir = scratch("mask");
+    // The reviewer's control, with a third, blended mesh: a mask below its cutoff would
+    // cut the whole triangle away when rendered. A mesh reference keeps the geometry,
+    // shown opaque, and the record names the mesh.
+    let text = gltf(&[], |v| {
+        v["nodes"] = json!([
+            {"name": "MaskedBelowCutoff", "mesh": 0},
+            {"name": "OpaqueControl", "mesh": 1, "translation": [2, 0, 0]},
+            {"name": "Blended", "mesh": 2, "translation": [4, 0, 0]},
+        ]);
+        v["scenes"][0]["nodes"] = json!([0, 1, 2]);
+        let tri = |m: usize, name: &str| json!({"name": name, "primitives": [{"attributes": {"POSITION": 0}, "mode": 4, "material": m}]});
+        v["meshes"] = json!([tri(0, "masked"), tri(1, "control"), tri(2, "glass")]);
+        v["materials"] = json!([
+            {"name": "masked", "alphaMode": "MASK", "alphaCutoff": 0.5, "pbrMetallicRoughness": {"baseColorFactor": [1, 0, 0, 0.25]}},
+            {"name": "control", "alphaMode": "OPAQUE", "pbrMetallicRoughness": {"baseColorFactor": [0, 1, 0, 0.25]}},
+            {"name": "glass", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0, 0, 1, 0.25]}},
+        ]);
+    });
+    let scene = read(&write(&dir, "mask-control.gltf", text), &Options::default()).unwrap();
+    let alpha: Vec<f64> = scene.materials.iter().map(|m| m.base_color[3]).collect();
+    assert_eq!(alpha, [1.0, 1.0, 0.25]);
+    assert_eq!(scene.nodes.iter().filter(|n| n.body.is_some()).count(), 3, "every triangle comes in");
+    let mask = scene.notes.iter().find(|n| n.contains("MASK")).unwrap_or_else(|| panic!("{:?}", scene.notes));
+    assert!(mask.contains("masked") && !mask.contains("control") && !mask.contains("glass"), "{mask}");
+    let blend = scene.notes.iter().find(|n| n.contains("BLEND")).unwrap_or_else(|| panic!("{:?}", scene.notes));
+    assert!(blend.contains("glass") && !blend.contains("masked"), "{blend}");
+    assert_eq!(scene.notes.len(), 2, "{:?}", scene.notes);
+    let _ = std::fs::remove_dir_all(dir);
+}

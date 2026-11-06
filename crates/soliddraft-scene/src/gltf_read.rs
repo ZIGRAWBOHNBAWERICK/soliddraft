@@ -3,7 +3,8 @@
 //! glTF is metres with Y up. A node keeps its transform; a mesh of one primitive is the
 //! node's body, and a mesh of several gives the node a child per primitive. Morph
 //! targets are applied at the node's weights, or else the mesh's. Materials keep their
-//! metallic-roughness factors; alpha counts only for blended ones. A file that requires
+//! metallic-roughness factors; alpha counts only for blended ones, and the record names
+//! the meshes whose material masks or blends, as neither is drawn. A file that requires
 //! an extension this reader does not know, such as compressed geometry, is refused. sand3d writes each joint in the extras of a
 //! node that holds what the joint moves (`s3d_joint`): that node's frame is the joint's.
 
@@ -51,6 +52,8 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
     if gltf.extensions_used().any(|e| e == "EXT_mesh_gpu_instancing") {
         scene.note("EXT_mesh_gpu_instancing instances are not imported; each mesh is shown once, at its node");
     }
+    // The meshes whose material masks, and those whose material blends.
+    let mut alpha: [Vec<String>; 2] = [Vec::new(), Vec::new()];
     // Each mesh read once per set of morph weights its nodes give it.
     let mut meshes: std::collections::HashMap<(usize, Vec<u32>), Vec<Primitive>> = std::collections::HashMap::new();
     let mut stack: Vec<(gltf::Node<'_>, usize)> =
@@ -65,7 +68,7 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
             let bodies = match meshes.get(&key) {
                 Some(b) => b.clone(),
                 None => {
-                    let b = read_mesh(&mut scene, &mesh, &weights, &buffers)?;
+                    let b = read_mesh(&mut scene, &mesh, &weights, &buffers, &mut alpha)?;
                     meshes.insert(key, b.clone());
                     b
                 }
@@ -93,6 +96,19 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
             joint(&mut scene, extras.get(), parent, me, local);
         }
         stack.extend(node.children().collect::<Vec<_>>().into_iter().rev().map(|c| (c, me)));
+    }
+    let [masked, blended] = alpha;
+    if !masked.is_empty() {
+        scene.note(format!(
+            "alphaMode MASK is not applied; these meshes are shown opaque, whatever their cutoff: {}",
+            masked.join(", ")
+        ));
+    }
+    if !blended.is_empty() {
+        scene.note(format!(
+            "alphaMode BLEND is shown as the material's constant opacity, without texture alpha: {}",
+            blended.join(", ")
+        ));
     }
     if gltf.animations().len() > 0 {
         scene.note("animations are not imported; the scene is shown at its rest pose");
@@ -142,8 +158,9 @@ fn percent_decode(uri: &str) -> String {
 fn material(m: &gltf::Material<'_>) -> Material {
     let pbr = m.pbr_metallic_roughness();
     let [r, g, b, a] = pbr.base_color_factor().map(f64::from);
-    // Alpha is coverage only when the material blends; a mask cuts by texture, which is
-    // not read, so it is shown opaque.
+    // Alpha is coverage only when the material blends. A mask cuts away whatever falls
+    // below its cutoff, which a mesh reference does not draw: it is shown opaque, and the
+    // record names its meshes.
     let a = if m.alpha_mode() == gltf::material::AlphaMode::Blend { a } else { 1.0 };
     Material {
         name: m.name().map(str::to_owned).unwrap_or_else(|| format!("material {}", m.index().unwrap_or(0))),
@@ -161,6 +178,7 @@ fn read_mesh(
     mesh: &gltf::Mesh<'_>,
     weights: &[f32],
     buffers: &[Vec<u8>],
+    alpha: &mut [Vec<String>; 2],
 ) -> Result<Vec<Primitive>, ImportError> {
     let name = mesh.name().map(str::to_owned).unwrap_or_else(|| format!("mesh {}", mesh.index()));
     let mut out = Vec::new();
@@ -223,6 +241,16 @@ fn read_mesh(
         let part =
             if mesh.primitives().len() == 1 { name.clone() } else { format!("{name} {}", primitive.index() + 1) };
         let m = scene.add_mesh(Mesh { name: part, positions, triangles, corner_normals });
+        let which = match primitive.material().alpha_mode() {
+            gltf::material::AlphaMode::Mask => Some(0),
+            gltf::material::AlphaMode::Blend => Some(1),
+            gltf::material::AlphaMode::Opaque => None,
+        };
+        if let Some(k) = which
+            && !alpha[k].contains(&scene.meshes[m].name)
+        {
+            alpha[k].push(scene.meshes[m].name.clone());
+        }
         out.push((m, primitive.material().index()));
     }
     Ok(out)

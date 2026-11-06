@@ -187,17 +187,24 @@ fn material(scene: &mut Scene, m: &urdf_rs::Material, named: &HashMap<&str, &urd
 /// Loads a mesh file a visual names: its meshes, each with the material its file gives.
 fn load(scene: &mut Scene, file: &Path) -> Result<Vec<(usize, Option<usize>)>, ImportError> {
     match crate::Format::of_path(file) {
-        Some(Format::Obj) => Ok(obj::objects(file)?
-            .into_iter()
-            .filter(|(m, _)| !m.triangles.is_empty())
-            .map(|(mesh, material)| {
-                let material = material.map(|m| {
-                    scene.materials.push(m);
-                    scene.materials.len() - 1
-                });
-                (scene.add_mesh(mesh), material)
-            })
-            .collect()),
+        Some(Format::Obj) => Ok({
+            let (objects, crossed) = obj::objects(file)?;
+            if crossed > 0 {
+                scene
+                    .note("polygons that cross themselves or have no area are split into fans from their first corner");
+            }
+            objects
+        }
+        .into_iter()
+        .filter(|(m, _)| !m.triangles.is_empty())
+        .map(|(mesh, material)| {
+            let material = material.map(|m| {
+                scene.materials.push(m);
+                scene.materials.len() - 1
+            });
+            (scene.add_mesh(mesh), material)
+        })
+        .collect()),
         Some(Format::Stl) => {
             let (mesh, _) = stl::mesh(file)?;
             Ok(vec![(scene.add_mesh(mesh), None)])

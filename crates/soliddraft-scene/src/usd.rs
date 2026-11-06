@@ -16,7 +16,8 @@ use openusd::usd::{self, Prim, Stage};
 use openusd_schemas::geom::XformCache;
 
 use crate::{
-    Body, Format, ImportError, Joint, JointKind, Material, Mesh, Mimic, Origin, Scene, UpAxis, fan, shapes, srgb,
+    Body, Format, ImportError, Joint, JointKind, Material, Mesh, Mimic, Origin, Scene, UpAxis, shapes, srgb,
+    triangulate,
 };
 
 fn err(path: &Path, e: impl std::fmt::Display) -> ImportError {
@@ -64,7 +65,18 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
             scene.nodes[0].local = matrix(&local);
             scene.nodes[0].source = one.path().to_string();
             reader.nodes.insert(one.path().to_string(), 0);
-            reader.visit_children(&mut scene, one, one, 0, None)?;
+            // The default prim may be a mesh itself, or bind the material its children use.
+            let kind = one.type_name().ok().flatten().map(|t| t.as_str().to_owned()).unwrap_or_default();
+            let binding = bound_material(one);
+            if let Some(mesh) = reader.body(&mut scene, one, &kind)? {
+                let material = match &binding {
+                    Some(m) => reader.material(&mut scene, one, m)?,
+                    None => None,
+                };
+                scene.nodes[0].body = Some(Body { mesh, material });
+            }
+            scene.nodes[0].hidden = attr_token(one, "visibility").as_deref() == Some("invisible");
+            reader.visit_children(&mut scene, one, one, 0, binding)?;
         }
         many => {
             for p in many {
@@ -315,14 +327,14 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
         .map(|i| i.max(0) as u32)
         .collect();
     let left = attr_token(prim, "orientation").as_deref() == Some("leftHanded");
-    let Some((triangles, corners)) = fan(&counts, &indices, left) else {
-        return Err(ImportError(format!("mesh {} has fewer indices than its faces need", prim.path())));
-    };
-    if triangles.iter().flatten().any(|i| *i as usize >= points.len()) {
+    if indices.iter().any(|i| *i as usize >= points.len()) {
         return Err(ImportError(format!("mesh {} has an index past its points", prim.path())));
     }
-    if counts.iter().any(|c| *c > 4) {
-        scene.note("polygons of more than four sides are split into fans from their first corner");
+    let Some((triangles, corners, crossed)) = triangulate(&points, &counts, &indices, left) else {
+        return Err(ImportError(format!("mesh {} has fewer indices than its faces need", prim.path())));
+    };
+    if crossed > 0 {
+        scene.note("polygons that cross themselves or have no area are split into fans from their first corner");
     }
     // Normals: `primvars:normals` wins over `normals`; their interpolation says what they
     // are per.

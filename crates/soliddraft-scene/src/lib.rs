@@ -557,28 +557,98 @@ pub(crate) fn header_hints(text: &str) -> (Option<f64>, Option<UpAxis>) {
     (units, up)
 }
 
-/// Triangles, and for each the flat corner indices it uses.
-pub(crate) type Fan = (Vec<[u32; 3]>, Vec<[usize; 3]>);
+/// Triangles, the flat corner indices each uses, and how many polygons crossed
+/// themselves or had no area and were fanned instead.
+pub(crate) type Triangulated = (Vec<[u32; 3]>, Vec<[usize; 3]>, usize);
 
-/// Triangles of a polygon list, fanned from each polygon's first corner; `flip` turns
-/// them the other way. Returns the triangles and, for each, the polygon corner indices it
-/// uses (into the flat corner list).
-pub(crate) fn fan(counts: &[usize], indices: &[u32], flip: bool) -> Option<Fan> {
+/// Triangles of a polygon list over `points`, each polygon cut by ear clipping in its own
+/// plane, so concave polygons keep their notches and every triangle keeps the polygon's
+/// winding; `flip` turns them the other way. Returns, for each triangle, the corner
+/// indices it uses into the flat corner list, so per-corner data follows it. A polygon
+/// that crosses itself or has no area has no right answer: it is fanned from its first
+/// corner and counted. `None` when the counts need more indices than there are.
+pub(crate) fn triangulate(points: &[DVec3], counts: &[usize], indices: &[u32], flip: bool) -> Option<Triangulated> {
     let mut tris = Vec::new();
     let mut corners = Vec::new();
+    let mut crossed = 0;
     let mut start = 0usize;
     for &n in counts {
         if start + n > indices.len() {
             return None;
         }
-        for k in 1..n.saturating_sub(1) {
-            let c = if flip { [start, start + k + 1, start + k] } else { [start, start + k, start + k + 1] };
-            tris.push(c.map(|i| indices[i]));
-            corners.push(c);
+        let corner: Vec<usize> = (start..start + n).collect();
+        let point = |c: usize| points.get(indices[c] as usize).copied().unwrap_or(DVec3::ZERO);
+        let cut = if n > 3 { ear_clip(&corner, &point) } else { None };
+        let cut = cut.unwrap_or_else(|| {
+            if n > 3 {
+                crossed += 1;
+            }
+            (1..n.saturating_sub(1)).map(|k| [corner[0], corner[k], corner[k + 1]]).collect()
+        });
+        for [a, b, c] in cut {
+            let t = if flip { [a, c, b] } else { [a, b, c] };
+            tris.push(t.map(|i| indices[i]));
+            corners.push(t);
         }
         start += n;
     }
-    Some((tris, corners))
+    Some((tris, corners, crossed))
+}
+
+/// Newell's normal of a polygon: its area-weighted normal, following its winding.
+fn polygon_normal(corner: &[usize], point: &dyn Fn(usize) -> DVec3) -> DVec3 {
+    let mut n = DVec3::ZERO;
+    for (i, &c) in corner.iter().enumerate() {
+        let (a, b) = (point(c), point(corner[(i + 1) % corner.len()]));
+        n += DVec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
+    }
+    n
+}
+
+/// Ear clipping of one polygon, projected onto the plane of its Newell normal so that it
+/// winds counter-clockwise there. `None` when the polygon has no area or no ear can be
+/// cut, as when it crosses itself.
+fn ear_clip(corner: &[usize], point: &dyn Fn(usize) -> DVec3) -> Option<Vec<[usize; 3]>> {
+    let normal = polygon_normal(corner, point);
+    if normal.length_squared() == 0.0 || !normal.is_finite() {
+        return None;
+    }
+    let w = normal.normalize();
+    let u = w.any_orthonormal_vector();
+    let v = w.cross(u);
+    let flat: Vec<glam::DVec2> = corner.iter().map(|&c| glam::DVec2::new(point(c).dot(u), point(c).dot(v))).collect();
+    // Twice the area of the triangle a, b, c: positive when it turns left.
+    let turn = |a: usize, b: usize, c: usize| (flat[b] - flat[a]).perp_dot(flat[c] - flat[a]);
+    let scale = flat.iter().fold(0.0f64, |m, p| m.max(p.abs().max_element()));
+    let eps = scale * scale * 1e-12;
+    let mut left: Vec<usize> = (0..corner.len()).collect();
+    let mut out = Vec::with_capacity(corner.len() - 2);
+    while left.len() > 3 {
+        let m = left.len();
+        let ear = (0..m).find(|&i| {
+            let (a, b, c) = (left[(i + m - 1) % m], left[i], left[(i + 1) % m]);
+            if turn(a, b, c) <= eps {
+                return false;
+            }
+            // No other corner on or inside the ear.
+            left.iter().all(|&p| {
+                p == a
+                    || p == b
+                    || p == c
+                    || flat[p] == flat[a]
+                    || flat[p] == flat[b]
+                    || flat[p] == flat[c]
+                    || turn(a, b, p) < -eps
+                    || turn(b, c, p) < -eps
+                    || turn(c, a, p) < -eps
+            })
+        })?;
+        let (a, b, c) = (left[(ear + m - 1) % m], left[ear], left[(ear + 1) % m]);
+        out.push([corner[a], corner[b], corner[c]]);
+        left.remove(ear);
+    }
+    out.push([corner[left[0]], corner[left[1]], corner[left[2]]]);
+    Some(out)
 }
 
 #[cfg(test)]
@@ -636,12 +706,62 @@ mod tests {
         assert_eq!(s.notes.len(), 1);
     }
 
+    /// Signed areas about +Z of each triangle.
+    fn areas(points: &[DVec3], tris: &[[u32; 3]]) -> Vec<f64> {
+        tris.iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|i| points[i as usize]);
+                (b - a).cross(c - a).z / 2.0
+            })
+            .collect()
+    }
+
     #[test]
-    fn fans_follow_the_winding() {
-        let (t, _) = fan(&[4], &[0, 1, 2, 3], false).unwrap();
-        assert_eq!(t, vec![[0, 1, 2], [0, 2, 3]]);
-        let (t, _) = fan(&[3], &[0, 1, 2], true).unwrap();
-        assert_eq!(t, vec![[0, 2, 1]]);
-        assert!(fan(&[4], &[0, 1, 2], false).is_none());
+    fn concave_polygons_keep_their_notch() {
+        // A counter-clockwise quad notched at its second corner: area 3, the point
+        // (1, 0.25) outside it.
+        let p = [DVec3::ZERO, DVec3::new(1.0, 1.0, 0.0), DVec3::new(3.0, 0.0, 0.0), DVec3::new(0.0, 3.0, 0.0)];
+        let (t, corners, crossed) = triangulate(&p, &[4], &[0, 1, 2, 3], false).unwrap();
+        assert_eq!(crossed, 0);
+        let a = areas(&p, &t);
+        assert!(a.iter().all(|x| (*x - 1.5).abs() < 1e-12), "{t:?} {a:?}");
+        assert!(t.iter().all(|tri| tri.contains(&1) && tri.contains(&3)), "cut along the diagonal 1-3: {t:?}");
+        assert_eq!(corners.len(), 2);
+        // Flipped, the same cut the other way round.
+        let (t, ..) = triangulate(&p, &[4], &[0, 1, 2, 3], true).unwrap();
+        assert!(areas(&p, &t).iter().all(|x| (*x + 1.5).abs() < 1e-12));
+        // Wound clockwise in the file, it stays clockwise.
+        let (t, ..) = triangulate(&p, &[4], &[3, 2, 1, 0], false).unwrap();
+        assert!(areas(&p, &t).iter().all(|x| (*x + 1.5).abs() < 1e-12), "{:?}", areas(&p, &t));
+    }
+
+    #[test]
+    fn convex_and_tilted_polygons_cover_their_area() {
+        let square = [DVec3::ZERO, DVec3::X, DVec3::new(1.0, 1.0, 0.0), DVec3::Y];
+        let (t, ..) = triangulate(&square, &[4], &[0, 1, 2, 3], false).unwrap();
+        assert!((areas(&square, &t).iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(areas(&square, &t).iter().all(|a| *a > 0.0));
+        // An L-shaped hexagon standing in the XZ plane: area 3 by its normal.
+        let l = [(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (1.0, 1.0), (1.0, 2.0), (0.0, 2.0)]
+            .map(|(x, z)| DVec3::new(x, 0.0, z));
+        let (t, _, crossed) = triangulate(&l, &[6], &[0, 1, 2, 3, 4, 5], false).unwrap();
+        assert_eq!((t.len(), crossed), (4, 0));
+        let total: f64 = t
+            .iter()
+            .map(|tri| {
+                let [a, b, c] = tri.map(|i| l[i as usize]);
+                (b - a).cross(c - a).y / -2.0
+            })
+            .sum();
+        assert!((total - 3.0).abs() < 1e-12, "{total}");
+        assert!(triangulate(&square, &[4], &[0, 1, 2], false).is_none());
+    }
+
+    #[test]
+    fn a_polygon_that_crosses_itself_is_counted() {
+        // A bow tie.
+        let p = [DVec3::ZERO, DVec3::new(1.0, 1.0, 0.0), DVec3::X, DVec3::Y];
+        let (t, _, crossed) = triangulate(&p, &[4], &[0, 1, 2, 3], false).unwrap();
+        assert_eq!((t.len(), crossed), (2, 1));
     }
 }

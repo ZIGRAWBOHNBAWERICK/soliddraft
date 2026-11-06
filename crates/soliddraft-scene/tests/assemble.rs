@@ -226,3 +226,90 @@ fn usd_fallbacks_instances_and_scale() {
     assert_eq!(c["scale_baked"], serde_json::json!([2.0, 2.0, 2.0]));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A counter-clockwise quad notched at its second corner: area 3 mm², and (1, 0.25)
+/// lies outside it.
+const NOTCH_USD: &str = r#"#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 0.001
+    upAxis = "Z"
+)
+def Xform "World"
+{
+    def Mesh "NotchedQuad"
+    {
+        uniform token subdivisionScheme = "none"
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(0, 0, 0), (1, 1, 0), (3, 0, 0), (0, 3, 0)]
+    }
+}
+"#;
+
+const NOTCH_OBJ: &str = "# notch, millimetres, Z up\no NotchedQuad\nv 0 0 0\nv 1 1 0\nv 3 0 0\nv 0 3 0\nf 1 2 3 4\n";
+
+/// Each triangle's signed area about +Z, and whether any covers `p`.
+fn coverage(scene: &soliddraft_scene::Scene, p: DVec3) -> (Vec<f64>, bool) {
+    let m = &scene.meshes[0];
+    let tris: Vec<[DVec3; 3]> = m.triangles.iter().map(|t| t.map(|i| m.positions[i as usize])).collect();
+    let areas = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).z / 2.0).collect();
+    let inside = tris.iter().any(|[a, b, c]| {
+        let s = |u: DVec3, v: DVec3| (v - u).cross(p - u).z;
+        let (x, y, z) = (s(*a, *b), s(*b, *c), s(*c, *a));
+        (x > 0.0 && y > 0.0 && z > 0.0) || (x < 0.0 && y < 0.0 && z < 0.0)
+    });
+    (areas, inside)
+}
+
+#[test]
+fn concave_polygons_keep_their_notch_from_usd_and_obj() {
+    let dir = scratch("notch");
+    for (name, text) in [("notch.usda", NOTCH_USD), ("notch.obj", NOTCH_OBJ)] {
+        let source = dir.join(name);
+        std::fs::write(&source, text).unwrap();
+        let scene = read(&source, &Options::default()).unwrap();
+        let (areas, inside) = coverage(&scene, DVec3::new(1.0, 0.25, 0.0));
+        assert_eq!(areas.len(), 2, "{name}");
+        assert!(
+            areas.iter().all(|a| (a - 1.5).abs() < 1e-9),
+            "{name}: two counter-clockwise halves of 1.5 mm²: {areas:?}"
+        );
+        assert!(!inside, "{name}: the notch stays open");
+        assert!(scene.notes.is_empty(), "{name}: {:?}", scene.notes);
+        // Written and reopened, the mesh keeps the cut.
+        let out = dir.join(format!("{name}.dwasm"));
+        assemble::write(&scene, &source, &out).unwrap();
+        let mut doc = AssemblyDocument::open(&out, OpenOptions::default()).unwrap();
+        doc.finish_loading();
+        let def = doc.store().iter().find(|(_, d)| d.kind == DocKind::Mesh).unwrap().1;
+        let mesh = def.mesh.as_ref().expect("the mesh loaded");
+        assert_eq!(mesh.triangle_count(), 2, "{name}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_default_prim_that_is_a_mesh_is_the_root_body() {
+    let dir = scratch("root-mesh");
+    let source = dir.join("tri.usda");
+    std::fs::write(
+        &source,
+        "#usda 1.0\n(\n    defaultPrim = \"Tri\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n)\n\
+         def Mesh \"Tri\"\n{\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n    \
+         point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]\n}\n",
+    )
+    .unwrap();
+    let scene = read(&source, &Options::default()).unwrap();
+    assert_eq!(scene.nodes.len(), 1);
+    assert!(scene.nodes[0].body.is_some());
+    let out = dir.join("tri.dwasm");
+    assemble::write(&scene, &source, &out).unwrap();
+    let mut doc = AssemblyDocument::open(&out, OpenOptions::default()).unwrap();
+    doc.finish_loading();
+    let t = tree(&doc);
+    assert_eq!(t.keys().map(String::as_str).collect::<Vec<_>>(), ["Tri"]);
+    let [lo, hi] = t["Tri"].1;
+    assert!(near(lo, DVec3::ZERO) && near(hi, DVec3::new(1.0, 1.0, 0.0)), "{lo} {hi}");
+    let _ = std::fs::remove_dir_all(dir);
+}

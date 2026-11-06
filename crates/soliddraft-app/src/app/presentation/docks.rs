@@ -169,6 +169,7 @@ impl TabViewer for Panels<'_> {
                     passive_sketches: passive,
                     dimension_edit: st.dimension_edit.as_mut(),
                     visible,
+                    rounding: st.editor.as_ref().and_then(crate::viewport::RoundingOverlay::of),
                 };
                 let events = st.viewport.show(ui, &st.doc, overlay, selection, hover_label.as_deref(), &st.navigation);
                 st.after_viewport(ui, &events);

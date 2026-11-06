@@ -270,8 +270,12 @@ fn fs_face(in: FaceOut) -> @location(0) vec4<f32> {
     // Selection and hover sit on top of the tone-mapped colour.
     let feature_selected = globals.selected_feature != 0u && in.feature_id == globals.selected_feature && !ghost && !preview;
     let lit_accent = accent * (0.55 + 0.45 * max(dot(n, v), 0.0));
+    // A preview marks the faces its operation made (document.rs PREVIEW_MADE).
+    let made = preview && in.feature_id == 0xffffffffu;
     if (selected_body || (in.face_id != 0u && in.face_id == globals.selected_id)) {
         color = mix(color, lit_accent, 0.55);
+    } else if (made) {
+        color = mix(color, lit_accent, 0.5);
     } else if (feature_selected) {
         color = mix(color, lit_accent, 0.40);
     } else if (in.face_id != 0u && in.face_id == globals.hover_id) {

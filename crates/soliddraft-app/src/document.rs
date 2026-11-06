@@ -2946,9 +2946,27 @@ impl Document {
             k.fillet(&OpTag::new("preview"), base, &edges, radius)
         }
         .map_err(|e| e.to_string())?;
-        let mesh = self.mesh_of(r.body);
+        // The faces the rounding makes carry the preview mark, so the viewport can tint them.
+        let made: HashMap<FaceId, FeatureId> =
+            r.record.faces.created.iter().map(|face| (*face, PREVIEW_MADE as FeatureId)).collect();
+        let mesh = preview_mesh_marked(k.as_ref(), r.body, &self.tess_params, &made);
         let _ = k.release(r.body);
         Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+    }
+
+    /// The picked edges of a fillet or chamfer on `body`, sampled along their curves for
+    /// the viewport to mark. An edge that no longer resolves is left out.
+    pub fn edge_paths(&self, refs: &[EdgeRef], body: Option<BodyId>) -> Vec<Vec<Vec3>> {
+        let Some(body) = body else { return Vec::new() };
+        let picked: Vec<EdgeId> = refs.iter().filter_map(|r| self.model.resolve_edge(r, body).ok()).collect();
+        if picked.is_empty() {
+            return Vec::new();
+        }
+        edge_polylines(self.kernel().as_ref(), body, &self.tess_params)
+            .into_iter()
+            .filter(|p| picked.contains(&p.edge))
+            .map(|p| p.points.iter().map(|q| Vec3::new(q.x as f32, q.y as f32, q.z as f32)).collect())
+            .collect()
     }
 
     /// Preview an analytic shell through the same kernel operation as a committed feature.
@@ -3586,11 +3604,25 @@ pub(crate) fn preview_mesh(
     body: BodyId,
     params: &TessellationParams,
 ) -> Result<Arc<DisplayMesh>, String> {
+    preview_mesh_marked(kernel, body, params, &HashMap::new())
+}
+
+/// The mark a preview mesh carries in [`DisplayMesh::face_features`] on the faces the
+/// previewed operation made. No feature has this id.
+pub const PREVIEW_MADE: u32 = u32::MAX;
+
+/// A preview mesh whose faces in `made` carry their marks in `face_features`.
+fn preview_mesh_marked(
+    kernel: &dyn Kernel,
+    body: BodyId,
+    params: &TessellationParams,
+    made: &HashMap<FaceId, FeatureId>,
+) -> Result<Arc<DisplayMesh>, String> {
     let topology = kernel.topology(body).map_err(|e| e.to_string())?;
     let mesh = kernel.preview(body, params).map_err(|e| e.to_string())?;
     let edges = edge_polylines(kernel, body, params);
     let mut picks = Vec::new();
-    Ok(Arc::new(display_mesh(0, &mesh, &edges, &topology, &HashMap::new(), &mut picks)))
+    Ok(Arc::new(display_mesh(0, &mesh, &edges, &topology, made, &mut picks)))
 }
 
 /// The body's edges sampled along their curves. A kernel that cannot sample them

@@ -245,6 +245,11 @@ pub struct FeatureEditor {
     pub saved_rollback: Option<usize>,
     /// The picks and typed sizes a Fillet or Chamfer panel refused.
     pub feedback: crate::fillet_collect::Feedback,
+    /// A Fillet or Chamfer panel's picked edges on the body it rounds, sampled for the
+    /// viewport to mark.
+    pub marks: Vec<Vec<glam::Vec3>>,
+    /// The picks and the body `marks` were sampled for.
+    marked: (Vec<EdgeRef>, Option<soliddraft_kernel_api::BodyId>),
     last: Option<EditorParams>,
 }
 
@@ -283,6 +288,8 @@ impl FeatureEditor {
             error: None,
             saved_rollback,
             feedback: Default::default(),
+            marks: Vec::new(),
+            marked: (Vec::new(), None),
             last: None,
         }
     }
@@ -332,6 +339,14 @@ impl FeatureEditor {
     /// Regenerates the preview when the parameters changed. A refused size shows no
     /// preview, so no picture stands for a value that was not accepted.
     pub fn refresh(&mut self, doc: &Document) {
+        let before = match self.target.and_then(|id| doc.index_of(id)) {
+            Some(i) => doc.body_before(i),
+            None => doc.display_body(),
+        };
+        if self.marked.0 != self.edges() || self.marked.1 != before {
+            self.marked = (self.edges().to_vec(), before);
+            self.marks = doc.edge_paths(&self.marked.0, before);
+        }
         if self.feedback.size.is_some() {
             self.preview = Preview::default();
             self.error = None;
@@ -342,10 +357,6 @@ impl FeatureEditor {
             return;
         }
         self.last = Some(self.params.clone());
-        let before = match self.target.and_then(|id| doc.index_of(id)) {
-            Some(i) => doc.body_before(i),
-            None => doc.display_body(),
-        };
         let result = match &self.params {
             EditorParams::Extrude(p) => doc.preview_extrude(p),
             EditorParams::Revolve(r) => doc.preview_revolve(r),

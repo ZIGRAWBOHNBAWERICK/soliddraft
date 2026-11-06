@@ -68,6 +68,41 @@ pub struct Overlay<'a> {
     pub dimension_edit: Option<&'a mut crate::dimension_edit::DimensionEdit>,
     /// Which of the part's items show.
     pub visible: Visible,
+    /// An open Fillet or Chamfer, whose preview the viewport names and marks.
+    pub rounding: Option<RoundingOverlay<'a>>,
+}
+
+/// What an open Fillet or Chamfer adds to the viewport: a label naming its size and
+/// picks, and the picked edges themselves while no rounded body stands for them.
+pub struct RoundingOverlay<'a> {
+    /// "Fillet preview" or "Chamfer preview": the label's accessible name.
+    pub title: &'static str,
+    /// What the label reads, such as "R 5 mm · 2 edges".
+    pub text: String,
+    /// Whether a rounded body is shown in place of the part.
+    pub shown: bool,
+    /// The picked edges on the body being rounded.
+    pub edges: &'a [Vec<Vec3>],
+}
+
+impl<'a> RoundingOverlay<'a> {
+    /// The overlay of an open editor, when it is a Fillet or Chamfer holding an edge.
+    pub fn of(editor: &'a crate::state::FeatureEditor) -> Option<Self> {
+        use crate::state::EditorParams;
+        let (title, size) = match &editor.params {
+            EditorParams::Fillet(f) => ("Fillet preview", format!("R {} mm", crate::document::fmt_mm(f.radius))),
+            EditorParams::Chamfer(c) => ("Chamfer preview", format!("{} mm", crate::document::fmt_mm(c.distance))),
+            _ => return None,
+        };
+        let count = editor.edges().len();
+        if count == 0 {
+            return None;
+        }
+        let shown = editor.preview.result.is_some();
+        let edges = format!("{count} edge{}", if count == 1 { "" } else { "s" });
+        let text = if shown { format!("{size} · {edges}") } else { format!("No preview · {edges}") };
+        Some(Self { title, text, shown, edges: &editor.marks })
+    }
 }
 
 pub struct ViewportState {
@@ -195,7 +230,7 @@ impl ViewportState {
         hover_label: Option<&str>,
         nav: &NavigationSettings,
     ) -> ViewportEvents {
-        let Overlay { ghost, preview, sketch, passive_sketches, dimension_edit, visible } = overlay;
+        let Overlay { ghost, preview, sketch, passive_sketches, dimension_edit, visible, rounding } = overlay;
         let pick_revision = Some((doc.model().id(), doc.mesh_version, doc.display_body()));
         let provisional = doc.provisional_mesh();
         let is_provisional = |shown: &Arc<DisplayMesh>| provisional.as_ref().is_some_and(|b| Arc::ptr_eq(shown, b));
@@ -304,6 +339,9 @@ impl ViewportState {
         }
         if visible.body {
             self.paint_highlights(&painter, doc, selection, rect);
+        }
+        if let Some(rounding) = &rounding {
+            self.paint_rounding(ui, &painter, rect, rounding);
         }
         // A selected body shows the dimensions that build it. A click on one keeps the
         // body selected and a double-click edits it, at the dimension when it is a value
@@ -496,6 +534,41 @@ impl ViewportState {
             ui.ctx().request_repaint();
         }
         fit
+    }
+
+    /// A Fillet or Chamfer preview's label over the top of the view, and its picked edges
+    /// in the accent while no rounded body shows them.
+    fn paint_rounding(&self, ui: &egui::Ui, painter: &egui::Painter, rect: Rect, rounding: &RoundingOverlay<'_>) {
+        if !rounding.shown {
+            for path in rounding.edges {
+                let points: Vec<Pos2> = path.iter().filter_map(|p| self.camera.project(*p, rect)).collect();
+                if points.len() < 2 {
+                    continue;
+                }
+                painter.add(egui::Shape::line(points.clone(), Stroke::new(5.0, theme::hud_bg())));
+                painter.add(egui::Shape::line(points.clone(), Stroke::new(2.5, theme::accent())));
+                for end in [points[0], points[points.len() - 1]] {
+                    painter.circle(end, 3.5, theme::accent(), Stroke::new(1.5, theme::hud_bg()));
+                }
+            }
+        }
+        let galley = painter.layout_no_wrap(rounding.text.clone(), theme::font_medium(12.0), theme::ink());
+        let size = vec2(galley.size().x + 40.0, 28.0);
+        // Under the heads-up toolbar, centred like it.
+        let pill = Rect::from_center_size(pos2(rect.center().x, rect.top() + 58.0 + size.y / 2.0), size);
+        let (fill, edge) =
+            if rounding.shown { (theme::hud_bg(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
+        painter.rect(pill, CornerRadius::same(14), fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+        let icon = Rect::from_center_size(pos2(pill.left() + 17.0, pill.center().y), vec2(14.0, 14.0));
+        let glyph = if rounding.title.starts_with("Chamfer") { Icon::Chamfer } else { Icon::Fillet };
+        icons::paint(painter, glyph, icon, if rounding.shown { theme::accent() } else { theme::muted() });
+        painter.galley(pos2(icon.right() + 7.0, pill.center().y - galley.size().y / 2.0), galley, theme::ink());
+        let response = ui.interact(pill, ui.id().with("rounding preview"), Sense::hover());
+        response.widget_info(|| {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Other, true, rounding.title);
+            info.current_text_value = Some(rounding.text.clone());
+            info
+        });
     }
 
     fn paint_highlights(&self, painter: &egui::Painter, doc: &Document, selection: Option<Selection>, rect: Rect) {

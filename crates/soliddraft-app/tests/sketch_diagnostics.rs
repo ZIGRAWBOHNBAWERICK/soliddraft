@@ -360,18 +360,37 @@ fn intended_extrusion_checks_do_not_create_features_or_change_geometry() {
 }
 
 #[test]
-fn feature_checks_keep_their_target_after_undo_refresh_and_reset_after_reopen() {
+fn feature_checks_refresh_after_native_edits_undo_redo_and_reset_after_reopen() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut sketch = Sketch::new();
-    sketch.add(EntityKind::Circle { center: P2::new(10.0, 10.0), radius: 5.0 }, false);
+    sketch.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 0.0) }, false);
+    sketch.add(EntityKind::Line { a: P2::new(0.0, 10.0), b: P2::ZERO }, false);
     let (mut app, id) = launch(sketch);
     control(&mut app, "Sketch diagnostics");
     control(&mut app, "Diagnostics only");
     control(&mut app, "Boss extrude");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude needs a closed region."));
+    let open = session(&app).sketch.clone();
+    frame(&mut app, "preflight-open");
+    app.key_press(Key::L);
+    app.run_steps(6);
+    for p in [P2::new(10.0, 0.0), P2::new(0.0, 10.0)] {
+        let at = screen(&app, p);
+        // Sketch endpoints use pointer events, not the solid viewport's GPU ID buffer.
+        ribbon::click_at(&mut app, at);
+    }
+    app.key_press(Key::Escape);
+    app.run_steps(8);
+    assert!(session(&app).diagnostics.is_some());
+    assert!(soliddraft_app::sketch_diagnostics::selected(session(&app)).is_none());
+    control(&mut app, "Refresh diagnostics");
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
     let closed = session(&app).sketch.clone();
+    assert_eq!(closed.drawn().count(), 3, "the native clicks add the missing edge");
+    frame(&mut app, "preflight-closed");
     app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     app.run_steps(8);
+    assert_eq!(session(&app).sketch, open, "undo removes only the closing edge and its snaps");
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "Sketch changed. Refresh diagnostics."));
     control(&mut app, "Refresh diagnostics");
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude needs a closed region."));
@@ -394,6 +413,7 @@ fn feature_checks_keep_their_target_after_undo_refresh_and_reset_after_reopen() 
     control(&mut app, "Sketch diagnostics");
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "Diagnostics only"));
     assert_eq!(session(&app).sketch, closed);
+    frame(&mut app, "preflight-reopened");
     drop(app);
     soliddraft_app::file::set_config_dir(None);
 }

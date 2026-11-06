@@ -905,6 +905,18 @@ pub enum Command {
         name: String,
         expression: String,
     },
+    /// Shares selected driving dimensions through one named value, atomically.
+    LinkSketchValues {
+        id: FeatureId,
+        constraints: Vec<sketch::ConstraintId>,
+        name: String,
+        value: Option<f64>,
+    },
+    /// Removes direct shared aliases without changing current numeric values.
+    UnlinkSketchValues {
+        id: FeatureId,
+        constraints: Vec<sketch::ConstraintId>,
+    },
     Drive {
         input: model::values::Input,
         expression: String,
@@ -1006,6 +1018,8 @@ impl Command {
             | Command::ActivateConfiguration { .. } => "Configuration".into(),
             Command::SetConfigurationGrid { .. } => "Configuration grid".into(),
             Command::SetValue { .. } => "Set value".into(),
+            Command::LinkSketchValues { .. } => "Link values".into(),
+            Command::UnlinkSketchValues { .. } => "Unlink values".into(),
             Command::Drive { .. } => "Drive input".into(),
             Command::RenameValue { .. } => "Rename value".into(),
             Command::SetValueCell { .. } => "Set value".into(),
@@ -2180,6 +2194,12 @@ impl Document {
             Command::ActivateConfiguration { name } => vec![model::Command::ActivateConfiguration { name }],
             Command::SetConfigurationGrid { grid } => vec![model::Command::SetConfigurationGrid { grid }],
             Command::SetValue { name, expression } => vec![model::Command::SetValue { name, expression }],
+            Command::LinkSketchValues { id, constraints, name, value } => {
+                crate::sketch_values::commands(&self.model, model_id(id), &constraints, &name, value, false)?
+            }
+            Command::UnlinkSketchValues { id, constraints } => {
+                crate::sketch_values::commands(&self.model, model_id(id), &constraints, "", None, true)?
+            }
             Command::Drive { input, expression } => vec![model::Command::Drive { input, expression }],
             Command::RenameValue { name, to } => vec![model::Command::RenameValue { name, to }],
             Command::SetValueCell { configuration, name, expression } => {

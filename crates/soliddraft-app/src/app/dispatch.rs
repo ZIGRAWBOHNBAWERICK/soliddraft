@@ -613,6 +613,13 @@ impl SolidDraftApp {
                 DimensionTarget::Feature(id) => self.apply(ctx, AppAction::EditFeature(id)),
                 DimensionTarget::Sketch { sketch, constraint } => {
                     self.apply(ctx, AppAction::EditSketch(sketch));
+                    if crate::sketch_values::links(self.state.doc.model(), sketch).contains_key(&constraint) {
+                        if let Some(s) = self.state.sketch.as_mut() {
+                            s.selection = vec![crate::state::SketchSel::Constraint(constraint)];
+                        }
+                        crate::sketch_values::open(&mut self.state);
+                        return;
+                    }
                     // The sketch opens with the value editor on the dimension, as a
                     // double-click on it inside the sketch does.
                     if let Some(s) = self.state.sketch.as_mut().filter(|s| s.feature == sketch)
@@ -1002,6 +1009,15 @@ impl SolidDraftApp {
             }
             AppAction::ToggleAutoApply => self.state.toggle_auto_apply(),
             AppAction::Values(action) => crate::values_tab::apply(&mut self.state, action),
+            AppAction::SketchValues(crate::sketch_values::Action::Open) => crate::sketch_values::open(&mut self.state),
+            AppAction::SketchValues(crate::sketch_values::Action::Cancel) => {
+                crate::sketch_values::cancel(&mut self.state)
+            }
+            AppAction::SketchValues(crate::sketch_values::Action::Apply { unlink }) => {
+                if crate::sketch_values::apply(&mut self.state, unlink) {
+                    self.sync_sketch_session();
+                }
+            }
             // The web build's provider, model and key are set on its server.
             #[cfg(target_arch = "wasm32")]
             AppAction::ShowProviderSettings => {
@@ -1244,6 +1260,7 @@ impl SolidDraftApp {
         match self.state.doc.feature(s.feature).and_then(|f| f.sketch()) {
             Some(sk) => {
                 if sk.sketch != s.sketch {
+                    s.link_values = None;
                     if !s.trim_bounds.is_empty() {
                         s.trim_bounds.clear();
                         s.selection.clear();

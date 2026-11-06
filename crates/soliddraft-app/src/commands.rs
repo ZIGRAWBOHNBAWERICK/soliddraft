@@ -1591,6 +1591,11 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::SketchDiagnostics(true))
             .when(AppState::in_sketch)
 .app_only(SKETCHER),
+        cmd("link_values", "Link values", Icon::SmartDim, "Share a named value between selected driving dimensions")
+            .run(|_|AppAction::SketchValues(crate::sketch_values::Action::Open))
+            .when(|state|state.sketch.as_ref().is_some_and(|s|crate::sketch_values::selected(s).is_ok()))
+            .hint(|state|state.sketch.as_ref().and_then(|s|crate::sketch_values::selected(s).err()))
+.app_only(SKETCHER),
         cmd("relations", "Relations", Icon::Cad("relations"), "Relations between sketch entities")
             .on(Sketch, "Constrain", Small)
             .run(|s| AppAction::SketchRelations(!s.sketch.as_ref().is_some_and(|s| s.relations_open)))
@@ -2257,7 +2262,9 @@ fn registry() -> Vec<CommandSpec> {
         )
         .key(Scope::Part, none, Key::Escape)
         .run(|s| {
-            if s.sketch.as_ref().is_some_and(|s| s.relations_open) {
+            if s.sketch.as_ref().is_some_and(|s|s.link_values.is_some()) {
+                AppAction::SketchValues(crate::sketch_values::Action::Cancel)
+            } else if s.sketch.as_ref().is_some_and(|s| s.relations_open) {
                 AppAction::SketchRelations(false)
             } else if s.dimension_edit.is_some() {
                 // Escape takes the keyboard from a text field before the shortcuts run.
@@ -2291,7 +2298,7 @@ fn registry() -> Vec<CommandSpec> {
                     AppAction::ExitSketch(None)
                 }
             })
-            .when(|s| s.drawing.new.is_some() || s.editor.is_some() || s.in_sketch())
+            .when(|s| s.drawing.new.is_some() || s.editor.is_some() || (s.in_sketch() && s.sketch.as_ref().is_some_and(|s|s.link_values.is_none())))
 .app_only(EDITOR),
         // Help.
         cmd("command_palette", "Command palette", Icon::Search, "Search the commands and run one")

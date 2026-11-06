@@ -46,6 +46,7 @@ pub mod scene_import;
 pub mod settings;
 pub mod sketch_diagnostics;
 pub mod sketch_tools;
+pub mod sketch_values;
 pub mod sketcher;
 pub mod start_page;
 pub mod state;

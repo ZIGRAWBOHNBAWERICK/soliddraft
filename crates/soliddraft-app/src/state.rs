@@ -40,6 +40,8 @@ pub enum AppAction {
     Command(Command),
     /// A step of the Values tab.
     Values(crate::values_tab::ValuesAction),
+    /// Link or edit shared sketch dimensions.
+    SketchValues(crate::sketch_values::Action),
     Undo,
     Redo,
     /// Starts a sketch on the selected plane or face, or asks for one.
@@ -635,6 +637,8 @@ pub struct SketchSession {
     pub auto_relations: bool,
     /// Whether the ribbon's relation list is open.
     pub relations_open: bool,
+    /// Pending shared-value form; saved truth stays in the part's values.
+    pub link_values: Option<crate::sketch_values::LinkValues>,
     /// Shows relation glyphs without changing the constraints or dimensions.
     pub show_relations: bool,
     /// Scope of the Existing relations property list for this session.
@@ -710,6 +714,7 @@ impl SketchSession {
             message: None,
             auto_relations: true,
             relations_open: false,
+            link_values: None,
             show_relations: true,
             relations_filter: RelationFilter::default(),
             diagnostics: None,
@@ -723,6 +728,7 @@ impl SketchSession {
     /// Picks a tool. Whatever the old tool had started is dropped. A tool that works on
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
+        self.link_values = None;
         self.cancel_trim();
         let bounds = if self.tool.bounded_trim() && tool.bounded_trim() {
             std::mem::take(&mut self.trim_bounds)

@@ -63,8 +63,8 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
 /// What `operation` would add to the sketch, tried on a copy. The refusal is the tool's
 /// own words.
 pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
-    if let Operation::TrimCorner { a, b, keep_a, keep_b } = &operation {
-        return match s.sketch.corner_preview(*a, *b, *keep_a, *keep_b) {
+    if let Operation::TrimCorner { a, b, keep_a, keep_b, options } = &operation {
+        return match s.sketch.corner_preview(*a, *b, *keep_a, *keep_b, *options) {
             Ok(p) => ToolPreview {
                 added: p.kept.to_vec(),
                 removed: p.removed,
@@ -74,8 +74,8 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
             Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
         };
     }
-    if let Operation::TrimBounded { entity, a, b, outside } = &operation {
-        return match s.sketch.trim_bounded_preview(*entity, *a, *b, *outside) {
+    if let Operation::TrimBounded { entity, a, b, outside, options } = &operation {
+        return match s.sketch.trim_bounded_preview(*entity, *a, *b, *outside, *options) {
             Ok(p) => {
                 ToolPreview { added: p.kept, removed: p.removed, operation: Some(operation), ..Default::default() }
             }
@@ -238,6 +238,15 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
         }
         _ => {}
     }
+    if tool.trims() {
+        let keep =
+            ui.checkbox(&mut s.trim_options.keep_as_construction, "Keep trimmed pieces as construction").changed();
+        let ignore = ui.checkbox(&mut s.trim_options.ignore_construction, "Ignore construction targets").changed();
+        if keep || ignore {
+            s.cancel_trim();
+            s.preview = None;
+        }
+    }
     if tool.selects() {
         hint(ui, "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed.");
         let selected = selected_in_order(s).len();
@@ -270,9 +279,16 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
 /// The same operations used by the sketcher's Modify tools, exposed to command/MCP scenarios.
 pub fn operation_schema() -> Value {
     use soliddraft_assistant::tools::schema::{
-        any_of, boolean, constant, integer, non_empty_array, number, object, one_of,
+        any_of, boolean, constant, integer, non_empty_array, number, object, one_of, optional,
     };
     let point = object(&[("u", number("Plane u, mm")), ("v", number("Plane v, mm"))]);
+    let trim_options = optional(object(&[
+        ("keep_as_construction", optional(boolean("Keep removed pieces as guides, default false"))),
+        (
+            "ignore_construction",
+            optional(boolean("Protect construction targets but retain them as boundaries, default false")),
+        ),
+    ]));
     let id = integer("An existing entity id, greater than 0");
     let ids = non_empty_array(id.clone(), "Distinct entity ids, in selection order");
     let count = integer("Instances including the seed, from 2 to 1000");
@@ -295,13 +311,19 @@ pub fn operation_schema() -> Value {
             ("vertex", point.clone()),
             ("sides", integer("Sides from 3 to 1000")),
         ]),
-        object(&[("tool", constant("trim")), ("entity", id.clone()), ("at", point.clone())]),
+        object(&[
+            ("tool", constant("trim")),
+            ("entity", id.clone()),
+            ("at", point.clone()),
+            ("options", trim_options.clone()),
+        ]),
         object(&[
             ("tool", constant("trim_corner")),
             ("a", id.clone()),
             ("b", id.clone()),
             ("keep_a", point.clone()),
             ("keep_b", point.clone()),
+            ("options", trim_options.clone()),
         ]),
         object(&[
             ("tool", constant("trim_bounded")),
@@ -309,6 +331,7 @@ pub fn operation_schema() -> Value {
             ("a", id.clone()),
             ("b", id.clone()),
             ("outside", boolean("Remove outside portions when true, otherwise remove the inside interval")),
+            ("options", trim_options),
         ]),
         object(&[
             ("tool", constant("extend")),

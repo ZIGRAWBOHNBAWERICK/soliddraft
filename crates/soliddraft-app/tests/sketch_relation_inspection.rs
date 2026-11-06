@@ -13,7 +13,7 @@ use soliddraft_app::{
         fmt_value, solve,
     },
     sketcher::Frame,
-    state::{AppAction, SketchSel, SketchSession},
+    state::{AppAction, RelationFilter, SketchSel, SketchSession},
     theme,
 };
 use std::sync::Mutex;
@@ -71,6 +71,221 @@ fn click(app: &mut App, at: Pos2, modifiers: Modifiers) {
         app.step();
     }
     app.run_steps(6);
+}
+
+fn filter_button(app: &mut App) -> (String, Rect) {
+    for _ in 0..6 {
+        let painted = ribbon::painted(app);
+        let left = app.state().state.viewport.rect.left();
+        if let Some(head) = painted.iter().find(|p| p.text == "Existing relations" && p.rect.right() < left)
+            && let Some(current) = painted.iter().find(|p| {
+                ["Selected", "All", "Conflicting", "Dangling"].contains(&p.text.as_str())
+                    && p.full.top() >= head.full.bottom()
+                    && p.rect.right() < left
+                    && p.rect.contains_rect(p.full)
+            })
+        {
+            return (current.text.clone(), current.rect);
+        }
+        let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
+        app.hover_at(pos2(left - 15.0, (head.bottom() + ribbon::band(app).top()) / 2.0));
+        app.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -160.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.run_steps(10);
+    }
+    panic!("relation scope filters must be available without selecting geometry");
+}
+
+fn filter(app: &mut App, wanted: &str) {
+    let (current, rect) = filter_button(app);
+    if current == wanted {
+        return;
+    }
+    ribbon::click_at(app, rect.center());
+    let choice = ribbon::painted(app)
+        .into_iter()
+        .find(|p| p.text == wanted && p.rect.contains_rect(p.full))
+        .unwrap_or_else(|| panic!("relation filter must offer {wanted}"));
+    ribbon::click_at(app, choice.rect.center());
+}
+
+#[test]
+fn whole_sketch_relations_can_be_inspected_without_selecting_geometry() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let a = sketch.add(EntityKind::Line { a: P2::new(-20.0, 0.0), b: P2::new(20.0, 0.0) }, false);
+    let b = sketch.add(EntityKind::Line { a: P2::new(30.0, -10.0), b: P2::new(30.0, 10.0) }, false);
+    let horizontal = sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(a) });
+    sketch.constrain(ConstraintKind::Vertical { target: Align::Line(b) });
+    let (mut app, _) = launch(sketch);
+    let before = session(&app).sketch.clone();
+    let revision = app.state().state.doc.revision();
+    filter(&mut app, "All");
+    assert!(session(&app).selection.is_empty());
+    assert_eq!(session(&app).sketch, before);
+    assert_eq!(app.state().state.doc.revision(), revision);
+    inspect(&mut app, "Horizontal");
+    assert_eq!(session(&app).selection, [SketchSel::Constraint(horizontal)]);
+    assert!(halo(&app, a));
+    assert!(!halo(&app, b));
+    filter(&mut app, "Selected");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "1 of 2 shown"));
+    filter(&mut app, "All");
+    ribbon::click_ribbon(&mut app, "Relations");
+    app.get_by_label("Show all relations").click();
+    app.run_steps(6);
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    assert!(!session(&app).show_relations);
+    inspect(&mut app, "Horizontal");
+    assert_eq!(session(&app).selection, [SketchSel::Constraint(horizontal)]);
+    frame(&mut app, "filter-all-hidden-relations");
+    app.key_press(Key::Delete);
+    app.run_steps(6);
+    assert!(session(&app).sketch.constraint(horizontal).is_none());
+    assert_eq!(session(&app).sketch.drawn().count(), before.drawn().count());
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, before);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn conflict_filter_locates_solver_relations_and_row_deletion_resolves_them() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let a = P2::new(-20.0, -10.0);
+    let b = P2::new(20.0, -10.0);
+    let line = sketch.add(EntityKind::Line { a, b }, false);
+    sketch.constrain(ConstraintKind::Fix { point: PointRef::new(line, 0), at: a });
+    sketch.constrain(ConstraintKind::Fix { point: PointRef::new(line, 1), at: b });
+    sketch.constrain(ConstraintKind::Vertical { target: Align::Line(line) });
+    let other = sketch.add(EntityKind::Line { a: P2::new(-20.0, 20.0), b: P2::new(20.0, 20.0) }, false);
+    sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(other) });
+    let (mut app, _) = launch(sketch);
+    let before = session(&app).sketch.clone();
+    let SolveStatus::OverDefined { conflicting } = &before.status else { panic!("the fixture must conflict") };
+    let chosen = *before.constraints.iter().find(|c| conflicting.contains(&c.id)).unwrap();
+    let revision = app.state().state.doc.revision();
+    let window = ribbon::window(&app);
+    ribbon::click_button(&mut app, "Inspect conflicts", window);
+    assert_eq!(session(&app).relations_filter, RelationFilter::Conflicting);
+    assert!(session(&app).selection.is_empty());
+    assert_eq!(app.state().state.doc.revision(), revision);
+    inspect(&mut app, chosen.name());
+    assert_eq!(session(&app).selection, [SketchSel::Constraint(chosen.id)]);
+    assert!(halo(&app, line));
+    assert!(!halo(&app, other));
+    let top = panel_heading(&app, "Existing relations").bottom();
+    let row = ribbon::painted(&app)
+        .into_iter()
+        .find(|p| {
+            p.text == chosen.name()
+                && p.full.top() >= top
+                && p.rect.right() < app.state().state.viewport.rect.left()
+                && p.rect.contains_rect(p.full)
+        })
+        .unwrap()
+        .rect;
+    let remove = app
+        .query_all(By::new().role(egui::accesskit::Role::Button).label("×"))
+        .find(|n| {
+            (n.rect().center().y - row.center().y).abs() < 8.0
+                && n.rect().right() < app.state().state.viewport.rect.left()
+        })
+        .unwrap()
+        .rect();
+    frame(&mut app, "filter-conflict-owner");
+    ribbon::click_at(&mut app, remove.center());
+    assert!(session(&app).sketch.constraint(chosen.id).is_none());
+    assert!(!matches!(session(&app).sketch.status, SolveStatus::OverDefined { .. }));
+    assert_eq!(session(&app).sketch.drawn().count(), before.drawn().count());
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "No conflicting relations."));
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, before);
+    assert_eq!(session(&app).relations_filter, RelationFilter::Conflicting);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    app.run_steps(6);
+    assert!(session(&app).sketch.constraint(chosen.id).is_none());
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn dangling_filter_recovers_missing_entities_and_points_after_reopen() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let line = sketch.add(EntityKind::Line { a: P2::new(-20.0, 0.0), b: P2::new(20.0, 0.0) }, false);
+    let valid = sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(line) });
+    let missing = sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(999) });
+    let point = sketch.constrain(ConstraintKind::Coincident { a: PointRef::new(line, 9), b: PointRef::new(ORIGIN, 0) });
+    let (mut app, id) = launch(sketch);
+    filter(&mut app, "Dangling");
+    assert_eq!(session(&app).relations_filter, RelationFilter::Dangling);
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "2 of 3 shown"));
+    frame(&mut app, "filter-dangling");
+    let path = proof_dir().join("dangling.dwprt");
+    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.run_steps(6);
+    app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+    app.run_steps(6);
+    app.state_mut().state.push(AppAction::Open(Some(path)));
+    app.run_steps(10);
+    app.state_mut().state.push(AppAction::EditSketch(id));
+    app.run_steps(10);
+    assert_eq!(session(&app).relations_filter, RelationFilter::Selected, "filters are session-local");
+    filter(&mut app, "Dangling");
+    inspect(&mut app, "Coincident");
+    assert_eq!(session(&app).selection, [SketchSel::Constraint(point)]);
+    assert!(halo(&app, line));
+    app.key_press(Key::Delete);
+    app.run_steps(6);
+    inspect(&mut app, "Horizontal");
+    assert_eq!(session(&app).selection, [SketchSel::Constraint(missing)]);
+    app.key_press(Key::Delete);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch.constraints.iter().map(|c| c.id).collect::<Vec<_>>(), [valid]);
+    assert_eq!(session(&app).sketch.drawn().count(), 1);
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "No dangling references."));
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn empty_filter_states_and_popup_escape_do_not_leave_the_sketch() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut app, _) = launch(Sketch::new());
+    app.set_size(vec2(960.0, 600.0));
+    theme::set_mode(&app.ctx, theme::Mode::Dark);
+    app.run_steps(12);
+    let revision = app.state().state.doc.revision();
+    for (scope, hint) in [
+        ("All", "No stored relations in this sketch."),
+        ("Conflicting", "No conflicting relations."),
+        ("Dangling", "No dangling references."),
+    ] {
+        filter(&mut app, scope);
+        frame(&mut app, &format!("filter-empty-{scope}-baseline"));
+        assert!(ribbon::painted(&app).iter().any(|p| p.text == hint), "{scope} empty state must be visible");
+    }
+    let (_, rect) = filter_button(&mut app);
+    ribbon::click_at(&mut app, rect.center());
+    frame(&mut app, "filter-popup-small-dark");
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    assert!(app.state().state.sketch.is_some(), "Escape must close only the relation filter popup");
+    assert_eq!(session(&app).relations_filter, RelationFilter::Dangling);
+    assert_eq!(app.state().state.doc.revision(), revision);
+    assert!(session(&app).selection.is_empty());
+    frame(&mut app, "filter-empty-small-dark");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
 }
 
 fn panel_heading(app: &App, name: &str) -> Rect {

@@ -9,7 +9,7 @@ use crate::drag::Dimension;
 use crate::icons::{self, Icon};
 use crate::sketch::{ConstraintKind, EntityKind, fmt_value, solve};
 use crate::sketcher;
-use crate::state::{AppAction, AppState, DragStep, EditorParams, ExitInto, SketchSel, Tool};
+use crate::state::{AppAction, AppState, DragStep, EditorParams, ExitInto, RelationFilter, SketchSel, Tool};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, Vec3};
@@ -1036,6 +1036,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
     egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
             // Status.
+            let mut reveal_relations = false;
             let (color, label) = match &s.sketch.status {
                 crate::sketch::SolveStatus::Empty => (theme::muted(), "Empty".to_owned()),
                 crate::sketch::SolveStatus::UnderDefined => (theme::accent(), "Under defined".to_owned()),
@@ -1063,6 +1064,10 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 let names: Vec<String> =
                     conflicting.iter().filter_map(|id| s.sketch.constraint(*id)).map(|c| c.name().to_owned()).collect();
                 hint(ui, &format!("Conflicting: {}. Delete one of them.", names.join(", ")));
+                if ui.small_button("Inspect conflicts").clicked() {
+                    s.relations_filter = RelationFilter::Conflicting;
+                    reveal_relations = true;
+                }
             }
             section_gap(ui);
 
@@ -1145,15 +1150,15 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
 
             // Selection.
             let selection = s.selection.clone();
+            let mut remove_constraint = None;
+            let mut delete_entities = false;
+            let mut toggle_construction = false;
+            let mut value_change: Option<(crate::sketch::ConstraintId, f64)> = None;
             if selection.is_empty() {
                 theme::section_label(ui, "Selection");
                 hint(ui, "Click an entity, a point or a relation. Ctrl-click adds to the selection.");
             } else {
                 theme::section_label(ui, &format!("Selection ({})", selection.len()));
-                let mut remove_constraint = None;
-                let mut delete_entities = false;
-                let mut toggle_construction = false;
-                let mut value_change: Option<(crate::sketch::ConstraintId, f64)> = None;
                 for sel in &selection {
                     match sel {
                         SketchSel::Entity(id) => {
@@ -1222,115 +1227,186 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         }
                     }
                 }
-                let entities = s.selected_entities();
-                if !entities.is_empty() {
-                    ui.add_space(4.0);
+            }
+            let entities = s.selected_entities();
+            if !entities.is_empty() {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let all_construction = entities.iter().all(|e| s.sketch.entity(*e).is_some_and(|e| e.construction));
+                    if ui
+                        .selectable_label(all_construction, "For construction")
+                        .on_hover_text("Construction geometry guides other entities and never becomes a profile (X)")
+                        .clicked()
+                    {
+                        toggle_construction = true;
+                    }
+                    if ui.button(egui::RichText::new("Delete").color(theme::error())).clicked() {
+                        delete_entities = true;
+                    }
+                });
+            }
+            // Inspect owners without making them geometry-deletion targets.
+            let inspected: std::collections::HashSet<_> = selection
+                .iter()
+                .flat_map(|sel| match sel {
+                    SketchSel::Entity(id) => vec![*id],
+                    SketchSel::Point(p) => vec![p.entity],
+                    SketchSel::Constraint(id) => s.sketch.constraint(*id).map(|c| c.entities()).unwrap_or_default(),
+                })
+                .collect();
+            ui.add_space(6.0);
+            if reveal_relations {
+                ui.scroll_to_cursor(Some(egui::Align::TOP));
+            }
+            let relation_top = ui.next_widget_position();
+            theme::section_label(ui, "Existing relations");
+            let previous_filter = s.relations_filter;
+            egui::ComboBox::from_label("Show").selected_text(s.relations_filter.label()).show_ui(ui, |ui| {
+                for scope in [
+                    RelationFilter::Selected,
+                    RelationFilter::All,
+                    RelationFilter::Conflicting,
+                    RelationFilter::Dangling,
+                ] {
+                    ui.selectable_value(&mut s.relations_filter, scope, scope.label());
+                }
+            });
+            if previous_filter != s.relations_filter {
+                ui.scroll_to_rect(Rect::from_min_size(relation_top, vec2(ui.available_width(), 90.0)), None);
+            }
+            let by_id: std::collections::HashMap<_, _> = s.sketch.entities.iter().map(|e| (e.id, e)).collect();
+            let conflicts: std::collections::HashSet<_> = match &s.sketch.status {
+                crate::sketch::SolveStatus::OverDefined { conflicting } => conflicting.iter().copied().collect(),
+                _ => Default::default(),
+            };
+            let conflicting = |id| conflicts.contains(&id);
+            let dangling = |c: &crate::sketch::Constraint| {
+                c.entities().iter().any(|id| !by_id.contains_key(id))
+                    || c.points().iter().any(|p| by_id.get(&p.entity).and_then(|e| e.point(p.index)).is_none())
+            };
+            let rels: Vec<_> = s
+                .sketch
+                .constraints
+                .iter()
+                .filter(|c| match s.relations_filter {
+                    RelationFilter::Selected => c.entities().iter().any(|id| inspected.contains(id)),
+                    RelationFilter::All => true,
+                    RelationFilter::Conflicting => conflicting(c.id),
+                    RelationFilter::Dangling => dangling(c),
+                })
+                .map(|c| (*c, conflicting(c.id), dangling(c)))
+                .collect();
+            hint(ui, &format!("{} of {} shown", rels.len(), s.sketch.constraints.len()));
+            if rels.is_empty() {
+                hint(
+                    ui,
+                    match s.relations_filter {
+                        RelationFilter::Selected if selection.is_empty() => {
+                            "Select geometry or a relation, or choose All."
+                        }
+                        RelationFilter::Selected => "No relations on this selection.",
+                        RelationFilter::All => "No stored relations in this sketch.",
+                        RelationFilter::Conflicting => "No conflicting relations.",
+                        RelationFilter::Dangling => "No dangling references.",
+                    },
+                );
+            }
+            for (c, conflict, broken) in rels {
+                ui.push_id(c.id, |ui| {
                     ui.horizontal(|ui| {
-                        let all_construction =
-                            entities.iter().all(|e| s.sketch.entity(*e).is_some_and(|e| e.construction));
+                        let text = match c.value() {
+                            Some(v) => format!("{} {}", c.name(), fmt_value(v)),
+                            None => c.name().to_owned(),
+                        };
+                        let mut text = egui::RichText::new(text);
+                        if conflict || broken {
+                            text = text.color(theme::error());
+                        }
+                        let owners = c
+                            .entities()
+                            .iter()
+                            .map(|id| {
+                                by_id
+                                    .get(id)
+                                    .map(|e| format!("{} {}", e.kind_name(), e.id))
+                                    .unwrap_or_else(|| format!("missing entity {id}"))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let status = if broken {
+                            "Missing reference. "
+                        } else if conflict {
+                            "Conflicting. "
+                        } else {
+                            ""
+                        };
                         if ui
-                            .selectable_label(all_construction, "For construction")
-                            .on_hover_text(
-                                "Construction geometry guides other entities and never becomes a profile (X)",
-                            )
+                            .selectable_label(s.selection.contains(&SketchSel::Constraint(c.id)), text)
+                            .on_hover_text(format!("{status}Relation {} on {owners}", c.id))
                             .clicked()
                         {
-                            toggle_construction = true;
+                            s.selection = vec![SketchSel::Constraint(c.id)];
                         }
-                        if ui.button(egui::RichText::new("Delete").color(theme::error())).clicked() {
-                            delete_entities = true;
-                        }
-                    });
-                }
-                // Inspect owners without making them geometry-deletion targets.
-                let inspected: std::collections::HashSet<_> = selection
-                    .iter()
-                    .flat_map(|sel| match sel {
-                        SketchSel::Entity(id) => vec![*id],
-                        SketchSel::Point(p) => vec![p.entity],
-                        SketchSel::Constraint(id) => s.sketch.constraint(*id).map(|c| c.entities()).unwrap_or_default(),
-                    })
-                    .collect();
-                let rels: Vec<_> = s
-                    .sketch
-                    .constraints
-                    .iter()
-                    .filter(|c| c.entities().iter().any(|id| inspected.contains(id)))
-                    .copied()
-                    .collect();
-                if !rels.is_empty() {
-                    ui.add_space(6.0);
-                    theme::section_label(ui, "Existing relations");
-                    for c in rels {
-                        ui.horizontal(|ui| {
-                            let text = match c.value() {
-                                Some(v) => format!("{} {}", c.name(), fmt_value(v)),
-                                None => c.name().to_owned(),
-                            };
-                            if ui.selectable_label(s.selection.contains(&SketchSel::Constraint(c.id)), text).clicked() {
-                                s.selection = vec![SketchSel::Constraint(c.id)];
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(egui::Button::new("×").small().frame(false))
+                                .on_hover_text("Delete relation")
+                                .clicked()
+                            {
+                                remove_constraint = Some(c.id);
                             }
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui
-                                    .add(egui::Button::new("×").small().frame(false))
-                                    .on_hover_text("Delete relation")
-                                    .clicked()
-                                {
-                                    remove_constraint = Some(c.id);
-                                }
-                            });
                         });
-                    }
-                }
-                // Relations that can be added.
-                let applicable = sketcher::applicable_relations(&s.sketch, &selection);
-                if !applicable.is_empty() {
-                    ui.add_space(6.0);
-                    theme::section_label(ui, "Add relation");
-                    let mut add = None;
-                    ui.horizontal_wrapped(|ui| {
-                        for (name, kind) in applicable {
-                            if ui.button(name).clicked() {
-                                add = Some(kind);
-                            }
-                        }
-                    });
-                    if let Some(kind) = add {
-                        actions.push(sketcher::add_relation(s, kind));
-                    }
-                }
-                let mut changed = false;
-                if let Some((id, v)) = value_change
-                    && let Some(c) = s.sketch.constraint_mut(id)
-                {
-                    c.set_value(v);
-                    changed = true;
-                }
-                if let Some(id) = remove_constraint {
-                    s.sketch.remove_constraint(id);
-                    s.selection.retain(|x| *x != SketchSel::Constraint(id));
-                    changed = true;
-                }
-                if toggle_construction {
-                    let all = entities.iter().all(|e| s.sketch.entity(*e).is_some_and(|e| e.construction));
-                    for e in &entities {
-                        if let Some(ent) = s.sketch.entity_mut(*e) {
-                            ent.construction = !all;
+                    })
+                });
+            }
+            // Relations that can be added.
+            let applicable = sketcher::applicable_relations(&s.sketch, &selection);
+            if !applicable.is_empty() {
+                ui.add_space(6.0);
+                theme::section_label(ui, "Add relation");
+                let mut add = None;
+                ui.horizontal_wrapped(|ui| {
+                    for (name, kind) in applicable {
+                        if ui.button(name).clicked() {
+                            add = Some(kind);
                         }
                     }
-                    changed = true;
+                });
+                if let Some(kind) = add {
+                    actions.push(sketcher::add_relation(s, kind));
                 }
-                if delete_entities {
-                    for e in &entities {
-                        s.sketch.remove_entity(*e);
+            }
+            let mut changed = false;
+            if let Some((id, v)) = value_change
+                && let Some(c) = s.sketch.constraint_mut(id)
+            {
+                c.set_value(v);
+                changed = true;
+            }
+            if let Some(id) = remove_constraint {
+                s.sketch.remove_constraint(id);
+                s.selection.retain(|x| *x != SketchSel::Constraint(id));
+                changed = true;
+            }
+            if toggle_construction {
+                let all = entities.iter().all(|e| s.sketch.entity(*e).is_some_and(|e| e.construction));
+                for e in &entities {
+                    if let Some(ent) = s.sketch.entity_mut(*e) {
+                        ent.construction = !all;
                     }
-                    s.selection.clear();
-                    changed = true;
                 }
-                if changed {
-                    solve::solve(&mut s.sketch, None, true);
-                    actions.push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
+                changed = true;
+            }
+            if delete_entities {
+                for e in &entities {
+                    s.sketch.remove_entity(*e);
                 }
+                s.selection.clear();
+                changed = true;
+            }
+            if changed {
+                solve::solve(&mut s.sketch, None, true);
+                actions.push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
             }
             ui.add_space(8.0);
             hint(ui, "Blue entities can still move; black ones are fully defined. Enter exits the sketch.");

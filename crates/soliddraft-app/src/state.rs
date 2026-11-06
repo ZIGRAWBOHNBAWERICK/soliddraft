@@ -558,6 +558,31 @@ pub enum Snap {
     Vertical,
 }
 
+/// The property list's relation scope, independent of geometry selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RelationFilter {
+    /// Relations on the selected geometry or inspected owners.
+    #[default]
+    Selected,
+    /// Every stored constraint in this sketch.
+    All,
+    /// Constraints the current solver result marks conflicting.
+    Conflicting,
+    /// Constraints with missing entity or directly referenced point IDs.
+    Dangling,
+}
+
+impl RelationFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Selected => "Selected",
+            Self::All => "All",
+            Self::Conflicting => "Conflicting",
+            Self::Dangling => "Dangling",
+        }
+    }
+}
+
 /// The sketcher while a sketch is open.
 pub struct SketchSession {
     pub feature: FeatureId,
@@ -593,6 +618,8 @@ pub struct SketchSession {
     pub relations_open: bool,
     /// Shows relation glyphs without changing the constraints or dimensions.
     pub show_relations: bool,
+    /// Scope of the Existing relations property list for this session.
+    pub relations_filter: RelationFilter,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
     /// The Modify tools' numeric and pointer-placed values.
@@ -661,6 +688,7 @@ impl SketchSession {
             auto_relations: true,
             relations_open: false,
             show_relations: true,
+            relations_filter: RelationFilter::default(),
             construction: false,
             modify: ModifyInputs::default(),
             preview: None,

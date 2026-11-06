@@ -2062,6 +2062,22 @@ fn registry() -> Vec<CommandSpec> {
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
             .agents(Agents::Mcp, "Automatic repairs take no answer. Declined gap ids, and each approved repair with its limit and approver, are saved with the source.", crate::import::params)
             .undo(Undo::Step),
+        cmd(
+            "import_scene",
+            "Import scene",
+            Icon::Import,
+            "Open an OpenUSD, glTF, URDF, OBJ or STL file as an assembly of mesh bodies",
+        )
+        .run(|_| AppAction::ImportScene(None))
+        .when(|_| !cfg!(target_arch = "wasm32"))
+        .agents(
+            Agents::Mcp,
+            "Writes the assembly, its sub-assemblies and its mesh reference bodies, then opens the assembly. \
+             The tree, names, units, up axis, transforms, colours and joints come from the file; the result's \
+             import record says what each came from and what was left out. Meshes are not solids: measure, \
+             mass and mates refuse them.",
+            crate::scene_import::params,
+        ),
         cmd("save", "Save", Icon::Glyph("save"), "Save the part")
             .key(Scope::Part, ctrl, Key::S)
             .run(|_| AppAction::Save)

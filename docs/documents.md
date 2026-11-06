@@ -12,9 +12,12 @@ crates write their files through it.
 | Part | `.dwprt` | `.dwpart` | `part.json` | `soliddraft-part/2` |
 | Assembly | `.dwasm` | | `assembly.json` | `soliddraft-assembly/1` |
 | Drawing | `.dwdrw` | `.dwdrawing` | `drawing.json` | `soliddraft-drawing/2` |
+| Mesh reference | `.dwmsh` | | `mesh.json` | `soliddraft-mesh/1` |
 
 A file under an old extension opens, and saving it writes the current name beside it. The
-old file stays where it was. Assemblies are described in [assemblies.md](assemblies.md).
+old file stays where it was. Assemblies and mesh references are described in
+[assemblies.md](assemblies.md). Scene import writes mesh references
+([exchange.md](exchange.md#scene-import)).
 
 Files with `draftwell-document`, `draftwell-part`, `draftwell-assembly` or
 `draftwell-drawing` format prefixes still open. Saving writes the SolidDraft prefixes

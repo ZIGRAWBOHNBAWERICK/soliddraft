@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<!-- written by sand3d: washing_machine at rest, metres and radians -->
+<robot name="washing_machine">
+  <link name="washing_machine">
+    <visual name="cabinet">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/cabinet.obj" />
+      </geometry>
+      <material name="plastic #f2f2f0">
+        <color rgba="0.949019608 0.949019608 0.941176471 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="dial">
+    <visual name="dial">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/dial.obj" />
+      </geometry>
+      <material name="plastic #e6e6e3">
+        <color rgba="0.901960784 0.901960784 0.890196078 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="door">
+    <visual name="glass">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/glass.obj" />
+      </geometry>
+      <material name="glass #cfe3e6 opacity=0.4">
+        <color rgba="0.811764706 0.890196078 0.901960784 0.4" />
+      </material>
+    </visual>
+    <visual name="handle">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/handle.obj" />
+      </geometry>
+    </visual>
+    <visual name="ring">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/ring.obj" />
+      </geometry>
+      <material name="painted_metal #3a3d42">
+        <color rgba="0.22745098 0.239215686 0.258823529 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="drawer">
+    <visual name="drawer">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/drawer.obj" />
+      </geometry>
+      <material name="plastic #e6e6e3">
+        <color rgba="0.901960784 0.901960784 0.890196078 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="drum">
+    <visual name="drum">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="washer_meshes/drum.obj" />
+      </geometry>
+      <material name="brushed_steel">
+        <color rgba="0.705882353 0.717647059 0.733333333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="dial_turn" type="continuous">
+    <origin xyz="0.3 -0.15 0.775" rpy="1.57079633 0 1.57079633" />
+    <parent link="washing_machine" />
+    <child link="dial" />
+    <axis xyz="0 0 1" />
+  </joint>
+  <joint name="door_hinge" type="revolute">
+    <origin xyz="0.345 -0.24 0.4" rpy="1.57079633 0 1.57079633" />
+    <parent link="washing_machine" />
+    <child link="door" />
+    <axis xyz="0 -1 0" />
+    <limit lower="0" upper="2.49582083" effort="0" velocity="0" />
+  </joint>
+  <joint name="drawer_slide" type="prismatic">
+    <origin xyz="0.3 0.15 0.775" rpy="1.57079633 0 1.57079633" />
+    <parent link="washing_machine" />
+    <child link="drawer" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.2" effort="0" velocity="0" />
+  </joint>
+  <joint name="drum_spin" type="continuous">
+    <origin xyz="0.3 0 0.4" rpy="1.57079633 0 1.57079633" />
+    <parent link="washing_machine" />
+    <child link="drum" />
+    <axis xyz="0 0 1" />
+  </joint>
+</robot>

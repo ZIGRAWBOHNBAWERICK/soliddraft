@@ -16,8 +16,33 @@ A `.dwasm` file is a document envelope with these entries:
 | `assembly.json` | required | the truth, below |
 | `placements.bin` | required when present | unnamed components of a large assembly, as fixed records |
 | `cache/refs/<id>/<revision>/...` | optional | display copies at the pinned revisions |
+| `import.json` | optional | the record of the scene import that wrote the assembly, if one did |
 
-Writing is deterministic: the same assembly and copies give the same bytes.
+Writing is deterministic: the same assembly and copies give the same bytes. `import.json`
+is outside both hashes and is kept as read when the assembly is saved; see
+[exchange.md](exchange.md#scene-import).
+
+## Mesh references
+
+An assembly places parts, sub-assemblies and mesh references. A mesh reference (`.dwmsh`,
+`crates/soliddraft-assembly/src/reference_mesh.rs`) is an imported mesh: it is drawn,
+picked, hidden, coloured and moved like a part, and has no features and no exact solid.
+Measure, mass properties, mates and drawing projection refuse it with "is a mesh
+reference body; it has no exact solid". Scene import writes them
+([exchange.md](exchange.md#scene-import)).
+
+| Entry | Section | What |
+|---|---|---|
+| `manifest.json` | | id, kind `mesh`, format `soliddraft-mesh/1`; the geometry hash is the mesh's hash |
+| `mesh.json` | required | the name, the source (file name, format, SHA-256, node in the file), vertex and triangle counts, and the BLAKE3 hash of `mesh.bin` |
+| `mesh.bin` | required | the mesh as a [display mesh](#displaybin), in millimetres in the body's frame |
+
+The revision is the semantic hash of `mesh.json`, which names the mesh's hash, so a
+changed mesh is a new revision and a renamed one keeps its geometry hash. A reader refuses
+a file whose `mesh.bin` is not the mesh `mesh.json` names. An assembly's display copy of a
+mesh reference holds the same `mesh.bin` bytes as `display.bin`; without the copy, the
+loader reads the mesh from the file itself, with no kernel. A mesh reference has one
+level of detail.
 
 ## assembly.json
 

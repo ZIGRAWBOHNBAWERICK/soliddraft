@@ -1031,6 +1031,33 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::ImportScene(path) => {
+                let path = path.or_else(|| {
+                    crate::platform::open_path(
+                        "Import scene",
+                        "OpenUSD, glTF, URDF, OBJ and STL",
+                        crate::scene_import::EXTENSIONS,
+                    )
+                });
+                let Some(path) = path else { return };
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported");
+                let default = format!("{stem}.{}", soliddraft_document::kind::ASSEMBLY_EXTENSION);
+                let Some(out) = crate::platform::save_path(
+                    "Save the imported assembly",
+                    "SolidDraft assembly",
+                    soliddraft_document::kind::ASSEMBLY_EXTENSION,
+                    &default,
+                ) else {
+                    return;
+                };
+                match crate::scene_import::import(&path, &out, crate::scene_import::Choices::default()) {
+                    Ok(record) => {
+                        self.state.note(crate::scene_import::said(&record), NoteKind::Ok);
+                        self.apply(ctx, AppAction::Assembly(crate::assembly::AssemblyAction::Open(out)));
+                    }
+                    Err(message) => self.state.note(message, NoteKind::Error),
+                }
+            }
             AppAction::Open(path) => {
                 let path =
                     path.or_else(|| crate::platform::open_path("Open", "SolidDraft documents", &file::OPEN_EXTENSIONS));

@@ -50,6 +50,8 @@ use crate::schema::{Assembly, Component, FORMAT, Invalid, OccurrenceAppearance, 
 pub const ASSEMBLY: &str = "assembly.json";
 /// The folder of display copies.
 pub const REFS: &str = "cache/refs/";
+/// The scene import record ([`Assembly::import`]).
+pub const IMPORT: &str = "import.json";
 /// The file name extension assemblies are saved under.
 pub const EXTENSION: &str = soliddraft_document::kind::ASSEMBLY_EXTENSION;
 
@@ -240,6 +242,9 @@ impl Assembly {
         if !self.settings.is_default() {
             m.sections.push(Section::optional(settings::ENTRY));
         }
+        if self.import.is_some() {
+            m.sections.push(Section::optional(IMPORT));
+        }
         if has_copies {
             m.sections.push(Section::optional(REFS));
         }
@@ -261,6 +266,9 @@ impl Assembly {
         let settings_json = a.settings.to_json();
         if !a.settings.is_default() {
             entries.push(Entry::new(settings::ENTRY, settings_json.as_bytes()));
+        }
+        if let Some(import) = &a.import {
+            entries.push(Entry::new(IMPORT, import.as_bytes()));
         }
         // Copies in folder order, each copy's entries in name order, once each.
         let mut sorted: BTreeMap<String, &Arc<[u8]>> = BTreeMap::new();
@@ -392,6 +400,8 @@ impl AssemblyPackage {
         if let Ok(Some(text)) = package.read_text(settings::ENTRY) {
             assembly.settings = Settings::from_json(&text).unwrap_or_default();
         }
+        // Optional: an import record this version cannot read is dropped.
+        assembly.import = package.read_text(IMPORT).ok().flatten();
         Ok(AssemblyPackage { manifest, assembly: Arc::new(assembly), package })
     }
 

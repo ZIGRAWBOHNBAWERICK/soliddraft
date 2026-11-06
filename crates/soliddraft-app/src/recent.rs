@@ -138,6 +138,7 @@ pub fn kind_name(kind: Option<DocKind>) -> &'static str {
         Some(DocKind::Part) => "Part",
         Some(DocKind::Assembly) => "Assembly",
         Some(DocKind::Drawing) => "Drawing",
+        Some(DocKind::Mesh) => "Mesh reference",
         None => "Document",
     }
 }

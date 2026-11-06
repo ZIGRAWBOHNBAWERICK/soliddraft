@@ -55,7 +55,9 @@ pub use backup::{BackupOutcome, Backups};
 pub use hash::ContentHash;
 pub use id::{ConfigScope, ConfigurationId, DisplayStateId, DocumentId};
 pub use index::{FolderIndex, IndexEntry};
-pub use kind::{DRAWING_EXTENSION, DocKind, LEGACY_DRAWING_EXTENSION, LEGACY_PART_EXTENSION, PART_EXTENSION};
+pub use kind::{
+    DRAWING_EXTENSION, DocKind, LEGACY_DRAWING_EXTENSION, LEGACY_PART_EXTENSION, MESH_EXTENSION, PART_EXTENSION,
+};
 pub use locations::{FileLocations, LocationKind};
 pub use manifest::{
     EnvelopeError, Identity, Manifest, Package, Section, identify, identify_file, thumbnail, thumbnail_of,

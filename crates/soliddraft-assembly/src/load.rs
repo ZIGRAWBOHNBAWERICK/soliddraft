@@ -210,6 +210,9 @@ impl Lookup {
                 return Ok((m, None));
             }
         }
+        if r.kind == DocKind::Mesh {
+            return self.reference_mesh(r);
+        }
         let made = |display: &dyn DisplaySource, bytes: &[u8]| match quality {
             None => display.part_mesh(bytes),
             Some(q) => display.part_mesh_at(bytes, q),
@@ -244,6 +247,32 @@ impl Lookup {
 }
 
 impl Lookup {
+    /// A mesh reference body's mesh from its file, which needs no kernel: at the pinned
+    /// revision, or the current one with a problem saying so.
+    fn reference_mesh(&self, r: &DocRef) -> Result<(DisplayMesh, Option<String>), String> {
+        let id = r.id.ok_or("the reference has no document id")?;
+        if let Some(store) = &self.revisions
+            && let Ok(bytes) = store.fetch(id, &r.pinned)
+            && matches_reference(&bytes, r)
+        {
+            return crate::reference_mesh::display(&bytes).map(|(m, _)| (m, None));
+        }
+        match self.current(r)? {
+            Some((bytes, now)) => {
+                let (m, _) = crate::reference_mesh::display(&bytes)?;
+                let problem = (now != r.pinned).then(|| {
+                    format!(
+                        "revision {} has no copy here; showing the current revision {}",
+                        r.pinned.short(),
+                        now.short()
+                    )
+                });
+                Ok((m, problem))
+            }
+            None => Err(format!("no copy of revision {} and {} cannot be found", r.pinned.short(), r.path)),
+        }
+    }
+
     /// A part's mesh at `level` of `quality` (`None` for its own) at the pinned
     /// revision: from the copies first, then from the referenced file while it is at
     /// that revision, then from the revision store. Unlike the standard level there is

@@ -2,6 +2,7 @@
 //! cube, origin axes, plane names, grid readout, hover label) and the hand-off to the wgpu
 //! renderer.
 
+mod annotation_drag;
 pub mod assembly;
 pub mod camera;
 pub mod dimensions;
@@ -85,6 +86,7 @@ pub struct ViewportState {
     pub rect: Rect,
     /// The dimensions a selected body showed last frame.
     pub dimensions: Vec<dimensions::ShownDimension>,
+    annotation_drag: Option<annotation_drag::AnnotationDrag>,
     /// Turns the pointer, the wheel and held keys into camera moves, by the user's preset.
     pub router: Router,
     pick: Arc<Mutex<PickSample>>,
@@ -104,6 +106,7 @@ impl Default for ViewportState {
             hover_point: None,
             rect: Rect::NOTHING,
             dimensions: Vec::new(),
+            annotation_drag: None,
             router: Router::new(&NavigationSettings::new(crate::settings::InstallKind::Existing), false),
             pick: Arc::new(Mutex::new(PickSample::default())),
             cube_hover: None,
@@ -170,6 +173,11 @@ const CUBE_FACES: [(StandardView, Vec3, &str); 6] = [
 ];
 
 impl ViewportState {
+    /// An annotation owns the pointer until its primary-button gesture ends.
+    pub(crate) fn moving_dimension(&self) -> bool {
+        self.annotation_drag.is_some()
+    }
+
     /// How many physical pixels a millimetre covers in the last frame's view, for the
     /// display level choice.
     pub fn projection(&self, pixels_per_point: f32) -> soliddraft_tessellation::Projection {
@@ -210,7 +218,23 @@ impl ViewportState {
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "3D viewport"));
         let ppp = ui.ctx().pixels_per_point();
-        events.fit = self.navigate(ui, &response, rect, sketching, nav);
+        let annotation_gesture = if !sketching && dimension_edit.is_none() {
+            annotation_drag::input(
+                &mut self.annotation_drag,
+                &self.dimensions,
+                &self.camera,
+                rect,
+                ui,
+                doc,
+                &mut events,
+            )
+        } else {
+            self.annotation_drag = None;
+            false
+        };
+        if !annotation_gesture {
+            events.fit = self.navigate(ui, &response, rect, sketching, nav);
+        }
         let scene = ReferenceScene::new(&visible, sketching, doc.bounds(), &self.camera);
 
         // Hover pick from the last id-buffer readback. The readback lags one
@@ -305,22 +329,35 @@ impl ViewportState {
         if visible.body {
             self.paint_highlights(&painter, doc, selection, rect);
         }
-        // A selected body shows the dimensions that build it. A click on one keeps the
-        // body selected and a double-click edits it, at the dimension when it is a value
-        // the viewport can take; a double-click on the part selects the body.
-        let pointer = response.hover_pos();
-        let dims = if selection == Some(Selection::Body) && !sketching && visible.body {
-            dimensions::paint(&painter, &self.camera, rect, doc, pointer)
+        // Label gestures take precedence over body picking and camera navigation.
+        let pointer = ui.input(|i| i.pointer.interact_pos()).filter(|p| rect.contains(*p));
+        let dims = if !sketching {
+            dimensions::paint(
+                &painter,
+                &self.camera,
+                rect,
+                doc,
+                pointer,
+                selection == Some(Selection::Body) && visible.body,
+                &visible.sketches,
+                self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
+            )
         } else {
             Vec::new()
         };
-        if let Some(d) = pointer.and_then(|p| dims.iter().find(|d| d.rect.contains(p))) {
+        if annotation_gesture {
             events.clicked = None;
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            events.clicked_reference = None;
+        }
+        if let Some(d) = pointer.and_then(|p| dims.iter().rev().find(|d| d.rect.contains(p))) {
+            events.clicked = None;
+            if self.annotation_drag.is_none() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
             if response.double_clicked_by(egui::PointerButton::Primary) {
                 events.actions.push(d.edit_action());
             }
-            response.clone().on_hover_text_at_pointer(format!("{} · double-click to edit", d.tip));
+            response.clone().on_hover_text_at_pointer(format!("{} · drag to move · double-click to edit", d.tip));
         } else if response.double_clicked_by(egui::PointerButton::Primary)
             && !sketching
             && self.hover.is_some()

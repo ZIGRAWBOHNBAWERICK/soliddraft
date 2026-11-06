@@ -1552,6 +1552,17 @@ fn paint_dimension_lines(
     color: Color32,
 ) {
     let st = Stroke::new(1.0, color);
+    let label_leader = |a: P2, b: P2| {
+        let span = b.sub(a);
+        let length2 = span.dot(span);
+        let t = if length2 > 0.0 { (label.sub(a).dot(span) / length2).clamp(0.0, 1.0) } else { 0.0 };
+        let nearest = a.add(span.scale(t));
+        if nearest.dist(label) > 1e-6
+            && let Some(at) = frame.screen(nearest)
+        {
+            painter.line_segment([at, lp], st);
+        }
+    };
     match c.geometry_kind() {
         ConstraintKind::Distance { a, b, kind, .. } => {
             let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return };
@@ -1578,6 +1589,7 @@ fn paint_dimension_lines(
             ext(spa, sa);
             ext(spb, sb);
             painter.line_segment([sa, sb], st);
+            label_leader(da, db);
             let dir = sb - sa;
             if dir.length() > 20.0 {
                 arrow(painter, sa, -dir, color);
@@ -1600,6 +1612,7 @@ fn paint_dimension_lines(
             painter.line_segment([sp, sa], Stroke::new(0.8, color.gamma_multiply(0.8)));
             painter.line_segment([sf, sb], Stroke::new(0.8, color.gamma_multiply(0.8)));
             painter.line_segment([sa, sb], st);
+            label_leader(da, db);
             let d = sb - sa;
             if d.length() > 20.0 {
                 arrow(painter, sa, -d, color);
@@ -1680,60 +1693,42 @@ pub fn value_pill(painter: &egui::Painter, at: Pos2, text: String, ink: Color32,
     r
 }
 
-/// Draws the dimensions of a sketch that is not open, on its plane, and returns each
-/// value's rectangle with its constraint. A value that would cover one of the `taken`
-/// values, or an earlier one of this sketch, moves clear of it on a short leader. A value
-/// under `pointer` shows as hovered.
+/// Draws closed-sketch dimensions with viewer-facing text at model-space positions.
+/// Lines stay attached to the sketch; a label lifted off its plane gets a 3D leader.
+#[allow(clippy::too_many_arguments)]
 pub fn paint_closed_dimensions(
     painter: &egui::Painter,
     camera: &Camera,
     rect: Rect,
     plane: Plane,
     sketch: &Sketch,
-    taken: &[Rect],
+    position: impl Fn(ConstraintId, Vec3) -> Vec3,
     pointer: Option<Pos2>,
-) -> Vec<(ConstraintId, Rect)> {
+) -> Vec<(ConstraintId, Rect, Vec3)> {
     let frame = Frame { plane, camera, rect };
-    let mut taken = taken.to_vec();
+    let gv = |v: soliddraft_kernel_api::Vec3| Vec3::new(v.x as f32, v.y as f32, v.z as f32);
     let mut shown = Vec::new();
     for c in sketch.constraints.iter().filter(|c| c.is_dimension()) {
         let Some(label) = c.label() else { continue };
+        let world = position(c.id, gv(plane.to_world(soliddraft_kernel_api::Point2::new(label.u, label.v))));
+        let Some(at) = camera.project(world, rect) else { continue };
+        let relative = world - gv(plane.origin);
+        let label = P2::new(relative.dot(gv(plane.x_dir)) as f64, relative.dot(gv(plane.y_dir())) as f64);
         let Some(lp) = frame.screen(label) else { continue };
         let text = dim_text(c, sketch);
         let size =
             painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size() + vec2(12.0, 6.0);
-        let at = clear_spot(lp, size, &taken);
         let hover = pointer.is_some_and(|p| Rect::from_center_size(at, size).contains(p));
         let color = if hover { theme::accent() } else { theme::ink().gamma_multiply(0.7) };
         paint_dimension_lines(painter, &frame, sketch, c, label, lp, color);
-        if at != lp {
+        if at.distance_sq(lp) > 0.01 {
             painter.line_segment([lp, at], Stroke::new(1.0, color));
         }
         let (bg, stroke) = if hover { (theme::hover(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
         let r = value_pill(painter, at, text, theme::ink(), bg, Stroke::new(1.0, stroke));
-        taken.push(r);
-        shown.push((c.id, r));
+        shown.push((c.id, r, world));
     }
     shown
-}
-
-/// Where a value of `size` centred near `at` covers none of `taken`: `at` itself, or just
-/// below, above, right or left of the first value it would cover.
-fn clear_spot(at: Pos2, size: egui::Vec2, taken: &[Rect]) -> Pos2 {
-    let free = |p: Pos2| !taken.iter().any(|t| t.intersects(Rect::from_center_size(p, size).expand(2.0)));
-    let Some(t) = taken.iter().find(|t| t.intersects(Rect::from_center_size(at, size).expand(2.0))) else {
-        return at;
-    };
-    let gap = 4.0;
-    [
-        pos2(at.x, t.bottom() + gap + size.y / 2.0),
-        pos2(at.x, t.top() - gap - size.y / 2.0),
-        pos2(t.right() + gap + size.x / 2.0, at.y),
-        pos2(t.left() - gap - size.x / 2.0, at.y),
-    ]
-    .into_iter()
-    .find(|&p| free(p))
-    .unwrap_or(at)
 }
 
 fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession, snapped: Option<P2>) {

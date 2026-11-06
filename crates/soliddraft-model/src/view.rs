@@ -45,10 +45,50 @@ pub enum ViewItem {
     Axis(DatumAxis),
 }
 
+/// Stable identity of a viewport dimension. It does not depend on formatted text or list order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AnnotationKey {
+    /// The owning feature, including the sketch for sketch constraints.
+    pub feature: FeatureId,
+    /// Which existing dimension of that feature is shown.
+    pub value: AnnotationValue,
+}
+
+/// Existing values that can own a viewport label, not new measurement types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AnnotationValue {
+    /// A sketch dimension's persistent constraint identity.
+    Sketch(soliddraft_sketch::ConstraintId),
+    /// Extrusion or hole depth.
+    Depth,
+    /// Revolve, draft or pattern angle.
+    Angle,
+    /// Fillet radius.
+    Radius,
+    /// Chamfer distance.
+    Distance,
+    /// Shell thickness.
+    Thickness,
+    /// Hole diameter.
+    Diameter,
+    /// Hole tip angle.
+    Tip,
+    /// Counterbore dimensions.
+    Counterbore,
+    /// Countersink dimensions.
+    Countersink,
+    /// Pattern instance count.
+    Count,
+    /// Linear pattern spacing.
+    Spacing,
+}
+
 /// The part's explicit show and hide choices.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Visibility {
     choices: BTreeMap<ViewItem, bool>,
+    // Free 3D label placement is session-local; view.json has no annotation schema.
+    pub(crate) annotations: BTreeMap<AnnotationKey, [f32; 3]>,
 }
 
 /// `view.json`: the items shown and hidden, each list in item order.
@@ -63,6 +103,11 @@ struct Entry {
 }
 
 impl Visibility {
+    /// A dimension label's model-space position, independent of camera and geometry.
+    pub fn annotation_position(&self, key: AnnotationKey) -> Option<[f32; 3]> {
+        self.annotations.get(&key).copied()
+    }
+
     /// The choice for `item`: shown, hidden, or `None` to follow the defaults.
     pub fn choice(&self, item: ViewItem) -> Option<bool> {
         self.choices.get(&item).copied()

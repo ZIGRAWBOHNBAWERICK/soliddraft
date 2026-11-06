@@ -1846,6 +1846,9 @@ impl Document {
     }
 
     pub fn undo_interactive(&mut self) -> Result<String, String> {
+        if self.model.annotation_history(false) {
+            return self.model.undo_deferred().map_err(|error| error.to_string());
+        }
         let label = self.model.undo_deferred().map_err(|error| error.to_string())?;
         self.touch();
         self.after_deferred_change();
@@ -1856,6 +1859,9 @@ impl Document {
     }
 
     pub fn redo_interactive(&mut self) -> Result<String, String> {
+        if self.model.annotation_history(true) {
+            return self.model.redo_deferred().map_err(|error| error.to_string());
+        }
         let label = self.model.redo_deferred().map_err(|error| error.to_string())?;
         self.touch();
         self.after_deferred_change();
@@ -2098,6 +2104,9 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<String, String> {
+        if self.model.annotation_history(false) {
+            return self.model.undo_deferred().map_err(|error| error.to_string());
+        }
         let journal = self.model.journal_command(|| serde_json::json!({"op":"app_undo"}));
         journal.finish((|| {
             let label = self.model.undo().map_err(|e| e.to_string())?;
@@ -2108,6 +2117,9 @@ impl Document {
     }
 
     pub fn redo(&mut self) -> Result<String, String> {
+        if self.model.annotation_history(true) {
+            return self.model.redo_deferred().map_err(|error| error.to_string());
+        }
         let journal = self.model.journal_command(|| serde_json::json!({"op":"app_redo"}));
         journal.finish((|| {
             let label = self.model.redo().map_err(|e| e.to_string())?;
@@ -2695,6 +2707,14 @@ impl Document {
         self.model.set_visibility(item.to_model(), shown);
         self.touch();
         self.mesh_version += 1;
+    }
+
+    /// Records one annotation gesture without rebuilding or invalidating a proof.
+    pub fn move_annotation(&mut self, key: model::view::AnnotationKey, position: Vec3) -> Result<(), String> {
+        self.model
+            .execute_deferred(model::Command::SetAnnotationPlacement { key, position: Some(position.to_array()) })
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     /// Labels every face and edge of the displayed body by the feature that

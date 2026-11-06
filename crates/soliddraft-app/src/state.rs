@@ -386,6 +386,10 @@ pub enum Tool {
     Trim,
     /// Trims or extends two picked lines/arcs to a shared corner.
     TrimCorner,
+    /// Removes the portion between two chosen boundary crossings.
+    TrimInside,
+    /// Removes the portions outside two chosen boundary crossings.
+    TrimOutside,
     /// Lengthens the end of a line or arc under the pointer to the nearest curve beyond it.
     Extend,
     /// Copies the selected chain at a distance.
@@ -412,6 +416,8 @@ impl Tool {
             Tool::Polygon => "Polygon",
             Tool::Trim => "Trim",
             Tool::TrimCorner => "Trim corner",
+            Tool::TrimInside => "Trim inside",
+            Tool::TrimOutside => "Trim outside",
             Tool::Extend => "Extend",
             Tool::Offset => "Offset",
             Tool::Mirror => "Mirror entities",
@@ -428,9 +434,19 @@ impl Tool {
         )
     }
 
+    /// The modes of the existing Trim command.
+    pub fn trims(self) -> bool {
+        matches!(self, Tool::Trim | Tool::TrimCorner) || self.bounded_trim()
+    }
+
+    /// Trim modes that collect two bounding curves before target picks.
+    pub fn bounded_trim(self) -> bool {
+        matches!(self, Tool::TrimInside | Tool::TrimOutside)
+    }
+
     /// Tools that change the line or arc under the pointer, and preview the change first.
     pub fn picks_curve(self) -> bool {
-        matches!(self, Tool::Trim | Tool::TrimCorner | Tool::Extend)
+        self.trims() || self == Tool::Extend
     }
 
     /// Tools that keep the selection as their input.
@@ -441,17 +457,16 @@ impl Tool {
     /// The tools of the ribbon's Modify group, which make or change geometry through
     /// [`crate::sketch::tools::Operation`].
     pub fn modifies(self) -> bool {
-        matches!(
-            self,
-            Tool::Polygon
-                | Tool::Trim
-                | Tool::TrimCorner
-                | Tool::Extend
-                | Tool::Offset
-                | Tool::Mirror
-                | Tool::LinearPattern
-                | Tool::CircularPattern
-        )
+        self.trims()
+            || matches!(
+                self,
+                Tool::Polygon
+                    | Tool::Extend
+                    | Tool::Offset
+                    | Tool::Mirror
+                    | Tool::LinearPattern
+                    | Tool::CircularPattern
+            )
     }
 }
 
@@ -559,6 +574,8 @@ pub struct SketchSession {
     pub trim_drag: Option<TrimDrag>,
     /// The first corner-trim target and the portion to keep, before the second pick.
     pub corner_first: Option<(EntityId, P2)>,
+    /// Up to two bounding curves, retained across inside/outside target edits.
+    pub trim_bounds: Vec<EntityId>,
     pub dim_edit: Option<DimEdit>,
     /// Smart dimension: the first picked item, waiting for a second or a placement.
     pub dim_first: Option<SketchSel>,
@@ -629,6 +646,7 @@ impl SketchSession {
             drag: None,
             trim_drag: None,
             corner_first: None,
+            trim_bounds: Vec::new(),
             dim_edit: None,
             dim_first: None,
             dim_second: None,
@@ -647,10 +665,16 @@ impl SketchSession {
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
         self.cancel_trim();
-        if self.tool == Tool::TrimCorner {
+        let bounds = if self.tool.bounded_trim() && tool.bounded_trim() {
+            std::mem::take(&mut self.trim_bounds)
+        } else {
+            Vec::new()
+        };
+        if self.tool == Tool::TrimCorner || self.tool.bounded_trim() {
             self.selection.clear();
         }
         self.corner_first = None;
+        self.trim_bounds = bounds;
         self.tool = tool;
         self.pending.clear();
         self.chain_from = None;
@@ -661,6 +685,9 @@ impl SketchSession {
         self.drag = None;
         if !tool.selects() {
             self.selection.clear();
+        }
+        if tool.bounded_trim() {
+            self.selection = self.trim_bounds.iter().copied().map(SketchSel::Entity).collect();
         }
     }
 

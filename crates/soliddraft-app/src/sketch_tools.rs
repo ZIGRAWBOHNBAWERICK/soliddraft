@@ -74,6 +74,14 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
             Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
         };
     }
+    if let Operation::TrimBounded { entity, a, b, outside } = &operation {
+        return match s.sketch.trim_bounded_preview(*entity, *a, *b, *outside) {
+            Ok(p) => {
+                ToolPreview { added: p.kept, removed: p.removed, operation: Some(operation), ..Default::default() }
+            }
+            Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
+        };
+    }
     let mut copy = s.sketch.clone();
     match copy.apply_operation(&operation) {
         Ok(ids) => ToolPreview {
@@ -134,13 +142,19 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
     if !tool.modifies() {
         return;
     }
-    if matches!(tool, Tool::Trim | Tool::TrimCorner) {
-        ui.horizontal(|ui| {
+    if tool.trims() {
+        ui.horizontal_wrapped(|ui| {
             if ui.selectable_label(s.tool == Tool::Trim, "Power / closest").clicked() {
                 s.set_tool(Tool::Trim);
             }
             if ui.selectable_label(s.tool == Tool::TrimCorner, "Corner").clicked() {
                 s.set_tool(Tool::TrimCorner);
+            }
+            if ui.selectable_label(s.tool == Tool::TrimInside, "Inside").clicked() {
+                s.set_tool(Tool::TrimInside);
+            }
+            if ui.selectable_label(s.tool == Tool::TrimOutside, "Outside").clicked() {
+                s.set_tool(Tool::TrimOutside);
             }
         });
     }
@@ -166,6 +180,32 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                     "Pick the part of the second line or arc to keep. Both ends will meet at the previewed corner."
                 },
             );
+            if let Some(why) = s.preview.as_ref().and_then(|p| p.refused.as_deref()) {
+                ui.label(egui::RichText::new(why).size(11.0).color(theme::error()));
+            }
+        }
+        Tool::TrimInside | Tool::TrimOutside => {
+            hint(
+                ui,
+                match s.trim_bounds.len() {
+                    0 => "Pick the first bounding line, arc or circle.",
+                    1 => "Pick a different second bounding curve.",
+                    _ => "Pick a line or arc crossing each bound once.",
+                },
+            );
+            hint(
+                ui,
+                if tool == Tool::TrimInside {
+                    "Remove inside. Ignore other crossings."
+                } else {
+                    "Keep inside. Ignore other crossings."
+                },
+            );
+            if !s.trim_bounds.is_empty() && ui.button("Choose bounds again").clicked() {
+                s.trim_bounds.clear();
+                s.selection.clear();
+                s.preview = None;
+            }
             if let Some(why) = s.preview.as_ref().and_then(|p| p.refused.as_deref()) {
                 ui.label(egui::RichText::new(why).size(11.0).color(theme::error()));
             }
@@ -262,6 +302,13 @@ pub fn operation_schema() -> Value {
             ("b", id.clone()),
             ("keep_a", point.clone()),
             ("keep_b", point.clone()),
+        ]),
+        object(&[
+            ("tool", constant("trim_bounded")),
+            ("entity", id.clone()),
+            ("a", id.clone()),
+            ("b", id.clone()),
+            ("outside", boolean("Remove outside portions when true, otherwise remove the inside interval")),
         ]),
         object(&[
             ("tool", constant("extend")),

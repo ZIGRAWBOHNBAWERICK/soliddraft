@@ -326,6 +326,11 @@ pub fn run(
                 corner_click(s, &frame, pos, &mut actions);
             }
         }
+        Tool::TrimInside | Tool::TrimOutside => {
+            if clicked && let Some(pos) = hover_pos {
+                bounded_trim_click(s, &frame, pos, &mut actions);
+            }
+        }
         Tool::Trim | Tool::Extend => {
             let dragging = s.tool == Tool::Trim && trim_input(ui, s, &frame, resp, &mut actions);
             if clicked && !dragging {
@@ -527,6 +532,34 @@ fn corner_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &m
         }
         None => s.say(
             s.preview.as_ref().and_then(|p| p.refused.clone()).unwrap_or_else(|| "Pick the second line or arc".into()),
+        ),
+    }
+}
+
+fn bounded_trim_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &mut Vec<AppAction>) {
+    if s.trim_bounds.len() < 2 {
+        if let Some(id) = hit_curve(frame, &s.sketch, pos) {
+            if s.trim_bounds.contains(&id) {
+                s.say("Choose a different bounding curve");
+            } else {
+                s.trim_bounds.push(id);
+                s.selection = s.trim_bounds.iter().copied().map(SketchSel::Entity).collect();
+                s.preview = None;
+            }
+        } else {
+            s.say("Pick a bounding line, arc or circle");
+        }
+        return;
+    }
+    match s.preview.as_ref().and_then(|p| p.operation.clone()) {
+        Some(operation) => {
+            sketch_tools::apply(s, &operation, actions);
+        }
+        None => s.say(
+            s.preview
+                .as_ref()
+                .and_then(|p| p.refused.clone())
+                .unwrap_or_else(|| "Pick an open target line or arc".into()),
         ),
     }
 }
@@ -739,9 +772,25 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
                 }
             }
         }
+        Tool::TrimInside | Tool::TrimOutside => {
+            if let [a, b] = s.trim_bounds.as_slice() {
+                let mut preview = sketch_tools::try_operation(
+                    s,
+                    Operation::TrimBounded { entity: id, a: *a, b: *b, outside: s.tool == Tool::TrimOutside },
+                );
+                preview.target = Some(id);
+                preview
+            } else {
+                ToolPreview {
+                    target: Some(id),
+                    refused: s.trim_bounds.contains(&id).then(|| "Choose a different bounding curve".into()),
+                    ..Default::default()
+                }
+            }
+        }
         Tool::Trim => match s.sketch.trim_preview(id, at) {
             Ok(trim) => ToolPreview {
-                removed: vec![trim.removed],
+                removed: trim.removed,
                 target: Some(id),
                 operation: Some(Operation::Trim { entity: id, at }),
                 ..Default::default()
@@ -966,6 +1015,8 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
         | Tool::Dimension
         | Tool::Trim
         | Tool::TrimCorner
+        | Tool::TrimInside
+        | Tool::TrimOutside
         | Tool::Extend
         | Tool::Offset
         | Tool::Mirror
@@ -1958,6 +2009,10 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
         (Tool::TrimCorner, _) if s.corner_first.is_none() => "Corner: first pick",
         (Tool::TrimCorner, _) => "Corner: second pick",
+        (Tool::TrimInside | Tool::TrimOutside, _) if s.trim_bounds.is_empty() => "Trim: first bound",
+        (Tool::TrimInside | Tool::TrimOutside, _) if s.trim_bounds.len() == 1 => "Trim: second bound",
+        (Tool::TrimInside, _) => "Trim inside: pick targets",
+        (Tool::TrimOutside, _) => "Trim outside: pick targets",
         (Tool::Trim, _) => "Trim: click or drag",
         (Tool::Extend, _) => "Extend: click the end of a line or arc to lengthen; Esc or right-click ends",
         (Tool::Offset, _) => "Offset: drag a selected curve to set distance and side, then Apply",

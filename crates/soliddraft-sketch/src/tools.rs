@@ -59,6 +59,17 @@ pub enum Operation {
         /// A point on the portion of the second curve to keep.
         keep_b: P2,
     },
+    /// Remove the inside or outside portions between two selected boundary crossings.
+    TrimBounded {
+        /// Open line or arc to trim.
+        entity: EntityId,
+        /// First bounding curve, distinct from the target.
+        a: EntityId,
+        /// Second bounding curve, distinct from the first and target.
+        b: EntityId,
+        /// Remove the outside portions when true, otherwise remove the inside interval.
+        outside: bool,
+    },
     /// Extend one endpoint to the nearest intersection with a bounded entity.
     Extend {
         /// Line or arc to extend.
@@ -114,11 +125,11 @@ pub struct ToolError(pub String);
 
 type Result<T, E = ToolError> = std::result::Result<T, E>;
 
-/// What a trim at a point would do: the interval that goes and the pieces that stay.
+/// What a trim would remove and keep, in target traversal order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrimPreview {
-    /// The interval of the target between its nearest crossings, which the trim removes.
-    pub removed: EntityKind,
+    /// The portions of the target that disappear.
+    pub removed: Vec<EntityKind>,
     /// The pieces of the target that remain, from its start to its end.
     pub kept: Vec<EntityKind>,
 }
@@ -484,6 +495,10 @@ impl Sketch {
             }
             Operation::Trim { entity: id, at } => self.trim_interval(*id, *at),
             Operation::TrimCorner { a, b, keep_a, keep_b } => self.trim_corner(*a, *b, *keep_a, *keep_b),
+            Operation::TrimBounded { entity, a, b, outside } => {
+                let preview = self.trim_bounded_preview(*entity, *a, *b, *outside)?;
+                self.replace_tool_entity(*entity, preview.kept)
+            }
             Operation::Extend { entity: id, end, boundary } => self.extend_to(*id, *end, *boundary),
             Operation::Offset { entities, distance } => self.offset_chain(entities, *distance),
             Operation::Mirror { entities, axis_start, axis_end } => {
@@ -614,12 +629,12 @@ impl Sketch {
                 return refuse("pick inside a trim interval, not at an intersection");
             }
             if cuts.len() < 2 {
-                return Ok(TrimPreview { removed: target.kind, kept: Vec::new() });
+                return Ok(TrimPreview { removed: vec![target.kind], kept: Vec::new() });
             }
             let next = cuts.iter().position(|p| angle(*p) > angle(pick)).unwrap_or(0);
             let previous = (next + cuts.len() - 1) % cuts.len();
             return Ok(TrimPreview {
-                removed: EntityKind::Arc { center, start: cuts[previous], end: cuts[next] },
+                removed: vec![EntityKind::Arc { center, start: cuts[previous], end: cuts[next] }],
                 kept: vec![EntityKind::Arc { center, start: cuts[next], end: cuts[previous] }],
             });
         }
@@ -646,7 +661,7 @@ impl Sketch {
             .filter(|(a, b)| point_at(target.kind, *a).dist(point_at(target.kind, *b)) > EPS)
             .map(|(a, b)| piece(a, b))
             .collect();
-        Ok(TrimPreview { removed: piece(pair[0], pair[1]), kept })
+        Ok(TrimPreview { removed: vec![piece(pair[0], pair[1])], kept })
     }
 
     /// Freely extends a line or arc along its supporting curve toward a pointer.
@@ -806,6 +821,70 @@ impl Sketch {
         trial.constrain(ConstraintKind::Coincident { a: preview.joint[0], b: preview.joint[1] });
         *self = trial;
         Ok(vec![a, b])
+    }
+
+    /// Trims an open target between two distinct, transverse boundary crossings.
+    /// Other curves do not contribute cuts. Zero/multiple crossings are refused.
+    pub fn trim_bounded_preview(&self, id: EntityId, a: EntityId, b: EntityId, outside: bool) -> Result<TrimPreview> {
+        if id == a || id == b || a == b {
+            return refuse("pick two distinct bounds and a different target");
+        }
+        let target = self.tool_entity(id)?;
+        let Some([start, end]) = ends(target.kind) else {
+            return refuse("inside/outside trim needs an open line or arc");
+        };
+        let tangent = |kind: EntityKind, at: P2| match kind {
+            EntityKind::Line { a, b } => (b - a).normalized(),
+            EntityKind::Arc { center, .. } | EntityKind::Circle { center, .. } => (at - center).perp().normalized(),
+            EntityKind::Point { .. } => P2::ZERO,
+        };
+        let mut cuts = Vec::with_capacity(2);
+        for bound in [a, b] {
+            let boundary = self.tool_entity(bound)?;
+            let mut hits: Vec<_> = intersections(target.kind, boundary.kind)
+                .into_iter()
+                .filter(|p| on_curve(target.kind, *p) && on_curve(boundary.kind, *p))
+                .collect();
+            hits.dedup_by(|p, q| p.dist(*q) <= EPS);
+            if hits.len() != 1 {
+                return refuse("each bound must cross the open target exactly once");
+            }
+            let mut at = hits[0];
+            if tangent(target.kind, at).cross(tangent(boundary.kind, at)).abs() <= 1e-9 {
+                return refuse("a tangent contact does not bound a trim interval");
+            }
+            if let Some(p) = [start, end].into_iter().find(|p| p.dist(at) <= EPS) {
+                at = p;
+            }
+            cuts.push((parameter(target.kind, at).expect("open target").clamp(0.0, 1.0), at));
+        }
+        cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let [(lo, p), (hi, q)] = [cuts[0], cuts[1]];
+        if lo >= hi || p.dist(q) <= EPS {
+            return refuse("the bounds must make two distinct crossings");
+        }
+        let piece = |from: P2, to: P2| {
+            let mut kind = target.kind;
+            set_end(&mut kind, End::Start, from);
+            set_end(&mut kind, End::End, to);
+            kind
+        };
+        let inside = vec![piece(p, q)];
+        let mut tails = Vec::new();
+        if lo > 0.0 {
+            tails.push(piece(start, p));
+        }
+        if hi < 1.0 {
+            tails.push(piece(q, end));
+        }
+        let (removed, kept) = if outside { (tails, inside) } else { (inside, tails) };
+        if removed.is_empty() {
+            return refuse("no target geometry lies outside these bounds");
+        }
+        if removed.iter().chain(&kept).any(|kind| !valid(*kind)) {
+            return refuse("the bounds would produce degenerate geometry");
+        }
+        Ok(TrimPreview { removed, kept })
     }
 
     fn trim_interval(&mut self, id: EntityId, at: P2) -> Result<Vec<EntityId>> {

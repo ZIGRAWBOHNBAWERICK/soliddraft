@@ -1116,11 +1116,11 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         egui::WidgetInfo::selected(
                             egui::WidgetType::Button,
                             true,
-                            s.tool == tool || (tool == Tool::Trim && s.tool == Tool::TrimCorner),
+                            s.tool == tool || (tool == Tool::Trim && s.tool.trims()),
                             tip,
                         )
                     });
-                    let on = s.tool == tool || (tool == Tool::Trim && s.tool == Tool::TrimCorner);
+                    let on = s.tool == tool || (tool == Tool::Trim && s.tool.trims());
                     if on {
                         ui.painter().rect_filled(r, CornerRadius::same(6), theme::selection_bg());
                     } else if resp.hovered() {

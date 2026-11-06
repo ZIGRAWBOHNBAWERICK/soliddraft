@@ -457,6 +457,40 @@ fn checked_cut_profiles_still_use_the_existing_editor_and_catallax_path() {
 }
 
 #[test]
+fn off_axis_circular_holes_keep_their_inner_loop_in_feature_checks() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (name, center, compact) in
+        [("off-axis", P2::new(99.6, 6.5), false), ("rotated", P2::new(99.81187304123692, 0.0), true)]
+    {
+        let mut sketch = Sketch::new();
+        sketch.add(EntityKind::Circle { center: P2::ZERO, radius: 100.0 }, false);
+        sketch.add(EntityKind::Circle { center, radius: 0.1 }, false);
+        let (mut app, _) = launch(sketch);
+        if compact {
+            app.set_size(vec2(960.0, 600.0));
+            soliddraft_app::theme::set_mode(&app.ctx, soliddraft_app::theme::Mode::Dark);
+            app.run_steps(12);
+        }
+        let before = session(&app).sketch.clone();
+        let revision = app.state().state.doc.revision();
+        control(&mut app, "Sketch diagnostics");
+        control(&mut app, "Diagnostics only");
+        control(&mut app, "Boss extrude");
+        frame(&mut app, &format!("nesting-{name}"));
+        assert!(session(&app).diagnostics.as_ref().unwrap().issues.is_empty());
+        assert!(
+            ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"),
+            "{name}: one containing circle must not become two outer regions"
+        );
+        assert!(ribbon::painted(&app).iter().any(|p| p.text == "1 inner loop"));
+        assert_eq!(session(&app).sketch, before);
+        assert_eq!(app.state().state.doc.revision(), revision);
+        drop(app);
+        soliddraft_app::file::set_config_dir(None);
+    }
+}
+
+#[test]
 fn circles_below_the_profile_tolerance_are_not_reported_as_valid() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut sketch = Sketch::new();

@@ -2077,7 +2077,8 @@ fn registry() -> Vec<CommandSpec> {
              import record says what each came from and what was left out. Meshes are not solids: measure, \
              mass and mates refuse them.",
             crate::scene_import::params,
-        ),
+        )
+        .undo(Undo::Replaces),
         cmd("save", "Save", Icon::Glyph("save"), "Save the part")
             .key(Scope::Part, ctrl, Key::S)
             .run(|_| AppAction::Save)

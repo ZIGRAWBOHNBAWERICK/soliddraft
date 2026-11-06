@@ -453,6 +453,12 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let formed = s.call("assembly_form_subassembly", json!({ "paths": [at], "path": module, "origin": at }));
     assert_eq!(formed["formed"]["migration"]["occurrences"][0]["from"], json!(at));
 
+    // A scene file opens as a new assembly of mesh bodies in place of this one.
+    let stl = concat!(env!("CARGO_MANIFEST_DIR"), "/../../ci/fixtures/scene-import/sand3d-bracket/bracket.stl");
+    let scene = s.call("import_scene", json!({ "path": stl, "out": s.path("bracket.dwasm") }));
+    assert_eq!(scene["assembly"]["occurrences"]["2"]["kind"], "mesh");
+    assert_eq!(scene["assembly"]["occurrences"]["2"]["name"], "plate");
+
     s.call("assembly_show_part", json!({}));
     s.call("new_part", json!({}));
     std::fs::write(s.dir.join("source.step"), include_bytes!("../../../ci/fixtures/import/block-seam-4um.step"))

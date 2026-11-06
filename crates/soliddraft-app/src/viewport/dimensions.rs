@@ -202,9 +202,23 @@ pub fn paint(
                     continue;
                 }
                 let Some(at) = anchors.get(&(f.id as u32)).copied().or_else(|| body_centre(doc)) else { continue };
+                // Untouched multi-value labels share a view-plane stack. Equal camera
+                // depth keeps its point spacing exact in perspective as well as orthographic.
+                let (origin, step) = if values.len() > 1 {
+                    let depth_scale = if camera.orthographic {
+                        1.0
+                    } else {
+                        (at - camera.eye()).dot(camera.forward()) / camera.distance
+                    };
+                    let mm_per_point = camera.mm_per_point(rect.height()) * depth_scale;
+                    let up = camera.up();
+                    (at + (camera.right() * 48.0 + up * 32.0) * mm_per_point, -up * 28.0 * mm_per_point)
+                } else {
+                    (at + Vec3::new(12.0, 0.0, 12.0), Vec3::ZERO)
+                };
                 for (i, (name, text)) in values.into_iter().enumerate() {
                     let key = AnnotationKey { feature: model::FeatureId(f.id as u32), value: name };
-                    let world = position(key, at + Vec3::new(12.0, 0.0, 12.0 + i as f32 * 7.0));
+                    let world = position(key, origin + step * i as f32);
                     let Some(r) = paint_leader(painter, camera, rect, at, world, &text, pointer) else { continue };
                     shown.push(ShownDimension {
                         target: DimensionTarget::Feature(f.id),

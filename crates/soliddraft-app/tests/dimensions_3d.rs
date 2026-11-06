@@ -1,7 +1,7 @@
 //! Model-space annotation placement through native pointer input and the real renderer.
 use egui::{Key, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::kittest::Queryable;
-use soliddraft_app::document::{Document, Selection, ViewItem};
+use soliddraft_app::document::{Command, Document, FeatureId, FeatureKind, Selection, ViewItem};
 use soliddraft_app::state::AppAction;
 use soliddraft_app::viewport::camera::StandardView;
 use soliddraft_app::viewport::dimensions::{DimensionTarget, ShownDimension};
@@ -207,4 +207,145 @@ fn escape_cancels_a_dimension_drag_without_orbiting_or_recording_history() {
     assert!(dimension(&app, &label.key).position.distance(label.position) < 0.001);
     assert_eq!(app.state().state.doc.undo_depth(), depth);
     assert_eq!(app.state().state.viewport.camera.view(), camera);
+}
+
+fn multi_value_document(hole: bool) -> (Document, FeatureId, usize) {
+    let mut doc = ribbon::plate();
+    let kind = if hole {
+        let top = doc.faces.iter().find(|face| face.label == "End cap").unwrap().id;
+        FeatureKind::Hole(soliddraft_model::HoleFeature {
+            face: doc.face_ref(top).unwrap(),
+            points: vec![soliddraft_sketch::P2::ZERO],
+            diameter: 6.0,
+            depth: soliddraft_kernel_api::HoleDepth::Blind { depth: 8.0 },
+            tip: soliddraft_kernel_api::HoleTip::Cone { angle_deg: 90.0 },
+            head: Some(soliddraft_kernel_api::HoleHead::Counterbore { diameter: 10.0, depth: 3.0 }),
+        })
+    } else {
+        FeatureKind::Pattern(soliddraft_model::PatternFeature {
+            layout: soliddraft_model::PatternSpec::Linear {
+                direction: soliddraft_kernel_api::Vec3::X,
+                spacing: 80.0,
+                count: 3,
+            },
+        })
+    };
+    let feature = doc.apply(Command::AddFeature(kind)).unwrap().unwrap();
+    doc.selection = Some(Selection::Body);
+    (doc, feature, if hole { 4 } else { 2 })
+}
+
+#[test]
+fn multi_value_defaults_stay_separate_and_each_centre_grabs_its_own_label() {
+    let _case = ribbon::case("dimensions-3d-multi-value");
+    for hole in [true, false] {
+        let (doc, feature, count) = multi_value_document(hole);
+        let name = if hole { "hole" } else { "pattern" };
+        let mut app = ribbon::app(doc);
+        app.key_press(Key::Z);
+        app.run_steps(40);
+        for orthographic in [true, false] {
+            app.state_mut().state.viewport.camera.orthographic = orthographic;
+            for (view_name, view) in [
+                ("top", Some(StandardView::Top)),
+                ("bottom", Some(StandardView::Bottom)),
+                ("front", Some(StandardView::Front)),
+                ("right", Some(StandardView::Right)),
+                ("isometric", Some(StandardView::Isometric)),
+                ("oblique", None),
+            ] {
+                if let Some(view) = view {
+                    app.state_mut().state.push(AppAction::SetView(view));
+                } else {
+                    app.state_mut().state.viewport.camera.turn_to("Oblique", 25.0, 17.0);
+                }
+                app.run_steps(40);
+                let labels: Vec<_> = app
+                    .state()
+                    .state
+                    .viewport
+                    .dimensions
+                    .iter()
+                    .filter(|d| d.target == DimensionTarget::Feature(feature))
+                    .cloned()
+                    .collect();
+                assert_eq!(labels.len(), count, "{name} exposes every value");
+                for (i, label) in labels.iter().enumerate() {
+                    assert!(
+                        app.state().state.viewport.rect.contains_rect(label.rect),
+                        "{name} {view_name} orthographic={orthographic}: {label:?}"
+                    );
+                    for other in &labels[i + 1..] {
+                        assert!(
+                            !label.rect.expand(2.0).intersects(other.rect),
+                            "{name} {view_name} orthographic={orthographic}: {:?} overlaps {:?}",
+                            label.key,
+                            other.key
+                        );
+                    }
+                    assert!(
+                        ribbon::painted_in(&app, label.rect).iter().any(|p| p.text == label.text && p.rect == p.full),
+                        "the complete {name} value is readable in {view_name}"
+                    );
+                }
+                frame(
+                    &mut app,
+                    &format!("multi-{name}-{view_name}-{}", if orthographic { "ortho" } else { "perspective" }),
+                );
+                for label in &labels {
+                    let camera = app.state().state.viewport.camera.view();
+                    let undo = app.state().state.doc.undo_depth();
+                    let to = label.rect.center() + vec2(100.0, -20.0);
+                    drag(&mut app, label.rect.center(), to);
+                    let moved = dimension(&app, &label.key);
+                    assert!(
+                        moved.rect.center().distance(to) < 2.0,
+                        "{name} {view_name}: its centre grabs {:?}, not another value",
+                        label.key
+                    );
+                    assert_eq!(app.state().state.viewport.camera.view(), camera);
+                    assert_eq!(app.state().state.doc.undo_depth(), undo + 1);
+                    for other in labels.iter().filter(|other| other.key != label.key) {
+                        assert!(
+                            dimension(&app, &other.key).position.distance(other.position) < 0.001,
+                            "grabbing {:?} must not move {:?}",
+                            label.key,
+                            other.key
+                        );
+                    }
+                    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+                    app.run_steps(5);
+                    assert!(
+                        dimension(&app, &label.key).rect.center().distance(label.rect.center()) < 0.01,
+                        "undo returns to the current view's default stack"
+                    );
+                }
+            }
+        }
+        let label = app
+            .state()
+            .state
+            .viewport
+            .dimensions
+            .iter()
+            .find(|d| d.target == DimensionTarget::Feature(feature))
+            .unwrap()
+            .clone();
+        drag(&mut app, label.rect.center(), label.rect.center() + vec2(100.0, -20.0));
+        let authored = dimension(&app, &label.key).position;
+        app.state_mut().state.push(AppAction::SetView(StandardView::Top));
+        app.run_steps(40);
+        assert!(
+            dimension(&app, &label.key).position.distance(authored) < 0.001,
+            "a manually moved label never follows automatic camera layout"
+        );
+        app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        app.run_steps(5);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+        app.run_steps(5);
+        assert!(
+            dimension(&app, &label.key).position.distance(authored) < 0.001,
+            "redo restores the authored model-space anchor even in another view"
+        );
+    }
 }

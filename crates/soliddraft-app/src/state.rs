@@ -630,6 +630,8 @@ pub struct SketchSession {
     pub diagnostics: Option<crate::sketch_diagnostics::Inspection>,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
+    /// Smart dimension creates reference annotations instead of equations.
+    pub reference_dimensions: bool,
     /// The Modify tools' numeric and pointer-placed values.
     pub modify: ModifyInputs,
     /// What the active Modify tool would do now, redrawn every frame.
@@ -699,6 +701,7 @@ impl SketchSession {
             relations_filter: RelationFilter::default(),
             diagnostics: None,
             construction: false,
+            reference_dimensions: false,
             modify: ModifyInputs::default(),
             preview: None,
         }

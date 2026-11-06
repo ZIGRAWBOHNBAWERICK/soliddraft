@@ -1,5 +1,5 @@
 //! The sketch: 2D entities on a plane, the constraints between them and the
-//! dimensions that drive them. Coordinates are in the plane's (u, v) frame, in
+//! dimensions that drive or measure them. Coordinates are in the plane's (u, v) frame, in
 //! millimetres. The solver ([`solve`]) keeps the geometry consistent with the
 //! constraints; [`profile`] turns the closed loops into kernel profiles.
 //!
@@ -11,6 +11,7 @@
 //! The solver is ezpz, but none of its types appear in this crate's interface,
 //! so another solver can take its place.
 
+mod dimension;
 pub mod profile;
 mod references;
 mod shapes;
@@ -22,6 +23,7 @@ mod tests;
 #[cfg(test)]
 mod tools_tests;
 
+pub use dimension::ReferenceDimension;
 pub use profile::{ProfileError, Region, RegionLoop};
 pub use shapes::{Shape, SketchError};
 
@@ -502,6 +504,13 @@ pub enum ConstraintKind {
         /// Where the label is drawn.
         label: P2,
     },
+    /// A measured annotation that contributes no solver equation.
+    Reference {
+        /// The geometry to measure, without an authored value.
+        dimension: ReferenceDimension,
+        /// Where the label is drawn.
+        label: P2,
+    },
     /// A driving radius (or diameter) of an arc or circle.
     Radius {
         /// The arc or circle.
@@ -525,7 +534,7 @@ pub struct Constraint {
 }
 
 impl Constraint {
-    /// True for constraints with a value: distances, angles and radii.
+    /// True for driving and reference numeric annotations.
     pub fn is_dimension(&self) -> bool {
         matches!(
             self.kind,
@@ -533,10 +542,11 @@ impl Constraint {
                 | ConstraintKind::PointLineDistance { .. }
                 | ConstraintKind::Angle { .. }
                 | ConstraintKind::Radius { .. }
+                | ConstraintKind::Reference { .. }
         )
     }
 
-    /// The value of a dimension.
+    /// The authored driving value. Reference dimensions have no editable value.
     pub fn value(&self) -> Option<f64> {
         match self.kind {
             ConstraintKind::Distance { value, .. }
@@ -547,7 +557,7 @@ impl Constraint {
         }
     }
 
-    /// Sets the value of a dimension. Relations are left alone.
+    /// Sets a driving value. Relations and reference annotations are left alone.
     pub fn set_value(&mut self, v: f64) {
         match &mut self.kind {
             ConstraintKind::Distance { value, .. }
@@ -564,7 +574,8 @@ impl Constraint {
             ConstraintKind::Distance { label, .. }
             | ConstraintKind::PointLineDistance { label, .. }
             | ConstraintKind::Angle { label, .. }
-            | ConstraintKind::Radius { label, .. } => Some(label),
+            | ConstraintKind::Radius { label, .. }
+            | ConstraintKind::Reference { label, .. } => Some(label),
             _ => None,
         }
     }
@@ -575,7 +586,8 @@ impl Constraint {
             ConstraintKind::Distance { label, .. }
             | ConstraintKind::PointLineDistance { label, .. }
             | ConstraintKind::Angle { label, .. }
-            | ConstraintKind::Radius { label, .. } => *label = p,
+            | ConstraintKind::Radius { label, .. }
+            | ConstraintKind::Reference { label, .. } => *label = p,
             _ => {}
         }
     }
@@ -583,6 +595,7 @@ impl Constraint {
     /// The constraint's name for the interface.
     pub fn name(&self) -> &'static str {
         match self.kind {
+            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.name(),
             ConstraintKind::Coincident { .. } => "Coincident",
             ConstraintKind::PointOn { .. } => "On entity",
             ConstraintKind::Horizontal { .. } => "Horizontal",
@@ -607,6 +620,7 @@ impl Constraint {
     /// Every entity the constraint touches.
     pub fn entities(&self) -> Vec<EntityId> {
         let mut v = match self.kind {
+            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.entities(),
             ConstraintKind::Coincident { a, b } => vec![a.entity, b.entity],
             ConstraintKind::PointOn { point, entity } => vec![point.entity, entity],
             ConstraintKind::Horizontal { target } | ConstraintKind::Vertical { target } => match target {
@@ -632,6 +646,7 @@ impl Constraint {
     /// The points the constraint touches directly.
     pub fn points(&self) -> Vec<PointRef> {
         match self.kind {
+            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.points(),
             ConstraintKind::Coincident { a, b } | ConstraintKind::Distance { a, b, .. } => vec![a, b],
             ConstraintKind::PointOn { point, .. }
             | ConstraintKind::Midpoint { point, .. }

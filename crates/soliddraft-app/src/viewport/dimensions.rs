@@ -117,7 +117,7 @@ pub fn paint(
                     target,
                     rect: r,
                     tip: format!("{} · {name}", f.name),
-                    text: c.map(dim_text).unwrap_or_default(),
+                    text: c.map(|c| dim_text(c, sketch)).unwrap_or_default(),
                     field,
                     witness: None,
                 });

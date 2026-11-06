@@ -101,7 +101,7 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
     }
     let line = |id| sketch.entity(id).is_some_and(|e| e.is_line());
     let circular = |id| sketch.entity(id).is_some_and(|e| tools::circle(e.kind).is_some());
-    let reason = match constraint.kind {
+    let reason = match constraint.geometry_kind() {
         ConstraintKind::Horizontal { target: Align::Line(id) }
         | ConstraintKind::Vertical { target: Align::Line(id) }
             if !line(id) =>

@@ -1058,7 +1058,7 @@ fn dimensions(sketch: &Sketch) -> impl Iterator<Item = &sketch::Constraint> {
 }
 
 fn dimension_kind(c: &sketch::Constraint) -> &'static str {
-    match c.kind {
+    match c.geometry_kind() {
         ConstraintKind::Radius { diameter: true, .. } => "diameter",
         ConstraintKind::Radius { .. } => "radius",
         ConstraintKind::Angle { .. } => "angle",
@@ -2722,7 +2722,7 @@ impl CommandTools<'_> {
         if let FeatureKind::Sketch(s) = &f.kind {
             v["dimensions"] = dimensions(&s.sketch)
                 .enumerate()
-                .map(|(i, c)| json!({ "number": i + 1, "kind": dimension_kind(c), "value": c.value() }))
+                .map(|(i, c)| json!({ "number": i + 1, "kind": dimension_kind(c), "value": c.display_value(&s.sketch), "reference":c.is_reference() }))
                 .collect();
         }
         if let Some(plane) = f.plane {
@@ -2806,6 +2806,9 @@ impl CommandTools<'_> {
             .map(|c| c.id)
             .ok_or_else(|| format!("`{name}` has {} dimensions; number them from 1", dimensions(&sketch).count()))?;
         let constraint = sketch.constraint_mut(target).expect("listed by dimensions");
+        if constraint.is_reference() {
+            return Err("Reference dimensions are read-only".into());
+        }
         // Lengths are sizes: the sketch would build -4 as 4 and keep showing -4.
         if !matches!(constraint.kind, ConstraintKind::Angle { .. }) && value <= 0.0 {
             return Err(format!("a length must be greater than 0, got {value}"));
@@ -3382,6 +3385,32 @@ mod tests {
         let feature = call_checked(&mut tools, "feature", json!({ "name": "Boss-Extrude1" }), &mcp);
         let v: Value = serde_json::from_str(&feature.content).unwrap();
         assert!(v["estimates"].as_str().is_some_and(|s| s.contains("display mesh")), "{v}");
+    }
+
+    #[test]
+    fn reference_dimensions_report_measurements_and_refuse_numeric_edits() {
+        let mut doc = Document::new("Reference controls", crate::kernel());
+        let mut book = ProposalBook::default();
+        let mut tools = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None };
+        let mcp = Caller::Mcp { client: "test".into() };
+        let circle = json!({"shape":"circle","center":[0,0,0],"diameter":12});
+        assert!(!call_checked(&mut tools, "sketch", json!({"plane":"top","shapes":[circle]}), &mcp).is_error);
+        let id = feature_by_name(tools.doc, "Sketch1").unwrap();
+        let FeatureKind::Sketch(s) = &tools.doc.feature(id).unwrap().kind else { unreachable!() };
+        let mut sketch = s.sketch.clone();
+        let c = sketch.constraints.iter_mut().find(|c| c.is_dimension()).unwrap();
+        c.kind = c.kind.as_reference().unwrap();
+        tools.doc.apply(Command::EditSketch { id, sketch }).unwrap();
+        let before = tools.doc.undo_depth();
+        let out = call_checked(&mut tools, "feature", json!({"name":"Sketch1"}), &mcp);
+        assert!(!out.is_error, "{}", out.content);
+        let data: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(data["dimensions"][0]["value"], 12.0);
+        assert_eq!(data["dimensions"][0]["reference"], true);
+        let out =
+            call_checked(&mut tools, "edit_dimension", json!({"sketch":"Sketch1","dimension":1,"value":20}), &mcp);
+        assert!(out.is_error && out.content.contains("read-only"), "{}", out.content);
+        assert_eq!(tools.doc.undo_depth(), before);
     }
 
     /// The real-use pass typed -4 for a boss's diameter: the boss built at 4 while the

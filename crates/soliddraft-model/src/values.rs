@@ -568,7 +568,7 @@ impl Values {
                             .sketch
                             .constraints
                             .iter()
-                            .filter(|c| c.value().is_some())
+                            .filter(|c| c.is_dimension())
                             .position(|c| c.id == constraint)?
                             + 1)
                         .to_string()

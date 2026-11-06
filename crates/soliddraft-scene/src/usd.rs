@@ -8,6 +8,7 @@
 //! at its frame in the stage's world. Stage units and up axis come from the
 //! root layer's `metersPerUnit` and `upAxis`, or USD's fallbacks of centimetres and Y up.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -20,6 +21,16 @@ use crate::{
     Body, Format, ImportError, Joint, JointKind, Material, Mesh, Mimic, Origin, Scene, UpAxis, shapes, srgb,
     triangulate,
 };
+
+thread_local! {
+    /// The time code every attribute is read at: the stage's start time code, which is
+    /// the default value wherever an attribute has no time samples.
+    static TIME: Cell<f64> = const { Cell::new(0.0) };
+}
+
+fn time() -> usd::TimeCode {
+    usd::TimeCode::new(TIME.get())
+}
 
 fn err(path: &Path, e: impl std::fmt::Display) -> ImportError {
     ImportError(format!("{}: {e}", path.display()))
@@ -53,8 +64,12 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
     let mut scene = Scene::new(name, Format::Usd, mpu.filter(|m| *m > 0.0).unwrap_or(0.01), up.unwrap_or(UpAxis::Y));
     scene.units_from = if mpu.is_some() { Origin::File } else { Origin::Fallback };
     scene.up_from = if up.is_some() { Origin::File } else { Origin::Fallback };
+    TIME.set(stage.start_time_code());
+    if stage.has_authored_time_code_range() && stage.end_time_code() != stage.start_time_code() {
+        scene.note(format!("the stage is animated; it was read at its start time code, {}", stage.start_time_code()));
+    }
     let mut reader = Reader {
-        xforms: XformCache::new(None),
+        xforms: XformCache::new(time()),
         materials: HashMap::new(),
         meshes: HashMap::new(),
         nodes: HashMap::new(),
@@ -70,10 +85,7 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
             let kind = one.type_name().ok().flatten().map(|t| t.as_str().to_owned()).unwrap_or_default();
             let binding = bound_material(one);
             if let Some(mesh) = reader.body(&mut scene, one, &kind)? {
-                let material = match &binding {
-                    Some(m) => reader.material(&mut scene, one, m)?,
-                    None => None,
-                };
+                let material = reader.body_material(&mut scene, one, &binding)?;
                 scene.nodes[0].body = Some(Body { mesh, material });
             }
             scene.nodes[0].hidden = attr_token(one, "visibility").as_deref() == Some("invisible");
@@ -139,15 +151,32 @@ impl Reader<'_> {
         parent: usize,
         binding: Option<String>,
     ) -> Result<(), ImportError> {
-        if !prim.is_active().unwrap_or(true) || prim.is_abstract().unwrap_or(false) {
+        // Inactive prims, classes and `over`s that nothing defines are not on the stage.
+        if !prim.is_active().unwrap_or(true)
+            || prim.is_abstract().unwrap_or(false)
+            || !prim.is_defined().unwrap_or(true)
+        {
             return Ok(());
         }
         let kind = prim.type_name().ok().flatten().map(|t| t.as_str().to_owned()).unwrap_or_default();
         if SKIPPED.contains(&kind.as_str()) || kind.ends_with("Light") || kind.starts_with("Physics") {
             return Ok(());
         }
-        if attr_token(prim, "purpose").as_deref() == Some("guide") {
+        if kind == "PointInstancer" {
+            // Its children are the prototypes it scatters, not geometry where they stand.
+            scene.note("point instancers are not imported, with their prototypes");
             return Ok(());
+        }
+        if kind == "SkelRoot" {
+            scene.note("skinned meshes are shown in their rest pose; skeletons and animation are not imported");
+        }
+        match attr_token(prim, "purpose").as_deref() {
+            Some("guide") => return Ok(()),
+            Some("proxy") => {
+                scene.note("proxy geometry is left out; render and default geometry come in");
+                return Ok(());
+            }
+            _ => {}
         }
         let (local, resets) = self.xforms.local_transformation(prim).map_err(|e| err(self.file, e))?;
         let mut local = matrix(&local);
@@ -161,10 +190,7 @@ impl Reader<'_> {
         scene.nodes[node].hidden = attr_token(prim, "visibility").as_deref() == Some("invisible");
         let binding = bound_material(prim).or(binding);
         if let Some(mesh) = self.body(scene, prim, &kind)? {
-            let material = match &binding {
-                Some(m) => self.material(scene, prim, m)?,
-                None => None,
-            };
+            let material = self.body_material(scene, prim, &binding)?;
             scene.nodes[node].body = Some(Body { mesh, material });
         }
         self.visit_children(scene, prim, named, node, binding)
@@ -190,8 +216,8 @@ impl Reader<'_> {
                 turn_to_axis(&mut m, attr_token(prim, "axis").as_deref());
                 Some(m)
             }
-            "Cone" | "Capsule" | "Plane" | "BasisCurves" | "NurbsCurves" | "NurbsPatch" | "Points"
-            | "PointInstancer" => {
+            "Cone" | "Capsule" | "Capsule_1" | "Cylinder_1" | "Plane" | "BasisCurves" | "HermiteCurves"
+            | "NurbsCurves" | "NurbsPatch" | "Points" | "TetMesh" => {
                 scene.note(format!("{kind} prims are not imported"));
                 None
             }
@@ -202,12 +228,40 @@ impl Reader<'_> {
         Ok(index)
     }
 
+    /// A body's material: the one bound to it when this import reads it, else its
+    /// constant display colour.
+    fn body_material(
+        &mut self,
+        scene: &mut Scene,
+        prim: &Prim,
+        binding: &Option<String>,
+    ) -> Result<Option<usize>, ImportError> {
+        if let Some(path) = binding
+            && let Some(m) = self.material(scene, prim, path)?
+        {
+            return Ok(Some(m));
+        }
+        Ok(display_color(scene, prim).map(|m| match scene.materials.iter().position(|x| *x == m) {
+            Some(i) => i,
+            None => {
+                scene.materials.push(m);
+                scene.materials.len() - 1
+            }
+        }))
+    }
+
     /// The material at `path` bound to `prim`, read once.
     fn material(&mut self, scene: &mut Scene, prim: &Prim, path: &str) -> Result<Option<usize>, ImportError> {
         if let Some(m) = self.materials.get(path) {
             return Ok(*m);
         }
         let material = prim.stage().prim(path).ok().and_then(|m| read_material(&m));
+        if material.is_none() {
+            scene.note(
+                "materials whose surface is neither UsdPreviewSurface nor OmniPBR are not read; \
+                 their bodies take their display colour or the default colour",
+            );
+        }
         let index = material.map(|m| {
             scene.materials.push(m);
             scene.materials.len() - 1
@@ -327,19 +381,57 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
     if indices.iter().any(|i| *i as usize >= points.len()) {
         return Err(ImportError(format!("mesh {} has an index past its points", prim.path())));
     }
-    let Some((triangles, corners, crossed)) = triangulate(&points, &counts, &indices, left) else {
+    let Some((mut triangles, mut corners, crossed)) = triangulate(&points, &counts, &indices, left) else {
         return Err(ImportError(format!("mesh {} has fewer indices than its faces need", prim.path())));
     };
     if crossed > 0 {
         scene.note("polygons that cross themselves or have no area are split into fans from their first corner");
     }
+    // Which polygon each flat corner belongs to.
+    let mut face_of = Vec::with_capacity(indices.len());
+    for (f, &n) in counts.iter().enumerate() {
+        face_of.extend(std::iter::repeat_n(f, n));
+    }
+    // Faces named in `holeIndices` are not drawn.
+    let holes: std::collections::HashSet<usize> = attr_value(prim, "holeIndices")
+        .as_ref()
+        .and_then(ints)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|h| usize::try_from(h).ok())
+        .collect();
+    if !holes.is_empty() {
+        let keep: Vec<bool> = corners.iter().map(|c| !holes.contains(&face_of[c[0]])).collect();
+        let mut k = keep.iter();
+        triangles.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        corners.retain(|_| *k.next().unwrap());
+    }
+    if triangles.is_empty() {
+        scene.note("meshes with no faces to draw were left out");
+        return Ok(None);
+    }
+    // Subdivision surfaces come in as their control polygons; bilinear is the polygons.
+    if let Some(scheme) = attr_token(prim, "subdivisionScheme").filter(|s| s == "catmullClark" || s == "loop") {
+        scene.note(format!(
+            "meshes marked for {scheme} subdivision (USD's fallback when none is named) are shown as their \
+             control polygons, not subdivided"
+        ));
+    }
+    let subsets = prim.children().unwrap_or_default().into_iter().any(|c| {
+        c.type_name().ok().flatten().is_some_and(|t| t.as_str() == "GeomSubset")
+            && (attr_token(&c, "familyName").as_deref() == Some("materialBind") || bound_material(&c).is_some())
+    });
+    if subsets {
+        scene.note("per-face materials (GeomSubset) are not imported; each mesh takes its own material");
+    }
     // Normals: `primvars:normals` wins over `normals`; their interpolation says what they
     // are per.
     let normals = ["primvars:normals", "normals"].into_iter().find_map(|n| {
         let attr = prim.attribute(n);
-        let values = attr.get::<Value>().ok().flatten().as_ref().and_then(vec3s)?;
+        let values = attr.get_at::<Value>(time()).ok().flatten().as_ref().and_then(vec3s)?;
         let interp = attr.get_metadata::<Value>("interpolation").ok().flatten().as_ref().and_then(token);
-        let idx = prim.attribute(format!("{n}:indices")).get::<Value>().ok().flatten().as_ref().and_then(ints);
+        let idx = prim.attribute(format!("{n}:indices")).get_at::<Value>(time()).ok().flatten().as_ref().and_then(ints);
         Some((values, interp.unwrap_or_else(|| "vertex".into()), idx))
     });
     let corner_normals = normals.and_then(|(values, interp, idx)| {
@@ -351,11 +443,6 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
             values.get(k).copied()
         };
         let mut out = Vec::with_capacity(triangles.len() * 3);
-        // Which polygon each flat corner belongs to, for uniform normals.
-        let mut face_of = Vec::with_capacity(indices.len());
-        for (f, &n) in counts.iter().enumerate() {
-            face_of.extend(std::iter::repeat_n(f, n));
-        }
         for (t, c) in triangles.iter().zip(&corners) {
             for k in 0..3 {
                 let v = match interp.as_str() {
@@ -373,6 +460,35 @@ fn mesh(scene: &mut Scene, prim: &Prim, name: &str) -> Result<Option<Mesh>, Impo
         Some(out)
     });
     Ok(Some(Mesh { name: name.to_owned(), positions: points, triangles, corner_normals }))
+}
+
+/// A gprim's constant `primvars:displayColor` and `displayOpacity` as a material.
+fn display_color(scene: &mut Scene, prim: &Prim) -> Option<Material> {
+    let attr = prim.attribute("primvars:displayColor");
+    let colours = attr.get_at::<Value>(time()).ok().flatten().as_ref().and_then(vec3s)?;
+    let interp = attr.get_metadata::<Value>("interpolation").ok().flatten().as_ref().and_then(token);
+    let constant = interp.as_deref().is_none_or(|i| i == "constant") || colours.len() == 1;
+    let (Some(c), true) = (colours.first(), constant) else {
+        scene.note("per-face and per-vertex display colours are not imported");
+        return None;
+    };
+    let opacity = attr_value(prim, "primvars:displayOpacity")
+        .as_ref()
+        .and_then(|v| match v {
+            Value::FloatVec(f) => f.first().map(|x| f64::from(*x)),
+            Value::DoubleVec(d) => d.first().copied(),
+            v => float(v),
+        })
+        .unwrap_or(1.0);
+    let base_color = [srgb(c.x), srgb(c.y), srgb(c.z), opacity];
+    let hex = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(Material {
+        name: format!("displayColor #{:02x}{:02x}{:02x}", hex(base_color[0]), hex(base_color[1]), hex(base_color[2])),
+        base_color,
+        metallic: 0.0,
+        roughness: 0.5,
+        textured: false,
+    })
 }
 
 /// The path of the material bound directly to `prim`, if any.
@@ -425,7 +541,7 @@ fn read_material(material: &Prim) -> Option<Material> {
 }
 
 fn attr_value(prim: &Prim, name: &str) -> Option<Value> {
-    prim.attribute(name).get::<Value>().ok().flatten()
+    prim.attribute(name).get_at::<Value>(time()).ok().flatten()
 }
 
 fn attr_float(prim: &Prim, name: &str) -> Option<f64> {

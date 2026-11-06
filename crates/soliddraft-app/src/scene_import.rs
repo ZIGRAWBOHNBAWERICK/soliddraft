@@ -109,7 +109,7 @@ pub(crate) fn said(record: &Value) -> String {
     );
     let notes = record["notes"].as_array().map_or(0, Vec::len);
     if notes > 0 {
-        line.push_str(&format!(" · {notes} left out (see import.json)"));
+        line.push_str(&format!(" · {notes} {} (see import.json)", if notes == 1 { "note" } else { "notes" }));
     }
     line
 }

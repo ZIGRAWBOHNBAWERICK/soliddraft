@@ -434,3 +434,230 @@ fn authored_normals_keep_their_direction_on_left_handed_meshes() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Each occurrence by its tree path of labels: hidden, itself or by an ancestor.
+fn hidden(doc: &AssemblyDocument) -> BTreeMap<String, bool> {
+    let table = doc.table();
+    let mut out = BTreeMap::new();
+    for row in (1..table.len() as u32).map(OccurrenceIndex) {
+        let mut names = vec![doc.label(row)];
+        let mut at = table.parent(row);
+        while let Some(p) = at.filter(|p| *p != OccurrenceIndex::ROOT) {
+            names.push(doc.label(p));
+            at = table.parent(p);
+        }
+        names.reverse();
+        out.insert(names.join("/"), table.flags(row).has(soliddraft_assembly::Flags::HIDDEN));
+    }
+    out
+}
+
+#[test]
+fn an_invisible_root_hides_what_inherits_its_visibility() {
+    let dir = scratch("invisible");
+    let usda = |root: &str, group: &str| {
+        format!(
+            "#usda 1.0\n(\n    defaultPrim = \"Root\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n)\n\
+             def Xform \"Root\"\n{{\n    token visibility = \"{root}\"\n    def Cube \"Child\"\n    {{\n        \
+             double size = 2\n    }}\n    def Xform \"Group\"\n    {{\n        token visibility = \"{group}\"\n        \
+             def Cube \"Leaf\"\n        {{\n            double size = 1\n        }}\n    }}\n}}\n"
+        )
+    };
+    for (name, root, group, want) in [
+        ("root-invisible", "invisible", "inherited", [("Child", true), ("Group", true), ("Group/Leaf", true)]),
+        ("root-visible", "inherited", "inherited", [("Child", false), ("Group", false), ("Group/Leaf", false)]),
+        ("group-invisible", "inherited", "invisible", [("Child", false), ("Group", true), ("Group/Leaf", true)]),
+    ] {
+        let source = dir.join(format!("{name}.usda"));
+        std::fs::write(&source, usda(root, group)).unwrap();
+        let scene = read(&source, &Options::default()).unwrap();
+        let out = dir.join(format!("{name}.dwasm"));
+        assemble::write(&scene, &source, &out).unwrap();
+        let mut doc = AssemblyDocument::open(&out, OpenOptions::default()).unwrap();
+        doc.finish_loading();
+        let got = hidden(&doc);
+        let want: BTreeMap<String, bool> = want.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        assert_eq!(got, want, "{name}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A millimetre, Z-up stage whose default prim `World` holds `body`.
+fn stage(body: &str) -> String {
+    format!(
+        "#usda 1.0\n(\n    defaultPrim = \"World\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n)\n\
+         def Xform \"World\"\n{{\n{body}\n}}\n"
+    )
+}
+
+/// Reads `text` as `name`.usda in `dir`.
+fn read_usda(dir: &Path, name: &str, text: &str) -> soliddraft_scene::Scene {
+    let source = dir.join(format!("{name}.usda"));
+    std::fs::write(&source, text).unwrap();
+    read(&source, &Options::default()).unwrap()
+}
+
+/// The total area of a mesh's triangles.
+fn area(m: &soliddraft_scene::Mesh) -> f64 {
+    m.triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|i| m.positions[i as usize]);
+            (b - a).cross(c - a).length() / 2.0
+        })
+        .sum()
+}
+
+#[test]
+fn hole_faces_are_not_drawn() {
+    let dir = scratch("holes");
+    let mesh = |holes: &str| {
+        stage(&format!(
+            "    def Mesh \"Two\"\n    {{\n        uniform token subdivisionScheme = \"bilinear\"\n        \
+             int[] faceVertexCounts = [3, 3]\n        int[] faceVertexIndices = [0, 1, 2, 3, 4, 5]\n        \
+             point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (2, 0, 0), (3, 0, 0), (2, 1, 0)]\n        \
+             normal3f[] normals = [(0, 0, 1), (0, 0, -1)] (\n            interpolation = \"uniform\"\n        )\n\
+             {holes}    }}"
+        ))
+    };
+    // The first face is a hole: only the second is drawn, with its own normal.
+    let scene = read_usda(&dir, "hole", &mesh("        int[] holeIndices = [0]\n"));
+    let m = &scene.meshes[0];
+    assert_eq!(m.triangles, [[3, 4, 5]]);
+    assert!((area(m) - 0.5).abs() < 1e-12);
+    assert!(m.corner_normals.as_ref().unwrap().iter().all(|n| *n == DVec3::NEG_Z), "{:?}", m.corner_normals);
+    assert!(scene.notes.is_empty(), "{:?}", scene.notes);
+    let out = dir.join("hole.dwasm");
+    assemble::write(&scene, &dir.join("hole.usda"), &out).unwrap();
+    let mut doc = AssemblyDocument::open(&out, OpenOptions::default()).unwrap();
+    doc.finish_loading();
+    let def = doc.store().iter().find(|(_, d)| d.kind == DocKind::Mesh).unwrap().1;
+    assert_eq!(def.mesh.as_ref().unwrap().triangle_count(), 1);
+    // With no holes both faces are drawn.
+    let scene = read_usda(&dir, "solid", &mesh(""));
+    assert!((area(&scene.meshes[0]) - 1.0).abs() < 1e-12);
+    // A mesh that is all holes is left out, and said so.
+    let all = mesh("        int[] holeIndices = [0, 1]\n")
+        .replace("def Xform \"World\"\n{\n", &format!("def Xform \"World\"\n{{\n{}", cube("Other", "")));
+    let scene = read_usda(&dir, "all-holes", &all);
+    let names: Vec<&str> = scene.nodes.iter().skip(1).map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Other"]);
+    assert!(scene.notes.iter().any(|n| n.contains("no faces")), "{:?}", scene.notes);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn subdivision_surfaces_are_shown_as_their_cage_and_said_so() {
+    let dir = scratch("subdivision");
+    let tri = |scheme: &str| {
+        stage(&format!(
+            "    def Mesh \"Tri\"\n    {{\n{scheme}        int[] faceVertexCounts = [3]\n        \
+             int[] faceVertexIndices = [0, 1, 2]\n        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]\n    }}"
+        ))
+    };
+    for (name, scheme, noted) in [
+        ("none", "        uniform token subdivisionScheme = \"none\"\n", None),
+        ("bilinear", "        uniform token subdivisionScheme = \"bilinear\"\n", None),
+        ("catmull-clark", "        uniform token subdivisionScheme = \"catmullClark\"\n", Some("catmullClark")),
+        ("loop", "        uniform token subdivisionScheme = \"loop\"\n", Some("loop")),
+        ("unnamed", "", Some("catmullClark")),
+    ] {
+        let scene = read_usda(&dir, name, &tri(scheme));
+        assert_eq!(scene.meshes[0].triangles.len(), 1, "{name}");
+        match noted {
+            Some(s) => assert!(scene.notes.iter().any(|n| n.contains(s) && n.contains("control")), "{name}"),
+            None => assert!(scene.notes.is_empty(), "{name}: {:?}", scene.notes),
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A cube of `size` mm named `name`, its prim body indented four spaces.
+fn cube(name: &str, extra: &str) -> String {
+    format!("    def Cube \"{name}\"\n    {{\n        double size = 2\n{extra}    }}\n")
+}
+
+#[test]
+fn purpose_instancers_and_undefined_prims_are_left_out_and_said_so() {
+    let dir = scratch("left-out");
+    let text = stage(&format!(
+        "{}{}{}    def PointInstancer \"Scatter\"\n    {{\n        point3f[] positions = [(10, 0, 0), (20, 0, 0)]\n        \
+         int[] protoIndices = [0, 0]\n        rel prototypes = </World/Scatter/Proto>\n{}    }}\n    \
+         over \"Ghost\"\n    {{\n{}    }}\n",
+        cube("Kept", ""),
+        cube("Proxy", "        uniform token purpose = \"proxy\"\n"),
+        cube("Render", "        uniform token purpose = \"render\"\n"),
+        cube("Proto", "").replace("\n    ", "\n        ").replacen("    def", "        def", 1),
+        cube("Overridden", "").replace("\n    ", "\n        ").replacen("    def", "        def", 1),
+    ));
+    let scene = read_usda(&dir, "left-out", &text);
+    let names: Vec<&str> = scene.nodes.iter().skip(1).map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Kept", "Render"], "{text}");
+    assert!(scene.notes.iter().any(|n| n.contains("proxy")), "{:?}", scene.notes);
+    assert!(scene.notes.iter().any(|n| n.contains("point instancers")), "{:?}", scene.notes);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn display_colours_and_unread_shaders() {
+    let dir = scratch("display-colour");
+    let text = stage(&format!(
+        "{}{}{}    def Material \"Glass\"\n    {{\n        token outputs:surface.connect = </World/Glass/Shader.outputs:out>\n        \
+         def Shader \"Shader\"\n        {{\n            uniform token info:id = \"SomeOtherSurface\"\n            \
+         token outputs:out\n        }}\n    }}\n",
+        cube("Red", "        color3f[] primvars:displayColor = [(1, 0, 0)]\n"),
+        cube(
+            "Speckled",
+            "        color3f[] primvars:displayColor = [(1, 0, 0), (0, 1, 0)] (\n            interpolation = \"vertex\"\n        )\n"
+        ),
+        cube(
+            "Bound",
+            "        rel material:binding = </World/Glass>\n        color3f[] primvars:displayColor = [(0, 0, 1)]\n"
+        ),
+    ));
+    let scene = read_usda(&dir, "colours", &text);
+    let colour = |name: &str| {
+        let n = scene.nodes.iter().find(|n| n.name == name).unwrap();
+        n.body.unwrap().material.map(|m| scene.materials[m].base_color.map(|c| (c * 1e6).round() / 1e6))
+    };
+    assert_eq!(colour("Red"), Some([1.0, 0.0, 0.0, 1.0]));
+    assert_eq!(colour("Speckled"), None);
+    // A bound material this import cannot read gives way to the display colour.
+    assert_eq!(colour("Bound"), Some([0.0, 0.0, 1.0, 1.0]));
+    assert!(scene.notes.iter().any(|n| n.contains("per-face and per-vertex")), "{:?}", scene.notes);
+    assert!(scene.notes.iter().any(|n| n.contains("neither UsdPreviewSurface")), "{:?}", scene.notes);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn transforms_compose_their_ops_and_animated_stages_read_their_start() {
+    let dir = scratch("xform-ops");
+    // translate, rotateXYZ about a pivot, then scale: the corner (1, 1, 1) of a 2 mm
+    // cube.
+    let text = stage(
+        "    def Cube \"Turned\"\n    {\n        double size = 2\n        \
+         double3 xformOp:translate = (10, 0, 0)\n        double3 xformOp:translate:pivot = (1, 0, 0)\n        \
+         float3 xformOp:rotateXYZ = (0, 0, 90)\n        float3 xformOp:scale = (2, 1, 1)\n        \
+         uniform token[] xformOpOrder = [\"xformOp:translate\", \"xformOp:translate:pivot\", \"xformOp:rotateXYZ\", \
+         \"xformOp:scale\", \"!invert!xformOp:translate:pivot\"]\n    }\n",
+    );
+    let scene = read_usda(&dir, "ops", &text);
+    let want = glam::DMat4::from_translation(DVec3::new(10.0, 0.0, 0.0))
+        * glam::DMat4::from_translation(DVec3::X)
+        * glam::DMat4::from_rotation_z(std::f64::consts::FRAC_PI_2)
+        * glam::DMat4::from_scale(DVec3::new(2.0, 1.0, 1.0))
+        * glam::DMat4::from_translation(-DVec3::X);
+    assert!(scene.world(1).abs_diff_eq(want, 1e-9), "{:?}", scene.world(1));
+    // An animated stage is read at its start time code, not at a default that is not
+    // there.
+    let text = String::from(
+        "#usda 1.0\n(\n    defaultPrim = \"World\"\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n    \
+         startTimeCode = 10\n    endTimeCode = 20\n)\ndef Xform \"World\"\n{\n    def Cube \"Moving\"\n    {\n        \
+         double size = 2\n        double3 xformOp:translate.timeSamples = { 10: (5, 0, 0), 20: (50, 0, 0) }\n        \
+         uniform token[] xformOpOrder = [\"xformOp:translate\"]\n    }\n}\n",
+    );
+    let scene = read_usda(&dir, "animated", &text);
+    assert!(scene.world(1).transform_point3(DVec3::ZERO).abs_diff_eq(DVec3::new(5.0, 0.0, 0.0), 1e-9));
+    assert!(scene.notes.iter().any(|n| n.contains("start time code")), "{:?}", scene.notes);
+    let _ = std::fs::remove_dir_all(dir);
+}

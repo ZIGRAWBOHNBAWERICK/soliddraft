@@ -252,7 +252,9 @@ impl Writer<'_> {
         let c = a.add_component(source, placement);
         let comp = a.components.iter_mut().find(|x| x.id == c).expect("just added");
         comp.name = Some(self.scene.nodes[i].name.clone());
-        comp.hidden = self.scene.nodes[i].hidden;
+        // The root is the assembly itself and has no component to hide, so a hidden
+        // root hides each component placed in it, and through them everything below.
+        comp.hidden = self.scene.nodes[i].hidden || (g == 0 && self.scene.nodes[0].hidden);
         Ok(c)
     }
 }

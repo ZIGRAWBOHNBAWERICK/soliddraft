@@ -87,7 +87,31 @@ The import converts every frame, point, normal and joint to millimetres with Z u
 
 Assembly placements are rigid. The import splits each node's frame in the root's into its rigid part, by polar decomposition, and the rest. The rigid part places the component. The rest, a scale, shear or mirror, is baked into the mesh, and a mirrored mesh keeps its outward winding. A tree of rigid frames keeps every frame exactly as the file has it. glTF files that scale metres down to millimetres at the root, as sand3d's do, arrive at true size. One mesh placed several times with the same baked residual is one mesh reference. OpenUSD and OBJ polygons are cut into triangles by ear clipping in each polygon's own plane, so a concave face keeps its notch and every triangle keeps the face's winding. A polygon that crosses itself or has no area has no right cut: it is fanned from its first corner, and the record's notes say so.
 
-A group becomes a sub-assembly named after it, and a body a component named after its node. A node with both a mesh and children, such as a glTF node or URDF link, holds its own mesh as a component of the same name inside its sub-assembly. Scopes and transforms with no mesh beneath them, such as USD's `Looks` and `Joints`, are left out. A USD prim marked invisible arrives as a hidden component, and USD guide geometry is left out. A material becomes the assembly's colour on the component (see [assemblies.md](assemblies.md#colours)). Texture maps are not read: a textured material keeps its constant factors, and the record marks it as textured.
+A group becomes a sub-assembly named after it, and a body a component named after its node. A node with both a mesh and children, such as a glTF node or URDF link, holds its own mesh as a component of the same name inside its sub-assembly. Scopes and transforms with no mesh beneath them, such as USD's `Looks` and `Joints`, are left out. A USD prim marked invisible arrives as a hidden component, which hides everything below it; an invisible default prim hides every component of the assembly, and USD guide geometry is left out. A material becomes the assembly's colour on the component (see [assemblies.md](assemblies.md#colours)). Texture maps are not read: a textured material keeps its constant factors, and the record marks it as textured.
+
+USD is read at the stage's start time code, which is the default value wherever an attribute has no time samples; an animated stage says so in the record. The table says what the reader does with each UsdGeom attribute it meets. Whatever it cannot bring in faithfully, it leaves out or shows plainly, and says so in the record's notes.
+
+| USD | Import |
+|---|---|
+| `points`, `faceVertexCounts`, `faceVertexIndices` | read; each polygon cut by ear clipping |
+| `orientation` | `leftHanded` turns the winding; authored normals keep their direction |
+| `normals`, `primvars:normals` | read, indexed or not, per vertex, face, corner or constant |
+| `holeIndices` | hole faces are not drawn; a mesh that is all holes is left out |
+| `subdivisionScheme` | `none` and `bilinear` are the polygons; `catmullClark` (USD's fallback) and `loop` show the control polygons, with a note |
+| `GeomSubset` materials | not read, with a note; the mesh takes its own material |
+| `primvars:displayColor`, `displayOpacity` | a constant colour is the body's colour when no material it can read is bound; other interpolations give a note |
+| materials | UsdPreviewSurface and OmniPBR constants; any other surface gives a note |
+| `visibility` | `invisible` hides the component and everything below it, the default prim's included |
+| `purpose` | `default` and `render` come in; `guide` is left out, `proxy` too with a note |
+| `xformOpOrder` and its ops, `!resetXformStack!` | composed by the `openusd` crate |
+| `active`, `class`, undefined `over` | left out, as on the stage |
+| `instanceable` | read through the prototype; instances share one mesh reference |
+| `PointInstancer` | left out with its prototypes, with a note |
+| `Cube`, `Sphere`, `Cylinder` | meshed from their size, radius, height and axis |
+| `Cone`, `Capsule`, `Plane`, curves, points, NURBS, `TetMesh` | left out, with a note |
+| `SkelRoot` | its meshes come in at their rest pose, with a note |
+| cameras, lights, `PhysicsScene` | left out |
+| `metersPerUnit`, `upAxis` | read from the root layer, else USD's fallbacks of centimetres and Y up |
 
 The root assembly keeps the import record in `import.json`, outside both hashes. It holds the source file's name, format, size and SHA-256, the units and up axis and where each came from (the file, the format's rules, a header comment, a default, a fallback or the caller), the box around every body, and every node's name, path in the file and occurrence path. It also holds the materials, the meshes written and the notes on what was left out. Each joint is recorded in assembly terms: its kind, the occurrence paths of the parent and the child, its origin and rotation in the parent's assembly frame, its axis, and its limits in millimetres or degrees. A USD joint that names no `physics:body0` is anchored to the stage's world frame: its parent is the root, but the root's own placement does not move it. Joints are recorded, not mated: assembly mates need exact faces.
 

@@ -623,6 +623,11 @@ impl SolidDraftApp {
                             text: crate::sketch::fmt_value(value),
                             focus: true,
                         });
+                    } else if let Some(s) = self.state.sketch.as_mut().filter(|s| s.feature == sketch)
+                        && s.sketch.constraint(constraint).is_some_and(|c| c.is_reference())
+                    {
+                        s.selection = vec![crate::state::SketchSel::Constraint(constraint)];
+                        s.say("Reference dimensions are read-only; change to driving to edit");
                     }
                 }
             },

@@ -1153,6 +1153,10 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     actions.push(AppAction::SketchDiagnostics(true));
                 }
             });
+            if s.tool == Tool::Dimension {
+                ui.checkbox(&mut s.reference_dimensions, "Reference dimensions")
+                    .on_hover_text("Measure geometry without adding a solver equation");
+            }
             if s.tool.modifies() {
                 section_gap(ui);
                 crate::sketch_tools::panel(ui, s, &mut actions);
@@ -1165,6 +1169,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             let mut delete_entities = false;
             let mut toggle_construction = false;
             let mut value_change: Option<(crate::sketch::ConstraintId, f64)> = None;
+            let mut reference_change = None;
             if selection.is_empty() {
                 theme::section_label(ui, "Selection");
                 hint(ui, "Click an entity, a point or a relation. Ctrl-click adds to the selection.");
@@ -1207,7 +1212,18 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                             if let Some(con) = s.sketch.constraint(*c).copied() {
                                 ui.horizontal(|ui| {
                                     ui.label(egui::RichText::new(con.name()).size(12.0));
-                                    if con.is_dimension() {
+                                    if con.is_reference() {
+                                        let value = con
+                                            .display_value(&s.sketch)
+                                            .map(fmt_value)
+                                            .unwrap_or_else(|| "unavailable".into());
+                                        let unit = if matches!(con.geometry_kind(), ConstraintKind::Angle { .. }) {
+                                            "°"
+                                        } else {
+                                            "mm"
+                                        };
+                                        ui.label(format!("({value} {unit})"));
+                                    } else if con.is_dimension() {
                                         let mut v = con.value().unwrap_or(0.0);
                                         let unit =
                                             if matches!(con.kind, ConstraintKind::Angle { .. }) { "°" } else { "mm" };
@@ -1234,6 +1250,12 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                                         }
                                     });
                                 });
+                                if con.is_dimension() {
+                                    let mut reference = con.is_reference();
+                                    if ui.checkbox(&mut reference, "Reference dimension").changed() {
+                                        reference_change = Some((con.id, reference));
+                                    }
+                                }
                             }
                         }
                     }
@@ -1325,9 +1347,14 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             for (c, conflict, broken) in rels {
                 ui.push_id(c.id, |ui| {
                     ui.horizontal(|ui| {
-                        let text = match c.value() {
-                            Some(v) => format!("{} {}", c.name(), fmt_value(v)),
-                            None => c.name().to_owned(),
+                        let text = if c.is_reference() {
+                            let value = c.display_value(&s.sketch).map(fmt_value).unwrap_or_else(|| "?".into());
+                            format!("{} ({value})", c.name())
+                        } else {
+                            match c.value() {
+                                Some(v) => format!("{} {}", c.name(), fmt_value(v)),
+                                None => c.name().to_owned(),
+                            }
                         };
                         let mut text = egui::RichText::new(text);
                         if conflict || broken {
@@ -1388,6 +1415,12 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             let mut changed = false;
+            if let Some((id, reference)) = reference_change {
+                match s.sketch.set_dimension_reference(id, reference) {
+                    Ok(()) => changed = true,
+                    Err(error) => s.say(error),
+                }
+            }
             if let Some((id, v)) = value_change
                 && let Some(c) = s.sketch.constraint_mut(id)
             {

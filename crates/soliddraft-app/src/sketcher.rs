@@ -668,7 +668,7 @@ fn select_input(
 ) {
     // Drag start: a point, an entity or a dimension label.
     if resp.drag_started_by(egui::PointerButton::Primary)
-        && let Some(pos) = resp.interact_pointer_pos()
+        && let Some(pos) = ui.input(|i| i.pointer.press_origin())
     {
         let labels = label_rects(frame, &s.sketch, ui);
         let hit = hit_test(frame, &s.sketch, pos, &[]);
@@ -730,7 +730,11 @@ fn select_input(
             && let Some(con) = s.sketch.constraint(c)
             && con.is_dimension()
         {
-            s.dim_edit = Some(DimEdit { constraint: c, text: fmt_value(con.value().unwrap_or(0.0)), focus: true });
+            if let Some(value) = con.value() {
+                s.dim_edit = Some(DimEdit { constraint: c, text: fmt_value(value), focus: true });
+            } else if con.is_reference() {
+                s.say("Reference dimensions are read-only; change to driving to edit");
+            }
         }
         return;
     }
@@ -1058,15 +1062,17 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
             s.say("Click to place the dimension");
         }
         (Some(first), _) => {
-            let kind = dimension_kind(&s.sketch, first, s.dim_second, at);
+            let kind = dimension_kind(&s.sketch, first, s.dim_second, at)
+                .and_then(|kind| if s.reference_dimensions { kind.as_reference() } else { Some(kind) });
             s.dim_first = None;
             s.dim_second = None;
             if let Some(kind) = kind {
                 let id = s.sketch.constrain(kind);
                 solve::solve(&mut s.sketch, None, true);
                 commit(s, actions);
-                let value = s.sketch.constraint(id).and_then(|c| c.value()).unwrap_or(0.0);
-                s.dim_edit = Some(DimEdit { constraint: id, text: fmt_value(value), focus: true });
+                if let Some(value) = s.sketch.constraint(id).and_then(|c| c.value()) {
+                    s.dim_edit = Some(DimEdit { constraint: id, text: fmt_value(value), focus: true });
+                }
             } else {
                 s.say("Those two cannot be dimensioned together");
             }
@@ -1088,6 +1094,11 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
         SketchSel::Point(p) => Some(p),
         SketchSel::Entity(e) => sketch.entity(e).filter(|e| e.is_point()).map(|_| PointRef::new(e, 0)),
         _ => None,
+    };
+    let point_line = |point, line| {
+        let mut c = Constraint { id: 0, kind: ConstraintKind::PointLineDistance { point, line, value: 0.0, label } };
+        c.set_value(c.measured_value(sketch)?);
+        Some(c.kind)
     };
     let between = |a: PointRef, b: PointRef| {
         let (pa, pb) = (sketch.point(a)?, sketch.point(b)?);
@@ -1136,13 +1147,7 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
                     };
                     let (da, db) = (a1.sub(a0).normalized(), b1.sub(b0).normalized());
                     if da.cross(db).abs() < 1e-3 {
-                        let foot = lb.nearest(a0).0;
-                        return Some(ConstraintKind::PointLineDistance {
-                            point: PointRef::new(la.id, 0),
-                            line: lb.id,
-                            value: a0.dist(foot),
-                            label,
-                        });
+                        return point_line(PointRef::new(la.id, 0), lb.id);
                     }
                     let mut deg = (db.angle() - da.angle()).to_degrees().rem_euclid(360.0);
                     if deg > 180.0 {
@@ -1150,16 +1155,8 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
                     }
                     Some(ConstraintKind::Angle { a: la.id, b: lb.id, value: deg, label })
                 }
-                (Some(l), _) if l.is_line() => {
-                    let p = point_of(b)?;
-                    let v = l.nearest(sketch.point(p)?).0.dist(sketch.point(p)?);
-                    Some(ConstraintKind::PointLineDistance { point: p, line: l.id, value: v, label })
-                }
-                (_, Some(l)) if l.is_line() => {
-                    let p = point_of(a)?;
-                    let v = l.nearest(sketch.point(p)?).0.dist(sketch.point(p)?);
-                    Some(ConstraintKind::PointLineDistance { point: p, line: l.id, value: v, label })
-                }
+                (Some(l), _) if l.is_line() => point_line(point_of(b)?, l.id),
+                (_, Some(l)) if l.is_line() => point_line(point_of(a)?, l.id),
                 _ => None,
             }
         }
@@ -1485,20 +1482,22 @@ fn label_rects(frame: &Frame<'_>, sketch: &Sketch, ui: &egui::Ui) -> Vec<(Constr
         .filter(|c| c.is_dimension())
         .filter_map(|c| {
             let sp = frame.screen(c.label()?)?;
-            let text = dim_text(c);
+            let text = dim_text(c, sketch);
             let galley = ui.painter().layout_no_wrap(text, theme::font_medium(11.5), theme::ink());
             Some((c.id, Rect::from_center_size(sp, galley.size() + vec2(12.0, 6.0))))
         })
         .collect()
 }
 
-pub(crate) fn dim_text(c: &Constraint) -> String {
-    match c.kind {
-        ConstraintKind::Radius { value, diameter: true, .. } => format!("Ø{}", fmt_value(value)),
-        ConstraintKind::Radius { value, diameter: false, .. } => format!("R{}", fmt_value(value)),
-        ConstraintKind::Angle { value, .. } => format!("{}°", fmt_value(value)),
-        _ => fmt_value(c.value().unwrap_or(0.0)),
-    }
+pub(crate) fn dim_text(c: &Constraint, sketch: &Sketch) -> String {
+    let value = c.display_value(sketch).map(fmt_value).unwrap_or_else(|| "?".into());
+    let text = match c.geometry_kind() {
+        ConstraintKind::Radius { diameter: true, .. } => format!("Ø{value}"),
+        ConstraintKind::Radius { diameter: false, .. } => format!("R{value}"),
+        ConstraintKind::Angle { .. } => format!("{value}°"),
+        _ => value,
+    };
+    if c.is_reference() { format!("({text})") } else { text }
 }
 
 fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
@@ -1531,7 +1530,7 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
         value_pill(
             painter,
             lp,
-            dim_text(c),
+            dim_text(c, &s.sketch),
             ink,
             bg,
             Stroke::new(1.0, if sel { theme::accent() } else { theme::line() }),
@@ -1550,7 +1549,7 @@ fn paint_dimension_lines(
     color: Color32,
 ) {
     let st = Stroke::new(1.0, color);
-    match c.kind {
+    match c.geometry_kind() {
         ConstraintKind::Distance { a, b, kind, .. } => {
             let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return };
             // Dimension line end points in plane coordinates.
@@ -1697,7 +1696,7 @@ pub fn paint_closed_dimensions(
     for c in sketch.constraints.iter().filter(|c| c.is_dimension()) {
         let Some(label) = c.label() else { continue };
         let Some(lp) = frame.screen(label) else { continue };
-        let text = dim_text(c);
+        let text = dim_text(c, sketch);
         let size =
             painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size() + vec2(12.0, 6.0);
         let at = clear_spot(lp, size, &taken);
@@ -1944,6 +1943,10 @@ fn paint_snaps(
 /// The popup where a dimension value is typed.
 fn dim_editor(ui: &mut egui::Ui, s: &mut SketchSession, frame: &Frame<'_>, actions: &mut Vec<AppAction>) {
     let Some(edit) = s.dim_edit.clone() else { return };
+    if s.sketch.constraint(edit.constraint).is_some_and(|c| c.is_reference()) {
+        s.dim_edit = None;
+        return;
+    }
     let Some(c) = s.sketch.constraint(edit.constraint).copied() else {
         s.dim_edit = None;
         return;

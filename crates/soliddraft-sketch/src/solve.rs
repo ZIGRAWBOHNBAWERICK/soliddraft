@@ -174,6 +174,7 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
     for c in &sketch.constraints {
         let mut reqs: Vec<Constraint> = Vec::new();
         match c.kind {
+            ConstraintKind::Reference { .. } => {}
             ConstraintKind::Coincident { a, b } => {
                 if let (Some(p), Some(q)) = (pt(&vars, a), pt(&vars, b)) {
                     reqs.push(Constraint::PointsCoincident(p, q));

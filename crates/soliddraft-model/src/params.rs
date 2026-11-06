@@ -182,8 +182,9 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
             if !matches!(sketch.plane, SketchPlane::Face { .. }) {
                 out.push(param(Parameter::Offset, Unit::Length, sketch.plane.offset()));
             }
-            let dimensions = sketch.sketch.constraints.iter().filter_map(|c| Some((c, c.value()?)));
-            for (n, (c, value)) in dimensions.enumerate() {
+            let dimensions = sketch.sketch.constraints.iter().filter(|c| c.is_dimension()).enumerate();
+            for (n, c) in dimensions {
+                let Some(value) = c.value() else { continue };
                 let unit = if matches!(c.kind, ConstraintKind::Angle { .. }) { Unit::Angle } else { Unit::Length };
                 let input = Input::Dimension { feature: id, constraint: c.id };
                 out.push(Param { input, label: format!("D{}", n + 1), unit, value });

@@ -861,6 +861,12 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::CheckSketchFeature => {
+                self.apply(ctx, AppAction::SketchDiagnostics(true));
+                if let Some(report) = self.state.sketch.as_mut().and_then(|s| s.diagnostics.as_mut()) {
+                    report.usage = crate::sketch_diagnostics::Usage::Boss;
+                }
+            }
             AppAction::LocateSketchDiagnostic => {
                 let bounds = self.state.sketch.as_ref().and_then(|s| {
                     let issue = crate::sketch_diagnostics::selected(s)?;

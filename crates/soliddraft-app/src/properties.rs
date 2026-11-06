@@ -1031,8 +1031,10 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         state.push(AppAction::ExitSketch(None));
     }
     let mut actions = Vec::new();
+    let has_body = state.doc.model().body().is_some();
     let Some(s) = state.sketch.as_mut() else { return };
-    let has_profile = crate::sketch::profile::profiles(&s.sketch, s.plane).is_ok();
+    let profiles = crate::sketch::profile::profiles(&s.sketch, s.plane);
+    let has_profile = profiles.is_ok();
     egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
             // Status.
@@ -1071,7 +1073,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             }
             section_gap(ui);
 
-            crate::sketch_diagnostics::panel(ui, s, &mut actions);
+            crate::sketch_diagnostics::panel(ui, s, &mut actions, &profiles, has_body);
 
             // Exit into a feature.
             theme::section_label(ui, "Use the sketch");

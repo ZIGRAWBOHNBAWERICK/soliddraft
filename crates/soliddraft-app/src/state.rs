@@ -71,6 +71,8 @@ pub enum AppAction {
     SketchRelations(bool),
     /// Open or close a read-only report of sketch profile warnings.
     SketchDiagnostics(bool),
+    /// Open the same inspector with intended extrusion checks enabled.
+    CheckSketchFeature,
     /// Focus the current, still-valid diagnostic locations.
     LocateSketchDiagnostic,
     /// Toggles construction on the sketch selection.

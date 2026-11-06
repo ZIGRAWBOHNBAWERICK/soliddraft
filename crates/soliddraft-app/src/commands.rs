@@ -1583,6 +1583,10 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::ToggleConstruction)
             .when(AppState::in_sketch)
 .app_only(SKETCHER),
+        cmd("check_sketch_feature", "Check sketch for feature", Icon::Cad("check"), "Check closed profiles for a boss or cut extrude")
+            .run(|_| AppAction::CheckSketchFeature)
+            .when(AppState::in_sketch)
+.app_only(SKETCHER),
         cmd("sketch_diagnostics", "Sketch diagnostics", Icon::Cad("check"), "Inspect profile warnings without repairing geometry")
             .run(|_| AppAction::SketchDiagnostics(true))
             .when(AppState::in_sketch)

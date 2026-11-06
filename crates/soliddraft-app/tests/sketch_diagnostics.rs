@@ -21,13 +21,16 @@ fn dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-diagnostics-{}", std::process::id())))
 }
 
-fn launch(mut sketch: Sketch) -> (App, FeatureId) {
+fn launch(sketch: Sketch) -> (App, FeatureId) {
+    launch_at(ribbon::blank(), sketch, 0.0)
+}
+
+fn launch_at(mut doc: soliddraft_app::document::Document, mut sketch: Sketch, offset: f64) -> (App, FeatureId) {
     std::fs::create_dir_all(dir().join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir().join("config")));
     solve::solve(&mut sketch, None, true);
-    let mut doc = ribbon::blank();
     let id = doc
-        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset } })
         .unwrap()
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
@@ -304,6 +307,151 @@ fn wrong_kind_relations_are_reported_after_reopen_without_silently_repairing_the
     app.run_steps(8);
     assert!(session(&app).sketch.constraints.is_empty());
     assert_eq!(session(&app).sketch.entities, authored.entities);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn intended_extrusion_checks_do_not_create_features_or_change_geometry() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    sketch.add(EntityKind::Circle { center: P2::new(10.0, 10.0), radius: 10.0 }, false);
+    let (mut app, _) = launch(sketch);
+    let before = session(&app).sketch.clone();
+    let revision = app.state().state.doc.revision();
+    let features = app.state().state.doc.features.len();
+    control(&mut app, "Sketch diagnostics");
+    control(&mut app, "Diagnostics only");
+    control(&mut app, "Boss extrude");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
+    frame(&mut app, "preflight-boss");
+    control(&mut app, "Boss extrude");
+    control(&mut app, "Cut extrude");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Cut extrude needs a part body."));
+    assert_eq!(session(&app).sketch, before);
+    assert_eq!(app.state().state.doc.revision(), revision);
+    assert_eq!(app.state().state.doc.features.len(), features);
+    assert!(session(&app).selection.is_empty());
+    app.set_size(vec2(960.0, 600.0));
+    soliddraft_app::theme::set_mode(&app.ctx, soliddraft_app::theme::Mode::Dark);
+    app.run_steps(12);
+    assert!(
+        ribbon::painted(&app)
+            .iter()
+            .any(|p| p.text == "Cut extrude needs a part body." && p.rect.contains_rect(p.full))
+    );
+    frame(&mut app, "preflight-missing-body-small-dark");
+    control(&mut app, "Close diagnostics");
+    app.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
+    app.run_steps(3);
+    app.event(egui::Event::Text("Check sketch for feature".into()));
+    app.run_steps(3);
+    app.key_press(Key::Enter);
+    app.run_steps(12);
+    assert!(session(&app).diagnostics.is_some());
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
+    app.key_press(Key::Escape);
+    app.run_steps(8);
+    assert!(app.state().state.sketch.is_some());
+    assert!(session(&app).diagnostics.is_none());
+    assert_eq!(app.state().state.doc.revision(), revision);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn feature_checks_keep_their_target_after_undo_refresh_and_reset_after_reopen() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    sketch.add(EntityKind::Circle { center: P2::new(10.0, 10.0), radius: 5.0 }, false);
+    let (mut app, id) = launch(sketch);
+    control(&mut app, "Sketch diagnostics");
+    control(&mut app, "Diagnostics only");
+    control(&mut app, "Boss extrude");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
+    let closed = session(&app).sketch.clone();
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(8);
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Sketch changed. Refresh diagnostics."));
+    control(&mut app, "Refresh diagnostics");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude needs a closed region."));
+    frame(&mut app, "preflight-no-region");
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    app.run_steps(8);
+    control(&mut app, "Refresh diagnostics");
+    assert_eq!(session(&app).sketch, closed);
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
+    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.run_steps(6);
+    let path = dir().join("preflight.dwprt");
+    app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+    app.run_steps(6);
+    app.state_mut().state.push(AppAction::Open(Some(path)));
+    app.run_steps(10);
+    app.state_mut().state.push(AppAction::EditSketch(id));
+    app.run_steps(12);
+    assert!(session(&app).diagnostics.is_none());
+    control(&mut app, "Sketch diagnostics");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Diagnostics only"));
+    assert_eq!(session(&app).sketch, closed);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn a_valid_region_keeps_unused_curve_warnings_in_feature_check_mode() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    sketch.add(EntityKind::Circle { center: P2::new(10.0, 10.0), radius: 5.0 }, false);
+    sketch.add(EntityKind::Circle { center: P2::new(10.0, 10.0), radius: 2.0 }, false);
+    sketch.add(EntityKind::Line { a: P2::new(30.0, 10.0), b: P2::new(40.0, 10.0) }, false);
+    let (mut app, _) = launch(sketch);
+    let before = session(&app).sketch.clone();
+    control(&mut app, "Sketch diagnostics");
+    control(&mut app, "Diagnostics only");
+    control(&mut app, "Boss extrude");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Review 2 sketch warnings."));
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "1 inner loop"));
+    assert_marker(&app);
+    assert_eq!(session(&app).sketch, before);
+    frame(&mut app, "preflight-unused-curves");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn checked_cut_profiles_still_use_the_existing_editor_and_catallax_path() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    sketch.add(EntityKind::Circle { center: P2::new(10.0, 10.0), radius: 2.0 }, false);
+    let (mut app, _) = launch_at(ribbon::plate(), sketch, 20.0);
+    let revision = app.state().state.doc.revision();
+    let features = app.state().state.doc.features.len();
+    control(&mut app, "Sketch diagnostics");
+    control(&mut app, "Diagnostics only");
+    control(&mut app, "Cut extrude");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Cut extrude: 1 closed region"));
+    assert_eq!(app.state().state.doc.revision(), revision);
+    assert_eq!(app.state().state.doc.features.len(), features);
+    frame(&mut app, "preflight-cut");
+    control(&mut app, "Cut");
+    assert!(app.state().state.sketch.is_none());
+    assert!(matches!(
+        app.state().state.editor.as_ref().map(|e| &e.params),
+        Some(soliddraft_app::state::EditorParams::Cut(_))
+    ));
+    app.key_press(Key::Enter);
+    ribbon::until_rendered(&mut app, "the checked profile commits through the existing cut editor", |app| {
+        app.state().state.editor.is_none()
+            && app.state().state.doc.features.len() == features + 1
+            && app.state().state.doc.proof_state().current_proved_model()
+    });
+    let doc = app.state().state.doc.model();
+    let volume = doc.kernel().mass_properties(doc.body().unwrap()).unwrap().volume;
+    let expected = 48000.0 - 80.0 * std::f64::consts::PI;
+    assert!((volume - expected).abs() < 1e-4, "{volume} != {expected}");
+    frame(&mut app, "preflight-cut-result");
     drop(app);
     soliddraft_app::file::set_config_dir(None);
 }

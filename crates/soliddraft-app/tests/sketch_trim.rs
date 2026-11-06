@@ -50,7 +50,7 @@ fn frame(app: &mut App, name: &str) {
 }
 
 fn option(app: &mut App, label: &str) {
-    for _ in 0..6 {
+    for _ in 0..12 {
         if let Some(p) = ribbon::painted(app).into_iter().find(|p| p.text == label && p.rect.contains_rect(p.full)) {
             ribbon::click_at(app, p.rect.center());
             return;
@@ -62,7 +62,7 @@ fn option(app: &mut App, label: &str) {
         ));
         app.event(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -180.0),
+            delta: vec2(0.0, -80.0),
             phase: egui::TouchPhase::Move,
             modifiers: Modifiers::NONE,
         });

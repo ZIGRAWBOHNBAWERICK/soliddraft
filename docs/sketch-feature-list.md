@@ -15,6 +15,8 @@ The tables below retain their original source-audit baseline. Later work has add
 
 - Orders 10-11: session-local keep-as-construction and ignore-construction-target options apply to closest/power, corner and inside/outside trimming. Guide curves still bound regular targets. Whole conversions preserve identity and relations; partial edits retain the existing stale-relation policy. [Shared operations](../crates/soliddraft-sketch/src/tools.rs) support strict optional headless settings with unchanged defaults. [Pointer/raster tests](../crates/soliddraft-app/tests/sketch_trim.rs) cover dashed previews, protected guides, retracing, live Undo, cancellation and reopen. [Kernel profile tests](../crates/soliddraft-model/tests/sketch_trim_bounds.rs) verify retained guides stay out of extrusion profiles.
 
+- Orders 12 and 49: Existing relations now offers Selected, All, Conflicting and Dangling scopes with no geometry selection required. Inspect conflicts opens the solver-reported set. Missing entity and point references can be found and removed after reopen. Row selection retains owner highlights and safe deletion. [Native inspection tests](../crates/soliddraft-app/tests/sketch_relation_inspection.rs) cover filters, compact empty states, hidden glyphs, popup Escape, undo/redo and persistence. External-reference filtering and automatic conflict repair remain unsupported.
+
 ## How to read the list
 
 - **SolidDraft** means an end-user command exists, not merely that the solver could express it. `yes` means the listed operation is implemented; `partial` names its limit; `no` names the inspected code boundary where support is absent. These are source-audit findings, not fresh interactive acceptance results.

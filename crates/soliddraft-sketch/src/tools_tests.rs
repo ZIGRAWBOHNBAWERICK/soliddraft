@@ -33,6 +33,156 @@ fn polygon_closes_and_survives_solving_and_serialization() {
 }
 
 #[test]
+fn bounded_trim_uses_only_the_two_selected_crossings() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let a = line(&mut s, p(-3.0, -5.0), p(-3.0, 5.0), true);
+    let b = line(&mut s, p(3.0, -5.0), p(3.0, 5.0), true);
+    line(&mut s, p(0.0, -5.0), p(0.0, 5.0), true);
+    let op: Operation = serde_json::from_value(serde_json::json!({
+        "tool":"trim_bounded", "entity":target, "a":a, "b":b, "outside":false,
+    }))
+    .unwrap();
+    let ids = s.apply_operation(&op).unwrap();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids[0], target);
+    assert_eq!(s.entity(ids[0]).unwrap().kind, EntityKind::Line { a: p(-10.0, 0.0), b: p(-3.0, 0.0) });
+    assert_eq!(s.entity(ids[1]).unwrap().kind, EntityKind::Line { a: p(3.0, 0.0), b: p(10.0, 0.0) });
+}
+
+#[test]
+fn bounded_outside_trim_is_direction_independent_and_preserves_guides() {
+    for reverse in [false, true] {
+        for swap in [false, true] {
+            let mut s = Sketch::new();
+            let (start, end) = if reverse { (p(10.0, 0.0), p(-10.0, 0.0)) } else { (p(-10.0, 0.0), p(10.0, 0.0)) };
+            let target = line(&mut s, start, end, true);
+            let a = line(&mut s, p(-3.0, -5.0), p(-3.0, 5.0), true);
+            let b = line(&mut s, p(3.0, 5.0), p(3.0, -5.0), false);
+            let target_fix = s.constrain(ConstraintKind::Fix { point: PointRef::new(target, 0), at: start });
+            let guide_fix = s.constrain(ConstraintKind::Fix { point: PointRef::new(a, 0), at: p(-3.0, -5.0) });
+            let (a, b) = if swap { (b, a) } else { (a, b) };
+            let before = s.clone();
+            let preview = s.trim_bounded_preview(target, a, b, true).unwrap();
+            assert_eq!(preview.removed.len(), 2);
+            assert_eq!(s, before);
+            assert_eq!(
+                s.apply_operation(&Operation::TrimBounded { entity: target, a, b, outside: true }).unwrap(),
+                [target]
+            );
+            assert_eq!(
+                s.entity(target).unwrap().kind,
+                EntityKind::Line {
+                    a: p(if reverse { 3.0 } else { -3.0 }, 0.0),
+                    b: p(if reverse { -3.0 } else { 3.0 }, 0.0),
+                }
+            );
+            assert!(s.entity(target).unwrap().construction);
+            assert!(s.constraint(target_fix).is_none());
+            assert!(s.constraint(guide_fix).is_some());
+            assert_eq!(s.entity(a), before.entity(a));
+            assert_eq!(s.entity(b), before.entity(b));
+        }
+    }
+}
+
+#[test]
+fn bounded_trim_splits_wrapping_major_arcs_without_moving_the_old_ends() {
+    use std::f64::consts::PI;
+    for outside in [false, true] {
+        let mut s = Sketch::new();
+        let start = P2::from_angle(4.0 * PI / 3.0).scale(10.0);
+        let end = P2::from_angle(2.0 * PI / 3.0).scale(10.0);
+        let target = s.add(EntityKind::Arc { center: P2::ZERO, start, end }, false);
+        let a = line(&mut s, p(5.0, -11.0), p(5.0, -1.0), true);
+        let b = line(&mut s, p(5.0, 1.0), p(5.0, 11.0), true);
+        let ids = s.apply_operation(&Operation::TrimBounded { entity: target, a, b, outside }).unwrap();
+        assert_eq!(ids.len(), if outside { 1 } else { 2 });
+        for &id in &ids {
+            let e = s.entity(id).unwrap();
+            close(e.arc_angles().unwrap().1, if outside { 2.0 * PI / 3.0 } else { PI / 3.0 });
+            let EntityKind::Arc { center, start, end } = e.kind else { panic!() };
+            assert_eq!(center, P2::ZERO);
+            close(center.dist(start), 10.0);
+            close(center.dist(end), 10.0);
+        }
+        if !outside {
+            let EntityKind::Arc { start: retained_start, .. } = s.entity(ids[0]).unwrap().kind else { panic!() };
+            let EntityKind::Arc { end: retained_end, .. } = s.entity(ids[1]).unwrap().kind else { panic!() };
+            assert_eq!(retained_start, start);
+            assert_eq!(retained_end, end);
+        }
+    }
+}
+
+#[test]
+fn bounded_trim_accepts_single_crossings_with_circle_and_arc_bounds() {
+    for arc_bound in [false, true] {
+        let mut s = Sketch::new();
+        let target = s.add(EntityKind::Arc { center: P2::ZERO, start: p(10.0, 0.0), end: p(0.0, 10.0) }, false);
+        let a = s.add(
+            if arc_bound {
+                EntityKind::Arc { center: p(10.0, 0.0), start: p(20.0, 0.0), end: p(0.0, 0.0) }
+            } else {
+                EntityKind::Circle { center: p(10.0, 0.0), radius: 10.0 }
+            },
+            true,
+        );
+        let b = s.add(EntityKind::Circle { center: p(0.0, 10.0), radius: 10.0 }, true);
+        s.apply_operation(&Operation::TrimBounded { entity: target, a, b, outside: true }).unwrap();
+        close(s.entity(target).unwrap().arc_angles().unwrap().1, std::f64::consts::PI / 6.0);
+        assert!(s.entity(a).unwrap().construction && s.entity(b).unwrap().construction);
+    }
+}
+
+#[test]
+fn bounded_trim_refuses_ambiguous_and_invalid_inputs_atomically() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
+    let a = line(&mut s, p(-3.0, -5.0), p(-3.0, 5.0), true);
+    let b = line(&mut s, p(3.0, -5.0), p(3.0, 5.0), true);
+    let same_hit = line(&mut s, p(-3.0, -7.0), p(-3.0, 7.0), true);
+    let absent = line(&mut s, p(-10.0, 6.0), p(10.0, 6.0), true);
+    let tangent = s.add(EntityKind::Circle { center: p(0.0, 5.0), radius: 5.0 }, true);
+    let twice = s.add(EntityKind::Circle { center: P2::ZERO, radius: 5.0 }, true);
+    let point = s.add(EntityKind::Point { p: P2::ZERO }, false);
+    let before = s.clone();
+    for outside in [false, true] {
+        for (entity, a, b) in [
+            (target, a, a),
+            (target, target, b),
+            (target, a, target),
+            (target, a, 999),
+            (target, a, 0),
+            (target, a, point),
+            (target, a, absent),
+            (target, a, tangent),
+            (target, a, twice),
+            (target, a, same_hit),
+            (point, a, b),
+            (twice, a, b),
+        ] {
+            assert!(s.apply_operation(&Operation::TrimBounded { entity, a, b, outside }).is_err());
+            assert_eq!(s, before);
+        }
+    }
+}
+
+#[test]
+fn bounded_trim_handles_end_crossings_and_refuses_an_outside_no_op() {
+    let mut s = Sketch::new();
+    let target = line(&mut s, p(-3.0, 0.0), p(3.0, 0.0), false);
+    let a = line(&mut s, p(-3.0, -5.0), p(-3.0, 5.0), true);
+    let b = line(&mut s, p(3.0, -5.0), p(3.0, 5.0), true);
+    let before = s.clone();
+    assert!(s.apply_operation(&Operation::TrimBounded { entity: target, a, b, outside: true }).is_err());
+    assert_eq!(s, before);
+    assert!(s.apply_operation(&Operation::TrimBounded { entity: target, a, b, outside: false }).unwrap().is_empty());
+    assert!(s.entity(target).is_none());
+    assert!(s.entity(a).is_some() && s.entity(b).is_some());
+}
+
+#[test]
 fn trim_splits_only_the_picked_interval_and_drops_stale_relations() {
     let mut s = Sketch::new();
     let target = line(&mut s, p(-10.0, 0.0), p(10.0, 0.0), false);
@@ -496,7 +646,7 @@ fn trim_preview_names_the_removed_interval_and_the_kept_pieces() {
     line(&mut s, p(4.0, -2.0), p(4.0, 2.0), true);
     let before = s.clone();
     let preview = s.trim_preview(target, P2::ZERO).unwrap();
-    assert_eq!(preview.removed, EntityKind::Line { a: p(-3.0, 0.0), b: p(4.0, 0.0) });
+    assert_eq!(preview.removed, [EntityKind::Line { a: p(-3.0, 0.0), b: p(4.0, 0.0) }]);
     assert_eq!(
         preview.kept,
         [EntityKind::Line { a: p(-10.0, 0.0), b: p(-3.0, 0.0) }, EntityKind::Line { a: p(4.0, 0.0), b: p(10.0, 0.0) }]
@@ -506,7 +656,7 @@ fn trim_preview_names_the_removed_interval_and_the_kept_pieces() {
     let whole = line(&mut s, p(0.0, 5.0), p(0.0, 9.0), false);
     let preview = s.trim_preview(whole, p(0.0, 7.0)).unwrap();
     assert!(preview.kept.is_empty());
-    assert_eq!(preview.removed, EntityKind::Line { a: p(0.0, 5.0), b: p(0.0, 9.0) });
+    assert_eq!(preview.removed, [EntityKind::Line { a: p(0.0, 5.0), b: p(0.0, 9.0) }]);
     assert!(s.trim_preview(target, p(-3.0, 0.0)).is_err(), "a pick on a crossing has no interval");
 }
 

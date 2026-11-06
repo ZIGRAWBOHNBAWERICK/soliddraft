@@ -1523,11 +1523,11 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Polygon))
 .app_only(SKETCHER),
-        cmd("sketch_trim", "Trim", Icon::Trim, "Trim a picked piece, power-trim a drag, or choose Corner in the tool panel")
+        cmd("sketch_trim", "Trim", Icon::Trim, "Trim a picked piece, power-trim a drag, or choose Corner, Inside or Outside in the tool panel")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Trim))
             .when(AppState::in_sketch)
-            .lit(|s| tool_is(s, Tool::Trim) || tool_is(s, Tool::TrimCorner))
+            .lit(|s| s.sketch.as_ref().is_some_and(|k| k.tool.trims()))
 .app_only(SKETCHER),
         cmd("sketch_extend", "Extend", Icon::Extend, "Extend: click the end of a line or arc to lengthen it to the next curve")
             .on(Sketch, "Modify", Small)

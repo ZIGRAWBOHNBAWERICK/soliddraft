@@ -1171,6 +1171,11 @@ impl SolidDraftApp {
         match self.state.doc.feature(s.feature).and_then(|f| f.sketch()) {
             Some(sk) => {
                 if sk.sketch != s.sketch {
+                    if !s.trim_bounds.is_empty() {
+                        s.trim_bounds.clear();
+                        s.selection.clear();
+                        s.preview = None;
+                    }
                     s.sketch = sk.sketch.clone();
                     s.selection.retain(|sel| match sel {
                         crate::state::SketchSel::Entity(e) => s.sketch.entity(*e).is_some(),

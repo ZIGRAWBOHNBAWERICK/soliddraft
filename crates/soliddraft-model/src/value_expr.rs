@@ -372,8 +372,8 @@ impl Expression {
         self
     }
 
-    /// True when it reads no value.
-    pub(crate) fn is_literal(&self) -> bool {
+    /// True for one signed number, with or without a unit.
+    pub fn is_literal(&self) -> bool {
         fn literal(tree: &Expr) -> bool {
             match tree {
                 Expr::Number(..) => true,

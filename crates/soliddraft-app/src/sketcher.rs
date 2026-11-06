@@ -730,8 +730,11 @@ fn select_input(
             && let Some(con) = s.sketch.constraint(c)
             && con.is_dimension()
         {
-            if let Some(value) = con.value() {
-                s.dim_edit = Some(DimEdit::new(c, value));
+            if con.value().is_some() {
+                actions.push(AppAction::EditDimension(crate::viewport::dimensions::DimensionTarget::Sketch {
+                    sketch: s.feature,
+                    constraint: c,
+                }));
             } else if con.is_reference() {
                 s.say("Reference dimensions are read-only; change to driving to edit");
             }

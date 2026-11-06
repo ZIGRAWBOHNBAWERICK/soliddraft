@@ -18,6 +18,7 @@ use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef};
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if state.sketch.is_some() {
         sketch_panel(ui, state);
+        crate::sketch_values::popup(ui, state);
     } else if state.editor.is_some() {
         editor(ui, state);
     } else {
@@ -1032,6 +1033,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
     }
     let mut actions = Vec::new();
     let has_body = state.doc.model().body().is_some();
+    let links =
+        state.sketch.as_ref().map(|s| crate::sketch_values::links(state.doc.model(), s.feature)).unwrap_or_default();
     let Some(s) = state.sketch.as_mut() else { return };
     let profiles = crate::sketch::profile::profiles(&s.sketch, s.plane);
     let has_profile = profiles.is_ok();
@@ -1152,6 +1155,18 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 {
                     actions.push(AppAction::SketchDiagnostics(true));
                 }
+                if s.selection.iter().any(|selection|matches!(selection,SketchSel::Constraint(id) if s.sketch.constraint(*id).is_some_and(|c|c.is_dimension()))) {
+                    let eligible = crate::sketch_values::selected(s);
+                    if ui
+                        .add_enabled(eligible.is_ok(), egui::Button::new("Link values"))
+                        .on_hover_text(
+                            eligible.err().unwrap_or_else(|| "Share a named value between selected dimensions".into()),
+                        )
+                        .clicked()
+                    {
+                        actions.push(AppAction::SketchValues(crate::sketch_values::Action::Open));
+                    }
+                }
             });
             if s.tool == Tool::Dimension {
                 ui.checkbox(&mut s.reference_dimensions, "Reference dimensions")
@@ -1223,6 +1238,15 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                                             "mm"
                                         };
                                         ui.label(format!("({value} {unit})"));
+                                    } else if let Some(name) = links.get(c) {
+                                        if ui
+                                            .small_button(format!("{} = {name}", fmt_value(con.value().unwrap_or(0.0))))
+                                            .on_hover_text("Edit the shared value for every linked member")
+                                            .clicked()
+                                        {
+                                            s.selection = vec![SketchSel::Constraint(*c)];
+                                            actions.push(AppAction::SketchValues(crate::sketch_values::Action::Open));
+                                        }
                                     } else if con.is_dimension() {
                                         let mut v = con.value().unwrap_or(0.0);
                                         let unit =

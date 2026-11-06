@@ -291,6 +291,12 @@ pub(crate) fn write(feature: &mut Feature, input: &Input, value: f64) -> Result<
         (Input::Dimension { constraint, .. }, FeatureKind::Sketch(sketch)) => {
             let c =
                 sketch.sketch.constraint_mut(*constraint).filter(|c| c.value().is_some()).ok_or("no such dimension")?;
+            if !value.is_finite() {
+                return Err(format!("{name}: the dimension must be a finite number"));
+            }
+            if !matches!(c.kind, soliddraft_sketch::ConstraintKind::Angle { .. }) {
+                positive("dimension length")?;
+            }
             if c.value() != Some(value) {
                 c.set_value(value);
                 soliddraft_sketch::solve::solve(&mut sketch.sketch, None, true);

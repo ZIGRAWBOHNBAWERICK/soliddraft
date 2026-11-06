@@ -225,6 +225,13 @@ paths = ["crates/soliddraft-app/src/sketch_diagnostics.rs"]
 module = ["sketch_diagnostics"]
 
 [[areas]]
+name = "app.sketch_values"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/sketch_values.rs"]
+module = ["sketch_values"]
+
+[[areas]]
 name = "app.sketch_tools"
 owner = "core"
 crate = "soliddraft-app"

@@ -88,6 +88,295 @@ fn circle() -> (Sketch, u32) {
     (sketch, dim)
 }
 
+fn shared_field(app: &mut App, label: &str, text: &str) {
+    app.get_by_label(label).focus();
+    app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.get_by_label(label).type_text(text);
+    app.run_steps(3);
+}
+
+#[test]
+fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let mut ids = Vec::new();
+    for (x, radius, y) in [(-12.0, 5.0, -9.0), (12.0, 7.0, -11.0)] {
+        let entity = sketch.add(EntityKind::Circle { center: P2::new(x, 0.0), radius }, false);
+        ids.push(sketch.constrain(ConstraintKind::Radius {
+            entity,
+            value: radius * 2.0,
+            diameter: true,
+            label: P2::new(x, y),
+        }));
+    }
+    let (mut app, feature) = launch(sketch);
+    app.run_steps(60);
+    let read = |app: &App| {
+        ids.iter().map(|id| session(app).sketch.constraint(*id).unwrap().value().unwrap()).collect::<Vec<_>>()
+    };
+    let label = |app: &App, id| screen(app, session(app).sketch.constraint(id).unwrap().label().unwrap());
+    let at = label(&app, ids[0]);
+    ribbon::click_at(&mut app, at);
+    let at = label(&app, ids[1]);
+    app.hover_at(at);
+    app.run_steps(2);
+    app.event(egui::Event::ModifiersChanged(Modifiers::CTRL));
+    app.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::CTRL,
+    });
+    app.step();
+    app.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::CTRL,
+    });
+    app.step();
+    app.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    app.run_steps(3);
+    assert_eq!(session(&app).selection, ids.iter().copied().map(SketchSel::Constraint).collect::<Vec<_>>());
+    let history = app.state().state.doc.model().undo_depth();
+    control(&mut app, "Link values");
+    shared_field(&mut app, "Shared value name", "Span");
+    frame(&mut app, "link-values-new-group");
+    control(&mut app, "Link selected");
+    app.run_steps(10);
+    assert!(session(&app).link_values.is_none());
+    assert_eq!(read(&app), [10.0, 10.0]);
+    assert_eq!(app.state().state.doc.model().undo_depth(), history + 1);
+    let linked = session(&app).sketch.clone();
+    app.run_steps(30);
+    let at = label(&app, ids[1]);
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    assert_eq!(app.get_by_label("Shared value name").value().as_deref(), Some("Span"));
+    shared_field(&mut app, "Shared numeric value (mm)", "20");
+    control(&mut app, "Link selected");
+    app.run_steps(10);
+    assert_eq!(read(&app), [20.0, 20.0]);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(10);
+    assert_eq!(session(&app).sketch, linked);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    app.run_steps(10);
+    assert_eq!(read(&app), [20.0, 20.0]);
+    app.set_size(vec2(960.0, 600.0));
+    soliddraft_app::theme::set_mode(&app.ctx, soliddraft_app::theme::Mode::Dark);
+    app.run_steps(60);
+    let at = label(&app, ids[1]);
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    frame(&mut app, "link-values-member-small-dark");
+    let before = (app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth());
+    control(&mut app, "Link selected");
+    app.run_steps(6);
+    assert!(session(&app).link_values.is_none());
+    assert_eq!((app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth()), before);
+    app.run_steps(30);
+    let at = label(&app, ids[1]);
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    assert!(session(&app).link_values.is_none());
+    assert_eq!((app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth()), before);
+    app.run_steps(30);
+    let at = label(&app, ids[1]);
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    shared_field(&mut app, "Shared numeric value (mm)", "not a number");
+    control(&mut app, "Unlink selected");
+    app.run_steps(10);
+    assert!(session(&app).link_values.is_none(), "unlink discards an unused numeric draft");
+    assert_eq!(read(&app), [20.0, 20.0]);
+    app.run_steps(30);
+    let at = label(&app, ids[0]);
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    shared_field(&mut app, "Shared numeric value (mm)", "16");
+    control(&mut app, "Link selected");
+    app.run_steps(10);
+    assert_eq!(read(&app), [16.0, 20.0]);
+    let saved = session(&app).sketch.clone();
+    let path = dir().join("linked-dimensions.dwprt");
+    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.run_steps(6);
+    app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+    app.run_steps(8);
+    app.state_mut().state.push(AppAction::Open(Some(path)));
+    app.run_steps(12);
+    ribbon::document_tab(&mut app, "Values");
+    app.run_steps(6);
+    shared_field(&mut app, "New global name", "Other");
+    app.key_press(Key::Enter);
+    app.run_steps(4);
+    shared_field(&mut app, "New global formula", "24 mm");
+    app.key_press(Key::Enter);
+    app.run_steps(8);
+    ribbon::document_tab(&mut app, "Tree");
+    app.state_mut().state.push(AppAction::EditSketch(feature));
+    app.run_steps(60);
+    assert_eq!(session(&app).sketch, saved);
+    let at = label(&app, ids[0]);
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    assert_eq!(app.get_by_label("Shared value name").value().as_deref(), Some("Span"));
+    assert_eq!(app.get_by_label("Shared numeric value (mm)").value().as_deref(), Some("16"));
+    frame(&mut app, "link-values-reopened");
+    app.key_press(Key::Escape);
+    app.run_steps(30);
+    let at = label(&app, ids[1]);
+    ribbon::click_at(&mut app, at);
+    control(&mut app, "Link values");
+    let choosing = (app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth());
+    app.key_press(Key::Tab);
+    app.run_steps(2);
+    app.key_press(Key::Enter);
+    app.run_steps(3);
+    assert!(session(&app).link_values.as_ref().unwrap().existing_open);
+    app.key_press(Key::ArrowDown);
+    app.run_steps(3);
+    assert_eq!(session(&app).link_values.as_ref().unwrap().existing_index, 1);
+    app.key_press(Key::ArrowUp);
+    app.run_steps(3);
+    assert_eq!(session(&app).link_values.as_ref().unwrap().existing_index, 0);
+    frame(&mut app, "link-values-inline-names");
+    app.key_press(Key::Escape);
+    app.run_steps(3);
+    assert!(!session(&app).link_values.as_ref().unwrap().existing_open, "Escape closes only the list");
+    assert_eq!((app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth()), choosing);
+    app.key_press(Key::Enter);
+    app.run_steps(3);
+    assert!(session(&app).link_values.as_ref().unwrap().existing_open);
+    app.key_press(Key::ArrowDown);
+    app.run_steps(3);
+    app.key_press(Key::Enter);
+    app.run_steps(3);
+    assert_eq!(app.get_by_label("Shared value name").value().as_deref(), Some("Other"));
+    assert_eq!(app.get_by_label("Shared numeric value (mm)").value().as_deref(), Some("24"));
+    assert!(!session(&app).link_values.as_ref().unwrap().existing_open);
+    assert_eq!((app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth()), choosing);
+    control(&mut app, "Choose existing value");
+    control(&mut app, "Span");
+    assert_eq!(app.get_by_label("Shared numeric value (mm)").value().as_deref(), Some("16"));
+    control(&mut app, "Link selected");
+    app.run_steps(10);
+    assert_eq!(read(&app), [16.0, 16.0]);
+    frame(&mut app, "link-values-joined-existing");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn compact_angle_literals_can_be_edited_from_a_linked_member() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let a = sketch.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 0.0) }, false);
+    let b = sketch.add(EntityKind::Line { a: P2::ZERO, b: P2::new(10.0, 10.0) }, false);
+    let dimension = sketch.constrain(ConstraintKind::Angle { a, b, value: 45.0, label: P2::new(9.0, 7.0) });
+    let (mut app, feature) = launch(sketch);
+    app.state_mut().state.doc.apply(Command::SetValue { name: "Bend".into(), expression: "45deg".into() }).unwrap();
+    app.state_mut()
+        .state
+        .doc
+        .apply(Command::LinkSketchValues {
+            id: feature,
+            constraints: vec![dimension],
+            name: "Bend".into(),
+            value: None,
+        })
+        .unwrap();
+    app.run_steps(10);
+    let at = screen(&app, P2::new(9.0, 7.0));
+    ribbon::double_click_at(&mut app, at);
+    app.run_steps(6);
+    frame(&mut app, "link-values-angle-literal");
+    shared_field(&mut app, "Shared numeric value (deg)", "60");
+    control(&mut app, "Link selected");
+    app.run_steps(8);
+    assert_eq!(session(&app).sketch.constraint(dimension).unwrap().value(), Some(60.0));
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn the_values_tab_refuses_non_positive_sketch_lengths_without_mutation() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (sketch, dimension) = circle();
+    let (mut app, feature) = launch(sketch);
+    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.run_steps(12);
+    ribbon::document_tab(&mut app, "Values");
+    app.run_steps(6);
+    let before = (app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth());
+    for text in ["-10", "0"] {
+        app.get_by_label("Default Sketch1.D1").focus();
+        app.run_steps(2);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.get_by_label("Default Sketch1.D1").type_text(text);
+        app.run_steps(2);
+        app.key_press(Key::Enter);
+        app.run_steps(8);
+        assert!(
+            app.state()
+                .state
+                .values
+                .error(&soliddraft_app::values_tab::Field::Cell("Sketch1.D1".into(), 0))
+                .is_some_and(|e| e.contains("greater than 0"))
+        );
+        frame(&mut app, "negative-dimension-values-cell");
+        assert_eq!(
+            app.state()
+                .state
+                .doc
+                .feature(feature)
+                .unwrap()
+                .sketch()
+                .unwrap()
+                .sketch
+                .constraint(dimension)
+                .unwrap()
+                .value(),
+            Some(10.0),
+            "a negative diameter must be refused, not solved by absolute magnitude"
+        );
+        assert_eq!((app.state().state.doc.model().part_json(), app.state().state.doc.model().undo_depth()), before);
+    }
+    app.get_by_label("Default Sketch1.D1").focus();
+    app.run_steps(2);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    app.get_by_label("Default Sketch1.D1").type_text("12");
+    app.run_steps(2);
+    app.key_press(Key::Enter);
+    app.run_steps(8);
+    assert_eq!(
+        app.state().state.doc.feature(feature).unwrap().sketch().unwrap().sketch.constraint(dimension).unwrap().value(),
+        Some(12.0)
+    );
+    assert!(app.state().state.values.error(&soliddraft_app::values_tab::Field::Cell("Sketch1.D1".into(), 0)).is_none());
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+#[test]
+fn link_values_is_an_actionable_selected_dimension_command() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (sketch, id) = circle();
+    let (mut app, _) = launch(sketch);
+    let at = screen(&app, session(&app).sketch.constraint(id).unwrap().label().unwrap());
+    ribbon::click_at(&mut app, at);
+    assert_eq!(session(&app).selection, [SketchSel::Constraint(id)]);
+    frame(&mut app, "link-values-selected-baseline");
+    control(&mut app, "Link values");
+    assert!(ribbon::painted(&app).iter().any(|p| p.text == "Shared value name"));
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
 #[test]
 fn accepting_a_measured_dimension_without_typing_keeps_its_full_precision() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

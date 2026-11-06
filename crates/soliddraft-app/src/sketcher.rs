@@ -321,6 +321,11 @@ pub fn run(
                 dimension_click(s, &frame, pos, &mut actions);
             }
         }
+        Tool::TrimCorner => {
+            if clicked && let Some(pos) = hover_pos {
+                corner_click(s, &frame, pos, &mut actions);
+            }
+        }
         Tool::Trim | Tool::Extend => {
             let dragging = s.tool == Tool::Trim && trim_input(ui, s, &frame, resp, &mut actions);
             if clicked && !dragging {
@@ -497,6 +502,32 @@ fn copy_input(
             s.pending = vec![(p, Vec::new())];
         }
         _ => {}
+    }
+}
+
+fn corner_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &mut Vec<AppAction>) {
+    if s.corner_first.is_none() {
+        let first = hit_curve(frame, &s.sketch, pos).filter(|id| {
+            s.sketch.entity(*id).is_some_and(|e| matches!(e.kind, EntityKind::Line { .. } | EntityKind::Arc { .. }))
+        });
+        if let (Some(id), Some(at)) = (first, frame.plane_at(pos)) {
+            s.corner_first = Some((id, at));
+            s.selection = vec![SketchSel::Entity(id)];
+        } else {
+            s.say("Pick a line or arc on the part to keep");
+        }
+        return;
+    }
+    match s.preview.as_ref().and_then(|p| p.operation.clone()) {
+        Some(operation) => {
+            if sketch_tools::apply(s, &operation, actions) {
+                s.corner_first = None;
+                s.selection.clear();
+            }
+        }
+        None => s.say(
+            s.preview.as_ref().and_then(|p| p.refused.clone()).unwrap_or_else(|| "Pick the second line or arc".into()),
+        ),
     }
 }
 
@@ -690,6 +721,24 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
     let at = frame.plane_at(pos)?;
     let entity = *s.sketch.entity(id)?;
     let preview = match s.tool {
+        Tool::TrimCorner => {
+            if let Some((a, keep_a)) = s.corner_first {
+                let mut preview =
+                    sketch_tools::try_operation(s, Operation::TrimCorner { a, b: id, keep_a, keep_b: at });
+                preview.target = Some(id);
+                preview
+            } else {
+                ToolPreview {
+                    target: Some(id),
+                    refused: s
+                        .sketch
+                        .entity(id)
+                        .filter(|e| !matches!(e.kind, EntityKind::Line { .. } | EntityKind::Arc { .. }))
+                        .map(|_| "A corner needs lines or arcs, not a closed circle".into()),
+                    ..Default::default()
+                }
+            }
+        }
         Tool::Trim => match s.sketch.trim_preview(id, at) {
             Ok(trim) => ToolPreview {
                 removed: vec![trim.removed],
@@ -916,6 +965,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
         Tool::Select
         | Tool::Dimension
         | Tool::Trim
+        | Tool::TrimCorner
         | Tool::Extend
         | Tool::Offset
         | Tool::Mirror
@@ -1906,6 +1956,8 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         }
         (Tool::Polygon, 0) => "Polygon: click the centre",
         (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
+        (Tool::TrimCorner, _) if s.corner_first.is_none() => "Corner: first pick",
+        (Tool::TrimCorner, _) => "Corner: second pick",
         (Tool::Trim, _) => "Trim: click or drag",
         (Tool::Extend, _) => "Extend: click the end of a line or arc to lengthen; Esc or right-click ends",
         (Tool::Offset, _) => "Offset: drag a selected curve to set distance and side, then Apply",

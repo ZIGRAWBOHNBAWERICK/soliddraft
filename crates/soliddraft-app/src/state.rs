@@ -382,8 +382,10 @@ pub enum Tool {
     Dimension,
     /// A regular polygon from a centre and a first vertex.
     Polygon,
-    /// Removes the piece of a line or arc under the pointer, between its crossings.
+    /// Removes a picked interval or power-trims a pointer trail.
     Trim,
+    /// Trims or extends two picked lines/arcs to a shared corner.
+    TrimCorner,
     /// Lengthens the end of a line or arc under the pointer to the nearest curve beyond it.
     Extend,
     /// Copies the selected chain at a distance.
@@ -409,6 +411,7 @@ impl Tool {
             Tool::Dimension => "Smart dimension",
             Tool::Polygon => "Polygon",
             Tool::Trim => "Trim",
+            Tool::TrimCorner => "Trim corner",
             Tool::Extend => "Extend",
             Tool::Offset => "Offset",
             Tool::Mirror => "Mirror entities",
@@ -427,7 +430,7 @@ impl Tool {
 
     /// Tools that change the line or arc under the pointer, and preview the change first.
     pub fn picks_curve(self) -> bool {
-        matches!(self, Tool::Trim | Tool::Extend)
+        matches!(self, Tool::Trim | Tool::TrimCorner | Tool::Extend)
     }
 
     /// Tools that keep the selection as their input.
@@ -442,6 +445,7 @@ impl Tool {
             self,
             Tool::Polygon
                 | Tool::Trim
+                | Tool::TrimCorner
                 | Tool::Extend
                 | Tool::Offset
                 | Tool::Mirror
@@ -553,6 +557,8 @@ pub struct SketchSession {
     pub drag: Option<SketchDrag>,
     /// Live power-trim edits, committed together on release.
     pub trim_drag: Option<TrimDrag>,
+    /// The first corner-trim target and the portion to keep, before the second pick.
+    pub corner_first: Option<(EntityId, P2)>,
     pub dim_edit: Option<DimEdit>,
     /// Smart dimension: the first picked item, waiting for a second or a placement.
     pub dim_first: Option<SketchSel>,
@@ -622,6 +628,7 @@ impl SketchSession {
             snaps: Vec::new(),
             drag: None,
             trim_drag: None,
+            corner_first: None,
             dim_edit: None,
             dim_first: None,
             dim_second: None,
@@ -640,6 +647,10 @@ impl SketchSession {
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
         self.cancel_trim();
+        if self.tool == Tool::TrimCorner {
+            self.selection.clear();
+        }
+        self.corner_first = None;
         self.tool = tool;
         self.pending.clear();
         self.chain_from = None;

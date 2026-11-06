@@ -1113,9 +1113,14 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 for (tool, icon, tip) in tools {
                     let (r, resp) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
                     resp.widget_info(|| {
-                        egui::WidgetInfo::selected(egui::WidgetType::Button, true, s.tool == tool, tip)
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::Button,
+                            true,
+                            s.tool == tool || (tool == Tool::Trim && s.tool == Tool::TrimCorner),
+                            tip,
+                        )
                     });
-                    let on = s.tool == tool;
+                    let on = s.tool == tool || (tool == Tool::Trim && s.tool == Tool::TrimCorner);
                     if on {
                         ui.painter().rect_filled(r, CornerRadius::same(6), theme::selection_bg());
                     } else if resp.hovered() {

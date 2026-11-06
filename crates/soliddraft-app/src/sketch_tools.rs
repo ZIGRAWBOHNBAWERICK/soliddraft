@@ -63,6 +63,17 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
 /// What `operation` would add to the sketch, tried on a copy. The refusal is the tool's
 /// own words.
 pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
+    if let Operation::TrimCorner { a, b, keep_a, keep_b } = &operation {
+        return match s.sketch.corner_preview(*a, *b, *keep_a, *keep_b) {
+            Ok(p) => ToolPreview {
+                added: p.kept.to_vec(),
+                removed: p.removed,
+                operation: Some(operation),
+                ..Default::default()
+            },
+            Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
+        };
+    }
     let mut copy = s.sketch.clone();
     match copy.apply_operation(&operation) {
         Ok(ids) => ToolPreview {
@@ -123,6 +134,17 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
     if !tool.modifies() {
         return;
     }
+    if matches!(tool, Tool::Trim | Tool::TrimCorner) {
+        ui.horizontal(|ui| {
+            if ui.selectable_label(s.tool == Tool::Trim, "Power / closest").clicked() {
+                s.set_tool(Tool::Trim);
+            }
+            if ui.selectable_label(s.tool == Tool::TrimCorner, "Corner").clicked() {
+                s.set_tool(Tool::TrimCorner);
+            }
+        });
+    }
+    let tool = s.tool;
     theme::section_label(ui, tool.label());
     match tool {
         Tool::Polygon => {
@@ -134,6 +156,19 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                 ui,
                 "Click a piece to trim to its closest crossings. Drag from empty space to power trim, or grab a line or arc to extend it. Retrace a red marker to undo a cut. Esc cancels a drag.",
             );
+        }
+        Tool::TrimCorner => {
+            hint(
+                ui,
+                if s.corner_first.is_none() {
+                    "Pick the part of the first line or arc to keep."
+                } else {
+                    "Pick the part of the second line or arc to keep. Both ends will meet at the previewed corner."
+                },
+            );
+            if let Some(why) = s.preview.as_ref().and_then(|p| p.refused.as_deref()) {
+                ui.label(egui::RichText::new(why).size(11.0).color(theme::error()));
+            }
         }
         Tool::Extend => {
             hint(ui, "Point at the end of a line or arc and click. It lengthens to the nearest curve in its way.");
@@ -221,6 +256,13 @@ pub fn operation_schema() -> Value {
             ("sides", integer("Sides from 3 to 1000")),
         ]),
         object(&[("tool", constant("trim")), ("entity", id.clone()), ("at", point.clone())]),
+        object(&[
+            ("tool", constant("trim_corner")),
+            ("a", id.clone()),
+            ("b", id.clone()),
+            ("keep_a", point.clone()),
+            ("keep_b", point.clone()),
+        ]),
         object(&[
             ("tool", constant("extend")),
             ("entity", id.clone()),

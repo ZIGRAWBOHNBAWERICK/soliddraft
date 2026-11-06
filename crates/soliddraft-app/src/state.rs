@@ -546,7 +546,17 @@ pub enum SketchSel {
 pub struct DimEdit {
     pub constraint: ConstraintId,
     pub text: String,
+    /// Original display text: unchanged acceptance must not round the target.
+    pub opened_with: String,
     pub focus: bool,
+}
+
+impl DimEdit {
+    /// Open a value using the viewport's compact display text.
+    pub fn new(constraint: ConstraintId, value: f64) -> Self {
+        let text = crate::sketch::fmt_value(value);
+        Self { constraint, opened_with: text.clone(), text, focus: true }
+    }
 }
 
 /// An inference the sketcher offers at the cursor.

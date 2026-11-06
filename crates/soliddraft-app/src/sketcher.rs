@@ -731,7 +731,7 @@ fn select_input(
             && con.is_dimension()
         {
             if let Some(value) = con.value() {
-                s.dim_edit = Some(DimEdit { constraint: c, text: fmt_value(value), focus: true });
+                s.dim_edit = Some(DimEdit::new(c, value));
             } else if con.is_reference() {
                 s.say("Reference dimensions are read-only; change to driving to edit");
             }
@@ -1071,7 +1071,7 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
                 solve::solve(&mut s.sketch, None, true);
                 commit(s, actions);
                 if let Some(value) = s.sketch.constraint(id).and_then(|c| c.value()) {
-                    s.dim_edit = Some(DimEdit { constraint: id, text: fmt_value(value), focus: true });
+                    s.dim_edit = Some(DimEdit::new(id, value));
                 }
             } else {
                 s.say("Those two cannot be dimensioned together");
@@ -2000,7 +2000,9 @@ fn dim_editor(ui: &mut egui::Ui, s: &mut SketchSession, frame: &Frame<'_>, actio
                     });
                 });
         });
-    if apply {
+    if apply && s.dim_edit.as_ref().is_some_and(|e| e.text.trim() == e.opened_with) {
+        close = true;
+    } else if apply {
         let text = s.dim_edit.as_ref().map(|e| e.text.clone()).unwrap_or_default();
         match text.trim().trim_end_matches("mm").trim().parse::<f64>() {
             Ok(v) if v.is_finite() && (v > 0.0 || is_angle) => {

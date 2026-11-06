@@ -618,11 +618,7 @@ impl SolidDraftApp {
                     if let Some(s) = self.state.sketch.as_mut().filter(|s| s.feature == sketch)
                         && let Some(value) = s.sketch.constraint(constraint).and_then(|c| c.value())
                     {
-                        s.dim_edit = Some(crate::state::DimEdit {
-                            constraint,
-                            text: crate::sketch::fmt_value(value),
-                            focus: true,
-                        });
+                        s.dim_edit = Some(crate::state::DimEdit::new(constraint, value));
                     } else if let Some(s) = self.state.sketch.as_mut().filter(|s| s.feature == sketch)
                         && s.sketch.constraint(constraint).is_some_and(|c| c.is_reference())
                     {

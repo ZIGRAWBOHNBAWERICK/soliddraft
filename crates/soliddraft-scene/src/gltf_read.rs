@@ -1,8 +1,10 @@
 //! glTF 2.0, binary (`.glb`) or JSON (`.gltf`): the default scene's node tree.
 //!
 //! glTF is metres with Y up. A node keeps its transform; a mesh of one primitive is the
-//! node's body, and a mesh of several gives the node a child per primitive. Materials
-//! keep their metallic-roughness factors. sand3d writes each joint in the extras of a
+//! node's body, and a mesh of several gives the node a child per primitive. Morph
+//! targets are applied at the node's weights, or else the mesh's. Materials keep their
+//! metallic-roughness factors; alpha counts only for blended ones. A file that requires
+//! an extension this reader does not know, such as compressed geometry, is refused. sand3d writes each joint in the extras of a
 //! node that holds what the joint moves (`s3d_joint`): that node's frame is the joint's.
 
 use std::path::Path;
@@ -43,7 +45,14 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
     let name = scene_def.name().map(str::to_owned).unwrap_or_else(|| stem(path));
     let mut scene = Scene::new(name, Format::Gltf, 1.0, UpAxis::Y);
     scene.materials = gltf.materials().map(|m| material(&m)).collect();
-    let mut meshes: Vec<Option<Vec<Primitive>>> = vec![None; gltf.meshes().len()];
+    if gltf.scenes().len() > 1 {
+        scene.note("only the default scene is imported");
+    }
+    if gltf.extensions_used().any(|e| e == "EXT_mesh_gpu_instancing") {
+        scene.note("EXT_mesh_gpu_instancing instances are not imported; each mesh is shown once, at its node");
+    }
+    // Each mesh read once per set of morph weights its nodes give it.
+    let mut meshes: std::collections::HashMap<(usize, Vec<u32>), Vec<Primitive>> = std::collections::HashMap::new();
     let mut stack: Vec<(gltf::Node<'_>, usize)> =
         scene_def.nodes().collect::<Vec<_>>().into_iter().rev().map(|n| (n, 0)).collect();
     while let Some((node, parent)) = stack.pop() {
@@ -51,11 +60,13 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
         let label = node.name().map(str::to_owned).unwrap_or_else(|| format!("node {}", node.index()));
         let me = scene.add(parent, label.clone(), format!("nodes[{}]", node.index()), local);
         if let Some(mesh) = node.mesh() {
-            let bodies = match &meshes[mesh.index()] {
+            let weights: Vec<f32> = node.weights().or(mesh.weights()).unwrap_or_default().to_vec();
+            let key = (mesh.index(), weights.iter().map(|w| w.to_bits()).collect());
+            let bodies = match meshes.get(&key) {
                 Some(b) => b.clone(),
                 None => {
-                    let b = read_mesh(&mut scene, &mesh, &buffers)?;
-                    meshes[mesh.index()] = Some(b.clone());
+                    let b = read_mesh(&mut scene, &mesh, &weights, &buffers)?;
+                    meshes.insert(key, b.clone());
                     b
                 }
             };
@@ -131,6 +142,9 @@ fn percent_decode(uri: &str) -> String {
 fn material(m: &gltf::Material<'_>) -> Material {
     let pbr = m.pbr_metallic_roughness();
     let [r, g, b, a] = pbr.base_color_factor().map(f64::from);
+    // Alpha is coverage only when the material blends; a mask cuts by texture, which is
+    // not read, so it is shown opaque.
+    let a = if m.alpha_mode() == gltf::material::AlphaMode::Blend { a } else { 1.0 };
     Material {
         name: m.name().map(str::to_owned).unwrap_or_else(|| format!("material {}", m.index().unwrap_or(0))),
         base_color: [srgb(r), srgb(g), srgb(b), a],
@@ -140,14 +154,42 @@ fn material(m: &gltf::Material<'_>) -> Material {
     }
 }
 
-/// The meshes of each triangle primitive of `mesh`, with their materials.
-fn read_mesh(scene: &mut Scene, mesh: &gltf::Mesh<'_>, buffers: &[Vec<u8>]) -> Result<Vec<Primitive>, ImportError> {
+/// The meshes of each triangle primitive of `mesh` with its morph targets applied at
+/// `weights`, with their materials.
+fn read_mesh(
+    scene: &mut Scene,
+    mesh: &gltf::Mesh<'_>,
+    weights: &[f32],
+    buffers: &[Vec<u8>],
+) -> Result<Vec<Primitive>, ImportError> {
     let name = mesh.name().map(str::to_owned).unwrap_or_else(|| format!("mesh {}", mesh.index()));
     let mut out = Vec::new();
     for primitive in mesh.primitives() {
         let reader = primitive.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
-        let Some(positions) = reader.read_positions() else { continue };
-        let positions: Vec<DVec3> = positions.map(|p| DVec3::from_array(p.map(f64::from))).collect();
+        let Some(positions) = reader.read_positions() else {
+            scene.note("primitives with no positions are not imported");
+            continue;
+        };
+        let mut positions: Vec<DVec3> = positions.map(|p| DVec3::from_array(p.map(f64::from))).collect();
+        let mut normals: Option<Vec<DVec3>> =
+            reader.read_normals().map(|n| n.map(|v| DVec3::from_array(v.map(f64::from))).collect());
+        for (k, (dp, dn, _)) in reader.read_morph_targets().enumerate() {
+            let w = f64::from(weights.get(k).copied().unwrap_or(0.0));
+            if w == 0.0 {
+                continue;
+            }
+            for (p, d) in positions.iter_mut().zip(dp.into_iter().flatten()) {
+                *p += w * DVec3::from_array(d.map(f64::from));
+            }
+            if let Some(normals) = &mut normals {
+                for (n, d) in normals.iter_mut().zip(dn.into_iter().flatten()) {
+                    *n += w * DVec3::from_array(d.map(f64::from));
+                }
+            }
+        }
+        if reader.read_colors(0).is_some() {
+            scene.note("vertex colours are not imported");
+        }
         let indices: Vec<u32> = match reader.read_indices() {
             Some(i) => i.into_u32().collect(),
             None => (0..positions.len() as u32).collect(),
@@ -172,9 +214,11 @@ fn read_mesh(scene: &mut Scene, mesh: &gltf::Mesh<'_>, buffers: &[Vec<u8>]) -> R
         if triangles.iter().flatten().any(|i| *i as usize >= positions.len()) {
             return Err(ImportError(format!("mesh {name} has an index past its points")));
         }
-        let corner_normals = reader.read_normals().map(|n| {
-            let normals: Vec<DVec3> = n.map(|v| DVec3::from_array(v.map(f64::from))).collect();
-            triangles.iter().flat_map(|t| t.map(|i| normals.get(i as usize).copied().unwrap_or(DVec3::Z))).collect()
+        let corner_normals = normals.map(|normals| {
+            triangles
+                .iter()
+                .flat_map(|t| t.map(|i| normals.get(i as usize).copied().unwrap_or(DVec3::Z).normalize_or(DVec3::Z)))
+                .collect()
         });
         let part =
             if mesh.primitives().len() == 1 { name.clone() } else { format!("{name} {}", primitive.index() + 1) };

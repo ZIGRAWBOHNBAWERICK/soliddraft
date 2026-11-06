@@ -1,4 +1,5 @@
-//! Wavefront OBJ: a node per object, with the MTL file's diffuse colours.
+//! Wavefront OBJ: a node per object, with the MTL file's diffuse colours. Lines,
+//! points, free-form curves and surfaces, and vertex colours are not read, and say so.
 
 use std::path::Path;
 
@@ -6,18 +7,41 @@ use glam::{DMat4, DVec3};
 
 use crate::{Body, Format, ImportError, Material, Mesh, Origin, Scene, UpAxis, header_hints, stem, triangulate};
 
-/// The objects of a file with their materials, and the count of polygons fanned.
-pub(crate) type Objects = (Vec<(Mesh, Option<Material>)>, usize);
+/// The objects of a file with their materials, and notes on what was not read.
+pub(crate) type Objects = (Vec<(Mesh, Option<Material>)>, Vec<String>);
 
-/// The objects of an OBJ file in the file's units, each with its material, and how many
-/// polygons crossed themselves or had no area. Polygons are cut by ear clipping
+/// The objects of an OBJ file in the file's units, each with its material, and notes on
+/// what the file holds that is not read. Polygons are cut by ear clipping
 /// ([`triangulate`]), not by the loader's fan, so concave faces keep their notches.
 pub(crate) fn objects(path: &Path) -> Result<Objects, ImportError> {
     let options = tobj::LoadOptions { triangulate: false, single_index: true, ignore_points: true, ignore_lines: true };
     let (models, materials) = tobj::load_obj(path, &options)
         .map_err(|e| ImportError(format!("{} is not a valid OBJ file: {e}", path.display())))?;
+    let mut notes = Vec::new();
+    let mut note = |what: String| {
+        if !notes.contains(&what) {
+            notes.push(what);
+        }
+    };
+    // What the loader passes over without a word.
+    let text = std::fs::read(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
+    let mut library = None;
+    for line in String::from_utf8_lossy(&text).lines() {
+        let mut words = line.split_whitespace();
+        match words.next() {
+            Some("l" | "p") => note("lines and points are not imported".into()),
+            Some("cstype" | "curv" | "curv2" | "surf") => note("free-form curves and surfaces are not imported".into()),
+            Some("mtllib") if library.is_none() => library = Some(words.collect::<Vec<_>>().join(" ")),
+            _ => {}
+        }
+    }
     // A missing or broken MTL file leaves the objects without colour, not the import.
-    let materials = materials.unwrap_or_default();
+    let materials = materials.unwrap_or_else(|_| {
+        if let Some(lib) = &library {
+            note(format!("the material library {lib} cannot be read; its objects come in without colour"));
+        }
+        Vec::new()
+    });
     let mut out = Vec::new();
     let mut crossed = 0;
     for model in models {
@@ -57,6 +81,9 @@ pub(crate) fn objects(path: &Path) -> Result<Objects, ImportError> {
                 })
                 .collect()
         });
+        if !m.vertex_color.is_empty() {
+            note("vertex colours are not imported".into());
+        }
         let material = m.material_id.and_then(|i| materials.get(i)).map(|mtl| {
             let d = mtl.diffuse.unwrap_or([0.8, 0.8, 0.8]);
             Material {
@@ -69,7 +96,10 @@ pub(crate) fn objects(path: &Path) -> Result<Objects, ImportError> {
         });
         out.push((Mesh { name: model.name.clone(), positions, triangles, corner_normals }, material));
     }
-    Ok((out, crossed))
+    if crossed > 0 {
+        note("polygons that cross themselves or have no area are split into fans from their first corner".into());
+    }
+    Ok((out, notes))
 }
 
 pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
@@ -83,9 +113,9 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
     let mut scene = Scene::new(stem(path), Format::Obj, units.unwrap_or(0.001), up.unwrap_or(UpAxis::Y));
     scene.units_from = if units.is_some() { Origin::Header } else { Origin::Default };
     scene.up_from = if up.is_some() { Origin::Header } else { Origin::Default };
-    let (objects, crossed) = objects(path)?;
-    if crossed > 0 {
-        scene.note("polygons that cross themselves or have no area are split into fans from their first corner");
+    let (objects, notes) = objects(path)?;
+    for n in notes {
+        scene.note(n);
     }
     for (i, (mesh, material)) in objects.into_iter().enumerate() {
         if mesh.triangles.is_empty() {

@@ -3,8 +3,9 @@
 //! The root link is the scene's root: its visuals sit directly under the robot. Every
 //! other link is a node at its joint's origin in its parent link, and every visual a node
 //! at its own origin in its link. Meshes are OBJ or STL files beside the URDF, in metres
-//! like the URDF, scaled by the visual's `scale`. Collision geometry and inertia are not
-//! read.
+//! like the URDF, scaled by the visual's `scale`; a visual whose mesh is missing or in
+//! another format is left out with a note. Collision geometry is noted and left out;
+//! inertia, transmissions and simulator tags are not geometry and are not read.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,11 @@ fn pose(p: &urdf_rs::Pose) -> DMat4 {
 }
 
 pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
-    let robot = urdf_rs::read_file(path)
+    let text = std::fs::read_to_string(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
+    if text.contains("xmlns:xacro") {
+        return Err(ImportError(format!("{} is a xacro file; expand it to URDF with xacro first", path.display())));
+    }
+    let robot = urdf_rs::read_from_string(&text)
         .map_err(|e| ImportError(format!("{} is not a valid URDF file: {e}", path.display())))?;
     let name = if robot.name.is_empty() { crate::stem(path) } else { robot.name.clone() };
     let mut scene = Scene::new(name, Format::Urdf, 1.0, UpAxis::Z);
@@ -34,7 +39,7 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
     let is_child: std::collections::HashSet<&str> = robot.joints.iter().map(|j| j.child.link.as_str()).collect();
     let roots: Vec<&urdf_rs::Link> = robot.links.iter().filter(|l| !is_child.contains(l.name.as_str())).collect();
     let links: HashMap<&str, &urdf_rs::Link> = robot.links.iter().map(|l| (l.name.as_str(), l)).collect();
-    let mut cache: HashMap<PathBuf, Vec<(usize, Option<usize>)>> = HashMap::new();
+    let mut cache: HashMap<PathBuf, Option<Vec<Loaded>>> = HashMap::new();
     let mut node_of: HashMap<String, usize> = HashMap::new();
     // One root link merges into the robot; several sit side by side under it.
     let mut stack: Vec<(&urdf_rs::Link, usize)> = Vec::new();
@@ -62,9 +67,11 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
                 scene.add(node, label.clone(), format!("link {} visual {}", link.name, i + 1), pose(&visual.origin));
             match &visual.geometry {
                 urdf_rs::Geometry::Mesh { filename, scale } => {
-                    let file = resolve(base, filename).ok_or_else(|| {
-                        ImportError(format!("the mesh {filename} of link {} cannot be found", link.name))
-                    })?;
+                    let Some(file) = resolve(base, filename) else {
+                        scene
+                            .note(format!("the mesh {filename} of link {} cannot be found; it is left out", link.name));
+                        continue;
+                    };
                     let loaded = match cache.get(&file) {
                         Some(l) => l.clone(),
                         None => {
@@ -72,6 +79,14 @@ pub(crate) fn read(path: &Path) -> Result<Scene, ImportError> {
                             cache.insert(file.clone(), l.clone());
                             l
                         }
+                    };
+                    let Some(loaded) = loaded else {
+                        scene.note(format!(
+                            "the mesh {filename} of link {} is in a format URDF import does not read (it reads OBJ \
+                             and STL); it is left out",
+                            link.name
+                        ));
+                        continue;
                     };
                     if let Some(s) = scale {
                         scene.nodes[v].local *= DMat4::from_scale(DVec3::from_array(s.0));
@@ -184,35 +199,42 @@ fn material(scene: &mut Scene, m: &urdf_rs::Material, named: &HashMap<&str, &urd
     Some(scene.materials.len() - 1)
 }
 
-/// Loads a mesh file a visual names: its meshes, each with the material its file gives.
-fn load(scene: &mut Scene, file: &Path) -> Result<Vec<(usize, Option<usize>)>, ImportError> {
+/// A mesh a visual's file holds, and the material the file gives it, as scene indices.
+type Loaded = (usize, Option<usize>);
+
+/// Loads a mesh file a visual names: its meshes, each with the material its file gives;
+/// `None` for a format this import does not read.
+fn load(scene: &mut Scene, file: &Path) -> Result<Option<Vec<Loaded>>, ImportError> {
     match crate::Format::of_path(file) {
-        Some(Format::Obj) => Ok({
-            let (objects, crossed) = obj::objects(file)?;
-            if crossed > 0 {
-                scene
-                    .note("polygons that cross themselves or have no area are split into fans from their first corner");
+        Some(Format::Obj) => Ok(Some(
+            {
+                let (objects, notes) = obj::objects(file)?;
+                for n in notes {
+                    scene.note(n);
+                }
+                objects
             }
-            objects
-        }
-        .into_iter()
-        .filter(|(m, _)| !m.triangles.is_empty())
-        .map(|(mesh, material)| {
-            let material = material.map(|m| {
-                scene.materials.push(m);
-                scene.materials.len() - 1
-            });
-            (scene.add_mesh(mesh), material)
-        })
-        .collect()),
+            .into_iter()
+            .filter(|(m, _)| !m.triangles.is_empty())
+            .map(|(mesh, material)| {
+                let material = material.map(|m| {
+                    scene.materials.push(m);
+                    scene.materials.len() - 1
+                });
+                (scene.add_mesh(mesh), material)
+            })
+            .collect(),
+        )),
         Some(Format::Stl) => {
-            let (mesh, _) = stl::mesh(file)?;
-            Ok(vec![(scene.add_mesh(mesh), None)])
+            let (meshes, _, notes) = stl::solids(file)?;
+            for n in notes {
+                scene.note(n);
+            }
+            Ok(Some(
+                meshes.into_iter().filter(|m| !m.triangles.is_empty()).map(|m| (scene.add_mesh(m), None)).collect(),
+            ))
         }
-        _ => Err(ImportError(format!(
-            "{} is a mesh format URDF import does not read; OBJ and STL are read",
-            file.display()
-        ))),
+        _ => Ok(None),
     }
 }
 

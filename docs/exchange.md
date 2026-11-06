@@ -113,6 +113,17 @@ USD is read at the stage's start time code, which is the default value wherever 
 | cameras, lights, `PhysicsScene` | left out |
 | `metersPerUnit`, `upAxis` | read from the root layer, else USD's fallbacks of centimetres and Y up |
 
+The other readers follow the same rule.
+
+| Format | Read | Left out, with a note | Refused |
+|---|---|---|---|
+| glTF | the default scene's nodes and their transforms; triangles, strips and fans; normals; morph targets at the node's weights, else the mesh's; metallic-roughness factors, with alpha only for `BLEND` materials; sparse accessors; sand3d's `s3d_joint` extras | other scenes, points and lines, primitives with no positions, vertex colours, skins (shown at rest), animations, `EXT_mesh_gpu_instancing` instances | a file that requires an extension the reader does not know, such as Draco, meshopt or quantised geometry |
+| OBJ | objects and groups, polygons by ear clipping, normals, the MTL file's `Kd`, `d` and diffuse texture flag | lines and points, free-form curves and surfaces, vertex colours, a missing or broken MTL file | - |
+| STL | binary and ASCII, every solid of an ASCII file as its own body, a header's units and up axis | colours in a binary file's attribute bytes or a `COLOR=` header, facet normals that disagree with the winding (the winding is kept) | - |
+| URDF | links nested by their joints, visual origins and scales, OBJ and STL meshes, box, cylinder and sphere, materials and their colours, joints with limits and mimics | collision geometry, capsules (shown as cylinders), a visual whose mesh is missing or in another format such as COLLADA | a xacro file, which must be expanded first |
+
+Cameras, lights, textures beyond the flag, emissive and occlusion factors, URDF inertia, transmissions and simulator tags are not geometry and are not read.
+
 The root assembly keeps the import record in `import.json`, outside both hashes. It holds the source file's name, format, size and SHA-256, the units and up axis and where each came from (the file, the format's rules, a header comment, a default, a fallback or the caller), the box around every body, and every node's name, path in the file and occurrence path. It also holds the materials, the meshes written and the notes on what was left out. Each joint is recorded in assembly terms: its kind, the occurrence paths of the parent and the child, its origin and rotation in the parent's assembly frame, its axis, and its limits in millimetres or degrees. A USD joint that names no `physics:body0` is anchored to the stage's world frame: its parent is the root, but the root's own placement does not move it. Joints are recorded, not mated: assembly mates need exact faces.
 
 MCP clients call `import_scene {"path":"washer.glb","out":"washer.dwasm"}`, with `units` and `up` when needed. The reply holds the status line, the import record and the opened assembly's summary, whose occurrences carry their names and kind `mesh`.

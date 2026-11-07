@@ -56,6 +56,7 @@ pub(crate) struct LocalPlane {
 }
 
 /// What fixes the translation between two parallel planes.
+#[allow(clippy::large_enum_variant, reason = "a solve holds a few of these, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Along {
     /// The signed distance from `a`'s plane to `b`'s, along `a`'s outward normal.
@@ -83,6 +84,7 @@ pub(crate) enum WidthMode {
 }
 
 /// One mate as the solver sees it.
+#[allow(clippy::large_enum_variant, reason = "a solve holds one per mate, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Constraint {
     /// The body's origin on a frame: the root's origin for the root's own mates, a

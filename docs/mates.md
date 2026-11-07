@@ -134,8 +134,9 @@ hashed. An assembly with neither writes neither key, so old files keep their has
 
 Plane normals are exact signed axes, which splits a solve in two:
 
-1. **Rotations.** An Origin mate with axes fixes a rotation, and a Lock fixes one part's from
-   the other's. Otherwise each mate between planes relates two normals: equal or opposite for
+1. **Rotations.** Parts joined by Locks turn as one rigid group, so a group's rotation is
+   solved once, from the ties all its members have. An Origin mate with axes fixes a
+   rotation. Otherwise each mate between planes relates two normals: equal or opposite for
    a Distance, Coincident, Parallel or Width, at right angles for a Perpendicular. Rotations
    spread out from what is fixed. Two perpendicular normals fix a rotation exactly. One
    leaves its spin alone and turns as little as it can. When that turn does not keep a right

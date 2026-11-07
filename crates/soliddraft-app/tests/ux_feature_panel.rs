@@ -309,3 +309,89 @@ fn fillet_panel_in_dark_at_double_scale() {
         assert_eq!(hud, "R 4 mm · 1 edge");
     });
 }
+
+/// Whether each tree node whose label or value is `text` is disabled.
+fn nodes_reading(app: &App, text: &str) -> Vec<bool> {
+    app.query_all(By::new().predicate(|n| n.label().as_deref() == Some(text) || n.value().as_deref() == Some(text)))
+        .map(|n| n.accesskit_node().is_disabled())
+        .collect()
+}
+
+#[test]
+fn fillet_options_catallax_cannot_build_yet_show_disabled() {
+    let mut case = Case::new("feature-panel/fillet-options");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    case.run(&mut app, |case, app| {
+        let soon_before = nodes_reading(app, "Coming soon").len();
+        open(app, AppAction::StartFillet);
+        let (long, _) = near_edges(app);
+        ribbon::click_world(app, long);
+        settle(app);
+        pointer_to_chrome(app);
+        case.frame(app, "fillet-options");
+
+        // Constant radius is the choice; Variable shows beside it but takes no click.
+        let chosen = |app: &App, label: &str| {
+            app.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+        };
+        assert!(chosen(app, "Constant") && !chosen(app, "Variable"), "Constant radius is chosen");
+        assert!(!app.get_by_label("Constant").accesskit_node().is_disabled(), "Constant stays a live choice");
+        let variable = app.get_by_label("Variable").rect();
+        assert!(app.get_by_label("Variable").accesskit_node().is_disabled(), "Variable waits for Catallax");
+        ribbon::click_at(app, variable.center());
+        settle(app);
+        assert!(chosen(app, "Constant") && !chosen(app, "Variable"), "the click changed nothing");
+        // Resting on it brings up the tip that says what it waits for.
+        pointer_to_chrome(app);
+        app.hover_at(variable.center());
+        app.run_steps(60);
+        let tip = app
+            .query_all(By::new().predicate(|n| {
+                [n.label(), n.value()]
+                    .into_iter()
+                    .flatten()
+                    .any(|t| t.starts_with("Coming soon: a start and end radius"))
+            }))
+            .count();
+        case.frame(app, "fillet-variable-tip");
+        assert_eq!(tip, 1, "the tip says what Variable waits for");
+        pointer_to_chrome(app);
+
+        // The setback and option cards are there, each marked Coming soon, every control in them disabled.
+        for title in ["Fillet parameters", "Setback parameters", "Fillet options"] {
+            assert!(shows(app, title), "the form has the {title} card");
+        }
+        assert_eq!(nodes_reading(app, "Coming soon").len(), soon_before + 2, "the two new cards carry the badge");
+        for control in ["Setback distance value", "Keep edge", "Keep surface", "Round corners"] {
+            let disabled = app.get_by_label(control).accesskit_node().is_disabled();
+            assert!(disabled, "{control} is drawn disabled");
+        }
+        assert_table(app, "Fillet", &["Radius value", "Setback distance value"]);
+        app.get_by_label("Round corners").scroll_to_me();
+        app.run_steps(24);
+        pointer_to_chrome(app);
+        case.frame(app, "fillet-options-lower");
+        app.get_by_label("Radius value").scroll_to_me();
+        app.run_steps(24);
+
+        // The live parts of the form still work: the radius previews and commits.
+        ribbon::type_field(app, "Radius value", "5");
+        settle(app);
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "R 5 mm · 1 edge");
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let doc = &app.state().state.doc;
+        match &doc.features.last().expect("a feature").kind {
+            soliddraft_app::document::FeatureKind::Fillet(f) => assert_eq!(f.radius, 5.0, "the fillet keeps R5"),
+            other => panic!("the last feature is the fillet, not {other:?}"),
+        }
+        assert!(doc.display_failure().is_none(), "the fillet builds");
+
+        // A chamfer has none of these.
+        open(app, AppAction::StartChamfer);
+        assert!(!shows(app, "Setback parameters") && !shows(app, "Fillet options"), "the chamfer form is unchanged");
+        assert!(app.query_by_label("Variable").is_none(), "a chamfer has no variable radius choice");
+        open(app, AppAction::CancelEditor);
+    });
+}

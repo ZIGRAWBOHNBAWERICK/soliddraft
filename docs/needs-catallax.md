@@ -52,3 +52,38 @@ The interface fragments since the previous pin also change saddle display sampli
 A 40 x 30 x 12 mm block with all four uprights rounded at R2 and its top loop then rounded at R1 builds and displays, but STEP exceeds the application's 20M work cap at this pin. A top round over one rounded upright exports at both smaller and equal radii. The larger case retains `numbers.operation-budget` and a calculation-limit message; no export allowance is raised.
 
 A full symmetric union of equal crossing cylinders can stop at an ambiguous application edge reference before the fillet evaluator runs. The app retains `recipe.ambiguous-reference` for that failure and leaves the part unchanged. Starting the narrow cylinder on the crossing-axis plane instead reaches `mesh.precision-or-budget` while reading topology at this pin. These arrangements remain outside the completed app acceptance; neither is evidence that singular fillet geometry builds.
+
+## Two-body intersection and distance
+
+Assembly Interference Detection and Clearance Verification ([interference.md](interference.md))
+run on certified meshes today. That tier proves a pair clear, proves it interferes with a
+point inside both parts, or leaves it touching or undecided within the meshes' chord bounds.
+It cannot report an overlap's volume, prove two parts touch without a mate, or measure a gap
+smaller than the bounds. The exact tier needs one Catallax query, called with two parts that
+were built separately, each from its own pinned revision:
+
+- **Inputs.** Two built bodies, each in its own model and checkpoint, and two rigid motions
+  that place them in one frame. A motion is an exact rotation and a rational translation in
+  millimetres. Rational quaternions cover identity, half-turn and quarter-turn placements
+  and the rational rotations of `docs/RECIPE.md`; a turn by typed degrees needs the algebraic
+  form `Isometry::around_axis` already holds. The caller's allowance bounds the work.
+- **Classification.** Disjoint, touching or overlapping, decided exactly: touching means the
+  regularised intersection is empty and the boundaries meet. An undecided case is a typed
+  refusal, never a guess.
+- **Volume.** The regularised intersection's volume as an enclosure, with an empty result
+  allowed. Today an empty boolean result has no `BodyKind` and the adapter returns
+  `Unsupported` (see the empty-result gap above), so this needs that fix or a query that
+  never makes a body.
+- **Distance.** A proven enclosure of the least distance between the two placed bodies, with
+  a closest point on each and the faces they lie on. `catallax-shapes` already bounds the
+  distance between trimmed analytic surfaces; this needs it between whole placed bodies,
+  and zero when one is inside the other.
+- **Contact.** For touching bodies, the face pairs in contact, so the application can name
+  them as it names mate faces.
+
+The application side is ready for it: each part is rebuilt at its pinned revision already,
+and the mesh tier's results keep their shape, so an exact answer replaces `touching_or_undecided`
+with `clear`, `interferes` or exact touching, and adds the volume. SolidDraft's placements are
+binary64 quaternions, so the exact tier also needs the exact rational placements the general
+rotation batch adds to `assembly.json`; until then it can run exactly on identity and half-turn
+placements, whose quaternions are exact.

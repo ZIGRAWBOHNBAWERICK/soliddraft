@@ -124,7 +124,7 @@ impl<'a> Scope<'a> {
     }
 
     /// The references of the sub-assemblies on the way to `path`, outermost first.
-    fn chain(&self, path: &OccurrencePath) -> Vec<DocRef> {
+    pub(crate) fn chain(&self, path: &OccurrencePath) -> Vec<DocRef> {
         let steps = path.steps();
         (1..steps.len())
             .filter_map(|k| {
@@ -324,9 +324,15 @@ impl AssemblyDocument {
     /// where the assembly holding it keeps it. Kept as it is when a file on the way cannot
     /// be found: the folder index still finds it by id.
     pub(crate) fn rebased(&self, end: &End) -> DocRef {
-        let Some(root) = self.path() else { return end.source.clone() };
+        self.rebased_source(&end.source, &end.chain)
+    }
+
+    /// A part's reference, held by the last of `chain`'s sub-assemblies, as the root's
+    /// folder resolves it.
+    pub(crate) fn rebased_source(&self, source: &DocRef, chain: &[DocRef]) -> DocRef {
+        let Some(root) = self.path() else { return source.clone() };
         let mut holder = root.to_path_buf();
-        for sub in &end.chain {
+        for sub in chain {
             let resolver = Resolver::new(Some(&holder))
                 .with_search_folders(self.options.search.iter())
                 .with_open(self.options.open.iter().cloned());
@@ -339,11 +345,11 @@ impl AssemblyDocument {
             };
             match file {
                 Some(f) => holder = f,
-                None => return end.source.clone(),
+                None => return source.clone(),
             }
         }
-        let target = end.source.stored_path(&holder);
-        let mut r = end.source.clone();
+        let target = source.stored_path(&holder);
+        let mut r = source.clone();
         r.set_path(root, &target);
         r
     }

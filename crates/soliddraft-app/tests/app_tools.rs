@@ -447,6 +447,14 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let c = json!({ "name": "C", "a": top, "b": bottom, "alignment": "opposed" });
     let touching = s.call("assembly_mate_coincident", c);
     assert_eq!(touching["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 10.0]));
+    // Interference and clearance checks read the two parts and change nothing.
+    let checked = s.call("assembly_check_interference", json!({}));
+    assert_eq!(
+        (checked["report"]["kind"].as_str(), checked["report"]["pairs"].as_u64()),
+        (Some("interference"), Some(1))
+    );
+    let clearance = s.call("assembly_check_clearance", json!({ "clearance": "0.5 mm" }));
+    assert_eq!(clearance["report"]["clearance_mm"], 0.5);
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();
     let module = s.path("module.dwasm");

@@ -68,6 +68,7 @@ pub enum AssemblyAction {
     ZoomFit,
     Mate(crate::mates::MateAction),
     Form(crate::subassembly::FormAction),
+    Interference(crate::interference::InterferenceAction),
 }
 
 /// The open assembly, one being opened, and whether the assembly is the active document.
@@ -82,6 +83,8 @@ pub struct AssemblyState {
     pub mate: crate::mates::Draft,
     /// The Form subassembly panel's fields.
     pub form: crate::subassembly::Draft,
+    /// The Interference panel's fields and last report.
+    pub interference: crate::interference::Draft,
 }
 
 impl AssemblyState {
@@ -497,6 +500,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         },
         AssemblyAction::Mate(action) => crate::mates::apply(state, action),
         AssemblyAction::Form(action) => crate::subassembly::apply(state, action),
+        AssemblyAction::Interference(action) => crate::interference::apply(state, action),
         AssemblyAction::Open(path) => {
             state.note(format!("Opening {}…", path.display()), NoteKind::Info);
             let opening = AssemblyDocument::open_in_background(&path, options(state));
@@ -856,6 +860,7 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
 pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let mating = state.assembly.mate.open;
     let forming = state.assembly.form.open;
+    let checking = state.assembly.interference.open;
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let title = match s.selected_row() {
@@ -882,6 +887,14 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(12, 0))
             .show(ui, |ui| crate::subassembly::panel::show(ui, state));
+        return;
+    }
+    if checking {
+        egui::ScrollArea::vertical().id_salt("assembly_interference").auto_shrink([false, true]).show(ui, |ui| {
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(12, 0))
+                .show(ui, |ui| crate::interference::panel::show(ui, state));
+        });
         return;
     }
     if mating {

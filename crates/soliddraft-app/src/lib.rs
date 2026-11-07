@@ -27,6 +27,7 @@ mod geometry_message;
 mod grid;
 pub mod icons;
 pub mod import;
+pub mod interference;
 pub mod journal;
 #[cfg(target_arch = "wasm32")]
 pub mod journal_browser;

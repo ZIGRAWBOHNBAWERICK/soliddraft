@@ -257,6 +257,9 @@ impl AppTools<'_> {
         if let Some(result) = crate::mates::tools::run(self.state, name, input) {
             return Some(result);
         }
+        if let Some(result) = crate::interference::tools::run(self.state, name, input) {
+            return Some(result);
+        }
         if let Some(result) = crate::grid::tools::run(self.state, name, input) {
             return Some(result);
         }

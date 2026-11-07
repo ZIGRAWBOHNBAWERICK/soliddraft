@@ -178,6 +178,8 @@ pub struct AssemblyDocument {
     generation: u64,
     /// Plane proofs and the parts rebuilt for them. Derived.
     pub(crate) proofs: Proofs,
+    /// Certified meshes for interference checks. Derived.
+    pub(crate) certified: crate::interference::Certified,
     /// The mates' status, until the truth changes. Derived.
     pub(crate) solver_status: Option<SolverStatus>,
 }
@@ -260,6 +262,7 @@ impl AssemblyDocument {
             bvh_job: None,
             generation: 0,
             proofs: Proofs::default(),
+            certified: Default::default(),
             solver_status: None,
         }
     }

@@ -509,6 +509,13 @@ paths = ["crates/soliddraft-assembly/src/mates/"]
 module = ["mates"]
 
 [[areas]]
+name = "b7.assembly_interference"
+owner = "B7"
+crate = "soliddraft-assembly"
+paths = ["crates/soliddraft-assembly/src/interference/"]
+module = ["interference"]
+
+[[areas]]
 name = "v6.subassembly_model"
 owner = "V6"
 crate = "soliddraft-assembly"
@@ -535,3 +542,10 @@ owner = "V5"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/mates/"]
 module = ["mates"]
+
+[[areas]]
+name = "b7.interference"
+owner = "B7"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/interference/"]
+module = ["interference"]

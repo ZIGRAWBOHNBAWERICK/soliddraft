@@ -135,7 +135,7 @@ pub(crate) fn check_endpoint(end: &FaceEndpoint) -> Result<(), MateRefusal> {
 }
 
 impl AssemblyDocument {
-    fn proof_part(&mut self, r: &DocRef) -> Result<Arc<Mutex<PartDocument>>, MateRefusal> {
+    pub(crate) fn proof_part(&mut self, r: &DocRef) -> Result<Arc<Mutex<PartDocument>>, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
         let key = (id, r.pinned.clone());
         if let Some(part) = self.proofs.parts.get(&key) {

@@ -444,6 +444,19 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(driven["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 22.0]));
     s.call("assembly_edit_mate", json!({ "mate": "O", "align_axes": false }));
     s.call("assembly_delete_mate", json!({ "mate": "Z" }));
+    // The B1 families, each added and taken away again.
+    let cap = |c: u64, feature: &str, g: &str| json!({ "component": c, "feature": feature, "generator": g });
+    let side = json!({ "component": parts[1], "feature": "Boss-Extrude1", "generator": "side", "normal": [1, 0, 0] });
+    s.call("assembly_mate_parallel", json!({ "name": "P", "a": top, "b": bottom, "alignment": "opposed" }));
+    s.call("assembly_delete_mate", json!({ "mate": "P" }));
+    let groove = [cap(parts[0], "Linked block", "end_cap"), cap(parts[0], "Linked block", "start_cap")];
+    let tab = [cap(parts[1], "Boss-Extrude1", "start_cap"), cap(parts[1], "Boss-Extrude1", "end_cap")];
+    s.call("assembly_mate_width", json!({ "name": "W", "groove": groove, "tab": tab, "alignment": "opposed" }));
+    s.call("assembly_delete_mate", json!({ "mate": "W" }));
+    s.call("assembly_mate_perpendicular", json!({ "name": "R", "a": top, "b": side }));
+    s.call("assembly_delete_mate", json!({ "mate": "R" }));
+    s.call("assembly_mate_lock", json!({ "name": "L", "a": parts[0], "b": parts[1] }));
+    s.call("assembly_delete_mate", json!({ "mate": "L" }));
     let c = json!({ "name": "C", "a": top, "b": bottom, "alignment": "opposed" });
     let touching = s.call("assembly_mate_coincident", c);
     assert_eq!(touching["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 10.0]));

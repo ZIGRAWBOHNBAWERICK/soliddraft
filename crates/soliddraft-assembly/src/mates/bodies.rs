@@ -7,19 +7,17 @@
 
 use std::collections::BTreeMap;
 
-use soliddraft_document::resolve::{Location, Resolution, Resolver};
-use soliddraft_document::{DocKind, DocRef};
-use soliddraft_model::FaceRef;
-
 use crate::document::AssemblyDocument;
 use crate::mates::reference::check_endpoint;
-use crate::mates::solver::Body;
-use crate::mates::{FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode};
+use crate::mates::solver::{self, Body};
+use crate::mates::{Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, WidthConstraint};
 use crate::occurrence::{Flags, OccurrenceIndex, OccurrenceTable};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::Placement;
 use crate::schema::Assembly;
 use crate::store::DefinitionStore;
+use soliddraft_document::resolve::{Location, Resolution, Resolver};
+use soliddraft_document::{DocKind, DocRef};
 
 /// An assembly's truth over the structure it was flattened into: `truth` decides the
 /// root's components and overrides, and each sub-assembly's own truth the rest.
@@ -29,7 +27,7 @@ pub(crate) struct Scope<'a> {
     pub store: &'a DefinitionStore,
 }
 
-/// One face a mate reads.
+/// One face or plane a mate reads.
 pub(crate) struct End {
     pub body: Body,
     /// The part, pinned where its containing assembly pins it.
@@ -37,15 +35,53 @@ pub(crate) struct End {
     /// The sub-assemblies on the way to it, outermost first: each holds the next one's
     /// reference, and the last holds `source`.
     pub chain: Vec<DocRef>,
-    pub face: FaceRef,
+    pub entity: Entity,
 }
 
-/// A mate, read from the assembly that holds it and placed in the root. A Coincident
-/// reads as a distance of zero.
+/// What a mate between planes asks of them.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Rule {
+    /// Parallel by `sign`, and a distance apart when there is one. A Coincident is a
+    /// distance of zero; a Parallel has none.
+    Parallel {
+        sign: i8,
+        distance: Option<f64>,
+    },
+    Perpendicular,
+    /// The ends are the groove's two faces, then the tab's.
+    Width {
+        sign: i8,
+        mode: solver::WidthMode,
+    },
+}
+
+/// A mate, read from the assembly that holds it and placed in the root.
 #[allow(clippy::large_enum_variant, reason = "a mate list is short and read one by one")]
 pub(crate) enum Gathered {
     Origin { mate: String, body: Body, axes: bool, at: Placement },
-    Distance { mate: String, ends: [End; 2], sign: i8, distance: f64 },
+    Planes { mate: String, ends: Vec<End>, rule: Rule },
+    Lock { mate: String, a: Body, b: Body, relative: Placement },
+}
+
+impl Gathered {
+    /// The part occurrences it reads.
+    fn bodies(&self) -> Vec<&Body> {
+        match self {
+            Gathered::Origin { body, .. } => vec![body],
+            Gathered::Planes { ends, .. } => ends.iter().map(|e| &e.body).collect(),
+            Gathered::Lock { a, b, .. } => vec![a, b],
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Gathered::Origin { mate, .. } | Gathered::Planes { mate, .. } | Gathered::Lock { mate, .. } => mate,
+        }
+    }
+}
+
+fn sign(alignment: &Alignment) -> i8 {
+    alignment.sign()
 }
 
 /// What a solve works on.
@@ -254,7 +290,7 @@ impl AssemblyDocument {
         if source.id != Some(e.document) {
             return Err(named(invalid(format!("{mate}: {body} places another document"))));
         }
-        Ok(End { chain: scope.chain(&body), body, source, face: e.face.clone() })
+        Ok(End { chain: scope.chain(&body), body, source, entity: e.entity.clone() })
     }
 
     /// Reads every mate `scope` holds, with its faces and the placements it starts from.
@@ -284,16 +320,59 @@ impl AssemblyDocument {
                         let at = scope.frame(&body).ok_or_else(|| invalid(format!("{name}: no frame for {body}")))?;
                         mates.push(Gathered::Origin { mate: name, body, axes: *align_axes, at });
                     }
-                    Mate::Distance { a, b, alignment, .. } | Mate::Coincident { a, b, alignment, .. } => {
-                        let d = match mate.expression() {
-                            Some(e) => holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e))?,
-                            None => 0.0,
-                        };
+                    Mate::Lock { a, b, relative, .. } => {
                         let (ba, bb) = (under(&prefix, &a.path), under(&prefix, &b.path));
-                        place(&ba)?;
-                        place(&bb)?;
-                        let ends = [self.end_of(scope, ba, a, &name)?, self.end_of(scope, bb, b, &name)?];
-                        mates.push(Gathered::Distance { mate: name, ends, sign: alignment.sign(), distance: d });
+                        for (body, document) in [(&ba, a.document), (&bb, b.document)] {
+                            place(body)?;
+                            let source =
+                                scope.part_source(body).map_err(|r| MateRefusal { mates: vec![name.clone()], ..r })?;
+                            if source.id != Some(document) {
+                                return Err(MateRefusal {
+                                    mates: vec![name.clone()],
+                                    ..invalid(format!("{name}: {body} places another document"))
+                                });
+                            }
+                        }
+                        mates.push(Gathered::Lock { mate: name, a: ba, b: bb, relative: *relative });
+                    }
+                    _ => {
+                        let length = |e| holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e));
+                        let rule = match mate {
+                            Mate::Distance { alignment, distance, .. } => {
+                                Rule::Parallel { sign: sign(alignment), distance: Some(length(distance)?) }
+                            }
+                            Mate::Coincident { alignment, .. } => {
+                                Rule::Parallel { sign: sign(alignment), distance: Some(0.0) }
+                            }
+                            Mate::Parallel { alignment, .. } => {
+                                Rule::Parallel { sign: sign(alignment), distance: None }
+                            }
+                            Mate::Perpendicular { .. } => Rule::Perpendicular,
+                            Mate::Width { alignment, constraint, .. } => {
+                                let mode = match constraint {
+                                    WidthConstraint::Centered => solver::WidthMode::Centered,
+                                    WidthConstraint::Dimension { distance, flipped } => {
+                                        solver::WidthMode::Gap { distance: length(distance)?, flipped: *flipped }
+                                    }
+                                    WidthConstraint::Percent { percent, flipped } => {
+                                        let hundred = num_rational::BigRational::from_integer(100.into());
+                                        let fraction = solver::exact(*percent)
+                                            .map(|p| p / hundred)
+                                            .ok_or_else(|| invalid(format!("{name}: the percentage is not finite")))?;
+                                        solver::WidthMode::Share { fraction, flipped: *flipped }
+                                    }
+                                };
+                                Rule::Width { sign: sign(alignment), mode }
+                            }
+                            Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
+                        };
+                        let mut ends = Vec::new();
+                        for e in mate.faces() {
+                            let body = under(&prefix, &e.path);
+                            place(&body)?;
+                            ends.push(self.end_of(scope, body, e, &name)?);
+                        }
+                        mates.push(Gathered::Planes { mate: name, ends, rule });
                     }
                 }
             }
@@ -307,14 +386,12 @@ impl AssemblyDocument {
     pub fn mate_participation(&self) -> BTreeMap<OccurrencePath, Vec<String>> {
         let mut out: BTreeMap<OccurrencePath, Vec<String>> = BTreeMap::new();
         let Ok(problem) = self.gather(&Scope::new(self.assembly(), self.table(), self.store())) else { return out };
-        for mate in problem.mates {
-            match mate {
-                Gathered::Origin { mate, body, .. } => out.entry(body).or_default().push(mate),
-                Gathered::Distance { mate, ends, .. } => {
-                    for end in ends {
-                        out.entry(end.body).or_default().push(mate.clone());
-                    }
-                }
+        for mate in &problem.mates {
+            let mut bodies = mate.bodies();
+            bodies.sort();
+            bodies.dedup();
+            for body in bodies {
+                out.entry(body.clone()).or_default().push(mate.name().to_owned());
             }
         }
         out

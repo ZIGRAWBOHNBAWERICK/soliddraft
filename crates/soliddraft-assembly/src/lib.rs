@@ -62,8 +62,9 @@ pub use interference::{
 };
 pub use load::{LoadError, LoadEvent, OpenOptions};
 pub use mates::{
-    Alignment, EndpointSelector, FaceEndpoint, FaceSelector, FreeMotion, GeneratorChoice, Mate, MateEdit, MateEntry,
-    MateId, MateRefusal, PlaneMeasurement, PlaneProof, ProofIdentity, RefusalCode, SolverState, SolverStatus,
+    Alignment, EndView, EndpointSelector, Entity, FaceEndpoint, FaceSelector, FreeMotion, GeneratorChoice, Mate,
+    MateEdit, MateEntry, MateId, MateRefusal, PartEndpoint, PartPlane, PlaneMeasurement, PlaneProof, ProofIdentity,
+    RefusalCode, SolverState, SolverStatus, WidthConstraint, WidthInput,
 };
 pub use mesh::{DisplayMesh, MeshBounds, MeshFace, SharedMesh};
 pub use occurrence::{Counts, Flags, OccurrenceIndex, OccurrenceTable};

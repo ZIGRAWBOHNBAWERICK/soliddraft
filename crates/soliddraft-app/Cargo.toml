@@ -53,6 +53,8 @@ quick-xml.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger.workspace = true
 rfd.workspace = true
+# Scene import reads files from disk; the browser build has none to read.
+soliddraft-scene.workspace = true
 
 # The web build: Catallax runs locally; assistant calls use the server (docs/web.md).
 [target.'cfg(target_arch = "wasm32")'.dependencies]

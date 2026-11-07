@@ -68,3 +68,64 @@ Selecting the import shows the record. Each gap has its answer, its approved lim
 MCP clients use `preview_import {"path":"source.step"}` to read the preview, then pass its token to `import_step {"path":"source.step","preview_token":"<token>","decline":["g0"]}` to decline a gap. The token binds the source digest and the repair questions shown. A changed file or changed questions require another preview. An empty decline list applies automatic repairs. A repair that asks for approval goes in `accept`, as `{"id":"g0","tolerance_mm":"0.02","approver":"Ana"}`. Coverage is one planar AP214 body whose repaired faces are straight, strictly convex polygons with one boundary. Curved repairs and nonconvex or holed faces show Coming soon.
 
 The focused rollout check is `CARGO_BUILD_JOBS=3 cargo test -p soliddraft-app --test step_import_rollout -- --test-threads=1`. Set `SOLIDDRAFT_STEP_IMPORT_PROOF_DIR` to keep its source files, saved parts, display screenshots, measured f32 mesh bounds and checked export reports outside the checkout. The test uses the real import dialog and renderer. It also takes an approved seam through the dialog, renderer, save, reopen and export. It does not independently validate the export in another CAD application; the `import-repair` scenario does.
+
+## Scene import
+
+File > Import scene opens an OpenUSD file from NVIDIA Omniverse or elsewhere (`.usd`, `.usda`, `.usdc`, `.usdz`), a glTF file (`.glb`, `.gltf`), a URDF robot, an OBJ file or an STL file as an assembly. This covers what [sand3d](https://github.com/Sandflow-ai/sand3d) exports. The import reads the file's tree, names, units, up axis, transforms, materials and joints where the format carries them. Every mesh arrives as a mesh reference body, never as an editable solid. Measure, mass properties, mates and drawing projection refuse a mesh reference body, because it has no exact solid. Turning a mesh into a solid, and USD NURBS or other exact geometry, wait for Catallax. The code is the `soliddraft-scene` crate; the app module is `crates/soliddraft-app/src/scene_import.rs`.
+
+The import asks for the source file, then for the assembly to write. Beside that assembly it makes a folder of the same name ending in `.parts`, holding one `.dwmsh` mesh reference per distinct mesh and one sub-assembly per group in the file. Files of the same names are replaced. The app then opens the assembly, and the status bar says how many bodies and joints came in and in what units.
+
+| Format | Tree | Units and up axis | Materials | Joints |
+|---|---|---|---|---|
+| OpenUSD | the composed stage under the default prim, with references, payloads, variants and instances resolved | the root layer's `metersPerUnit` and `upAxis`, or USD's fallbacks of centimetres and Y up | UsdPreviewSurface and OmniPBR constants | UsdPhysics revolute, prismatic, fixed and spherical joints |
+| glTF | the default scene's nodes; a mesh of several primitives gives a child per primitive | metres, Y up | metallic-roughness factors | sand3d's `s3d_joint` node extras |
+| URDF | the links nested by their joints, the root link merged into the robot, each visual a child of its link | metres, Z up | `<material>` colours, the robot's named ones included | every joint, with limits and mimics |
+| OBJ | one child per object | a header comment such as sand3d's "metres, Y up" or SolidDraft's "millimetres", else millimetres and Y up | MTL diffuse colours | none |
+| STL | one body | a header such as sand3d's "metres, Z up", else millimetres and Z up | none | none |
+
+The import converts every frame, point, normal and joint to millimetres with Z up once, as it reads the file. Y up becomes Z up by turning +Y onto +Z and +Z onto -Y. When a file names no units or names them wrongly, `units` (m, cm, mm or in) and `up` (y or z) override what the file says; the import record then says the choice came from the caller.
+
+Assembly placements are rigid. The import splits each node's frame in the root's into its rigid part, by polar decomposition, and the rest. The rigid part places the component. The rest, a scale, shear or mirror, is baked into the mesh, and a mirrored mesh keeps its outward winding. A tree of rigid frames keeps every frame exactly as the file has it. glTF files that scale metres down to millimetres at the root, as sand3d's do, arrive at true size. One mesh placed several times with the same baked residual is one mesh reference. OpenUSD and OBJ polygons are cut into triangles by ear clipping in each polygon's own plane, so a concave face keeps its notch and every triangle keeps the face's winding. A polygon that crosses itself or has no area has no right cut: it is fanned from its first corner, and the record's notes say so.
+
+A group becomes a sub-assembly named after it, and a body a component named after its node. A node with both a mesh and children, such as a glTF node or URDF link, holds its own mesh as a component of the same name inside its sub-assembly. Scopes and transforms with no mesh beneath them, such as USD's `Looks` and `Joints`, are left out. A USD prim marked invisible arrives as a hidden component, which hides everything below it; an invisible default prim hides every component of the assembly, and USD guide geometry is left out. A material becomes the assembly's colour on the component (see [assemblies.md](assemblies.md#colours)). Texture maps are not read: a textured material keeps its constant factors, and the record marks it as textured.
+
+USD is read at the stage's start time code, which is the default value wherever an attribute has no time samples; an animated stage says so in the record. The table says what the reader does with each UsdGeom attribute it meets. Whatever it cannot bring in faithfully, it leaves out or shows plainly, and says so in the record's notes.
+
+| USD | Import |
+|---|---|
+| `points`, `faceVertexCounts`, `faceVertexIndices` | read; each polygon cut by ear clipping |
+| `orientation` | `leftHanded` turns the winding; authored normals keep their direction |
+| `normals`, `primvars:normals` | read, indexed or not, per vertex, face, corner or constant |
+| `holeIndices` | hole faces are not drawn; a mesh that is all holes is left out |
+| `subdivisionScheme` | `none` and `bilinear` are the polygons; `catmullClark` (USD's fallback) and `loop` show the control polygons, with a note |
+| `GeomSubset` materials | not read, with a note; the mesh takes its own material |
+| `primvars:displayColor`, `displayOpacity` | a constant colour is the body's colour when no material it can read is bound; other interpolations give a note |
+| materials | UsdPreviewSurface and OmniPBR constants; any other surface gives a note |
+| `visibility` | `invisible` hides the component and everything below it, the default prim's included |
+| `purpose` | `default` and `render` come in; `guide` is left out, `proxy` too with a note |
+| `xformOpOrder` and its ops, `!resetXformStack!` | composed by the `openusd` crate |
+| `active`, `class`, undefined `over` | left out, as on the stage |
+| `instanceable` | read through the prototype; instances share one mesh reference |
+| `PointInstancer` | left out with its prototypes, with a note |
+| `Cube`, `Sphere`, `Cylinder` | meshed from their size, radius, height and axis |
+| `Cone`, `Capsule`, `Plane`, curves, points, NURBS, `TetMesh` | left out, with a note |
+| `SkelRoot` | its meshes come in at their rest pose, with a note |
+| cameras, lights, `PhysicsScene` | left out |
+| `metersPerUnit`, `upAxis` | read from the root layer, else USD's fallbacks of centimetres and Y up |
+
+The other readers follow the same rule.
+
+| Format | Read | Left out, with a note | Refused |
+|---|---|---|---|
+| glTF | the default scene's nodes and their transforms; triangles, strips and fans; normals; morph targets at the node's weights, else the mesh's; metallic-roughness factors, with alpha only for `BLEND` materials (the constant opacity, not texture alpha); sparse accessors; sand3d's `s3d_joint` extras | `MASK` cut-outs (shown opaque) and `BLEND` texture alpha, naming each mesh; other scenes, points and lines, primitives with no positions, vertex colours, skins (shown at rest), animations, `EXT_mesh_gpu_instancing` instances | a file that requires an extension the reader does not know, such as Draco, meshopt or quantised geometry |
+| OBJ | objects and groups, polygons by ear clipping, normals, the MTL file's `Kd`, `d` and diffuse texture flag | lines and points, free-form curves and surfaces, vertex colours, a missing or broken MTL file | - |
+| STL | binary and ASCII, every solid of an ASCII file as its own body, a header's units and up axis | colours in a binary file's attribute bytes or a `COLOR=` header, facet normals that disagree with the winding (the winding is kept) | - |
+| URDF | links nested by their joints, visual origins and scales, OBJ and STL meshes, box, cylinder and sphere, materials and their colours, joints with limits and mimics | collision geometry, capsules (shown as cylinders), a visual whose mesh is missing or in another format such as COLLADA | a xacro file, which must be expanded first |
+
+Cameras, lights, textures beyond the flag, emissive and occlusion factors, URDF inertia, transmissions and simulator tags are not geometry and are not read.
+
+The root assembly keeps the import record in `import.json`, outside both hashes. It holds the source file's name, format, size and SHA-256, the units and up axis and where each came from (the file, the format's rules, a header comment, a default, a fallback or the caller), the box around every body, and every node's name, path in the file and occurrence path. It also holds the materials, the meshes written and the notes on what was left out. Each joint is recorded in assembly terms: its kind, the occurrence paths of the parent and the child, its origin and rotation in the parent's assembly frame, its axis, and its limits in millimetres or degrees. A USD joint that names no `physics:body0` is anchored to the stage's world frame: its parent is the root, but the root's own placement does not move it. Joints are recorded, not mated: assembly mates need exact faces.
+
+MCP clients call `import_scene {"path":"washer.glb","out":"washer.dwasm"}`, with `units` and `up` when needed. The reply holds the status line, the import record and the opened assembly's summary, whose occurrences carry their names and kind `mesh`.
+
+The `scene-import` application scenario imports the sand3d bracket as `.usda`, `.glb`, `.urdf`, `.obj` and `.stl`, the sand3d washer as `.usda`, `.glb` and `.urdf`, and NVIDIA's SimReady cardboard box as binary `.usd`. It checks each tree, its names, scale and orientation against the source, and the transforms, colours and joints where the file has them. It saves and reopens the washer in a fresh process. The fixtures and their licences are in `ci/fixtures/scene-import`. `cargo test -p soliddraft-scene` runs the same files through the reader alone, and checks that the washer's three formats agree on every part's box and every joint's axis. `cargo test -p soliddraft-app --test scene_import_app` imports the washer from GLB and the box from USD in the rendered window; set `SOLIDDRAFT_SCENE_IMPORT_PROOF_DIR` to keep its frames.

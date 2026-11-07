@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- written by sand3d: plate at rest, metres and radians -->
+<robot name="plate">
+  <link name="plate">
+    <visual name="plate">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="bracket_meshes/plate.obj" />
+      </geometry>
+    </visual>
+  </link>
+</robot>

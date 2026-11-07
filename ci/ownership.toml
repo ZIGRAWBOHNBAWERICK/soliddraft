@@ -211,6 +211,13 @@ paths = ["crates/soliddraft-app/src/ribbon.rs"]
 module = ["ribbon"]
 
 [[areas]]
+name = "app.scene_import"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/scene_import.rs"]
+module = ["scene_import"]
+
+[[areas]]
 name = "app.settings"
 owner = "core"
 crate = "soliddraft-app"
@@ -483,6 +490,7 @@ paths = [
   "crates/soliddraft-assembly/src/store.rs",
   "crates/soliddraft-assembly/src/occurrence.rs",
   "crates/soliddraft-assembly/src/placement.rs",
+  "crates/soliddraft-assembly/src/reference_mesh.rs",
   "crates/soliddraft-assembly/src/path.rs",
   "crates/soliddraft-assembly/src/source.rs",
   "crates/soliddraft-assembly/src/scene.rs",

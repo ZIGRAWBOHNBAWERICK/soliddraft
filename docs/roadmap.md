@@ -85,7 +85,7 @@ Application work for a feature, such as its PropertyManager page, ribbon command
 | Draft | 4 | Works for planar faces and cylinders parallel to the pull |
 | Line and arc sweep | 5 | Works for closed polygons along lines and quarter, half and three-quarter arcs, within the backend domain in [the backend gaps](needs-catallax.md); after 0.2.0 |
 | Other path motions, loft; spline, ellipse and text profiles | 5 | Waits |
-| OpenUSD import from NVIDIA Omniverse (.usd, .usda, .usdc, .usdz); sand3d output import (USDA, GLB, URDF, OBJ, STL) | Application-side scene and mesh import, independent of stage 6 | Planned; does not wait for Catallax's importers; exit checks below |
+| OpenUSD import from NVIDIA Omniverse (.usd, .usda, .usdc, .usdz); sand3d output import (USDA, GLB, URDF, OBJ, STL) | Application-side scene and mesh import, independent of stage 6 | Works as mesh reference bodies in an assembly ([scene import](exchange.md#scene-import)); the `scene-import` scenario runs the exit checks below; mesh-to-solid conversion waits |
 | STEP import, then IGES import | 6 | Waits for Catallax's importers |
 | Lattice, gyroid, graded density, field-driven thickness | Field-only track, after stage 3 | One cubic lattice or one network gyroid works as the last feature, its radius or level constant or graded linearly along a part axis, with proven field moments and an explicit mass stand-in; other grades and field-driven thickness wait |
 

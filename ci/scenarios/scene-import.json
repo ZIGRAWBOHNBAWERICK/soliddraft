@@ -1,0 +1,1320 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "scene-import",
+  "steps": [
+    {
+      "tool": "import_scene",
+      "label": "sand3d bracket from usda: one plate, 80 x 40 x 6 mm on Z = 0",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-bracket/bracket.usda",
+        "out": "{bundle}/work/bracket-usda.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/active",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "usd"
+        },
+        {
+          "pointer": "/result/import/units/meters_per_unit",
+          "equals": 1.0
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "file"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Z"
+        },
+        {
+          "pointer": "/result/import/up_axis/from",
+          "equals": "file"
+        },
+        {
+          "pointer": "/result/import/joints",
+          "length": 0
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/0",
+          "approx": -40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/0",
+          "approx": 40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/1",
+          "approx": -20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/1",
+          "approx": 20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/2",
+          "approx": 6,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "Geometry"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12/kind",
+          "equals": "assembly"
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d bracket from glb: one plate, 80 x 40 x 6 mm on Z = 0",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-bracket/bracket.glb",
+        "out": "{bundle}/work/bracket-glb.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/active",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "gltf"
+        },
+        {
+          "pointer": "/result/import/units/meters_per_unit",
+          "equals": 1.0
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "format"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Y"
+        },
+        {
+          "pointer": "/result/import/up_axis/from",
+          "equals": "format"
+        },
+        {
+          "pointer": "/result/import/joints",
+          "length": 0
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/0",
+          "approx": -40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/0",
+          "approx": 40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/1",
+          "approx": -20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/1",
+          "approx": 20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/2",
+          "approx": 6,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d bracket from urdf: one plate, 80 x 40 x 6 mm on Z = 0",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-bracket/bracket.urdf",
+        "out": "{bundle}/work/bracket-urdf.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/active",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "urdf"
+        },
+        {
+          "pointer": "/result/import/units/meters_per_unit",
+          "equals": 1.0
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "format"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Z"
+        },
+        {
+          "pointer": "/result/import/up_axis/from",
+          "equals": "format"
+        },
+        {
+          "pointer": "/result/import/joints",
+          "length": 0
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/0",
+          "approx": -40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/0",
+          "approx": 40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/1",
+          "approx": -20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/1",
+          "approx": 20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/2",
+          "approx": 6,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d bracket from obj: one plate, 80 x 40 x 6 mm on Z = 0",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-bracket/bracket.obj",
+        "out": "{bundle}/work/bracket-obj.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/active",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "bracket"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "obj"
+        },
+        {
+          "pointer": "/result/import/units/meters_per_unit",
+          "equals": 1.0
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "header"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Y"
+        },
+        {
+          "pointer": "/result/import/up_axis/from",
+          "equals": "header"
+        },
+        {
+          "pointer": "/result/import/joints",
+          "length": 0
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/0",
+          "approx": -40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/0",
+          "approx": 40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/1",
+          "approx": -20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/1",
+          "approx": 20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/2",
+          "approx": 6,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d bracket from stl: one plate, 80 x 40 x 6 mm on Z = 0",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-bracket/bracket.stl",
+        "out": "{bundle}/work/bracket-stl.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/active",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "bracket"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "stl"
+        },
+        {
+          "pointer": "/result/import/units/meters_per_unit",
+          "equals": 1.0
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "header"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Z"
+        },
+        {
+          "pointer": "/result/import/up_axis/from",
+          "equals": "header"
+        },
+        {
+          "pointer": "/result/import/joints",
+          "length": 0
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "plate"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/0",
+          "approx": -40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/0",
+          "approx": 40,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/1",
+          "approx": -20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/1",
+          "approx": 20,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/2",
+          "approx": 6,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d washer from usda: links, materials and UsdPhysics joints",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-washer/washer.usda",
+        "out": "{bundle}/work/washer-usda.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "washing_machine"
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "file"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "Geometry"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16/name",
+          "equals": "door"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~12/name",
+          "equals": "glass"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~14/name",
+          "equals": "handle"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~14/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~16/name",
+          "equals": "ring"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~16/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/name",
+          "equals": "cabinet"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/0",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/0",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/1",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/1",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/2",
+          "approx": 850,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/nodes/7/material",
+          "equals": "glass__cfe3e6_opacity_0_4"
+        },
+        {
+          "pointer": "/summary/assembly/import/joints",
+          "equals": [
+            "dial_turn",
+            "door_hinge",
+            "drawer_slide",
+            "drum_spin"
+          ]
+        },
+        {
+          "pointer": "/result/import/joints/1/name",
+          "equals": "door_hinge"
+        },
+        {
+          "pointer": "/result/import/joints/1/kind",
+          "equals": "revolute"
+        },
+        {
+          "pointer": "/result/import/joints/1/units",
+          "equals": "deg"
+        },
+        {
+          "pointer": "/result/import/joints/1/limits/0",
+          "approx": 0
+        },
+        {
+          "pointer": "/result/import/joints/1/limits/1",
+          "approx": 143
+        },
+        {
+          "pointer": "/result/import/joints/1/parent",
+          "equals": "2/2"
+        },
+        {
+          "pointer": "/result/import/joints/1/child",
+          "equals": "2/6"
+        },
+        {
+          "pointer": "/result/import/joints/2/kind",
+          "equals": "prismatic"
+        },
+        {
+          "pointer": "/result/import/joints/2/units",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/result/import/joints/2/limits/1",
+          "approx": 200
+        },
+        {
+          "pointer": "/result/import/joints/0/kind",
+          "equals": "continuous"
+        },
+        {
+          "pointer": "/result/import/joints/3/kind",
+          "equals": "continuous"
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/0",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/1",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/2",
+          "approx": -1,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/0",
+          "approx": 1,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/1",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/2",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/0",
+          "approx": 345,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/1",
+          "approx": -240,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/2",
+          "approx": 400,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d washer from glb: Y up metres with a millimetre root scale, s3d_joint extras",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-washer/washer.glb",
+        "out": "{bundle}/work/washer-glb.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "washing_machine"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Y"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "washing_machine"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12/name",
+          "equals": "cabinet"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/name",
+          "equals": "cabinet"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~16/name",
+          "equals": "door_hinge"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~16/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~16~12/name",
+          "equals": "door"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~16~12/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~16~12~12/name",
+          "equals": "glass"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~16~12~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/0",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/0",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/1",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/1",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12~12/bounds/max/2",
+          "approx": 850,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/import/joints",
+          "equals": [
+            "dial_turn",
+            "door_hinge",
+            "drawer_slide",
+            "drum_spin"
+          ]
+        },
+        {
+          "pointer": "/result/import/joints/1/name",
+          "equals": "door_hinge"
+        },
+        {
+          "pointer": "/result/import/joints/1/kind",
+          "equals": "revolute"
+        },
+        {
+          "pointer": "/result/import/joints/1/units",
+          "equals": "deg"
+        },
+        {
+          "pointer": "/result/import/joints/1/limits/0",
+          "approx": 0
+        },
+        {
+          "pointer": "/result/import/joints/1/limits/1",
+          "approx": 143
+        },
+        {
+          "pointer": "/result/import/joints/1/parent",
+          "equals": "2/2"
+        },
+        {
+          "pointer": "/result/import/joints/1/child",
+          "equals": "2/2/6"
+        },
+        {
+          "pointer": "/result/import/joints/2/kind",
+          "equals": "prismatic"
+        },
+        {
+          "pointer": "/result/import/joints/2/units",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/result/import/joints/2/limits/1",
+          "approx": 200
+        },
+        {
+          "pointer": "/result/import/joints/0/kind",
+          "equals": "continuous"
+        },
+        {
+          "pointer": "/result/import/joints/3/kind",
+          "equals": "continuous"
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/0",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/1",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/2",
+          "approx": -1,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/0",
+          "approx": 1,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/1",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/2",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/0",
+          "approx": 345,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/1",
+          "approx": -240,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/2",
+          "approx": 400,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "NVIDIA SimReady box from binary USD",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/omniverse-cubebox/cubebox_a02.usd",
+        "out": "{bundle}/work/cubebox.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "World"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "usd"
+        },
+        {
+          "pointer": "/result/import/units/from",
+          "equals": "file"
+        },
+        {
+          "pointer": "/result/import/up_axis/axis",
+          "equals": "Z"
+        },
+        {
+          "pointer": "/result/import/materials",
+          "length": 2
+        },
+        {
+          "pointer": "/result/import/materials/0/textured",
+          "equals": true
+        },
+        {
+          "pointer": "/result/import/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/bounds/max/2",
+          "approx": 158.686,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/bounds/max/0",
+          "approx": 78.611,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "cubebox_a02_inst"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12/name",
+          "equals": "SM_CubeBox_A02_Decal_01"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~14/name",
+          "equals": "SM_CubeBox_A02_Scotch_01"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~14/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16/name",
+          "equals": "SM_CubeBox_A02_Body_01"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~12/name",
+          "equals": "M_CubeBox_A01_Body"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~14/name",
+          "equals": "M_CubeBox_A01_Details"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2~16~14/kind",
+          "equals": "mesh"
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "an assembly must be written as .dwasm",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-bracket/bracket.stl",
+        "out": "{bundle}/work/bracket.dwprt"
+      },
+      "refused": "must end in .dwasm",
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "World"
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "a file this import does not read",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/README.md",
+        "out": "{bundle}/work/readme.dwasm"
+      },
+      "refused": "is not a file this import reads",
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "World"
+        }
+      ]
+    },
+    {
+      "tool": "import_scene",
+      "label": "sand3d washer from urdf: links nested by joints, visuals inside",
+      "arguments": {
+        "path": "ci/fixtures/scene-import/sand3d-washer/washer.urdf",
+        "out": "{bundle}/work/washer.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "washing_machine"
+        },
+        {
+          "pointer": "/result/import/source/format",
+          "equals": "urdf"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "cabinet"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4/name",
+          "equals": "dial"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4~12/name",
+          "equals": "dial"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6/name",
+          "equals": "door"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~12/name",
+          "equals": "glass"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~14/name",
+          "equals": "handle"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~14/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~16/name",
+          "equals": "ring"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~16/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/8~12/name",
+          "equals": "drawer"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/8~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/10~12/name",
+          "equals": "drum"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/10~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/0",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/0",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/1",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/1",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/2",
+          "approx": 850,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/import/joints",
+          "equals": [
+            "dial_turn",
+            "door_hinge",
+            "drawer_slide",
+            "drum_spin"
+          ]
+        },
+        {
+          "pointer": "/result/import/joints/1/name",
+          "equals": "door_hinge"
+        },
+        {
+          "pointer": "/result/import/joints/1/kind",
+          "equals": "revolute"
+        },
+        {
+          "pointer": "/result/import/joints/1/units",
+          "equals": "deg"
+        },
+        {
+          "pointer": "/result/import/joints/1/limits/0",
+          "approx": 0
+        },
+        {
+          "pointer": "/result/import/joints/1/limits/1",
+          "approx": 143
+        },
+        {
+          "pointer": "/result/import/joints/1/parent",
+          "equals": ""
+        },
+        {
+          "pointer": "/result/import/joints/1/child",
+          "equals": "6"
+        },
+        {
+          "pointer": "/result/import/joints/2/kind",
+          "equals": "prismatic"
+        },
+        {
+          "pointer": "/result/import/joints/2/units",
+          "equals": "mm"
+        },
+        {
+          "pointer": "/result/import/joints/2/limits/1",
+          "approx": 200
+        },
+        {
+          "pointer": "/result/import/joints/0/kind",
+          "equals": "continuous"
+        },
+        {
+          "pointer": "/result/import/joints/3/kind",
+          "equals": "continuous"
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/0",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/1",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/axis/2",
+          "approx": -1,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/0",
+          "approx": 1,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/1",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/2/axis/2",
+          "approx": 0,
+          "tolerance": 1e-06
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/0",
+          "approx": 345,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/1",
+          "approx": -240,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/result/import/joints/1/origin/2",
+          "approx": 400,
+          "tolerance": 0.01
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "label": "save the imported washer",
+      "arguments": {
+        "path": "{bundle}/work/washer-saved.dwasm"
+      },
+      "files": [
+        "{bundle}/work/washer-saved.dwasm"
+      ],
+      "checks": [
+        {
+          "pointer": "/summary/assembly/dirty",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "label": "reopen the saved washer in a fresh process",
+      "fresh_process": true,
+      "arguments": {
+        "path": "{bundle}/work/washer-saved.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/name",
+          "equals": "washing_machine"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/name",
+          "equals": "cabinet"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4/name",
+          "equals": "dial"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4~12/name",
+          "equals": "dial"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/4~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6/name",
+          "equals": "door"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6/kind",
+          "equals": "assembly"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~12/name",
+          "equals": "glass"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~14/name",
+          "equals": "handle"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~14/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~16/name",
+          "equals": "ring"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~16/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/8~12/name",
+          "equals": "drawer"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/8~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/10~12/name",
+          "equals": "drum"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/10~12/kind",
+          "equals": "mesh"
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/0",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/0",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/1",
+          "approx": -300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/1",
+          "approx": 300,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/min/2",
+          "approx": 0,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/2/bounds/max/2",
+          "approx": 850,
+          "tolerance": 0.01
+        },
+        {
+          "pointer": "/summary/assembly/import/source/format",
+          "equals": "urdf"
+        },
+        {
+          "pointer": "/summary/assembly/import/joints",
+          "equals": [
+            "dial_turn",
+            "door_hinge",
+            "drawer_slide",
+            "drum_spin"
+          ]
+        },
+        {
+          "pointer": "/summary/assembly/occurrences/6~12/display",
+          "equals": "display"
+        }
+      ]
+    }
+  ]
+}

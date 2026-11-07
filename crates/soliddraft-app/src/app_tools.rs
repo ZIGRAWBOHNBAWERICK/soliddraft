@@ -272,6 +272,7 @@ impl AppTools<'_> {
             "undo" if drawing_active => self.step_drawing(true),
             "redo" if drawing_active => self.step_drawing(false),
             "open" => self.open(input)?,
+            "import_scene" => crate::scene_import::run(self.state, input),
             "new_part" => self.new_part(),
             "export_iges" => self.export_part(ExportFormat::Iges, input),
             "export_step" => self.export_part(ExportFormat::Step, input),
@@ -701,6 +702,7 @@ impl ToolHost for AppTools<'_> {
                     | "assembly_show_part"
                     | "new_part"
                     | "open"
+                    | "import_scene"
             )
         {
             self.state.tool_document = Some(if self.state.assembly.is_active() {

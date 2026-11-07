@@ -358,6 +358,26 @@ pub struct FilletParams {
     pub laws: Vec<model::FilletLaw>,
 }
 
+impl FilletParams {
+    /// The radius as people read it: "R4", or for a variable fillet the range its laws
+    /// and its constant edges span, such as "R2 to R6".
+    pub fn radius_label(&self) -> String {
+        let mut radii: Vec<f64> = self
+            .laws
+            .iter()
+            .flat_map(|l| match l.radius {
+                soliddraft_kernel_api::RadiusLaw::Linear { start, end } => [start, end],
+            })
+            .collect();
+        if self.laws.len() < self.edges.len() || radii.is_empty() {
+            radii.push(self.radius);
+        }
+        let low = radii.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = radii.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if low == high { format!("R{}", fmt_mm(low)) } else { format!("R{} to R{}", fmt_mm(low), fmt_mm(high)) }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChamferParams {
     pub edges: Vec<EdgeRef>,
@@ -778,7 +798,7 @@ impl Feature {
             },
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
             FeatureKind::Sweep(s) => format!("{} mm", fmt_mm(s.path.length())),
-            FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
+            FeatureKind::Fillet(f) => f.radius_label(),
             FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
             FeatureKind::Hole(h) => {
                 format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter))
@@ -4035,6 +4055,33 @@ mod tests {
         d.apply(Command::Rollback(None)).unwrap();
         built(&d);
     }
+    #[test]
+    fn a_fillet_reads_as_its_radius_or_the_range_of_its_laws() {
+        let mut d = doc();
+        d.apply(Command::AddExtrude {
+            params: ExtrudeParams {
+                profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },
+                depth: 10.0,
+                ..Default::default()
+            },
+            via_assistant: false,
+        })
+        .unwrap();
+        let edges: Vec<EdgeRef> = d.edges.iter().take(2).map(|e| d.edge_ref(e.id).unwrap()).collect();
+        let face = d.any_face_ref(d.faces[0].id).unwrap();
+        let law = |edge: u32, start: f64, end: f64| model::FilletLaw {
+            edge,
+            from: face.clone(),
+            radius: soliddraft_kernel_api::RadiusLaw::Linear { start, end },
+        };
+        let fillet =
+            |laws: Vec<model::FilletLaw>| FilletParams { edges: edges.clone(), radius: 4.0, overflow: None, laws };
+        assert_eq!(fillet(Vec::new()).radius_label(), "R4");
+        assert_eq!(fillet(vec![law(0, 2.0, 6.0)]).radius_label(), "R2 to R6", "the constant edge's R4 lies inside");
+        assert_eq!(fillet(vec![law(0, 0.0, 3.0), law(1, 1.0, 3.0)]).radius_label(), "R0 to R3", "every edge has a law");
+        assert_eq!(fillet(vec![law(0, 4.0, 4.0)]).radius_label(), "R4");
+    }
+
     #[test]
     fn a_setback_station_that_names_no_end_is_repaired_by_picking_an_end_face() {
         end_face_repair(|at| {

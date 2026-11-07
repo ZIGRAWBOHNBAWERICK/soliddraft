@@ -275,27 +275,7 @@ fn values(kind: &FeatureKind) -> Vec<(AnnotationValue, String)> {
     match kind {
         FeatureKind::Revolve(r) => vec![(Angle, format!("{}°", fmt_mm(r.angle_deg)))],
         FeatureKind::Sweep(_) => vec![],
-        FeatureKind::Fillet(p) => {
-            // A variable fillet shows the range its laws and its constant edges span.
-            let mut radii: Vec<f64> = p
-                .laws
-                .iter()
-                .flat_map(|l| match l.radius {
-                    soliddraft_kernel_api::RadiusLaw::Linear { start, end } => [start, end],
-                })
-                .collect();
-            if p.laws.len() < p.edges.len() {
-                radii.push(p.radius);
-            }
-            let low = radii.iter().copied().fold(f64::INFINITY, f64::min);
-            let high = radii.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            let text = if radii.is_empty() || low == high {
-                format!("R{}", fmt_mm(if radii.is_empty() { p.radius } else { low }))
-            } else {
-                format!("R{} to R{}", fmt_mm(low), fmt_mm(high))
-            };
-            vec![(Radius, text)]
-        }
+        FeatureKind::Fillet(p) => vec![(Radius, p.radius_label())],
         FeatureKind::Chamfer(p) => vec![(Distance, fmt_mm(p.distance))],
         FeatureKind::Draft(d) => vec![(Angle, format!("{}°", fmt_mm(d.angle)))],
         FeatureKind::Shell(s) => vec![(Thickness, fmt_mm(s.thickness))],

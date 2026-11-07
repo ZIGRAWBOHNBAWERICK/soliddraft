@@ -54,7 +54,7 @@ fn volume(d: &Document) -> f64 {
 struct Picks {
     back: EdgeRef,
     front: EdgeRef,
-    /// The face at x = 40, which both edges run into at their high-x end.
+    /// The face at the high-x side, which both edges run into at their high-x end.
     high_x: FaceRef,
     /// The back face, which runs along the whole back edge and meets neither end.
     along: FaceRef,
@@ -103,10 +103,11 @@ fn each_law_starts_at_its_named_end_and_unlawed_edges_keep_the_radius() {
     let placed = d.resolve_variable(&[law(0, &p.high_x, 1.0, 3.0)], &edges, 2.0, body).unwrap();
     let [lawed, constant]: [VariableFilletEdge; 2] = placed.try_into().unwrap();
 
-    // The law runs on the back edge from its x = 40 end, whatever the edge's own direction.
+    // The law runs on the back edge from its high-x end, whatever the edge's own direction.
     assert_eq!(lawed.edge, edges[0]);
     let from = t.vertex(lawed.from).unwrap().position;
-    assert!((from.x - 40.0).abs() < 1e-9, "the law starts at the high-x end: {from:?}");
+    let high_x = t.edge(edges[0]).unwrap().bbox.max.x;
+    assert!((from.x - high_x).abs() < 1e-9, "the law starts at x = {high_x}: {from:?}");
     assert_eq!(lawed.radius, RadiusLaw::Linear { start: 1.0, end: 3.0 });
 
     // The front edge has no law: it keeps R2 from one of its own ends.
@@ -210,4 +211,99 @@ fn removing_an_edge_takes_its_law_and_stations() {
     assert_eq!(b.laws, vec![law(1, &p.high_x, 1.0, 3.0)]);
     b.remove_edge(5);
     assert_eq!(b.edges.len(), 2, "an index past the list changes nothing");
+}
+
+/// The block with a later notch cut through its back-right corner, so the back top edge
+/// now ends at x = 10 against the notch wall. The edge's two faces come from the block's
+/// extrusion; the wall at its high-x end comes from the cut. Returns the cut, the edge
+/// and the wall.
+fn notched() -> (Document, FeatureId, EdgeRef, FaceRef) {
+    let mut d = block();
+    let mut s = Sketch::new();
+    s.rectangle(P2::new(20.0, 15.0), 20.0, 10.0).unwrap();
+    solve(&mut s, None, true);
+    let sketch = add(
+        &mut d,
+        FeatureKind::Sketch(SketchFeature {
+            plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 },
+            sketch: s,
+        }),
+    )
+    .unwrap();
+    let cut = add(
+        &mut d,
+        FeatureKind::Extrude(ExtrudeFeature {
+            profile: ProfileSource::Sketch { feature: sketch },
+            operation: ExtrudeOp::Cut,
+            end: EndCondition::ThroughAll,
+            reverse: false,
+        }),
+    )
+    .unwrap();
+    assert_eq!(d.status(cut), Some(&FeatureStatus::Ok));
+    let t = d.kernel().topology(d.body().unwrap()).unwrap();
+    let edge = t
+        .edges
+        .iter()
+        .find(|e| (e.midpoint.z - 10.0).abs() < 1e-6 && (e.midpoint.y - 15.0).abs() < 1e-6)
+        .expect("the shortened back top edge");
+    assert!((edge.bbox.max.x - 10.0).abs() < 1e-6, "the edge ends at the notch: {:?}", edge.bbox);
+    let wall = t
+        .faces
+        .iter()
+        .find(|f| f.normal.is_some_and(|n| (n - Vec3::X).length() < 1e-9) && (f.centroid.x - 10.0).abs() < 1e-6)
+        .expect("the notch wall at x = 10");
+    let (edge, wall) = (d.edge_ref(edge.id).unwrap(), d.face_ref(wall.id).unwrap());
+    assert!(edge.faces.iter().all(|f| f.feature != cut), "the edge's own faces are the block's");
+    assert_eq!(wall.feature, cut, "the wall is the cut's");
+    (d, cut, edge, wall)
+}
+
+/// A fillet whose end face comes from a later feature than its edge reads that feature
+/// too: it lists it, it cannot move above it, and it cannot name one that is missing.
+fn end_face_owner_is_an_input(kind: impl Fn(&EdgeRef, &FaceRef) -> FeatureKind) {
+    let (mut d, cut, edge, wall) = notched();
+    let block_extrude = edge.faces[0].feature;
+    let fillet = kind(&edge, &wall);
+    assert_eq!(fillet.dependencies(), vec![block_extrude, cut], "the edge's owner and the end face's owner");
+    let f = add(&mut d, fillet).unwrap();
+    assert!(
+        matches!(d.status(f), Some(FeatureStatus::Failed(why)) if why.to_lowercase().contains("coming soon")),
+        "the end resolves and the fillet reaches Catallax: {:?}",
+        d.status(f)
+    );
+    let order: Vec<FeatureId> = d.features().iter().map(|g| g.id).collect();
+    let cut_at = order.iter().position(|id| *id == cut).unwrap();
+    let moved = d.execute(Command::MoveFeature { id: f, position: cut_at });
+    assert!(matches!(moved, Err(CommandError::Order(id, dep)) if id == f && dep == cut), "{moved:?}");
+    assert_eq!(d.features().iter().map(|g| g.id).collect::<Vec<_>>(), order, "the tree is unchanged");
+
+    // An end face from a feature that does not exist is refused on add and on edit.
+    let mut ghost = wall.clone();
+    ghost.feature = FeatureId(9999);
+    let missing = |r: Result<_, CommandError>| matches!(r, Err(CommandError::UnknownFeature(FeatureId(9999))));
+    assert!(missing(add(&mut d, kind(&edge, &ghost))), "add names a missing producer");
+    assert!(missing(d.execute(Command::EditFeature { id: f, kind: kind(&edge, &ghost) }).map(|_| ())), "edit too");
+    assert_eq!(d.features().iter().map(|g| g.id).collect::<Vec<_>>(), order);
+}
+
+#[test]
+fn a_law_from_a_later_features_face_depends_on_that_feature() {
+    end_face_owner_is_an_input(|edge, from| fillet(&[edge], vec![law(0, from, 1.0, 3.0)]));
+}
+
+#[test]
+fn a_setback_station_at_a_later_features_face_depends_on_that_feature() {
+    end_face_owner_is_an_input(|edge, at| {
+        FeatureKind::Fillet(BlendFeature {
+            edges: vec![edge.clone()],
+            size: 2.0,
+            overflow: Some(FilletOverflow::KeepNeighbours(vec![FilletSetback {
+                edge: 0,
+                at: at.clone(),
+                setback: 3.0,
+            }])),
+            laws: Vec::new(),
+        })
+    });
 }

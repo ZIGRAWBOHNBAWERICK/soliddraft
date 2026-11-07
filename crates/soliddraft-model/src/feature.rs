@@ -121,7 +121,7 @@ impl FeatureKind {
     }
 
     /// The features this one reads: its sketch, and the features that made the faces
-    /// and edges it references.
+    /// and edges it references, including a fillet's end faces.
     pub fn dependencies(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
         match self {
@@ -139,6 +139,10 @@ impl FeatureKind {
             }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
                 out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
+                // An end face can come from a feature that made neither of the edge's faces,
+                // such as a later cut that shortens the edge.
+                out.extend(b.stations().iter().map(|s| s.at.feature));
+                out.extend(b.laws.iter().map(|l| l.from.feature));
             }
             FeatureKind::Hole(h) => out.push(h.face.feature),
             FeatureKind::Pattern(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {

@@ -11,7 +11,7 @@ use crate::{
     BackendInfo, BodyId, BooleanOp, Draft, EdgeId, EdgePolyline, ExactAxisPlane, Extrude, ExtrudeLimit, FaceCarrier,
     FaceId, FilletOverflow, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror,
     OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve,
-    TessellationParams, Topology, Validation, Vec3, drawing,
+    TessellationParams, Topology, Validation, VariableFilletEdge, Vec3, drawing,
 };
 
 /// One piece of work a kernel was asked for.
@@ -122,6 +122,11 @@ impl Kernel for Counting {
     ) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.fillet_overflow(tag, body, edges, radius, overflow)
+    }
+
+    fn fillet_variable(&self, tag: &OpTag, body: BodyId, edges: &[VariableFilletEdge]) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.fillet_variable(tag, body, edges)
     }
 
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {

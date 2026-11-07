@@ -255,6 +255,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; the refused steps keep the R3 volume"
     },
     {
+      "id": "fillet-variable",
+      "file": "ci/scenarios/fillet-variable.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP sketch, extrude, fillet and edit_fillet with radius_laws -> real document rebuild -> pinned Catallax constant fillet; variable-radius laws refused before construction",
+      "supported_limits": "One R2 then R3 constant fillet on a 40 mm top edge of a 40 x 30 x 10 block; a linear radius law on an edit and on a new fillet, including a collapsed zero end, is stored by the model but refused as coming soon until Catallax constructs variable-radius fillets (Catallax recipe section 4.5.2, schema in Catallax PR 319); a law zero at both ends and a law on an edge the fillet does not have are refused before any kernel call",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; the refused steps keep the R2 volume"
+    },
+    {
       "id": "graded-fields",
       "file": "ci/scenarios/graded-fields.json",
       "acceptance": true,

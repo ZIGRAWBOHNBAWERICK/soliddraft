@@ -595,6 +595,50 @@ impl Document {
         Ok(())
     }
 
+    /// A fillet's setback stations and radius laws, beyond its edges and radius.
+    fn check_fillet(b: &BlendFeature) -> Result<(), CommandError> {
+        let invalid = |message: String| Err(CommandError::Invalid(message));
+        let n = b.edges.len();
+        if let Some(FilletOverflow::KeepNeighbours(stations)) = &b.overflow {
+            if !b.laws.is_empty() {
+                return invalid("a variable-radius fillet rolls over; it cannot keep its neighbours yet".into());
+            }
+            for (i, s) in stations.iter().enumerate() {
+                if s.edge as usize >= n {
+                    return invalid(format!(
+                        "setback {} names edge {}, but the fillet has {n} edges",
+                        i + 1,
+                        s.edge + 1
+                    ));
+                }
+                if !(s.setback.is_finite() && s.setback > 0.0) {
+                    return invalid(format!("setback {} must be positive, got {}", i + 1, s.setback));
+                }
+            }
+        }
+        for (i, law) in b.laws.iter().enumerate() {
+            if law.edge as usize >= n {
+                return invalid(format!(
+                    "radius law {} names edge {}, but the fillet has {n} edges",
+                    i + 1,
+                    law.edge + 1
+                ));
+            }
+            if let Some(j) = b.laws[..i].iter().position(|other| other.edge == law.edge) {
+                return invalid(format!("radius laws {} and {} both name edge {}", j + 1, i + 1, law.edge + 1));
+            }
+            let soliddraft_kernel_api::RadiusLaw::Linear { start, end } = law.radius;
+            let size = |r: f64| r.is_finite() && r >= 0.0;
+            if !(size(start) && size(end)) || start == 0.0 && end == 0.0 {
+                return invalid(format!(
+                    "radius law {}: radii must be non-negative and not both zero, got {start} and {end}",
+                    i + 1
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn check_kind(kind: &FeatureKind) -> Result<(), CommandError> {
         match kind {
             FeatureKind::ReferencePlane(p) if !p.offset().is_finite() || p.offset().abs() > 100_000.0 => {
@@ -609,30 +653,10 @@ impl Document {
             FeatureKind::Chamfer(b) if b.overflow.is_some() => {
                 Err(CommandError::Invalid("a chamfer has no overflow policy".into()))
             }
-            FeatureKind::Fillet(BlendFeature {
-                edges,
-                overflow: Some(FilletOverflow::KeepNeighbours(stations)),
-                ..
-            }) => {
-                for (i, s) in stations.iter().enumerate() {
-                    if s.edge as usize >= edges.len() {
-                        return Err(CommandError::Invalid(format!(
-                            "setback {} names edge {}, but the fillet has {} edges",
-                            i + 1,
-                            s.edge + 1,
-                            edges.len()
-                        )));
-                    }
-                    if !(s.setback.is_finite() && s.setback > 0.0) {
-                        return Err(CommandError::Invalid(format!(
-                            "setback {} must be positive, got {}",
-                            i + 1,
-                            s.setback
-                        )));
-                    }
-                }
-                Ok(())
+            FeatureKind::Chamfer(b) if !b.laws.is_empty() => {
+                Err(CommandError::Invalid("a chamfer has no radius laws".into()))
             }
+            FeatureKind::Fillet(b) => Self::check_fillet(b),
             FeatureKind::Hole(h) if !(h.diameter.is_finite() && h.diameter > 0.0) => {
                 Err(CommandError::Invalid(format!("hole diameter must be positive, got {}", h.diameter)))
             }

@@ -333,8 +333,8 @@ impl FeatureEditor {
         }
     }
 
-    /// Drops edge `i` from a Fillet or Chamfer list. A fillet's setback stations on it go
-    /// too, and the rest keep naming the same edges.
+    /// Drops edge `i` from a Fillet or Chamfer list. A fillet's setback stations and radius
+    /// law on it go too, and the rest keep naming the same edges.
     pub fn remove_edge(&mut self, i: usize) {
         match &mut self.params {
             EditorParams::Fillet(f) if i < f.edges.len() => {
@@ -342,6 +342,7 @@ impl FeatureEditor {
                 if let Some(overflow) = &mut f.overflow {
                     overflow.edge_removed(i);
                 }
+                soliddraft_model::FilletLaw::edge_removed(&mut f.laws, i);
             }
             EditorParams::Chamfer(c) if i < c.edges.len() => {
                 c.edges.remove(i);
@@ -384,8 +385,10 @@ impl FeatureEditor {
             EditorParams::Revolve(r) => doc.preview_revolve(r),
             EditorParams::Sweep(s) => doc.preview_sweep(s),
             EditorParams::Cut(p) => doc.preview_cut(p, before),
-            EditorParams::Fillet(f) => doc.preview_rounding(&f.edges, f.radius, false, f.overflow.as_ref(), before),
-            EditorParams::Chamfer(c) => doc.preview_rounding(&c.edges, c.distance, true, None, before),
+            EditorParams::Fillet(f) => {
+                doc.preview_rounding(&f.edges, f.radius, false, f.overflow.as_ref(), &f.laws, before)
+            }
+            EditorParams::Chamfer(c) => doc.preview_rounding(&c.edges, c.distance, true, None, &[], before),
             EditorParams::Shell(s) => doc.preview_shell(s, before),
             // These preview once applied; the interface half adds ghosts for them.
             EditorParams::Lattice(_)

@@ -6,16 +6,16 @@ use std::sync::Arc;
 use soliddraft_kernel_api::{
     BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, Gyroid,
     HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult,
-    Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
+    Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, RadiusLaw, SurfaceKind, Vec3,
 };
 
 use crate::feature::{
-    BlendFeature, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId, FeatureKind,
+    BlendFeature, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId, FeatureKind, FilletLaw,
     FilletOverflow, FilletSetback, GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, MirrorFeature,
     PatternFeature, PatternSpec, PlaneRef, ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
 };
 use crate::rebuild::BuildCache;
-use crate::reference::{self, Generator, NamedFace, ReferenceSlot, RepairNeeded, RepairReason, View};
+use crate::reference::{self, FaceRef, Generator, NamedFace, ReferenceSlot, RepairNeeded, RepairReason, View};
 
 use crate::document::{BuiltSketch, Document, FeatureStatus};
 
@@ -670,15 +670,15 @@ impl Document {
         }
         if !repairs.is_empty() {
             // Station faces that are gone ask for repair in the same round as the edges.
-            if let Some(FilletOverflow::KeepNeighbours(stations)) = &b.overflow {
-                for (i, s) in stations.iter().enumerate() {
-                    if let Err(u) = reference::resolve_face(&s.at, &view, &names) {
-                        let message = format!("setback {}: {}", i + 1, u.message);
-                        repairs.push(RepairNeeded {
-                            message,
-                            ..u.into_repair(ReferenceSlot::Setback { index: i as u32 })
-                        });
-                    }
+            let stations = match &b.overflow {
+                Some(FilletOverflow::KeepNeighbours(stations)) => stations.as_slice(),
+                _ => &[],
+            };
+            let ends = stations.iter().enumerate().map(|(i, s)| (&s.at, ReferenceSlot::Setback { index: i as u32 }));
+            let laws = b.laws.iter().enumerate().map(|(i, l)| (&l.from, ReferenceSlot::Law { index: i as u32 }));
+            for (at, slot) in ends.chain(laws) {
+                if let Err(u) = reference::resolve_face(at, &view, &names) {
+                    repairs.push(RepairNeeded { message: format!("{slot}: {}", u.message), ..u.into_repair(slot) });
                 }
             }
             return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
@@ -688,20 +688,43 @@ impl Document {
                 return Built::failed(current, format!("edges {} and {} name the same edge", j + 1, i + 1));
             }
         }
-        let overflow = match &b.overflow {
-            None => None,
-            Some(FilletOverflow::RollOver) => Some(soliddraft_kernel_api::FilletOverflow::RollOver),
-            Some(FilletOverflow::KeepNeighbours(stations)) => match setbacks(stations, &ids, &t, &view, &names) {
-                Ok(s) => Some(soliddraft_kernel_api::FilletOverflow::KeepNeighbours(s)),
-                Err(StationError::Failed(why)) => return Built::failed(current, why),
-                Err(StationError::Repair(items)) => return Built::pass(FeatureStatus::RepairNeeded(items), current),
-            },
-        };
         let tag = OpTag::new(format!("{}.blend", f.id));
-        let result = match (chamfer, &overflow) {
-            (true, _) => self.kernel.chamfer(&tag, body, &ids, b.size),
-            (false, None) => self.kernel.fillet(&tag, body, &ids, b.size),
-            (false, Some(o)) => self.kernel.fillet_overflow(&tag, body, &ids, b.size, o),
+        let result = if chamfer {
+            self.kernel.chamfer(&tag, body, &ids, b.size)
+        } else if !b.laws.is_empty() {
+            if matches!(b.overflow, Some(FilletOverflow::KeepNeighbours(_))) {
+                return Built::failed(
+                    current,
+                    "a variable-radius fillet rolls over; it cannot keep its neighbours yet",
+                );
+            }
+            match placed(current, variable_edges(&b.laws, &ids, b.size, &t, &view, &names)) {
+                Ok(laws) => self.kernel.fillet_variable(&tag, body, &laws),
+                Err(built) => return *built,
+            }
+        } else {
+            match &b.overflow {
+                None => self.kernel.fillet(&tag, body, &ids, b.size),
+                Some(FilletOverflow::RollOver) => self.kernel.fillet_overflow(
+                    &tag,
+                    body,
+                    &ids,
+                    b.size,
+                    &soliddraft_kernel_api::FilletOverflow::RollOver,
+                ),
+                Some(FilletOverflow::KeepNeighbours(stations)) => {
+                    match placed(current, setbacks(stations, &ids, &t, &view, &names)) {
+                        Ok(s) => self.kernel.fillet_overflow(
+                            &tag,
+                            body,
+                            &ids,
+                            b.size,
+                            &soliddraft_kernel_api::FilletOverflow::KeepNeighbours(s),
+                        ),
+                        Err(built) => return *built,
+                    }
+                }
+            }
         };
         let result = match result {
             Ok(r) => r,
@@ -1207,93 +1230,167 @@ pub fn plane_on_face(normal: Vec3, point: Vec3) -> Plane {
     Plane { origin: n * point.dot(n), normal: n, x_dir }
 }
 
-/// Why a fillet's setback stations do not place on the body being rounded.
+/// Why a fillet's setback stations or radius laws do not place on the body being
+/// rounded.
 #[derive(Debug)]
-pub(crate) enum StationError {
+pub(crate) enum EndError {
     /// The definition is wrong in a way no repair pick fixes.
     Failed(String),
     /// Some end faces are gone, or do not meet their edge at exactly one end.
     Repair(Vec<RepairNeeded>),
 }
 
-impl StationError {
+impl EndError {
     /// The problem as one line, for a preview that cannot open a repair.
     pub(crate) fn message(&self) -> String {
         match self {
-            StationError::Failed(why) => why.clone(),
-            StationError::Repair(items) => items.iter().map(|r| r.message.as_str()).collect::<Vec<_>>().join("; "),
+            EndError::Failed(why) => why.clone(),
+            EndError::Repair(items) => items.iter().map(|r| r.message.as_str()).collect::<Vec<_>>().join("; "),
         }
     }
 }
 
+/// The end of `edge` that `at` names: the endpoint whose other edges run into that face.
+/// A face that is gone, or meets the edge at both ends or neither, asks for repair in
+/// `slot`; the faces that meet one end each are offered in its place. `what` names the
+/// reference in messages, such as "setback 1".
+fn edge_end(
+    edge: EdgeId,
+    at: &FaceRef,
+    slot: ReferenceSlot,
+    what: &str,
+    topology: &soliddraft_kernel_api::Topology,
+    view: &View,
+    names: &reference::NameMap,
+) -> Result<soliddraft_kernel_api::VertexId, EndError> {
+    let Some(info) = topology.edge(edge) else {
+        return Err(EndError::Failed(format!("{what}: its edge is not on the body")));
+    };
+    // The faces an end runs into: those of its other edges that are not the edge's own.
+    let end_faces = |v: &soliddraft_kernel_api::VertexId| -> Vec<FaceId> {
+        let mut faces: Vec<FaceId> = topology
+            .vertex(*v)
+            .into_iter()
+            .flat_map(|vertex| vertex.edges.iter())
+            .filter(|e| **e != edge)
+            .filter_map(|e| topology.edge(*e))
+            .flat_map(|other| other.faces.iter().copied())
+            .filter(|f| !info.faces.contains(f))
+            .collect();
+        faces.sort_unstable();
+        faces.dedup();
+        faces
+    };
+    let ends: Vec<Vec<FaceId>> = info.vertices.iter().map(end_faces).collect();
+    let face = reference::resolve_face(at, view, names).map_err(|u| {
+        EndError::Repair(vec![RepairNeeded { message: format!("{what}: {}", u.message), ..u.into_repair(slot) }])
+    })?;
+    let meets: Vec<usize> = (0..ends.len()).filter(|k| ends[*k].contains(&face)).collect();
+    if let [k] = meets.as_slice() {
+        return Ok(info.vertices[*k]);
+    }
+    let detail = format!("{} does not meet its edge at exactly one end", at.label);
+    let mut candidates = Vec::new();
+    for (k, faces) in ends.iter().enumerate() {
+        for f in faces {
+            let elsewhere = ends.iter().enumerate().any(|(j, other)| j != k && other.contains(f));
+            if !elsewhere && !candidates.contains(&reference::Candidate::Face(*f)) {
+                candidates.push(reference::Candidate::Face(*f));
+            }
+        }
+    }
+    Err(EndError::Repair(vec![RepairNeeded {
+        slot,
+        message: format!("{what}: {detail}"),
+        reason: RepairReason::Mismatch { detail },
+        candidates,
+    }]))
+}
+
+/// A placement, or what the feature reports when it cannot be placed.
+fn placed<T>(current: Option<BodyId>, r: Result<T, EndError>) -> Result<T, Box<Built>> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(EndError::Failed(why)) => Err(Box::new(Built::failed(current, why))),
+        Err(EndError::Repair(items)) => Err(Box::new(Built::pass(FeatureStatus::RepairNeeded(items), current))),
+    }
+}
+
+/// Gathers per-item results, keeping every repair so one round asks for all of them. A
+/// failure that no repair fixes stops at once.
+fn gather<T>(items: impl Iterator<Item = Result<T, EndError>>) -> Result<Vec<T>, EndError> {
+    let mut placed = Vec::new();
+    let mut repairs = Vec::new();
+    for item in items {
+        match item {
+            Ok(t) => placed.push(t),
+            Err(EndError::Repair(r)) => repairs.extend(r),
+            Err(failed) => return Err(failed),
+        }
+    }
+    if repairs.is_empty() { Ok(placed) } else { Err(EndError::Repair(repairs)) }
+}
+
 /// A fillet's setback stations on the body being rounded: each one's edge among the
-/// resolved `edges`, and the end of that edge that touches its `at` face. An end face
-/// that is gone, or that meets the edge at both ends or neither, asks for repair; the
-/// faces that meet one end each are offered in its place.
+/// resolved `edges`, and the end of that edge that touches its `at` face.
 pub(crate) fn setbacks(
     stations: &[FilletSetback],
     edges: &[EdgeId],
     topology: &soliddraft_kernel_api::Topology,
     view: &View,
     names: &reference::NameMap,
-) -> Result<Vec<soliddraft_kernel_api::FilletSetback>, StationError> {
-    let mut placed = Vec::new();
-    let mut repairs = Vec::new();
-    for (i, s) in stations.iter().enumerate() {
-        let n = i + 1;
+) -> Result<Vec<soliddraft_kernel_api::FilletSetback>, EndError> {
+    gather(stations.iter().enumerate().map(|(i, s)| {
+        let what = format!("setback {}", i + 1);
+        let &edge = edges
+            .get(s.edge as usize)
+            .ok_or_else(|| EndError::Failed(format!("{what} names no edge of the fillet")))?;
         let slot = ReferenceSlot::Setback { index: i as u32 };
-        let Some(&edge) = edges.get(s.edge as usize) else {
-            return Err(StationError::Failed(format!("setback {n} names no edge of the fillet")));
-        };
-        let Some(info) = topology.edge(edge) else {
-            return Err(StationError::Failed(format!("setback {n}: its edge is not on the body")));
-        };
-        // The faces an end runs into: those of its other edges that are not the edge's own.
-        let end_faces = |v: &soliddraft_kernel_api::VertexId| -> Vec<FaceId> {
-            let mut faces: Vec<FaceId> = topology
-                .vertex(*v)
-                .into_iter()
-                .flat_map(|vertex| vertex.edges.iter())
-                .filter(|e| **e != edge)
-                .filter_map(|e| topology.edge(*e))
-                .flat_map(|other| other.faces.iter().copied())
-                .filter(|f| !info.faces.contains(f))
-                .collect();
-            faces.sort_unstable();
-            faces.dedup();
-            faces
-        };
-        let ends: Vec<Vec<FaceId>> = info.vertices.iter().map(end_faces).collect();
-        let face = match reference::resolve_face(&s.at, view, names) {
-            Ok(face) => face,
-            Err(u) => {
-                repairs.push(RepairNeeded { message: format!("setback {n}: {}", u.message), ..u.into_repair(slot) });
-                continue;
-            }
-        };
-        let meets: Vec<usize> = (0..ends.len()).filter(|k| ends[*k].contains(&face)).collect();
-        if let [k] = meets.as_slice() {
-            placed.push(soliddraft_kernel_api::FilletSetback { edge, at: info.vertices[*k], setback: s.setback });
-            continue;
-        }
-        let detail = format!("{} does not meet its edge at exactly one end", s.at.label);
-        let mut candidates = Vec::new();
-        for (k, faces) in ends.iter().enumerate() {
-            for f in faces {
-                let elsewhere = ends.iter().enumerate().any(|(j, other)| j != k && other.contains(f));
-                if !elsewhere && !candidates.contains(&reference::Candidate::Face(*f)) {
-                    candidates.push(reference::Candidate::Face(*f));
-                }
-            }
-        }
-        repairs.push(RepairNeeded {
-            slot,
-            message: format!("setback {n}: {detail}"),
-            reason: RepairReason::Mismatch { detail },
-            candidates,
-        });
+        let at = edge_end(edge, &s.at, slot, &what, topology, view, names)?;
+        Ok(soliddraft_kernel_api::FilletSetback { edge, at, setback: s.setback })
+    }))
+}
+
+/// A variable fillet's edges on the body being rounded, in the fillet's edge order. An
+/// edge with a law starts it at the end its `from` face names; one without keeps the
+/// constant `size`, which reads the same from either end. Every edge must be open.
+pub(crate) fn variable_edges(
+    laws: &[FilletLaw],
+    edges: &[EdgeId],
+    size: f64,
+    topology: &soliddraft_kernel_api::Topology,
+    view: &View,
+    names: &reference::NameMap,
+) -> Result<Vec<soliddraft_kernel_api::VariableFilletEdge>, EndError> {
+    if let Some((i, law)) = laws.iter().enumerate().find(|(_, l)| l.edge as usize >= edges.len()) {
+        return Err(EndError::Failed(format!(
+            "radius law {} names edge {}, which the fillet does not have",
+            i + 1,
+            law.edge + 1
+        )));
     }
-    if repairs.is_empty() { Ok(placed) } else { Err(StationError::Repair(repairs)) }
+    gather(edges.iter().enumerate().map(|(e, &edge)| {
+        let vertices = topology.edge(edge).map(|info| info.vertices.clone()).unwrap_or_default();
+        let [first, _] = vertices.as_slice() else {
+            return Err(EndError::Failed(format!(
+                "edge {} is closed; a variable-radius fillet rounds open edges only",
+                e + 1
+            )));
+        };
+        match laws.iter().enumerate().find(|(_, l)| l.edge as usize == e) {
+            Some((i, law)) => {
+                let what = format!("radius law {}", i + 1);
+                let slot = ReferenceSlot::Law { index: i as u32 };
+                let from = edge_end(edge, &law.from, slot, &what, topology, view, names)?;
+                Ok(soliddraft_kernel_api::VariableFilletEdge { edge, from, radius: law.radius })
+            }
+            None => Ok(soliddraft_kernel_api::VariableFilletEdge {
+                edge,
+                from: *first,
+                radius: RadiusLaw::Linear { start: size, end: size },
+            }),
+        }
+    }))
 }
 
 #[cfg(test)]

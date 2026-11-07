@@ -275,7 +275,7 @@ fn values(kind: &FeatureKind) -> Vec<(AnnotationValue, String)> {
     match kind {
         FeatureKind::Revolve(r) => vec![(Angle, format!("{}°", fmt_mm(r.angle_deg)))],
         FeatureKind::Sweep(_) => vec![],
-        FeatureKind::Fillet(p) => vec![(Radius, format!("R{}", fmt_mm(p.radius)))],
+        FeatureKind::Fillet(p) => vec![(Radius, p.radius_label())],
         FeatureKind::Chamfer(p) => vec![(Distance, fmt_mm(p.distance))],
         FeatureKind::Draft(d) => vec![(Angle, format!("{}°", fmt_mm(d.angle)))],
         FeatureKind::Shell(s) => vec![(Thickness, fmt_mm(s.thickness))],

@@ -48,10 +48,12 @@ impl Dimension {
         match kind {
             FeatureKind::Extrude(p) if p.end == EndKind::Blind => Some(Dimension::Depth),
             FeatureKind::Cut(p) if !p.through_all && p.up_to.is_none() => Some(Dimension::Depth),
-            FeatureKind::Fillet(_) => Some(Dimension::Radius),
+            // The radius drives only edges without a radius law.
+            FeatureKind::Fillet(p) if p.laws.len() < p.edges.len() => Some(Dimension::Radius),
             FeatureKind::Chamfer(_) => Some(Dimension::Distance),
             FeatureKind::Extrude(_)
             | FeatureKind::Cut(_)
+            | FeatureKind::Fillet(_)
             | FeatureKind::ReferencePlane(_)
             | FeatureKind::Sketch(_)
             | FeatureKind::Hole(_)

@@ -464,6 +464,20 @@ impl Document {
             .map_err(|e| e.message())
     }
 
+    /// A variable fillet's edges on `body` with their laws, given the fillet's edges
+    /// resolved there and its constant radius for edges without a law.
+    pub fn resolve_variable(
+        &self,
+        laws: &[crate::feature::FilletLaw],
+        edges: &[EdgeId],
+        size: f64,
+        body: BodyId,
+    ) -> Result<Vec<soliddraft_kernel_api::VariableFilletEdge>, String> {
+        let t = self.view_of(body).map_err(|e| e.to_string())?;
+        crate::evaluate::variable_edges(laws, edges, size, &t, &View { topology: &t }, &self.name_map())
+            .map_err(|e| e.message())
+    }
+
     /// Moves the rollback bar without an undo entry and rebuilds, for views that show
     /// the part as it was before a feature, such as editing that feature. A command
     /// that rolls back for good is [`Command::RollTo`](crate::Command::RollTo).

@@ -201,6 +201,32 @@ pub struct FilletSetback {
     pub setback: f64,
 }
 
+/// How a variable fillet's radius runs along one edge, as Catallax recipe section 4.5.2
+/// defines it. `u` is normalized arc length from the law's starting vertex.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RadiusLaw {
+    /// `r(u) = (1 - u) start + u end`, in millimetres. Both are non-negative and at least
+    /// one is positive; zero is an exact collapsed end.
+    Linear {
+        /// Radius at the starting vertex.
+        start: f64,
+        /// Radius at the other end.
+        end: f64,
+    },
+}
+
+/// One edge of a variable fillet: the edge, the end its law starts from, and the law.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VariableFilletEdge {
+    /// An open edge of the body.
+    pub edge: EdgeId,
+    /// The endpoint where `u = 0`.
+    pub from: VertexId,
+    /// The radius along the edge.
+    pub radius: RadiusLaw,
+}
+
 /// Parameters of a set of holes drilled into a solid.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Hole {
@@ -852,6 +878,13 @@ pub trait Kernel: Send + Sync {
                 "Keeping a fillet's neighbours at setback stations is coming soon.".into(),
             )),
         }
+    }
+
+    /// Rounds each edge by its own radius law, rolling over its neighbours. A backend
+    /// that cannot follow a law refuses it rather than building a constant radius.
+    fn fillet_variable(&self, tag: &OpTag, body: BodyId, edges: &[VariableFilletEdge]) -> KernelResult<OpResult> {
+        let _ = (tag, body, edges);
+        Err(KernelError::Unsupported("Variable-radius fillets are coming soon.".into()))
     }
 
     /// Bevels the given edges with a flat cross section `distance` wide.

@@ -78,7 +78,7 @@ fn picks(d: &Document) -> Picks {
 }
 
 fn fillet(edge: &EdgeRef, overflow: Option<FilletOverflow>) -> FeatureKind {
-    FeatureKind::Fillet(BlendFeature { edges: vec![edge.clone()], size: 2.0, overflow })
+    FeatureKind::Fillet(BlendFeature { edges: vec![edge.clone()], size: 2.0, overflow, laws: Vec::new() })
 }
 
 fn keep(at: &soliddraft_model::FaceRef, setback: f64) -> FilletOverflow {
@@ -205,6 +205,7 @@ fn bad_stations_and_chamfer_policies_are_refused() {
         edges: vec![p.edge.clone()],
         size: 1.0,
         overflow: Some(FilletOverflow::RollOver),
+        laws: Vec::new(),
     });
     assert!(invalid(add(&mut d, chamfer)), "a chamfer has no overflow policy");
     // An empty station list is a valid policy: a closed run has no ends.

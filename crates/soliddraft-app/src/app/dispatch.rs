@@ -345,6 +345,7 @@ impl SolidDraftApp {
                         radius: 4.0,
                         overflow: None,
                         laws: Vec::new(),
+                        corner: None,
                     })
                 };
                 self.open_editor(None, params);

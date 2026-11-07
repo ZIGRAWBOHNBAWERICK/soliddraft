@@ -170,7 +170,13 @@ fn build_bracket(doc: &mut Document) -> Bracket {
     let fillet = add(
         doc,
         "Inside fillet",
-        FeatureKind::Fillet(BlendFeature { edges: vec![edge], size: 8.0, overflow: None, laws: Vec::new() }),
+        FeatureKind::Fillet(BlendFeature {
+            edges: vec![edge],
+            size: 8.0,
+            overflow: None,
+            laws: Vec::new(),
+            corner: None,
+        }),
     );
 
     let top = pick_face(doc, Vec3::new(0.0, 0.0, 10.0), Vec3::Z);

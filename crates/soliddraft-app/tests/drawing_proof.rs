@@ -137,7 +137,13 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     let fillet = state
         .doc
         .apply(PartCommand::AddFillet {
-            params: FilletParams { edges: vec![reference.clone()], radius: 1.0, overflow: None, laws: Vec::new() },
+            params: FilletParams {
+                edges: vec![reference.clone()],
+                radius: 1.0,
+                overflow: None,
+                laws: Vec::new(),
+                corner: None,
+            },
         })
         .unwrap()
         .unwrap();
@@ -147,7 +153,13 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
         .doc
         .apply_interactive(PartCommand::EditFillet {
             id: fillet,
-            params: FilletParams { edges: vec![reference], radius: 50.0, overflow: None, laws: Vec::new() },
+            params: FilletParams {
+                edges: vec![reference],
+                radius: 50.0,
+                overflow: None,
+                laws: Vec::new(),
+                corner: None,
+            },
         })
         .unwrap();
     settle(&mut state);

@@ -10,7 +10,10 @@ use soliddraft_materials::{Appearance, AppearanceId, Catalog, Material, Material
 use soliddraft_sketch::{ConstraintId, SolveStatus};
 
 use crate::document::Document;
-use crate::feature::{BlendFeature, DatumPlane, Feature, FeatureId, FeatureKind, FilletOverflow, PatternSpec};
+use crate::feature::{
+    BlendFeature, DatumPlane, Feature, FeatureId, FeatureKind, FilletCorner, FilletOverflow, PatternSpec,
+    VARIABLE_CORNERS,
+};
 use crate::materials::{AppearanceAssignment, AppearanceTarget, MaterialAssignment, PartMaterials};
 
 /// A change to a document.
@@ -616,6 +619,9 @@ impl Document {
                 }
             }
         }
+        if b.corner == Some(FilletCorner::Smooth) && !b.laws.is_empty() {
+            return invalid(VARIABLE_CORNERS.into());
+        }
         for (i, law) in b.laws.iter().enumerate() {
             if law.edge as usize >= n {
                 return invalid(format!(
@@ -655,6 +661,9 @@ impl Document {
             }
             FeatureKind::Chamfer(b) if !b.laws.is_empty() => {
                 Err(CommandError::Invalid("a chamfer has no radius laws".into()))
+            }
+            FeatureKind::Chamfer(b) if b.corner.is_some() => {
+                Err(CommandError::Invalid("a chamfer has no corner choice".into()))
             }
             FeatureKind::Fillet(b) => Self::check_fillet(b),
             FeatureKind::Hole(h) if !(h.diameter.is_finite() && h.diameter > 0.0) => {

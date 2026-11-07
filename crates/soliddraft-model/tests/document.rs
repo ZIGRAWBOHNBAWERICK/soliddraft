@@ -91,7 +91,10 @@ fn undo_and_redo_walk_the_command_stack() {
     let mut d = doc();
     let (_, e) = block(&mut d);
     let edges = top_edges(&d);
-    let f = add(&mut d, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new() }));
+    let f = add(
+        &mut d,
+        FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new(), corner: None }),
+    );
     let filleted = volume(&d);
     assert!(filleted < 12000.0);
     assert!(d.status(f).unwrap().is_ok());
@@ -117,7 +120,10 @@ fn edits_rebuild_only_from_the_first_changed_feature() {
     let mut d = doc();
     let (s, e) = block(&mut d);
     let edges = top_edges(&d);
-    let f = add(&mut d, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new() }));
+    let f = add(
+        &mut d,
+        FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new(), corner: None }),
+    );
     let (block_body, fillet_body) = (d.body_after(e), d.body_after(f));
     d.execute(Command::RenameFeature { id: f, name: "Round".into() }).unwrap();
     assert_eq!(d.body_after(e), block_body, "a rename rebuilds nothing");
@@ -128,6 +134,7 @@ fn edits_rebuild_only_from_the_first_changed_feature() {
             size: 3.0,
             overflow: None,
             laws: Vec::new(),
+            corner: None,
         }),
     })
     .unwrap();
@@ -204,7 +211,10 @@ fn suppress_and_rollback_pass_the_body_through() {
     let mut d = doc();
     let (_, e) = block(&mut d);
     let edges = top_edges(&d);
-    let f = add(&mut d, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new() }));
+    let f = add(
+        &mut d,
+        FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new(), corner: None }),
+    );
     let filleted = volume(&d);
     d.execute(Command::SetSuppressed { id: f, suppressed: true }).unwrap();
     assert_eq!(d.status(f), Some(&FeatureStatus::Suppressed));
@@ -298,7 +308,13 @@ fn grouped_commands_undo_redo_and_abandon_as_one() {
 fn invalid_commands_are_refused() {
     let mut d = doc();
     let (s, _) = block(&mut d);
-    let zero = FeatureKind::Fillet(BlendFeature { edges: top_edges(&d), size: 0.0, overflow: None, laws: Vec::new() });
+    let zero = FeatureKind::Fillet(BlendFeature {
+        edges: top_edges(&d),
+        size: 0.0,
+        overflow: None,
+        laws: Vec::new(),
+        corner: None,
+    });
     assert!(matches!(
         d.execute(Command::AddFeature { kind: zero, name: None, position: None, via_assistant: false }),
         Err(CommandError::Invalid(_))
@@ -325,7 +341,10 @@ fn a_kernel_failure_marks_the_feature_and_keeps_the_body() {
     let mut d = doc();
     let (_, e) = block(&mut d);
     let edges = top_edges(&d);
-    let f = add(&mut d, FeatureKind::Fillet(BlendFeature { edges, size: 50.0, overflow: None, laws: Vec::new() }));
+    let f = add(
+        &mut d,
+        FeatureKind::Fillet(BlendFeature { edges, size: 50.0, overflow: None, laws: Vec::new(), corner: None }),
+    );
     assert!(matches!(d.status(f), Some(FeatureStatus::Failed(_))), "{:?}", d.status(f));
     assert_eq!(d.body(), d.body_after(e), "the body passes through the failed fillet");
 }
@@ -336,7 +355,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
     let mut d = Document::new("Block", kernel.clone());
     block(&mut d);
     let edges = top_edges(&d);
-    add(&mut d, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new() }));
+    add(&mut d, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new(), corner: None }));
     let bytes = d.to_bytes().unwrap();
     assert_eq!(d.to_bytes().unwrap(), bytes, "saving is deterministic");
     let back = Document::from_bytes(&bytes, kernel.clone()).unwrap();
@@ -553,7 +572,10 @@ fn chamfers_build_and_keep_the_body_after_reopen() {
     let mut d = doc();
     let (_, block) = block(&mut d);
     let edges = top_edges(&d);
-    let c = add(&mut d, FeatureKind::Chamfer(BlendFeature { edges, size: 1.0, overflow: None, laws: Vec::new() }));
+    let c = add(
+        &mut d,
+        FeatureKind::Chamfer(BlendFeature { edges, size: 1.0, overflow: None, laws: Vec::new(), corner: None }),
+    );
     assert_eq!(d.feature(c).unwrap().name, "Chamfer1");
     let built = volume(&d);
     // Four 1 x 1 bevels take half a square millimetre along the 140 mm top loop, less

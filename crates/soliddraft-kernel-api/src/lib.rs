@@ -180,13 +180,37 @@ pub enum HoleHead {
 
 /// What a fillet does when its rolling ball reaches a neighbouring face, as Catallax's
 /// recipe section 4.5.1 defines it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilletOverflow {
     /// Continue across the neighbours, trimming or consuming them. The default.
+    #[default]
     RollOver,
     /// Keep every unselected neighbour whole, and stop each run at its setback stations.
     KeepNeighbours(Vec<FilletSetback>),
+}
+
+/// How a fillet closes the open side of a corner where only some of the corner's edges
+/// are filleted, as Catallax's recipe section 4.5.1 defines it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletCorner {
+    /// Close the corner's ball against a flat wall on its open side. The default.
+    #[default]
+    Cliff,
+    /// Continue the fillet across the open side at the same radius, as an exact
+    /// cylinder cut by the face it runs into.
+    Smooth,
+}
+
+/// A constant fillet's continuation choices. The default is what [`Kernel::fillet`]
+/// builds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FilletPolicy {
+    /// What the fillet does at a neighbouring face.
+    pub overflow: FilletOverflow,
+    /// How it closes a partly filleted corner.
+    pub corner: FilletCorner,
 }
 
 /// A station on one of a fillet's edges where its run stops, closed by the plane normal
@@ -861,22 +885,25 @@ pub trait Kernel: Send + Sync {
     /// Rounds the given edges with a circular cross section of `radius`.
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult>;
 
-    /// A fillet with an explicit overflow policy. Roll-over is what [`Kernel::fillet`]
-    /// builds; a backend that cannot keep neighbours refuses that policy rather than
-    /// rolling over in its place.
-    fn fillet_overflow(
+    /// A fillet with explicit continuation choices. The default policy is what
+    /// [`Kernel::fillet`] builds; a backend that cannot build a choice refuses it rather
+    /// than building the default in its place.
+    fn fillet_with(
         &self,
         tag: &OpTag,
         body: BodyId,
         edges: &[EdgeId],
         radius: f64,
-        overflow: &FilletOverflow,
+        policy: &FilletPolicy,
     ) -> KernelResult<OpResult> {
-        match overflow {
-            FilletOverflow::RollOver => self.fillet(tag, body, edges, radius),
-            FilletOverflow::KeepNeighbours(_) => Err(KernelError::Unsupported(
+        if let FilletOverflow::KeepNeighbours(_) = policy.overflow {
+            return Err(KernelError::Unsupported(
                 "Keeping a fillet's neighbours at setback stations is coming soon.".into(),
-            )),
+            ));
+        }
+        match policy.corner {
+            FilletCorner::Cliff => self.fillet(tag, body, edges, radius),
+            FilletCorner::Smooth => Err(KernelError::Unsupported("Smooth fillet corners are coming soon.".into())),
         }
     }
 

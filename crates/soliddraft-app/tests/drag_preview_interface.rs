@@ -190,7 +190,13 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     let reference = doc.edge_ref(edge.id).unwrap();
     let fillet = doc
         .apply(Command::AddFillet {
-            params: FilletParams { edges: vec![reference], radius: 1.0, overflow: None, laws: Vec::new() },
+            params: FilletParams {
+                edges: vec![reference],
+                radius: 1.0,
+                overflow: None,
+                laws: Vec::new(),
+                corner: None,
+            },
         })
         .unwrap()
         .unwrap();

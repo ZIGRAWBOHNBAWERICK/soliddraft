@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use soliddraft_document::DocumentId;
 use soliddraft_kernel_api::{
-    BodyId, EdgeId, FaceId, FieldMass, FieldMassAccuracy, Kernel, KernelResult, Plane, Topology,
+    BodyId, EdgeId, FaceId, FieldMass, FieldMassAccuracy, Kernel, KernelResult, OpResult, OpTag, Plane, Topology,
 };
 use soliddraft_sketch::profile::Region;
 use soliddraft_sketch::{EntityKind, Sketch, SolveStatus};
@@ -13,7 +13,7 @@ use soliddraft_tessellation::{Report, Settings};
 
 use crate::command::UndoEntry;
 use crate::evaluate::{Built, kernel_repair};
-use crate::feature::{DatumPlane, Feature, FeatureId, FeatureKind, ProfileSource};
+use crate::feature::{BlendFeature, DatumPlane, Feature, FeatureId, FeatureKind, ProfileSource};
 use crate::materials::PartMaterials;
 use crate::rebuild::BuildCache;
 use crate::reference::{
@@ -452,16 +452,20 @@ impl Document {
         reference::resolve_edge(r, &View { topology: &t }, &self.name_map()).map_err(|u| u.into_repair(slot))
     }
 
-    /// A fillet's setback stations on `body`, given the fillet's edges resolved there.
-    pub fn resolve_setbacks(
+    /// Rounds `body` as the fillet or chamfer `b` would, given its edges resolved there,
+    /// without adding a feature: what a form previews. The caller releases the result.
+    pub fn round(
         &self,
-        stations: &[crate::feature::FilletSetback],
+        tag: &OpTag,
+        b: &BlendFeature,
+        chamfer: bool,
         edges: &[EdgeId],
         body: BodyId,
-    ) -> Result<Vec<soliddraft_kernel_api::FilletSetback>, String> {
+    ) -> Result<OpResult, String> {
         let t = self.view_of(body).map_err(|e| e.to_string())?;
-        crate::evaluate::setbacks(stations, edges, &t, &View { topology: &t }, &self.name_map())
-            .map_err(|e| e.message())
+        crate::evaluate::blend(self.kernel.as_ref(), tag, b, chamfer, edges, body, &t, &self.name_map())
+            .map_err(|e| e.message())?
+            .map_err(|e| e.to_string())
     }
 
     /// A variable fillet's edges on `body` with their laws, given the fillet's edges

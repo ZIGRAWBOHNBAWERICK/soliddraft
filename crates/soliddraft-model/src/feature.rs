@@ -5,6 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub use soliddraft_kernel_api::FilletCorner;
 use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, RadiusLaw, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
@@ -395,7 +396,17 @@ pub struct BlendFeature {
     /// rolls over and has no setback stations yet. Chamfers have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub laws: Vec<FilletLaw>,
+    /// How a fillet closes a corner where only some of the corner's edges are filleted;
+    /// absent closes it as a cliff, the kernel's default. A variable fillet closes its
+    /// corners as cliffs. Chamfers have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner: Option<FilletCorner>,
 }
+
+/// Why a variable fillet refuses smooth corners: Catallax's `fillet_variable` closes
+/// them as cliffs and has no corner choice.
+pub(crate) const VARIABLE_CORNERS: &str =
+    "a variable-radius fillet closes its corners as cliffs; it cannot round them smoothly yet";
 
 impl BlendFeature {
     /// The setback stations a keep-neighbours policy holds; none otherwise.

@@ -356,9 +356,23 @@ pub struct FilletParams {
     /// Variable-radius laws, at most one per edge; an edge without one keeps `radius`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub laws: Vec<model::FilletLaw>,
+    /// How a partly filleted corner closes; absent closes it as a cliff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner: Option<model::FilletCorner>,
 }
 
 impl FilletParams {
+    /// The model's fillet these parameters make.
+    pub fn blend(&self) -> model::BlendFeature {
+        model::BlendFeature {
+            edges: self.edges.clone(),
+            size: self.radius,
+            overflow: self.overflow.clone(),
+            laws: self.laws.clone(),
+            corner: self.corner,
+        }
+    }
+
     /// The radius as people read it: "R4", or for a variable fillet the range its laws
     /// and its constant edges span, such as "R2 to R6".
     pub fn radius_label(&self) -> String {
@@ -382,6 +396,19 @@ impl FilletParams {
 pub struct ChamferParams {
     pub edges: Vec<EdgeRef>,
     pub distance: f64,
+}
+
+impl ChamferParams {
+    /// The model's chamfer these parameters make.
+    pub fn blend(&self) -> model::BlendFeature {
+        model::BlendFeature {
+            edges: self.edges.clone(),
+            size: self.distance,
+            overflow: None,
+            laws: Vec::new(),
+            corner: None,
+        }
+    }
 }
 
 /// A hole's parameters as its editor holds them: the face may not be picked yet.
@@ -572,18 +599,8 @@ impl FeatureKind {
                 // The model sweeps along the sketch normal; a cut goes into the face.
                 reverse: !p.flip,
             }),
-            FeatureKind::Fillet(p) => model::FeatureKind::Fillet(model::BlendFeature {
-                edges: p.edges.clone(),
-                size: p.radius,
-                overflow: p.overflow.clone(),
-                laws: p.laws.clone(),
-            }),
-            FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(model::BlendFeature {
-                edges: p.edges.clone(),
-                size: p.distance,
-                overflow: None,
-                laws: Vec::new(),
-            }),
+            FeatureKind::Fillet(p) => model::FeatureKind::Fillet(p.blend()),
+            FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(p.blend()),
             FeatureKind::Revolve(r) => model::FeatureKind::Revolve(r.clone()),
             FeatureKind::Sweep(s) => model::FeatureKind::Sweep(s.clone()),
             FeatureKind::Hole(h) => model::FeatureKind::Hole(h.clone()),
@@ -667,6 +684,7 @@ impl FeatureKind {
                 radius: b.size,
                 overflow: b.overflow.clone(),
                 laws: b.laws.clone(),
+                corner: b.corner,
             }),
             model::FeatureKind::Chamfer(b) => {
                 FeatureKind::Chamfer(ChamferParams { edges: b.edges.clone(), distance: b.size })
@@ -3012,49 +3030,24 @@ impl Document {
         }
     }
 
-    /// The body after a fillet or chamfer of the given edges of `before`.
+    /// The body after the fillet or chamfer `b` of `before`.
     pub fn preview_rounding(
         &self,
-        refs: &[EdgeRef],
-        radius: f64,
+        b: &model::BlendFeature,
         chamfer: bool,
-        overflow: Option<&model::FilletOverflow>,
-        laws: &[model::FilletLaw],
         before: Option<BodyId>,
     ) -> Result<Preview, String> {
         let base = before.ok_or("nothing to round yet")?;
-        if refs.is_empty() {
+        if b.edges.is_empty() {
             return Err("select at least one edge".into());
         }
         let mut edges = Vec::new();
-        for r in refs {
+        for r in &b.edges {
             let e = self.model.resolve_edge(r, base).map_err(|repair| format!("{}: {}", r.label, repair.message))?;
             edges.push(e);
         }
         let k = self.kernel();
-        let tag = OpTag::new("preview");
-        let r = match overflow {
-            _ if chamfer => k.chamfer(&tag, base, &edges, radius),
-            _ if !laws.is_empty() => {
-                let laws = self.model.resolve_variable(laws, &edges, radius, base)?;
-                k.fillet_variable(&tag, base, &laws)
-            }
-            None => k.fillet(&tag, base, &edges, radius),
-            Some(model::FilletOverflow::RollOver) => {
-                k.fillet_overflow(&tag, base, &edges, radius, &soliddraft_kernel_api::FilletOverflow::RollOver)
-            }
-            Some(model::FilletOverflow::KeepNeighbours(stations)) => {
-                let stations = self.model.resolve_setbacks(stations, &edges, base)?;
-                k.fillet_overflow(
-                    &tag,
-                    base,
-                    &edges,
-                    radius,
-                    &soliddraft_kernel_api::FilletOverflow::KeepNeighbours(stations),
-                )
-            }
-        }
-        .map_err(|e| e.to_string())?;
+        let r = self.model.round(&OpTag::new("preview"), b, chamfer, &edges, base)?;
         // The faces the rounding makes carry the preview mark, so the viewport can tint them.
         let made: HashMap<FaceId, FeatureId> =
             r.record.faces.created.iter().map(|face| (*face, PREVIEW_MADE as FeatureId)).collect();
@@ -4014,7 +4007,7 @@ mod tests {
         assert!(r.label.contains("Boss-Extrude2"), "{}", r.label);
         let fillet = d
             .apply(Command::AddFillet {
-                params: FilletParams { edges: vec![r], radius: 4.0, overflow: None, laws: Vec::new() },
+                params: FilletParams { edges: vec![r], radius: 4.0, overflow: None, laws: Vec::new(), corner: None },
             })
             .unwrap()
             .unwrap();
@@ -4074,8 +4067,13 @@ mod tests {
             from: face.clone(),
             radius: soliddraft_kernel_api::RadiusLaw::Linear { start, end },
         };
-        let fillet =
-            |laws: Vec<model::FilletLaw>| FilletParams { edges: edges.clone(), radius: 4.0, overflow: None, laws };
+        let fillet = |laws: Vec<model::FilletLaw>| FilletParams {
+            edges: edges.clone(),
+            radius: 4.0,
+            overflow: None,
+            laws,
+            corner: None,
+        };
         assert_eq!(fillet(Vec::new()).radius_label(), "R4");
         assert_eq!(fillet(vec![law(0, 2.0, 6.0)]).radius_label(), "R2 to R6", "the constant edge's R4 lies inside");
         assert_eq!(fillet(vec![law(0, 0.0, 3.0), law(1, 1.0, 3.0)]).radius_label(), "R0 to R3", "every edge has a law");
@@ -4132,6 +4130,7 @@ mod tests {
             size: 2.0,
             overflow,
             laws,
+            corner: None,
         });
         let fillet =
             m.execute(model::Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();

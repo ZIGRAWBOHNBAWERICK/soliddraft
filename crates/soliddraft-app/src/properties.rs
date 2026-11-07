@@ -602,7 +602,7 @@ enum FilletSoon {
     Setbacks,
     /// Keeping every neighbouring face whole instead of rolling over it.
     KeepNeighbours,
-    /// Rounded transitions between the fillets of a mitred corner.
+    /// Continuing a fillet across the open side of a partly filleted corner.
     Corners,
 }
 
@@ -623,7 +623,9 @@ impl FilletSoon {
                  Waits for Catallax to build fillets that keep their neighbours."
             }
             FilletSoon::Corners => {
-                "rounded transitions where the fillets of a corner meet. Waits for Catallax corner blends."
+                "where only some of a corner's edges are filleted, continue the fillet across the open side at \
+                 the same radius instead of closing it with a flat wall. Waits for Catallax to build smooth \
+                 corners."
             }
         }
     }
@@ -748,9 +750,11 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
 /// The fillet's setback and option cards, in the SolidWorks fillet panel's places. The
 /// overflow choice is Catallax's: roll over, which it builds, or keep neighbours with
 /// setback stations, which waits, so the stations' card is drawn disabled. A fillet
-/// made by a tool with stations lists them there.
+/// made by a tool with stations lists them there. Round corners is Catallax's smooth
+/// corner choice, which waits too; a fillet made with it shows it ticked, and unticking
+/// it goes back to cliff corners.
 fn fillet_option_cards(ui: &mut egui::Ui, fillet: &mut crate::document::FilletParams) {
-    use soliddraft_model::FilletOverflow;
+    use soliddraft_model::{FilletCorner, FilletOverflow};
     let tip = |o: FilletSoon| format!("{COMING_SOON}: {}", o.tip());
     soon_section(ui, "Setback parameters", &tip(FilletSoon::Setbacks), |ui| {
         if let Some(FilletOverflow::KeepNeighbours(stations)) = &fillet.overflow {
@@ -779,8 +783,14 @@ fn fillet_option_cards(ui: &mut egui::Ui, fillet: &mut crate::document::FilletPa
         {
             fillet.overflow = Some(FilletOverflow::RollOver);
         }
-        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Round corners"))
+        let mut smooth = fillet.corner == Some(FilletCorner::Smooth);
+        let r = ui
+            .add_enabled(smooth, egui::Checkbox::new(&mut smooth, "Round corners"))
+            .on_hover_text(tip(FilletSoon::Corners))
             .on_disabled_hover_text(tip(FilletSoon::Corners));
+        if r.changed() && !smooth {
+            fillet.corner = Some(FilletCorner::Cliff);
+        }
     });
 }
 

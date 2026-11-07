@@ -34,13 +34,22 @@ The adapter keeps its f32 rounding inside the same bound. So a part and its mesh
 what is inside everywhere farther than the bound from either surface. Three rules follow:
 
 - **Clear.** Two meshes farther apart than the sum of their bounds, neither inside the
-  other, hold two parts that do not meet. The pair's proven distance is the meshes'
-  distance less that sum, up to the meshes' distance plus it.
+  other, hold two parts that do not meet. The pair's proven distance is the meshes' lower
+  bound less that sum, up to the meshes' upper bound plus it.
 - **Interferes.** A point inside both meshes, farther than each mesh's bound from it, is
   inside both parts. The result carries that point as `witness`.
 - **Touching or undecided.** Anything else: the meshes come within the margin and no such
   point was found. Two parts that touch, overlap by less than the margin or stand apart by
   less than it all land here, and the result says which of those it cannot tell apart.
+
+The meshes' distance is kept as two numbers. The nearest pair of mesh points found bounds it
+from above. A lower bound comes only from a search that reaches the true closest points of
+every triangle pair that could be nearest: two triangles are nearest at a corner of one over
+the other, between two edges, or where an edge crosses the other. Two edges within 45
+degrees of parallel are nearest at an end of one, or where a point of one lies alongside
+the other, at its distance from the other's line. Their ends alone only bound them from
+above: two long edges crossing a hair apart are nearest in their middles. A clearance is
+met only when the lower bound less the margin is more than the clearance.
 
 Every margin also carries a binary64 allowance of 1e-9 of the largest coordinate placed,
 reported as `rounding_mm`. Placing a point, a distance and a containment ray each lose a few

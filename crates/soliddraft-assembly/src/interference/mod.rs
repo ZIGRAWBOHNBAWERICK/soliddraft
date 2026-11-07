@@ -695,6 +695,11 @@ fn mm(v: f64) -> String {
     format!("{} mm", round(v))
 }
 
+/// A distance known to lie from `lo` to `hi`, as one length when the two round alike.
+fn span(lo: f64, hi: f64) -> String {
+    if round(lo) == round(hi) { mm(hi) } else { format!("{} to {}", round(lo), mm(hi)) }
+}
+
 /// What two placed solids are proven to be, and the triangle pairs within the clearance
 /// and margin, nearest first, for naming faces. The paths and labels are the caller's.
 fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u32, u32)>) {
@@ -730,8 +735,9 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         result.clearance = clearance.map(|_| ClearanceOutcome::Undecided);
         return (result, faces);
     };
-    let d = closest.distance;
-    let within: Vec<_> = near.pairs.iter().filter(|p| p.2.distance <= margin).copied().collect();
+    // The meshes are at least `lower` apart and at most `d`.
+    let (lower, d) = (near.lower, closest.distance);
+    let within: Vec<_> = near.pairs.iter().filter(|p| p.2.lower <= margin).copied().collect();
     if let Some(y) = geometry::witness(a, b, &within) {
         result.outcome = Outcome::Interferes;
         result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
@@ -740,17 +746,17 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
             "The point {} is inside both parts: inside both certified meshes and farther from each than its bound.",
             point_text(y.to_array())
         );
-    } else if d > margin {
+    } else if lower > margin {
         let a_in_b = b.contains(a.triangle(0)[0]);
         let b_in_a = a.contains(b.triangle(0)[0]);
         if a_in_b == Some(false) && b_in_a == Some(false) {
             result.outcome = Outcome::Clear;
-            result.distance = DistanceBounds { lo: d - margin, hi: Some(d + margin) };
+            result.distance = DistanceBounds { lo: lower - margin, hi: Some(d + margin) };
             result.why = format!(
                 "The parts are {} to {} apart: their certified meshes are {} apart, and each mesh is within {} of its part.",
-                mm(d - margin),
+                mm(lower - margin),
                 mm(d + margin),
-                mm(d),
+                span(lower, d),
                 mm(a.slack().max(b.slack()))
             );
         } else {
@@ -819,6 +825,22 @@ mod tests {
         assert_eq!(compare(&a, &b, Some(2.0)).clearance, Some(ClearanceOutcome::Undecided));
         let into = block([10.0, 5.0, 9.0], [30.0, 25.0, 15.0], 0.01);
         assert_eq!(compare(&a, &into, Some(0.5)).clearance, Some(ClearanceOutcome::Below));
+    }
+
+    #[test]
+    fn near_parallel_ridges_never_prove_a_clearance_they_miss() {
+        // The parts are 0.01 mm apart where the ridges cross; the margin is about 0.002 mm.
+        // Asked for 0.011 mm, the bounds cannot tell, at the review's 9e-7 rad as at its
+        // controls, 0 and 1.1e-6 rad.
+        for angle in [0.0, 9e-7, 1.1e-6] {
+            let (a, b) = geometry::tests_support::ridges(angle, 0.001);
+            let r = compare(&a, &b, Some(0.011));
+            assert_eq!(r.clearance, Some(ClearanceOutcome::Undecided), "angle {angle}: {r:#?}");
+            assert!(r.distance.lo <= 0.01, "angle {angle}: {:?}", r.distance);
+            assert!(r.distance.hi.is_some_and(|hi| hi >= 0.01), "angle {angle}: {:?}", r.distance);
+            // Asked for 0.007 mm, below the distance less the margin, the clearance is met.
+            assert_eq!(compare(&a, &b, Some(0.007)).clearance, Some(ClearanceOutcome::Met), "angle {angle}");
+        }
     }
 
     #[test]

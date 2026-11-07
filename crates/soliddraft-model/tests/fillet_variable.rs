@@ -282,7 +282,7 @@ fn end_face_owner_is_an_input(kind: impl Fn(&EdgeRef, &FaceRef) -> FeatureKind) 
     let mut ghost = wall.clone();
     ghost.feature = FeatureId(9999);
     let missing = |r: Result<_, CommandError>| matches!(r, Err(CommandError::UnknownFeature(FeatureId(9999))));
-    assert!(missing(add(&mut d, kind(&edge, &ghost))), "add names a missing producer");
+    assert!(missing(add(&mut d, kind(&edge, &ghost)).map(|_| ())), "add names a missing producer");
     assert!(missing(d.execute(Command::EditFeature { id: f, kind: kind(&edge, &ghost) }).map(|_| ())), "edit too");
     assert_eq!(d.features().iter().map(|g| g.id).collect::<Vec<_>>(), order);
 }

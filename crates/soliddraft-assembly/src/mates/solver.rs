@@ -401,45 +401,101 @@ fn incompatible(names: Vec<String>) -> MateRefusal {
     conflict(names, message)
 }
 
+/// The rigid groups locks make. Each body maps to its group's first body, the root, and
+/// the turn `offset` with `rotation(body) = rotation(root) * offset`. A body no lock
+/// reaches is a group of its own.
+fn lock_groups(bodies: &BTreeMap<Body, Placement>, constraints: &[Constraint]) -> Groups {
+    let mut group = Groups::new();
+    for root in bodies.keys() {
+        if group.contains_key(root) {
+            continue;
+        }
+        group.insert(root.clone(), (root.clone(), DQuat::IDENTITY));
+        let mut queue = VecDeque::from([root.clone()]);
+        while let Some(body) = queue.pop_front() {
+            let offset = group[&body].1;
+            for l in links(constraints, &body) {
+                // Lock ties say rotation(body) = rotation(other) * relative.
+                let Tie::Locked(relative) = l.tie else { continue };
+                if !group.contains_key(l.other) {
+                    group.insert(l.other.clone(), (root.clone(), (offset * relative.inverse()).normalize()));
+                    queue.push_back(l.other.clone());
+                }
+            }
+        }
+    }
+    group
+}
+
+type Groups = BTreeMap<Body, (Body, DQuat)>;
+
+/// The bodies of the group `root` leads, with their offsets from it.
+fn members(group: &Groups, root: &Body) -> Vec<(Body, DQuat)> {
+    group.iter().filter(|(_, (r, _))| r == root).map(|(b, (_, offset))| (b.clone(), *offset)).collect()
+}
+
+/// Every tie a member of `root`'s group has to a body outside it whose rotation is known,
+/// with that member's offset.
+fn ties<'a>(
+    constraints: &'a [Constraint],
+    group: &Groups,
+    known: &BTreeMap<Body, DQuat>,
+    root: &Body,
+) -> Vec<(Link<'a>, DQuat)> {
+    let mut out = Vec::new();
+    for (member, offset) in members(group, root) {
+        for l in links(constraints, &member) {
+            if known.contains_key(l.other) && group[l.other].0 != *root {
+                out.push((l, offset));
+            }
+        }
+    }
+    out
+}
+
 fn rotations(
     bodies: &BTreeMap<Body, Placement>,
     constraints: &[Constraint],
 ) -> Result<BTreeMap<Body, DQuat>, MateRefusal> {
-    let mut known = BTreeMap::new();
+    // Locked parts turn as one: each group's rotation is solved once, from every tie its
+    // members have to what is known, in its root's frame, and each member follows.
+    let group = lock_groups(bodies, constraints);
+    let mut known: BTreeMap<Body, DQuat> = BTreeMap::new();
+    let place = |known: &mut BTreeMap<Body, DQuat>, root: &Body, rotation: DQuat| {
+        for (member, offset) in members(&group, root) {
+            known.insert(member, (rotation * offset).normalize());
+        }
+    };
     for c in constraints {
-        if let Constraint::Origin { body, axes: true, at, .. } = c {
-            known.insert(body.clone(), at.rotation);
+        if let Constraint::Origin { body, axes: true, at, .. } = c
+            && !known.contains_key(body)
+        {
+            let (root, offset) = &group[body];
+            place(&mut known, root, (at.rotation * offset.inverse()).normalize());
         }
     }
-    let mut pending: BTreeSet<Body> = bodies.keys().filter(|b| !known.contains_key(*b)).cloned().collect();
+    let mut pending: BTreeSet<Body> =
+        group.values().map(|(root, _)| root.clone()).filter(|r| !known.contains_key(r)).collect();
     while !pending.is_empty() {
-        // The body most tied to what is known: a lock decides a rotation outright, and a
-        // body held by one normal must not take a spin before a second normal reaches it.
-        let reach = |body: &Body| {
-            let tied: Vec<_> = links(constraints, body).into_iter().filter(|l| known.contains_key(l.other)).collect();
-            (tied.iter().any(|l| matches!(l.tie, Tie::Locked(_))), tied.len())
-        };
-        let best = pending.iter().max_by_key(|b| (reach(b), std::cmp::Reverse(*b))).expect("not empty").clone();
+        // The group most tied to what is known: one held by a single normal must not take a
+        // spin before a second normal reaches it.
+        let best = pending.iter().max_by_key(|r| (ties(constraints, &group, &known, r).len(), std::cmp::Reverse(*r)));
+        let best = best.expect("not empty").clone();
         pending.remove(&best);
         let authored = bodies[&best].rotation;
-        let tied: Vec<Link> = links(constraints, &best).into_iter().filter(|l| known.contains_key(l.other)).collect();
-        if let Some((other, relative)) = tied.iter().find_map(|l| match l.tie {
-            Tie::Locked(r) => Some((l.other, r)),
-            _ => None,
-        }) {
-            known.insert(best, (known[other] * relative).normalize());
-            continue;
-        }
         let (mut pairs, mut right) = (Vec::new(), Vec::new());
         let mut names: Vec<String> = Vec::new();
-        for l in &tied {
+        for (l, offset) in ties(constraints, &group, &known, &best) {
+            // The member's local normal, in the root's frame: a lock turns by quarter turns.
+            let own = |n: Normal| snapped(offset * vector(n)).ok_or_else(|| unsupported_lock(l.mate));
             match l.tie {
-                Tie::Pair { own, theirs, sign } => {
+                Tie::Pair { own: u, theirs, sign } => {
                     let there = world(known[l.other], theirs, l.mate)?;
-                    pairs.push((own, if sign > 0 { there } else { negate(there) }));
+                    pairs.push((own(u)?, if sign > 0 { there } else { negate(there) }));
                 }
-                Tie::Square { own, theirs } => right.push((own, world(known[l.other], theirs, l.mate)?)),
-                Tie::Locked(_) => unreachable!("a lock is taken above"),
+                Tie::Square { own: u, theirs } => right.push((own(u)?, world(known[l.other], theirs, l.mate)?)),
+                // A lock to a known part would have made this group known.
+                Tie::Locked(_) => continue,
             }
             names.push(l.mate.to_owned());
         }
@@ -451,7 +507,7 @@ fn rotations(
                 names.dedup();
                 incompatible(names.clone())
             })?;
-        known.insert(best, turned);
+        place(&mut known, &best, turned);
     }
     for c in constraints {
         match c {
@@ -473,6 +529,27 @@ fn rotations(
                 let off = [DVec3::X, DVec3::Y].iter().any(|v| (wanted * *v).distance(known[b] * *v) > AXIS_TOLERANCE);
                 if off {
                     return Err(incompatible(between(constraints, a, b)));
+                }
+            }
+            Constraint::Origin { mate, body, axes: true, at } => {
+                // Two Origin mates on one locked group must agree on its turn.
+                let off =
+                    [DVec3::X, DVec3::Y].iter().any(|v| (at.rotation * *v).distance(known[body] * *v) > AXIS_TOLERANCE);
+                if off {
+                    let root = &group[body].0;
+                    let mut names: Vec<String> = constraints
+                        .iter()
+                        .filter(|c| match c {
+                            Constraint::Origin { body, axes: true, .. } => group[body].0 == *root,
+                            Constraint::Lock { a, .. } => group[a].0 == *root,
+                            _ => false,
+                        })
+                        .map(|c| c.mate().to_owned())
+                        .collect();
+                    names.push(mate.clone());
+                    names.sort();
+                    names.dedup();
+                    return Err(incompatible(names));
                 }
             }
             Constraint::Origin { .. } => {}
@@ -1142,5 +1219,80 @@ mod tests {
             assert_eq!(cube_of(quaternion(m)), Some(*m));
         }
         assert_eq!(cube_of(DQuat::from_rotation_z(0.5)), None);
+    }
+
+    /// A locked pair turns as one: a Parallel on one member and a Perpendicular on the
+    /// other leave it a quarter turn about z, whichever member comes first.
+    #[test]
+    fn a_locked_group_turns_as_one_whatever_the_order() {
+        for (b_id, c_id) in [(4, 6), (6, 3)] {
+            let (pa, pb, pc) = (body(2), body(b_id), body(c_id));
+            let at: BTreeMap<Body, Placement> = [
+                (pa.clone(), Placement::IDENTITY),
+                (pb.clone(), Placement::translation(DVec3::new(10.0, 0.0, 0.0))),
+                (pc.clone(), Placement::translation(DVec3::new(10.0, 5.0, 0.0))),
+            ]
+            .into();
+            let lock = Constraint::Lock {
+                mate: "L".into(),
+                a: pb.clone(),
+                b: pc.clone(),
+                relative: Placement::translation(DVec3::new(0.0, 5.0, 0.0)),
+            };
+            let p = Constraint::Parallel {
+                mate: "P".into(),
+                a: pa.clone(),
+                b: pb.clone(),
+                plane_a: plane([0, 0, 1], 0),
+                plane_b: plane([0, 0, 1], 0),
+                sign: 1,
+                along: None,
+            };
+            let r = Constraint::Perpendicular {
+                mate: "R".into(),
+                a: pa.clone(),
+                b: pc.clone(),
+                plane_a: plane([1, 0, 0], 0),
+                plane_b: plane([1, 0, 0], 0),
+            };
+            let origin = Constraint::Origin { mate: "O".into(), body: pa.clone(), axes: true, at: Placement::IDENTITY };
+            let constraints = [origin, lock, p, r];
+            let solved = solve(&at, &constraints).unwrap_or_else(|e| panic!("B {b_id}, C {c_id}: {e}"));
+            let (qb, qc) = (solved[&pb].rotation, solved[&pc].rotation);
+            assert!(qb.angle_between(qc) < 1e-12, "B {b_id}, C {c_id}: the lock keeps them together");
+            assert_eq!(snapped(qb * DVec3::Z), Some([0, 0, 1]));
+            assert_eq!(snapped(qc * DVec3::X).map(|n| n[0]), Some(0), "C's x is at right angles to A's");
+            // C sits at B's placement composed with the lock: [0, 5, 0] turned a quarter.
+            let offset = solved[&pc].translation - solved[&pb].translation;
+            assert!(offset.distance(qb * DVec3::new(0.0, 5.0, 0.0)) < 1e-12, "{offset}");
+            assert_eq!(snapped(offset / 5.0).map(|n| n[1]), Some(0));
+            // The pair moves as one body: P takes two of its turns and R the third, so its
+            // three translations stay.
+            assert_eq!(freedoms(&solved, &constraints).unwrap().0, 3, "B {b_id}, C {c_id}");
+        }
+    }
+
+    /// A locked group whose members' mates ask for incompatible turns is still refused.
+    #[test]
+    fn a_locked_group_with_incompatible_mates_is_refused() {
+        let (pa, pb, pc) = (body(2), body(4), body(6));
+        let at: BTreeMap<Body, Placement> =
+            [(pa.clone(), Placement::IDENTITY), (pb.clone(), Placement::IDENTITY), (pc.clone(), Placement::IDENTITY)]
+                .into();
+        let parallel = |mate: &str, b: &Body, sign| Constraint::Parallel {
+            mate: mate.into(),
+            a: pa.clone(),
+            b: b.clone(),
+            plane_a: plane([0, 0, 1], 0),
+            plane_b: plane([0, 0, 1], 0),
+            sign,
+            along: None,
+        };
+        let lock = Constraint::Lock { mate: "L".into(), a: pb.clone(), b: pc.clone(), relative: Placement::IDENTITY };
+        let origin = Constraint::Origin { mate: "O".into(), body: pa.clone(), axes: true, at: Placement::IDENTITY };
+        let constraints = [origin, lock, parallel("Up", &pb, 1), parallel("Down", &pc, -1)];
+        let refused = solve(&at, &constraints).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::OverConstrained);
+        assert_eq!(refused.mates, ["Down", "Up"]);
     }
 }

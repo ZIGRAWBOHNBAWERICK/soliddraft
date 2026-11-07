@@ -986,3 +986,39 @@ fn reference_planes_mate_like_faces() {
     assert_eq!(refused.code, RefusalCode::NoSuchFace);
     assert_eq!(r.state(), before);
 }
+
+/// Two locked parts turn as one. A Parallel on one and a Perpendicular on the other leave
+/// the pair a quarter turn about z, whichever of the two the solver reaches first, and the
+/// result survives a save, a reopen and an Update.
+#[test]
+fn a_locked_pair_turns_as_one() {
+    for parallel_on_first in [true, false] {
+        let mut r = rig(&format!("lock-group-{parallel_on_first}"), 10.0);
+        let c =
+            r.doc.insert(reference(&r.root, &r.b_file), Placement::translation(DVec3::new(10.0, 15.0, 30.0))).unwrap();
+        r.doc.finish_loading();
+        let (first, second) = if parallel_on_first { (r.b, c) } else { (c, r.b) };
+        r.doc.mate_origin("O", r.a, true, false).unwrap();
+        r.doc.mate_lock("L", r.b, c, false).unwrap();
+        r.doc.mate_parallel("P", &top(r.a), &top(first), Alignment::Aligned, false).unwrap();
+        r.doc.mate_perpendicular("R", &side(r.a, X), &side(second, X), false).unwrap();
+        let check = |r: &mut Rig| {
+            let (qb, qc) = (r.placement(r.b).rotation, r.placement(c).rotation);
+            assert!(qb.angle_between(qc) < 1e-12, "the lock turns them together: {qb} {qc}");
+            assert!((qb * DVec3::Z).distance(DVec3::Z) < 1e-12, "{qb}");
+            assert!((qb * DVec3::X).x.abs() < 1e-12, "{qb}");
+            let offset = r.placement(c).translation - r.placement(r.b).translation;
+            close(offset, (qb * DVec3::new(0.0, 5.0, 0.0)).to_array());
+            assert_eq!(r.doc.solver().remaining_dof, 3, "the pair keeps its translations");
+        };
+        check(&mut r);
+        reopen(&mut r);
+        check(&mut r);
+        set_height(&r.a_file, 14.0);
+        r.doc.refresh_references(Vec::new());
+        r.doc.finish_loading();
+        let report = r.doc.rebuild();
+        assert!(report.refusal.is_none(), "{report:?}");
+        check(&mut r);
+    }
+}

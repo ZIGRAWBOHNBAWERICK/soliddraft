@@ -178,6 +178,29 @@ pub enum HoleHead {
     },
 }
 
+/// What a fillet does when its rolling ball reaches a neighbouring face, as Catallax's
+/// recipe section 4.5.1 defines it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletOverflow {
+    /// Continue across the neighbours, trimming or consuming them. The default.
+    RollOver,
+    /// Keep every unselected neighbour whole, and stop each run at its setback stations.
+    KeepNeighbours(Vec<FilletSetback>),
+}
+
+/// A station on one of a fillet's edges where its run stops, closed by the plane normal
+/// to the edge there.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FilletSetback {
+    /// One of the fillet's edges.
+    pub edge: EdgeId,
+    /// The end of that edge the distance is measured from.
+    pub at: VertexId,
+    /// Distance along the edge from `at`, in millimetres; positive.
+    pub setback: f64,
+}
+
 /// Parameters of a set of holes drilled into a solid.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Hole {
@@ -811,6 +834,25 @@ pub trait Kernel: Send + Sync {
 
     /// Rounds the given edges with a circular cross section of `radius`.
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult>;
+
+    /// A fillet with an explicit overflow policy. Roll-over is what [`Kernel::fillet`]
+    /// builds; a backend that cannot keep neighbours refuses that policy rather than
+    /// rolling over in its place.
+    fn fillet_overflow(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        radius: f64,
+        overflow: &FilletOverflow,
+    ) -> KernelResult<OpResult> {
+        match overflow {
+            FilletOverflow::RollOver => self.fillet(tag, body, edges, radius),
+            FilletOverflow::KeepNeighbours(_) => Err(KernelError::Unsupported(
+                "Keeping a fillet's neighbours at setback stations is coming soon.".into(),
+            )),
+        }
+    }
 
     /// Bevels the given edges with a flat cross section `distance` wide.
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult>;

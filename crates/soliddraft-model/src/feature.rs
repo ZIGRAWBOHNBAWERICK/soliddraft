@@ -382,6 +382,46 @@ pub struct BlendFeature {
     pub edges: Vec<EdgeRef>,
     /// Fillet radius or chamfer distance, in millimetres.
     pub size: f64,
+    /// A fillet's overflow policy; absent rolls over, the kernel's default. Chamfers have
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overflow: Option<FilletOverflow>,
+}
+
+/// What a fillet does when its rolling ball reaches a neighbouring face (Catallax
+/// recipe section 4.5.1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletOverflow {
+    /// Continue across the neighbours, trimming or consuming them.
+    RollOver,
+    /// Keep every unselected neighbour whole, and stop each run at its setback stations.
+    KeepNeighbours(Vec<FilletSetback>),
+}
+
+impl FilletOverflow {
+    /// Follows the removal of edge `index` from the fillet's list: the stations on that
+    /// edge go with it, and later stations keep naming the same edges.
+    pub fn edge_removed(&mut self, index: usize) {
+        if let FilletOverflow::KeepNeighbours(stations) = self {
+            stations.retain(|s| s.edge as usize != index);
+            for s in stations.iter_mut().filter(|s| s.edge as usize > index) {
+                s.edge -= 1;
+            }
+        }
+    }
+}
+
+/// A station on one of a fillet's edges where its run stops.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FilletSetback {
+    /// Index in the fillet's edge list.
+    pub edge: u32,
+    /// The face that edge runs into at the end the distance is measured from. It names
+    /// the end the way Catallax names a vertex, by the faces that meet there.
+    pub at: FaceRef,
+    /// Distance along the edge from that end, in millimetres; positive.
+    pub setback: f64,
 }
 
 /// Holes drilled into a planar face, one per point.

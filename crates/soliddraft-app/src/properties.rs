@@ -591,17 +591,17 @@ fn segmented_gated(
 /// What the gated controls say they are.
 const COMING_SOON: &str = "Coming soon";
 
-/// Fillet options the form shows before Catallax's recipe can say them. Each stays
-/// disabled and marked Coming soon until its Catallax support is merged and pinned;
-/// switching one on means plumbing its recipe field and dropping it from here.
+/// Fillet options the form shows before Catallax builds them. Each stays disabled and
+/// marked Coming soon until its Catallax construction is merged and pinned; switching
+/// one on means dropping it from here once the document can carry it.
 #[derive(Clone, Copy)]
 enum FilletSoon {
     /// A start and an end radius per edge, varying linearly between them.
     VariableRadius,
-    /// Setback distances where three or more fillets meet at a vertex.
+    /// The stations where a run stops when it keeps its neighbours.
     Setbacks,
-    /// What the fillet does when it runs past a neighbouring face.
-    Overflow,
+    /// Keeping every neighbouring face whole instead of rolling over it.
+    KeepNeighbours,
     /// Rounded transitions between the fillets of a mitred corner.
     Corners,
 }
@@ -615,12 +615,12 @@ impl FilletSoon {
                  fillets."
             }
             FilletSoon::Setbacks => {
-                "setback distances where fillets meet at a vertex. Waits for Catallax vertex blends with \
-                 setbacks."
+                "the stations where the fillet stops short of an edge's end, for Keep neighbours. Waits for \
+                 Catallax to build fillets that keep their neighbours."
             }
-            FilletSoon::Overflow => {
-                "a choice of what the fillet keeps when it runs past a neighbouring face. Waits for Catallax \
-                 fillet overflow."
+            FilletSoon::KeepNeighbours => {
+                "keep every neighbouring face whole, and stop at setback stations instead of rolling over. \
+                 Waits for Catallax to build fillets that keep their neighbours."
             }
             FilletSoon::Corners => {
                 "rounded transitions where the fillets of a corner meet. Waits for Catallax corner blends."
@@ -745,13 +745,22 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
         });
 }
 
-/// The fillet's setback and option cards, drawn disabled until Catallax builds them.
-/// They follow the SolidWorks fillet panel: setbacks pick the vertex and give a
-/// distance, the options give the overflow choice and round corners.
-fn fillet_soon_cards(ui: &mut egui::Ui) {
+/// The fillet's setback and option cards, in the SolidWorks fillet panel's places. The
+/// overflow choice is Catallax's: roll over, which it builds, or keep neighbours with
+/// setback stations, which waits, so the stations' card is drawn disabled. A fillet
+/// made by a tool with stations lists them there.
+fn fillet_option_cards(ui: &mut egui::Ui, fillet: &mut crate::document::FilletParams) {
+    use soliddraft_model::FilletOverflow;
     let tip = |o: FilletSoon| format!("{COMING_SOON}: {}", o.tip());
     soon_section(ui, "Setback parameters", &tip(FilletSoon::Setbacks), |ui| {
-        pick_prompt(ui, "Click the vertices where the fillets meet");
+        if let Some(FilletOverflow::KeepNeighbours(stations)) = &fillet.overflow {
+            // The distance and the end come first, so a narrow panel cuts only the face's name short.
+            for s in stations {
+                let edge = if fillet.edges.len() > 1 { format!("Edge {}: ", s.edge + 1) } else { String::new() };
+                picked_chip(ui, Icon::Axis, &format!("{edge}{} mm from {}", fmt_mm(s.setback), s.at.label), false);
+            }
+        }
+        pick_prompt(ui, "Click the end of an edge to stop short of");
         let mut none = String::new();
         let r = row(ui, "Distance", |ui, cell| {
             value_cell(ui, cell, "mm", |ui, inner| {
@@ -760,11 +769,18 @@ fn fillet_soon_cards(ui: &mut egui::Ui) {
         });
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, false, "Setback distance value"));
     });
-    soon_section(ui, "Fillet options", &tip(FilletSoon::Overflow), |ui| {
-        ui.label(egui::RichText::new("Overflow").size(12.0).color(theme::ink()))
-            .on_disabled_hover_text(tip(FilletSoon::Overflow));
-        segmented(ui, "fillet_overflow", &["Default", "Keep edge", "Keep surface"], 0);
-        ui.checkbox(&mut false, "Round corners").on_disabled_hover_text(tip(FilletSoon::Corners));
+    section(ui, "Fillet options", |ui| {
+        ui.label(egui::RichText::new("Overflow").size(12.0).color(theme::ink()));
+        let keeps = matches!(fillet.overflow, Some(FilletOverflow::KeepNeighbours(_)));
+        let options = ["Roll over", "Keep neighbours"];
+        if segmented_gated(ui, "fillet_overflow", &options, keeps as usize, &[(1, FilletSoon::KeepNeighbours.tip())])
+            == Some(0)
+            && keeps
+        {
+            fillet.overflow = Some(FilletOverflow::RollOver);
+        }
+        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Round corners"))
+            .on_disabled_hover_text(tip(FilletSoon::Corners));
     });
 }
 
@@ -997,8 +1013,8 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                     remove
                 });
-                if let (Some(i), Some(list)) = (remove, editor.edges_mut()) {
-                    list.remove(i);
+                if let Some(i) = remove {
+                    editor.remove_edge(i);
                 }
                 section(ui, if chamfer { "Chamfer parameters" } else { "Fillet parameters" }, |ui| {
                     let refused = &mut editor.feedback.size;
@@ -1020,8 +1036,8 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                         error_row(ui, err);
                     }
                 });
-                if !chamfer {
-                    fillet_soon_cards(ui);
+                if let EditorParams::Fillet(f) = &mut editor.params {
+                    fillet_option_cards(ui, f);
                 }
                 form_note(
                     ui,

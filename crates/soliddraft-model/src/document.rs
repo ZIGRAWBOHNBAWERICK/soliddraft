@@ -452,6 +452,18 @@ impl Document {
         reference::resolve_edge(r, &View { topology: &t }, &self.name_map()).map_err(|u| u.into_repair(slot))
     }
 
+    /// A fillet's setback stations on `body`, given the fillet's edges resolved there.
+    pub fn resolve_setbacks(
+        &self,
+        stations: &[crate::feature::FilletSetback],
+        edges: &[EdgeId],
+        body: BodyId,
+    ) -> Result<Vec<soliddraft_kernel_api::FilletSetback>, String> {
+        let t = self.view_of(body).map_err(|e| e.to_string())?;
+        crate::evaluate::setbacks(stations, edges, &t, &View { topology: &t }, &self.name_map())
+            .map_err(|e| e.message())
+    }
+
     /// Moves the rollback bar without an undo entry and rebuilds, for views that show
     /// the part as it was before a feature, such as editing that feature. A command
     /// that rolls back for good is [`Command::RollTo`](crate::Command::RollTo).

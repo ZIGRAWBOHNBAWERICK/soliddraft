@@ -136,7 +136,9 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     let reference = state.doc.edge_ref(edge).unwrap();
     let fillet = state
         .doc
-        .apply(PartCommand::AddFillet { params: FilletParams { edges: vec![reference.clone()], radius: 1.0 } })
+        .apply(PartCommand::AddFillet {
+            params: FilletParams { edges: vec![reference.clone()], radius: 1.0, overflow: None },
+        })
         .unwrap()
         .unwrap();
     soliddraft_app::drawing::follow_part(&mut state);
@@ -145,7 +147,7 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
         .doc
         .apply_interactive(PartCommand::EditFillet {
             id: fillet,
-            params: FilletParams { edges: vec![reference], radius: 50.0 },
+            params: FilletParams { edges: vec![reference], radius: 50.0, overflow: None },
         })
         .unwrap();
     settle(&mut state);

@@ -11,8 +11,8 @@ use soliddraft_kernel_api::{
 
 use crate::feature::{
     BlendFeature, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId, FeatureKind,
-    GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, MirrorFeature, PatternFeature, PatternSpec,
-    PlaneRef, ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
+    FilletOverflow, FilletSetback, GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, MirrorFeature,
+    PatternFeature, PatternSpec, PlaneRef, ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
 };
 use crate::rebuild::BuildCache;
 use crate::reference::{self, Generator, NamedFace, ReferenceSlot, RepairNeeded, RepairReason, View};
@@ -669,6 +669,18 @@ impl Document {
             }
         }
         if !repairs.is_empty() {
+            // Station faces that are gone ask for repair in the same round as the edges.
+            if let Some(FilletOverflow::KeepNeighbours(stations)) = &b.overflow {
+                for (i, s) in stations.iter().enumerate() {
+                    if let Err(u) = reference::resolve_face(&s.at, &view, &names) {
+                        let message = format!("setback {}: {}", i + 1, u.message);
+                        repairs.push(RepairNeeded {
+                            message,
+                            ..u.into_repair(ReferenceSlot::Setback { index: i as u32 })
+                        });
+                    }
+                }
+            }
             return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
         }
         for (i, id) in ids.iter().enumerate() {
@@ -676,11 +688,20 @@ impl Document {
                 return Built::failed(current, format!("edges {} and {} name the same edge", j + 1, i + 1));
             }
         }
+        let overflow = match &b.overflow {
+            None => None,
+            Some(FilletOverflow::RollOver) => Some(soliddraft_kernel_api::FilletOverflow::RollOver),
+            Some(FilletOverflow::KeepNeighbours(stations)) => match setbacks(stations, &ids, &t, &view, &names) {
+                Ok(s) => Some(soliddraft_kernel_api::FilletOverflow::KeepNeighbours(s)),
+                Err(StationError::Failed(why)) => return Built::failed(current, why),
+                Err(StationError::Repair(items)) => return Built::pass(FeatureStatus::RepairNeeded(items), current),
+            },
+        };
         let tag = OpTag::new(format!("{}.blend", f.id));
-        let result = if chamfer {
-            self.kernel.chamfer(&tag, body, &ids, b.size)
-        } else {
-            self.kernel.fillet(&tag, body, &ids, b.size)
+        let result = match (chamfer, &overflow) {
+            (true, _) => self.kernel.chamfer(&tag, body, &ids, b.size),
+            (false, None) => self.kernel.fillet(&tag, body, &ids, b.size),
+            (false, Some(o)) => self.kernel.fillet_overflow(&tag, body, &ids, b.size, o),
         };
         let result = match result {
             Ok(r) => r,
@@ -1184,6 +1205,95 @@ pub fn plane_on_face(normal: Vec3, point: Vec3) -> Plane {
         (Vec3::X - n * Vec3::X.dot(n)).normalized().expect("parallel to Z")
     };
     Plane { origin: n * point.dot(n), normal: n, x_dir }
+}
+
+/// Why a fillet's setback stations do not place on the body being rounded.
+#[derive(Debug)]
+pub(crate) enum StationError {
+    /// The definition is wrong in a way no repair pick fixes.
+    Failed(String),
+    /// Some end faces are gone, or do not meet their edge at exactly one end.
+    Repair(Vec<RepairNeeded>),
+}
+
+impl StationError {
+    /// The problem as one line, for a preview that cannot open a repair.
+    pub(crate) fn message(&self) -> String {
+        match self {
+            StationError::Failed(why) => why.clone(),
+            StationError::Repair(items) => items.iter().map(|r| r.message.as_str()).collect::<Vec<_>>().join("; "),
+        }
+    }
+}
+
+/// A fillet's setback stations on the body being rounded: each one's edge among the
+/// resolved `edges`, and the end of that edge that touches its `at` face. An end face
+/// that is gone, or that meets the edge at both ends or neither, asks for repair; the
+/// faces that meet one end each are offered in its place.
+pub(crate) fn setbacks(
+    stations: &[FilletSetback],
+    edges: &[EdgeId],
+    topology: &soliddraft_kernel_api::Topology,
+    view: &View,
+    names: &reference::NameMap,
+) -> Result<Vec<soliddraft_kernel_api::FilletSetback>, StationError> {
+    let mut placed = Vec::new();
+    let mut repairs = Vec::new();
+    for (i, s) in stations.iter().enumerate() {
+        let n = i + 1;
+        let slot = ReferenceSlot::Setback { index: i as u32 };
+        let Some(&edge) = edges.get(s.edge as usize) else {
+            return Err(StationError::Failed(format!("setback {n} names no edge of the fillet")));
+        };
+        let Some(info) = topology.edge(edge) else {
+            return Err(StationError::Failed(format!("setback {n}: its edge is not on the body")));
+        };
+        // The faces an end runs into: those of its other edges that are not the edge's own.
+        let end_faces = |v: &soliddraft_kernel_api::VertexId| -> Vec<FaceId> {
+            let mut faces: Vec<FaceId> = topology
+                .vertex(*v)
+                .into_iter()
+                .flat_map(|vertex| vertex.edges.iter())
+                .filter(|e| **e != edge)
+                .filter_map(|e| topology.edge(*e))
+                .flat_map(|other| other.faces.iter().copied())
+                .filter(|f| !info.faces.contains(f))
+                .collect();
+            faces.sort_unstable();
+            faces.dedup();
+            faces
+        };
+        let ends: Vec<Vec<FaceId>> = info.vertices.iter().map(end_faces).collect();
+        let face = match reference::resolve_face(&s.at, view, names) {
+            Ok(face) => face,
+            Err(u) => {
+                repairs.push(RepairNeeded { message: format!("setback {n}: {}", u.message), ..u.into_repair(slot) });
+                continue;
+            }
+        };
+        let meets: Vec<usize> = (0..ends.len()).filter(|k| ends[*k].contains(&face)).collect();
+        if let [k] = meets.as_slice() {
+            placed.push(soliddraft_kernel_api::FilletSetback { edge, at: info.vertices[*k], setback: s.setback });
+            continue;
+        }
+        let detail = format!("{} does not meet its edge at exactly one end", s.at.label);
+        let mut candidates = Vec::new();
+        for (k, faces) in ends.iter().enumerate() {
+            for f in faces {
+                let elsewhere = ends.iter().enumerate().any(|(j, other)| j != k && other.contains(f));
+                if !elsewhere && !candidates.contains(&reference::Candidate::Face(*f)) {
+                    candidates.push(reference::Candidate::Face(*f));
+                }
+            }
+        }
+        repairs.push(RepairNeeded {
+            slot,
+            message: format!("setback {n}: {detail}"),
+            reason: RepairReason::Mismatch { detail },
+            candidates,
+        });
+    }
+    if repairs.is_empty() { Ok(placed) } else { Err(StationError::Repair(repairs)) }
 }
 
 #[cfg(test)]

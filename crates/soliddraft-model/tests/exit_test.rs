@@ -167,7 +167,8 @@ fn build_bracket(doc: &mut Document) -> Bracket {
         report(doc)
     );
     let edge = doc.edge_ref(corner.id).expect("naming the inside corner");
-    let fillet = add(doc, "Inside fillet", FeatureKind::Fillet(BlendFeature { edges: vec![edge], size: 8.0 }));
+    let fillet =
+        add(doc, "Inside fillet", FeatureKind::Fillet(BlendFeature { edges: vec![edge], size: 8.0, overflow: None }));
 
     let top = pick_face(doc, Vec3::new(0.0, 0.0, 10.0), Vec3::Z);
     let mut boss = Sketch::new();

@@ -107,7 +107,12 @@ fn pick(state: &mut AppState, path: &OccurrencePath, name: &str) {
 
 pub fn apply(state: &mut AppState, action: MateAction) {
     match action {
-        MateAction::Toggle => state.assembly.mate.open = !state.assembly.mate.open,
+        MateAction::Toggle => {
+            state.assembly.mate.open = !state.assembly.mate.open;
+            if state.assembly.mate.open {
+                state.assembly.interference.open = false;
+            }
+        }
         MateAction::Pick(path, name) => pick(state, &path, &name),
         MateAction::Clear => {
             state.assembly.mate.a = None;

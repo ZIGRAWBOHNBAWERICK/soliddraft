@@ -1,0 +1,367 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "clearance-verification",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/b.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "25 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/kind",
+          "equals": "clearance"
+        },
+        {
+          "pointer": "/result/report/clearance_mm",
+          "equals": 25
+        },
+        {
+          "pointer": "/result/report/below",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/met",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/undecided",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/results/0/clearance",
+          "equals": "below"
+        },
+        {
+          "pointer": "/result/report/results/0/outcome",
+          "equals": "clear"
+        },
+        {
+          "pointer": "/result/report/results/0/distance/lo",
+          "approx": 20,
+          "tolerance": 0.05
+        },
+        {
+          "pointer": "/result/report/results/0/distance/hi",
+          "approx": 20,
+          "tolerance": 0.05
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 12,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "1.5 cm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/clearance_mm",
+          "equals": 15
+        },
+        {
+          "pointer": "/result/report/met",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/below",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/results",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "20 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/undecided",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/results/0/clearance",
+          "equals": "undecided"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "Cz",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "start_cap"
+        },
+        "alignment": "opposed"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "0.5 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/below",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/results/0/clearance",
+          "equals": "below"
+        },
+        {
+          "pointer": "/result/report/results/0/contact/0/mate",
+          "equals": "Cz"
+        },
+        {
+          "pointer": "/result/report/results/0/distance/hi",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "-1 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 16,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ],
+      "refused": "invalid"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    }
+  ]
+}

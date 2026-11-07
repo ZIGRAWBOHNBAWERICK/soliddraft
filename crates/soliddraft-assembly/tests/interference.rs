@@ -1,0 +1,265 @@
+//! Interference and clearance checks on real parts, rebuilt on Catallax at their pinned
+//! revisions: the three outcomes, exact touching from a Coincident mate, clearances proven
+//! both ways, and what is refused.
+//!
+//! A is a 40 x 30 x D block and B a 20 x 10 x 6 block, both centred on the origin in plan
+//! and rising along +Z. B starts at [3, 7, 30], 30 - D mm above A.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use glam::{DQuat, DVec3};
+use soliddraft_assembly::{
+    Alignment, AssemblyDocument, CheckCode, CheckRequest, CheckScope, ClearanceOutcome, ComponentId, EndpointSelector,
+    FaceSelector, GeneratorChoice, KernelSource, OccurrencePath, OpenOptions, Outcome, Placement, Step,
+};
+use soliddraft_document::{CacheOnlyStore, DocRef, identify_file};
+use soliddraft_kernel_api::Kernel;
+use soliddraft_kernel_catallax::CatallaxKernel;
+use soliddraft_model::sketch::{P2, Sketch, solve::solve};
+use soliddraft_model::{
+    Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, ProfileSource, SketchFeature,
+    SketchPlane,
+};
+
+fn kernel() -> Arc<dyn Kernel> {
+    Arc::new(CatallaxKernel::new())
+}
+
+fn folder(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("soliddraft-interference-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn options() -> OpenOptions {
+    OpenOptions {
+        display: Some(Arc::new(KernelSource::new(kernel()))),
+        revisions: Some(Arc::new(CacheOnlyStore::new())),
+        check_freshness: true,
+        ..OpenOptions::default()
+    }
+}
+
+/// A `w` x `d` x `h` block, centred in plan and rising from z = 0.
+fn new_block(path: &Path, w: f64, d: f64, h: f64) {
+    let mut doc = Document::new("Block", kernel());
+    let mut sketch = Sketch::new();
+    sketch.rectangle(P2::new(0.0, 0.0), w, d).unwrap();
+    solve(&mut sketch, None, true);
+    let plane = SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 };
+    let add = |doc: &mut Document, kind| {
+        doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false })
+            .unwrap()
+            .created
+            .unwrap()
+    };
+    let s = add(&mut doc, FeatureKind::Sketch(SketchFeature { plane, sketch }));
+    add(
+        &mut doc,
+        FeatureKind::Extrude(ExtrudeFeature {
+            profile: ProfileSource::Sketch { feature: s },
+            operation: ExtrudeOp::Boss,
+            end: EndCondition::Blind { depth: h },
+            reverse: false,
+        }),
+    );
+    doc.save(path).unwrap();
+}
+
+/// Sets a saved block's height, keeping its id and its extrusion.
+fn set_height(path: &Path, h: f64) {
+    let mut doc = Document::open(path, kernel()).unwrap();
+    let id = doc.features()[1].id;
+    let FeatureKind::Extrude(mut extrude) = doc.feature(id).unwrap().kind.clone() else { panic!("an extrusion") };
+    extrude.end = EndCondition::Blind { depth: h };
+    doc.execute(Command::EditFeature { id, kind: FeatureKind::Extrude(extrude) }).unwrap();
+    doc.save(path).unwrap();
+}
+
+fn reference(from: &Path, to: &Path) -> DocRef {
+    let i = identify_file(to).unwrap();
+    let mut r = DocRef::new(i.id, i.kind, "", i.revision);
+    r.set_path(from, to);
+    r
+}
+
+fn face(component: ComponentId, generator: GeneratorChoice) -> EndpointSelector {
+    EndpointSelector {
+        component,
+        face: FaceSelector::Generator { feature: "Boss-Extrude1".into(), generator, normal: None },
+    }
+}
+
+struct Rig {
+    a_file: PathBuf,
+    doc: AssemblyDocument,
+    a: ComponentId,
+    b: ComponentId,
+}
+
+fn path(c: ComponentId) -> OccurrencePath {
+    OccurrencePath::root().child(Step::component(c))
+}
+
+/// A of height `depth` at the origin and B at [3, 7, 30], saved.
+fn rig(name: &str, depth: f64) -> Rig {
+    let dir = folder(name);
+    let (a_file, b_file, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("rig.dwasm"));
+    new_block(&a_file, 40.0, 30.0, depth);
+    new_block(&b_file, 20.0, 10.0, 6.0);
+    let mut doc = AssemblyDocument::new_with("Rig", options());
+    doc.save(Some(&root)).unwrap();
+    let a = doc.insert(reference(&root, &a_file), Placement::IDENTITY).unwrap();
+    let b = doc.insert(reference(&root, &b_file), Placement::translation(DVec3::new(3.0, 7.0, 30.0))).unwrap();
+    doc.finish_loading();
+    doc.save(None).unwrap();
+    Rig { a_file, doc, a, b }
+}
+
+impl Rig {
+    /// The origin on A, and B's underside on A's top, opposed.
+    fn seat(&mut self) {
+        self.doc.mate_origin("O", self.a, true, false).unwrap();
+        let (top, bottom) = (face(self.a, GeneratorChoice::EndCap), face(self.b, GeneratorChoice::StartCap));
+        self.doc.mate_coincident("Cz", &top, &bottom, Alignment::Opposed, false).unwrap();
+    }
+
+    fn check(&mut self, clearance: Option<f64>) -> soliddraft_assembly::CheckReport {
+        self.doc.check_interference(&CheckRequest { clearance, ..CheckRequest::default() }).unwrap()
+    }
+}
+
+#[test]
+fn parts_apart_are_clear_on_their_pinned_revisions() {
+    let mut rig = rig("apart", 10.0);
+    let before = rig.doc.assembly().clone();
+    let report = rig.check(None);
+    assert_eq!((report.kind, report.tier), ("interference", "certified_mesh"));
+    assert_eq!((report.pairs, report.clear, report.interferes, report.touching_or_undecided), (1, 1, 0, 0));
+    assert!(report.results.is_empty() && report.complete && report.skipped.is_empty());
+    assert_eq!(report.parts.len(), 2);
+    for (part, c) in report.parts.iter().zip([rig.a, rig.b]) {
+        assert_eq!(part.path, path(c));
+        let pinned = rig.doc.assembly().source(rig.doc.assembly().component(c).unwrap().source).unwrap();
+        assert_eq!(part.revision, pinned.document.pinned);
+        assert!(part.triangles >= 12, "a block's certified mesh has every side");
+    }
+    assert!(rig.doc.parts_rebuilt_for_proofs() >= 2, "the parts are rebuilt from their pinned bytes");
+    assert_eq!(rig.doc.assembly(), &before, "a check changes nothing");
+    assert!(report.refused.iter().any(|r| r.starts_with("volume")));
+}
+
+#[test]
+fn an_exact_coincident_mate_is_exact_touching() {
+    let mut rig = rig("touching", 10.0);
+    rig.seat();
+    let report = rig.check(None);
+    assert_eq!((report.interferes, report.touching_or_undecided), (0, 1));
+    let r = &report.results[0];
+    assert_eq!(r.outcome, Outcome::TouchingOrUndecided);
+    assert_eq!((r.a.clone(), r.b.clone()), (path(rig.a), path(rig.b)));
+    assert_eq!(r.contact.len(), 1, "{r:#?}");
+    let contact = &r.contact[0];
+    assert_eq!(contact.mate, "Cz");
+    assert_eq!(contact.point[2], 10.0);
+    // The shared point is on both faces: A's top spans [-20, 20] x [-15, 15], B's
+    // underside [-7, 13] x [2, 12].
+    assert!((-7.0..=13.0).contains(&contact.point[0]) && (2.0..=12.0).contains(&contact.point[1]));
+    assert_eq!((r.distance.lo, r.distance.hi), (0.0, Some(0.0)));
+    assert!(r.why.starts_with("Exactly touching"), "{}", r.why);
+    assert!(!r.faces.is_empty());
+    // Exact touching is at or under any clearance.
+    let report = rig.check(Some(0.5));
+    assert_eq!(report.results[0].clearance, Some(ClearanceOutcome::Below));
+}
+
+#[test]
+fn a_part_sunk_into_another_interferes_at_a_proven_point() {
+    let mut rig = rig("sunk", 10.0);
+    rig.doc.mate_origin("O", rig.a, true, false).unwrap();
+    let (top, bottom) = (face(rig.a, GeneratorChoice::EndCap), face(rig.b, GeneratorChoice::StartCap));
+    rig.doc.mate_distance("Sink", &top, &bottom, "-1 mm", Alignment::Opposed, false).unwrap();
+    let report = rig.check(None);
+    assert_eq!(report.interferes, 1);
+    let r = &report.results[0];
+    assert_eq!(r.outcome, Outcome::Interferes);
+    let w = r.witness.expect("a witness");
+    assert!(w[2] > 9.0 && w[2] < 10.0, "{w:?}");
+    assert!((-7.0..=13.0).contains(&w[0]) && (2.0..=12.0).contains(&w[1]), "{w:?}");
+    assert!(r.contact.is_empty(), "a distance of -1 mm holds no faces on one plane");
+}
+
+#[test]
+fn clearances_are_proven_met_below_or_left_undecided() {
+    let mut rig = rig("clearance", 10.0);
+    // B's underside is 20 mm above A's top.
+    let below = rig.check(Some(25.0));
+    assert_eq!((below.below, below.met, below.undecided), (Some(1), Some(0), Some(0)));
+    let r = &below.results[0];
+    assert_eq!((r.outcome, r.clearance), (Outcome::Clear, Some(ClearanceOutcome::Below)));
+    assert!(r.distance.lo < 20.0 && r.distance.lo > 19.95, "{:?}", r.distance);
+    assert!(r.distance.hi.is_some_and(|hi| hi > 20.0 && hi < 20.05), "{:?}", r.distance);
+    let met = rig.check(Some(15.0));
+    assert_eq!((met.met, met.below), (Some(1), Some(0)));
+    assert!(met.results.is_empty());
+    let undecided = rig.check(Some(20.0));
+    assert_eq!(undecided.undecided, Some(1));
+    assert_eq!(undecided.results[0].clearance, Some(ClearanceOutcome::Undecided));
+}
+
+#[test]
+fn a_rotated_part_is_checked_where_it_is_placed() {
+    let mut rig = rig("rotated", 10.0);
+    // A quarter turn about x stands B on its side: it spans z in [25, 35] around [3, 7, 30],
+    // and a quarter turn about z then lays it across A's top, still 15 mm above it.
+    let turn =
+        DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2) * DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2);
+    rig.doc.move_to(&[(path(rig.b), Placement::new(turn, DVec3::new(3.0, 7.0, 30.0)))]).unwrap();
+    let report = rig.check(Some(16.0));
+    let r = &report.results[0];
+    assert_eq!(r.clearance, Some(ClearanceOutcome::Below));
+    assert!(r.distance.lo > 14.9 && r.distance.lo < 15.0, "{:?}", r.distance);
+    // Turned down into A, the same placement 10 mm lower interferes.
+    rig.doc.move_to(&[(path(rig.b), Placement::new(turn, DVec3::new(3.0, 7.0, 12.0)))]).unwrap();
+    assert_eq!(rig.check(None).interferes, 1);
+}
+
+#[test]
+fn an_edit_after_the_pin_changes_nothing_until_update() {
+    let mut rig = rig("pinned", 10.0);
+    rig.seat();
+    // A grows to 14 mm in its own file. The assembly still pins the 10 mm revision, so B
+    // still rests on it, touching, and does not sink into the new A.
+    set_height(&rig.a_file, 14.0);
+    let report = rig.check(None);
+    assert_eq!((report.interferes, report.touching_or_undecided), (0, 1));
+    assert_eq!(report.results[0].contact.len(), 1);
+}
+
+#[test]
+fn hidden_parts_join_only_when_asked() {
+    let mut rig = rig("hidden", 10.0);
+    rig.doc.set_hidden(&[path(rig.b)], true).unwrap();
+    let refused = rig.doc.check_interference(&CheckRequest::default()).unwrap_err();
+    assert_eq!(refused.code, CheckCode::TooFewParts);
+    let report = rig.doc.check_interference(&CheckRequest { include_hidden: true, ..CheckRequest::default() }).unwrap();
+    assert_eq!(report.pairs, 1);
+}
+
+#[test]
+fn bad_requests_are_refused_by_name() {
+    let mut rig = rig("refused", 10.0);
+    let before = rig.doc.assembly().clone();
+    let one = CheckRequest { scope: CheckScope::Occurrences(vec![path(rig.a)]), ..CheckRequest::default() };
+    assert_eq!(rig.doc.check_interference(&one).unwrap_err().code, CheckCode::TooFewParts);
+    let missing =
+        CheckRequest { scope: CheckScope::Occurrences(vec![path(ComponentId(99))]), ..CheckRequest::default() };
+    assert_eq!(rig.doc.check_interference(&missing).unwrap_err().code, CheckCode::Invalid);
+    let coarse = CheckRequest { chord: 5.0, ..CheckRequest::default() };
+    assert_eq!(rig.doc.check_interference(&coarse).unwrap_err().code, CheckCode::Invalid);
+    let negative = CheckRequest { clearance: Some(-1.0), ..CheckRequest::default() };
+    assert_eq!(rig.doc.check_interference(&negative).unwrap_err().code, CheckCode::Invalid);
+    assert_eq!(rig.doc.assembly(), &before);
+}

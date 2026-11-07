@@ -97,6 +97,8 @@ level of detail.
 - **Mates and values** tie components together; see [mates.md](mates.md). A placement is
   still the truth of where a component is: a solve writes placements, and an assembly with
   no mates keeps them as authored.
+  Interference and clearance checks read placements and save nothing; see
+  [interference.md](interference.md).
 - **Reserved.** `configurations` and `display_states` are kept exactly as read until those
   formats are defined.
 
@@ -523,6 +525,8 @@ the property panel and the status bar are the assembly's.
 - **The property panel** places the selection: x, y and z in millimetres and rotations
   about x, then y, then z in degrees, relative to the assembly that holds it. A change
   applies with `move_to` when the field lets go, as one undo step.
+- **Interference** opens the Interference panel, which checks the parts for interference
+  or a clearance on certified meshes; see [interference.md](interference.md).
 - **Save assembly** (Ctrl+S) and **Save assembly as** (Ctrl+Shift+S) write the `.dwasm`
   with its display copies; **File > Open** and Open recent open one with
   `open_in_background`. Undo and redo follow the active tab.

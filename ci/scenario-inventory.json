@@ -384,6 +384,38 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
     },
     {
+      "id": "interference-detection",
+      "file": "ci/scenarios/interference-detection.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly_check_interference -> assembly interference check -> parts rebuilt at pinned revisions -> certified tessellation with a proven chord bound -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B7 certified-mesh tier: Interference Detection over the whole assembly or named occurrences of part bodies, default configuration; clear, interferes with a witness point inside both parts, or touching or undecided; opposed faces an exact Coincident mate holds on one plane are exactly touching; a single part and an out-of-range chord bound refused; no overlap volumes.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "clearance-verification",
+      "file": "ci/scenarios/clearance-verification.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly_check_clearance -> assembly interference check with a clearance -> parts rebuilt at pinned revisions -> certified tessellation with a proven chord bound -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B7 certified-mesh tier: Clearance Verification over part bodies, default configuration; each pair proven to meet the clearance, proven at or under it, or undecided within the meshes' bounds, with proven distance bounds; exact touching from an opposed Coincident mate is at or under any clearance; a negative clearance refused.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "measure",
       "file": "ci/scenarios/measure.json",
       "acceptance": true,

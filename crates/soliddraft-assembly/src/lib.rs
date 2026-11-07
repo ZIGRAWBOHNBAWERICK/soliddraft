@@ -9,6 +9,8 @@
 //!   and reserved configurations and display states.
 //! - **Mates** ([`mates`]): driven relationships between components, solved from proven
 //!   plane equations through one transaction.
+//! - **Interference** ([`interference`]): Interference Detection and Clearance
+//!   Verification between placed parts, proven on certified meshes.
 //! - **Paths** ([`path`]): component, pattern and source ids, and occurrence paths made
 //!   of them, never of names.
 //! - **The file** ([`file`]): `.dwasm` in the document envelope, `placements.bin` for
@@ -37,6 +39,7 @@ pub mod bulk;
 pub mod bvh;
 pub mod document;
 pub mod file;
+pub mod interference;
 pub mod load;
 pub mod mates;
 pub mod mesh;
@@ -53,6 +56,10 @@ pub mod subassembly;
 pub use binary::BinaryError;
 pub use document::{AssemblyDocument, Changes, EditError, Opening, RebuildReport, RefChange, Selection, SourceReport};
 pub use file::{AssemblyPackage, CopyReader, FileError, RefCopy, TruthEntries};
+pub use interference::{
+    CheckCode, CheckRefusal, CheckReport, CheckRequest, CheckScope, CheckedPart, ClearanceOutcome, Contact,
+    DistanceBounds, FacePair, Outcome, PairResult, SkippedPart,
+};
 pub use load::{LoadError, LoadEvent, OpenOptions};
 pub use mates::{
     Alignment, EndpointSelector, FaceEndpoint, FaceSelector, FreeMotion, GeneratorChoice, Mate, MateEdit, MateEntry,

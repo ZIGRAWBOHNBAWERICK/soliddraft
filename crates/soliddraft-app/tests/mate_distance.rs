@@ -233,7 +233,16 @@ fn faces_are_found_or_refused_by_what_they_are() {
     let curved = coincident("C", read(round, "side"), side(2, x), "aligned");
     let said = r.refused(tool, curved, "unsupported_plane");
     assert_eq!(said["mates"], json!(["C"]), "{said}");
+    // Measuring reads the placements as they stand, so a face placed off the world axes is
+    // not proved.
+    let measured = json!({ "a": side(turned, x), "b": side(upright, x) });
+    r.refused("assembly_measure_planes", measured, "unsupported_placement");
+    // A mate may turn a part nothing else holds: the Coincident turns the part onto the
+    // axes, as it turns any part held by one face, and its planes are then proved exactly.
     let off = coincident("C", side(turned, x), side(upright, x), "aligned");
-    let said = r.refused(tool, off, "unsupported_placement");
-    assert_eq!(said["mates"], json!(["C"]), "{said}");
+    let mated = r.ok(tool, off);
+    let q = &mated["assembly"]["components"][3]["rotation"];
+    assert!(q[2].as_f64().unwrap().abs() < 1e-9 && q[3].as_f64().unwrap().abs() > 1.0 - 1e-9, "{q}");
+    let c = mated["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "C").unwrap();
+    assert_eq!(c["measurement"]["rational"], "0", "{c}");
 }

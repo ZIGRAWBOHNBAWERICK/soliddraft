@@ -20,9 +20,12 @@ are in `crates/soliddraft-app/src/mates/`.
 
 A mate's planes are faces or reference planes. A reference plane is one of the part's Top,
 Front and Right planes, or a plane feature built on one of them, with its offsets. Faces and
-planes must be axis-aligned with rational offsets, on parts in the default configuration. The commands below name the root's own part components; a mate read from a
-file may also name a part inside a sub-assembly by its path, as forming one leaves it (see
-[subassemblies.md](subassemblies.md)). A face placed off the world axes is refused. Only
+planes must be axis-aligned with rational offsets, on parts in the default configuration.
+The commands below name the root's own part components; a mate read from a file may also
+name a part inside a sub-assembly by its path, as forming one leaves it (see
+[subassemblies.md](subassemblies.md)). A mate may turn a part nothing else holds onto the
+axes, as it turns any part held by one face. A face that stays off the world axes is
+refused: one measured where it is placed, or one a frame fixes there. Only
 identity and exact half-turn placements carry the exact claim below: a quarter turn is
 accepted when its normals round onto the axes, but a later general rotation needs a bounded
 transform contract and does not inherit this one.

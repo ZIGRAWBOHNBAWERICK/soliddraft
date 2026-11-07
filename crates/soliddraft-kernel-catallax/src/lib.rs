@@ -1239,6 +1239,10 @@ impl Kernel for CatallaxKernel {
         self.observe("face_support_plane", || assembly_measure::face_support_plane(self, body, face))
     }
 
+    fn entity_support(&self, body: BodyId, entity: SupportEntity) -> KernelResult<ExactSupport> {
+        self.observe("entity_support", || assembly_measure::entity_support(self, body, entity))
+    }
+
     fn history(&self, body: BodyId) -> KernelResult<Vec<HistoryRecord>> {
         self.observe("history", || Ok(self.state()?.get(body)?.history.clone()))
     }

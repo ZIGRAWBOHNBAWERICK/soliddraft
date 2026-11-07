@@ -601,20 +601,19 @@ impl Assembly {
                     return bad(format!("mate {} ties component {c}, which does not exist", mate.name()));
                 }
             }
-            if let Some((ends, _)) = mate.faces() {
-                for end in ends {
-                    let placed = end.holder().and_then(|c| self.component(c)).and_then(|c| self.source(c.source));
-                    // A face inside a sub-assembly is checked against the sub-assembly when it
-                    // is solved; this file holds only its first step.
-                    let nested = end.path.steps().len() > 1;
-                    let ok = match placed {
-                        Some(s) if nested => s.document.kind == DocKind::Assembly,
-                        Some(s) => s.document.id == Some(end.document),
-                        None => false,
-                    };
-                    if !ok {
-                        return bad(format!("mate {} names a face of another document", mate.name()));
-                    }
+            for end in mate.ends() {
+                let placed =
+                    crate::mates::holder(end.path).and_then(|c| self.component(c)).and_then(|c| self.source(c.source));
+                // A part inside a sub-assembly is checked against the sub-assembly when it is
+                // solved; this file holds only its first step.
+                let nested = end.path.steps().len() > 1;
+                let ok = match placed {
+                    Some(s) if nested => s.document.kind == DocKind::Assembly,
+                    Some(s) => s.document.id == Some(end.document),
+                    None => false,
+                };
+                if !ok {
+                    return bad(format!("mate {} names a face of another document", mate.name()));
                 }
             }
             if let Some(distance) = mate.expression() {

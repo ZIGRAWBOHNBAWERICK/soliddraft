@@ -1702,33 +1702,70 @@ pub fn paint_closed_dimensions(
     rect: Rect,
     plane: Plane,
     sketch: &Sketch,
-    position: impl Fn(ConstraintId, Vec3) -> Vec3,
+    position: impl Fn(ConstraintId) -> Option<Vec3>,
+    taken: impl IntoIterator<Item = Rect>,
     pointer: Option<Pos2>,
 ) -> Vec<(ConstraintId, Rect, Vec3)> {
     let frame = Frame { plane, camera, rect };
     let gv = |v: soliddraft_kernel_api::Vec3| Vec3::new(v.x as f32, v.y as f32, v.z as f32);
     let mut shown = Vec::new();
-    for c in sketch.constraints.iter().filter(|c| c.is_dimension()) {
-        let Some(label) = c.label() else { continue };
-        let world = position(c.id, gv(plane.to_world(soliddraft_kernel_api::Point2::new(label.u, label.v))));
-        let Some(at) = camera.project(world, rect) else { continue };
-        let relative = world - gv(plane.origin);
-        let label = P2::new(relative.dot(gv(plane.x_dir)) as f64, relative.dot(gv(plane.y_dir())) as f64);
-        let Some(lp) = frame.screen(label) else { continue };
-        let text = dim_text(c, sketch);
-        let size =
-            painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size() + vec2(12.0, 6.0);
-        let hover = pointer.is_some_and(|p| Rect::from_center_size(at, size).contains(p));
-        let color = if hover { theme::accent() } else { theme::ink().gamma_multiply(0.7) };
-        paint_dimension_lines(painter, &frame, sketch, c, label, lp, color);
-        if at.distance_sq(lp) > 0.01 {
-            painter.line_segment([lp, at], Stroke::new(1.0, color));
+    let mut taken: Vec<Rect> = taken.into_iter().collect();
+    // Reserve authored labels first; only automatic placements may move to clear them.
+    for authored in [true, false] {
+        for c in sketch.constraints.iter().filter(|c| c.is_dimension()) {
+            let placed = position(c.id);
+            if placed.is_some() != authored {
+                continue;
+            }
+            let Some(label) = c.label() else { continue };
+            let mut world =
+                placed.unwrap_or_else(|| gv(plane.to_world(soliddraft_kernel_api::Point2::new(label.u, label.v))));
+            let Some(projected) = camera.project(world, rect) else { continue };
+            let text = dim_text(c, sketch);
+            let size =
+                painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size() + vec2(12.0, 6.0);
+            let at = if authored { projected } else { clear_dimension_spot(projected, size, &taken) };
+            if at != projected {
+                let (origin, ray) = camera.ray(at, rect);
+                let normal = camera.forward();
+                world = origin + ray * ((world - origin).dot(normal) / ray.dot(normal));
+            }
+            let relative = world - gv(plane.origin);
+            let label = P2::new(relative.dot(gv(plane.x_dir)) as f64, relative.dot(gv(plane.y_dir())) as f64);
+            let Some(lp) = frame.screen(label) else { continue };
+            let hover = pointer.is_some_and(|p| Rect::from_center_size(at, size).contains(p));
+            let color = if hover { theme::accent() } else { theme::ink().gamma_multiply(0.7) };
+            paint_dimension_lines(painter, &frame, sketch, c, label, lp, color);
+            if at.distance_sq(lp) > 0.01 {
+                painter.line_segment([lp, at], Stroke::new(1.0, color));
+            }
+            let r = Rect::from_center_size(at, size);
+            taken.push(r);
+            shown.push((c.id, r, world, text, hover));
         }
-        let (bg, stroke) = if hover { (theme::hover(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
-        let r = value_pill(painter, at, text, theme::ink(), bg, Stroke::new(1.0, stroke));
-        shown.push((c.id, r, world));
     }
+    // Paint all value backgrounds and text above every dimension line.
     shown
+        .into_iter()
+        .map(|(id, r, world, text, hover)| {
+            let (bg, stroke) = if hover { (theme::hover(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
+            value_pill(painter, r.center(), text, theme::ink(), bg, Stroke::new(1.0, stroke));
+            (id, r, world)
+        })
+        .collect()
+}
+
+/// Clears every occupied rectangle by advancing past each blocker, with no search cap
+/// that could leave later values covering earlier ones.
+fn clear_dimension_spot(mut at: Pos2, size: egui::Vec2, taken: &[Rect]) -> Pos2 {
+    for _ in 0..taken.len() {
+        let candidate = Rect::from_center_size(at, size);
+        let Some(blocker) = taken.iter().find(|other| other.expand(2.0).intersects(candidate)) else {
+            break;
+        };
+        at.y = blocker.bottom() + 4.0 + size.y / 2.0;
+    }
+    at
 }
 
 fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession, snapped: Option<P2>) {

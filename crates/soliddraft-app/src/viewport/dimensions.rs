@@ -108,13 +108,13 @@ pub fn paint(
         doc.features[..end].iter().filter(|f| !f.suppressed && f.status != FeatureStatus::Inactive).collect();
     let anchors = if body { anchors(doc) } else { HashMap::new() };
     let mut shown = Vec::new();
-    let position = |key: AnnotationKey, default: Vec3| {
+    let authored_position = |key: AnnotationKey| {
         preview
             .filter(|(k, _)| *k == key)
             .map(|(_, p)| p)
             .or_else(|| doc.model().visibility().annotation_position(key).map(Vec3::from_array))
-            .unwrap_or(default)
     };
+    let position = |key: AnnotationKey, default: Vec3| authored_position(key).unwrap_or(default);
     let sketch_dims =
         |shown: &mut Vec<ShownDimension>, f: &Feature, plane: Plane, sketch: &Sketch, edit_sketch: bool| {
             let key = |constraint| AnnotationKey {
@@ -127,7 +127,8 @@ pub fn paint(
                 rect,
                 plane,
                 sketch,
-                |constraint, default| position(key(constraint), default),
+                |constraint| authored_position(key(constraint)),
+                shown.iter().map(|d| d.rect),
                 pointer,
             ) {
                 let c = sketch.constraint(constraint);

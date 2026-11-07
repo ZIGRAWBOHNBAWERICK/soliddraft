@@ -349,3 +349,83 @@ fn multi_value_defaults_stay_separate_and_each_centre_grabs_its_own_label() {
         );
     }
 }
+
+#[test]
+fn two_closed_rectangles_keep_front_view_dimensions_readable_and_draggable() {
+    let _case = ribbon::case("dimensions-3d-two-rectangles");
+    let mut doc = ribbon::blank();
+    let sketch = doc
+        .apply(Command::AddSketch {
+            plane: soliddraft_app::document::SketchPlane::Reference {
+                plane: soliddraft_app::document::PlaneKind::Top,
+                offset: 0.0,
+            },
+        })
+        .unwrap()
+        .unwrap();
+    let mut geometry = soliddraft_sketch::Sketch::new();
+    geometry.rectangle(soliddraft_sketch::P2::new(0.0, -60.0), 60.0, 40.0).unwrap();
+    geometry.rectangle(soliddraft_sketch::P2::new(0.0, 60.0), 80.0, 40.0).unwrap();
+    doc.apply(Command::EditSketch { id: sketch, sketch: geometry }).unwrap();
+    doc.set_view_choice(ViewItem::Feature(sketch), Some(true));
+    doc.selection = None;
+    let mut app = ribbon::app(doc);
+    app.state_mut().state.push(AppAction::SetView(StandardView::Front));
+    app.run_steps(40);
+    for orthographic in [true, false] {
+        app.state_mut().state.viewport.camera.orthographic = orthographic;
+        app.run_steps(5);
+        let labels = app.state().state.viewport.dimensions.clone();
+        let mut values: Vec<_> = labels.iter().map(|d| d.text.as_str()).collect();
+        values.sort_unstable();
+        assert_eq!(values, ["40", "40", "60", "80"]);
+        for (i, label) in labels.iter().enumerate() {
+            assert!(matches!(label.target, DimensionTarget::Sketch { sketch: id, .. } if id == sketch));
+            assert!(ribbon::painted_in(&app, label.rect).iter().any(|p| p.text == label.text && p.rect == p.full));
+            for other in &labels[i + 1..] {
+                assert!(
+                    !label.rect.expand(1.0).intersects(other.rect),
+                    "orthographic={orthographic}: {} covers {}",
+                    label.text,
+                    other.text
+                );
+            }
+        }
+        frame(&mut app, if orthographic { "two-rectangles-front-ortho" } else { "two-rectangles-front-perspective" });
+        for label in &labels {
+            let to = label.rect.center() + vec2(100.0, -35.0);
+            drag(&mut app, label.rect.center(), to);
+            assert!(
+                dimension(&app, &label.key).rect.center().distance(to) < 2.0,
+                "the {} centre grabs its own constraint",
+                label.text
+            );
+            app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+            app.run_steps(5);
+            assert!(dimension(&app, &label.key).rect.center().distance(label.rect.center()) < 0.01);
+        }
+    }
+    let labels = app.state().state.viewport.dimensions.clone();
+    let first = labels.iter().find(|d| d.text == "60").unwrap();
+    let second = labels.iter().find(|d| d.text == "80").unwrap();
+    drag(&mut app, second.rect.center(), first.rect.center());
+    let moved = dimension(&app, &second.key);
+    assert!(
+        moved.rect.center().distance(first.rect.center()) < 2.0,
+        "authored placement wins over default collision avoidance"
+    );
+    let default = dimension(&app, &first.key);
+    assert!(!default.rect.intersects(moved.rect), "the automatic value clears the authored value");
+    frame(&mut app, "two-rectangles-authored-priority");
+    app.state_mut().state.push(AppAction::SetView(StandardView::Top));
+    app.run_steps(40);
+    assert!(dimension(&app, &second.key).position.distance(moved.position) < 0.001);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    app.run_steps(5);
+    app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    app.run_steps(5);
+    assert!(
+        dimension(&app, &second.key).position.distance(moved.position) < 0.001,
+        "redo retains the authored sketch anchor after a view change"
+    );
+}

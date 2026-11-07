@@ -111,16 +111,34 @@ impl Bounds {
     }
 }
 
-/// The length of a vector of nonnegative gaps, rounded down. A gap of zero or less is no
-/// gap.
+/// The length of a vector of gaps, rounded down, for any finite or infinite gaps. A gap
+/// of zero or less is no gap.
+///
+/// The gaps are scaled by the largest before squaring, as `hypot` does, so no square
+/// overflows or underflows enough to matter: the scaled squares sum to between 1 and 3.
+/// The largest gap alone is a lower bound too, and the result is never below it.
 fn gap_length(gaps: impl Iterator<Item = f64>) -> f64 {
-    let sum = gaps.map(|g| if g > 0.0 { g * g } else { 0.0 }).sum::<f64>();
-    // Three squares and their sum lose at most four ulps of the sum together, unless a
-    // square underflows, which leaves nothing worth bounding.
-    if sum < 1e-290 {
+    let gaps: Vec<f64> = gaps.map(|g| if g > 0.0 { g } else { 0.0 }).collect();
+    let most = gaps.iter().copied().fold(0.0, f64::max);
+    // The gaps are at least zero here, NaN included as zero.
+    if most == 0.0 {
         return 0.0;
     }
-    (sum * (1.0 - 4.0 * f64::EPSILON)).sqrt().next_down().max(0.0)
+    if most.is_infinite() {
+        return f64::MAX;
+    }
+    let sum: f64 = gaps
+        .iter()
+        .map(|g| {
+            let r = g / most;
+            r * r
+        })
+        .sum();
+    // Each quotient, square and sum, the root and the product lose under a relative ten
+    // units in the last place together; an underflowed square is far below that against a
+    // sum of at least 1.
+    let length = sum.sqrt() * (1.0 - 16.0 * f64::EPSILON) * most;
+    if length.is_finite() { length.next_down().max(most) } else { f64::MAX }
 }
 
 /// A hierarchy node: a leaf holds `order[first..first + count]`, an inner node
@@ -818,6 +836,33 @@ mod tests {
     /// The certified distance between two triangles, tight to 1e-12 mm.
     fn between(a: &[DVec3; 3], b: &[DVec3; 3]) -> Span {
         certified::triangles(a, b, 1e-12, f64::INFINITY)
+    }
+
+    #[test]
+    fn box_gaps_of_any_size_are_bounded_from_below() {
+        let length = |g: [f64; 3]| gap_length(g.into_iter());
+        let within = |x: f64, lo: f64, hi: f64| (lo..=hi).contains(&x);
+        // Squared, 1e155 overflows; scaled, it does not.
+        let one = length([1e155, 0.0, 0.0]);
+        assert!(within(one, 1e155 * (1.0 - 1e-15), 1e155), "{one}");
+        let three = length([1e155; 3]);
+        let exact = 1e155 * 3f64.sqrt();
+        assert!(within(three, exact * (1.0 - 1e-14), exact), "{three}");
+        // Near the top of the range the length stays a finite lower bound.
+        let top = length([1e308, 1e308, 1e308]);
+        assert!(within(top, 1e308, 1e308 * 3f64.sqrt()), "{top}");
+        assert_eq!(length([f64::MAX, f64::MAX, 0.0]), f64::MAX);
+        // Tiny gaps no longer vanish.
+        let tiny = length([3e-200, 4e-200, 0.0]);
+        assert!(within(tiny, 5e-200 * (1.0 - 1e-14), 5e-200), "{tiny}");
+        assert_eq!(length([0.0, -1.0, 0.0]), 0.0);
+        // As box distances: two boxes 1e155 and 1e308 apart along x.
+        let at = |x: f64| Bounds { min: DVec3::new(x, 0.0, 0.0), max: DVec3::new(x, 1.0, 1.0) };
+        let d = at(0.0).distance(&at(1e155));
+        assert!(within(d, 1e155 * (1.0 - 1e-15), 1e155), "{d}");
+        let d = at(-1e308).distance(&at(1e308));
+        assert!(within(d, 1e308, f64::MAX), "{d}");
+        assert!(at(0.0).point_distance(DVec3::new(1e155, 0.5, 0.5)) <= 1e155);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, Vec3, question_index};
+use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, RadiusLaw, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
 use crate::reference::{EdgeRef, FaceRef};
@@ -386,6 +386,57 @@ pub struct BlendFeature {
     /// none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overflow: Option<FilletOverflow>,
+    /// A fillet's variable-radius laws (Catallax recipe section 4.5.2), at most one per
+    /// edge. An edge without one keeps `size`. Any law makes the fillet variable, which
+    /// rolls over and has no setback stations yet. Chamfers have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub laws: Vec<FilletLaw>,
+}
+
+impl BlendFeature {
+    /// The setback stations a keep-neighbours policy holds; none otherwise.
+    pub fn stations(&self) -> &[FilletSetback] {
+        match &self.overflow {
+            Some(FilletOverflow::KeepNeighbours(stations)) => stations,
+            _ => &[],
+        }
+    }
+
+    /// Drops edge `index`, with the setback stations and radius law on it. The rest keep
+    /// naming the same edges.
+    pub fn remove_edge(&mut self, index: usize) {
+        if index >= self.edges.len() {
+            return;
+        }
+        self.edges.remove(index);
+        if let Some(overflow) = &mut self.overflow {
+            overflow.edge_removed(index);
+        }
+        FilletLaw::edge_removed(&mut self.laws, index);
+    }
+}
+
+/// How the radius runs along one of a variable fillet's edges.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FilletLaw {
+    /// Index in the fillet's edge list.
+    pub edge: u32,
+    /// The face that edge runs into at the end the law starts from, as for a
+    /// [`FilletSetback`].
+    pub from: FaceRef,
+    /// The radius along the edge from that end.
+    pub radius: RadiusLaw,
+}
+
+impl FilletLaw {
+    /// Follows the removal of edge `index` from a fillet's list: its law goes with it, and
+    /// later laws keep naming the same edges.
+    pub fn edge_removed(laws: &mut Vec<FilletLaw>, index: usize) {
+        laws.retain(|l| l.edge as usize != index);
+        for l in laws.iter_mut().filter(|l| l.edge as usize > index) {
+            l.edge -= 1;
+        }
+    }
 }
 
 /// What a fillet does when its rolling ball reaches a neighbouring face (Catallax

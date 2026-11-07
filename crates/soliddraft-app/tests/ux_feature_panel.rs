@@ -427,6 +427,7 @@ fn a_fillet_that_keeps_its_neighbours_opens_with_its_stations_and_can_roll_over(
                 edges: vec![edge],
                 size: 4.0,
                 overflow: Some(keep),
+                laws: Vec::new(),
             }),
             name: None,
             position: None,
@@ -489,6 +490,86 @@ fn a_fillet_that_keeps_its_neighbours_opens_with_its_stations_and_can_roll_over(
             soliddraft_app::document::FeatureKind::Fillet(f) => {
                 assert_eq!(f.overflow, Some(FilletOverflow::RollOver), "the choice is stored")
             }
+            other => panic!("still a fillet: {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn a_variable_fillet_opens_with_its_laws_and_can_go_constant() {
+    use soliddraft_kernel_api::RadiusLaw;
+    use soliddraft_model::FilletLaw;
+    // As with keep-neighbours, a variable fillet arrives in a saved part; the model stores it.
+    let plate = ribbon::plate();
+    let (edge, end) = back_edge_and_end(&plate);
+    let laws = vec![FilletLaw { edge: 0, from: end.clone(), radius: RadiusLaw::Linear { start: 2.0, end: 6.0 } }];
+    let mut model =
+        soliddraft_model::Document::from_bytes(&plate.model().to_bytes().unwrap(), plate.kernel().clone()).unwrap();
+    let id = model
+        .execute(soliddraft_model::Command::AddFeature {
+            kind: soliddraft_model::FeatureKind::Fillet(soliddraft_model::BlendFeature {
+                edges: vec![edge],
+                size: 4.0,
+                overflow: None,
+                laws,
+            }),
+            name: None,
+            position: None,
+            via_assistant: false,
+        })
+        .unwrap()
+        .created
+        .unwrap()
+        .0 as u64;
+    let mut case = Case::new("feature-panel/fillet-variable");
+    let mut app = launch(Document::from_model(model), STANDARD);
+    case.run(&mut app, |case, app| {
+        rebuilt(app);
+        match &app.state().state.doc.feature(id).expect("the fillet").status {
+            soliddraft_app::document::FeatureStatus::Error(why) => {
+                assert!(why.to_lowercase().contains("coming soon"), "the fillet is refused as coming soon: {why}")
+            }
+            other => panic!("the fillet is refused, not {other:?}"),
+        }
+
+        // Opened for editing, the form shows Variable and lists the law with its start end.
+        open(app, AppAction::EditFeature(id));
+        let chosen = |app: &App, label: &str| {
+            app.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+        };
+        assert!(chosen(app, "Variable") && !chosen(app, "Constant"), "the form shows the stored radius kind");
+        let listed_law = format!("R2 to R6 mm from {}", end.label);
+        let listed = app
+            .query_all(By::new().predicate(|n| [n.label(), n.value()].into_iter().flatten().any(|t| t == listed_law)))
+            .count();
+        assert!(listed >= 1, "the law is listed as {listed_law:?}");
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "No preview · 1 edge", "Catallax cannot preview it yet");
+        pointer_to_chrome(app);
+        case.frame(app, "variable");
+
+        // Constant builds: choosing it drops the law, previews R4 and commits.
+        let constant = app.get_by_label("Constant").rect();
+        ribbon::click_at(app, constant.center());
+        settle(app);
+        pointer_to_chrome(app);
+        assert!(chosen(app, "Constant"), "Constant is chosen");
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "R 4 mm · 1 edge", "the constant fillet previews");
+        case.frame(app, "constant");
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let doc = &app.state().state.doc;
+        let status = &doc.feature(id).expect("the fillet").status;
+        assert!(
+            matches!(
+                status,
+                soliddraft_app::document::FeatureStatus::Ok | soliddraft_app::document::FeatureStatus::Pending
+            ),
+            "the fillet builds: {status:?}"
+        );
+        match &doc.feature(id).expect("the fillet").kind {
+            soliddraft_app::document::FeatureKind::Fillet(f) => assert!(f.laws.is_empty(), "the laws are gone"),
             other => panic!("still a fillet: {other:?}"),
         }
     });

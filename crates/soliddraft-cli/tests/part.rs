@@ -41,7 +41,7 @@ fn save_block(name: &str, with_fillet: bool) -> (PathBuf, Document) {
     let t = doc.kernel().topology(doc.body().unwrap()).unwrap();
     let edges = t.edges.iter().filter(|e| e.midpoint.z > 10.0 - 1e-6).map(|e| doc.edge_ref(e.id).unwrap()).collect();
     if with_fillet {
-        add(&mut doc, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None }));
+        add(&mut doc, FeatureKind::Fillet(BlendFeature { edges, size: 2.0, overflow: None, laws: Vec::new() }));
     }
     let path = std::env::temp_dir().join(format!("soliddraft-cli-{}-{name}.dwprt", std::process::id()));
     doc.save(&path).unwrap();

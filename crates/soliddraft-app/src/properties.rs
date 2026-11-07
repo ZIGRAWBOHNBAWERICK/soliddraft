@@ -611,8 +611,8 @@ impl FilletSoon {
     fn tip(self) -> &'static str {
         match self {
             FilletSoon::VariableRadius => {
-                "a start and end radius for each edge, varying linearly. Waits for Catallax variable-radius \
-                 fillets."
+                "a start and end radius for each edge, varying linearly from the end you pick. Waits for \
+                 Catallax to build variable-radius fillets."
             }
             FilletSoon::Setbacks => {
                 "the stations where the fillet stops short of an edge's end, for Keep neighbours. Waits for \
@@ -1020,14 +1020,39 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     let refused = &mut editor.feedback.size;
                     match &mut editor.params {
                         EditorParams::Fillet(f) => {
-                            segmented_gated(
+                            // A part saved with radius laws opens on Variable; Constant drops them.
+                            let variable = !f.laws.is_empty();
+                            let choice = segmented_gated(
                                 ui,
                                 "fillet_radius_kind",
                                 &["Constant", "Variable"],
-                                0,
+                                variable as usize,
                                 &[(1, FilletSoon::VariableRadius.tip())],
                             );
-                            size_field(ui, "Radius", &mut f.radius, refused)
+                            if choice == Some(0) {
+                                f.laws.clear();
+                            }
+                            size_field(ui, "Radius", &mut f.radius, refused);
+                            if !f.laws.is_empty() {
+                                for law in &f.laws {
+                                    let soliddraft_kernel_api::RadiusLaw::Linear { start, end } = law.radius;
+                                    let edge = if f.edges.len() > 1 {
+                                        format!("Edge {}: ", law.edge + 1)
+                                    } else {
+                                        String::new()
+                                    };
+                                    let text = format!(
+                                        "{edge}R{} to R{} mm from {}",
+                                        fmt_mm(start),
+                                        fmt_mm(end),
+                                        law.from.label
+                                    );
+                                    picked_chip(ui, Icon::Axis, &text, false);
+                                }
+                                if f.laws.len() < f.edges.len() {
+                                    hint(ui, "Edges without a law keep the radius above.");
+                                }
+                            }
                         }
                         EditorParams::Chamfer(c) => size_field(ui, "Distance", &mut c.distance, refused),
                         _ => {}

@@ -353,6 +353,9 @@ pub struct FilletParams {
     /// The overflow policy; absent rolls over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overflow: Option<model::FilletOverflow>,
+    /// Variable-radius laws, at most one per edge; an edge without one keeps `radius`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub laws: Vec<model::FilletLaw>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -553,11 +556,13 @@ impl FeatureKind {
                 edges: p.edges.clone(),
                 size: p.radius,
                 overflow: p.overflow.clone(),
+                laws: p.laws.clone(),
             }),
             FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(model::BlendFeature {
                 edges: p.edges.clone(),
                 size: p.distance,
                 overflow: None,
+                laws: Vec::new(),
             }),
             FeatureKind::Revolve(r) => model::FeatureKind::Revolve(r.clone()),
             FeatureKind::Sweep(s) => model::FeatureKind::Sweep(s.clone()),
@@ -641,6 +646,7 @@ impl FeatureKind {
                 edges: b.edges.clone(),
                 radius: b.size,
                 overflow: b.overflow.clone(),
+                laws: b.laws.clone(),
             }),
             model::FeatureKind::Chamfer(b) => {
                 FeatureKind::Chamfer(ChamferParams { edges: b.edges.clone(), distance: b.size })
@@ -695,8 +701,9 @@ impl EntityRef {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RepairItem {
     /// Index into the feature's references: 0 for a sketch plane, the edge's
-    /// position for a fillet or chamfer, and for a fillet's setback station the
-    /// number of edges plus its position.
+    /// position for a fillet or chamfer, for a fillet's setback station the number of
+    /// edges plus its position, and for a radius law the number of edges and stations
+    /// plus its position.
     pub index: usize,
     pub kind: RefKind,
     pub label: String,
@@ -2377,11 +2384,18 @@ impl Document {
                     (model::FeatureKind::Fillet(b) | model::FeatureKind::Chamfer(b), EntityRef::Edge(edge)) => {
                         *b.edges.get_mut(index).ok_or("no such reference")? = edge;
                     }
+                    // A fillet's end faces follow its edges: setback stations, then radius laws.
                     (model::FeatureKind::Fillet(b), EntityRef::Face(face)) if index >= b.edges.len() => {
-                        let Some(model::FilletOverflow::KeepNeighbours(stations)) = &mut b.overflow else {
-                            return Err("no such reference".into());
-                        };
-                        stations.get_mut(index - b.edges.len()).ok_or("no such reference")?.at = face;
+                        let station = index - b.edges.len();
+                        let stations = b.stations().len();
+                        if station < stations {
+                            let Some(model::FilletOverflow::KeepNeighbours(list)) = &mut b.overflow else {
+                                unreachable!("a fillet with stations keeps its neighbours")
+                            };
+                            list[station].at = face;
+                        } else {
+                            b.laws.get_mut(station - stations).ok_or("no such reference")?.from = face;
+                        }
                     }
                     (model::FeatureKind::Hole(h), EntityRef::Face(face)) if index == 0 => h.face = face,
                     (model::FeatureKind::Mirror(m), EntityRef::Face(face)) if index == 0 => {
@@ -2985,6 +2999,7 @@ impl Document {
         radius: f64,
         chamfer: bool,
         overflow: Option<&model::FilletOverflow>,
+        laws: &[model::FilletLaw],
         before: Option<BodyId>,
     ) -> Result<Preview, String> {
         let base = before.ok_or("nothing to round yet")?;
@@ -3000,6 +3015,10 @@ impl Document {
         let tag = OpTag::new("preview");
         let r = match overflow {
             _ if chamfer => k.chamfer(&tag, base, &edges, radius),
+            _ if !laws.is_empty() => {
+                let laws = self.model.resolve_variable(laws, &edges, radius, base)?;
+                k.fillet_variable(&tag, base, &laws)
+            }
             None => k.fillet(&tag, base, &edges, radius),
             Some(model::FilletOverflow::RollOver) => {
                 k.fillet_overflow(&tag, base, &edges, radius, &soliddraft_kernel_api::FilletOverflow::RollOver)
@@ -3612,6 +3631,10 @@ fn view_status(
                             };
                             (b.edges.len() + index as usize, RefKind::Face, label)
                         }
+                        (model::ReferenceSlot::Law { index }, model::FeatureKind::Fillet(b)) => {
+                            let label = b.laws.get(index as usize).map(|l| l.from.label.clone()).unwrap_or_default();
+                            (b.edges.len() + b.stations().len() + index as usize, RefKind::Face, label)
+                        }
                         (model::ReferenceSlot::Face { index }, model::FeatureKind::Shell(s)) => {
                             let faces = s.open_faces.picked();
                             let label = faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
@@ -3662,9 +3685,12 @@ fn view_status(
                             | model::ReferenceSlot::Limit,
                             _,
                         ) => (0, RefKind::Face, String::new()),
-                        (model::ReferenceSlot::Face { index } | model::ReferenceSlot::Setback { index }, _) => {
-                            (index as usize, RefKind::Face, String::new())
-                        }
+                        (
+                            model::ReferenceSlot::Face { index }
+                            | model::ReferenceSlot::Setback { index }
+                            | model::ReferenceSlot::Law { index },
+                            _,
+                        ) => (index as usize, RefKind::Face, String::new()),
                         (model::ReferenceSlot::Edge { index }, _) => (index as usize, RefKind::Edge, String::new()),
                     };
                     RepairItem { index, kind, label: if label.is_empty() { r.message.clone() } else { label } }
@@ -3967,7 +3993,9 @@ mod tests {
         let r = d.edge_ref(inside.id).unwrap();
         assert!(r.label.contains("Boss-Extrude2"), "{}", r.label);
         let fillet = d
-            .apply(Command::AddFillet { params: FilletParams { edges: vec![r], radius: 4.0, overflow: None } })
+            .apply(Command::AddFillet {
+                params: FilletParams { edges: vec![r], radius: 4.0, overflow: None, laws: Vec::new() },
+            })
             .unwrap()
             .unwrap();
         let built = |d: &Document| {
@@ -4009,6 +4037,24 @@ mod tests {
     }
     #[test]
     fn a_setback_station_that_names_no_end_is_repaired_by_picking_an_end_face() {
+        end_face_repair(|at| {
+            let station = model::FilletSetback { edge: 0, at: at.clone(), setback: 5.0 };
+            (Some(model::FilletOverflow::KeepNeighbours(vec![station])), Vec::new())
+        });
+    }
+
+    #[test]
+    fn a_radius_law_that_names_no_end_is_repaired_by_picking_an_end_face() {
+        end_face_repair(|from| {
+            let radius = soliddraft_kernel_api::RadiusLaw::Linear { start: 1.0, end: 3.0 };
+            (None, vec![model::FilletLaw { edge: 0, from: from.clone(), radius }])
+        });
+    }
+
+    /// A fillet on one edge whose single end-face reference, made by `ends`, names a face
+    /// along the edge instead of at an end: it asks for repair after its edge, refuses a
+    /// wrong pick, and an end face places it so the fillet reaches Catallax.
+    fn end_face_repair(ends: impl Fn(&FaceRef) -> (Option<model::FilletOverflow>, Vec<model::FilletLaw>)) {
         let mut d = doc();
         d.apply(Command::AddExtrude {
             params: ExtrudeParams {
@@ -4032,46 +4078,43 @@ mod tests {
         };
         let edge_ref = d.edge_ref(edge.id).unwrap();
         let (end, along) = (facing(soliddraft_kernel_api::Vec3::X), facing(soliddraft_kernel_api::Vec3::Y));
-        let station = |at: &FaceRef| {
-            Some(model::FilletOverflow::KeepNeighbours(vec![model::FilletSetback {
-                edge: 0,
-                at: at.clone(),
-                setback: 5.0,
-            }]))
-        };
         let mut m = model::Document::from_bytes(&d.model.to_bytes().unwrap(), d.kernel().clone()).unwrap();
+        let (overflow, laws) = ends(&along);
         let kind = model::FeatureKind::Fillet(model::BlendFeature {
             edges: vec![edge_ref.clone()],
             size: 2.0,
-            overflow: station(&along),
+            overflow,
+            laws,
         });
         let fillet =
             m.execute(model::Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
         let fillet = fillet.created.unwrap().0 as u64;
         let mut d = Document::from_model(m);
 
-        // The back face runs along the edge, so the station asks for an end face. Its item
+        // The back face runs along the edge, so the reference asks for an end face. Its item
         // comes after the fillet's one edge and shows the face it named.
         let FeatureStatus::NeedsRepair(items) = d.feature(fillet).unwrap().status.clone() else {
             panic!("{:?}", d.feature(fillet).unwrap().status)
         };
         assert_eq!(items, vec![RepairItem { index: 1, kind: RefKind::Face, label: along.label.clone() }]);
 
-        // An edge is the wrong kind for a station, and a pick past the stations names nothing.
+        // An edge is the wrong kind for an end, and a pick past the references names nothing.
         let wrong = d.apply(Command::Repair { id: fillet, index: 1, replacement: EntityRef::Edge(edge_ref.clone()) });
         assert!(wrong.is_err(), "{wrong:?}");
         let past = d.apply(Command::Repair { id: fillet, index: 2, replacement: EntityRef::Face(end.clone()) });
         assert!(past.is_err(), "{past:?}");
 
-        // The end face places the station, and the fillet waits on Catallax instead.
+        // The end face places the reference, and the fillet waits on Catallax instead.
         let _ = d.apply(Command::Repair { id: fillet, index: 1, replacement: EntityRef::Face(end.clone()) });
         match &d.model.feature(model_id(fillet)).unwrap().kind {
-            model::FeatureKind::Fillet(b) => assert_eq!(b.overflow, station(&end), "the station names the end face"),
+            model::FeatureKind::Fillet(b) => {
+                assert_eq!((b.overflow.clone(), b.laws.clone()), ends(&end), "the reference names the end face")
+            }
             other => panic!("{other:?}"),
         }
         match &d.feature(fillet).unwrap().status {
             FeatureStatus::Error(why) => assert!(why.to_lowercase().contains("coming soon"), "{why}"),
-            other => panic!("the repaired station reaches Catallax: {other:?}"),
+            other => panic!("the repaired reference reaches Catallax: {other:?}"),
         }
     }
 }

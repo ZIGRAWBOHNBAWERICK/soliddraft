@@ -45,19 +45,33 @@ what is inside everywhere farther than the bound from either surface. Three rule
   point was found. Two parts that touch, overlap by less than the margin or stand apart by
   less than it all land here, and the result says which of those it cannot tell apart.
 
-The meshes' distance is kept as two numbers. The nearest pair of mesh points found bounds it
-from above. A lower bound comes only from a search that reaches the true closest points of
-every triangle pair that could be nearest: two triangles are nearest at a corner of one over
-the other, between two edges, or where an edge crosses the other. Two edges within 45
-degrees of parallel are nearest at an end of one, or where a point of one lies alongside
-the other, at its distance from the other's line. Their ends alone only bound them from
-above: two long edges crossing a hair apart are nearest in their middles. A clearance is
-met only when the lower bound less the margin is more than the clearance.
+The meshes' distance is kept as two numbers, a proven lower bound and a proven upper bound.
+The search reaches every triangle pair that could be nearest, and each pair's distance is
+itself an enclosure: two triangles are nearest at a corner of one over the other's face, at
+a corner against an edge, between two edges' inner points, or zero apart where an edge
+passes through the other. Which of these holds is a sign, never a rounded guess, and each
+candidate is a square of a signed quantity over a positive one, so it stays accurate near
+zero. A clearance is met only when the lower bound less the margin is more than the
+clearance.
 
-Every margin also carries a binary64 allowance of 1e-9 of the largest coordinate placed,
-reported as `rounding_mm`. Placing a point, a distance and a containment ray each lose a few
-units in the last place, about 1e-16 of the coordinate, so the allowance has seven orders of
-magnitude in hand.
+No distance or containment test trusts a rounded number. Each is computed first in binary64
+with a running bound on the error of every operation. That decides nearly every sign and
+bounds nearly every distance to a few units in the last place. A sign the bound leaves open,
+or a distance enclosure wider than a thousandth of the rounding allowance, is computed again
+in exact arithmetic: mesh coordinates are binary floats, so they are exact rationals, and
+every quantity the tests form from them is a polynomial or a ratio of two. Two cases need
+care in binary64 and are handled without that fallback where possible. A long thin
+triangle's corners are far apart, so where a point projects onto it is decided by signs, not
+by solving for barycentric weights. Two edges a hair off parallel have no well-conditioned
+nearest points on their lines, so their lower bound is the distance from the part of one
+alongside the other to the other's line. A containment ray's crossings are exact orientation
+signs: a ray through an edge, a corner or a triangle's plane is a graze, and the next
+direction is tried.
+
+Every margin also carries an allowance of 1e-9 of the largest coordinate placed, reported as
+`rounding_mm`, for placing each mesh in the root's frame in binary64. Turning and moving a
+point loses a few units in the last place, about 1e-16 of the coordinate, so the allowance
+has seven orders of magnitude in hand.
 
 A pair whose meshes' boxes are farther apart than the margin is clear from the boxes alone
 and is not measured further; its distance has a lower bound only. The witness search tries

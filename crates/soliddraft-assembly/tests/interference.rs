@@ -288,6 +288,34 @@ fn long_parts_a_hair_off_parallel_never_prove_a_clearance_they_miss() {
 }
 
 #[test]
+fn a_long_skinny_part_never_proves_a_clearance_it_misses() {
+    // A is a 30 m bar 0.0625 mm wide and 1 mm deep, its top at z = 0 from x = 0 to 30000.
+    // B is a 1 mm block 0.0078125 mm wide whose underside is 0.015625 mm over A's top
+    // around x = 21000. Every coordinate is exact in f32, and the gap fails 0.018 mm.
+    let dir = folder("skinny");
+    let (a_file, b_file, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("skinny.dwasm"));
+    new_block(&a_file, 30_000.0, 0.0625, 1.0);
+    new_block(&b_file, 1.0, 0.0078125, 0.984375);
+    let mut doc = AssemblyDocument::new_with("Skinny", options());
+    doc.save(Some(&root)).unwrap();
+    doc.insert(reference(&root, &a_file), Placement::translation(DVec3::new(15_000.0, 0.03125, -1.0))).unwrap();
+    doc.insert(reference(&root, &b_file), Placement::translation(DVec3::new(21_000.5, 0.01953125, 0.015625))).unwrap();
+    doc.finish_loading();
+    let mut check = |clearance| {
+        doc.check_interference(&CheckRequest { clearance: Some(clearance), chord: 0.001, ..CheckRequest::default() })
+            .unwrap()
+    };
+    // The margin is twice 0.001 mm plus rounding, about 0.00205 mm: 0.015625 mm plus that is
+    // under 0.018 mm, so the pair is proven below it.
+    let report = check(0.018);
+    assert_eq!((report.below, report.met), (Some(1), Some(0)), "{report:#?}");
+    let r = &report.results[0];
+    assert!(r.distance.lo <= 0.015625 && r.distance.hi.is_some_and(|hi| hi >= 0.015625), "{r:#?}");
+    // And 0.015625 mm less the margin is over 0.012 mm.
+    assert_eq!(check(0.012).met, Some(1));
+}
+
+#[test]
 fn a_patterned_part_with_one_copy_inside_another_part_is_never_clear() {
     let dir = folder("pieces");
     let (a_file, b_file, root) = (dir.join("cubes.dwprt"), dir.join("b.dwprt"), dir.join("pieces.dwasm"));

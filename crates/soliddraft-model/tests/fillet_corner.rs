@@ -145,7 +145,11 @@ fn corner_choices_a_fillet_cannot_have_are_refused() {
 
     // Cliff is what a variable fillet builds, so naming it is valid; the laws still wait.
     let f = add(&mut d, fillet(&edges, law(), Some(FilletCorner::Cliff))).unwrap();
-    assert!(matches!(d.status(f), Some(FeatureStatus::Failed(why)) if why.contains("coming soon")), "{:?}", d.status(f));
+    assert!(
+        matches!(d.status(f), Some(FeatureStatus::Failed(why)) if why.contains("coming soon")),
+        "{:?}",
+        d.status(f)
+    );
 
     // A form previews through the same call, so it refuses what a saved file could hold.
     let body = d.body().unwrap();

@@ -691,9 +691,13 @@ impl Document {
             }
         }
         let tag = OpTag::new(format!("{}.blend", f.id));
-        let result = match placed(current, blend(self.kernel.as_ref(), &tag, b, chamfer, &ids, body, &t, &names)) {
-            Ok(result) => result,
-            Err(built) => return *built,
+        let result = if chamfer {
+            self.kernel.chamfer(&tag, body, &ids, b.size)
+        } else {
+            match placed(current, fillet(self.kernel.as_ref(), &tag, b, &ids, body, &t, &names)) {
+                Ok(result) => result,
+                Err(built) => return *built,
+            }
         };
         let result = match result {
             Ok(r) => r,
@@ -1276,24 +1280,20 @@ fn edge_end(
     }]))
 }
 
-/// The kernel call that rounds `body`, given the fillet's or chamfer's edges resolved
-/// there. A fillet with radius laws is variable; otherwise its overflow and corner
-/// choices pick the call, and a fillet with neither is the kernel's plain fillet. The
-/// outer error is the definition's; the inner one is the kernel's.
-pub(crate) fn blend(
+/// The kernel call that rounds `body`, given the fillet's edges resolved there. A fillet
+/// with radius laws is variable; otherwise its overflow and corner choices pick the
+/// call, and a fillet with neither is the kernel's plain fillet. The outer error is the
+/// definition's; the inner one is the kernel's.
+pub(crate) fn fillet(
     kernel: &dyn Kernel,
     tag: &OpTag,
     b: &BlendFeature,
-    chamfer: bool,
     ids: &[EdgeId],
     body: BodyId,
     topology: &soliddraft_kernel_api::Topology,
     names: &reference::NameMap,
 ) -> Result<KernelResult<OpResult>, EndError> {
     let view = View { topology };
-    if chamfer {
-        return Ok(kernel.chamfer(tag, body, ids, b.size));
-    }
     if !b.laws.is_empty() {
         if matches!(b.overflow, Some(FilletOverflow::KeepNeighbours(_))) {
             return Err(EndError::Failed(

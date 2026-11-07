@@ -1,0 +1,141 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "fillet-corner",
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              20,
+              15,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12000,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude1 \u00b7 Edge 7",
+          "Boss-Extrude1 \u00b7 Edge 6"
+        ],
+        "radius": 2
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11940.678448,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "two fillets meeting at a corner whose third edge stays sharp build"
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 2,
+        "corner": "smooth"
+      },
+      "refused": "coming soon",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11940.678448,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "a smooth corner is refused until Catallax builds it"
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 2,
+        "corner": "cliff"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11940.678448,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "a cliff corner builds what the default builds"
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude1 \u00b7 Edge 5"
+        ],
+        "radius": 2,
+        "corner": "smooth",
+        "radius_laws": [
+          {
+            "edge": "Boss-Extrude1 \u00b7 Edge 5",
+            "from": "Boss-Extrude1 \u00b7 Side of line 2",
+            "radius": {
+              "kind": "linear",
+              "start": 1,
+              "end": 3
+            }
+          }
+        ]
+      },
+      "refused": "closes its corners as cliffs",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11940.678448,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "a variable fillet has no smooth corners"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/corner",
+          "equals": "cliff"
+        },
+        {
+          "pointer": "/result/radius",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/picked_edges/1",
+          "equals": "Boss-Extrude1 \u00b7 End cap \u2229 Boss-Extrude1 \u00b7 Side of line 2"
+        }
+      ],
+      "label": "the refusals left the part as it was, with the cliff choice stored"
+    }
+  ]
+}

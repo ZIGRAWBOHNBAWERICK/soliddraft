@@ -497,6 +497,86 @@ fn a_fillet_that_keeps_its_neighbours_opens_with_its_stations_and_can_roll_over(
 }
 
 #[test]
+fn a_smooth_corner_fillet_opens_ticked_and_can_go_back_to_cliff() {
+    use soliddraft_model::FilletCorner;
+    // As with keep-neighbours, a fillet with smooth corners arrives in a saved part.
+    let plate = ribbon::plate();
+    let (edge, _) = back_edge_and_end(&plate);
+    let mut model =
+        soliddraft_model::Document::from_bytes(&plate.model().to_bytes().unwrap(), plate.kernel().clone()).unwrap();
+    let id = model
+        .execute(soliddraft_model::Command::AddFeature {
+            kind: soliddraft_model::FeatureKind::Fillet(soliddraft_model::BlendFeature {
+                edges: vec![edge],
+                size: 4.0,
+                overflow: None,
+                laws: Vec::new(),
+                corner: Some(FilletCorner::Smooth),
+            }),
+            name: None,
+            position: None,
+            via_assistant: false,
+        })
+        .unwrap()
+        .created
+        .unwrap()
+        .0 as u64;
+    let mut case = Case::new("feature-panel/fillet-corner");
+    let mut app = launch(Document::from_model(model), STANDARD);
+    case.run(&mut app, |case, app| {
+        rebuilt(app);
+        match &app.state().state.doc.feature(id).expect("the fillet").status {
+            soliddraft_app::document::FeatureStatus::Error(why) => {
+                assert!(why.to_lowercase().contains("coming soon"), "the fillet is refused as coming soon: {why}")
+            }
+            other => panic!("the fillet is refused, not {other:?}"),
+        }
+
+        // Opened for editing, Round corners is ticked and live, so it can be unticked.
+        open(app, AppAction::EditFeature(id));
+        let ticked = |app: &App| {
+            app.get_by_label("Round corners").accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+        };
+        assert!(ticked(app), "the form shows the stored corner choice");
+        assert!(!app.get_by_label("Round corners").accesskit_node().is_disabled(), "it can be unticked");
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "No preview · 1 edge", "Catallax cannot preview it yet");
+        app.get_by_label("Round corners").scroll_to_me();
+        app.run_steps(24);
+        pointer_to_chrome(app);
+        case.frame(app, "smooth");
+
+        // Unticking it closes the corners as cliffs, which builds.
+        let tick = app.get_by_label("Round corners").rect();
+        ribbon::click_at(app, tick.center());
+        settle(app);
+        pointer_to_chrome(app);
+        assert!(!ticked(app), "Round corners is unticked");
+        assert!(app.get_by_label("Round corners").accesskit_node().is_disabled(), "and waits again");
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "R 4 mm · 1 edge", "the cliff fillet previews");
+        case.frame(app, "cliff");
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let doc = &app.state().state.doc;
+        let status = &doc.feature(id).expect("the fillet").status;
+        assert!(
+            matches!(
+                status,
+                soliddraft_app::document::FeatureStatus::Ok | soliddraft_app::document::FeatureStatus::Pending
+            ),
+            "the fillet builds: {status:?}"
+        );
+        match &doc.feature(id).expect("the fillet").kind {
+            soliddraft_app::document::FeatureKind::Fillet(f) => {
+                assert_eq!(f.corner, Some(FilletCorner::Cliff), "the choice is stored")
+            }
+            other => panic!("still a fillet: {other:?}"),
+        }
+    });
+}
+
+#[test]
 fn a_variable_fillet_opens_with_its_laws_and_can_go_constant() {
     use soliddraft_kernel_api::RadiusLaw;
     use soliddraft_model::FilletLaw;

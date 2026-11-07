@@ -462,8 +462,11 @@ impl Document {
         edges: &[EdgeId],
         body: BodyId,
     ) -> Result<OpResult, String> {
+        if chamfer {
+            return self.kernel.chamfer(tag, body, edges, b.size).map_err(|e| e.to_string());
+        }
         let t = self.view_of(body).map_err(|e| e.to_string())?;
-        crate::evaluate::blend(self.kernel.as_ref(), tag, b, chamfer, edges, body, &t, &self.name_map())
+        crate::evaluate::fillet(self.kernel.as_ref(), tag, b, edges, body, &t, &self.name_map())
             .map_err(|e| e.message())?
             .map_err(|e| e.to_string())
     }

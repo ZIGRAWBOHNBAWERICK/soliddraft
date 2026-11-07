@@ -269,6 +269,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; the refused steps keep the R2 volume"
     },
     {
+      "id": "fillet-corner",
+      "file": "ci/scenarios/fillet-corner.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP sketch, extrude, fillet and edit_fillet with corner -> real document rebuild -> pinned Catallax constant fillet; smooth corners refused before construction",
+      "supported_limits": "One R2 fillet on two top edges of a 40 x 30 x 10 block that meet at a corner whose vertical edge stays sharp, at 12000 - 70 (4 - pi) + (40/3 - 4 pi) mm3: the two edge prisms less their overlap in the corner cube. An explicit cliff corner builds the same volume; a smooth corner is stored by the model but refused as coming soon until Catallax constructs it (Catallax recipe section 4.5.1, schema in Catallax PR 332); a variable fillet with a smooth corner is refused before any kernel call",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; the refused steps keep the R2 volume"
+    },
+    {
       "id": "graded-fields",
       "file": "ci/scenarios/graded-fields.json",
       "acceptance": true,

@@ -26,6 +26,9 @@ fn button(app: &mut App, label: &str) {
 }
 
 fn field(app: &mut App, label: &str, text: &str) {
+    // The property page scrolls; bring the field into view as a user would.
+    app.get_by_label(label).scroll_to_me();
+    app.run_steps(24);
     app.get_by_label(label).click();
     app.run_steps(2);
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);

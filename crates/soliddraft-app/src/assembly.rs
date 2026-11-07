@@ -496,7 +496,12 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         }
         AssemblyAction::Update => match update(state) {
             Ok(report) => state.note(format!("Updated {} sources", report.updated()), NoteKind::Ok),
-            Err(report) => state.note(report.refusal.unwrap_or_default(), NoteKind::Error),
+            Err(report) => {
+                if let Some(r) = report.mate_refusal.clone().filter(|r| !r.mates.is_empty() || !r.free.is_empty()) {
+                    state.assembly.mate.conflict = Some(r);
+                }
+                state.note(report.refusal.unwrap_or_default(), NoteKind::Error)
+            }
         },
         AssemblyAction::Mate(action) => crate::mates::apply(state, action),
         AssemblyAction::Form(action) => crate::subassembly::apply(state, action),

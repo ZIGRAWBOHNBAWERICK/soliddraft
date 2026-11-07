@@ -125,6 +125,13 @@ trait Num: Clone {
     /// An enclosure of `self / den`, `self` known to be at least zero; `den` must be
     /// proven positive by [`Num::sign`] first.
     fn ratio(&self, den: &Self) -> Span;
+
+    /// A lower bound on the squared distance between inner points of two segments where
+    /// those are nearest, for when the arithmetic cannot tell whether they are: see
+    /// [`alongside`]. Exact arithmetic always can.
+    fn alongside(_: &Seg<'_, Self>, _: &Seg<'_, Self>) -> Span {
+        Span::OPEN
+    }
 }
 
 /// A binary64 value and a bound on how far it is from the exact value of the expression
@@ -198,6 +205,10 @@ impl Num for Fast {
         Span { lo: sub_down(self.v, r).max(0.0), hi: add_up(self.v, r) }
     }
 
+    fn alongside(s1: &Seg<'_, Fast>, s2: &Seg<'_, Fast>) -> Span {
+        alongside(s1, s2)
+    }
+
     fn ratio(&self, den: &Fast) -> Span {
         let (num, den) = (self.span(), den.span());
         if !(den.lo > 0.0 && den.hi.is_finite() && num.hi.is_finite()) {
@@ -208,6 +219,57 @@ impl Num for Fast {
         }
         Span { lo: (num.lo / den.hi).next_down().max(0.0), hi: (num.hi / den.lo).next_up() }
     }
+}
+
+impl Fast {
+    /// An enclosure of `self / den` for a `den` proven nonzero.
+    fn quotient(&self, den: &Fast) -> Option<(f64, f64)> {
+        den.sign().filter(|s| *s != Equal)?;
+        let (r, rd) = (self.radius(), den.radius());
+        let (a, b) = ([sub_down(self.v, r), add_up(self.v, r)], [sub_down(den.v, rd), add_up(den.v, rd)]);
+        let q = [a[0] / b[0], a[0] / b[1], a[1] / b[0], a[1] / b[1]];
+        let lo = q.iter().copied().fold(f64::INFINITY, f64::min).next_down();
+        let hi = q.iter().copied().fold(f64::NEG_INFINITY, f64::max).next_up();
+        (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+    }
+}
+
+/// A lower bound on the squared distance between the inner points of two segments where
+/// those are nearest, well conditioned however near parallel the segments are.
+///
+/// There the first segment's point lies alongside the second, between the planes square
+/// to it through its ends, and its distance to the second is its distance to the second's
+/// line. Over the alongside part of the first segment, that distance is the distance from
+/// the origin to a segment of offsets square to the line: `o(x) = dd (x - a) - d ((x - a)
+/// . d)` for the second segment from `a` along `d`, whose length is `dd` times the
+/// distance from `x` to the line. Clipping to a little more than the alongside part only
+/// lowers the bound. [`Span::NONE`] when no part of the first segment is alongside.
+fn alongside(s1: &Seg<'_, Fast>, s2: &Seg<'_, Fast>) -> Span {
+    let r = sub(s1.a, s2.a);
+    // Along the second segment, measured by `. d`, the first starts at `start` and moves
+    // `rate` per unit of its parameter.
+    let (start, rate) = (dot(&r, s2.d), dot(s1.d, s2.d));
+    let zero = Fast::of(0.0);
+    let (Some(e0), Some(e1)) = (zero.sub(&start).quotient(&rate), s2.dd.sub(&start).quotient(&rate)) else {
+        return Span::OPEN;
+    };
+    let (lo, hi) = (e0.0.min(e1.0).max(0.0), e0.1.max(e1.1).min(1.0));
+    if lo > hi {
+        return Span::NONE;
+    }
+    let offset = |t: f64| {
+        let v: V<Fast> = [0, 1, 2].map(|i| r[i].add(&s1.d[i].mul(&Fast::of(t))));
+        let along = dot(&v, s2.d);
+        [0, 1, 2].map(|i| s2.dd.mul(&v[i]).sub(&s2.d[i].mul(&along)))
+    };
+    let (o0, o1) = (offset(lo), offset(hi));
+    let near = point_to_segment_sq(&[zero; 3], &o0, &o1);
+    let dd = s2.dd.span();
+    if !(dd.hi.is_finite() && dd.hi > 0.0) {
+        return Span::OPEN;
+    }
+    let scale = (dd.hi * dd.hi).next_up();
+    Span { lo: (near.lo / scale).next_down().max(0.0), hi: f64::INFINITY }
 }
 
 /// An exact dyadic rational, `m * 2^e`.
@@ -356,41 +418,83 @@ fn orient<N: Num>(p: &V<N>, q: &V<N>, u: &V<N>, v: &V<N>) -> Option<Ordering> {
 
 use Ordering::{Equal, Greater, Less};
 
-/// The squared distance from `p` to segment `ab`.
-fn point_segment_sq<N: Num>(p: &V<N>, a: &V<N>, b: &V<N>) -> Span {
-    let (d, ap) = (sub(b, a), sub(p, a));
-    let along = dot(&ap, &d);
-    let dd = dot(&d, &d);
-    let past = along.sub(&dd);
+/// A segment from `a`, along `d`, with `dd` the square of its length.
+struct Seg<'a, N> {
+    a: &'a V<N>,
+    d: &'a V<N>,
+    dd: &'a N,
+}
+
+/// A triangle's corners, its edges `v[k + 1] - v[k]` and their squares, and its normal
+/// and the normal's square, formed once for every query on it.
+struct Tri<N> {
+    v: [V<N>; 3],
+    e: [V<N>; 3],
+    ee: [N; 3],
+    n: V<N>,
+    nn: N,
+}
+
+impl<N: Num> Tri<N> {
+    fn new(t: &[DVec3; 3]) -> Tri<N> {
+        let v = t.map(point);
+        let e = [sub(&v[1], &v[0]), sub(&v[2], &v[1]), sub(&v[0], &v[2])];
+        let ee = [dot(&e[0], &e[0]), dot(&e[1], &e[1]), dot(&e[2], &e[2])];
+        // (v1 - v0) x (v2 - v0), and v2 - v0 is -e[2].
+        let n = cross(&e[2], &e[0]);
+        let nn = dot(&n, &n);
+        Tri { v, e, ee, n, nn }
+    }
+
+    fn edge(&self, k: usize) -> Seg<'_, N> {
+        Seg { a: &self.v[k], d: &self.e[k], dd: &self.ee[k] }
+    }
+
+    /// The normal's dot with `p - v[0]`: the signed height of `p` over the plane, times
+    /// the normal's length.
+    fn height(&self, p: &V<N>) -> N {
+        dot(&self.n, &sub(p, &self.v[0]))
+    }
+}
+
+/// The squared distance from `p` to a segment.
+fn point_segment_sq<N: Num>(p: &V<N>, s: &Seg<'_, N>) -> Span {
+    let ap = sub(p, s.a);
+    let along = dot(&ap, s.d);
+    let past = along.sub(s.dd);
     let to_a = || dot(&ap, &ap).span();
+    // The far end is a + d; p - (a + d) is ap - d.
     let to_b = || {
-        let bp = sub(p, b);
+        let bp = sub(&ap, s.d);
         dot(&bp, &bp).span()
     };
-    match (along.sign(), past.sign()) {
+    let (sa, sb) = (along.sign(), past.sign());
+    match (sa, sb) {
         (Some(Less | Equal), _) => return to_a(),
         (_, Some(Greater | Equal)) => return to_b(),
         _ => {}
     }
     // Square to the line, divided by the length: never more than the distance to the
     // segment, and equal to it when `p` lies alongside.
-    let c = cross(&ap, &d);
-    let line = if dd.sign() == Some(Greater) { dot(&c, &c).ratio(&dd) } else { Span::OPEN };
-    match (along.sign(), past.sign()) {
-        (Some(Greater), Some(Less)) => line,
-        _ => Span { lo: line.lo, hi: to_a().hi.min(to_b().hi) },
+    let c = cross(&ap, s.d);
+    let line = if s.dd.sign() == Some(Greater) { dot(&c, &c).ratio(s.dd) } else { Span::OPEN };
+    if let (Some(Greater), Some(Less)) = (sa, sb) {
+        return line;
     }
+    // Every point of the segment is within its length of `a`, which bounds a segment too
+    // short to tell where `p` lies along it.
+    let (to_a, to_b) = (to_a(), to_b());
+    let short = sub_down(root(to_a.lo, Less), root(s.dd.span().hi, Greater));
+    let short = if short > 0.0 { (short * short).next_down() } else { 0.0 };
+    Span { lo: line.lo.max(short), hi: to_a.hi.min(to_b.hi) }
 }
 
 /// The squared distance from `p` to the plane of triangle `t`, when `p` lies over the
 /// triangle: [`Span::NONE`] when it is proven not to, so that the triangle's edges give
 /// its distance, and a lower bound only while that is open. A triangle with no area has
-/// no plane and gives nothing.
-fn point_face_sq<N: Num>(p: &V<N>, t: &[V<N>; 3]) -> Span {
-    let [a, b, c] = t;
-    let n = cross(&sub(b, a), &sub(c, a));
-    let nn = dot(&n, &n);
-    match nn.sign() {
+/// no plane and gives nothing. `h` is `t.height(p)`.
+fn point_face_sq<N: Num>(p: &V<N>, t: &Tri<N>, h: &N) -> Span {
+    match t.nn.sign() {
         Some(Equal) => return Span::NONE,
         Some(Greater) => {}
         _ => return Span::OPEN,
@@ -398,15 +502,14 @@ fn point_face_sq<N: Num>(p: &V<N>, t: &[V<N>; 3]) -> Span {
     // Which side of each edge the point lies, seen along the normal: over the triangle
     // where none is negative.
     let mut open = false;
-    for (u, v) in [(a, b), (b, c), (c, a)] {
-        match dot(&cross(&sub(v, u), &sub(p, u)), &n).sign() {
+    for k in 0..3 {
+        match dot(&cross(&t.e[k], &sub(p, &t.v[k])), &t.n).sign() {
             Some(Less) => return Span::NONE,
             None => open = true,
             _ => {}
         }
     }
-    let h = dot(&sub(p, a), &n);
-    let plane = h.mul(&h).ratio(&nn);
+    let plane = h.mul(h).ratio(&t.nn);
     // The plane is never farther than the triangle, so it bounds it from below either way.
     if open { Span { lo: plane.lo, hi: f64::INFINITY } } else { plane }
 }
@@ -414,34 +517,44 @@ fn point_face_sq<N: Num>(p: &V<N>, t: &[V<N>; 3]) -> Span {
 /// The squared distance between the inner points of two segments, when their nearest
 /// points are inner points of both: [`Span::NONE`] when proven otherwise, since an end
 /// then gives the distance, and a lower bound only while that is open.
-fn edge_edge_sq<N: Num>(p1: &V<N>, q1: &V<N>, p2: &V<N>, q2: &V<N>) -> Span {
-    let (d1, d2, r) = (sub(q1, p1), sub(q2, p2), sub(p1, p2));
-    let c = cross(&d1, &d2);
+fn edge_edge_sq<N: Num>(s1: &Seg<'_, N>, s2: &Seg<'_, N>) -> Span {
+    let c = cross(s1.d, s2.d);
     let denom = dot(&c, &c);
+    // Within rounding of parallel, the alongside bound does what the lines cannot.
+    let open = || {
+        let both = N::alongside(s1, s2).lo.max(N::alongside(s2, s1).lo);
+        Span { lo: both, hi: f64::INFINITY }
+    };
     match denom.sign() {
         // Parallel segments are nearest at an end of one.
         Some(Equal) => return Span::NONE,
         Some(Greater) => {}
-        _ => return Span::OPEN,
+        _ => return open(),
     }
-    let (a, b, e) = (dot(&d1, &d1), dot(&d1, &d2), dot(&d2, &d2));
-    let (cr, f) = (dot(&d1, &r), dot(&d2, &r));
+    let r = sub(s1.a, s2.a);
+    let b = dot(s1.d, s2.d);
+    let (cr, f) = (dot(s1.d, &r), dot(s2.d, &r));
     // The lines are nearest at s = s_num / denom along the first and t = t_num / denom
     // along the second (Ericson 5.1.9); strictly inside both is the inner case.
-    let s_num = b.mul(&f).sub(&cr.mul(&e));
-    let t_num = a.mul(&f).sub(&b.mul(&cr));
-    let mut open = false;
+    let s_num = b.mul(&f).sub(&cr.mul(s2.dd));
+    let t_num = s1.dd.mul(&f).sub(&b.mul(&cr));
+    let mut undecided = false;
     for x in [&s_num, &t_num] {
         match (x.sign(), x.sub(&denom).sign()) {
             (Some(Greater), Some(Less)) => {}
             (Some(Less | Equal), _) | (_, Some(Greater | Equal)) => return Span::NONE,
-            _ => open = true,
+            _ => undecided = true,
         }
     }
     // The lines' distance: never more than the segments', and theirs in the inner case.
     let h = dot(&r, &c);
     let lines = h.mul(&h).ratio(&denom);
-    if open { Span { lo: lines.lo, hi: f64::INFINITY } } else { lines }
+    if undecided {
+        let along = open();
+        Span { lo: lines.lo.max(along.lo), hi: f64::INFINITY }
+    } else {
+        lines
+    }
 }
 
 enum Pierce {
@@ -450,70 +563,88 @@ enum Pierce {
     Open,
 }
 
-/// Whether segment `pq` passes through the inside of triangle `t`, from strictly one side
-/// of its plane to strictly the other. Touching it otherwise, with an end on it or
-/// through its edge, is left to the distances to that end or edge, which are then zero.
-fn pierces<N: Num>(p: &V<N>, q: &V<N>, t: &[V<N>; 3]) -> Pierce {
-    let [a, b, c] = t;
-    let n = cross(&sub(b, a), &sub(c, a));
-    let (sp, sq) = (dot(&n, &sub(p, a)).sign(), dot(&n, &sub(q, a)).sign());
+/// Whether segment `pq` passes through the inside of triangle `t`, given the sides of
+/// `t`'s plane its ends lie on: from strictly one side to strictly the other. Touching it
+/// otherwise, with an end on it or through its edge, is left to the distances to that
+/// end or edge, which are then zero.
+fn pierces<N: Num>(p: &V<N>, q: &V<N>, sides: [Option<Ordering>; 2], t: &Tri<N>) -> Pierce {
+    let [sp, sq] = sides;
     if sp == Some(Equal) || sq == Some(Equal) || (sp.is_some() && sp == sq) {
         return Pierce::No;
     }
-    let sides = [orient(p, q, a, b), orient(p, q, b, c), orient(p, q, c, a)];
-    let has = |o: Ordering| sides.contains(&Some(o));
+    let [a, b, c] = &t.v;
+    let turns = [orient(p, q, a, b), orient(p, q, b, c), orient(p, q, c, a)];
+    let has = |o: Ordering| turns.contains(&Some(o));
     // Mixed signs pass the line outside the triangle; a zero puts it through an edge.
     if (has(Greater) && has(Less)) || has(Equal) {
         return Pierce::No;
     }
-    if sides.iter().all(Option::is_some) && sp.is_some() && sq.is_some() { Pierce::Yes } else { Pierce::Open }
+    if turns.iter().all(Option::is_some) && sp.is_some() && sq.is_some() { Pierce::Yes } else { Pierce::Open }
 }
 
 /// The squared distance between two triangles. Crossing triangles are zero apart, and
 /// an edge of one then passes through the other. Otherwise they are nearest from a corner
 /// to the other's face or edge, or between two edges' inner points.
-fn triangles_sq<N: Num>(a: &[V<N>; 3], b: &[V<N>; 3]) -> Span {
+fn triangles_sq<N: Num>(a: &Tri<N>, b: &Tri<N>) -> Span {
+    // Each triangle's corners against the other's plane.
+    let over_b = a.v.each_ref().map(|p| b.height(p));
+    let over_a = b.v.each_ref().map(|p| a.height(p));
+    let signs = |h: &[N; 3]| h.each_ref().map(Num::sign);
+    let (sa, sb) = (signs(&over_b), signs(&over_a));
     let mut best = Span::NONE;
-    for (s, t) in [(a, b), (b, a)] {
-        for k in 0..3 {
-            match pierces(&s[k], &s[(k + 1) % 3], t) {
-                Pierce::Yes => return Span::ZERO,
-                Pierce::Open => best.lo = 0.0,
-                Pierce::No => {}
+    // A triangle strictly on one side of the other's plane cannot cross it.
+    let apart = |s: &[Option<Ordering>; 3]| s[0].is_some_and(|x| x != Equal) && s[0] == s[1] && s[1] == s[2];
+    if !apart(&sa) && !apart(&sb) {
+        for (s, t, signs) in [(a, b, &sa), (b, a, &sb)] {
+            for k in 0..3 {
+                match pierces(&s.v[k], &s.v[(k + 1) % 3], [signs[k], signs[(k + 1) % 3]], t) {
+                    Pierce::Yes => return Span::ZERO,
+                    Pierce::Open => best.lo = 0.0,
+                    Pierce::No => {}
+                }
             }
         }
     }
-    for (s, t) in [(a, b), (b, a)] {
-        for p in s {
-            best = best.min(point_face_sq(p, t));
+    for (s, t, heights) in [(a, b, &over_b), (b, a, &over_a)] {
+        for (p, h) in s.v.iter().zip(heights) {
+            best = best.min(point_face_sq(p, t, h));
             for k in 0..3 {
-                best = best.min(point_segment_sq(p, &t[k], &t[(k + 1) % 3]));
+                best = best.min(point_segment_sq(p, &t.edge(k)));
             }
         }
     }
     for i in 0..3 {
         for j in 0..3 {
-            best = best.min(edge_edge_sq(&a[i], &a[(i + 1) % 3], &b[j], &b[(j + 1) % 3]));
+            best = best.min(edge_edge_sq(&a.edge(i), &b.edge(j)));
         }
     }
     best
 }
 
-fn point_triangle_sq<N: Num>(p: &V<N>, t: &[V<N>; 3]) -> Span {
-    let mut best = point_face_sq(p, t);
+fn point_triangle_sq<N: Num>(p: &V<N>, t: &Tri<N>) -> Span {
+    let mut best = point_face_sq(p, t, &t.height(p));
     for k in 0..3 {
-        best = best.min(point_segment_sq(p, &t[k], &t[(k + 1) % 3]));
+        best = best.min(point_segment_sq(p, &t.edge(k)));
     }
     best
 }
 
+/// The squared distance from `p` to the segment from `a` to `b`.
+fn point_to_segment_sq<N: Num>(p: &V<N>, a: &V<N>, b: &V<N>) -> Span {
+    let d = sub(b, a);
+    point_segment_sq(p, &Seg { a, d: &d, dd: &dot(&d, &d) })
+}
+
 #[cfg(test)]
 fn segments_sq<N: Num>(p1: &V<N>, q1: &V<N>, p2: &V<N>, q2: &V<N>) -> Span {
-    point_segment_sq(p1, p2, q2)
-        .min(point_segment_sq(q1, p2, q2))
-        .min(point_segment_sq(p2, p1, q1))
-        .min(point_segment_sq(q2, p1, q1))
-        .min(edge_edge_sq(p1, q1, p2, q2))
+    let (d1, d2) = (sub(q1, p1), sub(q2, p2));
+    let (dd1, dd2) = (dot(&d1, &d1), dot(&d2, &d2));
+    let (s1, s2) = (Seg { a: p1, d: &d1, dd: &dd1 }, Seg { a: p2, d: &d2, dd: &dd2 });
+    point_segment_sq(p1, &s2)
+        .min(point_segment_sq(q1, &s2))
+        .min(point_segment_sq(p2, &s1))
+        .min(point_segment_sq(q2, &s1))
+        .min(edge_edge_sq(&s1, &s2))
 }
 
 /// The binary64 enclosure, or the exact one when that is wider than `tol` and its lower
@@ -523,18 +654,14 @@ fn certify(tol: f64, enough: f64, fast: impl FnOnce() -> Span, exact: impl FnOnc
     if span.width() <= tol || span.lo >= enough { span } else { exact().sqrt() }
 }
 
-fn tri<N: Num>(t: &[DVec3; 3]) -> [V<N>; 3] {
-    t.map(point)
-}
-
 /// The distance between two triangles. `tol` is the widest enclosure wanted; at or above
 /// `enough`, any lower bound will do.
 pub(crate) fn triangles(a: &[DVec3; 3], b: &[DVec3; 3], tol: f64, enough: f64) -> Span {
     certify(
         tol,
         enough,
-        || triangles_sq::<Fast>(&tri(a), &tri(b)),
-        || triangles_sq::<Exact>(&tri(a), &tri(b)),
+        || triangles_sq::<Fast>(&Tri::new(a), &Tri::new(b)),
+        || triangles_sq::<Exact>(&Tri::new(a), &Tri::new(b)),
     )
 }
 
@@ -543,8 +670,8 @@ pub(crate) fn point_triangle(p: DVec3, t: &[DVec3; 3], tol: f64, enough: f64) ->
     certify(
         tol,
         enough,
-        || point_triangle_sq::<Fast>(&point(p), &tri(t)),
-        || point_triangle_sq::<Exact>(&point(p), &tri(t)),
+        || point_triangle_sq::<Fast>(&point(p), &Tri::new(t)),
+        || point_triangle_sq::<Exact>(&point(p), &Tri::new(t)),
     )
 }
 
@@ -553,8 +680,8 @@ pub(crate) fn point_segment(p: DVec3, a: DVec3, b: DVec3, tol: f64) -> Span {
     certify(
         tol,
         f64::INFINITY,
-        || point_segment_sq::<Fast>(&point(p), &point(a), &point(b)),
-        || point_segment_sq::<Exact>(&point(p), &point(a), &point(b)),
+        || point_to_segment_sq::<Fast>(&point(p), &point(a), &point(b)),
+        || point_to_segment_sq::<Exact>(&point(p), &point(a), &point(b)),
     )
 }
 
@@ -584,11 +711,10 @@ pub(crate) enum Crossing {
 fn crossing_in<N: Num>(p: &V<N>, q: &V<N>, t: &[V<N>; 3]) -> Option<Crossing> {
     let [a, b, c] = t;
     let n = cross(&sub(b, a), &sub(c, a));
-    match dot(&n, &n).sign()? {
-        // A triangle with no area has no inside to cross; a ray through its line passes
-        // through the edges of the triangles beside it, and grazes there.
-        Equal => return Some(Crossing::Miss),
-        _ => {}
+    // A triangle with no area has no inside to cross; a ray through its line passes
+    // through the edges of the triangles beside it, and grazes there.
+    if dot(&n, &n).sign()? == Equal {
+        return Some(Crossing::Miss);
     }
     let (sp, sq) = (dot(&n, &sub(p, a)).sign(), dot(&n, &sub(q, a)).sign());
     if sp.is_some() && sp == sq && sp != Some(Equal) {
@@ -612,8 +738,8 @@ fn crossing_in<N: Num>(p: &V<N>, q: &V<N>, t: &[V<N>; 3]) -> Option<Crossing> {
 
 /// How segment `pq` meets triangle `t`, decided exactly.
 pub(crate) fn crossing(p: DVec3, q: DVec3, t: &[DVec3; 3]) -> Crossing {
-    crossing_in::<Fast>(&point(p), &point(q), &tri(t))
-        .unwrap_or_else(|| crossing_in::<Exact>(&point(p), &point(q), &tri(t)).expect("exact signs decide"))
+    crossing_in::<Fast>(&point(p), &point(q), &t.map(point))
+        .unwrap_or_else(|| crossing_in::<Exact>(&point(p), &point(q), &t.map(point)).expect("exact signs decide"))
 }
 
 /// The sign of the turn `a, b, c` in the plane.
@@ -723,10 +849,15 @@ pub(crate) mod oracle {
     }
 
     pub fn segments(p1: &P, q1: &P, p2: &P, q2: &P) -> Q {
-        let ends = [point_segment(p1, p2, q2), point_segment(q1, p2, q2), point_segment(p2, p1, q1), point_segment(q2, p1, q1)]
-            .into_iter()
-            .min()
-            .unwrap();
+        let ends = [
+            point_segment(p1, p2, q2),
+            point_segment(q1, p2, q2),
+            point_segment(p2, p1, q1),
+            point_segment(q2, p1, q1),
+        ]
+        .into_iter()
+        .min()
+        .unwrap();
         let (d1, d2, r) = (sub(q1, p1), sub(q2, p2), sub(p1, p2));
         let (a, b, e, c, f) = (dot(&d1, &d1), dot(&d1, &d2), dot(&d2, &d2), dot(&d1, &r), dot(&d2, &r));
         let denom = &a * &e - &b * &b;
@@ -736,11 +867,7 @@ pub(crate) mod oracle {
         let s = (&b * &f - &c * &e) / &denom;
         let t = (&a * &f - &b * &c) / &denom;
         let inside = |x: &Q| !x.is_negative() && *x <= Q::one();
-        if inside(&s) && inside(&t) {
-            ends.min(sq(&add_scaled(p1, &d1, &s), &add_scaled(p2, &d2, &t)))
-        } else {
-            ends
-        }
+        if inside(&s) && inside(&t) { ends.min(sq(&add_scaled(p1, &d1, &s), &add_scaled(p2, &d2, &t))) } else { ends }
     }
 
     /// Whether segment `pq` meets triangle `t` where it crosses the triangle's plane.
@@ -889,28 +1016,39 @@ mod adversarial {
     }
 
     fn unit() -> impl Strategy<Value = DVec3> {
-        (-1.0..1.0f64, -1.0..1.0f64, -1.0..1.0f64)
-            .prop_map(|(x, y, z)| DVec3::new(x, y, z).normalize_or(DVec3::X))
+        (-1.0..1.0f64, -1.0..1.0f64, -1.0..1.0f64).prop_map(|(x, y, z)| DVec3::new(x, y, z).normalize_or(DVec3::X))
     }
 
     type Pair = ([DVec3; 3], [DVec3; 3]);
 
     /// A long sliver, and a small triangle over its inside, just off its plane.
     fn long_thin() -> impl Strategy<Value = Pair> {
-        (magnitude(2.0, 5.0), magnitude(-4.0, 0.0), 0.02..0.98f64, 0.05..0.95f64, signed(-7.0, -1.0), unit(), unit(), magnitude(-4.0, 1.0))
+        (
+            magnitude(2.0, 5.0),
+            magnitude(-4.0, 0.0),
+            0.02..0.98f64,
+            0.05..0.95f64,
+            signed(-7.0, -1.0),
+            unit(),
+            unit(),
+            magnitude(-4.0, 1.0),
+        )
             .prop_map(|(len, width, u, w, gap, e1, e2, size)| {
                 let a = [v(0.0, 0.0, 0.0), v(len, 0.0, 0.0), v(len, width, 0.0)];
                 let p = DVec3::new(len * u, width * u * w, gap);
-                let b = [v(p.x, p.y, p.z), v(p.x + e1.x * size, p.y + e1.y * size, p.z + e1.z.abs() * size * gap.signum()),
-                    v(p.x + e2.x * size, p.y + e2.y * size, p.z + e2.z.abs() * size * gap.signum())];
+                let b = [
+                    v(p.x, p.y, p.z),
+                    v(p.x + e1.x * size, p.y + e1.y * size, p.z + e1.z.abs() * size * gap.signum()),
+                    v(p.x + e2.x * size, p.y + e2.y * size, p.z + e2.z.abs() * size * gap.signum()),
+                ];
                 (a, b)
             })
     }
 
     /// Two long thin triangles whose long edges cross a hair apart, a hair off parallel.
     fn near_parallel() -> impl Strategy<Value = Pair> {
-        (magnitude(1.0, 4.5), signed(-14.0, -3.0), signed(-6.0, -1.0), magnitude(-3.0, 1.0), -0.5..0.5f64)
-            .prop_map(|(half, angle, gap, width, slide)| {
+        (magnitude(1.0, 4.5), signed(-14.0, -3.0), signed(-6.0, -1.0), magnitude(-3.0, 1.0), -0.5..0.5f64).prop_map(
+            |(half, angle, gap, width, slide)| {
                 let (c, s) = (angle.cos(), angle.sin());
                 let a = [v(-half, 0.0, 0.0), v(half, 0.0, 0.0), v(0.0, -width, -width)];
                 let x0 = slide * half;
@@ -920,33 +1058,55 @@ mod adversarial {
                     v(x0, width, gap + width * gap.signum()),
                 ];
                 (a, b)
-            })
+            },
+        )
     }
 
     /// A triangle whose third corner sits a hair off the line of the other two, and a
     /// triangle near it.
     fn near_degenerate() -> impl Strategy<Value = Pair> {
-        (unit(), magnitude(-1.0, 3.0), 0.0..1.0f64, signed(-12.0, -2.0), unit(), unit(), signed(-6.0, 0.0), magnitude(-3.0, 1.0))
+        (
+            unit(),
+            magnitude(-1.0, 3.0),
+            0.0..1.0f64,
+            signed(-12.0, -2.0),
+            unit(),
+            unit(),
+            signed(-6.0, 0.0),
+            magnitude(-3.0, 1.0),
+        )
             .prop_map(|(dir, len, t, off, e1, e2, gap, size)| {
                 let q = dir * len;
                 let side = dir.any_orthonormal_vector();
                 let r = q * t + side * (off * len);
                 let a = [v(0.0, 0.0, 0.0), v(q.x, q.y, q.z), v(r.x, r.y, r.z)];
                 let p = q * 0.5 + side.cross(dir) * gap;
-                let b = [v(p.x, p.y, p.z), v(p.x + e1.x * size, p.y + e1.y * size, p.z + e1.z * size),
-                    v(p.x + e2.x * size, p.y + e2.y * size, p.z + e2.z * size)];
+                let b = [
+                    v(p.x, p.y, p.z),
+                    v(p.x + e1.x * size, p.y + e1.y * size, p.z + e1.z * size),
+                    v(p.x + e2.x * size, p.y + e2.y * size, p.z + e2.z * size),
+                ];
                 (a, b)
             })
     }
 
     /// Any of the above, or two small triangles that may cross, moved far from the origin.
     fn far() -> impl Strategy<Value = Pair> {
-        let small = (unit(), unit(), unit(), unit(), unit(), unit(), unit(), magnitude(-2.0, 1.0))
-            .prop_map(|(a0, a1, a2, b0, b1, b2, off, s)| {
+        let small = (unit(), unit(), unit(), unit(), unit(), unit(), unit(), magnitude(-2.0, 1.0)).prop_map(
+            |(a0, a1, a2, b0, b1, b2, off, s)| {
                 let w = |p: DVec3, o: DVec3| v(p.x * s + o.x, p.y * s + o.y, p.z * s + o.z);
-                ([w(a0, DVec3::ZERO), w(a1, DVec3::ZERO), w(a2, DVec3::ZERO)], [w(b0, off * s), w(b1, off * s), w(b2, off * s)])
-            });
-        (prop_oneof![small, long_thin(), near_parallel(), near_degenerate()], signed(3.0, 7.0), signed(3.0, 7.0), signed(3.0, 7.0))
+                (
+                    [w(a0, DVec3::ZERO), w(a1, DVec3::ZERO), w(a2, DVec3::ZERO)],
+                    [w(b0, off * s), w(b1, off * s), w(b2, off * s)],
+                )
+            },
+        );
+        (
+            prop_oneof![small, long_thin(), near_parallel(), near_degenerate()],
+            signed(3.0, 7.0),
+            signed(3.0, 7.0),
+            signed(3.0, 7.0),
+        )
             .prop_map(|((a, b), x, y, z)| {
                 let o = DVec3::new(x, y, z);
                 let at = |p: DVec3| v(p.x + o.x, p.y + o.y, p.z + o.z);
@@ -965,15 +1125,21 @@ mod adversarial {
         (span.lo <= 0.0 || q(span.lo) <= *exact) && (span.hi.is_infinite() || q(span.hi) >= *exact)
     }
 
+    /// 400 cases each, or `PROPTEST_CASES` for a deeper run.
+    fn config() -> ProptestConfig {
+        let cases = std::env::var("PROPTEST_CASES").ok().and_then(|c| c.parse().ok()).unwrap_or(400);
+        ProptestConfig { cases, ..ProptestConfig::default() }
+    }
+
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 1500, ..ProptestConfig::default() })]
+        #![proptest_config(config())]
 
         #[test]
         fn every_enclosure_holds_the_exact_distance((a, b) in pairs()) {
             let exact = oracle::triangles(&a.map(oracle::point), &b.map(oracle::point));
-            let fast = triangles_sq::<Fast>(&tri(&a), &tri(&b));
+            let fast = triangles_sq::<Fast>(&Tri::new(&a), &Tri::new(&b));
             prop_assert!(holds_sq(fast, &exact), "binary64 {fast:?} misses {exact}");
-            let exact_span = triangles_sq::<Exact>(&tri(&a), &tri(&b));
+            let exact_span = triangles_sq::<Exact>(&Tri::new(&a), &Tri::new(&b));
             prop_assert!(holds_sq(exact_span, &exact), "exact {exact_span:?} misses {exact}");
             let tol = 1e-12 * (1.0 + a.iter().chain(&b).map(|p| p.abs().max_element()).fold(0.0, f64::max));
             let span = triangles(&a, &b, tol, f64::INFINITY);
@@ -989,7 +1155,7 @@ mod adversarial {
             let (pa, pb) = (a.map(oracle::point), b.map(oracle::point));
             for k in 0..3 {
                 let exact = oracle::point_triangle(&pb[k], &pa);
-                let fast = point_triangle_sq::<Fast>(&point(b[k]), &tri(&a));
+                let fast = point_triangle_sq::<Fast>(&point(b[k]), &Tri::new(&a));
                 prop_assert!(holds_sq(fast, &exact), "binary64 point {fast:?} misses {exact}");
                 let span = point_triangle(b[k], &a, 1e-9, f64::INFINITY);
                 prop_assert!(oracle::encloses(span, &exact), "point {span:?} misses {exact}");

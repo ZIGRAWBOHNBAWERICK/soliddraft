@@ -525,6 +525,12 @@ impl AssemblyDocument {
             at.apply(DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])))
         };
         let tris: Vec<[DVec3; 3]> = mesh.indices.as_chunks::<3>().0.iter().map(|t| t.map(place)).collect();
+        if !tris.iter().flatten().all(|p| p.is_finite()) {
+            return Err((
+                CheckCode::UnsupportedBody,
+                format!("{}: a placed mesh point is not a finite number", entry.label),
+            ));
+        }
         let solid = Solid::new(tris, mesh.triangle_faces.clone(), mesh.chord);
         Ok((solid, mesh, source))
     }
@@ -930,7 +936,13 @@ mod tests {
             block([0.0, 0.0, -1.0], [30_000.0, 0.625, 0.0], 0.001),
             block([21_000.0, 0.15625, 0.015625], [21_001.0, 0.234375, 1.0], 0.001),
         );
-        for (name, (a, b)) in [("long", (&a, &b)), ("short", (&short.0, &short.1)), ("wide", (&wide.0, &wide.1))] {
+        // Moved 100 m off the origin in x and y: every coordinate is still exact in f32.
+        let moved = (
+            block([100_000.0, 100_000.0, -1.0], [130_000.0, 100_000.062_5, 0.0], 0.001),
+            block([121_000.0, 100_000.015_625, 0.015625], [121_001.0, 100_000.023_437_5, 1.0], 0.001),
+        );
+        let cases = [("long", (&a, &b)), ("short", (&short.0, &short.1)), ("wide", (&wide.0, &wide.1))];
+        for (name, (a, b)) in cases.into_iter().chain([("moved", (&moved.0, &moved.1))]) {
             for (x, y) in [(a, b), (b, a)] {
                 let r = compare(x, y, Some(0.018));
                 assert_eq!((r.outcome, r.clearance), (Outcome::Clear, Some(ClearanceOutcome::Below)), "{name}: {r:#?}");

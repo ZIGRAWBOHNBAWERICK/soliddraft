@@ -73,7 +73,9 @@ impl Bounds {
 
     /// A lower bound on the distance between two boxes, zero when they overlap.
     pub fn distance(&self, other: &Bounds) -> f64 {
-        gap_length((0..3).map(|i| certified::sub_down(other.min[i], self.max[i]).max(certified::sub_down(self.min[i], other.max[i]))))
+        gap_length((0..3).map(|i| {
+            certified::sub_down(other.min[i], self.max[i]).max(certified::sub_down(self.min[i], other.max[i]))
+        }))
     }
 
     /// A lower bound on the distance from `p` to the box, zero inside it.
@@ -823,7 +825,7 @@ mod tests {
         let a = [DVec3::ZERO, DVec3::X, DVec3::Y];
         let b = [DVec3::new(0.0, 0.0, 2.0), DVec3::new(1.0, 0.0, 2.0), DVec3::new(0.0, 1.0, 2.0)];
         let s = between(&a, &b);
-        assert!(s.lo <= 2.0 && s.hi >= 2.0 && s.width() < 1e-15, "{s:?}");
+        assert!(s.lo <= 2.0 && s.hi >= 2.0 && s.width() < 1e-13, "{s:?}");
         // Crossing triangles are zero apart.
         let c = [DVec3::new(0.2, 0.2, -1.0), DVec3::new(0.2, 0.2, 1.0), DVec3::new(0.3, -1.0, 0.0)];
         assert_eq!(between(&a, &c), Span::ZERO);

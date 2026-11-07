@@ -1022,3 +1022,38 @@ fn a_locked_pair_turns_as_one() {
         check(&mut r);
     }
 }
+
+/// B's top on A's, C's +x side parallel to B's, and C's +x side at right angles to A's:
+/// B and C turn a quarter about z together. Whichever of the two the solver reaches first,
+/// it finds that turn instead of freezing B's spin, and keeps it through a save, a reopen
+/// and an Update.
+#[test]
+fn a_free_spin_is_solved_jointly() {
+    for b_first in [true, false] {
+        let mut r = rig(&format!("joint-spin-{b_first}"), 10.0);
+        let c =
+            r.doc.insert(reference(&r.root, &r.b_file), Placement::translation(DVec3::new(10.0, 40.0, 30.0))).unwrap();
+        r.doc.finish_loading();
+        let (b, c) = if b_first { (r.b, c) } else { (c, r.b) };
+        r.doc.mate_origin("O", r.a, true, false).unwrap();
+        r.doc.mate_parallel("P", &top(r.a), &top(b), Alignment::Aligned, false).unwrap();
+        r.doc.mate_parallel("Q", &side(b, X), &side(c, X), Alignment::Aligned, false).unwrap();
+        r.doc.mate_perpendicular("R", &side(r.a, X), &side(c, X), false).unwrap();
+        let check = |r: &mut Rig| {
+            let (qb, qc) = (r.placement(b).rotation, r.placement(c).rotation);
+            assert!((qb * DVec3::Z).distance(DVec3::Z) < 1e-12, "{qb}");
+            assert!((qb * DVec3::X).distance(qc * DVec3::X) < 1e-12, "Q holds: {qb} {qc}");
+            assert!((qc * DVec3::X).x.abs() < 1e-12, "R holds: {qc}");
+            assert_ne!(r.doc.solver().state, SolverState::Error);
+        };
+        check(&mut r);
+        reopen(&mut r);
+        check(&mut r);
+        set_height(&r.a_file, 14.0);
+        r.doc.refresh_references(Vec::new());
+        r.doc.finish_loading();
+        let report = r.doc.rebuild();
+        assert!(report.refusal.is_none(), "{report:?}");
+        check(&mut r);
+    }
+}

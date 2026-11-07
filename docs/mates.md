@@ -134,21 +134,23 @@ hashed. An assembly with neither writes neither key, so old files keep their has
 
 Plane normals are exact signed axes, which splits a solve in two:
 
-1. **Rotations.** Parts joined by Locks turn as one rigid group, so a group's rotation is
-   solved once, from the ties all its members have. An Origin mate with axes fixes a
-   rotation. Otherwise each mate between planes relates two normals: equal or opposite for
-   a Distance, Coincident, Parallel or Width, at right angles for a Perpendicular. Rotations
-   spread out from what is fixed. Two perpendicular normals fix a rotation exactly. One
-   leaves its spin alone and turns as little as it can. When that turn does not keep a right
-   angle, the part takes the quarter-turn rotation nearest its authored one that keeps every
-   relation on it, first in a fixed order among equals. So an authored pose that already
-   holds is kept, and one that does not moves by the smallest quarter turn.
+1. **Rotations.** Parts joined by Locks turn as one rigid group, so the unknowns are the
+   groups' turns. An Origin mate with axes fixes a group's turn. Each mate between planes
+   relates two normals: equal or opposite for a Distance, Coincident, Parallel or Width, at
+   right angles for a Perpendicular. Every turn the exact solver can prove takes the normals
+   it reads onto axes, so each group's candidates are the 24 quarter-turn rotations. One
+   unlocked part held along a single axis may also keep its own spin about that axis. All
+   groups are solved together, as a search over those candidates. Each group tries its
+   candidates nearest its authored turn first, in a fixed order among equals, so an
+   authored pose that already holds is kept and one that does not moves by the smallest
+   turn that works. The answer does not depend on the order the mates were added. When no
+   assignment exists, the refusal names a smallest set of mates that still cannot hold
+   together. The search refuses as `too_large` past 200,000 steps.
 2. **Translations.** Each distance, width and lock becomes an exact difference of one world
    coordinate, so each axis is a graph of differences. A lock adds one on each axis. Walking
    the graph places everything connected to the origin, or to the group's first component.
    An edge that disagrees by more than 1e-9 mm is an over-constrained set of mates, and
-   every mate on that cycle is named. A turn no part can take names every mate between the
-   two parts.
+   every mate on that cycle is named.
 
 An unconstrained coordinate keeps its authored value. A group with no Origin mate keeps its
 first component where it is, because something has to stay put, and it still reports its
@@ -210,7 +212,7 @@ the redo stack. Refusals are JSON: `refused` holds the code, with `message`, `ma
 | `driven_input` | A literal edit of a driven distance |
 | `already_driven` | A second driver, without `replace` |
 | `unit_mismatch`, `value_cycle`, `invalid_value` | The expression cannot be used |
-| `too_large` | More than 128 mated components |
+| `too_large` | More than 128 mated components, or turns that take too long to decide |
 | `invalid` | A request that names nothing usable, such as a distance edit of a mate without one |
 
 ## The Mate panel

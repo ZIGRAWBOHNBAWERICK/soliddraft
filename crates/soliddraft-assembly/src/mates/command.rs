@@ -9,14 +9,15 @@ use num_rational::BigRational;
 use serde::Serialize;
 use soliddraft_document::{ContentHash, DocRef, DocumentId};
 use soliddraft_kernel_api::Certainty;
-use soliddraft_model::{FaceRef, ValueTable};
+use soliddraft_model::ValueTable;
 
 use crate::document::{AssemblyDocument, EditError, key_of};
-use crate::mates::bodies::{Gathered, Problem, Scope};
+use crate::mates::bodies::{End, Gathered, Problem, Rule, Scope};
 use crate::mates::reference::check_endpoint;
-use crate::mates::solver::{self, Body, Constraint, FreeMotion, LocalPlane, SolverState, SolverStatus};
+use crate::mates::solver::{self, Along, Body, Constraint, FreeMotion, LocalPlane, SolverState, SolverStatus};
 use crate::mates::{
-    Alignment, EndpointSelector, FaceEndpoint, Mate, MateEntry, MateId, MateRefusal, PlaneProof, RefusalCode,
+    Alignment, EndpointSelector, FaceEndpoint, Mate, MateEntry, MateId, MateRefusal, PartEndpoint, PlaneProof,
+    RefusalCode, WidthConstraint,
 };
 use crate::path::{ComponentId, OccurrencePath, Step};
 use crate::placement::Placement;
@@ -26,12 +27,38 @@ use crate::store::Freshness;
 /// One change to a mate.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MateEdit {
-    /// A new literal distance.
+    /// A new literal distance, of a Distance or a Width by dimension.
     Distance(String),
     /// A new relation between the normals.
     Alignment(Alignment),
     /// Whether an Origin mate aligns the axes too.
     AlignAxes(bool),
+    /// A Width's new percentage.
+    Percent(f64),
+    /// Whether a Width measures from its second groove face.
+    Flipped(bool),
+}
+
+/// Where a new Width mate puts the tab.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WidthInput {
+    /// Centred in the groove.
+    Centered,
+    /// A literal gap from the first groove face, or the second when `flipped`, to the
+    /// tab face nearest it.
+    Dimension {
+        /// The gap, as a length such as 3 mm.
+        distance: String,
+        /// Measured from the second groove face.
+        flipped: bool,
+    },
+    /// That gap as a percentage of the play.
+    Percent {
+        /// From 0 to 100.
+        percent: f64,
+        /// Measured from the second groove face.
+        flipped: bool,
+    },
 }
 
 /// What a solve found.
@@ -236,34 +263,33 @@ impl AssemblyDocument {
                 Gathered::Origin { mate, body, axes, at } => {
                     constraints.push(Constraint::Origin { mate, body, axes, at })
                 }
-                Gathered::Distance { mate, ends, sign, distance } => {
+                Gathered::Lock { mate, a, b, relative } => {
+                    if solver::cube_of(relative.rotation).is_none() {
+                        return Err(off_quarter_turns(&mate));
+                    }
+                    constraints.push(Constraint::Lock { mate, a, b, relative })
+                }
+                Gathered::Planes { mate, ends, rule } => {
                     let mut planes = Vec::new();
                     for end in &ends {
                         let source = self.rebased(end);
-                        match self.prove(&source, &end.face) {
+                        match self.prove(&source, &end.entity) {
                             Ok(proof) => planes.push((end.body.clone(), local_plane(&mate, &proof)?)),
                             Err(r) if r.code == RefusalCode::DanglingReference => {
-                                let label = &end.face.label;
-                                let feature = end.face.feature;
                                 let at = format!(
-                                    "{}: occurrence {}, {label} of feature {feature}: {}",
-                                    end.source.path, end.body, r.message
+                                    "{}: occurrence {}, {}: {}",
+                                    end.source.path,
+                                    end.body,
+                                    end.entity.describe(),
+                                    r.message
                                 );
                                 dangling.push((mate.clone(), at));
                             }
                             Err(r) => return Err(MateRefusal { mates: vec![mate.clone()], ..r }),
                         }
                     }
-                    if let [(a, plane_a), (b, plane_b)] = &planes[..] {
-                        constraints.push(Constraint::Distance {
-                            mate,
-                            a: a.clone(),
-                            b: b.clone(),
-                            plane_a: plane_a.clone(),
-                            plane_b: plane_b.clone(),
-                            sign,
-                            distance,
-                        });
+                    if planes.len() == ends.len() {
+                        constraints.push(constraint(mate, planes, &rule)?);
                     }
                 }
             }
@@ -294,24 +320,19 @@ impl AssemblyDocument {
 
     fn read_status(&self) -> Result<SolverStatus, String> {
         let problem = self.gather(&Scope::new(&self.assembly, &self.table, &self.store)).map_err(|r| r.to_string())?;
-        let stored = |face: &soliddraft_model::FaceRef| {
-            let normal = face.fingerprint.normal.ok_or("a mate's face has no stored normal")?;
-            let n = [normal.x, normal.y, normal.z].map(|c| c.round() as i8);
-            Ok::<_, String>(LocalPlane { normal: n, offset: num_traits::Zero::zero() })
+        let stored = |end: &End| {
+            let normal = end.entity.stored_normal().ok_or("a mate's face has no stored normal")?;
+            Ok::<_, String>((end.body.clone(), LocalPlane { normal, offset: num_traits::Zero::zero() }))
         };
         let mut constraints = Vec::new();
         for mate in problem.mates {
             constraints.push(match mate {
                 Gathered::Origin { mate, body, axes, at } => Constraint::Origin { mate, body, axes, at },
-                Gathered::Distance { mate, ends: [a, b], sign, .. } => Constraint::Distance {
-                    mate,
-                    plane_a: stored(&a.face)?,
-                    plane_b: stored(&b.face)?,
-                    a: a.body,
-                    b: b.body,
-                    sign,
-                    distance: 0.0,
-                },
+                Gathered::Lock { mate, a, b, relative } => Constraint::Lock { mate, a, b, relative },
+                Gathered::Planes { mate, ends, rule } => {
+                    let planes = ends.iter().map(stored).collect::<Result<Vec<_>, _>>()?;
+                    constraint(mate, planes, &rule).map_err(|r| r.to_string())?
+                }
             });
         }
         let (dof, free) = solver::freedoms(&problem.bodies, &constraints).map_err(|r| r.to_string())?;
@@ -325,13 +346,13 @@ impl AssemblyDocument {
 
     fn endpoint(&mut self, truth: &Assembly, selector: &EndpointSelector) -> Result<FaceEndpoint, MateRefusal> {
         let source = Self::part_source(truth, selector.component)?;
-        let face: FaceRef = self.select(&source, &selector.face)?;
+        let entity = self.select(&source, &selector.face)?;
         let document = source.id.ok_or_else(|| MateRefusal::invalid("the source has no document id"))?;
         Ok(FaceEndpoint {
             path: component_path(selector.component),
             document,
             configuration: source.configuration,
-            face,
+            entity,
         })
     }
 
@@ -366,7 +387,7 @@ impl AssemblyDocument {
             (self.end_of(&scope, a.path.clone(), a, "")?, self.end_of(&scope, b.path.clone(), b, "")?, placements)
         };
         let (ra, rb) = (self.rebased(&ea), self.rebased(&eb));
-        let (pa, pb) = (self.prove(&ra, &a.face)?, self.prove(&rb, &b.face)?);
+        let (pa, pb) = (self.prove(&ra, &a.entity)?, self.prove(&rb, &b.entity)?);
         let gap = signed_gap(&pa, &pb, &placements)?;
         let value = solver::nearest(&gap);
         let (mut lo, mut hi) = (value, value);
@@ -403,17 +424,40 @@ impl AssemblyDocument {
         self.measure(&a, &b)
     }
 
-    /// What each mate between faces measures on the accepted placements, by proof. A
-    /// mate whose proof cannot be had says why; the accepted pose stands.
-    pub fn mate_measurements(&mut self) -> Vec<(MateId, Result<PlaneMeasurement, MateRefusal>)> {
+    /// What each mate between faces measures on the accepted placements, by proof: the
+    /// signed gap for those between parallel planes, and nothing but the proofs for a
+    /// Perpendicular. A mate whose proof cannot be had says why; the accepted pose stands.
+    pub fn mate_measurements(&mut self) -> Vec<(MateId, Result<Option<PlaneMeasurement>, MateRefusal>)> {
         let mates: Vec<Mate> = self.assembly.known_mates().cloned().collect();
         mates
             .iter()
-            .filter_map(|m| {
-                let ([a, b], _) = m.faces()?;
-                Some((m.id(), self.measure(a, b)))
+            .filter(|m| !m.faces().is_empty())
+            .map(|m| {
+                let measured = match m.measured() {
+                    Some([a, b]) => self.measure(a, b).map(Some),
+                    None => self.prove_ends(m).map(|()| None),
+                };
+                (m.id(), measured)
             })
             .collect()
+    }
+
+    /// Proves every face a mate names, on the accepted placements' revisions.
+    fn prove_ends(&mut self, mate: &Mate) -> Result<(), MateRefusal> {
+        let ends = {
+            let scope = Scope::new(&self.assembly, &self.table, &self.store);
+            let mut ends = Vec::new();
+            for e in mate.faces() {
+                check_endpoint(e)?;
+                ends.push(self.end_of(&scope, e.path.clone(), e, mate.name())?);
+            }
+            ends
+        };
+        for end in &ends {
+            let source = self.rebased(end);
+            self.prove(&source, &end.entity)?;
+        }
+        Ok(())
     }
 
     /// Adds an Origin mate on a component. One undo step.
@@ -462,6 +506,107 @@ impl AssemblyDocument {
         self.mate_faces(name, [a, b], alignment, None, strict)
     }
 
+    /// Keeps two faces' planes parallel, their normals as `alignment` says. One undo step.
+    pub fn mate_parallel(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        alignment: Alignment,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_between("Parallel mate", name, [a, b], strict, |id, name, [a, b]| {
+            Ok(Mate::Parallel { id, name, a, b, alignment })
+        })
+    }
+
+    /// Keeps two faces' planes at right angles. One undo step.
+    pub fn mate_perpendicular(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_between("Perpendicular mate", name, [a, b], strict, |id, name, [a, b]| {
+            Ok(Mate::Perpendicular { id, name, a, b })
+        })
+    }
+
+    /// Puts a tab between the two faces of a groove. `alignment` relates `tab[0]`'s normal to
+    /// `groove[0]`'s. One undo step.
+    pub fn mate_width(
+        &mut self,
+        name: &str,
+        groove: [&EndpointSelector; 2],
+        tab: [&EndpointSelector; 2],
+        alignment: Alignment,
+        width: &WidthInput,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Width mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if groove[0].component != groove[1].component || tab[0].component != tab[1].component {
+                return Err(MateRefusal::invalid("a groove's two faces are on one component, and a tab's on one"));
+            }
+            if groove[0].component == tab[0].component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let constraint = match width {
+                WidthInput::Centered => WidthConstraint::Centered,
+                WidthInput::Dimension { distance, flipped } => {
+                    WidthConstraint::Dimension { distance: literal(distance)?, flipped: *flipped }
+                }
+                WidthInput::Percent { percent, flipped } => {
+                    WidthConstraint::Percent { percent: check_percent(*percent)?, flipped: *flipped }
+                }
+            };
+            let groove = [doc.endpoint(truth, groove[0])?, doc.endpoint(truth, groove[1])?];
+            let tab = [doc.endpoint(truth, tab[0])?, doc.endpoint(truth, tab[1])?];
+            if groove[0].entity == groove[1].entity || tab[0].entity == tab[1].entity {
+                return Err(MateRefusal::invalid("a groove and a tab each have two different faces"));
+            }
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Width {
+                id,
+                name: name.into(),
+                groove,
+                tab,
+                alignment,
+                constraint,
+            }));
+            Ok(id)
+        })
+    }
+
+    /// Locks `b` where it is relative to `a`. One undo step. The relative turn must be a
+    /// quarter-turn rotation; anything else is refused, never rounded.
+    pub fn mate_lock(
+        &mut self,
+        name: &str,
+        a: ComponentId,
+        b: ComponentId,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Lock mate", strict, |_, truth| {
+            check_new_name(truth, name)?;
+            if a == b {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let end = |c: ComponentId| -> Result<(PartEndpoint, Placement), MateRefusal> {
+                let source = Self::part_source(truth, c)?;
+                let document = source.id.ok_or_else(|| MateRefusal::invalid("the source has no document id"))?;
+                let placement = truth.component(c).expect("part_source found it").placement;
+                Ok((PartEndpoint { path: component_path(c), document, configuration: source.configuration }, placement))
+            };
+            let ((ea, pa), (eb, pb)) = (end(a)?, end(b)?);
+            let relative = relative_lock(name, &pa, &pb)?;
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Lock { id, name: name.into(), a: ea, b: eb, relative }));
+            Ok(id)
+        })
+    }
+
     /// Adds a mate between two faces: a distance when one is given, else a Coincident.
     fn mate_faces(
         &mut self,
@@ -472,18 +617,32 @@ impl AssemblyDocument {
         strict: bool,
     ) -> Result<MateId, MateRefusal> {
         let label = if distance.is_some() { "Distance mate" } else { "Coincident mate" };
+        let distance = distance.map(literal).transpose()?;
+        self.mate_between(label, name, [a, b], strict, |id, name, [a, b]| {
+            Ok(match distance {
+                Some(distance) => Mate::Distance { id, name, a, b, alignment, distance },
+                None => Mate::Coincident { id, name, a, b, alignment },
+            })
+        })
+    }
+
+    /// Adds the mate `make` builds between two faces of different components.
+    fn mate_between(
+        &mut self,
+        label: &str,
+        name: &str,
+        [a, b]: [&EndpointSelector; 2],
+        strict: bool,
+        make: impl FnOnce(MateId, String, [FaceEndpoint; 2]) -> Result<Mate, MateRefusal>,
+    ) -> Result<MateId, MateRefusal> {
         self.transact(label, strict, |doc, truth| {
             check_new_name(truth, name)?;
             if a.component == b.component {
                 return Err(MateRefusal::invalid("a mate ties two different components"));
             }
-            let distance = distance.map(literal).transpose()?;
             let (a, b) = (doc.endpoint(truth, a)?, doc.endpoint(truth, b)?);
-            let (id, name) = (MateId(truth.take_id()), name.into());
-            truth.mates.push(MateEntry::Known(match distance {
-                Some(distance) => Mate::Distance { id, name, a, b, alignment, distance },
-                None => Mate::Coincident { id, name, a, b, alignment },
-            }));
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(make(id, name.into(), [a, b])?));
             Ok(id)
         })
     }
@@ -492,24 +651,45 @@ impl AssemblyDocument {
     pub fn edit_mates(&mut self, edits: &[(String, MateEdit)]) -> Result<(), MateRefusal> {
         self.transact("Edit mate", false, |_, truth| {
             for (name, edit) in edits {
-                match (mate_named(truth, name)?, edit) {
-                    (Mate::Distance { distance, .. }, MateEdit::Distance(_)) if !distance.references().is_empty() => {
-                        let driver = distance.text().to_owned();
-                        return Err(MateRefusal {
-                            mates: vec![name.clone()],
-                            ..MateRefusal::new(
-                                RefusalCode::DrivenInput,
-                                format!("{name} is driven by {driver}; edit {driver} instead"),
-                            )
-                        });
+                let mate = mate_named(truth, name)?;
+                let kind = mate.kind();
+                match (mate, edit) {
+                    (m, MateEdit::Distance(text)) if m.expression().is_some() => {
+                        let distance = m.expression_mut().expect("checked");
+                        if !distance.references().is_empty() {
+                            let driver = distance.text().to_owned();
+                            return Err(MateRefusal {
+                                mates: vec![name.clone()],
+                                ..MateRefusal::new(
+                                    RefusalCode::DrivenInput,
+                                    format!("{name} is driven by {driver}; edit {driver} instead"),
+                                )
+                            });
+                        }
+                        *distance = literal(text)?;
                     }
-                    (Mate::Distance { distance, .. }, MateEdit::Distance(text)) => *distance = literal(text)?,
-                    (Mate::Distance { alignment, .. } | Mate::Coincident { alignment, .. }, MateEdit::Alignment(a)) => {
-                        *alignment = *a
-                    }
+                    (
+                        Mate::Distance { alignment, .. }
+                        | Mate::Coincident { alignment, .. }
+                        | Mate::Parallel { alignment, .. }
+                        | Mate::Width { alignment, .. },
+                        MateEdit::Alignment(a),
+                    ) => *alignment = *a,
                     (Mate::Origin { align_axes, .. }, MateEdit::AlignAxes(on)) => *align_axes = *on,
-                    (Mate::Coincident { .. }, MateEdit::Distance(_)) => {
-                        return Err(MateRefusal::invalid(format!("{name} is a Coincident mate; it has no distance")));
+                    (
+                        Mate::Width { constraint: WidthConstraint::Percent { percent, .. }, .. },
+                        MateEdit::Percent(p),
+                    ) => *percent = check_percent(*p)?,
+                    (
+                        Mate::Width {
+                            constraint:
+                                WidthConstraint::Dimension { flipped, .. } | WidthConstraint::Percent { flipped, .. },
+                            ..
+                        },
+                        MateEdit::Flipped(on),
+                    ) => *flipped = *on,
+                    (_, MateEdit::Distance(_)) => {
+                        return Err(MateRefusal::invalid(format!("{name} is a {kind} mate; it has no distance")));
                     }
                     (_, _) => return Err(MateRefusal::invalid(format!("{name} has no such setting"))),
                 }
@@ -551,8 +731,8 @@ impl AssemblyDocument {
         self.transact("Rename value", false, |_, truth| {
             let Assembly { values, mates, .. } = truth;
             let expressions = mates.iter_mut().filter_map(|m| match m {
-                MateEntry::Known(Mate::Distance { distance, .. }) => Some(distance),
-                _ => None,
+                MateEntry::Known(m) => m.expression_mut(),
+                MateEntry::Future(_) => None,
             });
             values.rename(name, to, expressions).map_err(|e| value_refusal(name, e))
         })
@@ -563,7 +743,7 @@ impl AssemblyDocument {
     pub fn drive_mate(&mut self, mate: &str, expression: &str, replace: bool) -> Result<(), MateRefusal> {
         self.transact("Drive mate", false, |_, truth| {
             let driver = truth.values.parse(expression).map_err(|e| value_refusal(mate, e))?;
-            let Mate::Distance { distance, .. } = mate_named(truth, mate)? else {
+            let Some(distance) = mate_named(truth, mate)?.expression_mut() else {
                 return Err(MateRefusal::invalid(format!("{mate} has no distance to drive")));
             };
             if driver.references().is_empty() {
@@ -614,6 +794,83 @@ impl AssemblyDocument {
 fn status_of(remaining: usize, free: Vec<FreeMotion>) -> SolverStatus {
     let state = if remaining == 0 { SolverState::Solved } else { SolverState::Underconstrained };
     SolverStatus { state, remaining_dof: remaining, free, diagnostics: Vec::new() }
+}
+
+/// A percentage a Width can hold.
+fn check_percent(percent: f64) -> Result<f64, MateRefusal> {
+    if (0.0..=100.0).contains(&percent) {
+        Ok(percent)
+    } else {
+        Err(MateRefusal::new(
+            RefusalCode::InvalidValue,
+            format!("a width's percentage is from 0 to 100, not {percent}"),
+        ))
+    }
+}
+
+fn off_quarter_turns(mate: &str) -> MateRefusal {
+    let message = format!(
+        "{mate}: the parts are turned off the quarter turns from each other; this version locks quarter-turn relative rotations only"
+    );
+    MateRefusal { mates: vec![mate.to_owned()], ..MateRefusal::new(RefusalCode::UnsupportedPlacement, message) }
+}
+
+/// `b`'s placement in `a`'s frame, when the turn between them is a quarter-turn rotation.
+/// The turn is stored as the rotation it rounds onto, and the offset is computed through
+/// that rotation's integer matrix, so the lock holds what the two placements say exactly.
+fn relative_lock(mate: &str, a: &Placement, b: &Placement) -> Result<Placement, MateRefusal> {
+    let turn = a.rotation.inverse() * b.rotation;
+    let m = solver::cube_of(turn).ok_or_else(|| off_quarter_turns(mate))?;
+    let col = |c: usize| glam::DVec3::new(m[0][c] as f64, m[1][c] as f64, m[2][c] as f64);
+    let rotation = glam::DQuat::from_mat3(&glam::DMat3::from_cols(col(0), col(1), col(2)));
+    let ra = solver::cube_of(a.rotation).ok_or_else(|| solver::unsupported_lock(mate))?;
+    let exact =
+        |v: f64| solver::exact(v).ok_or_else(|| MateRefusal::invalid(format!("{mate}: a placement is not finite")));
+    // r = R_a^T (t_b - t_a), each row of R_a^T picking one signed difference.
+    let mut r = [0.0; 3];
+    for (j, out) in r.iter_mut().enumerate() {
+        let i = (0..3).find(|i| ra[*i][j] != 0).expect("a signed permutation");
+        let d = exact(b.translation[i])? - exact(a.translation[i])?;
+        *out = solver::nearest(&(BigRational::from_integer(BigInt::from(ra[i][j])) * d));
+    }
+    Ok(Placement { rotation, translation: glam::DVec3::from_array(r) })
+}
+
+/// The solver's constraint for a mate between planes, from the planes its ends lie on.
+fn constraint(mate: String, planes: Vec<(Body, LocalPlane)>, rule: &Rule) -> Result<Constraint, MateRefusal> {
+    let not_parallel = |mate: &str| MateRefusal {
+        mates: vec![mate.to_owned()],
+        ..MateRefusal::new(
+            RefusalCode::NotParallel,
+            format!("{mate}: a groove's faces, and a tab's, are parallel planes"),
+        )
+    };
+    let mut planes = planes.into_iter();
+    let (a, plane_a) = planes.next().expect("two planes");
+    let (b, plane_b) = planes.next().expect("two planes");
+    Ok(match rule {
+        Rule::Parallel { sign, distance } => {
+            Constraint::Parallel { mate, a, b, plane_a, plane_b, sign: *sign, along: distance.map(Along::Distance) }
+        }
+        Rule::Perpendicular => Constraint::Perpendicular { mate, a, b, plane_a, plane_b },
+        Rule::Width { sign, mode } => {
+            // The ends are groove, groove, tab, tab.
+            let (groove_body, groove) = (b, plane_b);
+            let (tab_body, tab) = planes.next().expect("four planes");
+            let (other_body, other_tab) = planes.next().expect("four planes");
+            if groove_body != a || other_body != tab_body || tab_body == a {
+                let message = format!("{mate}: a groove's faces are on one part and a tab's on another");
+                return Err(MateRefusal { mates: vec![mate], ..MateRefusal::invalid(message) });
+            }
+            let parallel =
+                |p: &LocalPlane, q: &LocalPlane| p.normal.iter().zip(q.normal).all(|(x, y)| x.abs() == y.abs());
+            if !parallel(&plane_a, &groove) || !parallel(&tab, &other_tab) {
+                return Err(not_parallel(&mate));
+            }
+            let along = Some(Along::Width { groove, tab: other_tab, mode: mode.clone() });
+            Constraint::Parallel { mate, a, b: tab_body, plane_a, plane_b: tab, sign: *sign, along }
+        }
+    })
 }
 
 fn local_plane(mate: &str, proof: &PlaneProof) -> Result<LocalPlane, MateRefusal> {

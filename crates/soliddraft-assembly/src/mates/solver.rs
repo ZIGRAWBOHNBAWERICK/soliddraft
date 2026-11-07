@@ -2,14 +2,17 @@
 //!
 //! Plane normals are exact signed axes here, which splits the problem in two:
 //!
-//! 1. **Rotations.** Each mate relates two normals, and an Origin mate with axes fixes a
-//!    rotation outright. Rotations spread outward from what is fixed. A body held by two
+//! 1. **Rotations.** Each mate between planes relates two normals: equal, opposite or at
+//!    right angles. An Origin mate with axes fixes a rotation outright, and a Lock fixes one
+//!    body's from another's. Rotations spread outward from what is fixed. A body held by two
 //!    perpendicular normals turns exactly; one held by a single normal turns as little as
-//!    it can, keeping its spin.
-//! 2. **Translations.** With rotations known, each distance is a difference of one world
-//!    coordinate between two bodies, so each axis is a graph of exact differences. Walking
-//!    it places what is connected to the assembly's origin, or to the graph's first body,
-//!    and a closing edge that disagrees is an over-constrained pair of mates.
+//!    it can, keeping its spin. A right angle the smallest turn does not keep is met by the
+//!    nearest quarter-turn rotation that keeps every relation.
+//! 2. **Translations.** With rotations known, each distance, width and lock is a difference
+//!    of one world coordinate between two bodies, so each axis is a graph of exact
+//!    differences. Walking it places what is connected to the assembly's origin, or to the
+//!    graph's first body, and a closing edge that disagrees is an over-constrained set of
+//!    mates.
 //!
 //! What is not constrained keeps its authored value. Nothing is fixed behind the user's
 //! back: an unanchored group keeps its first body's position only because something must
@@ -52,13 +55,42 @@ pub(crate) struct LocalPlane {
     pub offset: BigRational,
 }
 
+/// What fixes the translation between two parallel planes.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Along {
+    /// The signed distance from `a`'s plane to `b`'s, along `a`'s outward normal.
+    Distance(f64),
+    /// A tab between a groove's faces: `plane_a` and `groove` are the groove's, on `a`;
+    /// `plane_b` and `tab` the tab's, on `b`.
+    Width { groove: LocalPlane, tab: LocalPlane, mode: WidthMode },
+}
+
+/// Where a width puts the tab.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum WidthMode {
+    Centered,
+    /// The gap from the first groove face, or the second when `flipped`, to the tab face
+    /// nearest it.
+    Gap {
+        distance: f64,
+        flipped: bool,
+    },
+    /// That gap as a fraction of the play.
+    Share {
+        fraction: BigRational,
+        flipped: bool,
+    },
+}
+
 /// One mate as the solver sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Constraint {
     /// The body's origin on a frame: the root's origin for the root's own mates, a
     /// sub-assembly's frame for its mates.
     Origin { mate: String, body: Body, axes: bool, at: Placement },
-    Distance {
+    /// Two parallel planes, their outward normals related by `sign`. `along` fixes the
+    /// translation between them when there is one.
+    Parallel {
         mate: String,
         a: Body,
         b: Body,
@@ -66,8 +98,33 @@ pub(crate) enum Constraint {
         plane_b: LocalPlane,
         /// +1 when the outward normals agree, -1 when they oppose.
         sign: i8,
-        distance: f64,
+        along: Option<Along>,
     },
+    /// Two planes at right angles.
+    Perpendicular { mate: String, a: Body, b: Body, plane_a: LocalPlane, plane_b: LocalPlane },
+    /// `b`'s placement is `a`'s composed with `relative`.
+    Lock { mate: String, a: Body, b: Body, relative: Placement },
+}
+
+impl Constraint {
+    fn mate(&self) -> &str {
+        match self {
+            Constraint::Origin { mate, .. }
+            | Constraint::Parallel { mate, .. }
+            | Constraint::Perpendicular { mate, .. }
+            | Constraint::Lock { mate, .. } => mate,
+        }
+    }
+
+    /// The two bodies a constraint between bodies ties.
+    fn pair(&self) -> Option<(&Body, &Body)> {
+        match self {
+            Constraint::Parallel { a, b, .. }
+            | Constraint::Perpendicular { a, b, .. }
+            | Constraint::Lock { a, b, .. } => Some((a, b)),
+            Constraint::Origin { .. } => None,
+        }
+    }
 }
 
 /// A motion a component keeps.
@@ -83,6 +140,11 @@ pub struct FreeMotion {
 }
 
 impl FreeMotion {
+    /// The motion for people, such as "component 4 spin about Z".
+    pub fn describe(&self) -> String {
+        describe(self)
+    }
+
     fn of(body: &Body, motion: &str) -> FreeMotion {
         let component = body.steps().last().map_or(ComponentId(0), |s| s.component);
         let path = (body.steps().len() > 1).then(|| body.clone());
@@ -179,7 +241,7 @@ fn conflict(mates: Vec<String>, message: String) -> MateRefusal {
 /// The rotation taking each local direction to its world direction, if one exists,
 /// staying as close to `authored` as the pairs allow.
 fn orient(authored: DQuat, pairs: &[(Normal, Normal)]) -> Option<DQuat> {
-    let (u0, v0) = *pairs.first()?;
+    let Some(&(u0, v0)) = pairs.first() else { return Some(authored) };
     let second = pairs.iter().find(|(u, _)| dot(*u, u0) == 0).copied();
     let agrees = |(u, v): &(Normal, Normal), (x, y): (Normal, Normal)| dot(*u, x) == dot(*v, y);
     if !pairs.iter().all(|p| agrees(p, (u0, v0)) && second.is_none_or(|s| agrees(p, s))) {
@@ -190,6 +252,77 @@ fn orient(authored: DQuat, pairs: &[(Normal, Normal)]) -> Option<DQuat> {
     };
     let frame = |a, b| DMat3::from_cols(vector(a), vector(b), vector(cross(a, b)));
     Some(DQuat::from_mat3(&(frame(v0, v1) * frame(u0, u1).transpose())))
+}
+
+/// Whether `rotation` takes each `(u, w)` local direction `u` to a world axis at right
+/// angles to `w`.
+fn square(rotation: DQuat, perpendicular: &[(Normal, Normal)]) -> bool {
+    perpendicular.iter().all(|(u, w)| snapped(rotation * vector(*u)).is_some_and(|n| dot(n, *w) == 0))
+}
+
+/// A rotation as the integer matrix it is when it takes axes to axes.
+type Cube = [[i8; 3]; 3];
+
+fn apply(m: &Cube, n: Normal) -> Normal {
+    [0, 1, 2].map(|i| m[i][0] * n[0] + m[i][1] * n[1] + m[i][2] * n[2])
+}
+
+/// The 24 rotations that take axes to axes, in a fixed order.
+fn cube_rotations() -> Vec<Cube> {
+    let mut out = Vec::with_capacity(24);
+    for perm in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+        for signs in
+            [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]]
+        {
+            let mut m = [[0i8; 3]; 3];
+            for (col, row) in perm.iter().enumerate() {
+                m[*row][col] = signs[col];
+            }
+            let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+            if det == 1 {
+                out.push(m);
+            }
+        }
+    }
+    out
+}
+
+fn quaternion(m: &Cube) -> DQuat {
+    let col = |c: usize| DVec3::new(m[0][c] as f64, m[1][c] as f64, m[2][c] as f64);
+    DQuat::from_mat3(&DMat3::from_cols(col(0), col(1), col(2)))
+}
+
+/// The rotation's integer matrix, when it takes every axis to an axis.
+pub(crate) fn cube_of(rotation: DQuat) -> Option<Cube> {
+    let mut m = [[0i8; 3]; 3];
+    for (c, axis) in [[1, 0, 0], [0, 1, 0], [0, 0, 1]].into_iter().enumerate() {
+        let n = snapped(rotation * vector(axis))?;
+        for r in 0..3 {
+            m[r][c] = n[r];
+        }
+    }
+    Some(m)
+}
+
+/// The quarter-turn rotation nearest `authored` that takes each pair's local direction to
+/// its world one and keeps each right angle, first in a fixed order among equals.
+fn nearest_cube(authored: DQuat, pairs: &[(Normal, Normal)], perpendicular: &[(Normal, Normal)]) -> Option<DQuat> {
+    let mut best: Option<(f64, DQuat)> = None;
+    for m in cube_rotations() {
+        let holds = pairs.iter().all(|(u, v)| apply(&m, *u) == *v)
+            && perpendicular.iter().all(|(u, w)| dot(apply(&m, *u), *w) == 0);
+        if !holds {
+            continue;
+        }
+        let q = quaternion(&m);
+        let near = q.dot(authored).abs();
+        if best.is_none_or(|(b, _)| near > b + AXIS_TOLERANCE) {
+            best = Some((near, q));
+        }
+    }
+    best.map(|(_, q)| q)
 }
 
 /// The smallest turn taking unit `from` to the axis direction `to`. A half turn goes about
@@ -206,28 +339,64 @@ fn shortest_arc(from: DVec3, to: DVec3) -> DQuat {
     DQuat::from_rotation_arc(from, to)
 }
 
+/// What one mate says about the body being turned, given another it ties it to.
+enum Tie {
+    /// The local normal on the body being turned goes where the other's does, by sign.
+    Pair { own: Normal, theirs: Normal, sign: i8 },
+    /// The local normal on the body being turned is at right angles to the other's.
+    Square { own: Normal, theirs: Normal },
+    /// The body's rotation is the other's times this.
+    Locked(DQuat),
+}
+
 struct Link<'a> {
     other: &'a Body,
-    /// The normal on the body being turned, and on `other`.
-    own: Normal,
-    theirs: Normal,
-    sign: i8,
+    tie: Tie,
     mate: &'a str,
 }
 
 fn links<'a>(constraints: &'a [Constraint], body: &Body) -> Vec<Link<'a>> {
-    constraints
-        .iter()
-        .filter_map(|c| match c {
-            Constraint::Distance { mate, a, b, plane_a, plane_b, sign, .. } if b == body => {
-                Some(Link { other: a, own: plane_b.normal, theirs: plane_a.normal, sign: *sign, mate })
+    let mut out = Vec::new();
+    for c in constraints {
+        let Some((a, b)) = c.pair() else { continue };
+        let (other, mine_is_b) = if b == body {
+            (a, true)
+        } else if a == body {
+            (b, false)
+        } else {
+            continue;
+        };
+        let tie = match c {
+            Constraint::Parallel { plane_a, plane_b, sign, .. } => {
+                let (own, theirs) = if mine_is_b { (plane_b, plane_a) } else { (plane_a, plane_b) };
+                Tie::Pair { own: own.normal, theirs: theirs.normal, sign: *sign }
             }
-            Constraint::Distance { mate, a, b, plane_a, plane_b, sign, .. } if a == body => {
-                Some(Link { other: b, own: plane_a.normal, theirs: plane_b.normal, sign: *sign, mate })
+            Constraint::Perpendicular { plane_a, plane_b, .. } => {
+                let (own, theirs) = if mine_is_b { (plane_b, plane_a) } else { (plane_a, plane_b) };
+                Tie::Square { own: own.normal, theirs: theirs.normal }
             }
-            _ => None,
-        })
-        .collect()
+            Constraint::Lock { relative, .. } => {
+                Tie::Locked(if mine_is_b { relative.rotation } else { relative.rotation.inverse() })
+            }
+            Constraint::Origin { .. } => continue,
+        };
+        out.push(Link { other, tie, mate: c.mate() });
+    }
+    out
+}
+
+/// The names of every mate between `a` and `b`, sorted.
+fn between(constraints: &[Constraint], a: &Body, b: &Body) -> Vec<String> {
+    let mut names: Vec<String> =
+        links(constraints, a).iter().filter(|l| l.other == b).map(|l| l.mate.to_owned()).collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn incompatible(names: Vec<String>) -> MateRefusal {
+    let message = format!("{}: their faces would need incompatible directions", names.join(", "));
+    conflict(names, message)
 }
 
 fn rotations(
@@ -242,42 +411,69 @@ fn rotations(
     }
     let mut pending: BTreeSet<Body> = bodies.keys().filter(|b| !known.contains_key(*b)).cloned().collect();
     while !pending.is_empty() {
-        // The body most tied to what is known: a body held by one normal must not take a
-        // spin before a second normal reaches it.
-        let reach = |body: &Body| links(constraints, body).iter().filter(|l| known.contains_key(l.other)).count();
+        // The body most tied to what is known: a lock decides a rotation outright, and a
+        // body held by one normal must not take a spin before a second normal reaches it.
+        let reach = |body: &Body| {
+            let tied: Vec<_> = links(constraints, body).into_iter().filter(|l| known.contains_key(l.other)).collect();
+            (tied.iter().any(|l| matches!(l.tie, Tie::Locked(_))), tied.len())
+        };
         let best = pending.iter().max_by_key(|b| (reach(b), std::cmp::Reverse(*b))).expect("not empty").clone();
         pending.remove(&best);
         let authored = bodies[&best].rotation;
-        if reach(&best) == 0 {
-            known.insert(best, authored);
+        let tied: Vec<Link> = links(constraints, &best).into_iter().filter(|l| known.contains_key(l.other)).collect();
+        if let Some((other, relative)) = tied.iter().find_map(|l| match l.tie {
+            Tie::Locked(r) => Some((l.other, r)),
+            _ => None,
+        }) {
+            known.insert(best, (known[other] * relative).normalize());
             continue;
         }
-        let mut pairs = Vec::new();
+        let (mut pairs, mut right) = (Vec::new(), Vec::new());
         let mut names: Vec<String> = Vec::new();
-        for l in links(constraints, &best).iter().filter(|l| known.contains_key(l.other)) {
-            let there = world(known[l.other], l.theirs, l.mate)?;
-            pairs.push((l.own, if l.sign > 0 { there } else { negate(there) }));
+        for l in &tied {
+            match l.tie {
+                Tie::Pair { own, theirs, sign } => {
+                    let there = world(known[l.other], theirs, l.mate)?;
+                    pairs.push((own, if sign > 0 { there } else { negate(there) }));
+                }
+                Tie::Square { own, theirs } => right.push((own, world(known[l.other], theirs, l.mate)?)),
+                Tie::Locked(_) => unreachable!("a lock is taken above"),
+            }
             names.push(l.mate.to_owned());
         }
-        let turned = orient(authored, &pairs).ok_or_else(|| {
-            conflict(names.clone(), format!("{}: their faces would need incompatible directions", names.join(", ")))
-        })?;
+        let turned = orient(authored, &pairs)
+            .filter(|r| square(*r, &right))
+            .or_else(|| (!right.is_empty()).then(|| nearest_cube(authored, &pairs, &right)).flatten())
+            .ok_or_else(|| {
+                names.sort();
+                names.dedup();
+                incompatible(names.clone())
+            })?;
         known.insert(best, turned);
     }
     for c in constraints {
-        if let Constraint::Distance { mate, a, b, plane_a, plane_b, sign, .. } = c {
-            let (na, nb) = (world(known[a], plane_a.normal, mate)?, world(known[b], plane_b.normal, mate)?);
-            let wanted = if *sign > 0 { na } else { negate(na) };
-            if nb != wanted {
-                let mut names: Vec<String> =
-                    links(constraints, a).iter().filter(|l| l.other == b).map(|l| l.mate.to_owned()).collect();
-                names.sort();
-                names.dedup();
-                return Err(conflict(
-                    names.clone(),
-                    format!("{}: their faces would need incompatible directions", names.join(", ")),
-                ));
+        match c {
+            Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, .. } => {
+                let (na, nb) = (world(known[a], plane_a.normal, mate)?, world(known[b], plane_b.normal, mate)?);
+                let wanted = if *sign > 0 { na } else { negate(na) };
+                if nb != wanted {
+                    return Err(incompatible(between(constraints, a, b)));
+                }
             }
+            Constraint::Perpendicular { mate, a, b, plane_a, plane_b } => {
+                let (na, nb) = (world(known[a], plane_a.normal, mate)?, world(known[b], plane_b.normal, mate)?);
+                if dot(na, nb) != 0 {
+                    return Err(incompatible(between(constraints, a, b)));
+                }
+            }
+            Constraint::Lock { a, b, relative, .. } => {
+                let wanted = known[a] * relative.rotation;
+                let off = [DVec3::X, DVec3::Y].iter().any(|v| (wanted * *v).distance(known[b] * *v) > AXIS_TOLERANCE);
+                if off {
+                    return Err(incompatible(between(constraints, a, b)));
+                }
+            }
+            Constraint::Origin { .. } => {}
         }
     }
     Ok(known)
@@ -306,21 +502,82 @@ fn edges<'a>(
                     .ok_or_else(|| MateRefusal::invalid(format!("{mate}: the frame is not finite")))?;
                 out.push(Edge { from: None, to: body, gap, mate, says: "at the origin".into() })
             }
-            Constraint::Distance { mate, a, b, plane_a, plane_b, sign, distance } => {
+            Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, along: Some(along) } => {
                 let n = world(turned[a], plane_a.normal, mate)?;
                 if n[axis] == 0 {
                     continue;
                 }
-                let d = exact(*distance)
-                    .ok_or_else(|| MateRefusal::invalid(format!("{mate}: the distance is not finite")))?;
                 let s = BigRational::from_integer(BigInt::from(*sign));
-                let along = BigRational::from_integer(BigInt::from(n[axis]));
-                let gap = along * (d + &plane_a.offset - s * &plane_b.offset);
-                out.push(Edge { from: Some(a), to: b, gap, mate, says: format!("{distance} mm") });
+                let side = BigRational::from_integer(BigInt::from(n[axis]));
+                let (gap, says) = match along {
+                    Along::Distance(distance) => {
+                        let d = exact(*distance)
+                            .ok_or_else(|| MateRefusal::invalid(format!("{mate}: the distance is not finite")))?;
+                        (side * (d + &plane_a.offset - s * &plane_b.offset), format!("{distance} mm"))
+                    }
+                    Along::Width { groove, tab, mode } => {
+                        // Where each plane lies along this axis, from its body's origin.
+                        let at = |rotation: DQuat, p: &LocalPlane| -> Result<BigRational, MateRefusal> {
+                            let w = world(rotation, p.normal, mate)?;
+                            if w[axis] == 0 {
+                                return Err(MateRefusal {
+                                    mates: vec![mate.clone()],
+                                    ..MateRefusal::new(
+                                        RefusalCode::NotParallel,
+                                        format!("{mate}: its faces are not parallel"),
+                                    )
+                                });
+                            }
+                            Ok(BigRational::from_integer(BigInt::from(w[axis])) * &p.offset)
+                        };
+                        let g = [at(turned[a], plane_a)?, at(turned[a], groove)?];
+                        let h = [at(turned[b], plane_b)?, at(turned[b], tab)?];
+                        let two = BigRational::from_integer(BigInt::from(2));
+                        let (h_lo, h_hi) = if h[0] <= h[1] { (&h[0], &h[1]) } else { (&h[1], &h[0]) };
+                        let gap_from = |from: &BigRational, other: &BigRational, gap: BigRational| {
+                            if from <= other { from + gap - h_lo } else { from - gap - h_hi }
+                        };
+                        match mode {
+                            WidthMode::Centered => ((&g[0] + &g[1] - &h[0] - &h[1]) / two, "centred".to_owned()),
+                            WidthMode::Gap { distance, flipped } => {
+                                let d = exact(*distance).ok_or_else(|| {
+                                    MateRefusal::invalid(format!("{mate}: the distance is not finite"))
+                                })?;
+                                let (from, other) = if *flipped { (&g[1], &g[0]) } else { (&g[0], &g[1]) };
+                                (gap_from(from, other, d), format!("{distance} mm from a groove face"))
+                            }
+                            WidthMode::Share { fraction, flipped } => {
+                                let (from, other) = if *flipped { (&g[1], &g[0]) } else { (&g[0], &g[1]) };
+                                let play = (from - other).abs() - (h_hi - h_lo);
+                                let percent = nearest(&(fraction * BigRational::from_integer(BigInt::from(100))));
+                                (gap_from(from, other, fraction * play), format!("{percent}% of the play"))
+                            }
+                        }
+                    }
+                };
+                out.push(Edge { from: Some(a), to: b, gap, mate, says });
             }
+            Constraint::Lock { mate, a, b, relative } => {
+                let m = cube_of(turned[a]).ok_or_else(|| unsupported_lock(mate))?;
+                let t = relative.translation.to_array();
+                let j = (0..3).find(|j| m[axis][*j] != 0).expect("a signed permutation");
+                let offset =
+                    exact(t[j]).ok_or_else(|| MateRefusal::invalid(format!("{mate}: the lock is not finite")))?;
+                let gap = BigRational::from_integer(BigInt::from(m[axis][j])) * offset;
+                out.push(Edge { from: Some(a), to: b, gap, mate, says: "locked".into() });
+            }
+            Constraint::Parallel { along: None, .. } | Constraint::Perpendicular { .. } => {}
         }
     }
     Ok(out)
+}
+
+/// The refusal for a lock whose parts are turned off the quarter turns.
+pub(crate) fn unsupported_lock(mate: &str) -> MateRefusal {
+    let message = format!(
+        "{mate}: a locked part is turned off the quarter turns; this version locks quarter-turn rotations only"
+    );
+    MateRefusal { mates: vec![mate.to_owned()], ..MateRefusal::new(RefusalCode::UnsupportedPlacement, message) }
 }
 
 /// Every world coordinate of every body along one axis.
@@ -460,12 +717,15 @@ fn jacobian(
                     }
                 }
             }
-            Constraint::Distance { mate, a, b, plane_a, .. } => {
+            Constraint::Parallel { mate, a, b, plane_a, along, .. } => {
                 let (pa, pb) = (&bodies[a], &bodies[b]);
                 let n = world(pa.rotation, plane_a.normal, mate)?;
                 let (at_a, at_b) = (index[a] * 6, index[b] * 6);
                 for e in (0..3).filter(|k| n[*k] == 0) {
                     rows.push(row(size, &[(at_b + 3 + e, 1.0), (at_a + 3 + e, -1.0)]));
+                }
+                if along.is_none() {
+                    continue;
                 }
                 // d/dt of n · (t_b - t_a), with n turning with a.
                 let normal = vector(n);
@@ -477,6 +737,28 @@ fn jacobian(
                     entries.push((at_a + 3 + k, lever[k]));
                 }
                 rows.push(row(size, &entries));
+            }
+            Constraint::Perpendicular { mate, a, b, plane_a, plane_b } => {
+                // d/dt of n_a · n_b, each turning with its body: (w_a - w_b) · (n_a x n_b).
+                let na = vector(world(bodies[a].rotation, plane_a.normal, mate)?);
+                let nb = vector(world(bodies[b].rotation, plane_b.normal, mate)?);
+                let c = na.cross(nb);
+                let (at_a, at_b) = (index[a] * 6, index[b] * 6);
+                let entries: Vec<_> = (0..3).flat_map(|k| [(at_a + 3 + k, c[k]), (at_b + 3 + k, -c[k])]).collect();
+                rows.push(row(size, &entries));
+            }
+            Constraint::Lock { a, b, .. } => {
+                // The turns agree, and d/dt of t_b - t_a - R_a r is v_b - v_a - w_a x (t_b - t_a).
+                let r = bodies[b].translation - bodies[a].translation;
+                let (at_a, at_b) = (index[a] * 6, index[b] * 6);
+                for k in 0..3 {
+                    rows.push(row(size, &[(at_b + 3 + k, 1.0), (at_a + 3 + k, -1.0)]));
+                    let mut entries = vec![(at_b + k, 1.0), (at_a + k, -1.0)];
+                    for (i, e) in [DVec3::X, DVec3::Y, DVec3::Z].into_iter().enumerate() {
+                        entries.push((at_a + 3 + i, -e.cross(r)[k]));
+                    }
+                    rows.push(row(size, &entries));
+                }
             }
         }
     }
@@ -574,7 +856,8 @@ mod tests {
     }
 
     fn distance(mate: &str, pa: LocalPlane, pb: LocalPlane, sign: i8, d: f64) -> Constraint {
-        Constraint::Distance { mate: mate.into(), a: a(), b: b(), plane_a: pa, plane_b: pb, sign, distance: d }
+        let along = Some(Along::Distance(d));
+        Constraint::Parallel { mate: mate.into(), a: a(), b: b(), plane_a: pa, plane_b: pb, sign, along }
     }
 
     fn x() -> Constraint {
@@ -689,5 +972,173 @@ mod tests {
             rational(&ExactRational { numerator: "381".into(), denominator: "5".into() }).map(|r| text(&r)),
             Some("381/5".into())
         );
+    }
+
+    fn parallel(mate: &str, pa: LocalPlane, pb: LocalPlane, sign: i8) -> Constraint {
+        Constraint::Parallel { mate: mate.into(), a: a(), b: b(), plane_a: pa, plane_b: pb, sign, along: None }
+    }
+
+    fn perpendicular(mate: &str, pa: LocalPlane, pb: LocalPlane) -> Constraint {
+        Constraint::Perpendicular { mate: mate.into(), a: a(), b: b(), plane_a: pa, plane_b: pb }
+    }
+
+    fn lock(relative: Placement) -> Constraint {
+        Constraint::Lock { mate: "L".into(), a: a(), b: b(), relative }
+    }
+
+    /// B's groove from x = -10 to x = 10, A's tab from x = 2 to x = 6 in its own frame.
+    fn width(mode: WidthMode) -> Constraint {
+        let along = Some(Along::Width { groove: plane([-1, 0, 0], 10), tab: plane([-1, 0, 0], -2), mode });
+        Constraint::Parallel {
+            mate: "W".into(),
+            a: a(),
+            b: b(),
+            plane_a: plane([1, 0, 0], 10),
+            plane_b: plane([1, 0, 0], 6),
+            sign: 1,
+            along,
+        }
+    }
+
+    fn q90z() -> DQuat {
+        DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2)
+    }
+
+    #[test]
+    fn parallel_turns_and_leaves_every_translation() {
+        let mut at = bodies();
+        at.get_mut(&b()).unwrap().rotation = DQuat::from_rotation_x(std::f64::consts::PI);
+        let constraints = [origin(true), parallel("P", plane([0, 0, 1], 10), plane([0, 0, -1], 0), -1)];
+        let solved = solve(&at, &constraints).unwrap();
+        assert_eq!(snapped(solved[&b()].rotation * DVec3::NEG_Z), Some([0, 0, -1]), "the underside looks down");
+        assert_eq!(solved[&b()].translation, DVec3::new(10.0, 10.0, 30.0), "nothing moves along the normal");
+        let (dof, free) = freedoms(&solved, &constraints).unwrap();
+        assert_eq!(dof, 4);
+        let names: Vec<_> = free.iter().map(|f| f.motion.as_str()).collect();
+        assert_eq!(names, ["translate_x", "translate_y", "translate_z", "spin_z"]);
+    }
+
+    #[test]
+    fn perpendicular_keeps_the_authored_turn_when_it_holds() {
+        let constraints = [origin(true), perpendicular("R", plane([0, 0, 1], 10), plane([1, 0, 0], 10))];
+        let solved = solve(&bodies(), &constraints).unwrap();
+        assert_eq!(solved[&b()], bodies()[&b()], "x is already at right angles to z");
+        assert_eq!(freedoms(&solved, &constraints).unwrap().0, 5);
+    }
+
+    #[test]
+    fn perpendicular_takes_the_smallest_quarter_turn() {
+        // B's top would have to stand at right angles to A's: a quarter turn, about the
+        // first axis in order.
+        let constraints = [origin(true), perpendicular("R", plane([0, 0, 1], 10), plane([0, 0, 1], 6))];
+        let solved = solve(&bodies(), &constraints).unwrap();
+        let turned = solved[&b()].rotation;
+        assert_eq!(snapped(turned * DVec3::Z).map(|n| dot(n, [0, 0, 1])), Some(0));
+        assert!((turned.angle_between(DQuat::IDENTITY) - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{turned}");
+        assert!(cube_of(turned).is_some());
+        assert_eq!(freedoms(&solved, &constraints).unwrap().0, 5);
+    }
+
+    #[test]
+    fn perpendicular_and_parallel_together_pick_a_turn_that_keeps_both() {
+        // B's z parallel to A's x and B's x at right angles to A's y: B's x goes along z.
+        let constraints = [
+            origin(true),
+            parallel("P", plane([1, 0, 0], 0), plane([0, 0, 1], 0), 1),
+            perpendicular("R", plane([0, 1, 0], 0), plane([1, 0, 0], 0)),
+        ];
+        let solved = solve(&bodies(), &constraints).unwrap();
+        let r = solved[&b()].rotation;
+        assert_eq!(snapped(r * DVec3::Z), Some([1, 0, 0]));
+        assert_eq!(snapped(r * DVec3::X).map(|n| n[1]), Some(0));
+        assert_eq!(freedoms(&solved, &constraints).unwrap().0, 3, "every turn is held, no translation");
+    }
+
+    #[test]
+    fn perpendicular_against_a_parallel_is_named() {
+        let constraints = [
+            origin(true),
+            parallel("P", plane([0, 0, 1], 0), plane([0, 0, 1], 0), 1),
+            perpendicular("R", plane([0, 0, 1], 0), plane([0, 0, 1], 0)),
+        ];
+        let refused = solve(&bodies(), &constraints).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::OverConstrained);
+        assert_eq!(refused.mates, ["P", "R"]);
+    }
+
+    #[test]
+    fn a_lock_holds_every_motion_and_keeps_its_offset() {
+        let relative = Placement::new(q90z(), DVec3::new(1.0, 2.0, 3.0));
+        let constraints = [origin(true), lock(relative)];
+        let solved = solve(&bodies(), &constraints).unwrap();
+        let placed = solved[&b()];
+        assert!(placed.rotation.angle_between(q90z()) < 1e-12);
+        assert_eq!(placed.translation, DVec3::new(1.0, 2.0, 3.0));
+        assert_eq!(freedoms(&solved, &constraints).unwrap().0, 0);
+        // Without the origin the pair moves as one body.
+        let solved = solve(&bodies(), &[lock(relative)]).unwrap();
+        assert_eq!(freedoms(&solved, &[lock(relative)]).unwrap().0, 6);
+    }
+
+    #[test]
+    fn a_lock_follows_a_quarter_turned_first_part_exactly() {
+        let at = Placement::new(q90z(), DVec3::new(5.0, 0.0, 0.0));
+        let frame = Constraint::Origin { mate: "O".into(), body: a(), axes: true, at };
+        let constraints = [frame, lock(Placement::translation(DVec3::new(1.0, 2.0, 3.0)))];
+        let solved = solve(&bodies(), &constraints).unwrap();
+        // A's x is world y, so B's offset [1, 2, 3] lands at [5 - 2, 1, 3].
+        assert_eq!(solved[&b()].translation, DVec3::new(3.0, 1.0, 3.0));
+    }
+
+    #[test]
+    fn a_lock_on_a_part_turned_off_the_quarter_turns_is_refused() {
+        let at = Placement::new(DQuat::from_rotation_z(0.5), DVec3::ZERO);
+        let frame = Constraint::Origin { mate: "O".into(), body: a(), axes: true, at };
+        let refused = solve(&bodies(), &[frame, lock(Placement::IDENTITY)]).unwrap_err();
+        assert_eq!((refused.code, refused.mates), (RefusalCode::UnsupportedPlacement, vec!["L".to_owned()]));
+    }
+
+    #[test]
+    fn a_lock_against_a_distance_names_both() {
+        let constraints = [origin(true), lock(Placement::translation(DVec3::new(0.0, 0.0, 20.0))), z()];
+        let refused = solve(&bodies(), &constraints).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::OverConstrained);
+        assert_eq!(refused.mates, ["L", "Z"]);
+    }
+
+    #[test]
+    fn width_places_the_tab_exactly() {
+        // Groove -10..10 on A, tab 2..6 on B, play 16. The first groove face is the one at
+        // 10, so a gap from it puts the tab's top 1 below it, and a quarter of the play 4.
+        for (mode, x) in [
+            (WidthMode::Centered, -4.0),
+            (WidthMode::Gap { distance: 1.0, flipped: false }, 3.0),
+            (WidthMode::Gap { distance: 1.0, flipped: true }, -11.0),
+            (WidthMode::Share { fraction: BigRational::new(BigInt::from(1), BigInt::from(4)), flipped: false }, 0.0),
+            (WidthMode::Share { fraction: BigRational::new(BigInt::from(1), BigInt::from(4)), flipped: true }, -8.0),
+        ] {
+            let constraints = [origin(true), width(mode.clone())];
+            let solved = solve(&bodies(), &constraints).unwrap();
+            assert_eq!(solved[&b()].translation, DVec3::new(x, 10.0, 30.0), "{mode:?}");
+            assert_eq!(freedoms(&solved, &constraints).unwrap().0, 3, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn a_width_against_a_distance_names_both() {
+        let constraints = [origin(true), width(WidthMode::Centered), x()];
+        let refused = solve(&bodies(), &constraints).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::OverConstrained);
+        assert_eq!(refused.mates, ["W", "X"]);
+    }
+
+    #[test]
+    fn the_cube_rotations_are_the_twenty_four() {
+        let all = cube_rotations();
+        assert_eq!(all.len(), 24);
+        for m in &all {
+            assert_eq!(cube_of(quaternion(m)), Some(*m));
+        }
+        assert_eq!(cube_of(DQuat::from_rotation_z(0.5)), None);
     }
 }

@@ -1,6 +1,7 @@
 //! Mates on real parts through the commands the panel and the MCP tools call: what stays
 //! free, how alignment and Origin work, what a failed Update leaves behind, and what old
-//! and future files keep. Each holds for Coincident mates as for distances.
+//! and future files keep. Each holds for Coincident mates as for distances. Parallel,
+//! Perpendicular, Width, Lock and mates to reference planes follow at the end.
 //!
 //! Expected positions are hand-worked from the plane equations of a 40 x 30 x D block A
 //! and a 20 x 10 x 6 block B, both centred on the origin in plan and rising along +Z.
@@ -13,7 +14,7 @@ use serde_json::{Value, json};
 use soliddraft_assembly::{
     Alignment, Assembly, AssemblyDocument, AssemblyPackage, ComponentId, EndpointSelector, FaceSelector, FileError,
     GeneratorChoice, KernelSource, Mate, MateEdit, MateEntry, MateId, MateRefusal, OccurrencePath, OpenOptions,
-    Placement, RefusalCode, SolverState, Step,
+    Placement, RefusalCode, SolverState, Step, WidthInput,
 };
 use soliddraft_document::{CacheOnlyStore, ConfigurationId, DocRef, identify_file};
 use soliddraft_kernel_api::Kernel;
@@ -344,7 +345,7 @@ fn alignment_and_origin_use_the_same_solver() {
     close(bounds.min, [0.0, 15.0, 20.0]);
     close(bounds.max, [20.0, 25.0, 26.0]);
     let measured = r.doc.mate_measurements();
-    let z = measured.last().unwrap().1.as_ref().unwrap();
+    let z = measured.last().unwrap().1.as_ref().unwrap().as_ref().expect("a distance measures");
     assert_eq!((z.value, z.rational.as_str()), (12.0, "12"));
 
     r.doc.save(None).unwrap();
@@ -365,7 +366,7 @@ fn alignment_and_origin_use_the_same_solver() {
         let measured = r.doc.mate_measurements();
         assert_eq!(measured.len(), 3, "each Coincident is measured");
         for (_, m) in measured {
-            let m = m.unwrap();
+            let m = m.unwrap().expect("a Coincident measures");
             assert_eq!((m.value, m.rational.as_str()), (0.0, "0"));
         }
     };
@@ -695,7 +696,7 @@ fn a_proof_stays_with_its_revision() {
     let mut r = rig("retained", 10.0);
     r.graph();
     let before = r.doc.mate_measurements();
-    let pinned = before.last().unwrap().1.as_ref().unwrap().clone();
+    let pinned = before.last().unwrap().1.as_ref().unwrap().clone().expect("a distance measures");
     assert_eq!((pinned.value, pinned.rational.as_str()), (5.0, "5"));
     assert_eq!(pinned.certainty, soliddraft_kernel_api::Certainty::Exact);
     assert!(!pinned.a.retained);
@@ -703,7 +704,7 @@ fn a_proof_stays_with_its_revision() {
     r.doc.refresh_references(Vec::new());
     r.doc.finish_loading();
     let later = r.doc.mate_measurements();
-    let held = later.last().unwrap().1.as_ref().unwrap();
+    let held = later.last().unwrap().1.as_ref().unwrap().as_ref().expect("a distance measures");
     assert!(held.a.retained && !held.b.retained, "{held:?}");
     assert_eq!((held.value, &held.a.revision), (5.0, &pinned.a.revision));
 }
@@ -752,4 +753,236 @@ fn moves_and_deletes_respect_mates() {
     r.doc.delete_mate("Z").unwrap();
     assert_eq!(r.doc.solver().remaining_dof, 1);
     close(r.placement(r.b).translation, [10.0, 10.0, 15.0]);
+}
+
+/// A reference plane feature on a saved part, on `datum` moved by `offset`. Returns its name.
+fn add_plane(path: &Path, datum: DatumPlane, offset: f64) -> String {
+    let mut doc = Document::open(path, kernel()).unwrap();
+    let kind = FeatureKind::ReferencePlane(SketchPlane::Datum { datum, offset });
+    doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
+    let name = doc.features().last().unwrap().name.clone();
+    doc.save(path).unwrap();
+    name
+}
+
+fn plane(component: ComponentId, name: &str) -> EndpointSelector {
+    EndpointSelector { component, face: FaceSelector::Plane(name.into()) }
+}
+
+fn quarter_z() -> DQuat {
+    DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2)
+}
+
+/// Saves the assembly, opens it again, and checks the truth came back unchanged.
+fn reopen(r: &mut Rig) {
+    r.doc.save(None).unwrap();
+    let truth = r.doc.assembly().clone();
+    r.doc = AssemblyDocument::open(&r.root, options()).unwrap();
+    r.doc.finish_loading();
+    assert_eq!(r.doc.assembly(), &truth, "a save and a load keep every mate");
+}
+
+/// Parallel fixes two turns and no translation; Perpendicular fixes one turn and takes the
+/// nearest quarter turn when the authored pose does not hold it; together against one
+/// another they are named.
+#[test]
+fn parallel_and_perpendicular_hold_turns_only() {
+    let mut r = rig("parallel", 10.0);
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    r.doc.mate_parallel("P", &top(r.a), &bottom(r.b), Alignment::Opposed, false).unwrap();
+    assert!(r.placement(r.b) == Placement::translation(DVec3::new(10.0, 10.0, 30.0)), "it held already");
+    let status = r.doc.solver();
+    assert_eq!(status.remaining_dof, 4);
+    let motions: Vec<_> = status.free.iter().map(|f| f.motion.as_str()).collect();
+    assert_eq!(motions, ["translate_x", "translate_y", "translate_z", "spin_z"]);
+    let measured = r.doc.mate_measurements();
+    let gap = measured[0].1.as_ref().unwrap().as_ref().expect("a Parallel measures its gap");
+    assert_eq!(gap.rational, "20");
+    let refused = r.doc.edit_mates(&[("P".into(), MateEdit::Distance("1 mm".into()))]).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::Invalid, "{refused}");
+    reopen(&mut r);
+
+    // A strict Parallel says what it leaves: with the sides too, only translations.
+    let refused = r.doc.mate_parallel("Q", &side(r.a, X), &side(r.b, X), Alignment::Aligned, true).unwrap_err();
+    assert_eq!((refused.code, refused.remaining_dof), (RefusalCode::UnderConstrained, Some(3)));
+
+    // B's top at right angles to A's: a quarter turn.
+    let mut r = rig("perpendicular", 10.0);
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    r.doc.mate_perpendicular("R", &top(r.a), &top(r.b), false).unwrap();
+    let turned = r.placement(r.b).rotation;
+    assert!((turned * DVec3::Z).dot(DVec3::Z).abs() < 1e-12, "{turned}");
+    assert!((turned.angle_between(DQuat::IDENTITY) - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    assert_eq!(r.doc.solver().remaining_dof, 5);
+    let before = r.state();
+    let refused = r.doc.mate_parallel("P", &top(r.a), &top(r.b), Alignment::Aligned, false).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::OverConstrained);
+    assert_eq!(refused.mates, ["P", "R"], "over-constraint names both mates");
+    assert_eq!(r.state(), before);
+    let refused = r.doc.edit_mates(&[("R".into(), MateEdit::Alignment(Alignment::Aligned))]).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::Invalid, "a Perpendicular has no alignment");
+    reopen(&mut r);
+    assert_eq!(r.doc.solver().remaining_dof, 5);
+}
+
+/// A Lock keeps B where it is relative to A, fixes all six motions between them, survives
+/// a save, and refuses a relative turn off the quarter turns instead of rounding it.
+#[test]
+fn a_lock_keeps_the_relative_placement() {
+    let mut r = rig("lock", 10.0);
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    r.doc.mate_lock("L", r.a, r.b, false).unwrap();
+    assert_eq!(r.placement(r.b), Placement::translation(DVec3::new(10.0, 10.0, 30.0)));
+    assert_eq!(r.doc.solver().state, SolverState::Solved);
+    let Some(Mate::Lock { relative, .. }) = r.doc.assembly().known_mates().last().cloned() else { panic!("a lock") };
+    assert_eq!(relative, Placement::translation(DVec3::new(10.0, 10.0, 30.0)));
+    reopen(&mut r);
+    assert_eq!(r.doc.solver().state, SolverState::Solved);
+
+    // A distance that disagrees with the lock is refused, naming both.
+    let before = r.state();
+    let refused = r.doc.mate_distance("Z", &top(r.a), &bottom(r.b), "5 mm", Alignment::Opposed, false).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::OverConstrained);
+    assert_eq!(refused.mates, ["L", "Z"]);
+    assert_eq!(r.state(), before);
+
+    // A quarter turn between them is exact, and the lock carries B when A turns.
+    let mut r = rig("lock-quarter", 10.0);
+    let path = OccurrencePath::root().child(Step::component(r.b));
+    r.doc.move_to(&[(path, Placement::new(quarter_z(), DVec3::new(10.0, 10.0, 30.0)))]).unwrap();
+    r.doc.mate_lock("L", r.a, r.b, false).unwrap();
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    assert_eq!(r.doc.solver().state, SolverState::Solved);
+    turned(r.placement(r.b).rotation, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+
+    // Thirty degrees between them is refused, and nothing changes.
+    let mut r = rig("lock-oblique", 10.0);
+    let path = OccurrencePath::root().child(Step::component(r.b));
+    let oblique = Placement::new(DQuat::from_rotation_z(30f64.to_radians()), DVec3::new(10.0, 10.0, 30.0));
+    r.doc.move_to(&[(path, oblique)]).unwrap();
+    let before = r.state();
+    let refused = r.doc.mate_lock("L", r.a, r.b, false).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::UnsupportedPlacement, "{refused}");
+    assert_eq!(refused.mates, ["L"]);
+    assert!(refused.message.contains("quarter-turn"), "{refused}");
+    assert_eq!(r.state(), before, "a refused lock changes nothing");
+
+    // The same thirty degrees written into a file is refused when it solves.
+    let mut r = rig("lock-file", 10.0);
+    r.doc.mate_lock("L", r.a, r.b, false).unwrap();
+    r.doc.save(None).unwrap();
+    let package = AssemblyPackage::open(&r.root).unwrap();
+    let mut truth = (**package.assembly()).clone();
+    for entry in &mut truth.mates {
+        if let MateEntry::Known(Mate::Lock { relative, .. }) = entry {
+            relative.rotation = DQuat::from_rotation_z(30f64.to_radians());
+        }
+    }
+    truth.save(&r.root, package.id(), None, &[]).unwrap();
+    r.doc = AssemblyDocument::open(&r.root, options()).unwrap();
+    r.doc.finish_loading();
+    let refused = r.doc.set_value("gap", "5 mm").unwrap_err();
+    assert_eq!((refused.code, refused.mates), (RefusalCode::UnsupportedPlacement, vec!["L".to_owned()]));
+}
+
+/// Width holds B's x sides between A's: centred, at a gap from one face or the other, or at
+/// a share of the play, all exact.
+#[test]
+fn width_puts_the_tab_in_the_groove() {
+    const NX: [f64; 3] = [-1.0, 0.0, 0.0];
+    // A's sides at x = 20 and x = -20, B's at 10 and -10 in its frame: the play is 20.
+    for (width, x) in [
+        (WidthInput::Centered, 0.0),
+        (WidthInput::Dimension { distance: "3 mm".into(), flipped: false }, 7.0),
+        (WidthInput::Dimension { distance: "3 mm".into(), flipped: true }, -7.0),
+        (WidthInput::Percent { percent: 25.0, flipped: false }, 5.0),
+        (WidthInput::Percent { percent: 25.0, flipped: true }, -5.0),
+    ] {
+        let mut r = rig("width", 10.0);
+        r.doc.mate_origin("O", r.a, true, false).unwrap();
+        let (g0, g1, t0, t1) = (side(r.a, X), side(r.a, NX), side(r.b, X), side(r.b, NX));
+        r.doc.mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &width, false).unwrap();
+        assert_eq!(r.placement(r.b).translation, DVec3::new(x, 10.0, 30.0), "{width:?}");
+        let status = r.doc.solver();
+        let motions: Vec<_> = status.free.iter().map(|f| f.motion.as_str()).collect();
+        assert_eq!(motions, ["translate_y", "translate_z", "spin_x"], "{width:?}");
+        // From A's +x side at 20 to B's at x + 10.
+        let measured = r.doc.mate_measurements();
+        let gap = measured[0].1.as_ref().unwrap().as_ref().expect("a Width measures its first gap");
+        assert_eq!(gap.value, x - 10.0, "{width:?}");
+    }
+
+    let mut r = rig("width-edit", 10.0);
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    let (g0, g1, t0, t1) = (side(r.a, X), side(r.a, [-1.0, 0.0, 0.0]), side(r.b, X), side(r.b, [-1.0, 0.0, 0.0]));
+    let percent = WidthInput::Percent { percent: 25.0, flipped: false };
+    r.doc.mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &percent, false).unwrap();
+    r.doc.edit_mates(&[("W".into(), MateEdit::Percent(50.0))]).unwrap();
+    assert_eq!(r.placement(r.b).translation.x, 0.0);
+    r.doc.edit_mates(&[("W".into(), MateEdit::Percent(0.0)), ("W".into(), MateEdit::Flipped(true))]).unwrap();
+    assert_eq!(r.placement(r.b).translation.x, -10.0, "against the second groove face");
+    assert_eq!(
+        r.doc.edit_mates(&[("W".into(), MateEdit::Percent(120.0))]).unwrap_err().code,
+        RefusalCode::InvalidValue
+    );
+    reopen(&mut r);
+
+    // A distance across the groove disagrees with the width: both are named.
+    let before = r.state();
+    let refused =
+        r.doc.mate_distance("X", &side(r.a, X), &side(r.b, X), "0 mm", Alignment::Aligned, false).unwrap_err();
+    assert_eq!(
+        (refused.code, refused.mates.clone()),
+        (RefusalCode::OverConstrained, vec!["W".to_owned(), "X".to_owned()])
+    );
+    assert_eq!(r.state(), before);
+
+    // A groove whose faces are not parallel is refused by name.
+    let mut r = rig("width-skew", 10.0);
+    let (g0, g1, t0, t1) = (side(r.a, X), top(r.a), side(r.b, X), side(r.b, [-1.0, 0.0, 0.0]));
+    let before = r.state();
+    let refused = r.doc.mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &WidthInput::Centered, false);
+    assert_eq!(refused.unwrap_err().code, RefusalCode::NotParallel);
+    assert_eq!(r.state(), before);
+}
+
+/// A part's datum planes and its plane features mate like faces, proved from their
+/// definitions; a plane the part does not have is refused.
+#[test]
+fn reference_planes_mate_like_faces() {
+    let mut r = rig("planes", 10.0);
+    let name = add_plane(&r.a_file, DatumPlane::Top, 4.0);
+    r.doc.refresh_references(Vec::new());
+    r.doc.finish_loading();
+    let report = r.doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    r.doc.mate_coincident("Mid", &plane(r.a, &name), &bottom(r.b), Alignment::Opposed, false).unwrap();
+    assert_eq!(r.placement(r.b).translation, DVec3::new(10.0, 10.0, 4.0), "B's underside on the plane 4 up");
+    r.doc
+        .mate_coincident("Right", &plane(r.a, "Right plane"), &plane(r.b, "Right plane"), Alignment::Aligned, false)
+        .unwrap();
+    r.doc
+        .mate_distance(
+            "Front",
+            &plane(r.a, "Front plane"),
+            &plane(r.b, "Front plane"),
+            "2 mm",
+            Alignment::Aligned,
+            false,
+        )
+        .unwrap();
+    // The Front plane looks along -Y, so 2 mm along it is y = -2.
+    assert_eq!(r.placement(r.b).translation, DVec3::new(0.0, -2.0, 4.0));
+    assert_eq!(r.doc.solver().state, SolverState::Solved);
+    let text = serde_json::to_string(r.doc.assembly()).unwrap();
+    assert!(text.contains(r#""plane":{"on":"datum","datum":"right"}"#), "{text}");
+    assert!(text.contains(r#""on":"feature""#), "{text}");
+    reopen(&mut r);
+    assert_eq!(r.doc.solver().state, SolverState::Solved);
+
+    let before = r.state();
+    let refused = r.doc.mate_parallel("No", &plane(r.a, "Nope"), &top(r.b), Alignment::Aligned, false).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::NoSuchFace);
+    assert_eq!(r.state(), before);
 }

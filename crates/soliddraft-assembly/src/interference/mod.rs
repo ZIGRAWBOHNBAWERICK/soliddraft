@@ -695,6 +695,11 @@ fn mm(v: f64) -> String {
     format!("{} mm", round(v))
 }
 
+/// A distance known to lie from `lo` to `hi`, as one length when the two round alike.
+fn span(lo: f64, hi: f64) -> String {
+    if round(lo) == round(hi) { mm(hi) } else { format!("{} to {}", round(lo), mm(hi)) }
+}
+
 /// What two placed solids are proven to be, and the triangle pairs within the clearance
 /// and margin, nearest first, for naming faces. The paths and labels are the caller's.
 fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u32, u32)>) {
@@ -730,8 +735,9 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         result.clearance = clearance.map(|_| ClearanceOutcome::Undecided);
         return (result, faces);
     };
-    let d = closest.distance;
-    let within: Vec<_> = near.pairs.iter().filter(|p| p.2.distance <= margin).copied().collect();
+    // The meshes are at least `lower` apart and at most `d`.
+    let (lower, d) = (near.lower, closest.distance);
+    let within: Vec<_> = near.pairs.iter().filter(|p| p.2.lower <= margin).copied().collect();
     if let Some(y) = geometry::witness(a, b, &within) {
         result.outcome = Outcome::Interferes;
         result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
@@ -740,23 +746,34 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
             "The point {} is inside both parts: inside both certified meshes and farther from each than its bound.",
             point_text(y.to_array())
         );
-    } else if d > margin {
-        let a_in_b = b.contains(a.triangle(0)[0]);
-        let b_in_a = a.contains(b.triangle(0)[0]);
-        if a_in_b == Some(false) && b_in_a == Some(false) {
+    } else if lower > margin {
+        // The two meshes' surfaces do not meet, so each connected piece of either surface
+        // lies wholly inside the other mesh or wholly outside it, and the meshes overlap
+        // only where a piece of one lies inside the other. One point per piece settles it,
+        // every piece of both: a patterned part's mesh has one piece per copy.
+        let inside = |s: &Solid, other: &Solid| -> Vec<Option<bool>> {
+            s.pieces().iter().map(|t| other.contains(s.triangle(*t)[0])).collect()
+        };
+        let found = [inside(a, b), inside(b, a)].concat();
+        if found.iter().all(|c| *c == Some(false)) {
             result.outcome = Outcome::Clear;
-            result.distance = DistanceBounds { lo: d - margin, hi: Some(d + margin) };
+            result.distance = DistanceBounds { lo: lower - margin, hi: Some(d + margin) };
             result.why = format!(
                 "The parts are {} to {} apart: their certified meshes are {} apart, and each mesh is within {} of its part.",
-                mm(d - margin),
+                mm(lower - margin),
                 mm(d + margin),
-                mm(d),
+                span(lower, d),
                 mm(a.slack().max(b.slack()))
             );
         } else {
             result.distance = DistanceBounds { lo: 0.0, hi: Some(d + margin) };
-            result.why =
-                "One part's certified mesh lies inside the other's, and no point was proven inside both.".into();
+            result.why = if found.contains(&Some(true)) {
+                "A piece of one part's certified mesh lies inside the other's, and no point was proven inside both."
+            } else {
+                "Whether a piece of one part's certified mesh lies inside the other's is unsettled: every containment \
+                 ray grazed a triangle."
+            }
+            .into();
         }
     } else {
         result.distance = DistanceBounds { lo: 0.0, hi: Some(d + margin) };
@@ -819,6 +836,77 @@ mod tests {
         assert_eq!(compare(&a, &b, Some(2.0)).clearance, Some(ClearanceOutcome::Undecided));
         let into = block([10.0, 5.0, 9.0], [30.0, 25.0, 15.0], 0.01);
         assert_eq!(compare(&a, &into, Some(0.5)).clearance, Some(ClearanceOutcome::Below));
+    }
+
+    #[test]
+    fn near_parallel_ridges_never_prove_a_clearance_they_miss() {
+        // The parts are 0.01 mm apart where the ridges cross; the margin is about 0.002 mm.
+        // Asked for 0.011 mm, the bounds cannot tell, at the review's 9e-7 rad as at its
+        // controls, 0 and 1.1e-6 rad.
+        for angle in [0.0, 9e-7, 1.1e-6] {
+            let (a, b) = geometry::tests_support::ridges(angle, 0.001);
+            let r = compare(&a, &b, Some(0.011));
+            assert_eq!(r.clearance, Some(ClearanceOutcome::Undecided), "angle {angle}: {r:#?}");
+            assert!(r.distance.lo <= 0.01, "angle {angle}: {:?}", r.distance);
+            assert!(r.distance.hi.is_some_and(|hi| hi >= 0.01), "angle {angle}: {:?}", r.distance);
+            // Asked for 0.007 mm, below the distance less the margin, the clearance is met.
+            assert_eq!(compare(&a, &b, Some(0.007)).clearance, Some(ClearanceOutcome::Met), "angle {angle}");
+        }
+    }
+
+    /// The review's patterned part: 100 unit cubes 20 mm apart along x, in `order`.
+    fn cubes(order: impl IntoIterator<Item = usize>) -> Solid {
+        let at = |i: usize| ([20.0 * i as f64, 0.0, 0.0], [20.0 * i as f64 + 1.0, 1.0, 1.0]);
+        geometry::tests_support::boxes(&order.into_iter().map(at).collect::<Vec<_>>(), 0.001)
+    }
+
+    #[test]
+    fn a_piece_of_a_part_inside_another_part_is_never_clear() {
+        // B holds the whole of cube 2, [40, 41] x [0, 1] x [0, 1], and its surface is 4 mm
+        // from every cube's. Neither mesh's first vertex is inside the other, in any order.
+        let b = block([35.0, -4.0, -4.0], [46.0, 7.0, 7.0], 0.001);
+        let orders: [Vec<usize>; 3] = [
+            (0..100).collect(),
+            [2].into_iter().chain((0..100).filter(|i| *i != 2)).collect(),
+            (0..100).rev().collect(),
+        ];
+        for order in orders {
+            let first = order[0];
+            let a = cubes(order);
+            for (x, y) in [(&a, &b), (&b, &a)] {
+                let r = compare(x, y, Some(0.5));
+                assert_eq!((r.outcome, r.clearance), (Outcome::Interferes, Some(ClearanceOutcome::Below)), "{r:#?}");
+                let w = r.witness.expect("a witness");
+                assert!(w[0] > 40.0 && w[0] < 41.0, "cube {first} first: {w:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_piece_too_thin_to_prove_is_undecided_not_clear() {
+        // A plate 0.0015 mm thick, thinner than twice its mesh's bound, inside B: no point
+        // is proven inside both, and B holds it all the same.
+        let a = geometry::tests_support::boxes(&[([0.0; 3], [1.0; 3]), ([40.0, 0.0, 0.0], [41.0, 1.0, 0.0015])], 0.001);
+        let b = block([35.0, -4.0, -4.0], [46.0, 7.0, 7.0], 0.001);
+        let r = compare(&a, &b, Some(0.5));
+        assert_eq!(
+            (r.outcome, r.clearance),
+            (Outcome::TouchingOrUndecided, Some(ClearanceOutcome::Undecided)),
+            "{r:#?}"
+        );
+        assert_eq!(r.distance.lo, 0.0);
+        assert!(r.why.starts_with("A piece of one part's"), "{}", r.why);
+    }
+
+    #[test]
+    fn pieces_of_a_part_all_outside_another_are_clear() {
+        // B between cubes 0 and 1, 4 mm from each.
+        let b = block([5.0, -4.0, -4.0], [16.0, 7.0, 7.0], 0.001);
+        for a in [cubes(0..100), cubes((0..100).rev())] {
+            let r = compare(&a, &b, Some(0.5));
+            assert_eq!((r.outcome, r.clearance), (Outcome::Clear, Some(ClearanceOutcome::Met)), "{r:#?}");
+            assert!(r.distance.lo > 3.99 && r.distance.lo < 4.0, "{:?}", r.distance);
+        }
     }
 
     #[test]

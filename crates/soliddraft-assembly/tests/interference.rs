@@ -14,12 +14,12 @@ use soliddraft_assembly::{
     FaceSelector, GeneratorChoice, KernelSource, OccurrencePath, OpenOptions, Outcome, Placement, Step,
 };
 use soliddraft_document::{CacheOnlyStore, DocRef, identify_file};
-use soliddraft_kernel_api::Kernel;
+use soliddraft_kernel_api::{Kernel, Vec3};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{P2, Sketch, solve::solve};
 use soliddraft_model::{
-    Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, ProfileSource, SketchFeature,
-    SketchPlane,
+    Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, PatternFeature, PatternSpec,
+    ProfileSource, SketchFeature, SketchPlane,
 };
 
 fn kernel() -> Arc<dyn Kernel> {
@@ -44,11 +44,24 @@ fn options() -> OpenOptions {
 
 /// A `w` x `d` x `h` block, centred in plan and rising from z = 0.
 fn new_block(path: &Path, w: f64, d: f64, h: f64) {
-    let mut doc = Document::new("Block", kernel());
     let mut sketch = Sketch::new();
     sketch.rectangle(P2::new(0.0, 0.0), w, d).unwrap();
+    new_extrusion(path, DatumPlane::Top, sketch, h);
+}
+
+/// A prism with the cross-section `corners` in (y, z), running along x from 0 to `length`.
+fn new_prism(path: &Path, corners: &[[f64; 2]], length: f64) {
+    let mut sketch = Sketch::new();
+    let points: Vec<P2> = corners.iter().map(|[y, z]| P2::new(*y, *z)).collect();
+    sketch.polyline_loop(&points).unwrap();
+    new_extrusion(path, DatumPlane::Right, sketch, length);
+}
+
+/// A part made of one sketch on `datum` extruded by `h`.
+fn new_extrusion(path: &Path, datum: DatumPlane, mut sketch: Sketch, h: f64) {
+    let mut doc = Document::new("Block", kernel());
     solve(&mut sketch, None, true);
-    let plane = SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 };
+    let plane = SketchPlane::Datum { datum, offset: 0.0 };
     let add = |doc: &mut Document, kind| {
         doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false })
             .unwrap()
@@ -65,6 +78,17 @@ fn new_block(path: &Path, w: f64, d: f64, h: f64) {
             reverse: false,
         }),
     );
+    doc.save(path).unwrap();
+}
+
+/// A hundred 1 mm cubes 20 mm apart along x, centred on x = 0, 20, ... 1980: one part,
+/// made by a linear pattern of the first cube, whose body has a hundred separate pieces.
+fn new_cubes(path: &Path) {
+    new_block(path, 1.0, 1.0, 1.0);
+    let mut doc = Document::open(path, kernel()).unwrap();
+    let layout = PatternSpec::Linear { direction: Vec3::X, spacing: 20.0, count: 100 };
+    let kind = FeatureKind::Pattern(PatternFeature { layout });
+    doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
     doc.save(path).unwrap();
 }
 
@@ -224,6 +248,72 @@ fn a_rotated_part_is_checked_where_it_is_placed() {
     // Turned down into A, the same placement 10 mm lower interferes.
     rig.doc.move_to(&[(path(rig.b), Placement::new(turn, DVec3::new(3.0, 7.0, 12.0)))]).unwrap();
     assert_eq!(rig.check(None).interferes, 1);
+}
+
+#[test]
+fn long_parts_a_hair_off_parallel_never_prove_a_clearance_they_miss() {
+    // Two 20 m ridged bars, A's ridge up along x and B's down, crossed at the origin with
+    // B turned 9e-7 rad about z and lifted 0.01 mm. The ridges meet at mid-length only, so
+    // the parts are 0.01 mm apart there; their ridges' ends are about 0.013 mm apart.
+    let dir = folder("ridges");
+    let (a_file, b_file, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("ridges.dwasm"));
+    const LENGTH: f64 = 20_000.0;
+    new_prism(&a_file, &[[0.0, 0.0], [-10.0, -10.0], [10.0, -10.0]], LENGTH);
+    new_prism(&b_file, &[[0.0, 0.0], [10.0, 10.0], [-10.0, 10.0]], LENGTH);
+    let mut doc = AssemblyDocument::new_with("Ridges", options());
+    doc.save(Some(&root)).unwrap();
+    let mid = DVec3::new(LENGTH / 2.0, 0.0, 0.0);
+    doc.insert(reference(&root, &a_file), Placement::translation(-mid)).unwrap();
+    let b = doc.insert(reference(&root, &b_file), Placement::IDENTITY).unwrap();
+    doc.finish_loading();
+    for angle in [0.0, 9e-7, 1.1e-6] {
+        let turn = DQuat::from_rotation_z(angle);
+        let at = Placement::new(turn, DVec3::new(0.0, 0.0, 0.01) - turn * mid);
+        doc.move_to(&[(path(b), at)]).unwrap();
+        let check = |doc: &mut AssemblyDocument, clearance| {
+            doc.check_interference(&CheckRequest {
+                clearance: Some(clearance),
+                chord: 0.001,
+                ..CheckRequest::default()
+            })
+            .unwrap()
+        };
+        // The margin is twice 0.001 mm plus rounding, so 0.011 mm cannot be told apart.
+        let report = check(&mut doc, 0.011);
+        assert_eq!(report.undecided, Some(1), "angle {angle}: {report:#?}");
+        let r = &report.results[0];
+        assert!(r.distance.lo <= 0.01 && r.distance.hi.is_some_and(|hi| hi >= 0.01), "angle {angle}: {r:#?}");
+        assert_eq!(check(&mut doc, 0.007).met, Some(1), "angle {angle}");
+    }
+}
+
+#[test]
+fn a_patterned_part_with_one_copy_inside_another_part_is_never_clear() {
+    let dir = folder("pieces");
+    let (a_file, b_file, root) = (dir.join("cubes.dwprt"), dir.join("b.dwprt"), dir.join("pieces.dwasm"));
+    new_cubes(&a_file);
+    new_block(&b_file, 11.0, 11.0, 11.0);
+    let mut doc = AssemblyDocument::new_with("Pieces", options());
+    doc.save(Some(&root)).unwrap();
+    doc.insert(reference(&root, &a_file), Placement::IDENTITY).unwrap();
+    let b = doc.insert(reference(&root, &b_file), Placement::IDENTITY).unwrap();
+    doc.finish_loading();
+    let check = |doc: &mut AssemblyDocument| {
+        doc.check_interference(&CheckRequest { clearance: Some(0.5), chord: 0.001, ..CheckRequest::default() }).unwrap()
+    };
+    // B, 11 mm on a side, around the first, a middle and the last copy: its surface is
+    // 5 mm from the cube inside it and farther from the rest.
+    for x in [0.0, 40.0, 1000.0, 1980.0] {
+        doc.move_to(&[(path(b), Placement::translation(DVec3::new(x, 0.0, -5.0)))]).unwrap();
+        let report = check(&mut doc);
+        assert_eq!((report.interferes, report.below), (1, Some(1)), "B at x = {x}: {report:#?}");
+        let w = report.results[0].witness.expect("a witness");
+        assert!((w[0] - x).abs() < 0.5 && w[2] > 0.0 && w[2] < 1.0, "B at x = {x}: {w:?}");
+    }
+    // Between the first two copies, 4 mm from each, every piece is outside: clear.
+    doc.move_to(&[(path(b), Placement::translation(DVec3::new(10.0, 0.0, -5.0)))]).unwrap();
+    let report = check(&mut doc);
+    assert_eq!((report.clear, report.met), (1, Some(1)), "{report:#?}");
 }
 
 #[test]

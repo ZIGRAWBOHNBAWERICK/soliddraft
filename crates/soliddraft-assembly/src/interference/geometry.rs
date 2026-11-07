@@ -103,22 +103,58 @@ pub(crate) struct Solid {
     pub bounds: Bounds,
     nodes: Vec<Node>,
     order: Vec<u32>,
+    /// The first triangle of each connected piece of the mesh, in triangle order.
+    pieces: Vec<u32>,
 }
 
-/// Closest points on two triangles and how far apart they are.
+/// The nearest points found on two features, such as two triangles, and a proven lower
+/// bound on how far apart the features are. The two are kept apart: a pair of points
+/// bounds the distance from above only, and only a search that reaches the true closest
+/// points bounds it from below.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Closest {
+    /// How far apart `a` and `b` are. They lie on the two features, so the features are
+    /// at most this far apart.
     pub distance: f64,
+    /// The features are at least this far apart, up to the rounding allowance.
+    pub lower: f64,
+    /// A point of the first feature.
     pub a: DVec3,
+    /// A point of the second feature.
     pub b: DVec3,
+}
+
+impl Closest {
+    /// Two points proven to be the closest of their features, so that their distance
+    /// bounds the features' distance both ways.
+    fn exact(a: DVec3, b: DVec3) -> Closest {
+        let distance = a.distance(b);
+        Closest { distance, lower: distance, a, b }
+    }
+
+    /// Over two sub-problems whose least distance between them is the whole problem's:
+    /// the nearer pair of points, and the lesser lower bound.
+    fn or(self, other: Closest) -> Closest {
+        let lower = self.lower.min(other.lower);
+        let nearer = if other.distance < self.distance { other } else { self };
+        Closest { lower, ..nearer }
+    }
+
+    /// The same with the two features exchanged.
+    fn swapped(self) -> Closest {
+        Closest { a: self.b, b: self.a, ..self }
+    }
 }
 
 /// What two solids' meshes say near each other.
 pub(crate) struct Near {
-    /// The least distance found between the two meshes, with its points. Those two mesh
-    /// points are that far apart, so it bounds the least distance from above, and the
-    /// search is exhaustive, so it is the least distance within the rounding allowance.
+    /// The nearest pair of mesh points found. They are that far apart, so it bounds the
+    /// meshes' least distance from above.
     pub closest: Option<Closest>,
+    /// The meshes are at least this far apart, up to the rounding allowance: the least
+    /// lower bound over the triangle pairs searched. The search reaches every pair that
+    /// could be nearer than `closest`, so the nearest pair is among them.
+    pub lower: f64,
     /// Triangle pairs within the cutoff, nearest first: triangle of a, triangle of b,
     /// closest points. At most [`PAIRS_KEPT`] of them.
     pub pairs: Vec<(u32, u32, Closest)>,
@@ -138,12 +174,20 @@ impl Solid {
             chord,
             rounding: ROUNDING * extent,
             nodes: Vec::new(),
+            pieces: Vec::new(),
         };
+        solid.pieces = pieces(&solid.tris);
         if !solid.tris.is_empty() {
             solid.build(0, solid.tris.len());
             solid.bounds = solid.nodes[0].bounds;
         }
         solid
+    }
+
+    /// The first triangle of each connected piece of the mesh. A part's mesh holds one
+    /// piece per shell, so a patterned part or a part with a cavity has several.
+    pub fn pieces(&self) -> &[u32] {
+        &self.pieces
     }
 
     /// The number of triangles.
@@ -283,7 +327,7 @@ impl Solid {
 /// The meshes of `a` and `b` near each other: the least distance between them and the
 /// triangle pairs within `cutoff`.
 pub(crate) fn near(a: &Solid, b: &Solid, cutoff: f64) -> Near {
-    let mut out = Near { closest: None, pairs: Vec::new() };
+    let mut out = Near { closest: None, lower: f64::INFINITY, pairs: Vec::new() };
     if a.nodes.is_empty() || b.nodes.is_empty() {
         return out;
     }
@@ -309,7 +353,8 @@ pub(crate) fn near(a: &Solid, b: &Solid, cutoff: f64) -> Near {
                             best = c.distance;
                             out.closest = Some(c);
                         }
-                        if c.distance <= cutoff && out.pairs.len() < PAIRS_KEPT {
+                        out.lower = out.lower.min(c.lower);
+                        if c.lower <= cutoff && out.pairs.len() < PAIRS_KEPT {
                             out.pairs.push((ta, tb, c));
                         }
                     }
@@ -359,10 +404,11 @@ pub(crate) fn witness(a: &Solid, b: &Solid, pairs: &[(u32, u32, Closest)]) -> Op
         }
     }
     // One solid inside the other, or overlaps with no surface pair kept: walk inward from
-    // spread-out triangles of each.
+    // a triangle of every piece of each, then from spread-out triangles.
     for (s, other) in [(a, b), (b, a)] {
         let stride = (s.count() / 64).max(1);
-        for t in (0..s.count()).step_by(stride) {
+        let firsts = s.pieces.iter().map(|t| *t as usize);
+        for t in firsts.chain((0..s.count()).step_by(stride)) {
             let tri = &s.tris[t];
             let base = (tri[0] + tri[1] + tri[2]) / 3.0;
             if other.bounds.point_distance(base) > 0.0 {
@@ -425,6 +471,40 @@ pub(crate) fn shared_point(a: &Solid, fa: u32, b: &Solid, fb: u32, axis: usize) 
         }
     }
     None
+}
+
+/// The first triangle of each connected piece of a mesh, in triangle order. Triangles
+/// join where they share a corner, matched bit for bit, since the kernel places each
+/// shared vertex by the same arithmetic. A piece the matching misses splits in two, which
+/// only adds tests; two pieces never join unless their surfaces meet.
+fn pieces(tris: &[[DVec3; 3]]) -> Vec<u32> {
+    use std::collections::HashMap;
+    use std::collections::hash_map::Entry;
+    // Each triangle points towards the least triangle of its piece.
+    let mut parent: Vec<u32> = (0..tris.len() as u32).collect();
+    fn root(parent: &mut [u32], mut i: u32) -> u32 {
+        while parent[i as usize] != i {
+            parent[i as usize] = parent[parent[i as usize] as usize];
+            i = parent[i as usize];
+        }
+        i
+    }
+    let mut first: HashMap<[u64; 3], u32> = HashMap::new();
+    for (t, tri) in tris.iter().enumerate() {
+        for p in tri {
+            // Adding zero folds -0 into 0.
+            match first.entry((*p + DVec3::ZERO).to_array().map(f64::to_bits)) {
+                Entry::Vacant(e) => {
+                    e.insert(t as u32);
+                }
+                Entry::Occupied(e) => {
+                    let (x, y) = (root(&mut parent, *e.get()), root(&mut parent, t as u32));
+                    parent[x.max(y) as usize] = x.min(y);
+                }
+            }
+        }
+    }
+    (0..tris.len() as u32).filter(|t| parent[*t as usize] == *t).collect()
 }
 
 /// The edges of a set of triangles that only one of them has: the boundary of the
@@ -581,39 +661,34 @@ fn point_triangle(p: DVec3, t: &[DVec3; 3]) -> DVec3 {
     a + ab * (vb / denom) + ac * (vc / denom)
 }
 
-fn segment_point(p: DVec3, q: DVec3, x: DVec3) -> DVec3 {
+/// Where along segment `pq` its point nearest `x` is, from 0 at `p` to 1 at `q`.
+fn segment_param(p: DVec3, q: DVec3, x: DVec3) -> f64 {
     let d = q - p;
     let len = d.length_squared();
-    let t = if len > 0.0 { ((x - p).dot(d) / len).clamp(0.0, 1.0) } else { 0.0 };
-    p + d * t
+    if len > 0.0 { ((x - p).dot(d) / len).clamp(0.0, 1.0) } else { 0.0 }
 }
 
-/// The closest points of two segments (Ericson 5.1.9), with near-parallel segments
-/// settled from their endpoints, where the answer is well conditioned.
-fn segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> (DVec3, DVec3) {
+fn segment_point(p: DVec3, q: DVec3, x: DVec3) -> DVec3 {
+    p + (q - p) * segment_param(p, q, x)
+}
+
+/// The closest points of two segments. Segments more than 45 degrees from parallel meet
+/// where their lines come nearest, clamped to their ends (Ericson 5.1.9). Finding that
+/// point divides by the squared sine of the angle between them, so nearer parallel pairs
+/// go to [`alongside`], which never does.
+fn segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> Closest {
     let (d1, d2, r) = (q1 - p1, q2 - p2, p1 - p2);
     let (a, e, f) = (d1.length_squared(), d2.length_squared(), d2.dot(r));
-    if a == 0.0 && e == 0.0 {
-        return (p1, p2);
-    }
     if a == 0.0 {
-        return (p1, segment_point(p2, q2, p1));
+        return Closest::exact(p1, segment_point(p2, q2, p1));
     }
-    let c = d1.dot(r);
     if e == 0.0 {
-        return (segment_point(p1, q1, p2), p2);
+        return Closest::exact(segment_point(p1, q1, p2), p2);
     }
-    let b = d1.dot(d2);
+    let (b, c) = (d1.dot(d2), d1.dot(r));
     let denom = a * e - b * b;
-    if denom <= 1e-12 * a * e {
-        // Parallel within rounding: the least of the four endpoint projections.
-        let options = [
-            (p1, segment_point(p2, q2, p1)),
-            (q1, segment_point(p2, q2, q1)),
-            (segment_point(p1, q1, p2), p2),
-            (segment_point(p1, q1, q2), q2),
-        ];
-        return options.into_iter().min_by(|x, y| x.0.distance(x.1).total_cmp(&y.0.distance(y.1))).expect("four");
+    if 2.0 * denom <= a * e {
+        return alongside(p1, q1, p2, q2);
     }
     let mut s = ((b * f - c * e) / denom).clamp(0.0, 1.0);
     let mut t = (b * s + f) / e;
@@ -624,28 +699,64 @@ fn segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> (DVec3, DVec3) {
         t = 1.0;
         s = ((b - c) / a).clamp(0.0, 1.0);
     }
-    (p1 + d1 * s, p2 + d2 * t)
+    Closest::exact(p1 + d1 * s, p2 + d2 * t)
 }
 
-/// The closest points of a segment and a triangle.
-fn segment_triangle(p: DVec3, q: DVec3, t: &[DVec3; 3]) -> (DVec3, DVec3) {
+/// The closest points of two segments within 45 degrees of parallel, and a lower bound on
+/// their distance that does not rest on where their lines come nearest, which is ill
+/// conditioned here.
+///
+/// Their least distance is reached either with an end of one segment, or between inner
+/// points of both. An end's candidates are the four distances from an end to the other
+/// segment. Between inner points, the first segment's point lies alongside the second,
+/// between the planes square to the second through its ends, and its distance to the
+/// second is its distance to the second's line. Over the alongside part of the first
+/// segment that distance is the distance from the origin to a segment of offsets, which
+/// stays well conditioned however near parallel the two are. Near parallel, the four ends
+/// alone bound the distance from above only: two long segments crossing a hair apart are
+/// nearest in their middles.
+fn alongside(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> Closest {
+    let ends = Closest::exact(p1, segment_point(p2, q2, p1))
+        .or(Closest::exact(q1, segment_point(p2, q2, q1)))
+        .or(Closest::exact(segment_point(p1, q1, p2), p2))
+        .or(Closest::exact(segment_point(p1, q1, q2), q2));
+    let (d1, length) = (q1 - p1, p2.distance(q2));
+    let u = (q2 - p2) / length;
+    // Along u the first segment starts at `start` and moves `rate` per unit of its
+    // parameter; within 45 degrees of u, `rate` is at least 0.7 of its length.
+    let (start, rate) = ((p1 - p2).dot(u), d1.dot(u));
+    let (s0, s1) = (-start / rate, (length - start) / rate);
+    let (s0, s1) = (s0.min(s1).max(0.0), s0.max(s1).min(1.0));
+    if s0 > s1 {
+        return ends;
+    }
+    // A point's offset from the second segment's line, square to it.
+    let offset = |x: DVec3| {
+        let v = x - p2;
+        v - u * v.dot(u)
+    };
+    let (x0, x1) = (p1 + d1 * s0, p1 + d1 * s1);
+    let x = x0 + (x1 - x0) * segment_param(offset(x0), offset(x1), DVec3::ZERO);
+    let y = segment_point(p2, q2, x);
+    // The distance to the line is at most the distance to the segment, and equal to it
+    // alongside, so it bounds the inner candidate from below wherever rounding puts `x`.
+    ends.or(Closest { distance: x.distance(y), lower: offset(x).length(), a: x, b: y })
+}
+
+/// The closest points of a segment and a triangle. Their least distance is reached at an
+/// end of the segment, on an edge of the triangle, or where the segment crosses it.
+fn segment_triangle(p: DVec3, q: DVec3, t: &[DVec3; 3]) -> Closest {
     let n = (t[1] - t[0]).cross(t[2] - t[0]);
     let (dp, dq) = ((p - t[0]).dot(n), (q - t[0]).dot(n));
-    let mut best = (p, point_triangle(p, t));
-    let mut consider = |pair: (DVec3, DVec3)| {
-        if pair.0.distance(pair.1) < best.0.distance(best.1) {
-            best = pair;
-        }
-    };
-    consider((q, point_triangle(q, t)));
+    let mut best = Closest::exact(p, point_triangle(p, t)).or(Closest::exact(q, point_triangle(q, t)));
     for k in 0..3 {
-        consider(segments(p, q, t[k], t[(k + 1) % 3]));
+        best = best.or(segments(p, q, t[k], t[(k + 1) % 3]));
     }
     // Where the segment crosses the triangle's plane inside it, the crossing point is
     // the nearest, to within rounding.
     if (dp < 0.0) != (dq < 0.0) && dp != dq {
         let x = p + (q - p) * (dp / (dp - dq));
-        consider((x, point_triangle(x, t)));
+        best = best.or(Closest::exact(x, point_triangle(x, t)));
     }
     best
 }
@@ -653,20 +764,13 @@ fn segment_triangle(p: DVec3, q: DVec3, t: &[DVec3; 3]) -> (DVec3, DVec3) {
 /// The closest points of two triangles. Two triangles' least distance is reached on an
 /// edge of one of them, and where they cross, an edge of one passes through the other.
 pub(crate) fn triangles(a: &[DVec3; 3], b: &[DVec3; 3]) -> Closest {
-    let mut best = Closest { distance: f64::INFINITY, a: a[0], b: b[0] };
-    for k in 0..3 {
-        let (p, q) = segment_triangle(a[k], a[(k + 1) % 3], b);
-        let d = p.distance(q);
-        if d < best.distance {
-            best = Closest { distance: d, a: p, b: q };
-        }
-        let (p, q) = segment_triangle(b[k], b[(k + 1) % 3], a);
-        let d = p.distance(q);
-        if d < best.distance {
-            best = Closest { distance: d, a: q, b: p };
-        }
-    }
-    best
+    (0..3)
+        .map(|k| {
+            let from_a = segment_triangle(a[k], a[(k + 1) % 3], b);
+            from_a.or(segment_triangle(b[k], b[(k + 1) % 3], a).swapped())
+        })
+        .reduce(Closest::or)
+        .expect("three edges")
 }
 
 #[cfg(test)]
@@ -699,6 +803,52 @@ pub(crate) mod tests_support {
     pub(crate) fn block(lo: [f64; 3], hi: [f64; 3], chord: f64) -> Solid {
         let (tris, faces) = cuboid(DVec3::from_array(lo), DVec3::from_array(hi));
         Solid::new(tris, faces, chord)
+    }
+
+    /// One solid of several disjoint boxes, each `(lo, hi)`, their meshes in the order
+    /// given: a single part with one piece per box.
+    pub(crate) fn boxes(boxes: &[([f64; 3], [f64; 3])], chord: f64) -> Solid {
+        let (mut tris, mut faces) = (Vec::new(), Vec::new());
+        for (lo, hi) in boxes {
+            let (t, f) = cuboid(DVec3::from_array(*lo), DVec3::from_array(*hi));
+            tris.extend(t);
+            faces.extend(f);
+        }
+        Solid::new(tris, faces, chord)
+    }
+
+    /// A closed triangular prism along x from `-half` to `half`, with the cross-section
+    /// `section` in (y, z), turned by `angle` about world Z and then moved by `shift`: two
+    /// end caps and each side split along the diagonal from its lower-index corner at
+    /// `-half` to its other corner at `half`, eight outward triangles in all.
+    pub(crate) fn prism(section: [[f64; 2]; 3], half: f64, angle: f64, shift: DVec3, chord: f64) -> Solid {
+        let turn = glam::DQuat::from_rotation_z(angle);
+        let corner = |i: usize, x: f64| turn * DVec3::new(x, section[i][0], section[i][1]) + shift;
+        let (lo, hi): (Vec<DVec3>, Vec<DVec3>) = (0..3).map(|i| (corner(i, -half), corner(i, half))).unzip();
+        let mut tris = vec![[lo[0], lo[1], lo[2]], [hi[0], hi[1], hi[2]]];
+        for i in 0..3 {
+            let j = (i + 1) % 3;
+            tris.push([lo[i], lo[j], hi[j]]);
+            tris.push([lo[i], hi[j], hi[i]]);
+        }
+        let centre = (lo.iter().chain(&hi).copied().sum::<DVec3>()) / 6.0;
+        for t in &mut tris {
+            let mid = (t[0] + t[1] + t[2]) / 3.0;
+            if (t[1] - t[0]).cross(t[2] - t[0]).dot(mid - centre) < 0.0 {
+                t.swap(1, 2);
+            }
+        }
+        let faces = vec![0, 1, 2, 2, 3, 3, 4, 4];
+        Solid::new(tris, faces, chord)
+    }
+
+    /// The review's pair of ridged prisms, 20 m long: A's ridge points up along x at the
+    /// origin, B's points down, turned by `angle` about Z and lifted 0.01 mm. Their ridges
+    /// cross at x = 0, so the parts are exactly 0.01 mm apart at every angle.
+    pub(crate) fn ridges(angle: f64, chord: f64) -> (Solid, Solid) {
+        let a = prism([[0.0, 0.0], [-10.0, -10.0], [10.0, -10.0]], 10_000.0, 0.0, DVec3::ZERO, chord);
+        let b = prism([[0.0, 0.0], [10.0, 10.0], [-10.0, 10.0]], 10_000.0, angle, DVec3::new(0.0, 0.0, 0.01), chord);
+        (a, b)
     }
 }
 
@@ -744,11 +894,56 @@ mod tests {
     }
 
     #[test]
+    fn near_parallel_segments_are_bounded_from_both_sides() {
+        // Two 20 m segments crossing 0.01 mm apart at their middles: the ends are about
+        // 0.0135 mm apart, more than the true 0.01, at any angle under a few microradians.
+        let (p1, q1) = (DVec3::new(-10_000.0, 0.0, 0.0), DVec3::new(10_000.0, 0.0, 0.0));
+        for angle in [0.0, 1e-12, 9e-7, 1.1e-6, 1e-3, 0.5] {
+            let turn = glam::DQuat::from_rotation_z(angle);
+            let lift = DVec3::new(0.0, 0.0, 0.01);
+            let c = segments(p1, q1, turn * p1 + lift, turn * q1 + lift);
+            assert!(c.lower <= 0.01 && c.lower > 0.01 - 1e-12, "angle {angle}: {c:?}");
+            assert!(c.distance >= c.lower && c.distance < 0.01 + 1e-9, "angle {angle}: {c:?}");
+            assert!((c.a.distance(c.b) - c.distance).abs() < 1e-15, "the points realise the distance");
+        }
+        // End to end on one line, 3 mm apart, the ends are the nearest points.
+        let c = segments(DVec3::ZERO, DVec3::X * 10.0, DVec3::X * 13.0, DVec3::X * 20.0);
+        assert_eq!((c.distance, c.lower), (3.0, 3.0));
+        // Side by side, overlapping along their length, 2 mm apart.
+        let c = segments(DVec3::ZERO, DVec3::X * 10.0, DVec3::new(-5.0, 2.0, 0.0), DVec3::new(5.0, 2.0, 0.0));
+        assert_eq!((c.distance, c.lower), (2.0, 2.0));
+    }
+
+    #[test]
+    fn near_parallel_ridges_are_their_true_distance_apart() {
+        // The review's closed prisms: the meshes are 0.01 mm apart where the ridges cross.
+        for angle in [0.0, 9e-7, 1.1e-6] {
+            let (a, b) = tests_support::ridges(angle, 0.001);
+            let n = near(&a, &b, 0.1);
+            let c = n.closest.expect("closest points");
+            assert!(n.lower <= 0.01 && n.lower > 0.01 - 1e-9, "angle {angle}: lower {}", n.lower);
+            assert!(c.distance >= n.lower && c.distance < 0.01 + 1e-9, "angle {angle}: {c:?}");
+        }
+    }
+
+    #[test]
+    fn each_connected_piece_of_a_mesh_is_found() {
+        let one = block([0.0; 3], [1.0; 3], 0.001);
+        assert_eq!(one.pieces(), &[0]);
+        let three = tests_support::boxes(
+            &[([0.0; 3], [1.0; 3]), ([5.0, 0.0, 0.0], [6.0, 1.0, 1.0]), ([10.0, 0.0, 0.0], [11.0, 1.0, 1.0])],
+            0.001,
+        );
+        assert_eq!(three.pieces(), &[0, 12, 24]);
+    }
+
+    #[test]
     fn separated_blocks_are_far_and_touching_blocks_are_near() {
         let a = block([0.0; 3], [40.0, 30.0, 10.0], 0.01);
         let b = block([10.0, 5.0, 12.0], [30.0, 25.0, 18.0], 0.01);
         let n = near(&a, &b, 0.1);
         assert_eq!(n.closest.unwrap().distance, 2.0);
+        assert_eq!(n.lower, 2.0);
         assert!(n.pairs.is_empty());
         let on = block([10.0, 5.0, 10.0], [30.0, 25.0, 16.0], 0.01);
         let n = near(&a, &on, 0.1);

@@ -164,7 +164,8 @@ fn zab_b(h: &App<'_>) -> (OccurrencePath, FaceRef) {
     let s = session(h);
     let zab = s.doc.assembly().known_mates().find(|m| m.name() == "Zab").unwrap();
     let Mate::Distance { b, .. } = zab else { panic!("Zab is a distance") };
-    (b.path.clone(), b.face.clone())
+    let soliddraft_assembly::Entity::Face(face) = &b.entity else { panic!("Zab names a face") };
+    (b.path.clone(), face.clone())
 }
 
 fn check_pick(h: &App<'_>, picked: &soliddraft_assembly::Selection, pin: soliddraft_document::DocumentId) {

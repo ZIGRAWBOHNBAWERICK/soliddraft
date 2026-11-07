@@ -1,21 +1,28 @@
-//! Finding faces and proving their planes at a pinned revision.
+//! Finding faces and reference planes and proving their planes at a pinned revision.
 //!
 //! A proof belongs to a document, a revision and a face. It comes from the part rebuilt on
 //! the kernel from that revision's bytes, never from a display copy, so a cached picture
 //! can be shown but never proves a mate. Selectors are for commands: what is stored is the
-//! part's persistent [`FaceRef`].
+//! part's persistent [`FaceRef`], or the datum or feature id of a reference plane.
+//!
+//! A reference plane is proved from its definition: a datum plane is exact, and a plane
+//! feature is its datum or source plane moved by its stored offset, added in rationals. A
+//! plane feature on a face is refused; the face itself can be mated.
 
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+use num_rational::BigRational;
 use serde::Serialize;
 use soliddraft_document::{ConfigurationId, ContentHash, DocKind, DocRef, DocumentId};
-use soliddraft_kernel_api::{ExactAxisPlane, FaceId, KernelError};
-use soliddraft_model::{Document as PartDocument, FaceRef, FeatureId, Generator, RepairReason};
+use soliddraft_kernel_api::{Axis, ExactAxisPlane, ExactRational, FaceId, KernelError};
+use soliddraft_model::{
+    DatumPlane, Document as PartDocument, FaceRef, FeatureId, FeatureKind, Generator, RepairReason, SketchPlane,
+};
 
 use crate::document::AssemblyDocument;
-use crate::mates::{FaceEndpoint, MateRefusal, RefusalCode};
+use crate::mates::{EndView, Entity, FaceEndpoint, MateRefusal, PartPlane, RefusalCode, datum_normal};
 use crate::path::ComponentId;
 use crate::schema::Assembly;
 
@@ -50,6 +57,9 @@ pub enum FaceSelector {
     Picked(FaceRef),
     /// The face's current label, such as "Boss-Extrude1 · End cap".
     Label(String),
+    /// A reference plane: a datum plane by its name, such as "Top plane", or a plane
+    /// feature by its name.
+    Plane(String),
     /// The face a feature's generator made; a side also says which way it looks.
     Generator {
         /// The feature's current name.
@@ -85,7 +95,15 @@ pub struct PlaneProof {
     pub label: String,
 }
 
-type PlaneKey = (DocumentId, ContentHash, FeatureId, Generator, u32);
+/// What a proof is of on its part.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Proved {
+    Face(FeatureId, Generator, u32),
+    Datum(DatumPlane),
+    Plane(FeatureId),
+}
+
+type PlaneKey = (DocumentId, ContentHash, Proved);
 
 /// Proofs and the rebuilt parts behind them. All of it is derived: dropping it changes
 /// nothing but how soon the next proof comes.
@@ -112,8 +130,8 @@ fn configuration_refusal(what: fmt::Arguments, configuration: &ConfigurationId) 
 /// read, so this runs before anything is proved or changed.
 pub(crate) fn check_configurations(truth: &Assembly) -> Result<(), MateRefusal> {
     for mate in truth.known_mates() {
-        for end in mate.faces().into_iter().flat_map(|(ends, _)| ends) {
-            check_endpoint(end).map_err(|r| MateRefusal { mates: vec![mate.name().to_owned()], ..r })?;
+        for end in mate.ends() {
+            check_end(&end).map_err(|r| MateRefusal { mates: vec![mate.name().to_owned()], ..r })?;
         }
         for c in mate.components() {
             let source = truth.component(c).and_then(|c| truth.source(c.source));
@@ -128,7 +146,12 @@ pub(crate) fn check_configurations(truth: &Assembly) -> Result<(), MateRefusal> 
 
 /// Refuses a stored face of a configuration other than the default.
 pub(crate) fn check_endpoint(end: &FaceEndpoint) -> Result<(), MateRefusal> {
-    match &end.configuration {
+    check_end(&EndView { path: &end.path, document: end.document, configuration: end.configuration.as_ref() })
+}
+
+/// Refuses a stored part occurrence of a configuration other than the default.
+pub(crate) fn check_end(end: &EndView) -> Result<(), MateRefusal> {
+    match end.configuration {
         Some(configuration) => Err(configuration_refusal(format_args!("occurrence {}", end.path), configuration)),
         None => Ok(()),
     }
@@ -156,34 +179,79 @@ impl AssemblyDocument {
         Ok(part)
     }
 
-    /// The proof of `face`'s plane at the revision `r` pins.
-    pub(crate) fn prove(&mut self, r: &DocRef, face: &FaceRef) -> Result<PlaneProof, MateRefusal> {
+    /// The proof of the plane `entity` lies on, at the revision `r` pins.
+    pub(crate) fn prove(&mut self, r: &DocRef, entity: &Entity) -> Result<PlaneProof, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
-        let key = (id, r.pinned.clone(), face.feature, face.generator.clone(), face.ordinal);
-        if let Some(proof) = self.proofs.planes.get(&key) {
-            return Ok(proof.clone());
+        let what = match entity {
+            Entity::Face(face) => Proved::Face(face.feature, face.generator.clone(), face.ordinal),
+            Entity::Plane(PartPlane::Datum { datum }) => Proved::Datum(*datum),
+            Entity::Plane(PartPlane::Feature { feature, .. }) => Proved::Plane(*feature),
+        };
+        let key = (id, r.pinned.clone(), what);
+        let proof = match self.proofs.planes.get(&key) {
+            Some(proof) => proof.clone(),
+            None => {
+                let part = self.proof_part(r)?;
+                let part = part.lock().expect("the part lock");
+                let proof = match entity {
+                    Entity::Face(face) => {
+                        let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+                        let found = part.resolve_face(face, body).map_err(|repair| {
+                            let code = match repair.reason {
+                                RepairReason::Ambiguous => RefusalCode::AmbiguousReference,
+                                RepairReason::Missing | RepairReason::Mismatch { .. } => RefusalCode::DanglingReference,
+                            };
+                            MateRefusal::new(code, repair.message)
+                        })?;
+                        plane_of(&part, r, id, found)?
+                    }
+                    Entity::Plane(plane) => reference_plane_proof(&part, r, id, plane)?,
+                };
+                drop(part);
+                self.proofs.planes.insert(key, proof.clone());
+                proof
+            }
+        };
+        if let Entity::Plane(PartPlane::Feature { normal, .. }) = entity
+            && proof.plane.normal() != *normal
+        {
+            let message = format!("{} now faces another way than when it was mated", proof.label);
+            return Err(MateRefusal::new(RefusalCode::DanglingReference, message));
         }
-        let part = self.proof_part(r)?;
-        let part = part.lock().expect("the part lock");
-        let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
-        let found = part.resolve_face(face, body).map_err(|repair| {
-            let code = match repair.reason {
-                RepairReason::Ambiguous => RefusalCode::AmbiguousReference,
-                RepairReason::Missing | RepairReason::Mismatch { .. } => RefusalCode::DanglingReference,
-            };
-            MateRefusal::new(code, repair.message)
-        })?;
-        let proof = plane_of(&part, r, id, found)?;
-        drop(part);
-        self.proofs.planes.insert(key, proof.clone());
         Ok(proof)
     }
 
-    /// The persistent name of the face `selector` finds on the part `r` pins.
-    pub(crate) fn select(&mut self, r: &DocRef, selector: &FaceSelector) -> Result<FaceRef, MateRefusal> {
+    /// The persistent name of the face or plane `selector` finds on the part `r` pins.
+    pub(crate) fn select(&mut self, r: &DocRef, selector: &FaceSelector) -> Result<Entity, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
         let part = self.proof_part(r)?;
         let part = part.lock().expect("the part lock");
+        if let FaceSelector::Plane(name) = selector {
+            let name = name.trim();
+            let datum = [DatumPlane::Top, DatumPlane::Front, DatumPlane::Right]
+                .into_iter()
+                .filter(|d| part.datum_name(*d).eq_ignore_ascii_case(name) || d.label().eq_ignore_ascii_case(name));
+            let features = part
+                .features()
+                .iter()
+                .filter(|f| matches!(f.kind, FeatureKind::ReferencePlane(_)) && f.name.eq_ignore_ascii_case(name));
+            let mut found: Vec<PartPlane> = datum.map(|datum| PartPlane::Datum { datum }).collect();
+            for f in features {
+                let plane = PartPlane::Feature { feature: f.id, normal: [0; 3] };
+                let proof = reference_plane_proof(&part, r, id, &plane)?;
+                found.push(PartPlane::Feature { feature: f.id, normal: proof.plane.normal() });
+            }
+            return match found.len() {
+                1 => Ok(Entity::Plane(found.remove(0))),
+                0 => {
+                    Err(MateRefusal::new(RefusalCode::NoSuchFace, format!("{} has no reference plane {name}", r.path)))
+                }
+                _ => Err(MateRefusal::new(
+                    RefusalCode::AmbiguousReference,
+                    format!("{} has several reference planes named {name}", r.path),
+                )),
+            };
+        }
         let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
         let labels = part.face_labels(body);
         let found: Vec<FaceId> = match selector {
@@ -198,6 +266,7 @@ impl AssemblyDocument {
                 .filter(|(_, l)| l.as_ref().is_some_and(|l| l.text.eq_ignore_ascii_case(text.trim())))
                 .map(|(f, _)| *f)
                 .collect(),
+            FaceSelector::Plane(_) => unreachable!("a plane is found above"),
             FaceSelector::Generator { feature, generator, normal } => {
                 let wanted = part.features().iter().find(|f| f.name == *feature).map(|f| f.id);
                 labels
@@ -222,7 +291,9 @@ impl AssemblyDocument {
             };
             return Err(MateRefusal::new(code, format!("the selector {selector:?} {what} on {}", r.path)));
         };
-        part.face_ref(face).map_err(|e| MateRefusal::new(RefusalCode::AmbiguousReference, e.to_string()))
+        part.face_ref(face)
+            .map(Entity::Face)
+            .map_err(|e| MateRefusal::new(RefusalCode::AmbiguousReference, e.to_string()))
     }
 
     /// The reference of a root component that places a part.
@@ -261,4 +332,80 @@ fn plane_of(part: &PartDocument, r: &DocRef, document: DocumentId, face: FaceId)
         plane,
         label: part.face_label(face).map(|l| l.text).unwrap_or_default(),
     })
+}
+
+fn rational_text(value: &BigRational) -> ExactRational {
+    ExactRational { numerator: value.numer().to_string(), denominator: value.denom().to_string() }
+}
+
+/// The plane `u · p = offset` with `u` the signed axis `normal`.
+fn axis_plane(normal: [i8; 3], offset: &BigRational) -> ExactAxisPlane {
+    let at = normal.iter().position(|c| *c != 0).expect("a unit axis");
+    let axis = [Axis::X, Axis::Y, Axis::Z][at];
+    ExactAxisPlane { axis, positive: normal[at] > 0, offset: rational_text(offset) }
+}
+
+/// A reference plane's exact equation from its definition: a datum plane through the
+/// origin, or a plane feature's source moved by its stored offset along the source's
+/// normal. A plane on a face is refused by name.
+fn reference_plane_proof(
+    part: &PartDocument,
+    r: &DocRef,
+    document: DocumentId,
+    plane: &PartPlane,
+) -> Result<PlaneProof, MateRefusal> {
+    let (normal, offset, label) = match plane {
+        PartPlane::Datum { datum } => {
+            (datum_normal(*datum), BigRational::from_integer(0.into()), part.datum_name(*datum).to_owned())
+        }
+        PartPlane::Feature { feature, .. } => {
+            let (normal, offset) = feature_plane(part, *feature, 0)?;
+            let label = part.feature(*feature).map(|f| f.name.clone()).unwrap_or_default();
+            (normal, offset, label)
+        }
+    };
+    Ok(PlaneProof {
+        document,
+        revision: r.pinned.clone(),
+        geometry: part.geometry_hash(),
+        plane: axis_plane(normal, &offset),
+        label,
+    })
+}
+
+/// A plane feature's normal and offset along it, followed through the planes it sits on.
+fn feature_plane(part: &PartDocument, id: FeatureId, depth: usize) -> Result<([i8; 3], BigRational), MateRefusal> {
+    let gone = |message: String| MateRefusal::new(RefusalCode::DanglingReference, message);
+    let feature = part.feature(id).ok_or_else(|| gone(format!("reference plane feature {id} is gone")))?;
+    let FeatureKind::ReferencePlane(source) = &feature.kind else {
+        return Err(gone(format!("feature {id}, {}, is not a reference plane", feature.name)));
+    };
+    if feature.suppressed || part.reference_plane(id).is_none() {
+        return Err(gone(format!("reference plane {} is not built", feature.name)));
+    }
+    if depth > 64 {
+        return Err(MateRefusal::new(
+            RefusalCode::UnsupportedPlane,
+            format!("{} sits on too many planes", feature.name),
+        ));
+    }
+    let exact = |offset: f64| {
+        crate::mates::solver::exact(offset).ok_or_else(|| {
+            MateRefusal::new(RefusalCode::UnsupportedPlane, format!("{}: the offset is not finite", feature.name))
+        })
+    };
+    match source {
+        SketchPlane::Datum { datum, offset } => Ok((datum_normal(*datum), exact(*offset)?)),
+        SketchPlane::Feature { feature: under, offset } => {
+            let (normal, base) = feature_plane(part, *under, depth + 1)?;
+            Ok((normal, base + exact(*offset)?))
+        }
+        SketchPlane::Face { .. } | SketchPlane::FaceOffset { .. } => Err(MateRefusal::new(
+            RefusalCode::UnsupportedPlane,
+            format!(
+                "{} is defined on a face; this version proves datum-based planes only, so mate the face itself",
+                feature.name
+            ),
+        )),
+    }
 }

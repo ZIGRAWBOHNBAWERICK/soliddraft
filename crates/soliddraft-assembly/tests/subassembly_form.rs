@@ -273,12 +273,15 @@ fn forming_keeps_references_poses_and_freedoms_with(coincident: bool) {
             truth.known_mates().find(|x| x.name() == name).unwrap(),
             t0.known_mates().find(|x| x.name() == name).unwrap(),
         );
-        match (now.faces(), then.faces()) {
-            (Some(([na, nb], nl)), Some(([ta, tb], tl))) => {
+        match (now.faces().as_slice(), then.faces().as_slice(), now.alignment(), then.alignment()) {
+            ([na, nb], [ta, tb], nl, tl) => {
                 assert_eq!(std::mem::discriminant(now), std::mem::discriminant(then), "{name}: the same kind");
-                assert_eq!((&na.path, &na.document, &na.face), (&ta.path, &ta.document, &ta.face));
+                assert_eq!((&na.path, &na.document, &na.entity), (&ta.path, &ta.document, &ta.entity));
                 assert_eq!(nb.path, nested(fx.b), "{name}: B's endpoint is nested");
-                assert_eq!((&nb.document, &nb.face, &nb.configuration), (&tb.document, &tb.face, &tb.configuration));
+                assert_eq!(
+                    (&nb.document, &nb.entity, &nb.configuration),
+                    (&tb.document, &tb.entity, &tb.configuration)
+                );
                 assert_eq!((now.expression(), nl), (then.expression(), tl), "{name}: the same expression and binding");
             }
             _ => assert_eq!(now, then),

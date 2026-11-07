@@ -1,18 +1,19 @@
 //! Mates: authored relationships that decide where components sit.
 //!
-//! A mate names faces by occurrence path and the part's persistent [`FaceRef`], never by
-//! label or kernel handle. Distances are typed expressions; one that reads an assembly
-//! value is driven by it. Definitions are the assembly's truth. Proofs, solver status and
-//! diagnostics are derived and stay out of it.
+//! A mate names faces by occurrence path and the part's persistent [`FaceRef`], or a part's
+//! reference plane by its datum or feature id, never by label or kernel handle. Distances
+//! are typed expressions; one that reads an assembly value is driven by it. Definitions are
+//! the assembly's truth. Proofs, solver status and diagnostics are derived and stay out of
+//! it.
 //!
 //! - [`solver`] places components from proven plane equations and counts what stays free.
-//! - [`reference`] finds faces and proves their planes at a pinned revision.
+//! - [`reference`] finds faces and planes and proves them at a pinned revision.
 //! - [`command`] runs every change as one candidate: preview, prove, solve, then commit.
 //! - [`bodies`] reads the mates of the root and of every sub-assembly in it, and the
 //!   part occurrences they move, by path.
 //!
-//! There are three families: an Origin mate, a distance between planar faces, and two
-//! planar faces on one plane. They cover axis-aligned planes with exact offsets; see
+//! The families are Origin, Distance, Coincident, Parallel, Perpendicular, Width and Lock.
+//! They cover axis-aligned planes with exact offsets and quarter-turn rotations; see
 //! `docs/mates.md`.
 
 pub(crate) mod bodies;
@@ -25,11 +26,12 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use soliddraft_document::{ConfigurationId, DocumentId};
-use soliddraft_model::{Expression, FaceRef};
+use soliddraft_model::{DatumPlane, Expression, FaceRef, FeatureId};
 
 use crate::path::{ComponentId, OccurrencePath};
+use crate::placement::Placement;
 
-pub use command::{MateEdit, PlaneMeasurement, ProofIdentity};
+pub use command::{MateEdit, PlaneMeasurement, ProofIdentity, WidthInput};
 pub use reference::{EndpointSelector, FaceSelector, GeneratorChoice, PlaneProof};
 pub use solver::{FreeMotion, SolverState, SolverStatus};
 
@@ -65,10 +67,131 @@ impl Alignment {
     }
 }
 
-/// One side of a mate: a face of one placed part.
+/// A reference plane of a part: one of its three datum planes, or a plane feature.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "on", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PartPlane {
+    /// The Top, Front or Right plane through the part's origin.
+    Datum {
+        /// Which one.
+        datum: DatumPlane,
+    },
+    /// A reference plane feature, followed through edits and renames.
+    Feature {
+        /// The feature.
+        feature: FeatureId,
+        /// The proven normal when the reference was made, each component -1, 0 or 1. A proof
+        /// refuses a plane that now faces another way; the solver's status reads it so it
+        /// needs no part.
+        normal: [i8; 3],
+    },
+}
+
+impl PartPlane {
+    /// The normal the reference expects, in the part's frame.
+    pub fn normal(&self) -> [i8; 3] {
+        match self {
+            PartPlane::Datum { datum } => datum_normal(*datum),
+            PartPlane::Feature { normal, .. } => *normal,
+        }
+    }
+}
+
+/// A datum plane's normal: Top looks along +Z, Front along -Y, Right along +X.
+pub(crate) fn datum_normal(datum: DatumPlane) -> [i8; 3] {
+    match datum {
+        DatumPlane::Top => [0, 0, 1],
+        DatumPlane::Front => [0, -1, 0],
+        DatumPlane::Right => [1, 0, 0],
+    }
+}
+
+/// What a mate endpoint names on its part: a planar face or a reference plane.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Entity {
+    /// A face, by the part's persistent name.
+    Face(FaceRef),
+    /// A reference plane.
+    Plane(PartPlane),
+}
+
+impl Entity {
+    /// The normal the stored reference expects, when it records one.
+    pub(crate) fn stored_normal(&self) -> Option<[i8; 3]> {
+        match self {
+            Entity::Face(face) => {
+                let n = face.fingerprint.normal?;
+                Some([n.x, n.y, n.z].map(|c| c.round() as i8))
+            }
+            Entity::Plane(plane) => Some(plane.normal()),
+        }
+    }
+
+    /// The entity for a message: a face's label, or the plane.
+    pub(crate) fn describe(&self) -> String {
+        match self {
+            Entity::Face(face) => format!("{} of feature {}", face.label, face.feature),
+            Entity::Plane(PartPlane::Datum { datum }) => datum.label().to_owned(),
+            Entity::Plane(PartPlane::Feature { feature, .. }) => format!("reference plane feature {feature}"),
+        }
+    }
+}
+
+/// One side of a mate between planes: a face or a reference plane of one placed part.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "RawEndpoint", into = "RawEndpoint")]
+pub struct FaceEndpoint {
+    /// The occurrence, from the assembly that holds the mate.
+    pub path: OccurrencePath,
+    /// The part document.
+    pub document: DocumentId,
+    /// The part's configuration; absent for the default.
+    pub configuration: Option<ConfigurationId>,
+    /// The face or plane. Saved as `face` or `plane`.
+    pub entity: Entity,
+}
+
+/// A face endpoint as `assembly.json` holds it: exactly one of `face` and `plane`.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEndpoint {
+    path: OccurrencePath,
+    document: DocumentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    configuration: Option<ConfigurationId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    face: Option<FaceRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plane: Option<PartPlane>,
+}
+
+impl TryFrom<RawEndpoint> for FaceEndpoint {
+    type Error = String;
+
+    fn try_from(raw: RawEndpoint) -> Result<FaceEndpoint, String> {
+        let entity = match (raw.face, raw.plane) {
+            (Some(face), None) => Entity::Face(face),
+            (None, Some(plane)) => Entity::Plane(plane),
+            _ => return Err("an endpoint names a face or a plane".into()),
+        };
+        Ok(FaceEndpoint { path: raw.path, document: raw.document, configuration: raw.configuration, entity })
+    }
+}
+
+impl From<FaceEndpoint> for RawEndpoint {
+    fn from(e: FaceEndpoint) -> RawEndpoint {
+        let (face, plane) = match e.entity {
+            Entity::Face(face) => (Some(face), None),
+            Entity::Plane(plane) => (None, Some(plane)),
+        };
+        RawEndpoint { path: e.path, document: e.document, configuration: e.configuration, face, plane }
+    }
+}
+
+/// One side of a Lock: a whole placed part.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct FaceEndpoint {
+pub struct PartEndpoint {
     /// The occurrence, from the assembly that holds the mate.
     pub path: OccurrencePath,
     /// The part document.
@@ -76,8 +199,42 @@ pub struct FaceEndpoint {
     /// The part's configuration; absent for the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<ConfigurationId>,
-    /// The part's persistent name for the face.
-    pub face: FaceRef,
+}
+
+/// Where a Width mate puts the tab between the groove's faces.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WidthConstraint {
+    /// The tab's mid-plane on the groove's.
+    Centered,
+    /// The gap from the first groove face (the second with `flipped`) to the tab face
+    /// nearest it.
+    Dimension {
+        /// The gap. An expression that reads values is driven by them.
+        distance: Expression,
+        /// Measured from the second groove face.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flipped: bool,
+    },
+    /// That gap as a percentage of the play, the groove's width less the tab's: 0 puts the
+    /// tab against the first groove face, 50 centres it, 100 puts it against the second.
+    Percent {
+        /// The percentage.
+        percent: f64,
+        /// Measured from the second groove face.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flipped: bool,
+    },
+}
+
+/// A part occurrence a mate reads, whatever it names on the part.
+pub struct EndView<'a> {
+    /// The occurrence, from the assembly that holds the mate.
+    pub path: &'a OccurrencePath,
+    /// The part document.
+    pub document: DocumentId,
+    /// The part's configuration; absent for the default.
+    pub configuration: Option<&'a ConfigurationId>,
 }
 
 /// A mate this version can solve.
@@ -127,59 +284,202 @@ pub enum Mate {
         /// How their outward normals relate.
         alignment: Alignment,
     },
+    /// `a`'s plane and `b`'s are parallel, their normals as `alignment` says. It fixes two
+    /// turns and no translation.
+    Parallel {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first face.
+        a: FaceEndpoint,
+        /// The second face.
+        b: FaceEndpoint,
+        /// How their outward normals relate.
+        alignment: Alignment,
+    },
+    /// `a`'s plane and `b`'s are at right angles. It fixes one turn and no translation, and
+    /// has no alignment: the normals are at right angles either way.
+    Perpendicular {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first face.
+        a: FaceEndpoint,
+        /// The second face.
+        b: FaceEndpoint,
+    },
+    /// A tab between the two faces of a groove. The four faces are parallel; the tab's
+    /// normals relate to the groove's as `alignment` says, from `groove[0]` to `tab[0]`.
+    /// It fixes two turns and the translation across the groove.
+    Width {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The groove's two faces, on one part.
+        groove: [FaceEndpoint; 2],
+        /// The tab's two faces, on another.
+        tab: [FaceEndpoint; 2],
+        /// How `tab[0]`'s outward normal relates to `groove[0]`'s.
+        alignment: Alignment,
+        /// Where the tab sits across the groove.
+        constraint: WidthConstraint,
+    },
+    /// `b` keeps its placement relative to `a`: `b`'s placement is `a`'s composed with
+    /// `relative`. It fixes all six motions between them. The relative turn is a
+    /// quarter-turn rotation; anything else is refused.
+    Lock {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first part.
+        a: PartEndpoint,
+        /// The second part.
+        b: PartEndpoint,
+        /// `b`'s placement in `a`'s frame.
+        relative: Placement,
+    },
 }
 
 impl Mate {
     /// The mate's id.
     pub fn id(&self) -> MateId {
         match self {
-            Mate::Origin { id, .. } | Mate::Distance { id, .. } | Mate::Coincident { id, .. } => *id,
+            Mate::Origin { id, .. }
+            | Mate::Distance { id, .. }
+            | Mate::Coincident { id, .. }
+            | Mate::Parallel { id, .. }
+            | Mate::Perpendicular { id, .. }
+            | Mate::Width { id, .. }
+            | Mate::Lock { id, .. } => *id,
         }
     }
 
     /// The mate's label.
     pub fn name(&self) -> &str {
         match self {
-            Mate::Origin { name, .. } | Mate::Distance { name, .. } | Mate::Coincident { name, .. } => name,
+            Mate::Origin { name, .. }
+            | Mate::Distance { name, .. }
+            | Mate::Coincident { name, .. }
+            | Mate::Parallel { name, .. }
+            | Mate::Perpendicular { name, .. }
+            | Mate::Width { name, .. }
+            | Mate::Lock { name, .. } => name,
         }
     }
 
-    /// The root's components it ties: those its faces are on, or the sub-assemblies that
+    /// The family, as `assembly.json` names it.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Mate::Origin { .. } => "origin",
+            Mate::Distance { .. } => "distance",
+            Mate::Coincident { .. } => "coincident",
+            Mate::Parallel { .. } => "parallel",
+            Mate::Perpendicular { .. } => "perpendicular",
+            Mate::Width { .. } => "width",
+            Mate::Lock { .. } => "lock",
+        }
+    }
+
+    /// The root's components it ties: those its parts are, or the sub-assemblies that
     /// hold them.
     pub fn components(&self) -> Vec<ComponentId> {
         match self {
             Mate::Origin { component, .. } => vec![*component],
-            Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } => {
-                [a, b].iter().filter_map(|e| e.holder()).collect()
-            }
+            _ => self.ends().iter().filter_map(|e| holder(e.path)).collect(),
         }
     }
 
     /// The distance's expression, when it has one.
     pub fn expression(&self) -> Option<&Expression> {
         match self {
-            Mate::Distance { distance, .. } => Some(distance),
-            Mate::Origin { .. } | Mate::Coincident { .. } => None,
+            Mate::Distance { distance, .. }
+            | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. } => Some(distance),
+            _ => None,
         }
     }
 
-    /// The two faces a mate between faces names, and how their normals relate.
-    pub fn faces(&self) -> Option<([&FaceEndpoint; 2], Alignment)> {
+    /// The distance's expression, to change it.
+    pub(crate) fn expression_mut(&mut self) -> Option<&mut Expression> {
         match self {
-            Mate::Distance { a, b, alignment, .. } | Mate::Coincident { a, b, alignment, .. } => {
-                Some(([a, b], *alignment))
-            }
-            Mate::Origin { .. } => None,
+            Mate::Distance { distance, .. }
+            | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. } => Some(distance),
+            _ => None,
         }
     }
 
-    /// The two faces, to change their paths.
-    pub(crate) fn faces_mut(&mut self) -> Option<[&mut FaceEndpoint; 2]> {
+    /// Every face or plane the mate names, in order.
+    pub fn faces(&self) -> Vec<&FaceEndpoint> {
         match self {
-            Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } => Some([a, b]),
-            Mate::Origin { .. } => None,
+            Mate::Distance { a, b, .. }
+            | Mate::Coincident { a, b, .. }
+            | Mate::Parallel { a, b, .. }
+            | Mate::Perpendicular { a, b, .. } => vec![a, b],
+            Mate::Width { groove, tab, .. } => groove.iter().chain(tab).collect(),
+            Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
         }
     }
+
+    /// The two planes a mate measures between, when it fixes a distance between parallel
+    /// planes or keeps them parallel: a Width measures from `groove[0]` to `tab[0]`.
+    pub fn measured(&self) -> Option<[&FaceEndpoint; 2]> {
+        match self {
+            Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } | Mate::Parallel { a, b, .. } => Some([a, b]),
+            Mate::Width { groove, tab, .. } => Some([&groove[0], &tab[0]]),
+            Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } => None,
+        }
+    }
+
+    /// How the normals relate, for a family that has an alignment.
+    pub fn alignment(&self) -> Option<Alignment> {
+        match self {
+            Mate::Distance { alignment, .. }
+            | Mate::Coincident { alignment, .. }
+            | Mate::Parallel { alignment, .. }
+            | Mate::Width { alignment, .. } => Some(*alignment),
+            Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } => None,
+        }
+    }
+
+    /// The part occurrences the mate reads, in order. An Origin names a component and has
+    /// none.
+    pub fn ends(&self) -> Vec<EndView<'_>> {
+        match self {
+            Mate::Lock { a, b, .. } => [a, b]
+                .into_iter()
+                .map(|e| EndView { path: &e.path, document: e.document, configuration: e.configuration.as_ref() })
+                .collect(),
+            _ => self
+                .faces()
+                .into_iter()
+                .map(|e| EndView { path: &e.path, document: e.document, configuration: e.configuration.as_ref() })
+                .collect(),
+        }
+    }
+
+    /// The occurrence paths the mate reads, to change them.
+    pub(crate) fn paths_mut(&mut self) -> Vec<&mut OccurrencePath> {
+        match self {
+            Mate::Distance { a, b, .. }
+            | Mate::Coincident { a, b, .. }
+            | Mate::Parallel { a, b, .. }
+            | Mate::Perpendicular { a, b, .. } => vec![&mut a.path, &mut b.path],
+            Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab.iter_mut()).map(|e| &mut e.path).collect(),
+            Mate::Lock { a, b, .. } => vec![&mut a.path, &mut b.path],
+            Mate::Origin { .. } => Vec::new(),
+        }
+    }
+}
+
+/// The root component that holds the part at `path`: the part itself, or the
+/// sub-assembly it is placed in. `None` for a path through a pattern member, which mates
+/// do not reach.
+pub(crate) fn holder(path: &OccurrencePath) -> Option<ComponentId> {
+    let steps = path.steps();
+    (!steps.is_empty() && steps.iter().all(|s| s.member.is_none())).then(|| steps[0].component)
 }
 
 impl FaceEndpoint {
@@ -194,8 +494,7 @@ impl FaceEndpoint {
     /// The root component that holds its part: the part itself, or the sub-assembly it is
     /// placed in. `None` for a path through a pattern member, which mates do not reach.
     pub fn holder(&self) -> Option<ComponentId> {
-        let steps = self.path.steps();
-        (!steps.is_empty() && steps.iter().all(|s| s.member.is_none())).then(|| steps[0].component)
+        holder(&self.path)
     }
 }
 

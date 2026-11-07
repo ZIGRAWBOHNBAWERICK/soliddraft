@@ -188,7 +188,7 @@ impl AssemblyDocument {
             };
             let ends: Vec<OccurrencePath> = match mate {
                 Mate::Origin { component, .. } => vec![OccurrencePath::root().child(Step::component(*component))],
-                Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } => vec![a.path.clone(), b.path.clone()],
+                _ => mate.ends().iter().map(|e| e.path.clone()).collect(),
             };
             let inside =
                 ends.iter().filter(|p| p.steps().first().is_some_and(|s| chosen.contains(&s.component))).count();
@@ -211,7 +211,7 @@ impl AssemblyDocument {
                     ))
                     .caused_by(name.clone()));
                 }
-                (_, 2) => {
+                (_, n) if n == ends.len() => {
                     if let Some(distance) = mate.expression().filter(|d| !d.references().is_empty()) {
                         let name = mate.name();
                         return Err(unsupported(format!(
@@ -226,13 +226,11 @@ impl AssemblyDocument {
                 }
                 (_, _) => {
                     let mut crossing = mate.clone();
-                    if let Some(ends) = crossing.faces_mut() {
-                        for end in ends {
-                            if end.path.steps().first().is_some_and(|s| chosen.contains(&s.component)) {
-                                end.path = OccurrencePath([holder.steps(), end.path.steps()].concat());
-                            }
-                            record.endpoints_after.push(end.path.clone());
+                    for path in crossing.paths_mut() {
+                        if path.steps().first().is_some_and(|s| chosen.contains(&s.component)) {
+                            *path = OccurrencePath([holder.steps(), path.steps()].concat());
                         }
+                        record.endpoints_after.push(path.clone());
                     }
                     kept_mates.push(MateEntry::Known(crossing));
                 }

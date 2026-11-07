@@ -1,6 +1,6 @@
 //! G1: a distance mate made in the window, and a Coincident one. Real picks in the id
 //! buffer, the Mate panel's fields and buttons, the ribbon's Update, and what the scene
-//! then draws.
+//! then draws. Then the B1 families through the same panel, and its Conflicts list.
 
 use egui::{Pos2, vec2};
 use egui_kittest::{Harness, kittest::Queryable};
@@ -65,7 +65,11 @@ fn click_at(h: &mut App<'_>, pos: Pos2) {
     h.run_steps(3);
 }
 
+/// Clicks a button, first scrolling it into view: a button clipped out of the panel takes
+/// no click, and egui animates the scroll.
 fn button(h: &mut App<'_>, name: &str) {
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().scroll_to_me();
+    h.run_steps(24);
     h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().click();
     h.run_steps(4);
 }
@@ -76,6 +80,7 @@ fn type_into(h: &mut App<'_>, label: &str, text: &str) {
     match label {
         "Mate name" => d.name.clear(),
         "Mate distance" => d.distance.clear(),
+        "Mate percent" => d.percent.clear(),
         "Value name" => d.value_name.clear(),
         _ => d.value_expression.clear(),
     }
@@ -423,6 +428,162 @@ fn pick_coincident_update_and_refuse_in_the_window() {
     settle(&mut h);
     assert_eq!((shown(&h, 0), drawn(&h, 1)), (a14, [10.0, 10.0, 14.0]));
     snapshot(&mut h, "coincident-5-redone");
+    drop(h);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The persistent names of faces, read from Parallel mates that hold already and are
+/// undone: `pairs` of (A's face, B's face, alignment).
+fn face_names(st: &mut AppState, pairs: &[(serde_json::Value, serde_json::Value, &str)]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (i, (a, b, alignment)) in pairs.iter().enumerate() {
+        let name = format!("Probe{i}");
+        tool(st, "assembly_mate_parallel", json!({ "name": name, "a": a, "b": b, "alignment": alignment }));
+        let summary = AppTools { state: st }.summary()["assembly"].clone();
+        let row = summary["mates"].as_array().unwrap().iter().find(|m| m["name"] == name.as_str()).unwrap().clone();
+        out.push((row["a"]["face"].to_string(), row["b"]["face"].to_string()));
+        tool(st, "undo", json!({}));
+    }
+    out
+}
+
+fn pick(h: &mut App<'_>, component: u32, face: &str) {
+    let path = soliddraft_assembly::OccurrencePath::root()
+        .child(soliddraft_assembly::Step::component(soliddraft_assembly::ComponentId(component)));
+    soliddraft_app::mates::apply(&mut h.state_mut().state, soliddraft_app::mates::MateAction::Pick(path, face.into()));
+    h.run_steps(4);
+}
+
+#[test]
+fn width_lock_and_conflicts_in_the_window() {
+    let instance = egui_wgpu::wgpu::Instance::default();
+    let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
+    if adapters.is_empty() {
+        assert!(std::env::var_os("SOLIDDRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable");
+        eprintln!("no GPU adapter; skipping");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("soliddraft-mate-families-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    let mut h: App<'static> = Harness::builder()
+        .with_size(vec2(1600.0, 1000.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
+    h.run_steps(3);
+
+    // A on the origin, and B over it at [3, 7, 30].
+    let (a, b, rig) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("rig.dwasm"));
+    let names = {
+        let st = &mut h.state_mut().state;
+        part(st, &a, 40.0, 30.0, 10.0);
+        tool(st, "make_assembly", json!({}));
+        tool(st, "assembly_save", json!({ "path": rig }));
+        tool(st, "new_part", json!({}));
+        part(st, &b, 20.0, 10.0, 6.0);
+        tool(st, "show_assembly", json!({}));
+        let placement = json!({ "translation": [3, 7, 30], "rotation": [0, 0, 0, 1] });
+        tool(st, "insert_component", json!({ "paths": [b], "placement": placement }));
+        tool(st, "assembly_mate_origin", json!({ "name": "O", "component": 2, "align_axes": true }));
+        let side = |c: u64, n: [i32; 3]| json!({ "component": c, "feature": "Boss-Extrude1", "generator": "side", "normal": n });
+        let cap = |c: u64, g: &str| json!({ "component": c, "feature": "Boss-Extrude1", "generator": g });
+        let names = face_names(
+            st,
+            &[
+                (side(2, [1, 0, 0]), side(4, [1, 0, 0]), "aligned"),
+                (side(2, [-1, 0, 0]), side(4, [-1, 0, 0]), "aligned"),
+                (cap(2, "end_cap"), cap(4, "start_cap"), "opposed"),
+            ],
+        );
+        st.push(AppAction::Assembly(AssemblyAction::Show));
+        names
+    };
+    settle(&mut h);
+    assert_eq!(drawn(&h, 1), [3.0, 7.0, 30.0]);
+    view(&mut h, StandardView::Isometric);
+
+    // Width: the groove's two faces on A, the tab's on B, a quarter of the play from the
+    // first groove face. A's sides are at x = 20 and -20, B's at 10 and -10.
+    button(&mut h, "Mate");
+    button(&mut h, "Width");
+    for (component, face) in [(2, &names[0].0), (2, &names[1].0), (4, &names[0].1), (4, &names[1].1)] {
+        pick(&mut h, component, face);
+    }
+    {
+        let d = &h.state().state.assembly.mate;
+        assert!(d.a.is_some() && d.b.is_some() && d.c.is_some() && d.d.is_some(), "four faces fill four slots");
+    }
+    button(&mut h, "Aligned");
+    button(&mut h, "Percent");
+    type_into(&mut h, "Mate percent", "25");
+    type_into(&mut h, "Mate name", "W");
+    button(&mut h, "Add mate");
+    settle(&mut h);
+    assert!(h.state().state.assembly.mate.error.is_none(), "{:?}", h.state().state.assembly.mate.error);
+    h.get_by_value("W: width, aligned, 25% of the play");
+    assert_eq!(drawn(&h, 1), [5.0, 7.0, 30.0], "a quarter of the 20 mm play from A's +x side");
+    snapshot(&mut h, "families-1-width");
+
+    // A distance across the groove cannot hold with W: the Conflicts list names both and
+    // offers what can be done to W, the mate already in the assembly.
+    let accepted =
+        |h: &mut App<'_>| AppTools { state: &mut h.state_mut().state }.summary()["assembly"]["accepted_state"].clone();
+    let before = accepted(&mut h);
+    button(&mut h, "Clear faces");
+    button(&mut h, "Distance");
+    pick(&mut h, 2, &names[0].0);
+    pick(&mut h, 4, &names[0].1);
+    type_into(&mut h, "Mate distance", "0 mm");
+    type_into(&mut h, "Mate name", "X");
+    button(&mut h, "Add mate");
+    settle(&mut h);
+    assert_eq!(accepted(&mut h), before, "a refusal changes nothing");
+    let conflict = h.state().state.assembly.mate.conflict.clone().expect("the refusal fills the Conflicts list");
+    assert_eq!(conflict.mates, ["W", "X"]);
+    h.get_by_value("These mates cannot all hold");
+    h.get_by_value("W (width)");
+    h.get_by_value("X (not added)");
+    assert!(h.query_by_label("Delete X").is_none(), "X was refused, so there is nothing to delete");
+    h.get_by_label("Flip W");
+    h.get_by_label("Delete W").scroll_to_me();
+    h.run_steps(24);
+    snapshot(&mut h, "families-2-conflicts");
+    button(&mut h, "Delete W");
+    settle(&mut h);
+    assert!(h.state().state.assembly.mate.conflict.is_none(), "a success clears the list");
+    assert!(h.query_by_value("These mates cannot all hold").is_none());
+    assert!(h.query_by_value("W: width, aligned, 25% of the play").is_none());
+    button(&mut h, "Add mate");
+    settle(&mut h);
+    assert_eq!(drawn(&h, 1), [10.0, 7.0, 30.0], "with W gone the distance holds");
+
+    // Parallel and Lock from two picks each.
+    button(&mut h, "Clear faces");
+    button(&mut h, "Parallel");
+    pick(&mut h, 2, &names[2].0);
+    pick(&mut h, 4, &names[2].1);
+    button(&mut h, "Opposed");
+    type_into(&mut h, "Mate name", "P");
+    button(&mut h, "Add mate");
+    settle(&mut h);
+    h.get_by_value("P: parallel, opposed, 20 mm apart");
+    button(&mut h, "Clear faces");
+    button(&mut h, "Lock");
+    assert!(h.query_by_label("Aligned").is_none(), "a Lock has no alignment");
+    pick(&mut h, 2, &names[2].0);
+    pick(&mut h, 4, &names[2].1);
+    type_into(&mut h, "Mate name", "L");
+    button(&mut h, "Add mate");
+    settle(&mut h);
+    assert!(h.state().state.assembly.mate.error.is_none(), "{:?}", h.state().state.assembly.mate.error);
+    h.get_by_value("L: locked");
+    h.get_by_value("Fully constrained");
+    assert_eq!(drawn(&h, 1), [10.0, 7.0, 30.0], "a lock keeps B where it is");
+    snapshot(&mut h, "families-3-lock");
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }

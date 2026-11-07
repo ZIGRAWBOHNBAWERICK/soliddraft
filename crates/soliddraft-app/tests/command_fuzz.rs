@@ -607,13 +607,17 @@ fn mated_state() -> AppState {
     state
 }
 
-const MATE_TOOLS: [&str; 11] = [
+const MATE_TOOLS: [&str; 15] = [
     "insert_component",
     "assembly_form_subassembly",
     "assembly_measure_planes",
     "assembly_mate_origin",
     "assembly_mate_distance",
     "assembly_mate_coincident",
+    "assembly_mate_parallel",
+    "assembly_mate_perpendicular",
+    "assembly_mate_width",
+    "assembly_mate_lock",
     "assembly_set_value",
     "assembly_rename_value",
     "assembly_drive_mate",
@@ -624,9 +628,22 @@ const MATE_TOOLS: [&str; 11] = [
 /// The mate tools' calls, from their schemas, with the names an assembly really has.
 fn mate_calls() -> BoxedStrategy<Vec<Call>> {
     let mut pools = pools(&board_bracket());
-    pools.any = ["O", "Z", "gap", "5 mm", "12 deg", "gap + 1 mm", "Boss-Extrude1", "side", "end_cap", "opposed"]
-        .map(str::to_owned)
-        .to_vec();
+    pools.any = [
+        "O",
+        "Z",
+        "gap",
+        "5 mm",
+        "12 deg",
+        "gap + 1 mm",
+        "Boss-Extrude1",
+        "side",
+        "end_cap",
+        "opposed",
+        "Top plane",
+        "Plane1",
+    ]
+    .map(str::to_owned)
+    .to_vec();
     // Occurrence paths and assembly files for Form subassembly: real, nested, unknown, a
     // pattern member, a file that exists and one that does not.
     let dir = std::env::temp_dir().join(format!("soliddraft-fuzz-mates-{}", std::process::id()));

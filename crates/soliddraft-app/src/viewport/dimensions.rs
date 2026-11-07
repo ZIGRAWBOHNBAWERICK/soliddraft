@@ -9,7 +9,7 @@ use super::camera::Camera;
 use crate::dimension_edit::{DimensionAction, DimensionEdit, FeatureField};
 use crate::document::{Document, EndKind, Feature, FeatureId, FeatureKind, FeatureStatus, ProfileKind, fmt_mm};
 use crate::sketch::{ConstraintId, ConstraintKind, DistanceKind, P2, Sketch};
-use crate::sketcher::{arrow, dim_text, paint_closed_dimensions, value_pill};
+use crate::sketcher::{arrow, paint_closed_dimensions, value_pill};
 use crate::state::AppAction;
 use crate::theme;
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, vec2};
@@ -115,55 +115,65 @@ pub fn paint(
             .or_else(|| doc.model().visibility().annotation_position(key).map(Vec3::from_array))
     };
     let position = |key: AnnotationKey, default: Vec3| authored_position(key).unwrap_or(default);
-    let sketch_dims =
-        |shown: &mut Vec<ShownDimension>, f: &Feature, plane: Plane, sketch: &Sketch, edit_sketch: bool| {
-            let key = |constraint| AnnotationKey {
-                feature: model::FeatureId(f.id as u32),
-                value: AnnotationValue::Sketch(constraint),
-            };
-            for (constraint, r, world) in paint_closed_dimensions(
-                painter,
-                camera,
-                rect,
-                plane,
-                sketch,
-                |constraint| authored_position(key(constraint)),
-                shown.iter().map(|d| d.rect),
-                pointer,
-            ) {
-                let c = sketch.constraint(constraint);
-                let target = if edit_sketch {
-                    DimensionTarget::Sketch { sketch: f.id, constraint }
-                } else {
-                    DimensionTarget::Feature(f.id)
-                };
-                // A built-in profile's sizes are the extrude's own values.
-                let field = c.and_then(|c| profile_field(c.kind)).filter(|_| !edit_sketch);
-                let name = field.map(FeatureField::label).or(c.map(|c| c.name())).unwrap_or("Dimension");
-                shown.push(ShownDimension {
-                    target,
-                    key: key(constraint),
-                    position: world,
-                    rect: r,
-                    tip: format!("{} · {name}", f.name),
-                    text: c.map(|c| dim_text(c, sketch)).unwrap_or_default(),
-                    field,
-                    witness: None,
-                });
-            }
+    let sketch_dims = |shown: &mut Vec<ShownDimension>,
+                       f: &Feature,
+                       plane: Plane,
+                       sketch: &Sketch,
+                       edit_sketch: bool,
+                       authored_pass: Option<bool>| {
+        let key = |constraint| AnnotationKey {
+            feature: model::FeatureId(f.id as u32),
+            value: AnnotationValue::Sketch(constraint),
         };
+        for (constraint, r, world, text) in paint_closed_dimensions(
+            painter,
+            camera,
+            rect,
+            plane,
+            sketch,
+            |constraint| authored_position(key(constraint)),
+            shown.iter().map(|d| d.rect),
+            authored_pass,
+            pointer,
+        ) {
+            let c = sketch.constraint(constraint);
+            let target = if edit_sketch {
+                DimensionTarget::Sketch { sketch: f.id, constraint }
+            } else {
+                DimensionTarget::Feature(f.id)
+            };
+            // A built-in profile's sizes are the extrude's own values.
+            let field = c.and_then(|c| profile_field(c.kind)).filter(|_| !edit_sketch);
+            let name = field.map(FeatureField::label).or(c.map(|c| c.name())).unwrap_or("Dimension");
+            shown.push(ShownDimension {
+                target,
+                key: key(constraint),
+                position: world,
+                rect: r,
+                tip: format!("{} · {name}", f.name),
+                text,
+                field,
+                witness: None,
+            });
+        }
+    };
+    // Reserve authored labels across every visible sketch before placing any defaults.
+    let sketches = built.iter().filter_map(|f| {
+        let FeatureKind::Sketch(s) = &f.kind else { return None };
+        let plane = f.plane?;
+        (visible_sketches.contains(&f.id) || (body && built.iter().any(|c| c.kind.sketch() == Some(f.id))))
+            .then_some((*f, plane, &s.sketch))
+    });
+    for authored in [true, false] {
+        for (f, plane, sketch) in sketches.clone() {
+            sketch_dims(&mut shown, f, plane, sketch, true, Some(authored));
+        }
+    }
     for f in &built {
         let mut depth: Option<(Plane, &Sketch, f64)> = None;
         let builtin;
         match &f.kind {
-            FeatureKind::Sketch(s) => {
-                if let Some(plane) = f.plane
-                    && (visible_sketches.contains(&f.id)
-                        || (body && built.iter().any(|c| c.kind.sketch() == Some(f.id))))
-                {
-                    sketch_dims(&mut shown, f, plane, &s.sketch, true);
-                }
-            }
+            FeatureKind::Sketch(_) => {}
             FeatureKind::Extrude(p) if body => {
                 let profile = match p.sketch {
                     None => {
@@ -176,7 +186,7 @@ pub fn paint(
                         builtin = shape.sketch().ok();
                         // A built-in profile's sizes are the extrude's own values.
                         builtin.as_ref().map(|sk| {
-                            sketch_dims(&mut shown, f, p.plane.to_kernel(), sk, false);
+                            sketch_dims(&mut shown, f, p.plane.to_kernel(), sk, false, None);
                             (p.plane.to_kernel(), sk)
                         })
                     }
@@ -252,6 +262,9 @@ pub fn paint(
                 witness: Some(witness),
             });
         }
+    }
+    for dimension in &shown {
+        pill(painter, dimension.rect, dimension.text.clone(), pointer);
     }
     shown
 }
@@ -330,12 +343,11 @@ fn body_centre(doc: &Document) -> Option<Vec3> {
     Some((lo + hi) / 2.0)
 }
 
-/// A value pill that may be hovered, with its rectangle.
-fn pill(painter: &egui::Painter, at: Pos2, text: String, pointer: Option<Pos2>) -> (Rect, bool) {
-    let size = painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size();
-    let hover = pointer.is_some_and(|p| Rect::from_center_size(at, size + vec2(12.0, 6.0)).contains(p));
+/// Paints a laid-out value above the complete set of dimension lines.
+fn pill(painter: &egui::Painter, rect: Rect, text: String, pointer: Option<Pos2>) {
+    let hover = pointer.is_some_and(|p| rect.contains(p));
     let (bg, stroke) = if hover { (theme::hover(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
-    (value_pill(painter, at, text, theme::ink(), bg, Stroke::new(1.0, stroke)), hover)
+    value_pill(painter, rect.center(), text, theme::ink(), bg, Stroke::new(1.0, stroke));
 }
 
 /// A model-space leader with viewer-facing text at its far end.
@@ -350,7 +362,9 @@ fn paint_leader(
     pointer: Option<Pos2>,
 ) -> Option<Rect> {
     let (a, p) = (camera.project(at, rect)?, camera.project(label, rect)?);
-    let (r, hover) = pill(painter, p, text.to_owned(), pointer);
+    let size = painter.layout_no_wrap(text.to_owned(), theme::font_medium(11.5), theme::ink()).size();
+    let r = Rect::from_center_size(p, size + vec2(12.0, 6.0));
+    let hover = pointer.is_some_and(|p| r.contains(p));
     painter.line_segment([a, r.clamp(a)], Stroke::new(1.0, line_color(hover)));
     painter.circle_filled(a, 2.5, line_color(hover));
     Some(r)
@@ -404,7 +418,7 @@ fn paint_depth(
         arrow(painter, bo, -d, color);
         arrow(painter, to, d, color);
     }
-    Some((pill(painter, at, text, pointer).0, witness, world))
+    Some((Rect::from_center_size(at, size + vec2(12.0, 6.0)), witness, world))
 }
 
 /// The field where a value is typed, over its dimension in the viewport. It stays inside

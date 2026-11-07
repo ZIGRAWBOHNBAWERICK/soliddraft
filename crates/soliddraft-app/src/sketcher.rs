@@ -1693,8 +1693,8 @@ pub fn value_pill(painter: &egui::Painter, at: Pos2, text: String, ink: Color32,
     r
 }
 
-/// Draws closed-sketch dimensions with viewer-facing text at model-space positions.
-/// Lines stay attached to the sketch; a label lifted off its plane gets a 3D leader.
+/// Draws closed-sketch dimension lines and returns label placements and text.
+/// The viewport paints labels after the full scene so later lines cannot cover values.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_closed_dimensions(
     painter: &egui::Painter,
@@ -1704,14 +1704,19 @@ pub fn paint_closed_dimensions(
     sketch: &Sketch,
     position: impl Fn(ConstraintId) -> Option<Vec3>,
     taken: impl IntoIterator<Item = Rect>,
+    authored_pass: Option<bool>,
     pointer: Option<Pos2>,
-) -> Vec<(ConstraintId, Rect, Vec3)> {
+) -> Vec<(ConstraintId, Rect, Vec3, String)> {
     let frame = Frame { plane, camera, rect };
     let gv = |v: soliddraft_kernel_api::Vec3| Vec3::new(v.x as f32, v.y as f32, v.z as f32);
     let mut shown = Vec::new();
-    let mut taken: Vec<Rect> = taken.into_iter().collect();
+    let mut previous = taken.into_iter();
+    let mut taken = Vec::new();
     // Reserve authored labels first; only automatic placements may move to clear them.
     for authored in [true, false] {
+        if authored_pass.is_some_and(|only| only != authored) {
+            continue;
+        }
         for c in sketch.constraints.iter().filter(|c| c.is_dimension()) {
             let placed = position(c.id);
             if placed.is_some() != authored {
@@ -1724,6 +1729,7 @@ pub fn paint_closed_dimensions(
             let text = dim_text(c, sketch);
             let size =
                 painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size() + vec2(12.0, 6.0);
+            taken.extend(previous.by_ref());
             let at = if authored { projected } else { clear_dimension_spot(projected, size, &taken) };
             if at != projected {
                 let (origin, ray) = camera.ray(at, rect);
@@ -1741,18 +1747,10 @@ pub fn paint_closed_dimensions(
             }
             let r = Rect::from_center_size(at, size);
             taken.push(r);
-            shown.push((c.id, r, world, text, hover));
+            shown.push((c.id, r, world, text));
         }
     }
-    // Paint all value backgrounds and text above every dimension line.
     shown
-        .into_iter()
-        .map(|(id, r, world, text, hover)| {
-            let (bg, stroke) = if hover { (theme::hover(), theme::accent()) } else { (theme::hud_bg(), theme::line()) };
-            value_pill(painter, r.center(), text, theme::ink(), bg, Stroke::new(1.0, stroke));
-            (id, r, world)
-        })
-        .collect()
 }
 
 /// Clears every occupied rectangle by advancing past each blocker, with no search cap

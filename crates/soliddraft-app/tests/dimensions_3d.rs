@@ -429,3 +429,91 @@ fn two_closed_rectangles_keep_front_view_dimensions_readable_and_draggable() {
         "redo retains the authored sketch anchor after a view change"
     );
 }
+
+#[test]
+fn authored_labels_take_priority_across_separate_visible_sketches() {
+    let _case = ribbon::case("dimensions-3d-cross-sketch-priority");
+    let mut doc = ribbon::blank();
+    let mut sketches = Vec::new();
+    for (v, width) in [(-60.0, 60.0), (60.0, 80.0)] {
+        let id = doc
+            .apply(Command::AddSketch {
+                plane: soliddraft_app::document::SketchPlane::Reference {
+                    plane: soliddraft_app::document::PlaneKind::Top,
+                    offset: 0.0,
+                },
+            })
+            .unwrap()
+            .unwrap();
+        let mut geometry = soliddraft_sketch::Sketch::new();
+        geometry.rectangle(soliddraft_sketch::P2::new(0.0, v), width, 40.0).unwrap();
+        doc.apply(Command::EditSketch { id, sketch: geometry }).unwrap();
+        doc.set_view_choice(ViewItem::Feature(id), Some(true));
+        sketches.push(id);
+    }
+    doc.selection = None;
+    let mut app = ribbon::app(doc);
+    app.state_mut().state.push(AppAction::SetView(StandardView::Front));
+    app.run_steps(40);
+    for orthographic in [true, false] {
+        app.state_mut().state.viewport.camera.orthographic = orthographic;
+        app.run_steps(5);
+        let before = app.state().state.viewport.dimensions.clone();
+        let first = before.iter().find(|d| d.text == "60").unwrap();
+        let second = before.iter().find(|d| d.text == "80").unwrap();
+        assert!(matches!(first.target, DimensionTarget::Sketch { sketch, .. } if sketch == sketches[0]));
+        assert!(matches!(second.target, DimensionTarget::Sketch { sketch, .. } if sketch == sketches[1]));
+        drag(&mut app, second.rect.center(), first.rect.center());
+        let authored = dimension(&app, &second.key);
+        assert!(
+            authored.rect.center().distance(first.rect.center()) < 2.0,
+            "later sketch's authored value stays where the user put it"
+        );
+        let default = dimension(&app, &first.key);
+        assert!(
+            !default.rect.expand(1.0).intersects(authored.rect),
+            "earlier sketch's default clears the later sketch's authored label"
+        );
+        let shown = app.state().state.viewport.dimensions.clone();
+        let mut values: Vec<_> = shown.iter().map(|d| d.text.as_str()).collect();
+        values.sort_unstable();
+        assert_eq!(values, ["40", "40", "60", "80"]);
+        for (i, label) in shown.iter().enumerate() {
+            assert!(ribbon::painted_in(&app, label.rect).iter().any(|p| p.text == label.text && p.rect == p.full));
+            for other in &shown[i + 1..] {
+                assert!(
+                    !label.rect.expand(1.0).intersects(other.rect),
+                    "separate sketches keep every default clear of authored labels"
+                );
+            }
+        }
+        frame(&mut app, if orthographic { "cross-sketch-front-ortho" } else { "cross-sketch-front-perspective" });
+        for label in [&default, &authored] {
+            let to = dimension(&app, &label.key).rect.center() + vec2(100.0, -35.0);
+            let from = dimension(&app, &label.key).rect.center();
+            drag(&mut app, from, to);
+            assert!(
+                dimension(&app, &label.key).rect.center().distance(to) < 2.0,
+                "each separate sketch value remains grabbable at its own centre"
+            );
+            app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+            app.run_steps(5);
+            assert!(dimension(&app, &second.key).position.distance(authored.position) < 0.001);
+        }
+        app.state_mut().state.push(AppAction::SetView(StandardView::Top));
+        app.run_steps(40);
+        assert!(dimension(&app, &second.key).position.distance(authored.position) < 0.001);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        app.run_steps(5);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+        app.run_steps(5);
+        assert!(
+            dimension(&app, &second.key).position.distance(authored.position) < 0.001,
+            "cross-sketch collision layout never changes authored-anchor history"
+        );
+        app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        app.run_steps(5);
+        app.state_mut().state.push(AppAction::SetView(StandardView::Front));
+        app.run_steps(40);
+    }
+}

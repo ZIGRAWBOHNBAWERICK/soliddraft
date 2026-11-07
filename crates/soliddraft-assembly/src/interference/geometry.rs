@@ -103,6 +103,8 @@ pub(crate) struct Solid {
     pub bounds: Bounds,
     nodes: Vec<Node>,
     order: Vec<u32>,
+    /// The first triangle of each connected piece of the mesh, in triangle order.
+    pieces: Vec<u32>,
 }
 
 /// The nearest points found on two features, such as two triangles, and a proven lower
@@ -172,12 +174,20 @@ impl Solid {
             chord,
             rounding: ROUNDING * extent,
             nodes: Vec::new(),
+            pieces: Vec::new(),
         };
+        solid.pieces = pieces(&solid.tris);
         if !solid.tris.is_empty() {
             solid.build(0, solid.tris.len());
             solid.bounds = solid.nodes[0].bounds;
         }
         solid
+    }
+
+    /// The first triangle of each connected piece of the mesh. A part's mesh holds one
+    /// piece per shell, so a patterned part or a part with a cavity has several.
+    pub fn pieces(&self) -> &[u32] {
+        &self.pieces
     }
 
     /// The number of triangles.
@@ -394,10 +404,11 @@ pub(crate) fn witness(a: &Solid, b: &Solid, pairs: &[(u32, u32, Closest)]) -> Op
         }
     }
     // One solid inside the other, or overlaps with no surface pair kept: walk inward from
-    // spread-out triangles of each.
+    // a triangle of every piece of each, then from spread-out triangles.
     for (s, other) in [(a, b), (b, a)] {
         let stride = (s.count() / 64).max(1);
-        for t in (0..s.count()).step_by(stride) {
+        let firsts = s.pieces.iter().map(|t| *t as usize);
+        for t in firsts.chain((0..s.count()).step_by(stride)) {
             let tri = &s.tris[t];
             let base = (tri[0] + tri[1] + tri[2]) / 3.0;
             if other.bounds.point_distance(base) > 0.0 {
@@ -460,6 +471,40 @@ pub(crate) fn shared_point(a: &Solid, fa: u32, b: &Solid, fb: u32, axis: usize) 
         }
     }
     None
+}
+
+/// The first triangle of each connected piece of a mesh, in triangle order. Triangles
+/// join where they share a corner, matched bit for bit, since the kernel places each
+/// shared vertex by the same arithmetic. A piece the matching misses splits in two, which
+/// only adds tests; two pieces never join unless their surfaces meet.
+fn pieces(tris: &[[DVec3; 3]]) -> Vec<u32> {
+    use std::collections::HashMap;
+    use std::collections::hash_map::Entry;
+    // Each triangle points towards the least triangle of its piece.
+    let mut parent: Vec<u32> = (0..tris.len() as u32).collect();
+    fn root(parent: &mut [u32], mut i: u32) -> u32 {
+        while parent[i as usize] != i {
+            parent[i as usize] = parent[parent[i as usize] as usize];
+            i = parent[i as usize];
+        }
+        i
+    }
+    let mut first: HashMap<[u64; 3], u32> = HashMap::new();
+    for (t, tri) in tris.iter().enumerate() {
+        for p in tri {
+            // Adding zero folds -0 into 0.
+            match first.entry((*p + DVec3::ZERO).to_array().map(f64::to_bits)) {
+                Entry::Vacant(e) => {
+                    e.insert(t as u32);
+                }
+                Entry::Occupied(e) => {
+                    let (x, y) = (root(&mut parent, *e.get()), root(&mut parent, t as u32));
+                    parent[x.max(y) as usize] = x.min(y);
+                }
+            }
+        }
+    }
+    (0..tris.len() as u32).filter(|t| parent[*t as usize] == *t).collect()
 }
 
 /// The edges of a set of triangles that only one of them has: the boundary of the
@@ -760,6 +805,18 @@ pub(crate) mod tests_support {
         Solid::new(tris, faces, chord)
     }
 
+    /// One solid of several disjoint boxes, each `(lo, hi)`, their meshes in the order
+    /// given: a single part with one piece per box.
+    pub(crate) fn boxes(boxes: &[([f64; 3], [f64; 3])], chord: f64) -> Solid {
+        let (mut tris, mut faces) = (Vec::new(), Vec::new());
+        for (lo, hi) in boxes {
+            let (t, f) = cuboid(DVec3::from_array(*lo), DVec3::from_array(*hi));
+            tris.extend(t);
+            faces.extend(f);
+        }
+        Solid::new(tris, faces, chord)
+    }
+
     /// A closed triangular prism along x from `-half` to `half`, with the cross-section
     /// `section` in (y, z), turned by `angle` about world Z and then moved by `shift`: two
     /// end caps and each side split along the diagonal from its lower-index corner at
@@ -867,6 +924,17 @@ mod tests {
             assert!(n.lower <= 0.01 && n.lower > 0.01 - 1e-9, "angle {angle}: lower {}", n.lower);
             assert!(c.distance >= n.lower && c.distance < 0.01 + 1e-9, "angle {angle}: {c:?}");
         }
+    }
+
+    #[test]
+    fn each_connected_piece_of_a_mesh_is_found() {
+        let one = block([0.0; 3], [1.0; 3], 0.001);
+        assert_eq!(one.pieces(), &[0]);
+        let three = tests_support::boxes(
+            &[([0.0; 3], [1.0; 3]), ([5.0, 0.0, 0.0], [6.0, 1.0, 1.0]), ([10.0, 0.0, 0.0], [11.0, 1.0, 1.0])],
+            0.001,
+        );
+        assert_eq!(three.pieces(), &[0, 12, 24]);
     }
 
     #[test]

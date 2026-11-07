@@ -384,6 +384,86 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
     },
     {
+      "id": "mate-parallel",
+      "file": "ci/scenarios/mate-parallel.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Parallel mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B1: Parallel mates between proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; a strict refusal naming what stays free, a distance edit refused, an alignment edit that conflicts refused and named, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-perpendicular",
+      "file": "ci/scenarios/mate-perpendicular.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Perpendicular mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B1: Perpendicular mates between proven axis-aligned planar faces; a part that does not already hold the right angle takes the nearest quarter turn; an alignment edit refused, a conflicting Parallel refused naming both mates, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-width",
+      "file": "ci/scenarios/mate-width.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Width mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B1: Width mates between two parallel groove faces and two parallel tab faces, centred, by percent of the play from either face and by a dimension driven by an assembly value; non-parallel faces refused, a percentage out of range refused, a conflicting distance refused naming both mates, undo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-lock",
+      "file": "ci/scenarios/mate-lock.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Lock mate commands -> assembly transaction -> stored relative placement -> exact difference solve",
+      "supported_limits": "B1: Lock mates storing a relative placement between root part components; a conflicting distance refused naming both mates, save and reopen, a 30 degree relative rotation refused as unsupported_placement, a quarter-turn relative rotation accepted.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-reference-plane",
+      "file": "ci/scenarios/mate-reference-plane.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP reference plane, assembly and mate commands -> assembly transaction -> exact reference plane definition -> pinned part",
+      "supported_limits": "B1: Coincident and Distance mates to a part's Top, Front and Right planes and to plane features built on them, offsets added exactly; a plane feature on a face refused as unsupported_plane, an unknown plane refused as no_such_face, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "interference-detection",
       "file": "ci/scenarios/interference-detection.json",
       "acceptance": true,

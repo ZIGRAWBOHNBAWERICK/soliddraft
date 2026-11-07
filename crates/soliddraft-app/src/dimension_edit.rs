@@ -99,6 +99,8 @@ pub enum DimensionAction {
     Commit(f64),
     /// Closes the value with nothing applied.
     Cancel,
+    /// Commits one model-space annotation placement.
+    Move { key: soliddraft_model::view::AnnotationKey, position: glam::Vec3 },
 }
 
 /// What a double-click on a feature's tree row does.
@@ -162,6 +164,11 @@ impl AppState {
             }
             DimensionAction::Commit(value) => self.commit_dimension(value),
             DimensionAction::Cancel => self.dimension_edit = None,
+            DimensionAction::Move { key, position } => {
+                if let Err(error) = self.doc.move_annotation(key, position) {
+                    self.note(error, NoteKind::Error);
+                }
+            }
         }
     }
 

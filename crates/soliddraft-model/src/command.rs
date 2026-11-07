@@ -17,6 +17,13 @@ use crate::materials::{AppearanceAssignment, AppearanceTarget, MaterialAssignmen
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
+    /// Moves one viewport dimension without changing the part's geometry.
+    SetAnnotationPlacement {
+        /// Stable feature-and-dimension identity.
+        key: crate::view::AnnotationKey,
+        /// Model-space label position, or none for the default placement.
+        position: Option<[f32; 3]>,
+    },
     /// Adds a new feature. Without a position it goes at the rollback bar, or at the end.
     /// Without a name it gets the next free one for its kind, such as "Fillet2".
     AddFeature {
@@ -539,6 +546,11 @@ impl Document {
     pub fn redo_label(&self) -> Option<&str> {
         self.redo.last().map(|e| e.label.as_str())
     }
+    /// Whether the next undo or redo changes only a viewport annotation.
+    pub fn annotation_history(&self, redo: bool) -> bool {
+        let stack = if redo { &self.redo } else { &self.undo };
+        stack.last().is_some_and(|entry| matches!(entry.redo, Command::SetAnnotationPlacement { .. }))
+    }
 
     /// What a command that changed only the materials state did: its inverse puts the
     /// old state back.
@@ -775,6 +787,9 @@ impl Document {
     }
 
     fn apply(&mut self, command: Command) -> Result<Applied, CommandError> {
+        if matches!(command, Command::SetAnnotationPlacement { .. }) {
+            return self.apply_inner(command);
+        }
         if crate::configs::handles(&command, !self.configurations.is_empty()) {
             return self.apply_configuration(command);
         }
@@ -825,6 +840,21 @@ impl Document {
 
     fn apply_inner(&mut self, command: Command) -> Result<Applied, CommandError> {
         match command {
+            Command::SetAnnotationPlacement { key, position } => {
+                if position.is_some_and(|p| p.iter().any(|v| !v.is_finite())) {
+                    return Err(CommandError::Invalid("annotation position must be finite".into()));
+                }
+                let old = match position {
+                    Some(p) => self.view.annotations.insert(key, p),
+                    None => self.view.annotations.remove(&key),
+                };
+                Ok(Applied {
+                    inverse: Command::SetAnnotationPlacement { key, position: old },
+                    redo: Command::SetAnnotationPlacement { key, position },
+                    created: None,
+                    label: "Move dimension".into(),
+                })
+            }
             command @ (Command::AddConfiguration { .. }
             | Command::SetConfigurationValue { .. }
             | Command::ActivateConfiguration { .. }

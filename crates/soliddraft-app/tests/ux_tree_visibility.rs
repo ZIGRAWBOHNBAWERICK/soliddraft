@@ -23,6 +23,7 @@ use soliddraft_app::document::{
     ViewItem,
 };
 use soliddraft_app::state::EditorParams;
+use soliddraft_app::viewport::dimensions::DimensionTarget;
 use soliddraft_model::PatternSpec;
 use soliddraft_sketch::P2;
 use std::io::Write;
@@ -862,7 +863,15 @@ fn one_click(window: &str) {
         let sketch_shown_ink = row_ink(case, app, &sketch_name, "01-sketch-row-shown");
         pointer_away(app);
         let shown = case.frame(app, "01-settled");
-        let dimensions: Vec<Rect> = app.state().state.viewport.dimensions.iter().map(|d| d.rect).collect();
+        let dimensions: Vec<Rect> = app
+            .state()
+            .state
+            .viewport
+            .dimensions
+            .iter()
+            .filter(|d| d.target == DimensionTarget::Feature(solid))
+            .map(|d| d.rect)
+            .collect();
         case.note(format!("dimension annotations at {dimensions:?}"));
 
         // 2. The extrusion's eye hides the solid and nothing else.
@@ -882,7 +891,12 @@ fn one_click(window: &str) {
         let fraction = covered as f64 / body_samples().len() as f64;
         case.note(format!("body samples painted while shown: {covered} of {}", body_samples().len()));
         assert!(fraction >= detection("covered_sample_fraction"), "the shown frame painted the body there");
-        assert!(app.state().state.viewport.dimensions.is_empty(), "no dimensions on a hidden body");
+        let remaining = &app.state().state.viewport.dimensions;
+        assert_eq!(remaining.len(), 2, "the visible sketch keeps both of its dimensions");
+        assert!(
+            remaining.iter().all(|d| matches!(d.target, DimensionTarget::Sketch { sketch, .. } if sketch == wires)),
+            "no dimensions of the hidden solid remain"
+        );
         for r in &dimensions {
             assert!(bare(&hidden, app, r.center(), 2.0), "the dimension at {r:?} is gone");
         }

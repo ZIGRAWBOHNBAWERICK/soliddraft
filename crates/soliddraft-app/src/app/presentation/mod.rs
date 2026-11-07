@@ -41,6 +41,7 @@ impl SolidDraftApp {
             .bindings(context)
             .into_iter()
             .filter(|(_, k)| !(popup && k.key == Key::Escape))
+            .filter(|(_, k)| !(state.viewport.moving_dimension() && k.key == Key::Escape))
             .filter(|(c, k)| (!typing || k.fires_while_typing()) && (c.is_enabled(state) || (c.hint)(state).is_some()))
             .filter(|(c, k)| !superseded.contains(&(c.id, k.key)))
             .collect();

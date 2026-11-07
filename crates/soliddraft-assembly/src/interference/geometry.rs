@@ -17,18 +17,30 @@
 //!   its mesh boundary.
 //!
 //! Anything else is touching or undecided, and nothing here guesses which. Every margin
-//! also carries [`Solid::rounding`], an allowance for binary64 arithmetic on coordinates
-//! of the size placed.
+//! also carries [`Solid::rounding`], an allowance for placing the mesh's coordinates in
+//! the root's frame in binary64.
+//!
+//! On the placed mesh itself nothing is estimated. Every distance between mesh features is
+//! a proven enclosure and every containment ray's crossing a proven sign, from
+//! [`certified`]: binary64 with a running error bound, and exact arithmetic on the
+//! coordinates wherever that bound leaves the answer open. Floating-point nearest points
+//! appear only as places to start the witness search, which proves its own candidates.
 
 use glam::{DVec2, DVec3};
+
+use super::certified::{self, Crossing, Span};
 
 /// Triangles per leaf of a solid's hierarchy.
 const LEAF: usize = 4;
 
-/// The allowance for binary64 rounding, as a fraction of the largest coordinate. Placing
-/// a point, a distance and a containment ray each lose a few units in the last place,
-/// about 1e-16 of the coordinate; this is seven orders of magnitude above that.
+/// The allowance for binary64 rounding in placing a mesh, as a fraction of the largest
+/// coordinate. Turning and moving a point loses a few units in the last place, about 1e-16
+/// of the coordinate; this is seven orders of magnitude above that.
 pub(crate) const ROUNDING: f64 = 1e-9;
+
+/// The widest distance enclosure kept from binary64 before exact arithmetic tightens it,
+/// as a fraction of the rounding allowance: far below anything a margin can notice.
+const TIGHT: f64 = 1e-3;
 
 /// Triangle pairs within the cutoff that a pair query keeps.
 const PAIRS_KEPT: usize = 4096;
@@ -59,25 +71,54 @@ impl Bounds {
         Bounds { min: self.min.min(other.min), max: self.max.max(other.max) }
     }
 
-    /// The distance between two boxes, zero when they overlap.
+    /// A lower bound on the distance between two boxes, zero when they overlap.
     pub fn distance(&self, other: &Bounds) -> f64 {
-        (other.min - self.max).max(self.min - other.max).max(DVec3::ZERO).length()
+        gap_length((0..3).map(|i| certified::sub_down(other.min[i], self.max[i]).max(certified::sub_down(self.min[i], other.max[i]))))
     }
 
+    /// A lower bound on the distance from `p` to the box, zero inside it.
     fn point_distance(&self, p: DVec3) -> f64 {
-        (self.min - p).max(p - self.max).max(DVec3::ZERO).length()
+        gap_length((0..3).map(|i| certified::sub_down(self.min[i], p[i]).max(certified::sub_down(p[i], self.max[i]))))
     }
 
-    /// Whether the ray from `origin` with reciprocal direction `inv` meets the box.
-    fn hit_by(&self, origin: DVec3, inv: DVec3) -> bool {
-        let t0 = (self.min - origin) * inv;
-        let t1 = (self.max - origin) * inv;
-        let near = t0.min(t1).max_element();
-        let far = t0.max(t1).min_element();
-        // A NaN from 0 * inf orders as nothing and keeps the box, so a ray along one of
-        // its faces is never dropped.
-        far.partial_cmp(&near.max(0.0)) != Some(std::cmp::Ordering::Less)
+    /// Whether `p` lies in the closed box.
+    fn holds(&self, p: DVec3) -> bool {
+        (0..3).all(|i| self.min[i] <= p[i] && p[i] <= self.max[i])
     }
+
+    /// Whether segment `pq` may meet the box. The slab test runs on the box widened by far
+    /// more than its rounding, so a segment that meets it is never dropped.
+    fn hit_by(&self, p: DVec3, q: DVec3) -> bool {
+        let reach = p.abs().max(q.abs()).max(self.min.abs()).max(self.max.abs()).max_element();
+        let pad = DVec3::splat(1e-9 * reach + f64::MIN_POSITIVE);
+        let (min, max) = (self.min - pad, self.max + pad);
+        let d = q - p;
+        let (mut near, mut far) = (0.0_f64, 1.0_f64);
+        for i in 0..3 {
+            if d[i] == 0.0 {
+                if p[i] < min[i] || p[i] > max[i] {
+                    return false;
+                }
+                continue;
+            }
+            let (t0, t1) = ((min[i] - p[i]) / d[i], (max[i] - p[i]) / d[i]);
+            near = near.max(t0.min(t1));
+            far = far.min(t0.max(t1));
+        }
+        near <= far
+    }
+}
+
+/// The length of a vector of nonnegative gaps, rounded down. A gap of zero or less is no
+/// gap.
+fn gap_length(gaps: impl Iterator<Item = f64>) -> f64 {
+    let sum = gaps.map(|g| if g > 0.0 { g * g } else { 0.0 }).sum::<f64>();
+    // Three squares and their sum lose at most four ulps of the sum together, unless a
+    // square underflows, which leaves nothing worth bounding.
+    if sum < 1e-290 {
+        return 0.0;
+    }
+    (sum * (1.0 - 4.0 * f64::EPSILON)).sqrt().next_down().max(0.0)
 }
 
 /// A hierarchy node: a leaf holds `order[first..first + count]`, an inner node
@@ -97,7 +138,7 @@ pub(crate) struct Solid {
     faces: Vec<u32>,
     /// The kernel's proven chord bound for this mesh, in millimetres.
     pub chord: f64,
-    /// The binary64 allowance for this mesh's coordinates, in millimetres.
+    /// The binary64 allowance for placing this mesh's coordinates, in millimetres.
     pub rounding: f64,
     /// The box around every triangle.
     pub bounds: Bounds,
@@ -107,57 +148,18 @@ pub(crate) struct Solid {
     pieces: Vec<u32>,
 }
 
-/// The nearest points found on two features, such as two triangles, and a proven lower
-/// bound on how far apart the features are. The two are kept apart: a pair of points
-/// bounds the distance from above only, and only a search that reaches the true closest
-/// points bounds it from below.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Closest {
-    /// How far apart `a` and `b` are. They lie on the two features, so the features are
-    /// at most this far apart.
-    pub distance: f64,
-    /// The features are at least this far apart, up to the rounding allowance.
-    pub lower: f64,
-    /// A point of the first feature.
-    pub a: DVec3,
-    /// A point of the second feature.
-    pub b: DVec3,
-}
-
-impl Closest {
-    /// Two points proven to be the closest of their features, so that their distance
-    /// bounds the features' distance both ways.
-    fn exact(a: DVec3, b: DVec3) -> Closest {
-        let distance = a.distance(b);
-        Closest { distance, lower: distance, a, b }
-    }
-
-    /// Over two sub-problems whose least distance between them is the whole problem's:
-    /// the nearer pair of points, and the lesser lower bound.
-    fn or(self, other: Closest) -> Closest {
-        let lower = self.lower.min(other.lower);
-        let nearer = if other.distance < self.distance { other } else { self };
-        Closest { lower, ..nearer }
-    }
-
-    /// The same with the two features exchanged.
-    fn swapped(self) -> Closest {
-        Closest { a: self.b, b: self.a, ..self }
-    }
-}
-
 /// What two solids' meshes say near each other.
 pub(crate) struct Near {
-    /// The nearest pair of mesh points found. They are that far apart, so it bounds the
-    /// meshes' least distance from above.
-    pub closest: Option<Closest>,
-    /// The meshes are at least this far apart, up to the rounding allowance: the least
-    /// lower bound over the triangle pairs searched. The search reaches every pair that
-    /// could be nearer than `closest`, so the nearest pair is among them.
+    /// The meshes are at most this far apart: the least upper bound over the triangle
+    /// pairs measured. `None` when no pair was.
+    pub upper: Option<f64>,
+    /// The meshes are at least this far apart: the least lower bound over the triangle
+    /// pairs searched. The search reaches every pair that could be nearer than `upper`, so
+    /// the nearest pair is among them.
     pub lower: f64,
-    /// Triangle pairs within the cutoff, nearest first: triangle of a, triangle of b,
-    /// closest points. At most [`PAIRS_KEPT`] of them.
-    pub pairs: Vec<(u32, u32, Closest)>,
+    /// Triangle pairs whose lower bound is within the cutoff, nearest first: triangle of
+    /// a, triangle of b, and the pair's distance. At most [`PAIRS_KEPT`] of them.
+    pub pairs: Vec<(u32, u32, Span)>,
 }
 
 impl Solid {
@@ -207,7 +209,12 @@ impl Solid {
 
     /// The bound on how far this solid and its mesh disagree, rounding included.
     pub fn slack(&self) -> f64 {
-        self.chord + self.rounding
+        certified::add_up(self.chord, self.rounding)
+    }
+
+    /// The widest distance enclosure this mesh's queries keep without exact arithmetic.
+    fn tight(&self) -> f64 {
+        TIGHT * self.rounding
     }
 
     /// Builds the hierarchy over `order[first..first + count]` and returns its node.
@@ -246,8 +253,8 @@ impl Solid {
         &self.order[node.first as usize..(node.first + node.count) as usize]
     }
 
-    /// The least distance from `p` to the mesh, searched no farther than `cutoff`:
-    /// `cutoff` or more means nothing nearer.
+    /// A lower bound on the least distance from `p` to the mesh, searched no farther than
+    /// `cutoff`: `cutoff` means nothing nearer.
     pub fn surface_distance(&self, p: DVec3, cutoff: f64) -> f64 {
         let mut best = cutoff;
         if self.nodes.is_empty() {
@@ -265,17 +272,18 @@ impl Solid {
                 continue;
             }
             for &t in self.leaf(node) {
-                best = best.min(point_triangle(p, &self.tris[t as usize]).distance(p));
+                best = best.min(certified::point_triangle(p, &self.tris[t as usize], self.tight(), best).lo);
             }
         }
         best
     }
 
-    /// Whether `p` is inside the closed mesh, by the parity of crossings along a ray.
-    /// A ray that grazes an edge or a vertex, or runs along a triangle, says nothing and
-    /// the next direction is tried; `None` when every direction grazed.
+    /// Whether `p` is inside the closed mesh, by the parity of crossings along a ray. Each
+    /// crossing is decided exactly. A ray through an edge or a corner, along a triangle's
+    /// plane, or from a point on a triangle says nothing and the next direction is tried;
+    /// `None` when every direction did.
     pub fn contains(&self, p: DVec3) -> Option<bool> {
-        if self.nodes.is_empty() || self.bounds.point_distance(p) > 0.0 {
+        if self.nodes.is_empty() || !self.bounds.holds(p) {
             return Some(false);
         }
         // Fixed directions with no simple ratio between their components, so that axis
@@ -288,16 +296,26 @@ impl Solid {
             [0.131_472_6, 0.982_517_4, -0.131_895_3],
             [0.657_314_2, -0.437_926_1, -0.613_548_7],
         ];
-        DIRECTIONS.iter().find_map(|d| self.parity(p, DVec3::from_array(*d).normalize()))
+        let reach = (self.bounds.max - self.bounds.min).length() + 1.0;
+        DIRECTIONS.iter().find_map(|d| {
+            // The ray as a segment to a point beyond the box, whatever its rounding.
+            let dir = DVec3::from_array(*d);
+            let mut length = reach;
+            let mut q = p + dir * length;
+            while self.bounds.holds(q) {
+                length *= 2.0;
+                q = p + dir * length;
+            }
+            self.parity(p, q)
+        })
     }
 
-    fn parity(&self, origin: DVec3, dir: DVec3) -> Option<bool> {
-        let inv = DVec3::ONE / dir;
+    fn parity(&self, p: DVec3, q: DVec3) -> Option<bool> {
         let mut inside = false;
         let mut stack = vec![0u32];
         while let Some(i) = stack.pop() {
             let node = &self.nodes[i as usize];
-            if !node.bounds.hit_by(origin, inv) {
+            if !node.bounds.hit_by(p, q) {
                 continue;
             }
             if node.count == 0 {
@@ -306,7 +324,7 @@ impl Solid {
                 continue;
             }
             for &t in self.leaf(node) {
-                match crossing(origin, dir, &self.tris[t as usize]) {
+                match certified::crossing(p, q, &self.tris[t as usize]) {
                     Crossing::Clean => inside = !inside,
                     Crossing::Miss => {}
                     Crossing::Grazes => return None,
@@ -324,17 +342,20 @@ impl Solid {
     }
 }
 
-/// The meshes of `a` and `b` near each other: the least distance between them and the
-/// triangle pairs within `cutoff`.
+/// The meshes of `a` and `b` near each other: proven bounds on the least distance between
+/// them and the triangle pairs whose lower bound is within `cutoff`.
 pub(crate) fn near(a: &Solid, b: &Solid, cutoff: f64) -> Near {
-    let mut out = Near { closest: None, lower: f64::INFINITY, pairs: Vec::new() };
+    let mut out = Near { upper: None, lower: f64::INFINITY, pairs: Vec::new() };
     if a.nodes.is_empty() || b.nodes.is_empty() {
         return out;
     }
+    let tight = a.tight().min(b.tight());
     let mut best = f64::INFINITY;
     let mut stack = vec![(0u32, 0u32)];
     while let Some((i, j)) = stack.pop() {
         let (na, nb) = (&a.nodes[i as usize], &b.nodes[j as usize]);
+        // A lower bound on every pair below: past `best`, none can be nearest or lower
+        // the least lower bound, which is at most `best`.
         let gap = na.bounds.distance(&nb.bounds);
         if gap > best && gap > cutoff {
             continue;
@@ -348,14 +369,17 @@ pub(crate) fn near(a: &Solid, b: &Solid, cutoff: f64) -> Near {
             (false, false) => {
                 for &ta in a.leaf(na) {
                     for &tb in b.leaf(nb) {
-                        let c = triangles(&a.tris[ta as usize], &b.tris[tb as usize]);
-                        if c.distance < best {
-                            best = c.distance;
-                            out.closest = Some(c);
+                        // A pair whose lower bound reaches `best` changes neither bound,
+                        // so its enclosure need not be tight.
+                        let span = certified::triangles(&a.tris[ta as usize], &b.tris[tb as usize], tight, best);
+                        if span.hi < best {
+                            best = span.hi;
+                            out.upper = Some(span.hi);
                         }
-                        out.lower = out.lower.min(c.lower);
-                        if c.lower <= cutoff && out.pairs.len() < PAIRS_KEPT {
-                            out.pairs.push((ta, tb, c));
+                        out.upper.get_or_insert(span.hi);
+                        out.lower = out.lower.min(span.lo);
+                        if span.lo <= cutoff && out.pairs.len() < PAIRS_KEPT {
+                            out.pairs.push((ta, tb, span));
                         }
                     }
                 }
@@ -364,13 +388,13 @@ pub(crate) fn near(a: &Solid, b: &Solid, cutoff: f64) -> Near {
     }
     // The traversal order depends on the stack only, so the kept pairs are deterministic;
     // sort them so that callers see them nearest first.
-    out.pairs.sort_by(|p, q| p.2.distance.total_cmp(&q.2.distance).then((p.0, p.1).cmp(&(q.0, q.1))));
+    out.pairs.sort_by(|p, q| p.2.hi.total_cmp(&q.2.hi).then((p.0, p.1).cmp(&(q.0, q.1))));
     out
 }
 
 /// A point proven inside both solids, searched from the given near pairs and from each
 /// solid's own triangles. `None` proves nothing.
-pub(crate) fn witness(a: &Solid, b: &Solid, pairs: &[(u32, u32, Closest)]) -> Option<DVec3> {
+pub(crate) fn witness(a: &Solid, b: &Solid, pairs: &[(u32, u32, Span)]) -> Option<DVec3> {
     let step = 2.0 * (a.slack() + b.slack());
     let reach = a.bounds.union(b.bounds);
     let reach = (reach.max - reach.min).max_element().max(step);
@@ -385,11 +409,13 @@ pub(crate) fn witness(a: &Solid, b: &Solid, pairs: &[(u32, u32, Closest)]) -> Op
         Some(a.proves_inside(y) && b.proves_inside(y))
     };
     // Where the two surfaces meet, the overlap opens against both outward normals.
-    for (ta, tb, c) in pairs {
-        let (na, nb) = (normal(&a.tris[*ta as usize]), normal(&b.tris[*tb as usize]));
+    for (ta, tb, _) in pairs {
+        let (x, y) = (&a.tris[*ta as usize], &b.tris[*tb as usize]);
+        let (na, nb) = (normal(x), normal(y));
         let both = -(na + nb);
         let dirs = [both.normalize_or_zero(), -na, -nb];
-        let bases = [(c.a + c.b) * 0.5, c.a, c.b];
+        let (pa, pb) = nearest(x, y);
+        let bases = [(pa + pb) * 0.5, pa, pb];
         for base in bases {
             for dir in dirs.iter().filter(|d| **d != DVec3::ZERO) {
                 for s in &steps {
@@ -411,7 +437,7 @@ pub(crate) fn witness(a: &Solid, b: &Solid, pairs: &[(u32, u32, Closest)]) -> Op
         for t in firsts.chain((0..s.count()).step_by(stride)) {
             let tri = &s.tris[t];
             let base = (tri[0] + tri[1] + tri[2]) / 3.0;
-            if other.bounds.point_distance(base) > 0.0 {
+            if !other.bounds.holds(base) {
                 continue;
             }
             let dir = -normal(tri);
@@ -457,9 +483,14 @@ pub(crate) fn shared_point(a: &Solid, fa: u32, b: &Solid, fb: u32, axis: usize) 
             }
             let py = y.map(flat);
             let Some(c) = overlap_centre(&px, &py) else { continue };
-            let clear =
-                |edges: &[[DVec2; 2]], slack: f64| edges.iter().all(|[p, q]| segment_point_2d(*p, *q, c) > slack);
-            if clear(&ea, sa) && clear(&eb, sb) {
+            // The centre is computed in binary64, so it is proven anew: inside a triangle of
+            // each face, and farther than each face's bound from its boundary.
+            let flat3 = |p: DVec2| DVec3::new(p.x, p.y, 0.0);
+            let clear = |edges: &[[DVec2; 2]], slack: f64, tight: f64| {
+                edges.iter().all(|[p, q]| certified::point_segment(flat3(c), flat3(*p), flat3(*q), tight).lo > slack)
+            };
+            let inside = |t: &[DVec2; 3]| certified::in_triangle_2d(c.to_array(), t.map(|p| p.to_array()));
+            if inside(&px) && inside(&py) && clear(&ea, sa, a.tight()) && clear(&eb, sb, b.tight()) {
                 // Back on the plane: the axis coordinate of the face, which is the plane's.
                 let mut p = DVec3::ZERO;
                 let (u, v) = [(1, 2), (2, 0), (0, 1)][axis];
@@ -568,60 +599,47 @@ fn overlap_centre(a: &[DVec2; 3], b: &[DVec2; 3]) -> Option<DVec2> {
     (area > 0.0).then(|| centre / (3.0 * area))
 }
 
-fn segment_point_2d(p: DVec2, q: DVec2, x: DVec2) -> f64 {
-    let d = q - p;
-    let len = d.length_squared();
-    let t = if len > 0.0 { ((x - p).dot(d) / len).clamp(0.0, 1.0) } else { 0.0 };
-    (p + d * t).distance(x)
-}
-
 /// The unit outward normal of a triangle wound counter-clockwise seen from outside, or
 /// zero for a degenerate one.
 fn normal(t: &[DVec3; 3]) -> DVec3 {
     (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero()
 }
 
-enum Crossing {
-    Clean,
-    Miss,
-    Grazes,
+/// Points near where two triangles come nearest, from binary64 arithmetic: places to start
+/// a search, never a proof of a distance.
+fn nearest(a: &[DVec3; 3], b: &[DVec3; 3]) -> (DVec3, DVec3) {
+    let mut best = (f64::INFINITY, a[0], b[0]);
+    let mut take = |x: DVec3, y: DVec3| {
+        let d = x.distance(y);
+        if d < best.0 {
+            best = (d, x, y);
+        }
+    };
+    for k in 0..3 {
+        let (p, q) = (a[k], a[(k + 1) % 3]);
+        take(p, on_triangle(p, b));
+        take(on_triangle(b[k], a), b[k]);
+        for j in 0..3 {
+            let (x, y) = on_segments(p, q, b[j], b[(j + 1) % 3]);
+            take(x, y);
+        }
+        // Where each triangle's edges cross the other's plane.
+        for (s, t, flip) in [(a, b, false), (b, a, true)] {
+            let (p, q) = (s[k], s[(k + 1) % 3]);
+            let n = (t[1] - t[0]).cross(t[2] - t[0]);
+            let (dp, dq) = ((p - t[0]).dot(n), (q - t[0]).dot(n));
+            if (dp < 0.0) != (dq < 0.0) && dp != dq {
+                let x = p + (q - p) * (dp / (dp - dq));
+                let y = on_triangle(x, t);
+                if flip { take(y, x) } else { take(x, y) }
+            }
+        }
+    }
+    (best.1, best.2)
 }
 
-/// How a ray meets a triangle. Anything within a relative 1e-9 of an edge, a vertex, the
-/// triangle's plane or the ray's origin grazes.
-fn crossing(origin: DVec3, dir: DVec3, t: &[DVec3; 3]) -> Crossing {
-    const GRAZE: f64 = 1e-9;
-    let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
-    let p = dir.cross(e2);
-    let det = e1.dot(p);
-    let scale = e1.length() * e2.length();
-    if scale == 0.0 {
-        // A degenerate triangle has no inside to cross.
-        return Crossing::Miss;
-    }
-    if det.abs() <= GRAZE * scale {
-        // The ray runs along the triangle's plane: grazing if it is in that plane.
-        let off = (origin - t[0]).dot(e1.cross(e2).normalize_or_zero());
-        return if off.abs() <= GRAZE * (scale.sqrt() + origin.length()) { Crossing::Grazes } else { Crossing::Miss };
-    }
-    let s = origin - t[0];
-    let u = s.dot(p) / det;
-    let q = s.cross(e1);
-    let v = dir.dot(q) / det;
-    let w = 1.0 - u - v;
-    let d = e2.dot(q) / det;
-    let margin = GRAZE;
-    if u < -margin || v < -margin || w < -margin || d < -margin * scale.sqrt() {
-        return Crossing::Miss;
-    }
-    if u <= margin || v <= margin || w <= margin || d <= margin * scale.sqrt() {
-        return Crossing::Grazes;
-    }
-    Crossing::Clean
-}
-
-/// The closest point of triangle `t` to `p` (Ericson, Real-Time Collision Detection 5.1.5).
-fn point_triangle(p: DVec3, t: &[DVec3; 3]) -> DVec3 {
+/// A point of triangle `t` near `p` (Ericson, Real-Time Collision Detection 5.1.5).
+fn on_triangle(p: DVec3, t: &[DVec3; 3]) -> DVec3 {
     let [a, b, c] = *t;
     let (ab, ac, ap) = (b - a, c - a, p - a);
     let (d1, d2) = (ab.dot(ap), ac.dot(ap));
@@ -652,8 +670,7 @@ fn point_triangle(p: DVec3, t: &[DVec3; 3]) -> DVec3 {
     }
     let denom = va + vb + vc;
     if denom <= 0.0 {
-        // Degenerate: the nearest of the three edges.
-        return [segment_point(a, b, p), segment_point(b, c, p), segment_point(c, a, p)]
+        return [on_segment(a, b, p), on_segment(b, c, p), on_segment(c, a, p)]
             .into_iter()
             .min_by(|x, y| x.distance(p).total_cmp(&y.distance(p)))
             .expect("three edges");
@@ -661,36 +678,23 @@ fn point_triangle(p: DVec3, t: &[DVec3; 3]) -> DVec3 {
     a + ab * (vb / denom) + ac * (vc / denom)
 }
 
-/// Where along segment `pq` its point nearest `x` is, from 0 at `p` to 1 at `q`.
-fn segment_param(p: DVec3, q: DVec3, x: DVec3) -> f64 {
+/// The point of segment `pq` nearest `x`, near enough.
+fn on_segment(p: DVec3, q: DVec3, x: DVec3) -> DVec3 {
     let d = q - p;
     let len = d.length_squared();
-    if len > 0.0 { ((x - p).dot(d) / len).clamp(0.0, 1.0) } else { 0.0 }
+    p + d * if len > 0.0 { ((x - p).dot(d) / len).clamp(0.0, 1.0) } else { 0.0 }
 }
 
-fn segment_point(p: DVec3, q: DVec3, x: DVec3) -> DVec3 {
-    p + (q - p) * segment_param(p, q, x)
-}
-
-/// The closest points of two segments. Segments more than 45 degrees from parallel meet
-/// where their lines come nearest, clamped to their ends (Ericson 5.1.9). Finding that
-/// point divides by the squared sine of the angle between them, so nearer parallel pairs
-/// go to [`alongside`], which never does.
-fn segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> Closest {
+/// Points of two segments near where they come nearest (Ericson 5.1.9).
+fn on_segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> (DVec3, DVec3) {
     let (d1, d2, r) = (q1 - p1, q2 - p2, p1 - p2);
     let (a, e, f) = (d1.length_squared(), d2.length_squared(), d2.dot(r));
-    if a == 0.0 {
-        return Closest::exact(p1, segment_point(p2, q2, p1));
-    }
-    if e == 0.0 {
-        return Closest::exact(segment_point(p1, q1, p2), p2);
+    if a == 0.0 || e == 0.0 {
+        return if a == 0.0 { (p1, on_segment(p2, q2, p1)) } else { (on_segment(p1, q1, p2), p2) };
     }
     let (b, c) = (d1.dot(d2), d1.dot(r));
     let denom = a * e - b * b;
-    if 2.0 * denom <= a * e {
-        return alongside(p1, q1, p2, q2);
-    }
-    let mut s = ((b * f - c * e) / denom).clamp(0.0, 1.0);
+    let mut s = if denom > 0.0 { ((b * f - c * e) / denom).clamp(0.0, 1.0) } else { 0.0 };
     let mut t = (b * s + f) / e;
     if t < 0.0 {
         t = 0.0;
@@ -699,78 +703,7 @@ fn segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> Closest {
         t = 1.0;
         s = ((b - c) / a).clamp(0.0, 1.0);
     }
-    Closest::exact(p1 + d1 * s, p2 + d2 * t)
-}
-
-/// The closest points of two segments within 45 degrees of parallel, and a lower bound on
-/// their distance that does not rest on where their lines come nearest, which is ill
-/// conditioned here.
-///
-/// Their least distance is reached either with an end of one segment, or between inner
-/// points of both. An end's candidates are the four distances from an end to the other
-/// segment. Between inner points, the first segment's point lies alongside the second,
-/// between the planes square to the second through its ends, and its distance to the
-/// second is its distance to the second's line. Over the alongside part of the first
-/// segment that distance is the distance from the origin to a segment of offsets, which
-/// stays well conditioned however near parallel the two are. Near parallel, the four ends
-/// alone bound the distance from above only: two long segments crossing a hair apart are
-/// nearest in their middles.
-fn alongside(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> Closest {
-    let ends = Closest::exact(p1, segment_point(p2, q2, p1))
-        .or(Closest::exact(q1, segment_point(p2, q2, q1)))
-        .or(Closest::exact(segment_point(p1, q1, p2), p2))
-        .or(Closest::exact(segment_point(p1, q1, q2), q2));
-    let (d1, length) = (q1 - p1, p2.distance(q2));
-    let u = (q2 - p2) / length;
-    // Along u the first segment starts at `start` and moves `rate` per unit of its
-    // parameter; within 45 degrees of u, `rate` is at least 0.7 of its length.
-    let (start, rate) = ((p1 - p2).dot(u), d1.dot(u));
-    let (s0, s1) = (-start / rate, (length - start) / rate);
-    let (s0, s1) = (s0.min(s1).max(0.0), s0.max(s1).min(1.0));
-    if s0 > s1 {
-        return ends;
-    }
-    // A point's offset from the second segment's line, square to it.
-    let offset = |x: DVec3| {
-        let v = x - p2;
-        v - u * v.dot(u)
-    };
-    let (x0, x1) = (p1 + d1 * s0, p1 + d1 * s1);
-    let x = x0 + (x1 - x0) * segment_param(offset(x0), offset(x1), DVec3::ZERO);
-    let y = segment_point(p2, q2, x);
-    // The distance to the line is at most the distance to the segment, and equal to it
-    // alongside, so it bounds the inner candidate from below wherever rounding puts `x`.
-    ends.or(Closest { distance: x.distance(y), lower: offset(x).length(), a: x, b: y })
-}
-
-/// The closest points of a segment and a triangle. Their least distance is reached at an
-/// end of the segment, on an edge of the triangle, or where the segment crosses it.
-fn segment_triangle(p: DVec3, q: DVec3, t: &[DVec3; 3]) -> Closest {
-    let n = (t[1] - t[0]).cross(t[2] - t[0]);
-    let (dp, dq) = ((p - t[0]).dot(n), (q - t[0]).dot(n));
-    let mut best = Closest::exact(p, point_triangle(p, t)).or(Closest::exact(q, point_triangle(q, t)));
-    for k in 0..3 {
-        best = best.or(segments(p, q, t[k], t[(k + 1) % 3]));
-    }
-    // Where the segment crosses the triangle's plane inside it, the crossing point is
-    // the nearest, to within rounding.
-    if (dp < 0.0) != (dq < 0.0) && dp != dq {
-        let x = p + (q - p) * (dp / (dp - dq));
-        best = best.or(Closest::exact(x, point_triangle(x, t)));
-    }
-    best
-}
-
-/// The closest points of two triangles. Two triangles' least distance is reached on an
-/// edge of one of them, and where they cross, an edge of one passes through the other.
-pub(crate) fn triangles(a: &[DVec3; 3], b: &[DVec3; 3]) -> Closest {
-    (0..3)
-        .map(|k| {
-            let from_a = segment_triangle(a[k], a[(k + 1) % 3], b);
-            from_a.or(segment_triangle(b[k], b[(k + 1) % 3], a).swapped())
-        })
-        .reduce(Closest::or)
-        .expect("three edges")
+    (p1 + d1 * s, p2 + d2 * t)
 }
 
 #[cfg(test)]
@@ -880,17 +813,27 @@ mod tests {
         assert!(!s.proves_inside(DVec3::new(5.0, 5.0, 29.995)));
     }
 
+    /// The certified distance between two triangles, tight to 1e-12 mm.
+    fn between(a: &[DVec3; 3], b: &[DVec3; 3]) -> Span {
+        certified::triangles(a, b, 1e-12, f64::INFINITY)
+    }
+
     #[test]
     fn distances_between_triangles() {
         let a = [DVec3::ZERO, DVec3::X, DVec3::Y];
         let b = [DVec3::new(0.0, 0.0, 2.0), DVec3::new(1.0, 0.0, 2.0), DVec3::new(0.0, 1.0, 2.0)];
-        assert_eq!(triangles(&a, &b).distance, 2.0);
+        let s = between(&a, &b);
+        assert!(s.lo <= 2.0 && s.hi >= 2.0 && s.width() < 1e-15, "{s:?}");
         // Crossing triangles are zero apart.
         let c = [DVec3::new(0.2, 0.2, -1.0), DVec3::new(0.2, 0.2, 1.0), DVec3::new(0.3, -1.0, 0.0)];
-        assert!(triangles(&a, &c).distance < 1e-15, "{:?}", triangles(&a, &c));
+        assert_eq!(between(&a, &c), Span::ZERO);
         // Edge to corner: d's upright edge passes (2, 0.5, 0), nearest a's corner (1, 0, 0).
         let d = [DVec3::new(2.0, 0.5, -1.0), DVec3::new(2.0, 0.5, 1.0), DVec3::new(3.0, 0.5, 0.0)];
-        assert!((triangles(&a, &d).distance - 1.25_f64.sqrt()).abs() < 1e-15);
+        let s = between(&a, &d);
+        assert!(s.lo <= 1.25_f64.sqrt() && s.hi >= 1.25_f64.sqrt() && s.width() < 1e-14, "{s:?}");
+        // Touching along a shared edge: exactly zero.
+        let e = [DVec3::X, DVec3::Y, DVec3::new(1.0, 1.0, 0.0)];
+        assert_eq!(between(&a, &e), Span::ZERO);
     }
 
     #[test]
@@ -901,17 +844,22 @@ mod tests {
         for angle in [0.0, 1e-12, 9e-7, 1.1e-6, 1e-3, 0.5] {
             let turn = glam::DQuat::from_rotation_z(angle);
             let lift = DVec3::new(0.0, 0.0, 0.01);
-            let c = segments(p1, q1, turn * p1 + lift, turn * q1 + lift);
-            assert!(c.lower <= 0.01 && c.lower > 0.01 - 1e-12, "angle {angle}: {c:?}");
-            assert!(c.distance >= c.lower && c.distance < 0.01 + 1e-9, "angle {angle}: {c:?}");
-            assert!((c.a.distance(c.b) - c.distance).abs() < 1e-15, "the points realise the distance");
+            let s = certified::segments(p1, q1, turn * p1 + lift, turn * q1 + lift, 1e-12);
+            // The turned ends are rounded, so the lift is 0.01 to within an ulp of 1e4.
+            assert!(s.lo <= 0.01 + 1e-11 && s.hi >= 0.01 - 1e-11 && s.width() <= 1e-12, "angle {angle}: {s:?}");
         }
-        // End to end on one line, 3 mm apart, the ends are the nearest points.
-        let c = segments(DVec3::ZERO, DVec3::X * 10.0, DVec3::X * 13.0, DVec3::X * 20.0);
-        assert_eq!((c.distance, c.lower), (3.0, 3.0));
+        // End to end on one line, 3 mm apart.
+        let s = certified::segments(DVec3::ZERO, DVec3::X * 10.0, DVec3::X * 13.0, DVec3::X * 20.0, 1e-12);
+        assert!(s.lo <= 3.0 && s.hi >= 3.0 && s.width() < 1e-14, "{s:?}");
         // Side by side, overlapping along their length, 2 mm apart.
-        let c = segments(DVec3::ZERO, DVec3::X * 10.0, DVec3::new(-5.0, 2.0, 0.0), DVec3::new(5.0, 2.0, 0.0));
-        assert_eq!((c.distance, c.lower), (2.0, 2.0));
+        let s = certified::segments(
+            DVec3::ZERO,
+            DVec3::X * 10.0,
+            DVec3::new(-5.0, 2.0, 0.0),
+            DVec3::new(5.0, 2.0, 0.0),
+            1e-12,
+        );
+        assert!(s.lo <= 2.0 && s.hi >= 2.0 && s.width() < 1e-14, "{s:?}");
     }
 
     #[test]
@@ -920,10 +868,41 @@ mod tests {
         for angle in [0.0, 9e-7, 1.1e-6] {
             let (a, b) = tests_support::ridges(angle, 0.001);
             let n = near(&a, &b, 0.1);
-            let c = n.closest.expect("closest points");
-            assert!(n.lower <= 0.01 && n.lower > 0.01 - 1e-9, "angle {angle}: lower {}", n.lower);
-            assert!(c.distance >= n.lower && c.distance < 0.01 + 1e-9, "angle {angle}: {c:?}");
+            let upper = n.upper.expect("a pair measured");
+            assert!(n.lower <= 0.01 + 1e-11 && n.lower > 0.01 - 1e-9, "angle {angle}: lower {}", n.lower);
+            assert!(upper >= n.lower && upper < 0.01 + 1e-9, "angle {angle}: upper {upper}");
         }
+    }
+
+    #[test]
+    fn a_long_skinny_face_is_its_true_distance_from_a_block_over_it() {
+        // The review's case: A's top face is a 30 m by 0.0625 mm strip in two slivers, and
+        // B's underside is 0.015625 mm over its middle. Binary64 projection onto a sliver
+        // lands 0.07 mm away; the true distance is the gap.
+        let a = block([0.0, 0.0, -1.0], [30_000.0, 0.0625, 0.0], 0.001);
+        let b = block([21_000.0, 0.015625, 0.015625], [21_001.0, 0.0234375, 1.0], 0.001);
+        for (x, y) in [(&a, &b), (&b, &a)] {
+            let n = near(x, y, 0.1);
+            let upper = n.upper.expect("a pair measured");
+            assert!(n.lower <= 0.015625 && upper >= 0.015625, "{} to {upper}", n.lower);
+            assert!(upper - n.lower < 1e-12, "{} to {upper}", n.lower);
+        }
+        // The point over the sliver's middle, as the review gives it.
+        let t = [DVec3::ZERO, DVec3::new(30_000.0, 0.0, 0.0), DVec3::new(30_000.0, 0.0625, 0.0)];
+        let p = DVec3::new(21_000.0, 0.015625, 0.015625);
+        let s = certified::point_triangle(p, &t, 1e-12, f64::INFINITY);
+        assert!(s.lo <= 0.015625 && s.hi >= 0.015625 && s.width() < 1e-15, "{s:?}");
+        let s = block([21_000.0, 0.0, -1.0], [21_001.0, 1.0, 0.0], 0.001);
+        assert!(s.surface_distance(p, 1.0) <= 0.015625);
+    }
+
+    #[test]
+    fn a_sliver_triangle_in_a_closed_mesh_still_counts_its_crossing() {
+        // A box 30 m long and 1e-6 mm across in y: its long sides are slivers whose angle
+        // at the corner is about 3e-11 rad. A point inside it is inside.
+        let s = block([0.0, 0.0, 0.0], [30_000.0, 1e-6, 1.0], 0.001);
+        assert_eq!(s.contains(DVec3::new(12_345.0, 5e-7, 0.5)), Some(true));
+        assert_eq!(s.contains(DVec3::new(12_345.0, 2e-6, 0.5)), Some(false));
     }
 
     #[test]
@@ -942,12 +921,12 @@ mod tests {
         let a = block([0.0; 3], [40.0, 30.0, 10.0], 0.01);
         let b = block([10.0, 5.0, 12.0], [30.0, 25.0, 18.0], 0.01);
         let n = near(&a, &b, 0.1);
-        assert_eq!(n.closest.unwrap().distance, 2.0);
-        assert_eq!(n.lower, 2.0);
+        let upper = n.upper.unwrap();
+        assert!(n.lower <= 2.0 && upper >= 2.0 && upper - n.lower < 1e-12, "{} to {upper}", n.lower);
         assert!(n.pairs.is_empty());
         let on = block([10.0, 5.0, 10.0], [30.0, 25.0, 16.0], 0.01);
         let n = near(&a, &on, 0.1);
-        assert_eq!(n.closest.unwrap().distance, 0.0);
+        assert_eq!((n.lower, n.upper), (0.0, Some(0.0)));
         assert!(!n.pairs.is_empty());
         assert!(witness(&a, &on, &n.pairs).is_none(), "touching blocks have no common inside");
     }

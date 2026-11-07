@@ -5338,6 +5338,7 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits 0.2.19",
+ "proptest",
  "serde",
  "serde_json",
  "soliddraft-document",

@@ -12,6 +12,7 @@
 //!
 //! The rules are in `docs/interference.md`.
 
+mod certified;
 pub(crate) mod geometry;
 
 use std::collections::{BTreeMap, HashMap};
@@ -703,7 +704,7 @@ fn span(lo: f64, hi: f64) -> String {
 /// What two placed solids are proven to be, and the triangle pairs within the clearance
 /// and margin, nearest first, for naming faces. The paths and labels are the caller's.
 fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u32, u32)>) {
-    let margin = a.slack() + b.slack();
+    let margin = certified::add_up(a.slack(), b.slack());
     let cutoff = margin + clearance.unwrap_or(0.0);
     let gap = a.bounds.distance(&b.bounds);
     let mut result = PairResult {
@@ -722,22 +723,25 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
     if gap > cutoff {
         // Every point of each mesh lies in its box, so the meshes are at least as far
         // apart as the boxes.
+        let lo = certified::sub_down(gap, margin);
         result.outcome = Outcome::Clear;
-        result.distance = DistanceBounds { lo: gap - margin, hi: None };
-        result.why = format!("The parts are at least {} apart: their certified meshes' boxes are.", mm(gap - margin));
+        result.distance = DistanceBounds { lo, hi: None };
+        result.why = format!("The parts are at least {} apart: their certified meshes' boxes are.", mm(lo));
         result.clearance = clearance.map(|_| ClearanceOutcome::Met);
         return (result, Vec::new());
     }
     let near = geometry::near(a, b, cutoff);
     let faces = near.pairs.iter().map(|(ta, tb, _)| (*ta, *tb)).collect();
-    let Some(closest) = near.closest else {
+    let Some(d) = near.upper else {
         result.why = "A part's certified mesh is empty.".into();
         result.clearance = clearance.map(|_| ClearanceOutcome::Undecided);
         return (result, faces);
     };
-    // The meshes are at least `lower` apart and at most `d`.
-    let (lower, d) = (near.lower, closest.distance);
-    let within: Vec<_> = near.pairs.iter().filter(|p| p.2.lower <= margin).copied().collect();
+    // The meshes are proven at least `lower` apart and at most `d`.
+    let lower = near.lower;
+    // The parts are at most this far apart.
+    let hi = certified::add_up(d, margin);
+    let within: Vec<_> = near.pairs.iter().filter(|p| p.2.lo <= margin).copied().collect();
     if let Some(y) = geometry::witness(a, b, &within) {
         result.outcome = Outcome::Interferes;
         result.distance = DistanceBounds { lo: 0.0, hi: Some(0.0) };
@@ -756,17 +760,18 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         };
         let found = [inside(a, b), inside(b, a)].concat();
         if found.iter().all(|c| *c == Some(false)) {
+            let lo = certified::sub_down(lower, margin);
             result.outcome = Outcome::Clear;
-            result.distance = DistanceBounds { lo: lower - margin, hi: Some(d + margin) };
+            result.distance = DistanceBounds { lo, hi: Some(hi) };
             result.why = format!(
                 "The parts are {} to {} apart: their certified meshes are {} apart, and each mesh is within {} of its part.",
-                mm(lower - margin),
-                mm(d + margin),
+                mm(lo),
+                mm(hi),
                 span(lower, d),
                 mm(a.slack().max(b.slack()))
             );
         } else {
-            result.distance = DistanceBounds { lo: 0.0, hi: Some(d + margin) };
+            result.distance = DistanceBounds { lo: 0.0, hi: Some(hi) };
             result.why = if found.contains(&Some(true)) {
                 "A piece of one part's certified mesh lies inside the other's, and no point was proven inside both."
             } else {
@@ -776,7 +781,7 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
             .into();
         }
     } else {
-        result.distance = DistanceBounds { lo: 0.0, hi: Some(d + margin) };
+        result.distance = DistanceBounds { lo: 0.0, hi: Some(hi) };
         result.why = format!(
             "The certified meshes come within {} of each other, inside the {} the bounds leave open: the parts may \
              touch, overlap by less than that, or stand apart by less than that.",
@@ -906,6 +911,35 @@ mod tests {
             let r = compare(&a, &b, Some(0.5));
             assert_eq!((r.outcome, r.clearance), (Outcome::Clear, Some(ClearanceOutcome::Met)), "{r:#?}");
             assert!(r.distance.lo > 3.99 && r.distance.lo < 4.0, "{:?}", r.distance);
+        }
+    }
+
+    #[test]
+    fn a_long_skinny_face_never_proves_a_clearance_it_misses() {
+        // The review's blocks: A's top face is a 30 m by 0.0625 mm strip of two slivers and
+        // B's underside is exactly 0.015625 mm over it. Binary64 projection onto a sliver
+        // put B 0.022 mm away, past 0.018 mm with the margin; the gap fails 0.018 mm.
+        let a = block([0.0, 0.0, -1.0], [30_000.0, 0.0625, 0.0], 0.001);
+        let b = block([21_000.0, 0.015625, 0.015625], [21_001.0, 0.0234375, 1.0], 0.001);
+        // Shorter by ten along x, or ten times wider along y: the same gap.
+        let short = (
+            block([0.0, 0.0, -1.0], [3_000.0, 0.0625, 0.0], 0.001),
+            block([2_100.0, 0.015625, 0.015625], [2_101.0, 0.0234375, 1.0], 0.001),
+        );
+        let wide = (
+            block([0.0, 0.0, -1.0], [30_000.0, 0.625, 0.0], 0.001),
+            block([21_000.0, 0.15625, 0.015625], [21_001.0, 0.234375, 1.0], 0.001),
+        );
+        for (name, (a, b)) in [("long", (&a, &b)), ("short", (&short.0, &short.1)), ("wide", (&wide.0, &wide.1))] {
+            for (x, y) in [(a, b), (b, a)] {
+                let r = compare(x, y, Some(0.018));
+                assert_eq!((r.outcome, r.clearance), (Outcome::Clear, Some(ClearanceOutcome::Below)), "{name}: {r:#?}");
+                let hi = r.distance.hi.expect("an upper bound");
+                assert!(r.distance.lo <= 0.015625 && hi >= 0.015625, "{name}: {:?}", r.distance);
+                // Under the gap less the margin, the clearance is met.
+                let r = compare(x, y, Some(0.012));
+                assert_eq!(r.clearance, Some(ClearanceOutcome::Met), "{name}: {r:#?}");
+            }
         }
     }
 

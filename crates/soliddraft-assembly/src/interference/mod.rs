@@ -24,7 +24,7 @@ use soliddraft_kernel_api::{Certainty, FaceId, KernelError, TessellationParams};
 
 use crate::document::AssemblyDocument;
 use crate::mates::bodies::Scope;
-use crate::mates::{Alignment, MateRefusal, RefusalCode};
+use crate::mates::{Alignment, Entity, Mate, MateRefusal, RefusalCode};
 use crate::occurrence::{Flags, OccurrenceIndex};
 use crate::path::{OccurrencePath, Step};
 use geometry::Solid;
@@ -590,13 +590,18 @@ impl AssemblyDocument {
         mates
             .iter()
             .filter_map(|m| {
-                let ([a, b], alignment) = m.faces()?;
-                let (_, Ok(measurement)) = measured.iter().find(|(id, _)| *id == m.id())? else { return None };
+                // Only the families that hold the two planes a fixed distance apart; a
+                // reference plane has no face on the mesh.
+                let (Mate::Distance { a, b, alignment, .. } | Mate::Coincident { a, b, alignment, .. }) = m else {
+                    return None;
+                };
+                let (Entity::Face(face_a), Entity::Face(face_b)) = (&a.entity, &b.entity) else { return None };
+                let (_, Ok(Some(measurement))) = measured.iter().find(|(id, _)| *id == m.id())? else { return None };
                 let exact = measurement.certainty == Certainty::Exact && measurement.rational == "0";
-                (exact && alignment == Alignment::Opposed).then(|| MateContact {
+                (exact && *alignment == Alignment::Opposed).then(|| MateContact {
                     mate: m.name().to_owned(),
-                    a: (a.path.clone(), a.face.clone()),
-                    b: (b.path.clone(), b.face.clone()),
+                    a: (a.path.clone(), face_a.clone()),
+                    b: (b.path.clone(), face_b.clone()),
                 })
             })
             .collect()

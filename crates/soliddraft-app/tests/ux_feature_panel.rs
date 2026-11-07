@@ -357,12 +357,15 @@ fn fillet_options_catallax_cannot_build_yet_show_disabled() {
         assert_eq!(tip, 1, "the tip says what Variable waits for");
         pointer_to_chrome(app);
 
-        // The setback and option cards are there, each marked Coming soon, every control in them disabled.
+        // The overflow choice is Catallax's: Roll over builds and is chosen; Keep neighbours and its
+        // setback stations wait, so their controls are disabled and the setback card says so.
         for title in ["Fillet parameters", "Setback parameters", "Fillet options"] {
             assert!(shows(app, title), "the form has the {title} card");
         }
-        assert_eq!(nodes_reading(app, "Coming soon").len(), soon_before + 2, "the two new cards carry the badge");
-        for control in ["Setback distance value", "Keep edge", "Keep surface", "Round corners"] {
+        assert_eq!(nodes_reading(app, "Coming soon").len(), soon_before + 1, "the setback card carries the badge");
+        assert!(chosen(app, "Roll over"), "Roll over is the fillet's overflow");
+        assert!(!app.get_by_label("Roll over").accesskit_node().is_disabled(), "Roll over is a live choice");
+        for control in ["Setback distance value", "Keep neighbours", "Round corners"] {
             let disabled = app.get_by_label(control).accesskit_node().is_disabled();
             assert!(disabled, "{control} is drawn disabled");
         }
@@ -393,5 +396,100 @@ fn fillet_options_catallax_cannot_build_yet_show_disabled() {
         assert!(!shows(app, "Setback parameters") && !shows(app, "Fillet options"), "the chamfer form is unchanged");
         assert!(app.query_by_label("Variable").is_none(), "a chamfer has no variable radius choice");
         open(app, AppAction::CancelEditor);
+    });
+}
+
+/// The plate's back top edge, along x at y = 20, and the end face it runs into at x = 30.
+fn back_edge_and_end(doc: &Document) -> (soliddraft_app::document::EdgeRef, soliddraft_app::document::FaceRef) {
+    let t = doc.kernel().topology(doc.model().body().expect("the plate")).unwrap();
+    let edge = t
+        .edges
+        .iter()
+        .find(|e| (e.midpoint.y - 20.0).abs() < 1e-6 && (e.midpoint.z - TOP as f64).abs() < 1e-6)
+        .expect("the back top edge");
+    let end = t.faces.iter().find(|f| f.normal.is_some_and(|n| (n.x - 1.0).abs() < 1e-9)).expect("the face at x = 30");
+    (doc.edge_ref(edge.id).expect("edge name"), doc.any_face_ref(end.id).expect("face name"))
+}
+
+#[test]
+fn a_fillet_that_keeps_its_neighbours_opens_with_its_stations_and_can_roll_over() {
+    use soliddraft_model::{FilletOverflow, FilletSetback};
+    // The app adds no feature that fails, so a fillet that keeps its neighbours arrives in a
+    // saved part, such as one written where Catallax builds it. The model stores it as is.
+    let plate = ribbon::plate();
+    let (edge, end) = back_edge_and_end(&plate);
+    let keep = FilletOverflow::KeepNeighbours(vec![FilletSetback { edge: 0, at: end.clone(), setback: 10.0 }]);
+    let mut model =
+        soliddraft_model::Document::from_bytes(&plate.model().to_bytes().unwrap(), plate.kernel().clone()).unwrap();
+    let id = model
+        .execute(soliddraft_model::Command::AddFeature {
+            kind: soliddraft_model::FeatureKind::Fillet(soliddraft_model::BlendFeature {
+                edges: vec![edge],
+                size: 4.0,
+                overflow: Some(keep),
+            }),
+            name: None,
+            position: None,
+            via_assistant: false,
+        })
+        .unwrap()
+        .created
+        .unwrap()
+        .0 as u64;
+    let mut case = Case::new("feature-panel/fillet-keep-neighbours");
+    let mut app = launch(Document::from_model(model), STANDARD);
+    case.run(&mut app, |case, app| {
+        rebuilt(app);
+        match &app.state().state.doc.feature(id).expect("the fillet").status {
+            soliddraft_app::document::FeatureStatus::Error(why) => {
+                assert!(why.to_lowercase().contains("coming soon"), "the fillet is refused as coming soon: {why}")
+            }
+            other => panic!("the fillet is refused, not {other:?}"),
+        }
+
+        // Opened for editing, the form shows the policy it holds and lists the station.
+        open(app, AppAction::EditFeature(id));
+        let chosen = |app: &App, label: &str| {
+            app.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+        };
+        assert!(chosen(app, "Keep neighbours") && !chosen(app, "Roll over"), "the form shows the stored policy");
+        let station = format!("10 mm from {}", end.label);
+        let listed = app
+            .query_all(By::new().predicate(|n| [n.label(), n.value()].into_iter().flatten().any(|t| t == station)))
+            .count();
+        assert!(listed >= 1, "the station is listed as {station:?}");
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "No preview · 1 edge", "Catallax cannot preview it yet");
+        app.get_by_label("Round corners").scroll_to_me();
+        app.run_steps(24);
+        pointer_to_chrome(app);
+        case.frame(app, "keep-neighbours");
+
+        // Roll over builds: choosing it previews and commits the rounded body.
+        let roll = app.get_by_label("Roll over").rect();
+        ribbon::click_at(app, roll.center());
+        settle(app);
+        pointer_to_chrome(app);
+        assert!(chosen(app, "Roll over"), "Roll over is chosen");
+        let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
+        assert_eq!(hud, "R 4 mm · 1 edge", "the rolled-over fillet previews");
+        case.frame(app, "rolled-over");
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let doc = &app.state().state.doc;
+        let status = &doc.feature(id).expect("the fillet").status;
+        assert!(
+            matches!(
+                status,
+                soliddraft_app::document::FeatureStatus::Ok | soliddraft_app::document::FeatureStatus::Pending
+            ),
+            "the fillet builds: {status:?}"
+        );
+        match &doc.feature(id).expect("the fillet").kind {
+            soliddraft_app::document::FeatureKind::Fillet(f) => {
+                assert_eq!(f.overflow, Some(FilletOverflow::RollOver), "the choice is stored")
+            }
+            other => panic!("still a fillet: {other:?}"),
+        }
     });
 }

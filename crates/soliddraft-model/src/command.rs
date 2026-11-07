@@ -10,7 +10,7 @@ use soliddraft_materials::{Appearance, AppearanceId, Catalog, Material, Material
 use soliddraft_sketch::{ConstraintId, SolveStatus};
 
 use crate::document::Document;
-use crate::feature::{DatumPlane, Feature, FeatureId, FeatureKind, PatternSpec};
+use crate::feature::{BlendFeature, DatumPlane, Feature, FeatureId, FeatureKind, FilletOverflow, PatternSpec};
 use crate::materials::{AppearanceAssignment, AppearanceTarget, MaterialAssignment, PartMaterials};
 
 /// A change to a document.
@@ -605,6 +605,33 @@ impl Document {
             }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) if b.edges.is_empty() => {
                 Err(CommandError::Invalid("a fillet or chamfer needs at least one edge".into()))
+            }
+            FeatureKind::Chamfer(b) if b.overflow.is_some() => {
+                Err(CommandError::Invalid("a chamfer has no overflow policy".into()))
+            }
+            FeatureKind::Fillet(BlendFeature {
+                edges,
+                overflow: Some(FilletOverflow::KeepNeighbours(stations)),
+                ..
+            }) => {
+                for (i, s) in stations.iter().enumerate() {
+                    if s.edge as usize >= edges.len() {
+                        return Err(CommandError::Invalid(format!(
+                            "setback {} names edge {}, but the fillet has {} edges",
+                            i + 1,
+                            s.edge + 1,
+                            edges.len()
+                        )));
+                    }
+                    if !(s.setback.is_finite() && s.setback > 0.0) {
+                        return Err(CommandError::Invalid(format!(
+                            "setback {} must be positive, got {}",
+                            i + 1,
+                            s.setback
+                        )));
+                    }
+                }
+                Ok(())
             }
             FeatureKind::Hole(h) if !(h.diameter.is_finite() && h.diameter > 0.0) => {
                 Err(CommandError::Invalid(format!("hole diameter must be positive, got {}", h.diameter)))

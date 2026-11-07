@@ -241,6 +241,20 @@
       ]
     },
     {
+      "id": "fillet-overflow",
+      "file": "ci/scenarios/fillet-overflow.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP sketch, extrude, fillet and edit_fillet with an overflow policy -> real document rebuild -> pinned Catallax roll-over fillet; keep_neighbours refused before construction",
+      "supported_limits": "One R2 then R3 fillet on a 40 mm top edge of a 40 x 30 x 10 block with explicit roll_over, matching the default; keep_neighbours with a setback station is stored by the model but refused as coming soon, on an edit and on a new fillet, until Catallax constructs station-plane fillets (Catallax recipe section 4.5.1, schema in Catallax PR 318)",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; the refused steps keep the R3 volume"
+    },
+    {
       "id": "graded-fields",
       "file": "ci/scenarios/graded-fields.json",
       "acceptance": true,

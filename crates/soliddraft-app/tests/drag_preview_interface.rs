@@ -189,7 +189,7 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     let edge = doc.edges.iter().find(|edge| (edge.midpoint.z - 10.0).abs() < 1e-6).unwrap();
     let reference = doc.edge_ref(edge.id).unwrap();
     let fillet = doc
-        .apply(Command::AddFillet { params: FilletParams { edges: vec![reference], radius: 1.0 } })
+        .apply(Command::AddFillet { params: FilletParams { edges: vec![reference], radius: 1.0, overflow: None } })
         .unwrap()
         .unwrap();
     let proved_body = doc.display_body();

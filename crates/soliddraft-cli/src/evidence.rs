@@ -14,7 +14,8 @@ use soliddraft_assistant::{Caller, ToolHost, ToolOutput, ToolSpec};
 use soliddraft_kernel_api::counting::{Counting, Work};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::{
-    Document, EndCondition, FaceRef, FeatureKind, FeatureStatus, PlaneRef, ReferenceSlot, SketchPlane, feature_of_tag,
+    Document, EndCondition, FaceRef, FeatureKind, FeatureStatus, FilletOverflow, PlaneRef, ReferenceSlot, SketchPlane,
+    feature_of_tag,
 };
 
 pub(crate) struct Evidence<'a> {
@@ -280,15 +281,26 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                     vec![(ReferenceSlot::SketchPlane, format!("datum:{datum:?}"), Vec::new())]
                 }
             },
-            FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => b
-                .edges
-                .iter()
-                .enumerate()
-                .map(|(i, e)| {
-                    let text = format!("{} | {}", origin(&e.faces[0]), origin(&e.faces[1]));
-                    (ReferenceSlot::Edge { index: i as u32 }, text, e.faces.iter().collect())
-                })
-                .collect(),
+            FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
+                let stations = match &b.overflow {
+                    Some(FilletOverflow::KeepNeighbours(stations)) => stations.as_slice(),
+                    _ => &[],
+                };
+                b.edges
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        let text = format!("{} | {}", origin(&e.faces[0]), origin(&e.faces[1]));
+                        (ReferenceSlot::Edge { index: i as u32 }, text, e.faces.iter().collect())
+                    })
+                    .chain(
+                        stations
+                            .iter()
+                            .enumerate()
+                            .map(|(i, s)| (ReferenceSlot::Setback { index: i as u32 }, origin(&s.at), vec![&s.at])),
+                    )
+                    .collect()
+            }
             FeatureKind::Extrude(e) => match &e.end {
                 EndCondition::UpToFace { face } => vec![(ReferenceSlot::Limit, origin(face), vec![face])],
                 _ => Vec::new(),

@@ -125,6 +125,33 @@ fn before_all_faces(id: &str, current: &mut Value) {
     assert_eq!(added["type"], "boolean", "all_faces is one optional flag");
 }
 
+/// Takes away the optional `overflow` that `fillet` and `edit_fillet` gained with Catallax's
+/// fillet overflow policy, after checking it is the one optional field Catallax spells.
+fn before_overflow(id: &str, current: &mut Value) {
+    let mut lines: Vec<&mut Value> = match id {
+        "fillet" | "edit_fillet" => current.pointer_mut("/tool/input").into_iter().collect(),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .map(|lines| {
+                lines
+                    .iter_mut()
+                    .filter(|line| matches!(line["properties"]["op"]["const"].as_str(), Some("fillet" | "edit_fillet")))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => return,
+    };
+    assert!(!lines.is_empty(), "{id} has fillet inputs");
+    for line in lines.iter_mut() {
+        assert!(!line["required"].as_array().unwrap().contains(&json!("overflow")), "overflow stays optional");
+        let added = line["properties"].as_object_mut().unwrap().remove("overflow").expect("the overflow policy");
+        let choices = added["anyOf"].as_array().expect("roll over or keep neighbours");
+        assert_eq!(choices[0], json!({"type":"string", "const":"roll_over"}));
+        assert_eq!(choices[1]["required"], json!(["keep_neighbours"]));
+    }
+}
+
 fn before_trim_modes(id: &str, current: &mut Value) {
     let variants = match id {
         "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
@@ -302,6 +329,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         let mut current = configuration_registry::before_configurations(id, current, plain);
         before_all_faces(id, &mut current);
         before_trim_modes(id, &mut current);
+        before_overflow(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

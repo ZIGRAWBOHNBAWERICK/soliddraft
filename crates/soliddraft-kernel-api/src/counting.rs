@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     BackendInfo, BodyId, BooleanOp, Draft, EdgeId, EdgePolyline, ExactAxisPlane, Extrude, ExtrudeLimit, FaceCarrier,
-    FaceId, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror, OpResult, OpTag,
-    PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve, TessellationParams, Topology,
-    Validation, Vec3, drawing,
+    FaceId, FilletOverflow, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror,
+    OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve,
+    TessellationParams, Topology, Validation, Vec3, drawing,
 };
 
 /// One piece of work a kernel was asked for.
@@ -110,6 +110,18 @@ impl Kernel for Counting {
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.fillet(tag, body, edges, radius)
+    }
+
+    fn fillet_overflow(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        radius: f64,
+        overflow: &FilletOverflow,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.fillet_overflow(tag, body, edges, radius, overflow)
     }
 
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {

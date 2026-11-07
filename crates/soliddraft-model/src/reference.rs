@@ -226,6 +226,20 @@ pub struct EdgeRef {
     pub label: String,
 }
 
+/// A vertex, named by the faces that meet at it. A vertex is where its faces meet, so it
+/// follows them through edits; the position is kept for repair messages only.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VertexRef {
+    /// Every face around the vertex, in the order the kernel listed them when it was named.
+    pub faces: Vec<FaceRef>,
+    /// Where the vertex was when the reference was made. Resolution never reads it.
+    pub position: Vec3,
+    /// What the vertex was called when the reference was made, for repair prompts.
+    /// Resolution never reads it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+}
+
 /// Which reference of a feature broke.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "slot", rename_all = "snake_case")]

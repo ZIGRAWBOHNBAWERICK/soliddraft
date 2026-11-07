@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use crate::document::AssemblyDocument;
 use crate::mates::reference::check_endpoint;
 use crate::mates::solver::{self, Body};
-use crate::mates::{Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, WidthConstraint};
+use crate::mates::{
+    Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, StoredSupport, WidthConstraint,
+};
 use crate::occurrence::{Flags, OccurrenceIndex, OccurrenceTable};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::Placement;
@@ -27,7 +29,7 @@ pub(crate) struct Scope<'a> {
     pub store: &'a DefinitionStore,
 }
 
-/// One face or plane a mate reads.
+/// One face, plane, edge or vertex a mate reads.
 pub(crate) struct End {
     pub body: Body,
     /// The part, pinned where its containing assembly pins it.
@@ -36,16 +38,20 @@ pub(crate) struct End {
     /// reference, and the last holds `source`.
     pub chain: Vec<DocRef>,
     pub entity: Entity,
+    /// The axis or point the mate stored for it.
+    pub support: Option<StoredSupport>,
 }
 
-/// What a mate between planes asks of them.
+/// What a mate between faces, edges or vertices asks of what they support.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Rule {
     /// Parallel by `sign`, and a distance apart when there is one. A Coincident is a
-    /// distance of zero; a Parallel has none.
+    /// distance of zero and says so, since it also puts axes and points on each other; a
+    /// Parallel has none.
     Parallel {
         sign: i8,
         distance: Option<f64>,
+        coincident: bool,
     },
     Perpendicular,
     /// The ends are the groove's two faces, then the tab's.
@@ -53,13 +59,29 @@ pub(crate) enum Rule {
         sign: i8,
         mode: solver::WidthMode,
     },
+    /// Two axes on one line, a point on an axis, or two points on one. `sign` relates two
+    /// axes' directions, and `lock` is `b`'s stored turn in `a`'s frame.
+    Concentric {
+        sign: Option<i8>,
+        lock: Option<[[i8; 3]; 3]>,
+    },
+    /// A plane and a cylinder or sphere: `sign` relates the curved face's outward normal at
+    /// the contact to the plane's.
+    Tangent {
+        sign: i8,
+    },
+    /// The ends are two axes, then two planes.
+    Hinge {
+        sign: i8,
+        plane_sign: i8,
+    },
 }
 
 /// A mate, read from the assembly that holds it and placed in the root.
 #[allow(clippy::large_enum_variant, reason = "a mate list is short and read one by one")]
 pub(crate) enum Gathered {
     Origin { mate: String, body: Body, axes: bool, at: Placement },
-    Planes { mate: String, ends: Vec<End>, rule: Rule },
+    Between { mate: String, ends: Vec<End>, rule: Rule },
     Lock { mate: String, a: Body, b: Body, relative: Placement },
 }
 
@@ -68,14 +90,14 @@ impl Gathered {
     fn bodies(&self) -> Vec<&Body> {
         match self {
             Gathered::Origin { body, .. } => vec![body],
-            Gathered::Planes { ends, .. } => ends.iter().map(|e| &e.body).collect(),
+            Gathered::Between { ends, .. } => ends.iter().map(|e| &e.body).collect(),
             Gathered::Lock { a, b, .. } => vec![a, b],
         }
     }
 
     fn name(&self) -> &str {
         match self {
-            Gathered::Origin { mate, .. } | Gathered::Planes { mate, .. } | Gathered::Lock { mate, .. } => mate,
+            Gathered::Origin { mate, .. } | Gathered::Between { mate, .. } | Gathered::Lock { mate, .. } => mate,
         }
     }
 }
@@ -290,7 +312,7 @@ impl AssemblyDocument {
         if source.id != Some(e.document) {
             return Err(named(invalid(format!("{mate}: {body} places another document"))));
         }
-        Ok(End { chain: scope.chain(&body), body, source, entity: e.entity.clone() })
+        Ok(End { chain: scope.chain(&body), body, source, entity: e.entity.clone(), support: e.support.clone() })
     }
 
     /// Reads every mate `scope` holds, with its faces and the placements it starts from.
@@ -338,14 +360,16 @@ impl AssemblyDocument {
                     _ => {
                         let length = |e| holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e));
                         let rule = match mate {
-                            Mate::Distance { alignment, distance, .. } => {
-                                Rule::Parallel { sign: sign(alignment), distance: Some(length(distance)?) }
-                            }
+                            Mate::Distance { alignment, distance, .. } => Rule::Parallel {
+                                sign: sign(alignment),
+                                distance: Some(length(distance)?),
+                                coincident: false,
+                            },
                             Mate::Coincident { alignment, .. } => {
-                                Rule::Parallel { sign: sign(alignment), distance: Some(0.0) }
+                                Rule::Parallel { sign: sign(alignment), distance: Some(0.0), coincident: true }
                             }
                             Mate::Parallel { alignment, .. } => {
-                                Rule::Parallel { sign: sign(alignment), distance: None }
+                                Rule::Parallel { sign: sign(alignment), distance: None, coincident: false }
                             }
                             Mate::Perpendicular { .. } => Rule::Perpendicular,
                             Mate::Width { alignment, constraint, .. } => {
@@ -364,6 +388,13 @@ impl AssemblyDocument {
                                 };
                                 Rule::Width { sign: sign(alignment), mode }
                             }
+                            Mate::Concentric { alignment, lock_rotation, .. } => {
+                                Rule::Concentric { sign: alignment.as_ref().map(sign), lock: *lock_rotation }
+                            }
+                            Mate::Tangent { alignment, .. } => Rule::Tangent { sign: sign(alignment) },
+                            Mate::Hinge { alignment, plane_alignment, .. } => {
+                                Rule::Hinge { sign: sign(alignment), plane_sign: sign(plane_alignment) }
+                            }
                             Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
                         };
                         let mut ends = Vec::new();
@@ -372,7 +403,7 @@ impl AssemblyDocument {
                             place(&body)?;
                             ends.push(self.end_of(scope, body, e, &name)?);
                         }
-                        mates.push(Gathered::Planes { mate: name, ends, rule });
+                        mates.push(Gathered::Between { mate: name, ends, rule });
                     }
                 }
             }

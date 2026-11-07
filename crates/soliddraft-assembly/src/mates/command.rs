@@ -6,18 +6,21 @@ use std::collections::BTreeMap;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use num_traits::Zero;
 use serde::Serialize;
 use soliddraft_document::{ContentHash, DocRef, DocumentId};
-use soliddraft_kernel_api::Certainty;
+use soliddraft_kernel_api::{Certainty, ExactRadius, ExactRational, ExactSupport};
 use soliddraft_model::ValueTable;
 
 use crate::document::{AssemblyDocument, EditError, key_of};
 use crate::mates::bodies::{End, Gathered, Problem, Rule, Scope};
 use crate::mates::reference::check_endpoint;
-use crate::mates::solver::{self, Along, Body, Constraint, FreeMotion, LocalPlane, SolverState, SolverStatus};
+use crate::mates::solver::{
+    self, Along, Body, Constraint, FreeMotion, LocalAxis, LocalPlane, LocalPoint, SolverState, SolverStatus,
+};
 use crate::mates::{
     Alignment, EndpointSelector, FaceEndpoint, Mate, MateEntry, MateId, MateRefusal, PartEndpoint, PlaneProof,
-    RefusalCode, WidthConstraint,
+    RefusalCode, StoredSupport, SupportProof, WidthConstraint,
 };
 use crate::path::{ComponentId, OccurrencePath, Step};
 use crate::placement::Placement;
@@ -37,6 +40,10 @@ pub enum MateEdit {
     Percent(f64),
     /// Whether a Width measures from its second groove face.
     Flipped(bool),
+    /// How a Hinge's planes relate.
+    PlaneAlignment(Alignment),
+    /// Whether a Concentric holds the turn about its axis where it is.
+    LockRotation(bool),
 }
 
 /// Where a new Width mate puts the tab.
@@ -269,12 +276,12 @@ impl AssemblyDocument {
                     }
                     constraints.push(Constraint::Lock { mate, a, b, relative })
                 }
-                Gathered::Planes { mate, ends, rule } => {
+                Gathered::Between { mate, ends, rule } => {
                     let mut planes = Vec::new();
                     for end in &ends {
                         let source = self.rebased(end);
-                        match self.prove(&source, &end.entity) {
-                            Ok(proof) => planes.push((end.body.clone(), local_plane(&mate, &proof)?)),
+                        match self.prove_support(&source, &end.entity, end.support.as_ref()) {
+                            Ok(proof) => planes.push(read_of(&mate, end.body.clone(), &proof)?),
                             Err(r) if r.code == RefusalCode::DanglingReference => {
                                 let at = format!(
                                     "{}: occurrence {}, {}: {}",
@@ -289,7 +296,7 @@ impl AssemblyDocument {
                         }
                     }
                     if planes.len() == ends.len() {
-                        constraints.push(constraint(mate, planes, &rule)?);
+                        constraints.extend(constraint(mate, planes, &rule)?);
                     }
                 }
             }
@@ -320,18 +327,16 @@ impl AssemblyDocument {
 
     fn read_status(&self) -> Result<SolverStatus, String> {
         let problem = self.gather(&Scope::new(&self.assembly, &self.table, &self.store)).map_err(|r| r.to_string())?;
-        let stored = |end: &End| {
-            let normal = end.entity.stored_normal().ok_or("a mate's face has no stored normal")?;
-            Ok::<_, String>((end.body.clone(), LocalPlane { normal, offset: num_traits::Zero::zero() }))
-        };
+        let stored = |end: &End| stored_read(end).ok_or("a mate's face has no stored normal, axis or point");
         let mut constraints = Vec::new();
         for mate in problem.mates {
             constraints.push(match mate {
                 Gathered::Origin { mate, body, axes, at } => Constraint::Origin { mate, body, axes, at },
                 Gathered::Lock { mate, a, b, relative } => Constraint::Lock { mate, a, b, relative },
-                Gathered::Planes { mate, ends, rule } => {
+                Gathered::Between { mate, ends, rule } => {
                     let planes = ends.iter().map(stored).collect::<Result<Vec<_>, _>>()?;
-                    constraint(mate, planes, &rule).map_err(|r| r.to_string())?
+                    constraints.extend(constraint(mate, planes, &rule).map_err(|r| r.to_string())?);
+                    continue;
                 }
             });
         }
@@ -348,11 +353,13 @@ impl AssemblyDocument {
         let source = Self::part_source(truth, selector.component)?;
         let entity = self.select(&source, &selector.face)?;
         let document = source.id.ok_or_else(|| MateRefusal::invalid("the source has no document id"))?;
+        let support = self.stored_support(&source, &entity)?;
         Ok(FaceEndpoint {
             path: component_path(selector.component),
             document,
             configuration: source.configuration,
             entity,
+            support,
         })
     }
 
@@ -433,9 +440,10 @@ impl AssemblyDocument {
             .iter()
             .filter(|m| !m.faces().is_empty())
             .map(|m| {
+                let planes = m.faces().iter().all(|e| e.support.is_none() && e.entity.stored_normal().is_some());
                 let measured = match m.measured() {
-                    Some([a, b]) => self.measure(a, b).map(Some),
-                    None => self.prove_ends(m).map(|()| None),
+                    Some([a, b]) if planes => self.measure(a, b).map(Some),
+                    _ => self.prove_ends(m).map(|()| None),
                 };
                 (m.id(), measured)
             })
@@ -455,7 +463,7 @@ impl AssemblyDocument {
         };
         for end in &ends {
             let source = self.rebased(end);
-            self.prove(&source, &end.entity)?;
+            self.prove_support(&source, &end.entity, end.support.as_ref())?;
         }
         Ok(())
     }
@@ -607,6 +615,125 @@ impl AssemblyDocument {
         })
     }
 
+    /// Puts `b`'s axis on `a`'s line, a point on an axis, or two points on one. `alignment`
+    /// relates two axes' directions and is not stored where a point is involved. With
+    /// `lock_rotation` the turn about the axis is held where the solve leaves it, which
+    /// must be a quarter-turn rotation from `a`. One undo step.
+    pub fn mate_concentric(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        alignment: Alignment,
+        lock_rotation: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Concentric mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if a.component == b.component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let (a, b) = (doc.endpoint(truth, a)?, doc.endpoint(truth, b)?);
+            let axes = matches!(
+                (&a.support, &b.support),
+                (Some(StoredSupport::Axis { .. }), Some(StoredSupport::Axis { .. }))
+            );
+            if lock_rotation && !axes {
+                return Err(MateRefusal::invalid("Lock rotation holds the turn between two axes"));
+            }
+            let id = MateId(truth.take_id());
+            let alignment = axes.then_some(alignment);
+            let paths = [a.path.clone(), b.path.clone()];
+            truth.mates.push(MateEntry::Known(Mate::Concentric {
+                id,
+                name: name.into(),
+                a,
+                b,
+                alignment,
+                lock_rotation: None,
+            }));
+            if lock_rotation {
+                let turn = doc.solved_turn(truth, &paths, name)?;
+                if let Mate::Concentric { lock_rotation, .. } = mate_named(truth, name)? {
+                    *lock_rotation = Some(turn);
+                }
+            }
+            Ok(id)
+        })
+    }
+
+    /// Lays a cylinder or sphere `b` against the plane `a`, one radius from it. One undo step.
+    pub fn mate_tangent(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        alignment: Alignment,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_between("Tangent mate", name, [a, b], strict, |id, name, [a, b]| {
+            Ok(Mate::Tangent { id, name, a, b, alignment })
+        })
+    }
+
+    /// Puts two axes on one line and two planes on one plane, under one name. The first
+    /// axis and plane are on one component and the second on another. One undo step.
+    pub fn mate_hinge(
+        &mut self,
+        name: &str,
+        axes: [&EndpointSelector; 2],
+        planes: [&EndpointSelector; 2],
+        alignment: Alignment,
+        plane_alignment: Alignment,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Hinge mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if axes[0].component != planes[0].component || axes[1].component != planes[1].component {
+                return Err(MateRefusal::invalid(
+                    "a hinge's first axis and plane are on one component, and its second ones on another",
+                ));
+            }
+            if axes[0].component == axes[1].component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let axes = [doc.endpoint(truth, axes[0])?, doc.endpoint(truth, axes[1])?];
+            let planes = [doc.endpoint(truth, planes[0])?, doc.endpoint(truth, planes[1])?];
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Hinge {
+                id,
+                name: name.into(),
+                axes,
+                planes,
+                alignment,
+                plane_alignment,
+            }));
+            Ok(id)
+        })
+    }
+
+    /// The quarter-turn rotation of the part at `paths[1]` in the frame of the part at
+    /// `paths[0]`, once `truth` is solved.
+    fn solved_turn(
+        &mut self,
+        truth: &Assembly,
+        paths: &[OccurrencePath; 2],
+        mate: &str,
+    ) -> Result<solver::Cube, MateRefusal> {
+        let solved = self.solve_truth(truth)?;
+        let scope = Scope::new(truth, &self.table, &self.store);
+        let at = |p: &OccurrencePath| {
+            solved
+                .placements
+                .get(p)
+                .copied()
+                .or_else(|| scope.world(p))
+                .ok_or_else(|| MateRefusal::invalid(format!("no occurrence at {p}")))
+        };
+        let (a, b) = (at(&paths[0])?, at(&paths[1])?);
+        solver::cube_of(a.rotation.inverse() * b.rotation).ok_or_else(|| off_quarter_turns(mate))
+    }
+
     /// Adds a mate between two faces: a distance when one is given, else a Coincident.
     fn mate_faces(
         &mut self,
@@ -649,7 +776,8 @@ impl AssemblyDocument {
 
     /// Changes mates together, as one candidate and one undo step.
     pub fn edit_mates(&mut self, edits: &[(String, MateEdit)]) -> Result<(), MateRefusal> {
-        self.transact("Edit mate", false, |_, truth| {
+        self.transact("Edit mate", false, |doc, truth| {
+            let mut locks = Vec::new();
             for (name, edit) in edits {
                 let mate = mate_named(truth, name)?;
                 let kind = mate.kind();
@@ -672,9 +800,17 @@ impl AssemblyDocument {
                         Mate::Distance { alignment, .. }
                         | Mate::Coincident { alignment, .. }
                         | Mate::Parallel { alignment, .. }
-                        | Mate::Width { alignment, .. },
+                        | Mate::Width { alignment, .. }
+                        | Mate::Tangent { alignment, .. }
+                        | Mate::Hinge { alignment, .. }
+                        | Mate::Concentric { alignment: Some(alignment), .. },
                         MateEdit::Alignment(a),
                     ) => *alignment = *a,
+                    (Mate::Hinge { plane_alignment, .. }, MateEdit::PlaneAlignment(a)) => *plane_alignment = *a,
+                    (Mate::Concentric { lock_rotation, .. }, MateEdit::LockRotation(false)) => *lock_rotation = None,
+                    (Mate::Concentric { a, b, alignment: Some(_), .. }, MateEdit::LockRotation(true)) => {
+                        locks.push((name.clone(), [a.path.clone(), b.path.clone()]));
+                    }
                     (Mate::Origin { align_axes, .. }, MateEdit::AlignAxes(on)) => *align_axes = *on,
                     (
                         Mate::Width { constraint: WidthConstraint::Percent { percent, .. }, .. },
@@ -692,6 +828,16 @@ impl AssemblyDocument {
                         return Err(MateRefusal::invalid(format!("{name} is a {kind} mate; it has no distance")));
                     }
                     (_, _) => return Err(MateRefusal::invalid(format!("{name} has no such setting"))),
+                }
+            }
+            // A turn is locked where the other edits leave it.
+            for (name, paths) in locks {
+                if let Mate::Concentric { lock_rotation, .. } = mate_named(truth, &name)? {
+                    *lock_rotation = None;
+                }
+                let turn = doc.solved_turn(truth, &paths, &name)?;
+                if let Mate::Concentric { lock_rotation, .. } = mate_named(truth, &name)? {
+                    *lock_rotation = Some(turn);
                 }
             }
             Ok(())
@@ -837,48 +983,265 @@ fn relative_lock(mate: &str, a: &Placement, b: &Placement) -> Result<Placement, 
     Ok(Placement { rotation, translation: glam::DVec3::from_array(r) })
 }
 
-/// The solver's constraint for a mate between planes, from the planes its ends lie on.
-fn constraint(mate: String, planes: Vec<(Body, LocalPlane)>, rule: &Rule) -> Result<Constraint, MateRefusal> {
-    let not_parallel = |mate: &str| MateRefusal {
-        mates: vec![mate.to_owned()],
-        ..MateRefusal::new(
-            RefusalCode::NotParallel,
-            format!("{mate}: a groove's faces, and a tab's, are parallel planes"),
-        )
+/// What one end of a mate reads, in its part's frame.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Local {
+    Plane(LocalPlane),
+    Axis(LocalAxis),
+    Point(LocalPoint),
+}
+
+/// A radius a curved face or circle has.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Radius {
+    /// The radius when it is rational; otherwise its square, for a message.
+    pub value: Result<BigRational, BigRational>,
+    /// For a face, whether its outward side looks away from the axis or centre.
+    pub outward: Option<bool>,
+}
+
+/// One end of a mate as a solve reads it.
+pub(crate) struct Read {
+    pub body: Body,
+    pub local: Local,
+    pub radius: Option<Radius>,
+}
+
+/// The exact square root of a rational, when it has one.
+fn rational_root(squared: &BigRational) -> Option<BigRational> {
+    if squared < &BigRational::zero() {
+        return None;
+    }
+    let (n, d) = (squared.numer().sqrt(), squared.denom().sqrt());
+    (&n * &n == *squared.numer() && &d * &d == *squared.denom()).then(|| BigRational::new(n, d))
+}
+
+fn radius_of(r: &Option<ExactRadius>) -> Option<Radius> {
+    let r = r.as_ref()?;
+    let squared = solver::rational(&r.squared)?;
+    let value = rational_root(&squared).ok_or(squared);
+    Some(Radius { value, outward: r.outward })
+}
+
+/// What a proof says an end reads.
+fn read_of(mate: &str, body: Body, proof: &SupportProof) -> Result<Read, MateRefusal> {
+    let not_exact = || {
+        MateRefusal::new(RefusalCode::UnsupportedReference, format!("{mate}: {} has no exact coordinates", proof.label))
     };
-    let mut planes = planes.into_iter();
-    let (a, plane_a) = planes.next().expect("two planes");
-    let (b, plane_b) = planes.next().expect("two planes");
-    Ok(match rule {
-        Rule::Parallel { sign, distance } => {
-            Constraint::Parallel { mate, a, b, plane_a, plane_b, sign: *sign, along: distance.map(Along::Distance) }
+    let point = |p: &[ExactRational; 3]| -> Result<LocalPoint, MateRefusal> {
+        let c = |i: usize| solver::rational(&p[i]).ok_or_else(not_exact);
+        Ok([c(0)?, c(1)?, c(2)?])
+    };
+    Ok(match &proof.support {
+        ExactSupport::Plane(plane) => {
+            let offset = solver::rational(&plane.offset).ok_or_else(|| {
+                MateRefusal::new(RefusalCode::UnsupportedPlane, format!("{mate}: the plane has no exact offset"))
+            })?;
+            Read { body, local: Local::Plane(LocalPlane { normal: plane.normal(), offset }), radius: None }
         }
-        Rule::Perpendicular => Constraint::Perpendicular { mate, a, b, plane_a, plane_b },
+        ExactSupport::Axis(a) => Read {
+            body,
+            local: Local::Axis(LocalAxis { direction: a.direction(), through: point(&a.through)? }),
+            radius: radius_of(&a.radius),
+        },
+        ExactSupport::Point(p) => Read { body, local: Local::Point(point(&p.at)?), radius: radius_of(&p.radius) },
+    })
+}
+
+/// What an end reads from what its mate stored, for the status: the stored axis or point,
+/// or the stored normal of a plane with offset zero.
+fn stored_read(end: &End) -> Option<Read> {
+    let exact = |v: f64| solver::exact(v).unwrap_or_default();
+    let radius = |r: &Option<f64>, outward: &Option<bool>| r.map(|r| Radius { value: Ok(exact(r)), outward: *outward });
+    let (local, radius) = match &end.support {
+        Some(StoredSupport::Axis { direction, through, radius: r, outward }) => {
+            (Local::Axis(LocalAxis { direction: *direction, through: through.map(exact) }), radius(r, outward))
+        }
+        Some(StoredSupport::Point { at, radius: r, outward }) => (Local::Point(at.map(exact)), radius(r, outward)),
+        None => {
+            let normal = end.entity.stored_normal()?;
+            (Local::Plane(LocalPlane { normal, offset: BigRational::zero() }), None)
+        }
+    };
+    Some(Read { body: end.body.clone(), local, radius })
+}
+
+/// The solver's constraints for a mate between faces, edges or vertices, from what its
+/// ends read. A Hinge gives two.
+fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constraint>, MateRefusal> {
+    let named = |code: RefusalCode, message: &str| MateRefusal {
+        mates: vec![mate.clone()],
+        ..MateRefusal::new(code, format!("{mate}: {message}"))
+    };
+    let unsupported = |message: &str| named(RefusalCode::UnsupportedReference, message);
+    let exact =
+        |d: f64| solver::exact(d).ok_or_else(|| MateRefusal::invalid(format!("{mate}: the distance is not finite")));
+    let mut reads = reads.into_iter();
+    let first = reads.next().expect("two ends");
+    let second = reads.next().expect("two ends");
+    let (a, b) = (first.body, second.body);
+    let out = match rule {
+        Rule::Parallel { sign, distance, coincident } => {
+            let at = |d: f64| if *coincident { "in the plane".to_owned() } else { format!("{d} mm from the plane") };
+            match (first.local, second.local, distance) {
+                (Local::Plane(plane_a), Local::Plane(plane_b), _) => {
+                    let along = distance.map(Along::Distance);
+                    vec![Constraint::Parallel { mate, a, b, plane_a, plane_b, sign: *sign, along }]
+                }
+                (Local::Axis(axis_a), Local::Axis(axis_b), None) => {
+                    vec![Constraint::Axes { mate, a, b, axis_a, axis_b, sign: *sign, coaxial: false }]
+                }
+                (Local::Plane(plane), Local::Axis(axis), Some(d)) => {
+                    let (gap, says) = (exact(*d)?, at(*d));
+                    let (point, direction) = (axis.through, Some(axis.direction));
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, says }]
+                }
+                (Local::Axis(axis), Local::Plane(plane), Some(d)) => {
+                    let (gap, says) = (exact(*d)?, at(*d));
+                    let (point, direction) = (axis.through, Some(axis.direction));
+                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction, gap, says }]
+                }
+                (Local::Plane(plane), Local::Point(point), Some(d)) => {
+                    let (gap, says) = (exact(*d)?, at(*d));
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, says }]
+                }
+                (Local::Point(point), Local::Plane(plane), Some(d)) => {
+                    let (gap, says) = (exact(*d)?, at(*d));
+                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction: None, gap, says }]
+                }
+                (Local::Axis(axis_a), Local::Axis(axis_b), Some(_)) if *coincident => {
+                    vec![Constraint::Axes { mate, a, b, axis_a, axis_b, sign: *sign, coaxial: true }]
+                }
+                (Local::Axis(axis), Local::Point(point), Some(_)) if *coincident => {
+                    vec![Constraint::OnAxis { mate, a, axis, b, point }]
+                }
+                (Local::Point(point), Local::Axis(axis), Some(_)) if *coincident => {
+                    vec![Constraint::OnAxis { mate, a: b, axis, b: a, point }]
+                }
+                (Local::Point(point_a), Local::Point(point_b), Some(_)) if *coincident => {
+                    vec![Constraint::Points { mate, a, point_a, b, point_b }]
+                }
+                (_, _, Some(_)) => {
+                    return Err(unsupported(
+                        "a distance between two axes or points is a length across them, which this version does not solve exactly",
+                    ));
+                }
+                (_, _, None) => return Err(unsupported("Parallel takes two planes or two axes")),
+            }
+        }
+        Rule::Perpendicular => match (first.local, second.local) {
+            (Local::Plane(plane_a), Local::Plane(plane_b)) => {
+                vec![Constraint::Perpendicular { mate, a, b, plane_a, plane_b }]
+            }
+            (Local::Axis(axis_a), Local::Axis(axis_b)) => {
+                vec![Constraint::Axes { mate, a, b, axis_a, axis_b, sign: 0, coaxial: false }]
+            }
+            _ => return Err(unsupported("Perpendicular takes two planes or two axes")),
+        },
         Rule::Width { sign, mode } => {
-            // The ends are groove, groove, tab, tab.
-            let (groove_body, groove) = (b, plane_b);
-            let (tab_body, tab) = planes.next().expect("four planes");
-            let (other_body, other_tab) = planes.next().expect("four planes");
-            if groove_body != a || other_body != tab_body || tab_body == a {
+            let plane = |l: Local| match l {
+                Local::Plane(p) => Ok(p),
+                _ => Err(named(RefusalCode::UnsupportedPlane, "a Width reads four planar faces")),
+            };
+            let (plane_a, groove) = (plane(first.local)?, plane(second.local)?);
+            let (t, u) = (reads.next().expect("four planes"), reads.next().expect("four planes"));
+            let (tab_body, tab, other_body, other_tab) = (t.body, plane(t.local)?, u.body, plane(u.local)?);
+            if b != a || other_body != tab_body || tab_body == a {
                 let message = format!("{mate}: a groove's faces are on one part and a tab's on another");
                 return Err(MateRefusal { mates: vec![mate], ..MateRefusal::invalid(message) });
             }
             let parallel =
                 |p: &LocalPlane, q: &LocalPlane| p.normal.iter().zip(q.normal).all(|(x, y)| x.abs() == y.abs());
             if !parallel(&plane_a, &groove) || !parallel(&tab, &other_tab) {
-                return Err(not_parallel(&mate));
+                return Err(named(RefusalCode::NotParallel, "a groove's faces, and a tab's, are parallel planes"));
             }
             let along = Some(Along::Width { groove, tab: other_tab, mode: mode.clone() });
-            Constraint::Parallel { mate, a, b: tab_body, plane_a, plane_b: tab, sign: *sign, along }
+            vec![Constraint::Parallel { mate, a, b: tab_body, plane_a, plane_b: tab, sign: *sign, along }]
         }
-    })
-}
-
-fn local_plane(mate: &str, proof: &PlaneProof) -> Result<LocalPlane, MateRefusal> {
-    let offset = solver::rational(&proof.plane.offset).ok_or_else(|| {
-        MateRefusal::new(RefusalCode::UnsupportedPlane, format!("{mate}: the plane has no exact offset"))
-    })?;
-    Ok(LocalPlane { normal: proof.plane.normal(), offset })
+        Rule::Concentric { sign, lock } => {
+            let m = mate.clone();
+            let mut out = match (first.local, second.local) {
+                (Local::Axis(axis_a), Local::Axis(axis_b)) => {
+                    let sign =
+                        sign.ok_or_else(|| MateRefusal::invalid(format!("{mate}: two axes need an alignment")))?;
+                    let (a, b) = (a.clone(), b.clone());
+                    vec![Constraint::Axes { mate: m, a, b, axis_a, axis_b, sign, coaxial: true }]
+                }
+                (Local::Axis(axis), Local::Point(point)) => {
+                    vec![Constraint::OnAxis { mate: m, a: a.clone(), axis, b: b.clone(), point }]
+                }
+                (Local::Point(point), Local::Axis(axis)) => {
+                    vec![Constraint::OnAxis { mate: m, a: b.clone(), axis, b: a.clone(), point }]
+                }
+                (Local::Point(point_a), Local::Point(point_b)) => {
+                    vec![Constraint::Points { mate: m, a: a.clone(), point_a, b: b.clone(), point_b }]
+                }
+                _ => {
+                    return Err(unsupported(
+                        "Concentric takes cylinders, cones, spheres, circles, lines and points, not planes",
+                    ));
+                }
+            };
+            if let Some(turn) = lock {
+                if !matches!(out[0], Constraint::Axes { .. }) {
+                    return Err(MateRefusal::invalid(format!("{mate}: Lock rotation holds the turn between two axes")));
+                }
+                if !solver::cube_rotations().contains(turn) {
+                    return Err(off_quarter_turns(&mate));
+                }
+                out.push(Constraint::Turn { mate, a, b, relative: solver::quaternion(turn) });
+            }
+            out
+        }
+        Rule::Tangent { sign } => {
+            let Local::Plane(plane) = first.local else {
+                return Err(unsupported("a Tangent's first end is the plane"));
+            };
+            let Some(Radius { value, outward: Some(outward) }) = second.radius else {
+                return Err(unsupported("a Tangent's second end is a cylinder or a sphere"));
+            };
+            let r = value.map_err(|squared| {
+                unsupported(&format!("its radius is not rational: the radius squared is {}", solver::text(&squared)))
+            })?;
+            // The axis or centre sits one radius in front of the plane, or behind it: in
+            // front when a shaft's outward side meets the plane's opposed, or a bore's
+            // aligned.
+            let gap = if outward == (*sign < 0) { r } else { -r };
+            let says = "tangent".to_owned();
+            match second.local {
+                Local::Axis(axis) => {
+                    let (point, direction) = (axis.through, Some(axis.direction));
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, says }]
+                }
+                Local::Point(point) => {
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, says }]
+                }
+                Local::Plane(_) => return Err(unsupported("a Tangent's second end is a cylinder or a sphere")),
+            }
+        }
+        Rule::Hinge { sign, plane_sign } => {
+            let (Local::Axis(axis_a), Local::Axis(axis_b)) = (first.local, second.local) else {
+                return Err(unsupported("a Hinge's first two ends are axes"));
+            };
+            let (p, q) = (reads.next().expect("four ends"), reads.next().expect("four ends"));
+            let (Local::Plane(plane_a), Local::Plane(plane_b)) = (p.local, q.local) else {
+                return Err(unsupported("a Hinge's last two ends are planes"));
+            };
+            vec![
+                Constraint::Axes { mate: mate.clone(), a, b, axis_a, axis_b, sign: *sign, coaxial: true },
+                Constraint::Parallel {
+                    mate,
+                    a: p.body,
+                    b: q.body,
+                    plane_a,
+                    plane_b,
+                    sign: *plane_sign,
+                    along: Some(Along::Distance(0.0)),
+                },
+            ]
+        }
+    };
+    Ok(out)
 }
 
 fn signed_gap(a: &PlaneProof, b: &PlaneProof, placements: &[Placement; 2]) -> Result<BigRational, MateRefusal> {

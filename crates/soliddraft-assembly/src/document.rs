@@ -345,7 +345,7 @@ impl AssemblyDocument {
         let parts: Vec<(DefinitionIndex, DocRef, Option<Quality>)> = self
             .store
             .iter()
-            .filter(|(_, d)| d.kind == DocKind::Part && d.state == LoadState::Unresolved)
+            .filter(|(_, d)| matches!(d.kind, DocKind::Part | DocKind::Mesh) && d.state == LoadState::Unresolved)
             .filter_map(|(i, d)| Some((i, self.refs.get(&i)?.clone(), d.quality)))
             .collect();
         // An unsaved assembly has no folder to resolve its references from, so its parts
@@ -899,8 +899,10 @@ impl AssemblyDocument {
     /// edit is accepted: an assembly that would contain this one, at any depth, is refused
     /// and nothing changes.
     pub fn insert(&mut self, document: DocRef, placement: Placement) -> Result<ComponentId, EditError> {
-        if !matches!(document.kind, DocKind::Part | DocKind::Assembly) || !document.is_bound() {
-            return Err(EditError::Invalid("only a part or an assembly with an id can be inserted".into()));
+        if !matches!(document.kind, DocKind::Part | DocKind::Assembly | DocKind::Mesh) || !document.is_bound() {
+            return Err(EditError::Invalid(
+                "only a part, a mesh reference or an assembly with an id can be inserted".into(),
+            ));
         }
         if document.id == Some(self.id) {
             return Err(EditError::Invalid("an assembly cannot contain itself".into()));
@@ -1282,6 +1284,9 @@ impl AssemblyDocument {
             return Ok(e.clone());
         }
         let d = self.store.get(def);
+        if d.kind == DocKind::Mesh {
+            return Err(format!("{} is a mesh reference body; it has no exact solid", d.label));
+        }
         if d.kind != DocKind::Part {
             return Err("only parts have an exact body".into());
         }
@@ -1570,7 +1575,7 @@ impl AssemblyDocument {
                             continue;
                         }
                         let showable = match definition.kind {
-                            DocKind::Part => {
+                            DocKind::Part | DocKind::Mesh => {
                                 matches!(definition.state, LoadState::DisplayReady | LoadState::ExactReady)
                             }
                             _ => !matches!(definition.state, LoadState::Failed | LoadState::Stale),

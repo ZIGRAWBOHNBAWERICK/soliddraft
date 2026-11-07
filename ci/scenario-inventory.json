@@ -843,6 +843,20 @@
       "route": "MCP sweep and edit_sweep with segments -> document rebuild -> native path and sweep with exact arc ends -> viewport and checked STEP export",
       "supported_limits": "Closed polygon profile beside the path; line, quarter arc, line chain with the profile turning along it, edited run length; refused oblique join, zero-length line and reversal without a turn axis leave the part unchanged; face measured by name, undo/redo, save and fresh-process reopen; other path motions and loft remain unavailable",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle over planes and cylinders"
+    },
+    {
+      "id": "scene-import",
+      "file": "ci/scenarios/scene-import.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-scene",
+        "soliddraft-assembly",
+        "soliddraft-document"
+      ],
+      "route": "MCP import_scene -> soliddraft-scene readers -> assembly and mesh reference files -> assembly open -> save -> fresh-process open",
+      "supported_limits": "OpenUSD (usd, usda, usdc, usdz) composed under the default prim, glTF 2.0, URDF with OBJ or STL meshes and primitive shapes, OBJ and STL; meshes arrive as mesh reference bodies, never solids; texture maps, skins, animation, collision geometry, USD curves, points and NURBS are left out",
+      "evidence": "result.json, protocol.json and commands/NNNN/command.json with each import record and assembly summary; work/*.dwasm and work/*.parts/ mesh references; work/washer-saved.dwasm"
     }
   ]
 }

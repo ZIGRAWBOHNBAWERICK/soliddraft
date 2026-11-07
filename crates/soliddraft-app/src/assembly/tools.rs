@@ -38,7 +38,22 @@ pub(crate) fn summary(state: &mut AppState) -> Option<Value> {
         "components": components, "occurrences": occurrences, "mates": mates, "values": values, "solver": solver,
         "proof_rebuilds": s.doc.parts_rebuilt_for_proofs(),
         "accepted_state": accepted_state(s),
+        "import": imported(s),
     }))
+}
+
+/// What the scene import that wrote the assembly recorded, in brief: the source file and
+/// its digest, units, up axis, and the joints by name. `null` for an assembly no import
+/// wrote.
+fn imported(s: &AssemblySession) -> Value {
+    let Some(record) = s.doc.assembly().import.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()) else {
+        return Value::Null;
+    };
+    let joints: Vec<&Value> = record["joints"].as_array().into_iter().flatten().map(|j| &j["name"]).collect();
+    json!({
+        "source": record["source"], "units": record["units"], "up_axis": record["up_axis"],
+        "bounds": record["bounds"], "joints": joints, "notes": record["notes"],
+    })
 }
 
 /// How a definition's pinned revision compares with its document now, and the revision
@@ -90,6 +105,13 @@ fn occurrences(s: &mut AssemblySession) -> Value {
         let parent = table.parent(row).map(|p| table.path(p)).unwrap_or_default();
         let (local, world, bounds) = (table.local(row), table.world(row), table.bounds(row));
         let mates = participation.get(&path).cloned().unwrap_or_default();
+        let kind = if flags.has(Flags::ASSEMBLY) {
+            "assembly"
+        } else if def.kind == DocKind::Mesh {
+            "mesh"
+        } else {
+            "part"
+        };
         // A part no mate reads keeps all six; a pattern member follows its seed.
         let alone = mates.is_empty()
             && !flags.has(Flags::ASSEMBLY)
@@ -106,7 +128,7 @@ fn occurrences(s: &mut AssemblySession) -> Value {
                 .collect()
         };
         out.insert(path.to_string(), json!({
-            "path": path, "parent": parent, "kind": if flags.has(Flags::ASSEMBLY) { "assembly" } else { "part" },
+            "path": path, "parent": parent, "kind": kind, "name": s.doc.label(row),
             "document": def.key.document, "configuration": def.key.configuration, "pinned": reference.map(|r| &r.pinned),
             "definition": { "document": def.key.document, "revision": def.key.revision, "quality": def.key.quality },
             "display": def.state.as_str(), "warning": warning(def), "status": freshness(def).0,

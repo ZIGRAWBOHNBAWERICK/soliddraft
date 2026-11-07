@@ -97,6 +97,11 @@ pub struct Assembly {
     /// own.
     #[serde(skip)]
     pub settings: Settings,
+    /// The record of the scene import that made this assembly, from `import.json`: the
+    /// source file, its units and up axis, materials and joints as JSON text. Not part of
+    /// the truth or its hashes; kept as read and written back on save.
+    #[serde(skip)]
+    pub import: Option<String>,
 }
 
 /// The units of an assembly file.
@@ -347,6 +352,7 @@ impl Assembly {
             values: ValueTable::default(),
             next_id: 1,
             settings: Settings::default(),
+            import: None,
         }
     }
 
@@ -504,9 +510,9 @@ impl Assembly {
             return bad("lists are not in id order, or two overrides share a path".into());
         }
         for s in &self.sources {
-            if !matches!(s.document.kind, DocKind::Part | DocKind::Assembly) {
+            if !matches!(s.document.kind, DocKind::Part | DocKind::Assembly | DocKind::Mesh) {
                 return bad(format!(
-                    "source {} is a {}; an assembly places parts and assemblies",
+                    "source {} is a {}; an assembly places parts, mesh references and assemblies",
                     s.id, s.document.kind
                 ));
             }

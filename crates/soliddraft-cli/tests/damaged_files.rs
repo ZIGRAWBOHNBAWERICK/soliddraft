@@ -125,6 +125,15 @@ fn valid_drawing(part: &[u8]) -> Vec<u8> {
 }
 
 /// An assembly that places the part `block.dwprt`, made with the binary as a user would.
+/// A mesh reference body: a 10 mm cube as an import writes one.
+fn valid_mesh() -> Vec<u8> {
+    use soliddraft_assembly::reference_mesh::{MeshDocument, MeshSource};
+    let source =
+        MeshSource { file: "cube.stl".into(), format: "stl".into(), sha256: "00".repeat(32), node: "solid".into() };
+    let cube = soliddraft_assembly::DisplayMesh::cuboid(glam::DVec3::ZERO, glam::DVec3::splat(10.0));
+    MeshDocument::new("cube", source, cube).to_bytes().unwrap()
+}
+
 fn valid_assembly(part: &[u8]) -> Vec<u8> {
     let dir = Dir::new("assembly-source");
     std::fs::write(dir.path("block.dwprt"), part).unwrap();
@@ -438,6 +447,13 @@ fn assert_libraries_refuse(kind: DocKind, path: &Path, bytes: &[u8], case: &Case
             let LoadError::File(e) = e else { panic!("{}: refused as {e:?}", case.label) };
             check("AssemblyDocument::open", assembly_refusal(&e), e.to_string());
         }
+        DocKind::Mesh => {
+            use soliddraft_assembly::reference_mesh::MeshDocument;
+            let e = MeshDocument::from_bytes(bytes).err().unwrap_or_else(|| panic!("{} opened", case.label));
+            check("MeshDocument::from_bytes", assembly_refusal(&e), e.to_string());
+            let e = MeshDocument::open(path).err().unwrap_or_else(|| panic!("{} opened", case.label));
+            check("MeshDocument::open", assembly_refusal(&e), e.to_string());
+        }
     }
 }
 
@@ -498,6 +514,8 @@ fn commands(kind: DocKind, name: &str, occurrence: &str) -> Vec<Line> {
             words(&["asm", "delete", "FILE", "OCC"]),
             words(&["asm", "rebuild", "FILE"]),
         ]),
+        // A mesh reference is read by the assemblies that place it.
+        DocKind::Mesh => {}
     }
     all
 }
@@ -601,6 +619,11 @@ fn damaged_assemblies_are_refused_and_left_alone() {
 }
 
 #[test]
+fn damaged_mesh_references_are_refused_and_left_alone() {
+    run_kind(DocKind::Mesh, &valid_mesh(), &[]);
+}
+
+#[test]
 fn the_damage_variants_are_all_damaged_files() {
     // Guards the generator: a variant that happened to equal the valid file would pass
     // for the wrong reason.
@@ -608,6 +631,7 @@ fn the_damage_variants_are_all_damaged_files() {
         (DocKind::Part, valid_part()),
         (DocKind::Drawing, valid_drawing(&valid_part())),
         (DocKind::Assembly, valid_assembly(&valid_part())),
+        (DocKind::Mesh, valid_mesh()),
     ] {
         let all = cases(kind, &valid);
         assert!(all.len() > 30, "{kind}: {} variants", all.len());

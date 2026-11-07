@@ -17,6 +17,7 @@ members = [
     "crates/soliddraft-assembly",
     "crates/soliddraft-tessellation",
     "crates/soliddraft-exchange",
+    "crates/soliddraft-scene",
 ]
 
 [workspace.package]
@@ -37,6 +38,7 @@ soliddraft-kernel-api = { path = "crates/soliddraft-kernel-api" }
 soliddraft-kernel-catallax = { path = "crates/soliddraft-kernel-catallax" }
 soliddraft-materials = { path = "crates/soliddraft-materials" }
 soliddraft-recipe = { path = "crates/soliddraft-recipe" }
+soliddraft-scene = { path = "crates/soliddraft-scene" }
 soliddraft-sketch = { path = "crates/soliddraft-sketch" }
 soliddraft-model = { path = "crates/soliddraft-model" }
 soliddraft-tessellation = { path = "crates/soliddraft-tessellation" }

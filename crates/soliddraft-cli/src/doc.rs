@@ -309,8 +309,8 @@ fn migrate(a: &Args) -> Result<bool, String> {
                         .map_err(|e| e.to_string())?;
                     Some(to)
                 }
-                // Assemblies have had a manifest from their first version.
-                DocKind::Assembly => None,
+                // Assemblies and mesh references have had a manifest from their first version.
+                DocKind::Assembly | DocKind::Mesh => None,
             }
         };
         if a.json {

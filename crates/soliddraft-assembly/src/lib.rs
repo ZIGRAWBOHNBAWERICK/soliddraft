@@ -27,6 +27,8 @@
 //!   camera's view.
 //! - **Sub-assemblies** ([`subassembly`]): forming chosen parts into a new assembly file
 //!   that keeps their references, mates and freedoms.
+//! - **Mesh reference bodies** ([`reference_mesh`]): imported meshes an assembly places
+//!   and shows, with no exact solid (`.dwmsh`).
 //!
 //! The schema is documented in `docs/assemblies.md`.
 
@@ -41,6 +43,7 @@ pub mod mesh;
 pub mod occurrence;
 pub mod path;
 pub mod placement;
+pub mod reference_mesh;
 pub mod scene;
 pub mod schema;
 pub mod source;

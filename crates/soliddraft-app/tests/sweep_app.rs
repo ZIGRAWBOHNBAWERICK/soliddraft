@@ -123,6 +123,9 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-sweep-proof-{}", std::process::id())));
     std::fs::create_dir_all(&proof).unwrap();
     harness.render().unwrap().save(proof.join("sweep-property-page.png")).unwrap();
+    // The property page scrolls; bring the control into view as a user would.
+    harness.get_by_label("sweep end Z value").scroll_to_me();
+    harness.run_steps(24);
     harness.get_by_label("sweep end Z value").click();
     harness.run_steps(2);
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
@@ -379,6 +382,9 @@ fn property_page_builds_a_chain_and_offers_only_what_works() {
     assert!(harness.query_by_label("Spline · Coming soon").is_some());
     assert!(harness.query_by_label("Helix · Coming soon").is_some());
     assert!(harness.query_by_label("Keep direction").is_some());
+    // The property page scrolls; bring the control into view as a user would.
+    harness.get_by_label("Add arc").scroll_to_me();
+    harness.run_steps(24);
     harness.get_by_label("Add arc").click();
     harness.run_steps(4);
     let path = |harness: &Harness<'_, soliddraft_app::app::SolidDraftApp>| {
@@ -392,8 +398,14 @@ fn property_page_builds_a_chain_and_offers_only_what_works() {
     assert_eq!(path(&harness).orientation, SweepOrientation::FollowPath);
     assert!(matches!(path(&harness).segments[1], PathSegment::Arc { .. }));
     assert!(harness.query_by_label("Keep direction · Coming soon").is_some());
+    // The property page scrolls; bring the control into view as a user would.
+    harness.get_by_label("Half").scroll_to_me();
+    harness.run_steps(24);
     harness.get_by_label("Half").click();
     harness.run_steps(4);
+    // The property page scrolls; bring the control into view as a user would.
+    harness.get_by_label("Add line").scroll_to_me();
+    harness.run_steps(24);
     harness.get_by_label("Add line").click();
     harness.run_steps(6);
     assert_eq!(path(&harness).segments.len(), 3);

@@ -1,8 +1,9 @@
 //! Document kinds, their file extensions and their format tags.
 //!
 //! Each kind is saved as its own file: parts `.dwprt`, assemblies `.dwasm`, drawings
-//! `.dwdrw`. Files under the names before phase 0 (`.dwpart` parts, `.dwdrawing`
-//! drawings) still open, and saving one writes the current name beside it.
+//! `.dwdrw`, imported mesh reference bodies `.dwmsh`. Files under the names before
+//! phase 0 (`.dwpart` parts, `.dwdrawing` drawings) still open, and saving one writes the
+//! current name beside it.
 
 use std::path::Path;
 
@@ -18,6 +19,8 @@ pub const ASSEMBLY_EXTENSION: &str = "dwasm";
 pub const DRAWING_EXTENSION: &str = "dwdrw";
 /// The drawing extension before phase 0. Such files open and are saved as `.dwdrw`.
 pub const LEGACY_DRAWING_EXTENSION: &str = "dwdrawing";
+/// The extension imported mesh reference bodies are saved under (see `soliddraft-assembly`).
+pub const MESH_EXTENSION: &str = "dwmsh";
 
 /// The kind of a SolidDraft document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -29,18 +32,22 @@ pub enum DocKind {
     Assembly,
     /// A drawing: sheets of views of parts and assemblies.
     Drawing,
+    /// A mesh reference body: an imported mesh an assembly places and shows, with no
+    /// exact solid behind it.
+    Mesh,
 }
 
 impl DocKind {
     /// Every kind.
-    pub const ALL: [DocKind; 3] = [DocKind::Part, DocKind::Assembly, DocKind::Drawing];
+    pub const ALL: [DocKind; 4] = [DocKind::Part, DocKind::Assembly, DocKind::Drawing, DocKind::Mesh];
 
-    /// The kind as the manifest writes it: "part", "assembly", "drawing".
+    /// The kind as the manifest writes it: "part", "assembly", "drawing", "mesh".
     pub fn as_str(self) -> &'static str {
         match self {
             DocKind::Part => "part",
             DocKind::Assembly => "assembly",
             DocKind::Drawing => "drawing",
+            DocKind::Mesh => "mesh",
         }
     }
 
@@ -50,6 +57,7 @@ impl DocKind {
             DocKind::Part => "SolidDraft part",
             DocKind::Assembly => "SolidDraft assembly",
             DocKind::Drawing => "SolidDraft drawing",
+            DocKind::Mesh => "SolidDraft mesh reference",
         }
     }
 
@@ -59,6 +67,7 @@ impl DocKind {
             DocKind::Part => PART_EXTENSION,
             DocKind::Assembly => ASSEMBLY_EXTENSION,
             DocKind::Drawing => DRAWING_EXTENSION,
+            DocKind::Mesh => MESH_EXTENSION,
         }
     }
 
@@ -66,7 +75,7 @@ impl DocKind {
     pub fn legacy_extension(self) -> Option<&'static str> {
         match self {
             DocKind::Part => Some(LEGACY_PART_EXTENSION),
-            DocKind::Assembly => None,
+            DocKind::Assembly | DocKind::Mesh => None,
             DocKind::Drawing => Some(LEGACY_DRAWING_EXTENSION),
         }
     }
@@ -77,6 +86,7 @@ impl DocKind {
             DocKind::Part => &[PART_EXTENSION, LEGACY_PART_EXTENSION],
             DocKind::Assembly => &[ASSEMBLY_EXTENSION],
             DocKind::Drawing => &[DRAWING_EXTENSION, LEGACY_DRAWING_EXTENSION],
+            DocKind::Mesh => &[MESH_EXTENSION],
         }
     }
 
@@ -98,6 +108,7 @@ impl DocKind {
             DocKind::Part => "soliddraft-part/2",
             DocKind::Assembly => "soliddraft-assembly/1",
             DocKind::Drawing => "soliddraft-drawing/2",
+            DocKind::Mesh => "soliddraft-mesh/1",
         }
     }
 
@@ -107,6 +118,7 @@ impl DocKind {
             DocKind::Part => "part.json",
             DocKind::Assembly => "assembly.json",
             DocKind::Drawing => "drawing.json",
+            DocKind::Mesh => "mesh.json",
         }
     }
 }
@@ -156,6 +168,8 @@ mod tests {
         assert_eq!(DocKind::from_extension("dwdrw"), Some(DocKind::Drawing));
         assert_eq!(DocKind::Drawing.extension(), "dwdrw");
         assert_eq!(DocKind::from_extension("json"), None);
+        assert_eq!(DocKind::from_extension("dwmsh"), Some(DocKind::Mesh));
+        assert_eq!(DocKind::Mesh.truth_entry(), "mesh.json");
         assert_eq!(DocKind::Part.extension(), "dwprt");
         assert_eq!(DocKind::Drawing.extension(), DRAWING_EXTENSION);
     }

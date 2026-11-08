@@ -459,6 +459,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         "assembly_drag",
         json!({"path": parts[1].to_string(), "placement":{"translation":[11,10,22], "rotation":[0,0,0,1]}}),
     );
+    s.call("undo", json!({}));
     let reference = json!({ "component": parts[0], "plane": "Right plane" });
     s.call(
         "assembly_mate_angle",

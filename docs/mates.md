@@ -558,10 +558,10 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Dragging under mates, Gear, Rack and Pinion, Screw and hinge angle limits remain outside B5.
-Named mechanical and dragging commands return `unsupported_motion`. Path, Cam, arc Slot,
-Universal Joint and Physical Dynamics remain unsupported. This work adds static constraints,
-not contact simulation or motion.
+Dragging under mates and Hinge angular stops are supported. Gear, Rack and Pinion and Screw
+remain unsupported until the second B6 stage. Their named commands return `unsupported_motion`.
+Path, Cam, arc Slot, Universal Joint, Physical Dynamics, collision while dragging and Mate
+Controller remain outside this version.
 
 Nonparallel Width Free, angular Dimension and Percent; Distance limits across two points or
 two axes; the misaligned Concentric option; Parallel or Perpendicular between a plane and an

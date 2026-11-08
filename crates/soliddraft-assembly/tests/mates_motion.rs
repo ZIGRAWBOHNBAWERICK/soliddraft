@@ -543,3 +543,125 @@ fn ordinary_edits_never_capture_a_drag_preview_in_history() {
         }
     }
 }
+
+#[test]
+fn limited_hinge_aligns_an_exactly_reversed_axis_and_corrects_reversed_drag_targets() {
+    for (index, limits) in [[-30.0, 30.0], [-180.0, 180.0], [0.0, 0.0]].into_iter().enumerate() {
+        let mut r = rig(&format!("hinge-antipodal-{index}"), Profile::Circle);
+        let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+        let reversed = Placement { rotation: DQuat::from_xyzw(0.0, 1.0, 0.0, 0.0), translation: DVec3::ZERO };
+        r.doc.move_to(&[(path.clone(), reversed)]).unwrap();
+        r.doc
+            .mate_hinge(
+                "Unlimited",
+                [&cylinder(r.a), &cylinder(r.b)],
+                [&datum(r.a, "Top plane"), &datum(r.b, "Top plane")],
+                Alignment::Aligned,
+                Alignment::Aligned,
+                false,
+            )
+            .unwrap();
+        assert!(r.doc.assembly().component(r.b).unwrap().placement.rotation.angle_between(DQuat::IDENTITY) < 1e-7);
+        assert!(r.doc.undo());
+        assert_eq!(r.doc.assembly().component(r.b).unwrap().placement, reversed);
+        r.doc
+            .mate_hinge_limited(
+                "H",
+                [&cylinder(r.a), &cylinder(r.b)],
+                [&datum(r.a, "Top plane"), &datum(r.b, "Top plane")],
+                [Alignment::Aligned; 2],
+                Some(limits),
+                false,
+            )
+            .unwrap();
+        bounded(&mut r.doc, "H");
+        let accepted = r.doc.assembly().clone();
+        for rotation in [reversed.rotation, DQuat::from_rotation_y(std::f64::consts::PI - 0.1)] {
+            r.doc.begin_drag(path.clone()).unwrap();
+            r.doc.preview_drag(Placement::new(rotation, DVec3::ZERO)).unwrap();
+            r.doc.commit_drag().unwrap();
+            bounded(&mut r.doc, "H");
+            assert!(r.doc.assembly().component(r.a).unwrap().placement.rotation.angle_between(DQuat::IDENTITY) < 1e-7);
+        }
+        let at = r.doc.assembly().component(r.b).unwrap().placement;
+        r.doc.begin_drag(path).unwrap();
+        r.doc.preview_drag(at).unwrap();
+        r.doc.commit_drag().unwrap();
+        assert_eq!(r.doc.assembly().component(r.b).unwrap().placement, at);
+        assert_eq!(r.doc.assembly().mates, accepted.mates);
+        std::fs::remove_dir_all(r.dir).unwrap();
+    }
+}
+
+#[test]
+fn limited_hinge_can_move_its_first_axis_when_the_second_is_held() {
+    for indirect in [false, true] {
+        let mut r = rig(&format!("hinge-fixed-second-{indirect}"), Profile::Circle);
+        r.doc.delete_mate("O").unwrap();
+        if indirect {
+            let reference = r.doc.assembly().sources[0].document.clone();
+            let ground = r.doc.insert(reference, Placement::IDENTITY).unwrap();
+            r.doc.finish_loading();
+            r.doc.mate_origin("Ground", ground, true, false).unwrap();
+            r.doc.mate_lock("Held", ground, r.b, false).unwrap();
+        } else {
+            r.doc.mate_origin("Ground", r.b, true, false).unwrap();
+        }
+        let held = r.doc.assembly().component(r.b).unwrap().placement;
+        let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.a));
+        r.doc
+            .move_to(&[(path, Placement { rotation: DQuat::from_xyzw(0.0, 1.0, 0.0, 0.0), translation: DVec3::ZERO })])
+            .unwrap();
+        r.doc
+            .mate_hinge_limited(
+                "H",
+                [&cylinder(r.a), &cylinder(r.b)],
+                [&datum(r.a, "Top plane"), &datum(r.b, "Top plane")],
+                [Alignment::Aligned; 2],
+                Some([-30.0, 30.0]),
+                false,
+            )
+            .unwrap();
+        bounded(&mut r.doc, "H");
+        let a = r.doc.assembly().component(r.a).unwrap().placement;
+        let b = r.doc.assembly().component(r.b).unwrap().placement;
+        assert!((a.rotation * DVec3::Z - b.rotation * DVec3::Z).length() < 1e-8);
+        assert!(a.translation.distance(b.translation) < 1e-8);
+        assert!(b.translation.distance(held.translation) < 1e-8);
+        assert!(b.rotation.angle_between(held.rotation) < 1e-7);
+        std::fs::remove_dir_all(r.dir).unwrap();
+    }
+}
+
+#[test]
+fn unrestricted_hinge_stops_preserve_non_axial_plane_alignment() {
+    let mut r = rig("hinge-nonaxial-antipodal", Profile::Circle);
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+    r.doc
+        .move_to(&[(path, Placement { rotation: DQuat::from_xyzw(1.0, 0.0, 0.0, 0.0), translation: DVec3::ZERO })])
+        .unwrap();
+    r.doc
+        .mate_hinge(
+            "Unlimited",
+            [&cylinder(r.a), &cylinder(r.b)],
+            [&datum(r.a, "Right plane"), &datum(r.b, "Right plane")],
+            Alignment::Aligned,
+            Alignment::Aligned,
+            false,
+        )
+        .unwrap();
+    assert!(r.doc.undo());
+    r.doc
+        .mate_hinge_limited(
+            "H",
+            [&cylinder(r.a), &cylinder(r.b)],
+            [&datum(r.a, "Right plane"), &datum(r.b, "Right plane")],
+            [Alignment::Aligned; 2],
+            Some([-180.0, 180.0]),
+            false,
+        )
+        .unwrap();
+    bounded(&mut r.doc, "H");
+    assert!(r.doc.assembly().component(r.b).unwrap().placement.rotation.angle_between(DQuat::IDENTITY) < 1e-7);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

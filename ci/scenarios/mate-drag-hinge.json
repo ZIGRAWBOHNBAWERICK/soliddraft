@@ -454,6 +454,106 @@
           ]
         }
       ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "H"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_hinge",
+      "arguments": {
+        "name": "H",
+        "axes": [
+          {
+            "component": 2,
+            "feature": "Cut-Extrude1",
+            "generator": "side"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          }
+        ],
+        "planes": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          }
+        ],
+        "alignment": "aligned",
+        "plane_alignment": "aligned",
+        "angle_limits": [
+          -30,
+          30
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/3",
+          "approx": 1,
+          "tolerance": 1e-08
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/3",
+          "approx": 1,
+          "tolerance": 1e-08
+        }
+      ]
     }
   ]
 }

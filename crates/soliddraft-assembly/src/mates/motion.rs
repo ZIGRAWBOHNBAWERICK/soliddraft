@@ -597,13 +597,36 @@ fn shortest_arc(from: DVec3, to: DVec3) -> DQuat {
 }
 fn seed(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> BTreeMap<Body, Placement> {
     let mut out = bodies.clone();
-    let fixed_rotation: BTreeSet<_> = cs
+    let mut held: BTreeMap<Body, DQuat> = cs
         .iter()
         .filter_map(|c| match c {
-            Constraint::Origin { body, axes: true, .. } => Some(body.clone()),
+            Constraint::Origin { body, axes: true, at, .. } => Some((body.clone(), at.rotation)),
             _ => None,
         })
         .collect();
+    loop {
+        let before = held.len();
+        for c in cs {
+            let (a, b, relative) = match c {
+                Constraint::Lock { a, b, relative, .. } => (a, b, relative.rotation),
+                Constraint::Turn { a, b, relative, .. } => (a, b, *relative),
+                _ => continue,
+            };
+            if let Some(rotation) = held.get(a).copied()
+                && !held.contains_key(b)
+            {
+                held.insert(b.clone(), Placement::new(rotation * relative, DVec3::ZERO).rotation);
+            } else if let Some(rotation) = held.get(b).copied()
+                && !held.contains_key(a)
+            {
+                held.insert(a.clone(), Placement::new(rotation * relative.inverse(), DVec3::ZERO).rotation);
+            }
+        }
+        if held.len() == before {
+            break;
+        }
+    }
+    let fixed_rotation: BTreeSet<_> = held.keys().cloned().collect();
     let fixed_position: BTreeSet<_> = cs
         .iter()
         .filter_map(|c| match c {
@@ -619,6 +642,9 @@ fn seed(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> BTreeMap<Body,
                 p.rotation = at.rotation;
             }
         }
+    }
+    for (body, rotation) in held {
+        out.get_mut(&body).expect("known held body").rotation = rotation;
     }
     // Resolve an antipodal slot axis before the signed-angle seed chooses its spin.
     for c in cs {
@@ -720,7 +746,7 @@ fn seed(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> BTreeMap<Body,
                     };
                     out.get_mut(body).expect("known body").translation += direction * correction;
                 }
-                _ => {}
+                Relation::Native { reads, rule } => native::seed_hinge(reads, rule, &mut out, &fixed_rotation),
             },
             _ => {}
         }

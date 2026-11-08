@@ -481,7 +481,7 @@ fn drag_params() -> Vec<(&'static str, Value)> {
         (
             "placement",
             optional(
-                serde_json::json!({"type":"object", "description":"Target in the parent frame, required for update or move", "properties":{"translation":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"rotation":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4}},"required":["translation","rotation"],"additionalProperties":false}),
+                serde_json::json!({"type":"object", "description":"Target in the parent frame, required for update or move", "properties":{"translation":{"type":"array","items":{"type":"number"}},"rotation":{"type":"array","items":{"type":"number"}}},"required":["translation","rotation"],"additionalProperties":false}),
             ),
         ),
     ]

@@ -79,9 +79,10 @@ fn to_f32(p: DVec3, origin: DVec3) -> Vec3 {
 }
 
 impl Bvh {
-    /// Builds the hierarchy over every part occurrence that is not suppressed or
-    /// removed and has bounds. Hidden ones are included: showing them again needs no
-    /// rebuild; queries skip them by flag when they want to.
+    /// Builds the hierarchy over every part occurrence that is not removed and has
+    /// bounds. Hidden and suppressed ones are included, so showing or unsuppressing them
+    /// needs no rebuild: queries leave out what is suppressed or removed by its flags at
+    /// the time, and skip hidden ones by flag when they want to.
     pub fn build(table: &OccurrenceTable) -> Bvh {
         Bvh::build_from(table.all_bounds(), table.all_flags(), table.bounds(OccurrenceIndex::ROOT).center())
     }
@@ -94,7 +95,6 @@ impl Bvh {
             .filter(|&r| {
                 let f = flags[r as usize];
                 !f.has(crate::occurrence::Flags::ASSEMBLY)
-                    && !f.has(crate::occurrence::Flags::SUPPRESSED)
                     && !f.has(crate::occurrence::Flags::REMOVED)
                     && !bounds[r as usize].is_empty()
             })
@@ -324,7 +324,7 @@ impl Bvh {
         self.visit(
             |b| b.intersects(region),
             |r| {
-                if table.bounds(OccurrenceIndex(r)).intersects(region) {
+                if live(table, r) && table.bounds(OccurrenceIndex(r)).intersects(region) {
                     out.push(OccurrenceIndex(r));
                 }
             },
@@ -347,7 +347,7 @@ impl Bvh {
         };
         let mut out = Vec::new();
         self.visit(inside, |r| {
-            if inside(&table.bounds(OccurrenceIndex(r))) {
+            if live(table, r) && inside(&table.bounds(OccurrenceIndex(r))) {
                 out.push(OccurrenceIndex(r));
             }
         });
@@ -361,13 +361,23 @@ impl Bvh {
         self.visit(
             |b| ray_box(ray, b).is_some(),
             |r| {
-                if let Some(t) = ray_box(ray, &table.bounds(OccurrenceIndex(r))) {
+                if let Some(t) = ray_box(ray, &table.bounds(OccurrenceIndex(r))).filter(|_| live(table, r)) {
                     out.push((OccurrenceIndex(r), t));
                 }
             },
         );
         out.sort_by(|a, b| a.1.total_cmp(&b.1));
         out
+    }
+}
+
+/// Whether a leaf's row counts for a query now: not suppressed or removed since the
+/// hierarchy was built. A row past the table's end belongs to a table it was not built
+/// for and counts as gone.
+fn live(table: &OccurrenceTable, r: u32) -> bool {
+    (r as usize) < table.len() && {
+        let f = table.flags(OccurrenceIndex(r));
+        !f.has(crate::occurrence::Flags::SUPPRESSED) && !f.has(crate::occurrence::Flags::REMOVED)
     }
 }
 

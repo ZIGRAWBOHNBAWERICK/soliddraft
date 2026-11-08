@@ -430,7 +430,9 @@ measuring), boxes (`in_box`) and the camera's view (`in_frustum`). It is built o
 another thread from a copy of the boxes once loading is done (0.7 s for a million
 occurrences); `bvh_ready()` returns it when it is there and never waits, `bvh()` waits
 for it. A move refits the boxes of the moved occurrences' leaves and their ancestors; a
-new structure starts a new build.
+new structure starts a new build. Hidden and suppressed parts keep their leaves, so hiding,
+suppressing and their Undo need no rebuild: the queries leave out what is suppressed or
+deleted by its flags at the time they run.
 
 Edges are not drawn for assemblies yet; the viewport's kernel-sampled wide edges will
 draw them from the display copies' edge polylines.

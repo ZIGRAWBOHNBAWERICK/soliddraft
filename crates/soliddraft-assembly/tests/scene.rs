@@ -13,6 +13,13 @@ use soliddraft_materials::{Appearance, Srgb};
 /// A root with a grid of 4 x 5 bricks (components 3 to 22, sources 1 and 2) and two
 /// copies of a sub-assembly of two plates (components 23 and 24; inside, 2 and 3).
 fn sample() -> AssemblyDocument {
+    let mut doc = sample_loading();
+    doc.finish_loading();
+    doc
+}
+
+/// The sample, its loading still under way.
+fn sample_loading() -> AssemblyDocument {
     let brick = (DocumentId::new(), ContentHash::of_bytes(b"brick"));
     let plate = (DocumentId::new(), ContentHash::of_bytes(b"plate"));
     let mut sub = Assembly::new("Sub");
@@ -39,9 +46,7 @@ fn sample() -> AssemblyDocument {
     ];
     let bytes = root.to_bytes(DocumentId::new(), None, &copies).unwrap();
     let package = AssemblyPackage::from_bytes(bytes).unwrap();
-    let mut doc = AssemblyDocument::open_package(package, None, OpenOptions::default()).unwrap();
-    doc.finish_loading();
-    doc
+    AssemblyDocument::open_package(package, None, OpenOptions::default()).unwrap()
 }
 
 #[test]
@@ -213,4 +218,60 @@ fn a_reread_keeps_the_selection_on_the_same_occurrence() {
     assert_eq!((p2.0, b2.0), (p.0 - 1, b.0 - 1), "the rows moved");
     assert_eq!(marked(&scene, Instance::SELECTED), [p2.0]);
     assert_eq!(marked(&scene, Instance::HOVERED), [b2.0]);
+}
+
+/// Whether the hierarchy finds brick 6 by a ray down through it and by a small box
+/// around it, against the table as it is now.
+fn finds_brick_6(doc: &mut AssemblyDocument) -> (bool, bool) {
+    let row = doc.table().find(&"6".parse().unwrap());
+    let ray = Ray { origin: DVec3::new(5.0, 65.0, 100.0), direction: DVec3::NEG_Z };
+    let region = Aabb { min: DVec3::new(4.0, 64.0, 4.0), max: DVec3::new(6.0, 66.0, 6.0) };
+    let table = doc.table().clone();
+    let bvh = doc.bvh();
+    let by_ray = bvh.along_ray(&table, &ray).iter().any(|h| Some(h.0) == row);
+    let by_box = bvh.in_box(&table, &region).iter().any(|r| Some(*r) == row);
+    (by_ray, by_box)
+}
+
+/// The hierarchy is built while brick 6 is suppressed. Showing the brick again, by
+/// Unsuppress or by Undo, makes rays and boxes find it; suppressing or deleting it
+/// again keeps them from returning it, though the hierarchy is not rebuilt.
+#[test]
+fn the_hierarchy_follows_suppression_and_deletion() {
+    let mut doc = sample();
+    let brick: OccurrencePath = "6".parse().unwrap();
+    assert_eq!(finds_brick_6(&mut doc), (true, true));
+    doc.set_suppressed(std::slice::from_ref(&brick), true).unwrap();
+    let mut fresh = sample();
+    fresh.set_suppressed(std::slice::from_ref(&brick), true).unwrap();
+    for (name, doc) in [("built before", &mut doc), ("built while suppressed", &mut fresh)] {
+        assert_eq!(finds_brick_6(doc), (false, false), "{name}: suppressed");
+        doc.set_suppressed(std::slice::from_ref(&brick), false).unwrap();
+        assert_eq!(finds_brick_6(doc), (true, true), "{name}: unsuppressed");
+        assert!(doc.undo());
+        assert_eq!(finds_brick_6(doc), (false, false), "{name}: unsuppress undone");
+        assert!(doc.undo());
+        assert_eq!(finds_brick_6(doc), (true, true), "{name}: suppress undone");
+        assert!(doc.redo());
+        assert_eq!(finds_brick_6(doc), (false, false), "{name}: suppress redone");
+        assert!(doc.undo());
+        doc.delete(&[soliddraft_assembly::ComponentId(6)]).unwrap();
+        assert_eq!(finds_brick_6(doc), (false, false), "{name}: deleted");
+    }
+
+    // The background build starts when loading ends, here with the brick suppressed,
+    // and is taken after the brick is shown again: it finds the brick too.
+    let mut late = sample_loading();
+    late.set_suppressed(std::slice::from_ref(&brick), true).unwrap();
+    while late.poll(std::time::Duration::from_millis(10)) {}
+    late.set_suppressed(std::slice::from_ref(&brick), false).unwrap();
+    let started = std::time::Instant::now();
+    while late.bvh_ready().is_none() && started.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let row = late.table().find(&brick).unwrap();
+    let ray = Ray { origin: DVec3::new(5.0, 65.0, 100.0), direction: DVec3::NEG_Z };
+    let table = late.table().clone();
+    let ready = late.bvh_ready().expect("the background build is done");
+    assert!(ready.along_ray(&table, &ray).iter().any(|h| h.0 == row), "the ready hierarchy finds it");
 }

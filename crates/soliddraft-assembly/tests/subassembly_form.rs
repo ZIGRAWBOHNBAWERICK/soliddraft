@@ -14,7 +14,8 @@ use glam::{DQuat, DVec3};
 use soliddraft_assembly::subassembly::{FAULT_EXIT, Fault};
 use soliddraft_assembly::{
     Alignment, AssemblyDocument, AssemblyPackage, ComponentId, EndpointSelector, FaceSelector, FormCode, FormRequest,
-    GeneratorChoice, KernelSource, Mate, OccurrencePath, OpenOptions, Placement, SolverState, Step,
+    GeneratorChoice, KernelSource, Mate, MateEdit, OccurrencePath, OpenOptions, Placement, RefusalCode, SolverState,
+    Step,
 };
 use soliddraft_document::{CacheOnlyStore, DocKind, DocRef, identify_file};
 use soliddraft_kernel_api::Kernel;
@@ -805,4 +806,121 @@ fn cold_missing_child_keeps_the_accepted_assembly() {
     assert_eq!(doc.undo_label(), Some("Set value"));
     let c = doc.table().find(&path(&[s.0, fx.c.0])).unwrap();
     close(doc.table().world(c).translation, [10.0, 10.0, 33.0]);
+}
+
+/// A distance from a root part to a part inside a sub-assembly, each on its own assembly's
+/// origin, the sub-assembly 10 mm along x. As authored both tops face up and both origins
+/// hold z at 0, so a 10 mm gap between the tops cannot hold; with both parts turned so
+/// their tops face world x it holds exactly. Update finds that turn, and it survives a
+/// reopen. An 11 mm gap, which no turn holds, is still refused.
+#[test]
+fn update_turns_parts_when_only_a_turn_lets_a_cross_assembly_distance_hold() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-subassembly-{}-turn", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let work = dir.join("work");
+    let (pin, root, pack) = (work.join("parts/pin.dwprt"), work.join("root.dwasm"), work.join("modules/pack.dwasm"));
+    new_block(&pin, 20.0, 10.0, 6.0);
+    let mut doc = AssemblyDocument::new_with("Root", options());
+    doc.save(Some(&root)).unwrap();
+    let a = doc.insert(reference(&root, &pin), Placement::IDENTITY).unwrap();
+    let b = doc.insert(reference(&root, &pin), Placement::translation(DVec3::new(10.0, 0.0, 0.0))).unwrap();
+    doc.finish_loading();
+    let top = |c| face(c, GeneratorChoice::EndCap, None);
+    doc.mate_origin("OA", a, false, false).unwrap();
+    doc.mate_distance("D", &top(a), &top(b), "0 mm", Alignment::Aligned, false).unwrap();
+    let request = FormRequest { paths: vec![path(&[b.0])], path: pack.clone(), origin: path(&[b.0]) };
+    let s = doc.form_subassembly(&request).unwrap().migration.component;
+    // With nothing holding B yet, the root lifts it 10 mm.
+    doc.edit_mates(&[("D".into(), MateEdit::Distance("10 mm".into()))]).unwrap();
+    doc.save(None).unwrap();
+    let nested = path(&[s.0, b.0]);
+
+    // The sub-assembly puts B on its own origin, 10 mm along x from the root's.
+    let mut child = AssemblyDocument::open(&pack, options()).unwrap();
+    child.finish_loading();
+    child.mate_origin("OB", b, false, false).unwrap();
+    child.save(None).unwrap();
+
+    let pose = |doc: &AssemblyDocument, p: &OccurrencePath| {
+        let row = doc.table().find(p).unwrap_or_else(|| panic!("no occurrence at {p}"));
+        doc.table().world(row)
+    };
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    assert_eq!(report.updated(), 1);
+    doc.finish_loading();
+    for (p, t) in [(path(&[a.0]), [0.0, 0.0, 0.0]), (nested.clone(), [10.0, 0.0, 0.0])] {
+        let at = pose(&doc, &p);
+        close(at.translation, t);
+        assert!((at.rotation * DVec3::Z).distance(DVec3::X) <= 1e-12, "{p}: its top faces world x");
+    }
+    assert_ne!(doc.solver().state, SolverState::Error);
+    doc.save(None).unwrap();
+
+    let mut reopened = AssemblyDocument::open(&root, options()).unwrap();
+    reopened.finish_loading();
+    assert_ne!(reopened.solver().state, SolverState::Error, "{:?}", reopened.solver());
+    for (p, t) in [(path(&[a.0]), [0.0, 0.0, 0.0]), (nested, [10.0, 0.0, 0.0])] {
+        let at = pose(&reopened, &p);
+        close(at.translation, t);
+        assert!((at.rotation * DVec3::Z).distance(DVec3::X) <= 1e-12, "{p}: its top still faces world x");
+    }
+
+    let refused = reopened.edit_mates(&[("D".into(), MateEdit::Distance("11 mm".into()))]).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::OverConstrained, "{refused}");
+    assert_eq!(refused.mates.len(), 3, "{refused}");
+    assert!(refused.mates[..2] == ["D", "OA"] && refused.mates[2].starts_with("OB"), "{refused}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A lock from a root part to a part inside a sub-assembly whose frame is 10 mm along y,
+/// with each part on its own assembly's origin. The lock holds B 10 mm along A's x, so
+/// only a quarter turn of the pair, taking x to world y, lets all three hold; no mate
+/// relates their faces. Update finds that turn and it survives a reopen.
+#[test]
+fn update_turns_a_locked_pair_when_only_a_turn_places_it() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-subassembly-{}-lock-turn", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let work = dir.join("work");
+    let (pin, root, pack) = (work.join("parts/pin.dwprt"), work.join("root.dwasm"), work.join("modules/pack.dwasm"));
+    new_block(&pin, 20.0, 10.0, 6.0);
+    let mut doc = AssemblyDocument::new_with("Root", options());
+    doc.save(Some(&root)).unwrap();
+    let at = |x: f64, y: f64| Placement::translation(DVec3::new(x, y, 0.0));
+    let a = doc.insert(reference(&root, &pin), Placement::IDENTITY).unwrap();
+    let b = doc.insert(reference(&root, &pin), at(10.0, 0.0)).unwrap();
+    // C only gives the sub-assembly its frame.
+    let c = doc.insert(reference(&root, &pin), at(0.0, 10.0)).unwrap();
+    doc.finish_loading();
+    doc.mate_origin("OA", a, false, false).unwrap();
+    doc.mate_lock("L", a, b, false).unwrap();
+    let request = FormRequest { paths: vec![path(&[b.0]), path(&[c.0])], path: pack.clone(), origin: path(&[c.0]) };
+    let s = doc.form_subassembly(&request).unwrap().migration.component;
+    doc.save(None).unwrap();
+    let nested = path(&[s.0, b.0]);
+
+    let mut child = AssemblyDocument::open(&pack, options()).unwrap();
+    child.finish_loading();
+    child.mate_origin("OB", b, false, false).unwrap();
+    child.save(None).unwrap();
+
+    let check = |doc: &AssemblyDocument| {
+        for (p, t) in [(path(&[a.0]), [0.0, 0.0, 0.0]), (nested.clone(), [0.0, 10.0, 0.0])] {
+            let row = doc.table().find(&p).unwrap_or_else(|| panic!("no occurrence at {p}"));
+            let at = doc.table().world(row);
+            close(at.translation, t);
+            assert!((at.rotation * DVec3::X).distance(DVec3::Y) <= 1e-12, "{p}: its x faces world y");
+            assert!((at.rotation * DVec3::Z).distance(DVec3::Z) <= 1e-12, "{p}: the smallest turn, about z");
+        }
+    };
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    doc.finish_loading();
+    check(&doc);
+    doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&root, options()).unwrap();
+    reopened.finish_loading();
+    assert_ne!(reopened.solver().state, SolverState::Error, "{:?}", reopened.solver());
+    check(&reopened);
+    let _ = std::fs::remove_dir_all(&dir);
 }

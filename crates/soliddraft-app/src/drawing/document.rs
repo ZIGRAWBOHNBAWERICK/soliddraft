@@ -365,6 +365,25 @@ impl DrawingDoc {
         Ok(warning)
     }
 
+    /// Keeps historical paths relative to the file just saved, preserving each pin.
+    pub(crate) fn rebase_history_paths(
+        &mut self,
+        previous_path: Option<&Path>,
+        previous_model: &soliddraft_drawing::DocRef,
+    ) {
+        let Some(path) = self.path.as_deref() else { return };
+        let current_model = &self.drawing.model;
+        self.stack.map_model_paths(|model| {
+            if model.id == previous_model.id && model.kind == previous_model.kind && model.path == previous_model.path {
+                return current_model.path.clone();
+            }
+            let target = previous_path.map_or_else(|| PathBuf::from(&model.path), |old| model.stored_path(old));
+            let mut model = model.clone();
+            model.set_path(path, &target);
+            model.path
+        });
+    }
+
     /// A drawing from the bytes of a drawing file, such as a recovery copy.
     pub fn from_bytes(bytes: &[u8]) -> Result<DrawingDoc, String> {
         let (drawing, meta) = file::from_bytes(bytes).map_err(|e| e.to_string())?;

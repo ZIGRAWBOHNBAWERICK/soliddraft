@@ -12,7 +12,7 @@ use crate::part::Part;
 use crate::sheet::{Projection, RevisionRow, Scale, Table, TableKind};
 use crate::update::{self, UpdateReport};
 use crate::view::{AlignAxis, Alignment, Boundary, BrokenOut, FoldDirection, View, ViewDisplay, ViewKind, ViewScale};
-use crate::{Drawing, DrawingError, DrawingMeta, library, measure, project};
+use crate::{DocRef, Drawing, DrawingError, DrawingMeta, library, measure, project};
 
 /// One undoable change to a drawing.
 // Placing a view carries the whole view; commands are run one at a time, so the size of
@@ -951,6 +951,13 @@ impl UndoStack {
     /// An empty stack.
     pub fn new() -> UndoStack {
         UndoStack::default()
+    }
+
+    /// Rewrites only the model paths in history when the drawing's file moves.
+    pub fn map_model_paths(&mut self, mut path: impl FnMut(&DocRef) -> String) {
+        for (_, drawing) in self.undo.iter_mut().chain(&mut self.redo) {
+            drawing.model.path = path(&drawing.model);
+        }
     }
 
     /// Runs `command`, with the part when given, and records it. A failed command leaves

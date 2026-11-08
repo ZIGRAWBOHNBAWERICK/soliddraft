@@ -1850,6 +1850,8 @@ pub(crate) fn save_session(
     kernel: &str,
 ) -> Result<(PathBuf, Option<String>), String> {
     let path = soliddraft_document::kind::saved_path(path, DocKind::Drawing);
+    let previous_path = s.doc.path.clone();
+    let previous_model = s.doc.drawing.model.clone();
     let target = s.model_target().map(|t| (t.path().map(Path::to_path_buf), t.id()));
     if let Some((file, id)) = target {
         if let Some(file) = file {
@@ -1860,6 +1862,7 @@ pub(crate) fn save_session(
         }
     }
     let warning = s.doc.save(&path, kernel)?;
+    s.doc.rebase_history_paths(previous_path.as_deref(), &previous_model);
     Ok((path, warning))
 }
 

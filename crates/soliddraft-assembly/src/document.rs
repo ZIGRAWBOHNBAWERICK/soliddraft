@@ -914,7 +914,9 @@ impl AssemblyDocument {
         let mut before = self.image(&[], &[]);
         let known = self.assembly.sources.len();
         let source = self.assembly.add_source(document.clone());
-        before.sources.push((source, None));
+        // A part placed again shares its source, which undo must leave as it was.
+        let shared = (self.assembly.sources.len() == known).then(|| self.assembly.source(source).cloned()).flatten();
+        before.sources.push((source, shared));
         let id = self.assembly.add_component(source, placement);
         before.components.push((id, None));
         let mut lookup = Lookup::with_packages(self.packages.clone(), self.path.as_deref(), &self.options);
@@ -974,8 +976,8 @@ impl AssemblyDocument {
         Ok(id)
     }
 
-    /// Deletes components of the root, with the patterns that only repeat them and
-    /// the overrides below them. One undo step.
+    /// Deletes components of the root, with the patterns that only repeat them, the
+    /// overrides below them and the sources no other component places. One undo step.
     pub fn delete(&mut self, components: &[ComponentId]) -> Result<(), EditError> {
         if let Some(c) = components.iter().find(|c| self.assembly.component(**c).is_none()) {
             return Err(EditError::NoComponent(*c));
@@ -1002,18 +1004,32 @@ impl AssemblyDocument {
         let patterns: Vec<PatternId> =
             self.assembly.patterns.iter().filter(|p| p.seeds.iter().any(|s| gone.contains(s))).map(|p| p.id).collect();
         before.patterns = patterns.iter().map(|p| (*p, self.assembly.pattern(*p).cloned())).collect();
+        // A source goes with its last component, so a file nothing places any more
+        // cannot block an Update.
+        let kept: HashSet<SourceId> =
+            self.assembly.components.iter().filter(|c| !gone.contains(&c.id)).map(|c| c.source).collect();
+        let sources: HashSet<SourceId> = self
+            .assembly
+            .components
+            .iter()
+            .filter(|c| gone.contains(&c.id) && !kept.contains(&c.source))
+            .map(|c| c.source)
+            .collect();
+        before.sources =
+            self.assembly.sources.iter().filter(|s| sources.contains(&s.id)).map(|s| (s.id, Some(s.clone()))).collect();
         self.assembly.components.retain(|c| !gone.contains(&c.id));
+        self.assembly.sources.retain(|s| !sources.contains(&s.id));
         self.assembly.overrides.retain(|o| !overrides.contains(&o.path));
         for p in &mut self.assembly.patterns {
             p.seeds.retain(|s| !gone.contains(s));
         }
         self.assembly.patterns.retain(|p| !p.seeds.is_empty());
-        let mut removed = Vec::new();
-        for row in self.table.children(OccurrenceIndex::ROOT).collect::<Vec<_>>() {
-            if gone.contains(&self.table.step(row).component) {
-                removed.extend(self.table.remove(row));
-            }
-        }
+        let rows: Vec<OccurrenceIndex> = self
+            .table
+            .children(OccurrenceIndex::ROOT)
+            .filter(|r| gone.contains(&self.table.step(*r).component))
+            .collect();
+        let removed = self.table.remove_all(&rows);
         self.changes.flags.extend(removed.iter().copied());
         self.solver_status = None;
         let after = self.reimage(&before);
@@ -1529,6 +1545,10 @@ impl AssemblyDocument {
         self.finish_loading();
         let resolver = self.resolver();
         let mut proposed = self.assembly.clone();
+        // A source no component places is not looked for: it goes, and the undo step
+        // keeps it. Files saved before deletes dropped sources can hold one.
+        let placed: HashSet<SourceId> = proposed.components.iter().map(|c| c.source).collect();
+        proposed.sources.retain(|s| placed.contains(&s.id));
         let mut report = RebuildReport::default();
         let mut problems = Vec::new();
         for source in &mut proposed.sources {

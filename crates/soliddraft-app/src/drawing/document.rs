@@ -206,9 +206,7 @@ impl DrawingDoc {
         journal.finish((|| {
             let from = self.drawing.model.pinned.clone();
             let p = part.map(|c| c.part());
-            // Commands that remake one view's line work through the kernel; its transform
-            // and circles are remembered again afterwards, since a flipped section or a
-            // cropped view sees the part from a new frame.
+            // A remade view also changes its descendants' linework and picking data.
             let remade = match &cmd {
                 Command::EditView { view, .. }
                 | Command::SetViewCrop { view, .. }
@@ -228,9 +226,16 @@ impl DrawingDoc {
             self.touch();
             if let (Some(id), Some(p)) = (remade, p.as_ref())
                 && let Ok(index) = soliddraft_drawing::PartIndex::build(p)
-                && let Ok(ctx) = project::ViewContext::compute(&self.drawing, p, &index, id)
             {
-                self.remember(id, &ctx.projected);
+                let mut contexts = project::Contexts::new();
+                for child in project::dependent_views(&self.drawing, id) {
+                    if child != id && self.drawing.view(child).is_some_and(|v| v.excluded_from_update) {
+                        continue;
+                    }
+                    if project::compute_in(&self.drawing, p, &index, child, &mut contexts).is_ok() {
+                        self.remember(child, &contexts[&child].projected);
+                    }
+                }
             }
             if let (Some(r), Some(ctx)) = (report, part) {
                 for (id, projected) in &r.projections {

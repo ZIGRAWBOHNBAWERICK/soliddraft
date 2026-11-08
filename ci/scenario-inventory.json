@@ -319,7 +319,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Fillet, chamfer, boss, pocket and hole on the imported planar block, with an edit before and after a save and reopen; imported faces keep their Import1 · Face N names; a lattice on an imported body is refused as coming soon",
+      "supported_limits": "Fillet, chamfer, boss, pocket and hole on the imported planar block, with an edit before and after a save and reopen; imported faces keep their Import1 \u00b7 Face N names; a lattice on an imported body is refused as coming soon",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; imported-features.dwprt"
     },
     {
@@ -1127,6 +1127,19 @@
       "route": "MCP import_scene -> soliddraft-scene readers -> assembly and mesh reference files -> assembly open -> save -> fresh-process open",
       "supported_limits": "OpenUSD (usd, usda, usdc, usdz) composed under the default prim, glTF 2.0, URDF with OBJ or STL meshes and primitive shapes, OBJ and STL; meshes arrive as mesh reference bodies, never solids; texture maps, skins, animation, collision geometry, USD curves, points and NURBS are left out",
       "evidence": "result.json, protocol.json and commands/NNNN/command.json with each import record and assembly summary; work/*.dwasm and work/*.parts/ mesh references; work/washer-saved.dwasm"
+    },
+    {
+      "id": "hole-alignment",
+      "file": "ci/scenarios/hole-alignment.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly_check_hole_alignment -> pinned native cylinder supports -> exact rational placed axes",
+      "supported_limits": "Internal cylindrical axes exactly on world axes; coaxial or parallel offset within a maximum deviation; selected components, negative deviation and single-part refusals; no diameter or fit test.",
+      "evidence": "result.json, protocol.json and command evidence; work/a.dwprt and work/rig.dwasm; unchanged accepted state and fresh-process reopen."
     }
   ]
 }

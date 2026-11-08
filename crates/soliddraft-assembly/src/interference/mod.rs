@@ -13,6 +13,9 @@
 //! The rules are in `docs/interference.md`.
 
 mod certified;
+mod holes;
+
+pub use holes::{HoleAlignmentReport, HoleAlignmentRequest, HoleAxis, HoleOutcome, HolePair};
 pub(crate) mod geometry;
 
 use std::collections::{BTreeMap, HashMap};

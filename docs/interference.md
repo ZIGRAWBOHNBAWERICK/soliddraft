@@ -149,6 +149,12 @@ property panel's place. It checks interference or a clearance, over the whole as
 parts chosen in the tree, and lists the results. Clicking a result chooses its two parts. A
 check made before the assembly changed is marked out of date.
 
+## Hole alignment
+
+The same panel also offers Hole alignment. This check reads internal cylindrical axes at
+pinned revisions and uses exact rational comparisons, independently of the mesh tier.
+See [mates.md](mates.md#static-assembly-checks) for its scope, command and limits.
+
 ## The exact tier
 
 An exact tier would report overlap volumes, touching without a mate, and distances closer than

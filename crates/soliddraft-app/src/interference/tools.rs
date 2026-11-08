@@ -2,7 +2,7 @@
 
 use crate::state::AppState;
 use serde_json::{Value, json};
-use soliddraft_assembly::{CheckRefusal, CheckRequest, CheckScope, OccurrencePath};
+use soliddraft_assembly::{CheckRefusal, CheckRequest, CheckScope, HoleAlignmentRequest, OccurrencePath};
 use soliddraft_model::ValueTable;
 
 /// A refusal as a tool's error: typed JSON.
@@ -13,8 +13,8 @@ pub(crate) fn refused(r: CheckRefusal) -> String {
 /// A length typed as text, such as `0.5 mm`, in millimetres.
 pub(crate) fn length(text: &str) -> Result<f64, String> {
     let none = ValueTable::default();
-    let expression = none.parse(text).map_err(|e| format!("the clearance: {e}"))?;
-    none.length(&expression).map_err(|e| format!("the clearance: {e}"))
+    let expression = none.parse(text).map_err(|e| format!("the length: {e}"))?;
+    none.length(&expression).map_err(|e| format!("the length: {e}"))
 }
 
 /// The request a tool call asks for.
@@ -45,6 +45,17 @@ fn request(input: &Value, clearance: Option<f64>) -> Result<CheckRequest, String
 
 /// Runs the check tools. `None` hands the call on.
 pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
+    if name == "assembly_check_hole_alignment" {
+        return Some((|| {
+            let scope = request(input, None)?;
+            let max_deviation_mm = length(input["max_deviation"].as_str().ok_or("max_deviation is required")?)?;
+            let request =
+                HoleAlignmentRequest { scope: scope.scope, include_hidden: scope.include_hidden, max_deviation_mm };
+            let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
+            let report = s.doc.check_hole_alignment(&request).map_err(refused)?;
+            Ok(json!({ "report": report }))
+        })());
+    }
     let clearance = match name {
         "assembly_check_interference" => None,
         "assembly_check_clearance" => {

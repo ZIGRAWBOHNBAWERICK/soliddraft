@@ -468,6 +468,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     );
     let clearance = s.call("assembly_check_clearance", json!({ "clearance": "0.5 mm" }));
     assert_eq!(clearance["report"]["clearance_mm"], 0.5);
+    let holes = s.call("assembly_check_hole_alignment", json!({ "max_deviation": "0.5 mm" }));
+    assert_eq!(holes["report"]["parts"], 2);
+    assert_eq!(holes["report"]["holes"], json!([]));
     // The B2 families, on two pins: each added and taken away again.
     s.call("assembly_show_part", json!({}));
     s.call("new_part", json!({}));

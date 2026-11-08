@@ -58,7 +58,8 @@ pub use document::{AssemblyDocument, Changes, EditError, Opening, RebuildReport,
 pub use file::{AssemblyPackage, CopyReader, FileError, RefCopy, TruthEntries};
 pub use interference::{
     CheckCode, CheckRefusal, CheckReport, CheckRequest, CheckScope, CheckedPart, ClearanceOutcome, Contact,
-    DistanceBounds, FacePair, Outcome, PairResult, SkippedPart,
+    DistanceBounds, FacePair, HoleAlignmentReport, HoleAlignmentRequest, HoleAxis, HoleOutcome, HolePair, Outcome,
+    PairResult, SkippedPart,
 };
 pub use load::{LoadError, LoadEvent, OpenOptions};
 pub use mates::{

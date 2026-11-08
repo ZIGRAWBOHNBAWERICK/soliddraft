@@ -28,9 +28,22 @@ fn clearance_params() -> Vec<(&'static str, Value)> {
     params
 }
 
+fn hole_params() -> Vec<(&'static str, Value)> {
+    let mut params = vec![("max_deviation", string("Maximum parallel hole-axis deviation, such as 0.5 mm"))];
+    params.extend(scope_params().into_iter().filter(|(name, _)| *name != "chord_mm"));
+    params
+}
+
 pub(crate) fn commands() -> Vec<CommandSpec> {
     let row = |id, label, icon, doc| CommandSpec::new(id, label, icon, doc).assembly();
     vec![
+        row(
+            "assembly_check_hole_alignment",
+            "Check hole alignment",
+            Icon::Cad("interference"),
+            "Compare internal cylinder axes on the pinned parts without moving them",
+        )
+        .agents(Agents::Mcp, "Exact coaxial or parallel offset axes within max_deviation; unsupported cylinders are listed as unchecked. Does not test diameter or fit.", hole_params),
         row(
             "assembly_interference",
             "Interference",

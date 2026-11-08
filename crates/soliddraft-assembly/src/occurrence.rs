@@ -588,6 +588,22 @@ impl OccurrenceTable {
         }
     }
 
+    /// Updates the bounds of the rows placing `def` after its mesh was replaced, and
+    /// redoes their ancestors' from their children, so a smaller mesh shrinks them.
+    pub fn replace_definition_bounds(&mut self, def: DefinitionIndex, store: &DefinitionStore) {
+        let rows = self.rows_of_definitions(store.len());
+        let rows = rows.get(def.0 as usize).cloned().unwrap_or_default();
+        let local = store.get(def).bounds;
+        let mut parents = Vec::with_capacity(rows.len());
+        for r in rows {
+            self.bounds[r as usize] = local.placed(&self.world[r as usize]);
+            if self.parent[r as usize] != NONE {
+                parents.push(self.parent[r as usize]);
+            }
+        }
+        self.rebound_above(&parents);
+    }
+
     /// Adds `b` to the boxes above `row`, up to the first occurrence its own component
     /// suppresses: that one's box holds it, but its parent's does not.
     fn grow_ancestors(&mut self, row: u32, b: &Aabb) {

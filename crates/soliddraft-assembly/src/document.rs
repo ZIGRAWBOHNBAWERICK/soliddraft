@@ -33,7 +33,7 @@ use crate::path::{ComponentId, OccurrencePath, PatternId, SourceId, Step};
 use crate::placement::Placement;
 use crate::scene::Scene;
 use crate::schema::{Assembly, Component, OccurrenceAppearance, Override, Pattern, PatternRule, Source};
-use crate::source::KernelSource;
+use crate::source::{DisplaySource, KernelSource};
 use crate::store::{DefinitionIndex, DefinitionKey, DefinitionStore, LoadState};
 
 /// What changed since the renderer last asked ([`AssemblyDocument::take_changes`]).
@@ -1397,6 +1397,10 @@ impl AssemblyDocument {
     /// exact-ready until [`AssemblyDocument::release_exact`]. Fails when the pinned
     /// revision's bytes are not available (the document moved on and no revision store
     /// has the old one): Rebuild to use the current version.
+    ///
+    /// A stale definition, drawn from another revision, gets its display made from the
+    /// pinned revision's file too, so what is shown and saved is the revision the
+    /// exact body is. If that display cannot be made, the definition stays stale.
     pub fn exact(&mut self, def: DefinitionIndex, source: &KernelSource) -> Result<Arc<Mutex<PartDocument>>, String> {
         if let Some(e) = self.exact.get(&def) {
             return Ok(e.clone());
@@ -1412,8 +1416,36 @@ impl AssemblyDocument {
         let bytes = self.revision_bytes(&r)?;
         let part = Arc::new(Mutex::new(source.exact(&bytes)?));
         self.exact.insert(def, part.clone());
-        self.store.get_mut(def).state = LoadState::ExactReady;
+        if self.store.get(def).state == LoadState::Stale {
+            self.display_at_pin(def, &bytes, source);
+        }
+        // Exact work does not make another revision's picture this one's.
+        let d = self.store.get_mut(def);
+        if d.state != LoadState::Stale {
+            d.state = LoadState::ExactReady;
+        }
         Ok(part)
+    }
+
+    /// Replaces a stale definition's display with one made from `bytes`, its pinned
+    /// revision's file, as loading would have had that file been found. Its coarse and
+    /// fine levels, and any still being made, were of the other revision and go.
+    fn display_at_pin(&mut self, def: DefinitionIndex, bytes: &[u8], source: &KernelSource) {
+        let display: &dyn DisplaySource = self.options.display.as_deref().unwrap_or(source);
+        let quality = self.store.get(def).quality;
+        let made = match &quality {
+            None => display.part_mesh(bytes),
+            Some(q) => display.part_mesh_at(bytes, q),
+        };
+        let Ok((mesh, _)) = made else { return };
+        self.store.set_mesh(def, Arc::new(mesh), None);
+        let d = self.store.get_mut(def);
+        d.coarse = None;
+        d.fine = None;
+        self.levels = None;
+        self.table.replace_definition_bounds(def, &self.store);
+        self.changes.meshes.push(def);
+        self.bvh = None;
     }
 
     /// The file of the revision `r` pins: the referenced file while it is at that
@@ -1452,7 +1484,10 @@ impl AssemblyDocument {
     pub fn release_exact(&mut self, def: DefinitionIndex) {
         if self.exact.remove(&def).is_some() {
             let d = self.store.get_mut(def);
-            d.state = if d.mesh.is_some() { LoadState::DisplayReady } else { LoadState::MetadataOnly };
+            // A stale definition stays stale: its picture is still another revision's.
+            if d.state == LoadState::ExactReady {
+                d.state = if d.mesh.is_some() { LoadState::DisplayReady } else { LoadState::MetadataOnly };
+            }
         }
     }
 

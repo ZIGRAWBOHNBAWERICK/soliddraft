@@ -12,11 +12,14 @@ if [[ $# -ne 2 || "$1" != --tools ]]; then
 fi
 python3 - "$root" "$2" <<'PYTHON'
 import hashlib
+import http.client
 import io
 import json
 import pathlib
 import platform
 import tarfile
+import time
+import urllib.error
 import urllib.request
 import sys
 
@@ -29,8 +32,26 @@ if key not in tool["platforms"]:
 asset = tool["platforms"][key]
 name = f"cargo-nextest-{tool['version']}-{asset['target']}.tar.gz"
 url = f"https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-{tool['version']}/{name}"
-with urllib.request.urlopen(url, timeout=120) as response:
-    payload = response.read()
+# A release download can fail for a moment on the forge's side (HTTP 5xx, a read
+# timeout, a dropped connection). Retry those with backoff; any other 4xx is final.
+ATTEMPTS = 5
+for attempt in range(1, ATTEMPTS + 1):
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response:
+            payload = response.read()
+        break
+    except urllib.error.HTTPError as error:
+        if (error.code < 500 and error.code != 429) or attempt == ATTEMPTS:
+            raise
+        reason = f"HTTP {error.code}"
+    except (OSError, http.client.HTTPException) as error:
+        if attempt == ATTEMPTS:
+            raise
+        reason = repr(error)
+    delay = 5 * 2 ** (attempt - 1)
+    print(f"cargo-nextest download attempt {attempt} failed ({reason}); retrying in {delay} s",
+          file=sys.stderr)
+    time.sleep(delay)
 if hashlib.sha256(payload).hexdigest() != asset["sha256"]:
     sys.exit("cargo-nextest checksum mismatch")
 with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:

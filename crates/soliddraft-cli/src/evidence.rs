@@ -288,18 +288,6 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                     let text = format!("{} | {}", origin(&e.faces[0]), origin(&e.faces[1]));
                     (ReferenceSlot::Edge { index: i as u32 }, text, e.faces.iter().collect())
                 })
-                .chain(
-                    b.stations()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, s)| (ReferenceSlot::Setback { index: i as u32 }, origin(&s.at), vec![&s.at])),
-                )
-                .chain(
-                    b.laws
-                        .iter()
-                        .enumerate()
-                        .map(|(i, l)| (ReferenceSlot::Law { index: i as u32 }, origin(&l.from), vec![&l.from])),
-                )
                 .collect(),
             FeatureKind::Extrude(e) => match &e.end {
                 EndCondition::UpToFace { face } => vec![(ReferenceSlot::Limit, origin(face), vec![face])],

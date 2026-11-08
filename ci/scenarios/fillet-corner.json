@@ -51,70 +51,38 @@
           "tolerance": 0.005
         }
       ],
-      "label": "two fillets meeting at a corner whose third edge stays sharp build"
+      "label": "two fillets meeting at a corner whose third edge stays sharp build, with no corner choice asked"
     },
     {
       "tool": "edit_fillet",
       "arguments": {
         "feature": "Fillet1",
-        "radius": 2,
-        "corner": "smooth"
+        "radius": 3
       },
-      "refused": "coming soon",
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 11940.678448,
+          "approx": 11867.389342,
           "tolerance": 0.005
         }
       ],
-      "label": "a smooth corner is refused until Catallax builds it"
+      "label": "an R3 edit closes the corner the same way"
     },
     {
       "tool": "edit_fillet",
       "arguments": {
         "feature": "Fillet1",
-        "radius": 2,
-        "corner": "cliff"
+        "radius": 0
       },
+      "refused": "radius must be greater than 0",
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 11940.678448,
+          "approx": 11867.389342,
           "tolerance": 0.005
         }
       ],
-      "label": "a cliff corner builds what the default builds"
-    },
-    {
-      "tool": "fillet",
-      "arguments": {
-        "edges": [
-          "Boss-Extrude1 \u00b7 Edge 5"
-        ],
-        "radius": 2,
-        "corner": "smooth",
-        "radius_laws": [
-          {
-            "edge": "Boss-Extrude1 \u00b7 Edge 5",
-            "from": "Boss-Extrude1 \u00b7 Side of line 2",
-            "radius": {
-              "kind": "linear",
-              "start": 1,
-              "end": 3
-            }
-          }
-        ]
-      },
-      "refused": "closes its corners as cliffs",
-      "checks": [
-        {
-          "pointer": "/measurement/volume_mm3",
-          "approx": 11940.678448,
-          "tolerance": 0.005
-        }
-      ],
-      "label": "a variable fillet has no smooth corners"
+      "label": "a zero radius is refused and leaves the R3 fillet"
     },
     {
       "tool": "feature",
@@ -123,19 +91,15 @@
       },
       "checks": [
         {
-          "pointer": "/result/corner",
-          "equals": "cliff"
-        },
-        {
           "pointer": "/result/radius",
-          "equals": 2
+          "equals": 3
         },
         {
           "pointer": "/result/picked_edges/1",
           "equals": "Boss-Extrude1 \u00b7 End cap \u2229 Boss-Extrude1 \u00b7 Side of line 2"
         }
       ],
-      "label": "the refusals left the part as it was, with the cliff choice stored"
+      "label": "the fillet holds its edges and radius only"
     }
   ]
 }

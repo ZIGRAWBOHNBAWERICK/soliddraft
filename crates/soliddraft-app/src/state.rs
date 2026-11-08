@@ -333,24 +333,6 @@ impl FeatureEditor {
         }
     }
 
-    /// Drops edge `i` from a Fillet or Chamfer list. A fillet's setback stations and radius
-    /// law on it go too, and the rest keep naming the same edges.
-    pub fn remove_edge(&mut self, i: usize) {
-        match &mut self.params {
-            EditorParams::Fillet(f) if i < f.edges.len() => {
-                f.edges.remove(i);
-                if let Some(overflow) = &mut f.overflow {
-                    overflow.edge_removed(i);
-                }
-                soliddraft_model::FilletLaw::edge_removed(&mut f.laws, i);
-            }
-            EditorParams::Chamfer(c) if i < c.edges.len() => {
-                c.edges.remove(i);
-            }
-            _ => {}
-        }
-    }
-
     pub fn edges(&self) -> &[EdgeRef] {
         match &self.params {
             EditorParams::Fillet(f) => &f.edges,

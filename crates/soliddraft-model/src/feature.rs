@@ -5,8 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-pub use soliddraft_kernel_api::FilletCorner;
-use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, RadiusLaw, Vec3, question_index};
+use soliddraft_kernel_api::{Decision, Grade, HoleDepth, HoleHead, HoleTip, Plane, Vec3, question_index};
 use soliddraft_sketch::{P2, Sketch};
 
 use crate::reference::{EdgeRef, FaceRef};
@@ -122,7 +121,7 @@ impl FeatureKind {
     }
 
     /// The features this one reads: its sketch, and the features that made the faces
-    /// and edges it references, including a fillet's end faces.
+    /// and edges it references.
     pub fn dependencies(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
         match self {
@@ -140,10 +139,6 @@ impl FeatureKind {
             }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) => {
                 out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
-                // An end face can come from a feature that made neither of the edge's faces,
-                // such as a later cut that shortens the edge.
-                out.extend(b.stations().iter().map(|s| s.at.feature));
-                out.extend(b.laws.iter().map(|l| l.from.feature));
             }
             FeatureKind::Hole(h) => out.push(h.face.feature),
             FeatureKind::Pattern(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {
@@ -387,107 +382,6 @@ pub struct BlendFeature {
     pub edges: Vec<EdgeRef>,
     /// Fillet radius or chamfer distance, in millimetres.
     pub size: f64,
-    /// A fillet's overflow policy; absent rolls over, the kernel's default. Chamfers have
-    /// none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overflow: Option<FilletOverflow>,
-    /// A fillet's variable-radius laws (Catallax recipe section 4.5.2), at most one per
-    /// edge. An edge without one keeps `size`. Any law makes the fillet variable, which
-    /// rolls over and has no setback stations yet. Chamfers have none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub laws: Vec<FilletLaw>,
-    /// How a fillet closes a corner where only some of the corner's edges are filleted;
-    /// absent closes it as a cliff, the kernel's default. A variable fillet closes its
-    /// corners as cliffs. Chamfers have none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub corner: Option<FilletCorner>,
-}
-
-/// Why a variable fillet refuses smooth corners: Catallax's `fillet_variable` closes
-/// them as cliffs and has no corner choice.
-pub(crate) const VARIABLE_CORNERS: &str =
-    "a variable-radius fillet closes its corners as cliffs; it cannot round them smoothly yet";
-
-impl BlendFeature {
-    /// The setback stations a keep-neighbours policy holds; none otherwise.
-    pub fn stations(&self) -> &[FilletSetback] {
-        match &self.overflow {
-            Some(FilletOverflow::KeepNeighbours(stations)) => stations,
-            _ => &[],
-        }
-    }
-
-    /// Drops edge `index`, with the setback stations and radius law on it. The rest keep
-    /// naming the same edges.
-    pub fn remove_edge(&mut self, index: usize) {
-        if index >= self.edges.len() {
-            return;
-        }
-        self.edges.remove(index);
-        if let Some(overflow) = &mut self.overflow {
-            overflow.edge_removed(index);
-        }
-        FilletLaw::edge_removed(&mut self.laws, index);
-    }
-}
-
-/// How the radius runs along one of a variable fillet's edges.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FilletLaw {
-    /// Index in the fillet's edge list.
-    pub edge: u32,
-    /// The face that edge runs into at the end the law starts from, as for a
-    /// [`FilletSetback`].
-    pub from: FaceRef,
-    /// The radius along the edge from that end.
-    pub radius: RadiusLaw,
-}
-
-impl FilletLaw {
-    /// Follows the removal of edge `index` from a fillet's list: its law goes with it, and
-    /// later laws keep naming the same edges.
-    pub fn edge_removed(laws: &mut Vec<FilletLaw>, index: usize) {
-        laws.retain(|l| l.edge as usize != index);
-        for l in laws.iter_mut().filter(|l| l.edge as usize > index) {
-            l.edge -= 1;
-        }
-    }
-}
-
-/// What a fillet does when its rolling ball reaches a neighbouring face (Catallax
-/// recipe section 4.5.1).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FilletOverflow {
-    /// Continue across the neighbours, trimming or consuming them.
-    RollOver,
-    /// Keep every unselected neighbour whole, and stop each run at its setback stations.
-    KeepNeighbours(Vec<FilletSetback>),
-}
-
-impl FilletOverflow {
-    /// Follows the removal of edge `index` from the fillet's list: the stations on that
-    /// edge go with it, and later stations keep naming the same edges.
-    pub fn edge_removed(&mut self, index: usize) {
-        if let FilletOverflow::KeepNeighbours(stations) = self {
-            stations.retain(|s| s.edge as usize != index);
-            for s in stations.iter_mut().filter(|s| s.edge as usize > index) {
-                s.edge -= 1;
-            }
-        }
-    }
-}
-
-/// A station on one of a fillet's edges where its run stops.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FilletSetback {
-    /// Index in the fillet's edge list.
-    pub edge: u32,
-    /// The face that edge runs into at the end the distance is measured from. It names
-    /// the end the way Catallax names a vertex, by the faces that meet there.
-    pub at: FaceRef,
-    /// Distance along the edge from that end, in millimetres; positive.
-    pub setback: f64,
 }
 
 /// Holes drilled into a planar face, one per point.

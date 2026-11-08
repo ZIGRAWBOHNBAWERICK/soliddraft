@@ -260,16 +260,6 @@ pub enum ReferenceSlot {
     Plane,
     /// The face an extrusion goes up to.
     Limit,
-    /// The end face of one of a fillet's setback stations.
-    Setback {
-        /// Index in the fillet's station list.
-        index: u32,
-    },
-    /// The end face a variable fillet's radius law starts from.
-    Law {
-        /// Index in the fillet's law list.
-        index: u32,
-    },
 }
 
 impl fmt::Display for ReferenceSlot {
@@ -280,8 +270,6 @@ impl fmt::Display for ReferenceSlot {
             ReferenceSlot::Face { index } => write!(f, "face {}", index + 1),
             ReferenceSlot::Plane => f.write_str("plane"),
             ReferenceSlot::Limit => f.write_str("end face"),
-            ReferenceSlot::Setback { index } => write!(f, "setback {}", index + 1),
-            ReferenceSlot::Law { index } => write!(f, "radius law {}", index + 1),
         }
     }
 }

@@ -21,11 +21,13 @@ pub struct Feedback {
 /// Takes a viewport pick into the open Fillet or Chamfer panel.
 pub fn collect(editor: &mut FeatureEditor, doc: &Document, pick: Selection) {
     let refused = match pick {
-        Selection::Edge(edge) => match (doc.edge_ref(edge), editor.edges_mut().is_some()) {
-            (Some(r), true) => {
-                match editor.edges().iter().position(|x| x.label == r.label) {
-                    Some(i) => editor.remove_edge(i),
-                    None => editor.edges_mut().expect("a Fillet or Chamfer panel").push(r),
+        Selection::Edge(edge) => match (doc.edge_ref(edge), editor.edges_mut()) {
+            (Some(r), Some(list)) => {
+                match list.iter().position(|x| x.label == r.label) {
+                    Some(i) => {
+                        list.remove(i);
+                    }
+                    None => list.push(r),
                 }
                 None
             }

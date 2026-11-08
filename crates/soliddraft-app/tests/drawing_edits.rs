@@ -49,6 +49,65 @@ fn drawing(doc: &Document) -> DrawingDoc {
 }
 
 #[test]
+fn cropping_a_parent_refreshes_detail_picking_in_the_same_history_step() {
+    let doc = part(ProfileKind::Circle { diameter: 10.0 });
+    let ctx = PartContext::new(&doc).unwrap();
+    let certified = ctx.certified_part();
+    let mut drawing = drawing(&doc);
+    let top = ViewId(2);
+    let index = PartIndex::build(&certified).unwrap();
+    let (view, projected) = derived::new_detail(
+        &drawing.drawing,
+        &certified,
+        &index,
+        0,
+        top,
+        Point2::new(0.0, 0.0),
+        20.0,
+        Vec::new(),
+        2.0,
+        None,
+    )
+    .unwrap();
+    let detail = view.id;
+    drawing.apply(Command::PlaceView { sheet: 0, view }, None).unwrap();
+    drawing.remember(detail, &projected.projected);
+    let before = drawing.circles[&detail].clone();
+    assert!(!before.is_empty());
+    drawing
+        .apply(
+            Command::SetViewCrop {
+                view: top,
+                crop: Some(soliddraft_drawing::Boundary::rectangle(
+                    Point2::new(-200.0, -200.0),
+                    Point2::new(-1.0, 200.0),
+                )),
+            },
+            Some(&ctx),
+        )
+        .unwrap();
+    let source = ctx.part();
+    let index = PartIndex::build(&source).unwrap();
+    let fresh = project::ViewContext::compute(&drawing.drawing, &source, &index, detail).unwrap();
+    assert!(fresh.projected.circles.is_empty());
+    assert_eq!(drawing.circles[&detail], fresh.projected.circles);
+    assert_eq!(drawing.transforms[&detail], fresh.projected.transform);
+    assert!(drawing.drawing.view(detail).unwrap().geometry.unproved);
+    assert!(matches!(
+        soliddraft_drawing::export::bytes(
+            &soliddraft_drawing::display::layout_sheet(&drawing.drawing, 0),
+            soliddraft_drawing::export::Format::Svg,
+            "Circle",
+        ),
+        Err(soliddraft_drawing::DrawingError::Unproved)
+    ));
+    drawing.undo().unwrap();
+    assert_eq!(drawing.circles[&detail], before);
+    drawing.redo().unwrap();
+    assert_eq!(drawing.circles[&detail], fresh.projected.circles);
+}
+
+#[test]
 fn circle_picks_follow_sheet_view_and_inherited_scales_through_history() {
     let doc = part(ProfileKind::Circle { diameter: 10.0 });
     let original = drawing(&doc);

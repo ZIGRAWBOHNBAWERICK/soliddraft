@@ -156,6 +156,144 @@ fn crops_keep_only_what_is_inside() {
     ));
 }
 
+fn corner_detail(d: &mut Drawing, part: &Part, stack: &mut UndoStack, parent: ViewId, sheet: usize) -> ViewId {
+    let index = PartIndex::build(part).unwrap();
+    let ctx = derived::context(d, part, &index, parent).unwrap();
+    let (view, _) = derived::new_detail(
+        d,
+        part,
+        &index,
+        sheet,
+        parent,
+        ctx.xf.point(Vec3::new(40.0, 0.0, 10.0)),
+        5.0,
+        Vec::new(),
+        2.0,
+        None,
+    )
+    .unwrap();
+    let id = view.id;
+    run(stack, d, part, Command::PlaceView { sheet, view });
+    id
+}
+
+fn left_half() -> Boundary {
+    Boundary::rectangle(Point2::new(-200.0, -200.0), Point2::new(0.0, 200.0))
+}
+
+fn assert_fresh_detail(d: &Drawing, part: &Part, id: ViewId, empty: bool) {
+    let index = PartIndex::build(part).unwrap();
+    let fresh = derived::context(d, part, &index, id).unwrap();
+    assert_eq!(fresh.projected.geometry.curves.is_empty(), empty);
+    assert_eq!(d.view(id).unwrap().geometry, fresh.projected.geometry, "{id} must show its current parent");
+}
+
+fn drawing_roundtrip(d: &Drawing) -> Drawing {
+    let meta = soliddraft_drawing::file::FileMeta::new("box test", d.meta.units);
+    let bytes = soliddraft_drawing::file::to_bytes_with(d, &meta, false).unwrap();
+    soliddraft_drawing::file::from_bytes(&bytes).unwrap().0
+}
+
+#[test]
+fn parent_crop_refreshes_nested_details_across_sheets_history_and_save() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    for sheet in [0, 1] {
+        let mut d = drawing(&part);
+        let mut stack = UndoStack::new();
+        if sheet == 1 {
+            run(&mut stack, &mut d, &part, Command::AddSheet { name: "Sheet2".into(), template: "iso-a3".into() });
+        }
+        let detail = corner_detail(&mut d, &part, &mut stack, FRONT, sheet);
+        let nested = corner_detail(&mut d, &part, &mut stack, detail, 0);
+        for id in [detail, nested] {
+            assert_fresh_detail(&d, &part, id, false);
+        }
+        let before = d.clone();
+        run(&mut stack, &mut d, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+        for id in [detail, nested] {
+            assert_fresh_detail(&d, &part, id, true);
+        }
+        let cropped = d.clone();
+        stack.undo(&mut d).unwrap();
+        assert_eq!(d, before);
+        stack.redo(&mut d).unwrap();
+        assert_eq!(d, cropped);
+        let reopened = drawing_roundtrip(&d);
+        for id in [detail, nested] {
+            assert_fresh_detail(&reopened, &part, id, true);
+        }
+        for i in 0..reopened.sheets.len() {
+            assert!(export::bytes(&layout_sheet(&reopened, i), export::Format::Svg, "Box").is_ok());
+        }
+    }
+}
+
+#[test]
+fn removing_a_parent_crop_restores_detail_linework() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let mut stack = UndoStack::new();
+    run(&mut stack, &mut d, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    let detail = corner_detail(&mut d, &part, &mut stack, FRONT, 0);
+    assert_fresh_detail(&d, &part, detail, true);
+    run(&mut stack, &mut d, &part, Command::SetViewCrop { view: FRONT, crop: None });
+    assert_fresh_detail(&d, &part, detail, false);
+    assert_fresh_detail(&drawing_roundtrip(&d), &part, detail, false);
+}
+
+#[test]
+fn same_revision_rebuild_repairs_an_obsolete_fine_detail_cache() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut d, &part, &mut stack, FRONT, 0);
+    let obsolete = d.view(detail).unwrap().geometry.clone();
+    assert!(!obsolete.unproved && !obsolete.coarse && !obsolete.curves.is_empty());
+    run(&mut stack, &mut d, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    // An older saved drawing can already contain this obsolete cache.
+    d.view_mut(detail).unwrap().geometry = obsolete;
+    let mut d = drawing_roundtrip(&d);
+    assert_eq!(d.view(detail).unwrap().geometry.source_digest, part.digest.as_str());
+    update_from_model(&mut d, &part).unwrap();
+    assert_fresh_detail(&d, &part, detail, true);
+}
+
+#[test]
+fn detail_updates_preserve_coarse_and_fine_quality() {
+    let k = BoxKernel::new();
+    let mut part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut d, &part, &mut stack, FRONT, 0);
+    part.preview = true;
+    run(&mut stack, &mut d, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    assert_fresh_detail(&d, &part, detail, true);
+    assert!(d.view(detail).unwrap().geometry.coarse);
+    part.preview = false;
+    update_from_model(&mut d, &part).unwrap();
+    assert_fresh_detail(&d, &part, detail, true);
+    assert!(!d.view(detail).unwrap().geometry.coarse);
+    assert!(export::bytes(&layout_sheet(&d, 0), export::Format::Svg, "Box").is_ok());
+}
+
+#[test]
+fn excluded_details_keep_their_intentionally_frozen_geometry() {
+    let k = BoxKernel::new();
+    let part = box_part(&k, "block", Vec3::new(40.0, 30.0, 10.0));
+    let mut d = drawing(&part);
+    let mut stack = UndoStack::new();
+    let detail = corner_detail(&mut d, &part, &mut stack, FRONT, 0);
+    d.view_mut(detail).unwrap().excluded_from_update = true;
+    let frozen = d.view(detail).unwrap().geometry.clone();
+    run(&mut stack, &mut d, &part, Command::SetViewCrop { view: FRONT, crop: Some(left_half()) });
+    assert_eq!(d.view(detail).unwrap().geometry, frozen);
+    update_from_model(&mut d, &part).unwrap();
+    assert_eq!(d.view(detail).unwrap().geometry, frozen);
+}
+
 #[test]
 fn dimension_sets_measure_and_follow_the_part() {
     let k = BoxKernel::new();

@@ -861,6 +861,22 @@ pub fn view_bounds(view: &View) -> [f64; 4] {
     [x0 + view.position.u, y0 + view.position.v, x1 + view.position.u, y1 + view.position.v]
 }
 
+/// A view and its dependent descendants, parent first, across every sheet.
+pub fn dependent_views(drawing: &Drawing, parent: ViewId) -> Vec<ViewId> {
+    let mut out = vec![parent];
+    let mut i = 0;
+    while i < out.len() {
+        let parent = out[i];
+        for view in drawing.sheets.iter().flat_map(|sheet| &sheet.views) {
+            if view.parent() == Some(parent) && !out.contains(&view.id) {
+                out.push(view.id);
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 /// The views aligned to `parent`, directly or through other children.
 pub fn descendants(sheet: &Sheet, parent: ViewId) -> Vec<ViewId> {
     let mut out = Vec::new();

@@ -130,6 +130,10 @@ pub fn update_from_model(drawing: &mut Drawing, part: &Part) -> Result<UpdateRep
         if view.geometry.source_digest != part.digest.as_str()
             || (view.geometry.unproved && !ctx.projected.geometry.unproved)
             || (view.geometry.coarse && !ctx.projected.geometry.coarse)
+            // Parent definitions can change linework without changing the part revision.
+            || (view.geometry.unproved == ctx.projected.geometry.unproved
+                && view.geometry.coarse == ctx.projected.geometry.coarse
+                && view.geometry != ctx.projected.geometry)
         {
             view.geometry = ctx.projected.geometry.clone();
             report.views_updated += 1;
@@ -209,19 +213,26 @@ pub fn reattach_view(drawing: &mut Drawing, part: &Part, id: ViewId, entity: Ent
     regenerate_view(drawing, part, id)
 }
 
-/// Remakes one view's line work and re-resolves its annotations, keeping placement
-/// and the last accepted dimension values.
+/// Remakes a view and its dependent descendants, keeping placement and accepted
+/// dimension values. Descendants excluded from updates keep their linework.
 pub fn regenerate_view(drawing: &mut Drawing, part: &Part, id: ViewId) -> Result<(), DrawingError> {
     let index = PartIndex::build(part)?;
     let mut contexts = Contexts::new();
-    project::compute_in(drawing, part, &index, id, &mut contexts)?;
-    follow_parent(drawing, id, &contexts);
-    let geometry = contexts[&id].projected.geometry.clone();
-    drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.geometry = geometry;
+    let ids: Vec<_> = project::dependent_views(drawing, id)
+        .into_iter()
+        .filter(|child| *child == id || !drawing.view(*child).is_some_and(|v| v.excluded_from_update))
+        .collect();
+    for &id in &ids {
+        project::compute_in(drawing, part, &index, id, &mut contexts)?;
+        follow_parent(drawing, id, &contexts);
+        let geometry = contexts[&id].projected.geometry.clone();
+        drawing.view_mut(id).ok_or(DrawingError::UnknownView(id))?.geometry = geometry;
+    }
     for sheet in &mut drawing.sheets {
         let symbols = &library::template(sheet.template.as_str()).style_file().symbols;
-        for a in sheet.annotations.iter_mut().filter(|a| a.view == id) {
-            re_resolve(a, &index, &contexts[&id], symbols);
+        for a in sheet.annotations.iter_mut().filter(|a| ids.contains(&a.view)) {
+            let context = &contexts[&a.view];
+            re_resolve(a, &index, context, symbols);
         }
     }
     Ok(())

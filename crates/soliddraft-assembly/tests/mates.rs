@@ -826,7 +826,7 @@ fn parallel_and_perpendicular_hold_turns_only() {
 }
 
 /// A Lock keeps B where it is relative to A, fixes all six motions between them, survives
-/// a save, and refuses a relative turn off the quarter turns instead of rounding it.
+/// a save, and labels a relative turn off the quarter turns as bounded.
 #[test]
 fn a_lock_keeps_the_relative_placement() {
     let mut r = rig("lock", 10.0);
@@ -855,19 +855,16 @@ fn a_lock_keeps_the_relative_placement() {
     assert_eq!(r.doc.solver().state, SolverState::Solved);
     turned(r.placement(r.b).rotation, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
 
-    // Thirty degrees between them is refused, and nothing changes.
+    // Thirty degrees between them is retained with a bounded proof.
     let mut r = rig("lock-oblique", 10.0);
     let path = OccurrencePath::root().child(Step::component(r.b));
     let oblique = Placement::new(DQuat::from_rotation_z(30f64.to_radians()), DVec3::new(10.0, 10.0, 30.0));
     r.doc.move_to(&[(path, oblique)]).unwrap();
-    let before = r.state();
-    let refused = r.doc.mate_lock("L", r.a, r.b, false).unwrap_err();
-    assert_eq!(refused.code, RefusalCode::UnsupportedPlacement, "{refused}");
-    assert_eq!(refused.mates, ["L"]);
-    assert!(refused.message.contains("quarter-turn"), "{refused}");
-    assert_eq!(r.state(), before, "a refused lock changes nothing");
+    r.doc.mate_lock("L", r.a, r.b, false).unwrap();
+    assert_eq!(r.placement(r.b), oblique);
+    assert!(r.doc.solver().bounded.iter().any(|p| p.mate == "L" && p.certainty == "bounded"));
 
-    // The same thirty degrees written into a file is refused when it solves.
+    // A stored general relative turn solves through the same bounded path.
     let mut r = rig("lock-file", 10.0);
     r.doc.mate_lock("L", r.a, r.b, false).unwrap();
     r.doc.save(None).unwrap();
@@ -881,8 +878,8 @@ fn a_lock_keeps_the_relative_placement() {
     truth.save(&r.root, package.id(), None, &[]).unwrap();
     r.doc = AssemblyDocument::open(&r.root, options()).unwrap();
     r.doc.finish_loading();
-    let refused = r.doc.set_value("gap", "5 mm").unwrap_err();
-    assert_eq!((refused.code, refused.mates), (RefusalCode::UnsupportedPlacement, vec!["L".to_owned()]));
+    r.doc.set_value("gap", "5 mm").unwrap();
+    assert!(r.doc.solver().bounded.iter().any(|p| p.mate == "L"));
 }
 
 /// Width holds B's x sides between A's: centred, at a gap from one face or the other, or at
@@ -937,13 +934,15 @@ fn width_puts_the_tab_in_the_groove() {
     );
     assert_eq!(r.state(), before);
 
-    // A groove whose faces are not parallel is refused by name.
+    // Nonparallel Width supports Centered and refuses Free by name.
     let mut r = rig("width-skew", 10.0);
     let (g0, g1, t0, t1) = (side(r.a, X), top(r.a), side(r.b, X), side(r.b, [-1.0, 0.0, 0.0]));
     let before = r.state();
-    let refused = r.doc.mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &WidthInput::Centered, false);
-    assert_eq!(refused.unwrap_err().code, RefusalCode::NotParallel);
+    let refused = r.doc.mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &WidthInput::Free, false);
+    assert_eq!(refused.unwrap_err().code, RefusalCode::UnsupportedReference);
     assert_eq!(r.state(), before);
+    r.doc.mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &WidthInput::Centered, false).unwrap();
+    assert!(r.doc.solver().bounded.iter().any(|p| p.mate == "W"));
 }
 
 /// A part's datum planes and its plane features mate like faces, proved from their

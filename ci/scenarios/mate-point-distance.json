@@ -1,0 +1,435 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-point-distance",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "rotation": [
+            0,
+            0,
+            0.19866933079506122,
+            0.9800665778412416
+          ],
+          "translation": [
+            3,
+            4,
+            20
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "D",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "12 mm",
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ],
+      "fresh_process": true
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Invalid",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "-1 mm",
+        "alignment": "aligned"
+      },
+      "refused": "invalid_value",
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid_value"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "D"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_parallel",
+      "arguments": {
+        "name": "Right plane",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_parallel",
+      "arguments": {
+        "name": "Top plane",
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "D",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "0 mm",
+        "alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "D"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Zero axes",
+        "a": {
+          "component": 2,
+          "edge": [
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "edge": [
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "0 mm",
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/free/0/motion",
+          "equals": "translate_z"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Axial",
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "distance": "5 mm",
+        "alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 24,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "fresh_process": true
+    },
+    {
+      "tool": "assembly_update",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        }
+      ]
+    }
+  ]
+}

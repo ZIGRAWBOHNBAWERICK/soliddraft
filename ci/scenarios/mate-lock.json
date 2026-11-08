@@ -421,12 +421,12 @@
       "arguments": {
         "name": "Skew",
         "a": 2,
-        "b": 7
+        "b": 2
       },
       "checks": [
         {
           "pointer": "/result/refused",
-          "equals": "unsupported_placement"
+          "equals": "invalid"
         },
         {
           "pointer": "/summary/assembly/accepted_state",
@@ -434,19 +434,9 @@
             "step": 18,
             "pointer": "/summary/assembly/accepted_state"
           }
-        },
-        {
-          "pointer": "/result/mates",
-          "equals": [
-            "Skew"
-          ]
-        },
-        {
-          "pointer": "/result/message",
-          "contains": "quarter-turn"
         }
       ],
-      "refused": "unsupported_placement"
+      "refused": "invalid"
     },
     {
       "tool": "insert_component",

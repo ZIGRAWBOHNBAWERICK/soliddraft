@@ -1243,6 +1243,10 @@ impl Kernel for CatallaxKernel {
         self.observe("entity_support", || assembly_measure::entity_support(self, body, entity))
     }
 
+    fn entity_support_enclosed(&self, body: BodyId, entity: SupportEntity) -> KernelResult<EnclosedSupport> {
+        self.observe("entity_support_enclosed", || assembly_measure::enclosed_support(self, body, entity))
+    }
+
     fn history(&self, body: BodyId) -> KernelResult<Vec<HistoryRecord>> {
         self.observe("history", || Ok(self.state()?.get(body)?.history.clone()))
     }

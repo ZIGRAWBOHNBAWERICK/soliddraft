@@ -24,6 +24,10 @@ of the MCP server: the same id, the same JSON arguments checked against the same
 schema, and the same undo steps. `soliddraft commands --json` lists every command
 with its parameters, and says why a command that needs the window does.
 
+Assembly scripts use the same static mate transactions. assembly_mate_angle takes
+signed degrees and an explicit reference direction; assembly_mate_limit_angle takes
+inclusive min_degrees and max_degrees. General motions report bounded proofs.
+
 A script holds one command per line: the id, then its arguments as one JSON object,
 left out when the command takes none. Blank lines and lines starting with # are
 skipped. Each result prints as one line of JSON. Nothing is saved unless a command

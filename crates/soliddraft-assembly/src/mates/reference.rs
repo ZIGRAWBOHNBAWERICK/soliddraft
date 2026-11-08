@@ -133,6 +133,7 @@ impl SupportProof {
         let f = |c: &ExactRational| rational(c).map_or(f64::NAN, |r| nearest(&r));
         let r = |r: &Option<ExactRadius>| r.as_ref().map(|r| (f(&r.squared).sqrt(), r.outward));
         match &self.support {
+            ExactSupport::Enclosed(support) => Some(StoredSupport::Enclosed { support: support.clone() }),
             ExactSupport::Plane(_) => None,
             ExactSupport::Axis(a) => {
                 let (radius, outward) = r(&a.radius).map_or((None, None), |(v, o)| (Some(v), o));
@@ -204,7 +205,7 @@ impl StoredSupport {
         match self {
             StoredSupport::Profile { .. } => Some(ShapeKind::Profile),
             StoredSupport::Slot { .. } => Some(ShapeKind::Slot),
-            StoredSupport::Axis { .. } | StoredSupport::Point { .. } => None,
+            StoredSupport::Enclosed { .. } | StoredSupport::Axis { .. } | StoredSupport::Point { .. } => None,
         }
     }
 }
@@ -393,6 +394,9 @@ impl AssemblyDocument {
             (None, _) => false,
             (Some(StoredSupport::Axis { direction, .. }), ExactSupport::Axis(a)) => a.direction() != *direction,
             (Some(StoredSupport::Point { .. }), ExactSupport::Point(_)) => false,
+            (Some(StoredSupport::Enclosed { support: old }), ExactSupport::Enclosed(new)) => {
+                std::mem::discriminant(old.as_ref()) != std::mem::discriminant(new.as_ref())
+            }
             (Some(_), _) => true,
         };
         if changed {
@@ -662,24 +666,36 @@ fn support_of(
         SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
         SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
     };
-    let support = part.kernel().entity_support(body, entity).map_err(|e| {
-        let planar = match entity {
-            SupportEntity::Face(face) => part
-                .kernel()
-                .topology(body)
-                .ok()
-                .and_then(|t| t.face(face).map(|f| f.surface == SurfaceKind::Plane))
-                .unwrap_or(false),
-            _ => false,
-        };
-        let code = match e {
-            KernelError::Unsupported(_) if planar => RefusalCode::UnsupportedPlane,
-            KernelError::Unsupported(_) => RefusalCode::UnsupportedReference,
-            _ => RefusalCode::ProofUnavailable,
-        };
-        let named = if label.is_empty() { String::new() } else { format!(", {label}") };
-        MateRefusal::new(code, format!("{}{named}: {e}", r.path))
-    })?;
+    let support = part
+        .kernel()
+        .entity_support(body, entity)
+        .or_else(|error| {
+            if matches!(error, KernelError::Unsupported(_)) {
+                part.kernel()
+                    .entity_support_enclosed(body, entity)
+                    .map(|support| ExactSupport::Enclosed(Box::new(support)))
+            } else {
+                Err(error)
+            }
+        })
+        .map_err(|e| {
+            let planar = match entity {
+                SupportEntity::Face(face) => part
+                    .kernel()
+                    .topology(body)
+                    .ok()
+                    .and_then(|t| t.face(face).map(|f| f.surface == SurfaceKind::Plane))
+                    .unwrap_or(false),
+                _ => false,
+            };
+            let code = match e {
+                KernelError::Unsupported(_) if planar => RefusalCode::UnsupportedPlane,
+                KernelError::Unsupported(_) => RefusalCode::UnsupportedReference,
+                _ => RefusalCode::ProofUnavailable,
+            };
+            let named = if label.is_empty() { String::new() } else { format!(", {label}") };
+            MateRefusal::new(code, format!("{}{named}: {e}", r.path))
+        })?;
     Ok(SupportProof { document, revision: r.pinned.clone(), geometry: part.geometry_hash(), support, label })
 }
 

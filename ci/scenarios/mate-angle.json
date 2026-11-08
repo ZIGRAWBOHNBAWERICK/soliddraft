@@ -1,0 +1,338 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-angle",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              40,
+              50,
+              0
+            ],
+            "width": 180,
+            "height": 160
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              60,
+              45,
+              0
+            ],
+            "width": 120,
+            "height": 90
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              5,
+              45,
+              0
+            ],
+            "width": 10,
+            "height": 90
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 60,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "rotation": [
+            0,
+            0,
+            0.19866933079506122,
+            0.9800665778412416
+          ],
+          "translation": [
+            3,
+            4,
+            20
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_angle",
+      "arguments": {
+        "name": "A",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "degrees": 30
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Gap",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "distance": "5 mm",
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 17,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ],
+      "fresh_process": true
+    },
+    {
+      "tool": "assembly_mate_angle",
+      "arguments": {
+        "name": "Invalid",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "degrees": 181
+      },
+      "refused": "invalid_value",
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid_value"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 18,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ]
+    }
+  ]
+}

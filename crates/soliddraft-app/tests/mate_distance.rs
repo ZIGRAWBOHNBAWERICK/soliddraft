@@ -205,8 +205,7 @@ fn faces_are_found_or_refused_by_what_they_are() {
     assert!(malformed.to_string().contains("alignment"), "{malformed}");
     assert_eq!(r.accepted(), before);
 
-    // A curved face has no plane to measure, and a face placed off the world axes is not
-    // proved.
+    // A curved face has no plane to measure. Planes are read at their stored placements.
     let (round, turned) = (r.dir.join("round.dwprt"), r.dir.join("b.dwprt"));
     r.ok("new_part", json!({}));
     let circle = json!({ "shape": "circle", "center": [0, 0, 0], "diameter": 10 });
@@ -242,16 +241,24 @@ fn faces_are_found_or_refused_by_what_they_are() {
     };
     assert_eq!(at(&mated, round), json!([20.0, 80.0, 0.0]));
     r.ok("assembly_delete_mate", json!({ "mate": "C" }));
-    // Measuring reads the placements as they stand, so a face placed off the world axes is
-    // not proved.
+    // The selected planes are not parallel at their current placements.
     let measured = json!({ "a": side(turned, x), "b": side(upright, x) });
-    r.refused("assembly_measure_planes", measured, "unsupported_placement");
-    // A mate may turn a part nothing else holds: the Coincident turns the part onto the
-    // axes, as it turns any part held by one face, and its planes are then proved exactly.
+    r.refused("assembly_measure_planes", measured, "not_parallel");
+    // A Coincident aligns the free parts and proves their gap. Their remaining group
+    // motion does not prescribe a world-axis orientation.
     let off = coincident("C", side(turned, x), side(upright, x), "aligned");
     let mated = r.ok(tool, off);
-    let q = &mated["assembly"]["components"][3]["rotation"];
-    assert!(q[2].as_f64().unwrap().abs() < 1e-9 && q[3].as_f64().unwrap().abs() > 1.0 - 1e-9, "{q}");
     let c = mated["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "C").unwrap();
-    assert_eq!(c["measurement"]["rational"], "0", "{c}");
+    assert_eq!(c["status"], "ok", "{c}");
+    assert!(c["measurement"]["value"].as_f64().unwrap().abs() <= 1e-9, "{c}");
+    match c["measurement"]["certainty"].as_str() {
+        Some("exact") => assert_eq!(c["measurement"]["rational"], "0", "{c}"),
+        Some("bounded") => {
+            assert_eq!(c["proof"]["certainty"], "bounded", "{c}");
+            assert_eq!(c["proof"]["bound_mm"], 1e-9);
+            assert_eq!(c["proof"]["bound_angle"], 1e-9);
+            assert!(c["measurement"]["rational"].as_str().is_none_or(str::is_empty));
+        }
+        _ => panic!("measurement needs a proof tier: {c}"),
+    }
 }

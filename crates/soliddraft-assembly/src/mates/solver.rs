@@ -159,6 +159,8 @@ pub(crate) enum WidthMode {
 #[allow(clippy::large_enum_variant, reason = "a solve holds one per mate, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Constraint {
+    /// A relation requiring the bounded rigid-motion solver.
+    Motion { mate: String, relation: Box<super::motion::Relation> },
     /// The body's origin on a frame: the root's origin for the root's own mates, a
     /// sub-assembly's frame for its mates.
     Origin { mate: String, body: Body, axes: bool, at: Placement },
@@ -218,9 +220,10 @@ pub(crate) enum Constraint {
 }
 
 impl Constraint {
-    fn mate(&self) -> &str {
+    pub(super) fn mate(&self) -> &str {
         match self {
-            Constraint::Origin { mate, .. }
+            Constraint::Motion { mate, .. }
+            | Constraint::Origin { mate, .. }
             | Constraint::Parallel { mate, .. }
             | Constraint::Perpendicular { mate, .. }
             | Constraint::Lock { mate, .. }
@@ -237,7 +240,7 @@ impl Constraint {
     }
 
     /// The bodies a constraint between bodies ties.
-    fn tied(&self) -> Vec<&Body> {
+    pub(super) fn tied(&self) -> Vec<&Body> {
         match self {
             Constraint::Parallel { a, b, .. }
             | Constraint::Perpendicular { a, b, .. }
@@ -251,6 +254,7 @@ impl Constraint {
             | Constraint::Spin { a, b, .. } => vec![a, b],
             Constraint::Symmetric { a, b, s, .. } => vec![a, b, s],
             Constraint::Coupler { a, b, .. } => [&a.body, &b.body].into_iter().chain(&a.from).chain(&b.from).collect(),
+            Constraint::Motion { relation, .. } => relation.bodies(),
             Constraint::Origin { .. } => Vec::new(),
         }
     }
@@ -288,7 +292,7 @@ impl FreeMotion {
         describe(self)
     }
 
-    fn of(body: &Body, motion: &str) -> FreeMotion {
+    pub(super) fn of(body: &Body, motion: &str) -> FreeMotion {
         let component = body.steps().last().map_or(ComponentId(0), |s| s.component);
         let path = (body.steps().len() > 1).then(|| body.clone());
         FreeMotion { component, path, motion: motion.to_owned() }
@@ -316,13 +320,22 @@ pub struct SolverStatus {
     pub remaining_dof: usize,
     /// The motions one component can make alone. Group motions are only counted.
     pub free: Vec<FreeMotion>,
+    /// Certified bounds for groups that need general rigid motions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bounded: Vec<super::motion::BoundedProof>,
     /// Problems, for people.
     pub diagnostics: Vec<String>,
 }
 
 impl SolverStatus {
     pub(crate) fn error(diagnostic: String) -> SolverStatus {
-        SolverStatus { state: SolverState::Error, remaining_dof: 0, free: Vec::new(), diagnostics: vec![diagnostic] }
+        SolverStatus {
+            state: SolverState::Error,
+            remaining_dof: 0,
+            free: Vec::new(),
+            diagnostics: vec![diagnostic],
+            bounded: Vec::new(),
+        }
     }
 }
 
@@ -721,6 +734,7 @@ impl<'a> Search<'a> {
         let mut from_planes = vec![None; constraints.len()];
         for (i, c) in constraints.iter().enumerate() {
             match c {
+                Constraint::Motion { .. } => unreachable!("bounded constraints use the motion solver"),
                 Constraint::Origin { mate, body, axes, at } => {
                     if *axes {
                         let (g, offset) = of(body);
@@ -1148,6 +1162,7 @@ fn rotations(
         .collect();
     for c in constraints {
         match c {
+            Constraint::Motion { .. } => unreachable!("bounded constraints use the motion solver"),
             Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, .. } => {
                 let (na, nb) = (world(known[a], plane_a.normal, mate)?, world(known[b], plane_b.normal, mate)?);
                 let wanted = if *sign > 0 { na } else { negate(na) };
@@ -1302,6 +1317,7 @@ fn asks<'a>(
     let mut out = Asks { edges: Default::default(), bounds: Default::default(), rows: Vec::new() };
     for c in constraints {
         match c {
+            Constraint::Motion { .. } => unreachable!("bounded constraints use the motion solver"),
             Constraint::Origin { mate, body, at, .. } => {
                 for axis in 0..3 {
                     let gap = finite(at.translation[axis], mate, "the frame")?;
@@ -1986,7 +2002,7 @@ fn place<'a>(
 }
 
 /// The placements that satisfy `constraints`, starting from `bodies`.
-pub(crate) fn solve(
+pub(super) fn solve_exact(
     bodies: &BTreeMap<Body, Placement>,
     constraints: &[Constraint],
 ) -> Result<BTreeMap<Body, Placement>, MateRefusal> {
@@ -2005,6 +2021,13 @@ pub(crate) fn solve(
             (body.clone(), if kept { *authored } else { Placement::new(rotation, t) })
         })
         .collect())
+}
+
+pub(crate) fn solve(
+    bodies: &BTreeMap<Body, Placement>,
+    constraints: &[Constraint],
+) -> Result<BTreeMap<Body, Placement>, MateRefusal> {
+    super::motion::solve(bodies, constraints)
 }
 
 /// One row of the constraint Jacobian over six motions per body, translation first.
@@ -2032,6 +2055,7 @@ fn jacobian(
     let mut rows = Vec::new();
     for c in constraints {
         match c {
+            Constraint::Motion { .. } => unreachable!("bounded constraints use the motion solver"),
             Constraint::Origin { body, axes, .. } => {
                 let at = index[body] * 6;
                 for k in 0..3 {
@@ -2381,7 +2405,7 @@ const MOTIONS: [&str; 6] = ["translate_x", "translate_y", "translate_z", "spin_x
 
 /// How many motions remain of the mated `bodies` at their placements, and those one
 /// body can make alone.
-pub(crate) fn freedoms(
+pub(super) fn freedoms_exact(
     bodies: &BTreeMap<Body, Placement>,
     constraints: &[Constraint],
 ) -> Result<(usize, Vec<FreeMotion>), MateRefusal> {
@@ -2405,6 +2429,13 @@ pub(crate) fn freedoms(
     Ok((index.len() * 6 - rank(rows), free))
 }
 
+pub(crate) fn freedoms(
+    bodies: &BTreeMap<Body, Placement>,
+    constraints: &[Constraint],
+) -> Result<(usize, Vec<FreeMotion>), MateRefusal> {
+    super::motion::freedoms(bodies, constraints)
+}
+
 /// Names a motion for people.
 pub(crate) fn describe(m: &FreeMotion) -> String {
     let (kind, axis) = m.motion.split_once('_').unwrap_or((&m.motion, ""));
@@ -2422,6 +2453,7 @@ pub(crate) fn describe(m: &FreeMotion) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::{freedoms_exact as freedoms, solve_exact as solve};
 
     fn body(id: u32) -> Body {
         OccurrencePath::root().child(crate::path::Step::component(ComponentId(id)))

@@ -48,6 +48,11 @@ pub(crate) struct End {
 #[allow(clippy::large_enum_variant, reason = "a solve holds one per mate, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Rule {
+    Angle {
+        min: f64,
+        max: f64,
+        limit: bool,
+    },
     /// Parallel by `sign`, and a distance apart when there is one. A Coincident is a
     /// distance of zero and says so, since it also puts axes and points on each other; a
     /// Parallel has none.
@@ -66,7 +71,7 @@ pub(crate) enum Rule {
     /// axes' directions, and `lock` is `b`'s stored turn in `a`'s frame.
     Concentric {
         sign: Option<i8>,
-        lock: Option<[[i8; 3]; 3]>,
+        lock: Option<super::StoredTurn>,
     },
     /// A plane and a cylinder or sphere: `sign` relates the curved face's outward normal at
     /// the contact to the plane's.
@@ -104,13 +109,13 @@ pub(crate) enum Rule {
     Profile {
         sign: i8,
         distance: f64,
-        lock: Option<[[i8; 3]; 3]>,
+        lock: Option<super::StoredTurn>,
     },
     /// The ends are the slot, then the pin.
     Slot {
         sign: i8,
         mode: solver::SlotMode,
-        lock: Option<[[i8; 3]; 3]>,
+        lock: Option<super::StoredTurn>,
     },
 }
 
@@ -413,6 +418,10 @@ impl AssemblyDocument {
                             }
                             Mate::Parallel { alignment, .. } => {
                                 Rule::Parallel { sign: sign(alignment), distance: None, coincident: false }
+                            }
+                            Mate::Angle { degrees, .. } => Rule::Angle { min: *degrees, max: *degrees, limit: false },
+                            Mate::LimitAngle { min_degrees, max_degrees, .. } => {
+                                Rule::Angle { min: *min_degrees, max: *max_degrees, limit: true }
                             }
                             Mate::Perpendicular { .. } => Rule::Perpendicular,
                             Mate::Width { alignment, constraint, .. } => {

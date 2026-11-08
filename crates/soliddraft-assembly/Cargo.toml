@@ -22,6 +22,7 @@ num-traits.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror.workspace = true
+libm = "0.2"
 
 [dev-dependencies]
 proptest.workspace = true

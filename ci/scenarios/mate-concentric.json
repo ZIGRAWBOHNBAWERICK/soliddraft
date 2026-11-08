@@ -666,18 +666,19 @@
         "name": "C60",
         "a": {
           "component": 8,
-          "face": "CirPattern1 · Copy 1 face 7"
+          "face": "CirPattern1 \u00b7 Copy 1 face 7"
         },
         "b": {
           "component": 10,
           "feature": "Boss-Extrude1",
           "generator": "side"
-        }
+        },
+        "require_fully_constrained": true
       },
       "checks": [
         {
           "pointer": "/result/refused",
-          "equals": "unsupported_reference"
+          "equals": "under_constrained"
         },
         {
           "pointer": "/summary/assembly/accepted_state",
@@ -685,17 +686,9 @@
             "step": 34,
             "pointer": "/summary/assembly/accepted_state"
           }
-        },
-        {
-          "pointer": "/result/message",
-          "contains": "tabs.dwprt, CirPattern1 · Copy 1 face 7"
-        },
-        {
-          "pointer": "/result/message",
-          "contains": "not structurally rational"
         }
       ],
-      "refused": "unsupported_reference"
+      "refused": "under_constrained"
     },
     {
       "tool": "assembly_mate_concentric",

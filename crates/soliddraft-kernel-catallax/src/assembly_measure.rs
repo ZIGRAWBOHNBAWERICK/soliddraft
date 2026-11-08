@@ -3,8 +3,8 @@
 //! A cylinder keeps its axis origin, direction and squared radius, a cone its apex and
 //! direction, a sphere its centre and radius, a circle its centre, normal and squared
 //! radius, a line its origin and direction, and an explicit vertex its point. Each is read
-//! as it is stored: a value that is not syntactically rational, or a direction off the
-//! world axes, is refused. Nothing here does numerical work.
+//! as it is stored. The exact reader refuses non-rational values and off-axis directions.
+//! The separate enclosed reader bounds those definitions through Catallax's Decider.
 
 use catallax_numbers::{Rational, Real, Sign};
 use catallax_shapes::{Curve, Point3, PointDef, Surface, Vector3};
@@ -170,6 +170,95 @@ pub(super) fn entity_support(k: &CatallaxKernel, body: BodyId, entity: SupportEn
     }
 }
 
+fn enclosed_number(value: &Real) -> KernelResult<SupportBounds> {
+    use catallax_numbers::{Decider, OperationSpan};
+    let mut decider = Decider::default();
+    let width = Rational::from_i64(1) / Rational::from_i64(1 << 60);
+    let span = OperationSpan::begin("brep", &"entity_support_enclosed", "entity_support_enclosed", &decider);
+    let result = decider.enclose(value, &width);
+    span.finish(&decider, result.as_ref().err(), None);
+    let ball = result.map_err(|e| crate::query_error("entity_support_enclosed", e))?;
+    Ok(SupportBounds { lo: exact(&ball.lo()), hi: exact(&ball.hi()) })
+}
+
+pub(super) fn enclosed_support(
+    k: &CatallaxKernel,
+    body: BodyId,
+    entity: SupportEntity,
+) -> KernelResult<EnclosedSupport> {
+    let solid = k.solid(body)?;
+    let model = &solid.app.checkpoint.built().model;
+    let coords = |v: [&Real; 3]| -> KernelResult<[SupportBounds; 3]> {
+        Ok([enclosed_number(v[0])?, enclosed_number(v[1])?, enclosed_number(v[2])?])
+    };
+    let axis = |direction: &Vector3,
+                through: &Point3,
+                radius: Option<&Real>,
+                outward: Option<bool>|
+     -> KernelResult<EnclosedSupport> {
+        let direction = coords([&direction.x, &direction.y, &direction.z])?;
+        let through = coords([&through.x, &through.y, &through.z])?;
+        let radius_squared = radius.map(enclosed_number).transpose()?;
+        Ok(EnclosedSupport::Axis { direction, through, radius_squared, outward })
+    };
+    match entity {
+        SupportEntity::Face(face) => {
+            let id = solid
+                .ids
+                .faces
+                .iter()
+                .find_map(|(id, f)| (*f == face).then_some(*id))
+                .ok_or(KernelError::UnknownFace { body, face })?;
+            let native = model.face(id);
+            let outward = Some(native.sense == Sense::Same);
+            match model.geom().surface(native.surface) {
+                Surface::Plane(p) => {
+                    let sign = if native.sense == Sense::Same { Real::from_i64(1) } else { Real::from_i64(-1) };
+                    let normal = coords([&(&p.normal.x * &sign), &(&p.normal.y * &sign), &(&p.normal.z * &sign)])?;
+                    let through = coords([&p.origin.x, &p.origin.y, &p.origin.z])?;
+                    Ok(EnclosedSupport::Plane { normal, through })
+                }
+                Surface::Cylinder(c) => axis(&c.axis, &c.origin, Some(&c.radius_sq), outward),
+                Surface::Cone(c) => axis(&c.axis, &c.apex, None, outward),
+                Surface::Sphere(s) => {
+                    let at = coords([&s.center.x, &s.center.y, &s.center.z])?;
+                    let squared = &s.radius * &s.radius;
+                    let radius_squared = Some(enclosed_number(&squared)?);
+                    Ok(EnclosedSupport::Point { at, radius_squared, outward })
+                }
+                _ => Err(unsupported("Torus and spline faces have no supported analytic mate definition".into())),
+            }
+        }
+        SupportEntity::Edge(edge) => {
+            let id = solid
+                .ids
+                .edges
+                .iter()
+                .find_map(|(id, e)| (*e == edge).then_some(*id))
+                .ok_or(KernelError::UnknownEdge { body, edge })?;
+            match model.geom().curve(model.edge(id).curve) {
+                Curve::Line(l) => axis(&l.dir, &l.origin, None, None),
+                Curve::Circle(c) => axis(&c.normal, &c.center, Some(&c.radius_sq), None),
+                _ => Err(unsupported("Only line and circle edges have enclosed mate supports".into())),
+            }
+        }
+        SupportEntity::Vertex(vertex) => {
+            let id = solid
+                .ids
+                .vertices
+                .iter()
+                .find_map(|(id, v)| (*v == vertex).then_some(*id))
+                .ok_or_else(|| KernelError::InvalidInput(format!("unknown vertex {vertex}")))?;
+            match model.geom().point(model.vertex(id).point) {
+                PointDef::Explicit(p) => {
+                    Ok(EnclosedSupport::Point { at: coords([&p.x, &p.y, &p.z])?, radius_squared: None, outward: None })
+                }
+                _ => Err(unsupported("Intersection-only vertices have no explicit mate point".into())),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,6 +372,21 @@ mod tests {
             if refused {
                 assert_eq!(bad.len(), 1, "{angle} degrees: {bad:?}");
                 assert!(bad[0].contains("not structurally rational"), "{}", bad[0]);
+                let topology = k.topology(pins).unwrap();
+                let face = topology
+                    .faces
+                    .iter()
+                    .find(|f| {
+                        f.surface == SurfaceKind::Cylinder && k.entity_support(pins, SupportEntity::Face(f.id)).is_err()
+                    })
+                    .unwrap();
+                let bounded = k.entity_support_enclosed(pins, SupportEntity::Face(face.id)).unwrap();
+                let EnclosedSupport::Axis { through, radius_squared: Some(radius), .. } = bounded else {
+                    panic!("an enclosed cylinder")
+                };
+                assert_eq!(radius.lo, whole(4));
+                assert_eq!(radius.hi, whole(4));
+                assert_ne!(through[1].lo, through[1].hi, "the algebraic centre keeps a nonzero enclosure width");
             } else {
                 assert!(bad.is_empty(), "{angle} degrees: {bad:?}");
             }

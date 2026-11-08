@@ -428,7 +428,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP assembly and Width mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B1: Width mates between two parallel groove faces and two parallel tab faces, centred, by percent of the play from either face and by a dimension driven by an assembly value; non-parallel faces refused, a percentage out of range refused, a conflicting distance refused naming both mates, undo, save and reopen.",
+      "supported_limits": "B1: Width mates between two parallel groove faces and two parallel tab faces, centred, by percent of the play from either face and by a dimension driven by an assembly value; Free between nonparallel faces refused, a percentage out of range refused, a conflicting distance refused naming both mates, undo, save and reopen.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
@@ -444,7 +444,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP assembly and Lock mate commands -> assembly transaction -> stored relative placement -> exact difference solve",
-      "supported_limits": "B1: Lock mates storing a relative placement between root part components; a conflicting distance refused naming both mates, save and reopen, a 30 degree relative rotation refused as unsupported_placement, a quarter-turn relative rotation accepted.",
+      "supported_limits": "B1: Lock mates storing a relative placement between root part components; a conflicting distance refused naming both mates, save and reopen, a same-component Lock refused and a quarter-turn relative rotation accepted. General relative turns are covered by mate-bounded.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
@@ -460,7 +460,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP assembly and Concentric mate commands -> assembly transaction -> proven axis query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B2: Concentric mates between axes read exactly from cylinders on root part components: a shaft in a bore placed exactly, a strict refusal naming what stays free, Lock rotation stored as a quarter-turn matrix, a distance edit refused, save and reopen; a hole copied by a 60 degree circular pattern refused as unsupported_reference by name, the original hole taking a pin exactly, undo and redo.",
+      "supported_limits": "B2: Concentric mates between axes read from cylinders on root part components: a shaft in a bore placed exactly, a strict refusal naming what stays free, Lock rotation stored as a quarter-turn matrix, a distance edit refused, save and reopen; a strict request on a hole copied by a 60-degree circular pattern refused as under_constrained, the original hole taking a pin exactly, undo and redo.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt, work/tabs.dwprt, work/pin.dwprt and work/rig.dwasm"
     },
     {
@@ -508,7 +508,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP assembly and Coincident, Distance, Parallel and Perpendicular mate commands on edges and vertices -> assembly transaction -> proven axis and point queries -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B2: Coincident between two vertices, a straight edge in a plane, a vertex at a distance from a plane and its edit, Parallel between two straight edges, a Perpendicular against it refused naming both, a distance between two vertices refused as unsupported_reference, save and reopen.",
+      "supported_limits": "B2: Coincident between two vertices, a straight edge in a plane, a vertex at a distance from a plane and its edit, Parallel between two straight edges, a Perpendicular against it refused naming both, negative point-point Distance refused without state changes, save and reopen. Positive Euclidean Distance is covered by mate-point-distance.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
@@ -590,6 +590,86 @@
       "route": "MCP assembly and Slot mate commands -> assembly transaction -> slot recognition from proven walls and round ends -> Catallax adapter -> pinned kernel",
       "supported_limits": "B4: Slot between a straight, axis-aligned slot cut through a block and a pin's cylinder: a block's top refused as unsupported_reference by name, the pin free and stopped at the far end, Lock rotation, a distance along the slot edited and flipped, undo, redo, save and reopen.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/pin.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-angle",
+      "file": "ci/scenarios/mate-angle.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+      "supported_limits": "B5: a real bracket at a signed 30-degree angle about an explicit reference direction and a 5 mm gap; residual bounds 1e-9 mm and 1e-9 rad; save, fresh reopen and invalid-angle refusal without state changes.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+    },
+    {
+      "id": "mate-bounded",
+      "file": "ci/scenarios/mate-bounded.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+      "supported_limits": "B5: earlier static mate families on rotated parts, curved Tangent, axis-axis Distance, signed Angle and Limit Angle including the 180-degree wrap; residual bounds 1e-9 mm and 1e-9 rad; undo/redo, reopen and named dragging/mechanical refusals.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+    },
+    {
+      "id": "mate-bounded-slot",
+      "file": "ci/scenarios/mate-bounded-slot.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+      "supported_limits": "B5: a straight Slot with an off-axis pin and a signed Angle, including rotation lock; residual bounds 1e-9 mm and 1e-9 rad; unsupported slot selection refused; save and fresh reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+    },
+    {
+      "id": "mate-nonparallel-width",
+      "file": "ci/scenarios/mate-nonparallel-width.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+      "supported_limits": "B5: Centered Width aligns nonparallel face-pair bisectors with residual bounds 1e-9 mm and 1e-9 rad; Free, Dimension and Percent refused without state changes; save and fresh reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+    },
+    {
+      "id": "mate-point-distance",
+      "file": "ci/scenarios/mate-point-distance.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
+      "supported_limits": "B5: Euclidean point-point Distance on persistent vertices; exact-zero point and axis Distance keep their translational constraints and support strict admission; residual bounds 1e-9 mm and 1e-9 rad; negative-distance refusal, save, fresh reopen and Update.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
     },
     {
       "id": "mate-reference-plane",

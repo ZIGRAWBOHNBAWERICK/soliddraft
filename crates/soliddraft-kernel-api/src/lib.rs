@@ -29,7 +29,8 @@ pub mod counting;
 pub mod drawing;
 pub mod measure;
 pub use assembly_measure::{
-    Axis, ExactAxis, ExactAxisPlane, ExactPoint, ExactRadius, ExactRational, ExactSupport, SupportEntity, SupportSource,
+    Axis, EnclosedSupport, ExactAxis, ExactAxisPlane, ExactPoint, ExactRadius, ExactRational, ExactSupport,
+    SupportBounds, SupportEntity, SupportSource,
 };
 pub use measure::{Certainty, Measurement, PairEndpoint, PairQuantity, PointProof};
 mod assembly_measure;
@@ -1032,6 +1033,13 @@ pub trait Kernel: Send + Sync {
             SupportEntity::Face(face) => self.face_support_plane(body, face).map(ExactSupport::Plane),
             _ => Err(KernelError::Unsupported("proven axes and points".into())),
         }
+    }
+
+    /// Encloses native analytic definitions for bounded assembly mates. The exact query
+    /// above keeps its exact-or-refused contract.
+    fn entity_support_enclosed(&self, body: BodyId, entity: SupportEntity) -> KernelResult<EnclosedSupport> {
+        let _ = (body, entity);
+        Err(KernelError::Unsupported("enclosed analytic support".into()))
     }
 
     /// The records of every operation that produced `body`, oldest first.

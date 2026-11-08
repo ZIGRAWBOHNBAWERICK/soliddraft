@@ -604,7 +604,7 @@ fn a_sub_assembly_shown_from_another_revision_leaves_the_check_incomplete() {
 fn a_part_hidden_or_suppressed_only_by_another_revision_is_not_left_out_quietly() {
     for suppress in [false, true] {
         let fx = nested_at(&format!("stale-flag-{suppress}"), 0.0);
-        let mut doc = fx.open();
+        let doc = fx.open();
         let branch = Nested::branch(&doc);
         let c_path = doc.table().path(doc.table().subtree(doc.table().find(&branch).unwrap())[1]);
         let id = doc.id();

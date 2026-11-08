@@ -190,6 +190,11 @@ fn check_new_name(truth: &Assembly, name: &str) -> Result<(), MateRefusal> {
     Ok(())
 }
 
+/// `refusal` naming `mate`.
+fn named(refusal: MateRefusal, mate: &str) -> MateRefusal {
+    MateRefusal { mates: vec![mate.to_owned()], ..refusal }
+}
+
 /// A length with no reference to any value.
 fn literal(text: &str) -> Result<soliddraft_model::Expression, MateRefusal> {
     let none = ValueTable::default();
@@ -436,22 +441,23 @@ impl AssemblyDocument {
     }
 
     fn endpoint(&mut self, truth: &Assembly, selector: &EndpointSelector) -> Result<FaceEndpoint, MateRefusal> {
-        self.endpoint_as(truth, selector, None)
+        self.endpoint_as(truth, selector, None, "")
     }
 
     /// An endpoint that reads a profile or a slot when `shape` says so, else its plane, axis
-    /// or point.
+    /// or point. A profile or slot it cannot read is refused naming `mate`.
     fn endpoint_as(
         &mut self,
         truth: &Assembly,
         selector: &EndpointSelector,
         shape: Option<ShapeKind>,
+        mate: &str,
     ) -> Result<FaceEndpoint, MateRefusal> {
         let source = Self::part_source(truth, selector.component)?;
         let entity = self.select(&source, &selector.face)?;
         let document = source.id.ok_or_else(|| MateRefusal::invalid("the source has no document id"))?;
         let support = match shape {
-            Some(kind) => Some(self.prove_shape(&source, &entity, kind, None)?.stored()),
+            Some(kind) => Some(self.prove_shape(&source, &entity, kind, None).map_err(|r| named(r, mate))?.stored()),
             None => self.stored_support(&source, &entity)?,
         };
         Ok(FaceEndpoint {
@@ -928,7 +934,7 @@ impl AssemblyDocument {
                 return Err(MateRefusal::invalid("a mate ties two different components"));
             }
             let profile = Some(ShapeKind::Profile);
-            let (a, b) = (doc.endpoint_as(truth, a, profile)?, doc.endpoint_as(truth, b, profile)?);
+            let (a, b) = (doc.endpoint_as(truth, a, profile, name)?, doc.endpoint_as(truth, b, profile, name)?);
             let circles =
                 [&a, &b].iter().all(|e| matches!(e.support, Some(StoredSupport::Profile { sides: None, .. })));
             if lock_rotation && !circles {
@@ -987,7 +993,7 @@ impl AssemblyDocument {
             if slot.component == pin.component {
                 return Err(MateRefusal::invalid("a mate ties two different components"));
             }
-            let (slot, pin) = (doc.endpoint_as(truth, slot, Some(ShapeKind::Slot))?, doc.endpoint(truth, pin)?);
+            let (slot, pin) = (doc.endpoint_as(truth, slot, Some(ShapeKind::Slot), name)?, doc.endpoint(truth, pin)?);
             let id = MateId(truth.take_id());
             let paths = [slot.path.clone(), pin.path.clone()];
             truth.mates.push(MateEntry::Known(Mate::Slot {

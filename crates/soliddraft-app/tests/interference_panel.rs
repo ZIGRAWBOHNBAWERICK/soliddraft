@@ -212,6 +212,7 @@ fn check_hole_alignment_from_the_panel() {
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let mut h: App<'static> = Harness::builder()
         .with_size(vec2(1600.0, 1000.0))
+        .with_render_every_step(true)
         .with_step_dt(1.0 / 60.0)
         .wgpu()
         .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));

@@ -180,17 +180,17 @@
         "a": {
           "component": 2,
           "vertex": [
-            "Boss-Extrude1 · End cap",
-            "Boss-Extrude1 · Side of line 2",
-            "Boss-Extrude1 · Side of line 3"
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
           ]
         },
         "b": {
           "component": 4,
           "vertex": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 4",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 4",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
         "alignment": "aligned"
@@ -232,26 +232,26 @@
         "a": {
           "component": 2,
           "vertex": [
-            "Boss-Extrude1 · End cap",
-            "Boss-Extrude1 · Side of line 2",
-            "Boss-Extrude1 · Side of line 3"
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
           ]
         },
         "b": {
           "component": 4,
           "vertex": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 4",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 4",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
-        "distance": "5 mm",
+        "distance": "-5 mm",
         "alignment": "aligned"
       },
       "checks": [
         {
           "pointer": "/result/refused",
-          "equals": "unsupported_reference"
+          "equals": "invalid_value"
         },
         {
           "pointer": "/summary/assembly/accepted_state",
@@ -267,7 +267,7 @@
           ]
         }
       ],
-      "refused": "unsupported_reference"
+      "refused": "invalid_value"
     },
     {
       "tool": "assembly_delete_mate",
@@ -291,13 +291,13 @@
         "name": "E",
         "a": {
           "component": 2,
-          "face": "Boss-Extrude1 · Side of line 1"
+          "face": "Boss-Extrude1 \u00b7 Side of line 1"
         },
         "b": {
           "component": 4,
           "edge": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
         "alignment": "aligned"
@@ -330,9 +330,9 @@
         "b": {
           "component": 4,
           "vertex": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 4",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 4",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
         "distance": "5 mm",
@@ -375,15 +375,15 @@
         "a": {
           "component": 2,
           "edge": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
         "b": {
           "component": 4,
           "edge": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
         "alignment": "aligned"
@@ -406,15 +406,15 @@
         "a": {
           "component": 2,
           "edge": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         },
         "b": {
           "component": 4,
           "edge": [
-            "Boss-Extrude1 · Start cap",
-            "Boss-Extrude1 · Side of line 1"
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 1"
           ]
         }
       },

@@ -24,6 +24,8 @@ pub struct PickedFace {
 /// Which mate the panel adds between its picked faces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
+    Angle,
+    LimitAngle,
     Coincident,
     Distance,
     Parallel,
@@ -51,7 +53,9 @@ pub enum Family {
 }
 
 impl Family {
-    const ALL: [Family; 14] = [
+    const ALL: [Family; 16] = [
+        Family::Angle,
+        Family::LimitAngle,
         Family::Coincident,
         Family::Distance,
         Family::Parallel,
@@ -70,6 +74,8 @@ impl Family {
 
     fn label(self) -> &'static str {
         match self {
+            Family::Angle => "Angle",
+            Family::LimitAngle => "Limit Angle",
             Family::Coincident => "Coincident",
             Family::Distance => "Distance",
             Family::Parallel => "Parallel",
@@ -91,13 +97,16 @@ impl Family {
     fn picks(self) -> usize {
         match self {
             Family::Width | Family::Hinge => 4,
-            Family::Symmetric => 3,
+            Family::Angle | Family::LimitAngle | Family::Symmetric => 3,
             _ => 2,
         }
     }
 
     fn has_alignment(self) -> bool {
-        !matches!(self, Family::Perpendicular | Family::Lock | Family::LinearCoupler)
+        !matches!(
+            self,
+            Family::Angle | Family::LimitAngle | Family::Perpendicular | Family::Lock | Family::LinearCoupler
+        )
     }
 }
 
@@ -325,6 +334,19 @@ fn add(state: &mut AppState) {
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (a, b) = (&ends[0], &ends[1]);
     let done = match family {
+        Family::Angle => match distance.parse::<f64>() {
+            Ok(v) => s.doc.mate_angle(&name, a, b, &ends[2], v, false),
+            Err(_) => {
+                Err(MateRefusal::new(soliddraft_assembly::RefusalCode::InvalidValue, "Angle takes signed degrees"))
+            }
+        },
+        Family::LimitAngle => match (limits[0].parse::<f64>(), limits[1].parse::<f64>()) {
+            (Ok(min), Ok(max)) => s.doc.mate_limit_angle(&name, a, b, &ends[2], [min, max], false),
+            _ => Err(MateRefusal::new(
+                soliddraft_assembly::RefusalCode::InvalidValue,
+                "Limit Angle takes signed degrees",
+            )),
+        },
         Family::Coincident => s.doc.mate_coincident(&name, a, b, alignment, false),
         Family::Distance => s.doc.mate_distance(&name, a, b, &distance, alignment, false),
         Family::Parallel => s.doc.mate_parallel(&name, a, b, alignment, false),
@@ -445,8 +467,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let slots: &[&str] = match d.family {
         Family::Width => &["Groove face", "Groove face", "Tab face", "Tab face"],
         Family::Lock => &["First component", "Second component"],
-        Family::Tangent => &["Plane", "Cylinder or sphere"],
+        Family::Tangent => &["Plane or curved face", "Curved face"],
         Family::Hinge => &["First axis", "Second axis", "First plane", "Second plane"],
+        Family::Angle | Family::LimitAngle => &["First direction", "Second direction", "Positive rotation direction"],
         Family::Symmetric => &["Face", "Mirror image", "Symmetry plane"],
         Family::Slot => &["Slot", "Pin"],
         _ => &["First face", "Second face"],
@@ -456,7 +479,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
     ui.horizontal_wrapped(|ui| {
         for f in Family::ALL {
-            ui.selectable_value(&mut d.family, f, f.label());
+            if ui.selectable_value(&mut d.family, f, f.label()).changed() {
+                if f == Family::Angle {
+                    d.distance = "30".into();
+                }
+                if f == Family::LimitAngle {
+                    d.min = "-30".into();
+                    d.max = "30".into();
+                }
+                if f == Family::LimitDistance {
+                    d.min = "0 mm".into();
+                    d.max = "10 mm".into();
+                }
+            }
         }
     });
     if d.family.has_alignment() {
@@ -507,6 +542,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         if matches!(d.slot_mode, SlotMode::Distance | SlotMode::Percent) {
             ui.checkbox(&mut d.flipped, "From the second end");
         }
+    }
+    if d.family == Family::Angle {
+        labelled(ui, &mut d.distance, "Signed degrees", "Mate degrees");
+    }
+    if d.family == Family::LimitAngle {
+        labelled(ui, &mut d.min, "Least signed degrees", "Mate least degrees");
+        labelled(ui, &mut d.max, "Greatest signed degrees", "Mate greatest degrees");
     }
     if matches!(d.family, Family::Distance | Family::ProfileCenter) {
         labelled(ui, &mut d.distance, "Distance, such as 5 mm", "Mate distance");
@@ -564,6 +606,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let named: Vec<String> = d.conflict.as_ref().map(|c| c.mates.clone()).unwrap_or_default();
     for m in mates.as_array().into_iter().flatten() {
         let name = m["name"].as_str().unwrap_or("?").to_owned();
+        if m["proof"]["certainty"].as_str() == Some("bounded") {
+            ui.small(format!("{name}: bounded to {} mm and {} rad", m["proof"]["bound_mm"], m["proof"]["bound_angle"]));
+        }
         let alignment = m["alignment"].as_str().unwrap_or("?");
         let gap = |m: &serde_json::Value| m["measurement"]["value"].as_f64();
         let shown = |v: Option<f64>, unit: &str| {
@@ -587,6 +632,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some("coincident") => format!("{name}: coincident, {alignment}, {}", shown(gap(m), " apart")),
             Some("parallel") => format!("{name}: parallel, {alignment}, {}", shown(gap(m), " apart")),
             Some("perpendicular") => format!("{name}: perpendicular"),
+            Some("angle") => format!("{name}: {} degrees", m["degrees"]),
+            Some("limit_angle") => format!("{name}: {} to {} degrees", m["min_degrees"], m["max_degrees"]),
             Some("width") => {
                 let how = match m["width"]["mode"].as_str() {
                     Some("dimension") => shown(m["width"]["distance"]["value"].as_f64(), " gap"),

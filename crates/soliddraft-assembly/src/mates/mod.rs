@@ -17,11 +17,12 @@
 //!
 //! The families are Origin, Distance, Coincident, Parallel, Perpendicular, Width, Lock,
 //! Concentric, Tangent, Hinge, Symmetric, Linear Coupler, Limit Distance, Profile Center and
-//! Slot. They cover axis-aligned planes, axes, points, profiles and straight slots with exact
-//! coordinates, and quarter-turn rotations; see `docs/mates.md`.
+//! Slot, Angle and Limit Angle. Axis-aligned groups stay exact. General rigid motions
+//! carry certified residual bounds; see `docs/mates.md`.
 
 pub(crate) mod bodies;
 pub(crate) mod command;
+mod motion;
 mod reference;
 pub(crate) mod solver;
 
@@ -36,6 +37,7 @@ use crate::path::{ComponentId, OccurrencePath};
 use crate::placement::Placement;
 
 pub use command::{MateEdit, PlaneMeasurement, ProofIdentity, SlotInput, WidthInput};
+pub use motion::BoundedProof;
 pub use reference::{EndpointSelector, FaceSelector, GeneratorChoice, PlaneProof, SupportProof};
 pub use solver::{FreeMotion, SolverState, SolverStatus};
 
@@ -155,6 +157,11 @@ impl Entity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StoredSupport {
+    /// An off-axis or algebraic native definition, retained for status only.
+    Enclosed {
+        /// Enclosures read at authoring or Update. Solving re-proves them.
+        support: Box<soliddraft_kernel_api::EnclosedSupport>,
+    },
     /// The axis of a cylinder, cone or circle, or a line.
     Axis {
         /// The direction, each component -1, 0 or 1.
@@ -355,11 +362,68 @@ pub struct EndView<'a> {
     pub configuration: Option<&'a ConfigurationId>,
 }
 
+/// A saved relative turn. The matrix form preserves existing files byte for byte.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StoredTurn {
+    /// An exact quarter-turn matrix by rows.
+    Cube([[i8; 3]; 3]),
+    /// A quaternion [x,y,z,w], certified by the bounded solver.
+    Bounded([f64; 4]),
+}
+impl StoredTurn {
+    pub(crate) fn rotation(&self) -> Result<glam::DQuat, MateRefusal> {
+        match self {
+            Self::Cube(c) if solver::cube_rotations().contains(c) => Ok(solver::quaternion(c)),
+            Self::Bounded(q)
+                if q.iter().all(|x| x.is_finite())
+                    && glam::DQuat::from_array(*q).length_squared().is_finite()
+                    && glam::DQuat::from_array(*q).length_squared() > 1e-20 =>
+            {
+                Ok(glam::DQuat::from_array(*q).normalize())
+            }
+            _ => Err(MateRefusal::invalid("a rotation lock needs a proper cube matrix or a finite nonzero quaternion")),
+        }
+    }
+}
+
 /// A mate this version can solve.
 #[allow(clippy::large_enum_variant, reason = "a mate list is short and read one by one")]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Mate {
+    /// Signed angle in degrees about the direction of `reference`, in its part's frame.
+    Angle {
+        /// Stable id.
+        id: MateId,
+        /// User's name.
+        name: String,
+        /// First plane normal or axis direction.
+        a: FaceEndpoint,
+        /// Second plane normal or axis direction.
+        b: FaceEndpoint,
+        /// Plane normal or axis defining the positive rotation direction.
+        reference: FaceEndpoint,
+        /// Signed degrees, from -180 to 180.
+        degrees: f64,
+    },
+    /// Signed angle bounded in degrees about an explicit reference direction.
+    LimitAngle {
+        /// Stable id.
+        id: MateId,
+        /// User's name.
+        name: String,
+        /// First direction.
+        a: FaceEndpoint,
+        /// Second direction.
+        b: FaceEndpoint,
+        /// Positive rotation direction.
+        reference: FaceEndpoint,
+        /// Inclusive least degrees.
+        min_degrees: f64,
+        /// Inclusive greatest degrees.
+        max_degrees: f64,
+    },
     /// A component's origin on the assembly's. With `align_axes` its axes match too.
     Origin {
         /// The mate's id.
@@ -478,7 +542,7 @@ pub enum Mate {
         /// With Lock rotation, `b`'s turn in `a`'s frame: a quarter-turn rotation, as its
         /// integer matrix by rows. Absent leaves the spin about the axis free.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        lock_rotation: Option<[[i8; 3]; 3]>,
+        lock_rotation: Option<StoredTurn>,
     },
     /// A cylinder or sphere touching a plane: the axis lies parallel to the plane, or the
     /// centre in front of it, one radius away. The radius must be rational.
@@ -594,7 +658,7 @@ pub enum Mate {
         /// For circles, `b`'s turn in `a`'s frame as a quarter-turn matrix by rows. Absent
         /// leaves the spin free.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        lock_rotation: Option<[[i8; 3]; 3]>,
+        lock_rotation: Option<StoredTurn>,
     },
     /// A pin in a straight slot: square to the slot's run, on its mid-plane, and along it as
     /// `constraint` says.
@@ -614,7 +678,7 @@ pub enum Mate {
         /// The pin's turn in the slot's part's frame, as a quarter-turn matrix by rows.
         /// Absent leaves the spin free.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        lock_rotation: Option<[[i8; 3]; 3]>,
+        lock_rotation: Option<StoredTurn>,
     },
 }
 
@@ -622,7 +686,9 @@ impl Mate {
     /// The mate's id.
     pub fn id(&self) -> MateId {
         match self {
-            Mate::Origin { id, .. }
+            Mate::Angle { id, .. }
+            | Mate::LimitAngle { id, .. }
+            | Mate::Origin { id, .. }
             | Mate::Distance { id, .. }
             | Mate::Coincident { id, .. }
             | Mate::Parallel { id, .. }
@@ -643,7 +709,9 @@ impl Mate {
     /// The mate's label.
     pub fn name(&self) -> &str {
         match self {
-            Mate::Origin { name, .. }
+            Mate::Angle { name, .. }
+            | Mate::LimitAngle { name, .. }
+            | Mate::Origin { name, .. }
             | Mate::Distance { name, .. }
             | Mate::Coincident { name, .. }
             | Mate::Parallel { name, .. }
@@ -664,6 +732,8 @@ impl Mate {
     /// The family, as `assembly.json` names it.
     pub fn kind(&self) -> &'static str {
         match self {
+            Mate::Angle { .. } => "angle",
+            Mate::LimitAngle { .. } => "limit_angle",
             Mate::Origin { .. } => "origin",
             Mate::Distance { .. } => "distance",
             Mate::Coincident { .. } => "coincident",
@@ -725,6 +795,7 @@ impl Mate {
             | Mate::LinearCoupler { a, b, .. }
             | Mate::LimitDistance { a, b, .. }
             | Mate::ProfileCenter { a, b, .. } => vec![a, b],
+            Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => vec![a, b, reference],
             Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
             Mate::Slot { slot, pin, .. } => vec![slot, pin],
             Mate::Width { groove, tab, .. } => groove.iter().chain(tab).collect(),
@@ -745,6 +816,7 @@ impl Mate {
             | Mate::LinearCoupler { a, b, .. }
             | Mate::LimitDistance { a, b, .. }
             | Mate::ProfileCenter { a, b, .. } => vec![a, b],
+            Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => vec![a, b, reference],
             Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
             Mate::Slot { slot, pin, .. } => vec![slot, pin],
             Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab).collect(),
@@ -770,7 +842,9 @@ impl Mate {
             | Mate::Parallel { a, b, .. }
             | Mate::LimitDistance { a, b, .. } => Some([a, b]),
             Mate::Width { groove, tab, .. } => Some([&groove[0], &tab[0]]),
-            Mate::Origin { .. }
+            Mate::Angle { .. }
+            | Mate::LimitAngle { .. }
+            | Mate::Origin { .. }
             | Mate::Perpendicular { .. }
             | Mate::Lock { .. }
             | Mate::Concentric { .. }
@@ -796,7 +870,12 @@ impl Mate {
             | Mate::ProfileCenter { alignment, .. }
             | Mate::Slot { alignment, .. } => Some(*alignment),
             Mate::Concentric { alignment, .. } | Mate::Symmetric { alignment, .. } => *alignment,
-            Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } | Mate::LinearCoupler { .. } => None,
+            Mate::Angle { .. }
+            | Mate::LimitAngle { .. }
+            | Mate::Origin { .. }
+            | Mate::Perpendicular { .. }
+            | Mate::Lock { .. }
+            | Mate::LinearCoupler { .. } => None,
         }
     }
 
@@ -828,6 +907,9 @@ impl Mate {
             | Mate::Tangent { a, b, .. }
             | Mate::LimitDistance { a, b, .. }
             | Mate::ProfileCenter { a, b, .. } => vec![&mut a.path, &mut b.path],
+            Mate::Angle { a, b, reference, .. } | Mate::LimitAngle { a, b, reference, .. } => {
+                vec![&mut a.path, &mut b.path, &mut reference.path]
+            }
             Mate::Symmetric { a, b, plane, .. } => vec![&mut a.path, &mut b.path, &mut plane.path],
             Mate::Slot { slot, pin, .. } => vec![&mut slot.path, &mut pin.path],
             Mate::LinearCoupler { a, b, reference_a, reference_b, .. } => [&mut a.path, &mut b.path]
@@ -901,6 +983,12 @@ impl MateEntry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefusalCode {
+    /// A numerical solve did not produce a certified placement.
+    Uncertified,
+    /// The Jacobian rank is too close to singular to report freedoms.
+    UncertainRank,
+    /// A later motion family is outside this version.
+    UnsupportedMotion,
     /// The candidate leaves freedom a strict request forbids.
     UnderConstrained,
     /// The candidate's mates cannot all hold.
@@ -945,6 +1033,9 @@ impl RefusalCode {
     /// The code as text.
     pub fn as_str(self) -> &'static str {
         match self {
+            RefusalCode::Uncertified => "uncertified",
+            RefusalCode::UncertainRank => "uncertain_rank",
+            RefusalCode::UnsupportedMotion => "unsupported_motion",
             RefusalCode::UnderConstrained => "under_constrained",
             RefusalCode::OverConstrained => "over_constrained",
             RefusalCode::DanglingReference => "dangling_reference",

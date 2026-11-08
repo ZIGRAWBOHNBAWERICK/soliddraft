@@ -3,8 +3,9 @@
 //! A display centroid or a rounded reference point cannot prove a mate. These queries read
 //! the plane a face lies on, the axis of a cylinder, cone, circle or line, and the centre
 //! of a sphere or the point of a vertex from the kernel's own definitions, exactly. They
-//! cover axis-aligned directions with rational coordinates; anything else is refused,
-//! never approximated.
+//! cover axis-aligned directions with rational coordinates and refuse everything else.
+//! The separate enclosed-support query supplies rational bounds for general analytic
+//! definitions, explicitly labelled as bounded by the assembly solver.
 
 use serde::{Deserialize, Serialize};
 
@@ -151,10 +152,54 @@ pub struct ExactPoint {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExactSupport {
+    /// Algebraic or off-axis native definitions, explicitly enclosed rather than exact.
+    Enclosed(Box<EnclosedSupport>),
     /// A planar face's plane.
     Plane(ExactAxisPlane),
     /// The axis of a cylinder, cone or circle, or a line.
     Axis(ExactAxis),
     /// The centre of a sphere, or a vertex.
     Point(ExactPoint),
+}
+
+/// Rational endpoints enclosing a native algebraic value. Bounds are inclusive.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SupportBounds {
+    /// Lower endpoint.
+    pub lo: ExactRational,
+    /// Upper endpoint.
+    pub hi: ExactRational,
+}
+
+/// Native analytic support enclosed before any placement is applied.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EnclosedSupport {
+    /// A plane through `through`, with an outward, possibly unnormalized normal.
+    Plane {
+        /// Outward normal.
+        normal: [SupportBounds; 3],
+        /// A point on the supporting plane.
+        through: [SupportBounds; 3],
+    },
+    /// An axis through `through`, with a possibly unnormalized direction.
+    Axis {
+        /// Native direction.
+        direction: [SupportBounds; 3],
+        /// A point on the axis.
+        through: [SupportBounds; 3],
+        /// Squared radius, when the support has one.
+        radius_squared: Option<SupportBounds>,
+        /// Material side of a curved face, absent for an edge.
+        outward: Option<bool>,
+    },
+    /// A sphere centre or an explicit vertex.
+    Point {
+        /// Native coordinates.
+        at: [SupportBounds; 3],
+        /// Squared radius for a sphere.
+        radius_squared: Option<SupportBounds>,
+        /// Material side for a sphere.
+        outward: Option<bool>,
+    },
 }

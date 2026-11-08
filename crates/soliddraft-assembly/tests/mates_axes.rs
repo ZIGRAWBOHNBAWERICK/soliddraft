@@ -313,7 +313,7 @@ fn lock_rotation_holds_the_spin() {
     let Some(MateEntry::Known(Mate::Concentric { lock_rotation, .. })) = r.doc.assembly().mates.last() else {
         panic!("a concentric mate")
     };
-    assert_eq!(*lock_rotation, Some([[1, 0, 0], [0, 1, 0], [0, 0, 1]]));
+    assert_eq!(*lock_rotation, Some(soliddraft_assembly::StoredTurn::Cube([[1, 0, 0], [0, 1, 0], [0, 0, 1]])));
     r.doc.edit_mates(&[("C".into(), MateEdit::LockRotation(false))]).unwrap();
     assert_eq!(r.free().0, 2);
     r.doc.edit_mates(&[("C".into(), MateEdit::LockRotation(true))]).unwrap();
@@ -326,8 +326,8 @@ fn lock_rotation_holds_the_spin() {
 }
 
 /// A pin goes into the first tab's hole exactly. The copy turned 60 degrees has an
-/// algebraic axis, so a mate on it is refused by name and nothing changes; a quarter-turn
-/// copy is accepted.
+/// algebraic axis. Asking the pin to occupy both holes is refused without an edit;
+/// either hole alone is supported, with a bounded proof for the algebraic copy.
 #[test]
 fn a_pin_in_a_hole_and_a_sixty_degree_copy() {
     let mut r = rig("pin", |p| new_tabs(p, 60.0), |p| new_shaft(p, 4.0, 12.0));
@@ -340,11 +340,15 @@ fn a_pin_in_a_hole_and_a_sixty_degree_copy() {
 
     let before = serde_json::to_value(r.doc.assembly()).unwrap();
     let depth = r.doc.undo_depth();
-    let refused = r.doc.mate_concentric("C2", &picked(r.a, copy), &pin, Alignment::Aligned, false, false).unwrap_err();
-    assert_eq!(refused.code, RefusalCode::UnsupportedReference, "{refused:?}");
-    assert!(refused.message.contains("not structurally rational"), "{}", refused.message);
+    let copied = picked(r.a, copy);
+    let refused = r.doc.mate_concentric("C2", &copied, &pin, Alignment::Aligned, false, false).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::Uncertified, "{refused:?}");
+    assert!(refused.mates.contains(&"C1".into()) && refused.mates.contains(&"C2".into()));
     assert_eq!(serde_json::to_value(r.doc.assembly()).unwrap(), before);
     assert_eq!(r.doc.undo_depth(), depth);
+    r.doc.delete_mate("C1").unwrap();
+    r.doc.mate_concentric("C2", &copied, &pin, Alignment::Aligned, false, false).unwrap();
+    assert!(r.doc.solver().bounded.iter().any(|p| p.mate == "C2"));
 
     let mut q = rig("pin-quarter", |p| new_tabs(p, 90.0), |p| new_shaft(p, 4.0, 12.0));
     let holes = q.pa.faces(SurfaceKind::Cylinder);
@@ -400,7 +404,7 @@ fn a_hinge_seats_a_shaft_and_leaves_the_spin() {
 }
 
 /// Vertices and edges: a corner on a corner, an edge in a plane, a corner a distance from
-/// a plane; a distance between two corners is refused by name.
+/// a plane; an incompatible distance between two corners is refused by name.
 #[test]
 fn vertices_and_edges_mate_exactly() {
     let mut r = rig("points", |p| new_block(p, 40.0, 30.0, 10.0), |p| new_block(p, 20.0, 10.0, 6.0));
@@ -425,7 +429,12 @@ fn vertices_and_edges_mate_exactly() {
     assert_eq!(r.placement(r.b).translation.z, 15.0);
 
     let refused = r.doc.mate_distance("Bad", &corner_a, &corner_b, "5 mm", Alignment::Aligned, false).unwrap_err();
-    assert_eq!((refused.code, refused.mates), (RefusalCode::UnsupportedReference, vec!["Bad".to_owned()]));
+    assert_eq!(refused.code, RefusalCode::Uncertified);
+    assert!(
+        refused.mates.contains(&"Bad".into())
+            && refused.mates.contains(&"D".into())
+            && refused.mates.contains(&"E".into())
+    );
 
     r.doc.save(None).unwrap();
     let reopened = r.reopened();

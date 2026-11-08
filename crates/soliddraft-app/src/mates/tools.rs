@@ -128,9 +128,27 @@ fn text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
 
 /// Runs the mate tools. `None` hands the call on.
 pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
+    if matches!(
+        name,
+        "assembly_mate_gear"
+            | "assembly_mate_rack_and_pinion"
+            | "assembly_mate_screw"
+            | "assembly_drag"
+            | "assembly_mate_path"
+            | "assembly_mate_cam"
+            | "assembly_mate_universal_joint"
+            | "assembly_physical_dynamics"
+    ) {
+        return Some(Err(refused(MateRefusal::new(
+            soliddraft_assembly::RefusalCode::UnsupportedMotion,
+            format!("{name} is outside the static rigid-motion mate solver"),
+        ))));
+    }
     let known = matches!(
         name,
-        "assembly_measure_planes"
+        "assembly_mate_angle"
+            | "assembly_mate_limit_angle"
+            | "assembly_measure_planes"
             | "assembly_mate_origin"
             | "assembly_mate_distance"
             | "assembly_mate_coincident"
@@ -169,6 +187,23 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
         "assembly_measure_planes" => {
             let m = doc.measure_planes(&selector(&input["a"])?, &selector(&input["b"])?).map_err(refused)?;
             return Ok(json!({ "measurement": m }));
+        }
+        "assembly_mate_angle" | "assembly_mate_limit_angle" => {
+            let (a, b, reference) = (selector(&input["a"])?, selector(&input["b"])?, selector(&input["reference"])?);
+            let number = |key| input[key].as_f64().ok_or_else(|| format!("{key} is a signed angle in degrees"));
+            if name == "assembly_mate_angle" {
+                doc.mate_angle(text(input, "name")?, &a, &b, &reference, number("degrees")?, strict)
+            } else {
+                doc.mate_limit_angle(
+                    text(input, "name")?,
+                    &a,
+                    &b,
+                    &reference,
+                    [number("min_degrees")?, number("max_degrees")?],
+                    strict,
+                )
+            }
+            .map(|id| json!({"mate":id}))
         }
         "assembly_mate_origin" => {
             let component = input["component"].as_u64().and_then(|c| u32::try_from(c).ok()).map(ComponentId);
@@ -274,6 +309,18 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
         "assembly_edit_mate" => {
             let mate = text(input, "mate")?.to_owned();
             let mut edits = Vec::new();
+            if let Some(v) = input["degrees"].as_f64() {
+                edits.push((mate.clone(), MateEdit::Degrees(v)));
+            }
+            if !input["angle_limits"].is_null() {
+                let v = input["angle_limits"].as_array().ok_or("angle_limits is [min_degrees, max_degrees]")?;
+                if v.len() != 2 {
+                    return Err("angle_limits is [min_degrees, max_degrees]".into());
+                }
+                let min = v[0].as_f64().ok_or("least degrees must be a number")?;
+                let max = v[1].as_f64().ok_or("greatest degrees must be a number")?;
+                edits.push((mate.clone(), MateEdit::AngleLimits([min, max])));
+            }
             if let Some(d) = input["distance"].as_str() {
                 edits.push((mate.clone(), MateEdit::Distance(d.to_owned())));
             }
@@ -337,6 +384,7 @@ fn endpoint(root: impl serde::Serialize, e: &FaceEndpoint) -> Value {
 
 /// `model_summary`'s `mates`, `values` and `solver`.
 pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
+    let bounded = s.doc.solver().bounded;
     let measured = s.doc.mate_measurements();
     let truth = s.doc.assembly();
     let values = truth.values.summary();
@@ -350,6 +398,7 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
             };
             let found = measured.iter().find(|(id, _)| *id == m.id()).map(|(_, r)| r);
             let mut row = json!({ "id": m.id(), "name": m.name(), "kind": m.kind() });
+            if let Some(p)=bounded.iter().find(|p|p.mate==m.name()) {row["proof"]=json!(p);}
             let distance = |d: &soliddraft_model::Expression| {
                 json!({
                     "expression": d.text(),
@@ -360,6 +409,12 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                 })
             };
             match m {
+                Mate::Angle {a,b,reference,degrees,..} => {
+                    row["a"]=endpoint(root,a);row["b"]=endpoint(root,b);row["reference"]=endpoint(root,reference);row["degrees"]=json!(degrees);
+                }
+                Mate::LimitAngle {a,b,reference,min_degrees,max_degrees,..} => {
+                    row["a"]=endpoint(root,a);row["b"]=endpoint(root,b);row["reference"]=endpoint(root,reference);row["min_degrees"]=json!(min_degrees);row["max_degrees"]=json!(max_degrees);
+                }
                 Mate::Origin { component, align_axes, .. } => {
                     row["component"] = json!(component);
                     row["align_axes"] = json!(align_axes);

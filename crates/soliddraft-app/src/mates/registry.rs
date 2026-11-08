@@ -32,6 +32,30 @@ fn face(what: &str) -> Value {
     )
 }
 
+fn unsupported_motion_params() -> Vec<(&'static str, Value)> {
+    Vec::new()
+}
+
+fn angle_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("First plane normal or axis")),
+        ("b", face("Second plane normal or axis")),
+        ("reference", face("Explicit positive rotation direction: a plane normal or axis")),
+        ("degrees", number("Signed degrees from -180 to 180")),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
+    ]
+}
+fn limit_angle_params() -> Vec<(&'static str, Value)> {
+    let mut out = angle_params();
+    out.retain(|(key, _)| *key != "degrees");
+    out.extend([
+        ("min_degrees", number("Inclusive least signed degrees")),
+        ("max_degrees", number("Inclusive greatest signed degrees")),
+    ]);
+    out
+}
+
 fn measure_params() -> Vec<(&'static str, Value)> {
     vec![("a", face("The first face")), ("b", face("The second face"))]
 }
@@ -264,6 +288,8 @@ fn drive_params() -> Vec<(&'static str, Value)> {
 
 fn edit_params() -> Vec<(&'static str, Value)> {
     vec![
+        ("degrees", optional(number("New signed Angle degrees"))),
+        ("angle_limits", optional(array(number("Signed degrees"), "New [min_degrees, max_degrees]"))),
         ("mate", string("The mate's name")),
         ("distance", optional(string("A new literal length"))),
         ("alignment", optional(one_of(&["aligned", "opposed"], ALIGNMENT))),
@@ -315,6 +341,18 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "Reads exact plane equations at the accepted revisions and changes nothing.",
             measure_params,
         ),
+        row("assembly_drag", "Drag under mates", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_gear", "Gear mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_rack_and_pinion", "Rack and Pinion mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_screw", "Screw mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_path", "Path mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_cam", "Cam mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_universal_joint", "Universal Joint mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_physical_dynamics", "Physical Dynamics", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_angle", "Angle mate", "Set a signed angle about an explicit reference direction")
+            .agents(Agents::Mcp, "Rotates projected directions about the reference; certified bounds are reported per mate.", angle_params).undo(Undo::Step),
+        row("assembly_mate_limit_angle", "Limit angle mate", "Bound a signed angle about an explicit reference direction")
+            .agents(Agents::Mcp, "Leaves angular motion free between inclusive bounds.", limit_angle_params).undo(Undo::Step),
         row("assembly_mate_origin", "Origin mate", "Put a component's origin on the assembly's")
             .agents(
                 Agents::Mcp,

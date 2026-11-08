@@ -1664,6 +1664,10 @@ impl AssemblyDocument {
         }
         let placed: Vec<(OccurrencePath, Placement)> = kept.iter().map(|k| (k.path.clone(), k.local)).collect();
         bodies::keep(&mut candidate.assembly, kept);
+        if !solved.status.bounded.is_empty() {
+            let problem = self.gather(&Scope::new(&candidate.assembly, &candidate.table, &candidate.store))?;
+            self.verify_problem(problem)?;
+        }
         for (path, placement) in placed {
             if let Some(row) = candidate.table.find(&path) {
                 candidate.table.set_local(row, placement, &candidate.store);

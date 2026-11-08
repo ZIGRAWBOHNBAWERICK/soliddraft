@@ -1,0 +1,1907 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-bounded",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 6
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "rotation": [
+            0,
+            0,
+            0.19866933079506122,
+            0.9800665778412416
+          ],
+          "translation": [
+            3,
+            4,
+            20
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_angle",
+      "arguments": {
+        "name": "A",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "degrees": 30
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 13,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 14,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned",
+        "distance": "5 mm",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 17,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 18,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_parallel",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 21,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 22,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_perpendicular",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 25,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 26,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_width",
+      "arguments": {
+        "groove": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "end_cap"
+          }
+        ],
+        "tab": [
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "end_cap"
+          }
+        ],
+        "alignment": "aligned",
+        "mode": "centered",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 29,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 30,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_lock",
+      "arguments": {
+        "a": 2,
+        "b": 4,
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 33,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 34,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_concentric",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "alignment": "aligned",
+        "lock_rotation": true,
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 37,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 38,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_tangent",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "alignment": "opposed",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 41,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 42,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_hinge",
+      "arguments": {
+        "axes": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          }
+        ],
+        "planes": [
+          {
+            "component": 2,
+            "plane": "Top plane"
+          },
+          {
+            "component": 4,
+            "plane": "Top plane"
+          }
+        ],
+        "alignment": "aligned",
+        "plane_alignment": "aligned",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 45,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 46,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_symmetric",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned",
+        "plane": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 49,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 50,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_linear_coupler",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "ratio": [
+          1,
+          2
+        ],
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 53,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 54,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_limit_distance",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned",
+        "min": "0 mm",
+        "max": "5 mm",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 57,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 58,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_profile_center",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "alignment": "aligned",
+        "distance": "2 mm",
+        "lock_rotation": true,
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 61,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 62,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "distance": "3 mm",
+        "alignment": "aligned",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 65,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 66,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "distance": "12 mm",
+        "alignment": "aligned",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 69,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 70,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_tangent",
+      "arguments": {
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "alignment": "opposed",
+        "name": "M"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 73,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 74,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "M"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "A"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_limit_angle",
+      "arguments": {
+        "name": "L",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "min_degrees": -10,
+        "max_degrees": 10
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "L",
+        "angle_limits": [
+          -5,
+          5
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "unsupported_motion"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 81,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "refused": "unsupported_motion"
+    },
+    {
+      "tool": "assembly_mate_gear",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "unsupported_motion"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 81,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "refused": "unsupported_motion"
+    },
+    {
+      "tool": "assembly_mate_rack_and_pinion",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "unsupported_motion"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 81,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "refused": "unsupported_motion"
+    },
+    {
+      "tool": "assembly_mate_screw",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "unsupported_motion"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 81,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "refused": "unsupported_motion"
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 80,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 87,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ],
+      "fresh_process": true
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "L"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_angle",
+      "arguments": {
+        "name": "A",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "degrees": 170
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "A"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_limit_angle",
+      "arguments": {
+        "name": "L",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "min_degrees": -180,
+        "max_degrees": -90
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/rotation/3",
+          "approx": 0,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ],
+      "fresh_process": true
+    }
+  ]
+}

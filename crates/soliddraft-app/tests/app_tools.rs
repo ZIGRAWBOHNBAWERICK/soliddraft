@@ -78,6 +78,17 @@ struct Session {
 }
 
 impl Session {
+    fn refuse_motion(&mut self, name: &str) {
+        let before = depths(&self.state);
+        let caller = Caller::Mcp { client: "test".into() };
+        let out = call_checked(&mut AppTools { state: &mut self.state }, name, json!({}), &caller);
+        assert!(out.is_error, "{name}: {}", out.content);
+        let result: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(result["refused"], "unsupported_motion", "{result}");
+        assert_eq!(depths(&self.state), before);
+        self.ran.insert(name.to_owned());
+    }
+
     /// Calls a tool and checks it ran, and changed the undo stacks as its row says.
     fn call(&mut self, name: &str, arguments: Value) -> Value {
         let row = commands::get(name).unwrap_or_else(|| panic!("{name} is not a registry command"));
@@ -444,6 +455,29 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(driven["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 22.0]));
     s.call("assembly_edit_mate", json!({ "mate": "O", "align_axes": false }));
     s.call("assembly_delete_mate", json!({ "mate": "Z" }));
+    let reference = json!({ "component": parts[0], "plane": "right" });
+    s.call(
+        "assembly_mate_angle",
+        json!({ "name": "A", "a": top, "b": bottom, "reference": reference, "degrees": 180 }),
+    );
+    s.call("assembly_delete_mate", json!({ "mate": "A" }));
+    s.call(
+        "assembly_mate_limit_angle",
+        json!({ "name": "LA", "a": top, "b": bottom, "reference": reference, "min_degrees": -180, "max_degrees": 180 }),
+    );
+    s.call("assembly_delete_mate", json!({ "mate": "LA" }));
+    for command in [
+        "assembly_drag",
+        "assembly_mate_gear",
+        "assembly_mate_rack_and_pinion",
+        "assembly_mate_screw",
+        "assembly_mate_path",
+        "assembly_mate_cam",
+        "assembly_mate_universal_joint",
+        "assembly_physical_dynamics",
+    ] {
+        s.refuse_motion(command);
+    }
     // The B1 families, each added and taken away again.
     let cap = |c: u64, feature: &str, g: &str| json!({ "component": c, "feature": feature, "generator": g });
     let side = json!({ "component": parts[1], "feature": "Boss-Extrude1", "generator": "side", "normal": [1, 0, 0] });

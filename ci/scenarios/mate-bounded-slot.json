@@ -1,0 +1,328 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-bounded-slot",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 60,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "slot",
+            "start": [
+              -11,
+              0,
+              0
+            ],
+            "end": [
+              11,
+              0,
+              0
+            ],
+            "width": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 20,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/pin.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/pin.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/pin.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            40,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_slot",
+      "arguments": {
+        "name": "Q",
+        "slot": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "pin": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        }
+      },
+      "checks": [],
+      "refused": "unsupported_reference"
+    },
+    {
+      "tool": "assembly_mate_angle",
+      "arguments": {
+        "name": "A",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "reference": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "degrees": 30
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_slot",
+      "arguments": {
+        "name": "SL",
+        "slot": {
+          "component": 2,
+          "feature": "Cut-Extrude1",
+          "generator": "side",
+          "normal": [
+            0,
+            1,
+            0
+          ]
+        },
+        "pin": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "mode": "free",
+        "require_fully_constrained": false,
+        "lock_rotation": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/2/proof/certainty",
+          "equals": "bounded"
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_mm",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/proof/bound_angle",
+          "equals": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/2/status",
+          "equals": "ok"
+        }
+      ],
+      "fresh_process": true
+    }
+  ]
+}

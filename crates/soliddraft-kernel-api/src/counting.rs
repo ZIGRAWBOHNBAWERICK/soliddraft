@@ -8,10 +8,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    BackendInfo, BodyId, BooleanOp, Draft, EdgeId, EdgePolyline, ExactAxisPlane, ExactSupport, Extrude, ExtrudeLimit,
-    FaceCarrier, FaceId, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror,
-    OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve, SupportEntity,
-    TessellationParams, Topology, Validation, Vec3, drawing,
+    BackendInfo, BodyId, BooleanOp, Draft, EdgeId, EdgePolyline, EnclosedSupport, ExactAxisPlane, ExactSupport,
+    Extrude, ExtrudeLimit, FaceCarrier, FaceId, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement,
+    Mesh, Mirror, OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve,
+    SupportEntity, TessellationParams, Topology, Validation, Vec3, drawing,
 };
 
 /// One piece of work a kernel was asked for.
@@ -280,6 +280,10 @@ impl Kernel for Counting {
 
     fn entity_support(&self, body: BodyId, entity: SupportEntity) -> KernelResult<ExactSupport> {
         self.inner.entity_support(body, entity)
+    }
+
+    fn entity_support_enclosed(&self, body: BodyId, entity: SupportEntity) -> KernelResult<EnclosedSupport> {
+        self.inner.entity_support_enclosed(body, entity)
     }
 
     fn history(&self, body: BodyId) -> KernelResult<Vec<HistoryRecord>> {

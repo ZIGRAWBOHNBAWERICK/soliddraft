@@ -231,12 +231,13 @@
             ]
           }
         ],
-        "alignment": "aligned"
+        "alignment": "aligned",
+        "mode": "free"
       },
       "checks": [
         {
           "pointer": "/result/refused",
-          "equals": "not_parallel"
+          "equals": "unsupported_reference"
         },
         {
           "pointer": "/summary/assembly/accepted_state",
@@ -246,7 +247,7 @@
           }
         }
       ],
-      "refused": "not_parallel"
+      "refused": "unsupported_reference"
     },
     {
       "tool": "assembly_mate_width",

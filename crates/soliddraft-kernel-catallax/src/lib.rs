@@ -34,7 +34,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "b1452051a101198d7e1d528636301c240bda3d61";
+pub const CATALLAX_REVISION: &str = "d7da137395bee11ca839d62012efbf575e90d28f";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -855,6 +855,10 @@ impl Kernel for CatallaxKernel {
                 body: state.step(body)?,
                 edges: catallax_recipe::EdgeSelection::Refs(refs),
                 radius: native::number(radius, "fillet radius")?,
+                // The user picks only edges and a radius. Continuation and corner
+                // closure stay at the recipe's defaults: roll over and cliff.
+                overflow: None,
+                corner: None,
             };
             self.native(state, tag, OpKind::Fillet, body, &[body], native, None, edges)
         })

@@ -138,18 +138,6 @@ fn header_buttons(ui: &mut egui::Ui, head: Rect, ok: bool) -> (bool, bool) {
 /// A card of the form: a titled section on the raised surface. The title keeps its
 /// exact text, so automation and the acceptance tests can find the section by it.
 fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    card(ui, title, None, add)
-}
-
-/// A card for options the kernel cannot build yet: its title carries a Coming soon
-/// badge, and everything in it is drawn disabled, with `tip` saying what it waits for.
-fn soon_section(ui: &mut egui::Ui, title: &str, tip: &str, add: impl FnOnce(&mut egui::Ui)) {
-    card(ui, title, Some(tip), |ui| {
-        ui.add_enabled_ui(false, add).response.on_disabled_hover_text(tip);
-    });
-}
-
-fn card<R>(ui: &mut egui::Ui, title: &str, soon: Option<&str>, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let inner = egui::Frame::new()
         .fill(theme::chip())
         .stroke(Stroke::new(1.0, theme::line().gamma_multiply(0.4)))
@@ -161,11 +149,6 @@ fn card<R>(ui: &mut egui::Ui, title: &str, soon: Option<&str>, add: impl FnOnce(
                 let (bar, _) = ui.allocate_exact_size(vec2(3.0, 13.0), Sense::hover());
                 ui.painter().rect_filled(bar, CornerRadius::same(2), theme::accent());
                 ui.label(egui::RichText::new(title).family(theme::semibold()).size(11.5).color(theme::ink()));
-                if let Some(tip) = soon {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        soon_badge(ui).on_hover_text(tip);
-                    });
-                }
             });
             ui.add_space(2.0);
             add(ui)
@@ -173,16 +156,6 @@ fn card<R>(ui: &mut egui::Ui, title: &str, soon: Option<&str>, add: impl FnOnce(
         .inner;
     ui.add_space(CARD_GAP);
     inner
-}
-
-/// A small muted "Coming soon" pill.
-fn soon_badge(ui: &mut egui::Ui) -> egui::Response {
-    egui::Frame::new()
-        .fill(theme::hover())
-        .corner_radius(CornerRadius::same(5))
-        .inner_margin(egui::Margin::symmetric(6, 1))
-        .show(ui, |ui| ui.label(egui::RichText::new(COMING_SOON).size(10.5).color(theme::muted())))
-        .response
 }
 
 /// One row of a form table: the caption in its column, and the cell the value goes in.
@@ -531,18 +504,6 @@ fn count_note(ui: &mut egui::Ui, count: usize, one: &str, many: &str) {
 /// A row of mutually exclusive choices as one segmented control. Returns the index
 /// clicked, if any. Each segment reports itself selected or not, like a selectable label.
 fn segmented(ui: &mut egui::Ui, id: &str, options: &[&str], selected: usize) -> Option<usize> {
-    segmented_gated(ui, id, options, selected, &[])
-}
-
-/// A segmented control in which some segments wait for the kernel: each `(index, tip)`
-/// of `soon` is drawn muted, takes no click, and says on hover what it waits for.
-fn segmented_gated(
-    ui: &mut egui::Ui,
-    id: &str,
-    options: &[&str],
-    selected: usize,
-    soon: &[(usize, &str)],
-) -> Option<usize> {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT), Sense::hover());
     let painter = ui.painter();
@@ -558,20 +519,11 @@ fn segmented_gated(
     for (i, text) in options.iter().enumerate() {
         let segment =
             Rect::from_min_size(pos2(rect.left() + each * i as f32, rect.top()), vec2(each, rect.height())).shrink(2.0);
-        let waits = soon.iter().find(|(at, _)| *at == i).map(|(_, tip)| *tip);
-        let r =
-            ui.interact(segment, ui.id().with((id, i)), if waits.is_some() { Sense::hover() } else { Sense::click() });
+        let r = ui.interact(segment, ui.id().with((id, i)), Sense::click());
         let on = i == selected;
-        let enabled = ui.is_enabled() && waits.is_none();
-        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, enabled, on, *text));
-        let r = match waits {
-            Some(tip) => r.on_hover_text(format!("{COMING_SOON}: {tip}")),
-            None => r,
-        };
+        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, *text));
         let (fill, ink) = if on {
             (theme::accent(), theme::on_accent())
-        } else if waits.is_some() {
-            (egui::Color32::TRANSPARENT, theme::muted().gamma_multiply(0.6))
         } else if r.hovered() {
             (theme::hover(), theme::ink())
         } else {
@@ -580,55 +532,12 @@ fn segmented_gated(
         ui.painter().rect_filled(segment, CornerRadius::same(5), fill);
         let font = if on { theme::font_semibold(12.0) } else { theme::font(12.0) };
         ui.painter().text(segment.center(), Align2::CENTER_CENTER, *text, font, ink);
-        if r.clicked() && waits.is_none() {
+        if r.clicked() {
             clicked = Some(i);
         }
     }
     ui.add_space(4.0);
     clicked
-}
-
-/// What the gated controls say they are.
-const COMING_SOON: &str = "Coming soon";
-
-/// Fillet options the form shows before Catallax builds them. Each stays disabled and
-/// marked Coming soon until its Catallax construction is merged and pinned; switching
-/// one on means dropping it from here once the document can carry it.
-#[derive(Clone, Copy)]
-enum FilletSoon {
-    /// A start and an end radius per edge, varying linearly between them.
-    VariableRadius,
-    /// The stations where a run stops when it keeps its neighbours.
-    Setbacks,
-    /// Keeping every neighbouring face whole instead of rolling over it.
-    KeepNeighbours,
-    /// Continuing a fillet across the open side of a partly filleted corner.
-    Corners,
-}
-
-impl FilletSoon {
-    /// What the option waits for, shown on hover.
-    fn tip(self) -> &'static str {
-        match self {
-            FilletSoon::VariableRadius => {
-                "a start and end radius for each edge, varying linearly from the end you pick. Waits for \
-                 Catallax to build variable-radius fillets."
-            }
-            FilletSoon::Setbacks => {
-                "the stations where the fillet stops short of an edge's end, for Keep neighbours. Waits for \
-                 Catallax to build fillets that keep their neighbours."
-            }
-            FilletSoon::KeepNeighbours => {
-                "keep every neighbouring face whole, and stop at setback stations instead of rolling over. \
-                 Waits for Catallax to build fillets that keep their neighbours."
-            }
-            FilletSoon::Corners => {
-                "where only some of a corner's edges are filleted, continue the fillet across the open side at \
-                 the same radius instead of closing it with a flat wall. Waits for Catallax to build smooth \
-                 corners."
-            }
-        }
-    }
 }
 
 fn coord(ui: &mut egui::Ui, id: &str, label: &str, value: &mut f64) {
@@ -745,53 +654,6 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
                 );
             });
         });
-}
-
-/// The fillet's setback and option cards, in the SolidWorks fillet panel's places. The
-/// overflow choice is Catallax's: roll over, which it builds, or keep neighbours with
-/// setback stations, which waits, so the stations' card is drawn disabled. A fillet
-/// made by a tool with stations lists them there. Round corners is Catallax's smooth
-/// corner choice, which waits too; a fillet made with it shows it ticked, and unticking
-/// it goes back to cliff corners.
-fn fillet_option_cards(ui: &mut egui::Ui, fillet: &mut crate::document::FilletParams) {
-    use soliddraft_model::{FilletCorner, FilletOverflow};
-    let tip = |o: FilletSoon| format!("{COMING_SOON}: {}", o.tip());
-    soon_section(ui, "Setback parameters", &tip(FilletSoon::Setbacks), |ui| {
-        if let Some(FilletOverflow::KeepNeighbours(stations)) = &fillet.overflow {
-            // The distance and the end come first, so a narrow panel cuts only the face's name short.
-            for s in stations {
-                let edge = if fillet.edges.len() > 1 { format!("Edge {}: ", s.edge + 1) } else { String::new() };
-                picked_chip(ui, Icon::Axis, &format!("{edge}{} mm from {}", fmt_mm(s.setback), s.at.label), false);
-            }
-        }
-        pick_prompt(ui, "Click the end of an edge to stop short of");
-        let mut none = String::new();
-        let r = row(ui, "Distance", |ui, cell| {
-            value_cell(ui, cell, "mm", |ui, inner| {
-                ui.put(inner, egui::TextEdit::singleline(&mut none).hint_text("-").frame(egui::Frame::NONE))
-            })
-        });
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, false, "Setback distance value"));
-    });
-    section(ui, "Fillet options", |ui| {
-        ui.label(egui::RichText::new("Overflow").size(12.0).color(theme::ink()));
-        let keeps = matches!(fillet.overflow, Some(FilletOverflow::KeepNeighbours(_)));
-        let options = ["Roll over", "Keep neighbours"];
-        if segmented_gated(ui, "fillet_overflow", &options, keeps as usize, &[(1, FilletSoon::KeepNeighbours.tip())])
-            == Some(0)
-            && keeps
-        {
-            fillet.overflow = Some(FilletOverflow::RollOver);
-        }
-        let mut smooth = fillet.corner == Some(FilletCorner::Smooth);
-        let r = ui
-            .add_enabled(smooth, egui::Checkbox::new(&mut smooth, "Round corners"))
-            .on_hover_text(tip(FilletSoon::Corners))
-            .on_disabled_hover_text(tip(FilletSoon::Corners));
-        if r.changed() && !smooth {
-            fillet.corner = Some(FilletCorner::Cliff);
-        }
-    });
 }
 
 /// A field parameter: one value, or a linear grade between two anchors on a part axis.
@@ -1023,47 +885,13 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                     remove
                 });
-                if let Some(i) = remove {
-                    editor.remove_edge(i);
+                if let (Some(i), Some(list)) = (remove, editor.edges_mut()) {
+                    list.remove(i);
                 }
                 section(ui, if chamfer { "Chamfer parameters" } else { "Fillet parameters" }, |ui| {
                     let refused = &mut editor.feedback.size;
                     match &mut editor.params {
-                        EditorParams::Fillet(f) => {
-                            // A part saved with radius laws opens on Variable; Constant drops them.
-                            let variable = !f.laws.is_empty();
-                            let choice = segmented_gated(
-                                ui,
-                                "fillet_radius_kind",
-                                &["Constant", "Variable"],
-                                variable as usize,
-                                &[(1, FilletSoon::VariableRadius.tip())],
-                            );
-                            if choice == Some(0) {
-                                f.laws.clear();
-                            }
-                            size_field(ui, "Radius", &mut f.radius, refused);
-                            if !f.laws.is_empty() {
-                                for law in &f.laws {
-                                    let soliddraft_kernel_api::RadiusLaw::Linear { start, end } = law.radius;
-                                    let edge = if f.edges.len() > 1 {
-                                        format!("Edge {}: ", law.edge + 1)
-                                    } else {
-                                        String::new()
-                                    };
-                                    let text = format!(
-                                        "{edge}R{} to R{} mm from {}",
-                                        fmt_mm(start),
-                                        fmt_mm(end),
-                                        law.from.label
-                                    );
-                                    picked_chip(ui, Icon::Axis, &text, false);
-                                }
-                                if f.laws.len() < f.edges.len() {
-                                    hint(ui, "Edges without a law keep the radius above.");
-                                }
-                            }
-                        }
+                        EditorParams::Fillet(f) => size_field(ui, "Radius", &mut f.radius, refused),
                         EditorParams::Chamfer(c) => size_field(ui, "Distance", &mut c.distance, refused),
                         _ => {}
                     }
@@ -1071,9 +899,6 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                         error_row(ui, err);
                     }
                 });
-                if let EditorParams::Fillet(f) = &mut editor.params {
-                    fillet_option_cards(ui, f);
-                }
                 form_note(
                     ui,
                     "A face adds every edge on its boundary. Edges stay picked across a rebuild: each one is \

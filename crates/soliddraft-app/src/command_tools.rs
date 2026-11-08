@@ -429,15 +429,6 @@ pub enum Line {
         edges: Vec<String>,
         /// Radius, mm.
         radius: f64,
-        /// What the fillet does where it reaches a neighbouring face; absent rolls over.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        overflow: Option<OverflowLine>,
-        /// Variable-radius laws, at most one per edge; an edge without one keeps `radius`.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        radius_laws: Vec<LawLine>,
-        /// How a partly filleted corner closes; absent closes it as a cliff.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        corner: Option<soliddraft_model::FilletCorner>,
     },
     /// Bevels edges.
     Chamfer {
@@ -466,22 +457,12 @@ pub enum Line {
         /// Direction.
         flip: bool,
     },
-    /// Changes a fillet's radius, and its overflow policy, radius laws and corner choice
-    /// when given.
+    /// Changes a fillet's radius.
     EditFillet {
         /// The feature's name.
         feature: String,
         /// New radius, mm.
         radius: f64,
-        /// New overflow policy; absent keeps the fillet's.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        overflow: Option<OverflowLine>,
-        /// New radius laws; absent keeps the fillet's, and an empty list makes it constant.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        radius_laws: Option<Vec<LawLine>>,
-        /// New corner choice; absent keeps the fillet's.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        corner: Option<soliddraft_model::FilletCorner>,
     },
     /// Changes a chamfer's distance.
     EditChamfer {
@@ -917,198 +898,7 @@ pub fn edit_draft_params() -> Vec<(&'static str, Value)> {
 
 /// The `fillet` verb's parameters.
 pub fn fillet_params() -> Vec<(&'static str, Value)> {
-    vec![edges_param(), radius_param(), overflow_param(), laws_param(), corner_param()]
-}
-
-/// A fillet's radius, which edges without a radius law keep.
-fn radius_param() -> (&'static str, Value) {
-    ("radius", number("Radius, mm, greater than 0; with radius_laws, the radius of edges without a law"))
-}
-
-/// A fillet's variable-radius laws, spelled as Catallax's `fillet_variable` spells each
-/// edge: `{edge, from, radius: {kind: "linear", start, end}}`.
-fn laws_param() -> (&'static str, Value) {
-    let linear = object(&[
-        ("kind", constant("linear")),
-        ("start", number("Radius at the `from` end, mm, 0 or more")),
-        ("end", number("Radius at the other end, mm, 0 or more; not 0 when start is 0")),
-    ]);
-    let law = object(&[
-        (
-            "edge",
-            string(
-                "One of the fillet's edges: a name from `edges`, or for edit_fillet one of the `picked_edges` that `feature` lists",
-            ),
-        ),
-        ("from", string("The face that edge runs into at the end the law starts from")),
-        (
-            "radius",
-            soliddraft_assistant::tools::schema::described(any_of(vec![linear]), "How the radius runs along the edge"),
-        ),
-    ]);
-    (
-        "radius_laws",
-        optional(array(
-            law,
-            "Variable-radius laws, at most one per edge; an edge without one keeps `radius`. A variable fillet \
-             rolls over. Catallax cannot build variable radii yet and refuses them. For edit_fillet an empty \
-             list makes the fillet constant again, and leaving it out keeps the fillet's laws.",
-        )),
-    )
-}
-
-/// How a fillet closes a partly filleted corner, spelled as Catallax's recipe spells it.
-fn corner_param() -> (&'static str, Value) {
-    (
-        "corner",
-        optional(soliddraft_assistant::tools::schema::described(
-            any_of(vec![constant("cliff"), constant("smooth")]),
-            "Where only some of a corner's edges are filleted: cliff (the default) closes the open side with \
-             a flat wall; smooth continues the fillet across it at the same radius. A variable fillet closes \
-             corners as cliffs. Catallax cannot build smooth yet and refuses it. For edit_fillet, leaving it \
-             out keeps the fillet's choice.",
-        )),
-    )
-}
-
-/// A variable-radius law as a tool spells it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LawLine {
-    /// One of the fillet's edges, by name.
-    pub edge: String,
-    /// The face the edge runs into at the end the law starts from, by name.
-    pub from: String,
-    /// The radius along the edge from that end.
-    pub radius: soliddraft_kernel_api::RadiusLaw,
-}
-
-/// The model's radius laws for a tool's, with each law's edge found among the fillet's
-/// `edge_names`.
-fn laws_of(
-    doc: &Document,
-    lines: &[LawLine],
-    edge_names: &[String],
-) -> Result<Vec<soliddraft_model::FilletLaw>, String> {
-    lines
-        .iter()
-        .map(|l| {
-            let edge = edge_names.iter().position(|n| n == &l.edge).ok_or_else(|| {
-                format!("radius law edge `{}` is not one of the fillet's edges: {}", l.edge, edge_names.join(", "))
-            })?;
-            Ok(soliddraft_model::FilletLaw {
-                edge: edge as u32,
-                from: face_ref_by_name(doc, &l.from)?,
-                radius: l.radius,
-            })
-        })
-        .collect()
-}
-
-/// A fillet's radius laws for `feature`'s JSON, with each law's edge by name.
-fn laws_json(laws: &[soliddraft_model::FilletLaw], edges: &[EdgeRef]) -> Value {
-    laws.iter()
-        .map(|l| {
-            json!({
-                "edge": edges.get(l.edge as usize).map(|e| e.label.clone()).unwrap_or_default(),
-                "from": l.from.label,
-                "radius": l.radius,
-            })
-        })
-        .collect()
-}
-
-/// A fillet's overflow policy, spelled as Catallax's recipe spells it: `"roll_over"`, or
-/// `{"keep_neighbours": [setback, ...]}`.
-fn overflow_param() -> (&'static str, Value) {
-    let setback = object(&[
-        (
-            "edge",
-            string(
-                "One of the fillet's edges: a name from `edges`, or for edit_fillet one of the `picked_edges` that `feature` lists",
-            ),
-        ),
-        ("at", string("The face that edge runs into at the end the setback is measured from")),
-        ("setback", number("Distance along the edge from that end, mm, greater than 0")),
-    ]);
-    (
-        "overflow",
-        optional(soliddraft_assistant::tools::schema::described(
-            any_of(vec![
-                constant("roll_over"),
-                object(&[("keep_neighbours", array(setback, "Stations where each run stops"))]),
-            ]),
-            "Where the fillet reaches a neighbouring face: roll_over (the default) continues across it; \
-             keep_neighbours keeps every neighbour whole and stops at the setback stations. Catallax cannot \
-             build keep_neighbours yet and refuses it.",
-        )),
-    )
-}
-
-/// A fillet's overflow policy as a tool spells it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OverflowLine {
-    /// Continue across neighbouring faces.
-    RollOver,
-    /// Keep neighbours whole and stop at these stations.
-    KeepNeighbours(Vec<SetbackLine>),
-}
-
-/// A setback station as a tool spells it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SetbackLine {
-    /// One of the fillet's edges, by name.
-    pub edge: String,
-    /// The face the edge runs into at the measured end, by name.
-    pub at: String,
-    /// Distance along the edge, mm.
-    pub setback: f64,
-}
-
-/// The model's overflow policy for a tool's, with each station's edge found among the
-/// fillet's `edge_names`.
-fn overflow_of(
-    doc: &Document,
-    line: &OverflowLine,
-    edge_names: &[String],
-) -> Result<soliddraft_model::FilletOverflow, String> {
-    Ok(match line {
-        OverflowLine::RollOver => soliddraft_model::FilletOverflow::RollOver,
-        OverflowLine::KeepNeighbours(stations) => soliddraft_model::FilletOverflow::KeepNeighbours(
-            stations
-                .iter()
-                .map(|s| {
-                    let edge = edge_names.iter().position(|n| n == &s.edge).ok_or_else(|| {
-                        format!("setback edge `{}` is not one of the fillet's edges: {}", s.edge, edge_names.join(", "))
-                    })?;
-                    Ok(soliddraft_model::FilletSetback {
-                        edge: edge as u32,
-                        at: face_ref_by_name(doc, &s.at)?,
-                        setback: positive("setback", s.setback)?,
-                    })
-                })
-                .collect::<Result<_, String>>()?,
-        ),
-    })
-}
-
-/// A fillet's overflow policy for `feature`'s JSON, with each station's edge by name.
-fn overflow_json(overflow: &soliddraft_model::FilletOverflow, edges: &[EdgeRef]) -> Value {
-    match overflow {
-        soliddraft_model::FilletOverflow::RollOver => json!("roll_over"),
-        soliddraft_model::FilletOverflow::KeepNeighbours(stations) => json!({
-            "keep_neighbours": stations
-                .iter()
-                .map(|s| json!({
-                    "edge": edges.get(s.edge as usize).map(|e| e.label.clone()).unwrap_or_default(),
-                    "at": s.at.label,
-                    "setback": s.setback,
-                }))
-                .collect::<Vec<_>>(),
-        }),
-    }
+    vec![edges_param(), ("radius", number("Radius, mm, greater than 0"))]
 }
 
 /// The `chamfer` verb's parameters.
@@ -1137,7 +927,7 @@ pub fn edit_cut_params() -> Vec<(&'static str, Value)> {
 
 /// The `edit_fillet` verb's parameters.
 pub fn edit_fillet_params() -> Vec<(&'static str, Value)> {
-    vec![feature_param(), radius_param(), overflow_param(), laws_param(), corner_param()]
+    vec![feature_param(), ("radius", number("Radius, mm, greater than 0"))]
 }
 
 /// The `edit_chamfer` verb's parameters.
@@ -1862,12 +1652,9 @@ impl Line {
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Draft(draft)))?;
             }
-            Line::Fillet { edges: names, radius, overflow, radius_laws, corner } => {
-                let edges = names.iter().map(|e| edge_ref(doc, e)).collect::<Result<Vec<_>, _>>()?;
-                let overflow = overflow.as_ref().map(|o| overflow_of(doc, o, names)).transpose()?;
-                let laws = laws_of(doc, radius_laws, names)?;
-                let radius = positive("radius", *radius)?;
-                let params = FilletParams { edges, radius, overflow, laws, corner: *corner };
+            Line::Fillet { edges, radius } => {
+                let edges = edges.iter().map(|e| edge_ref(doc, e)).collect::<Result<Vec<_>, _>>()?;
+                let params = FilletParams { edges, radius: positive("radius", *radius)? };
                 run.apply(doc, Command::AddFillet { params })?;
             }
             Line::Chamfer { edges, distance } => {
@@ -1951,22 +1738,12 @@ impl Line {
                 d.angle = *angle;
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Draft(d) })?;
             }
-            Line::EditFillet { feature, radius, overflow, radius_laws, corner } => {
+            Line::EditFillet { feature, radius } => {
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Fillet(p)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a fillet"));
                 };
-                let names: Vec<String> = p.edges.iter().map(|e| e.label.clone()).collect();
-                let overflow = match overflow {
-                    Some(o) => Some(overflow_of(doc, o, &names)?),
-                    None => p.overflow.clone(),
-                };
-                let laws = match radius_laws {
-                    Some(lines) => laws_of(doc, lines, &names)?,
-                    None => p.laws.clone(),
-                };
-                let corner = corner.or(p.corner);
-                let params = FilletParams { radius: positive("radius", *radius)?, overflow, laws, corner, ..p };
+                let params = FilletParams { radius: positive("radius", *radius)?, ..p };
                 run.apply(doc, Command::EditFillet { id, params })?;
             }
             Line::EditChamfer { feature, distance } => {
@@ -2205,27 +1982,9 @@ impl Line {
                 (format!("Edit {feature}"), if *keep_original { "keep the original" } else { "reflection only" }.into())
             }
             Line::EditDraft { feature, angle } => (format!("Edit {feature}"), format!("{}°", fmt_mm(*angle))),
-            Line::Fillet { edges, radius, overflow, radius_laws, corner } => (
-                "Fillet".into(),
-                format!(
-                    "R{} on {}{}{}{}",
-                    fmt_mm(*radius),
-                    edges.join(", "),
-                    match overflow {
-                        Some(OverflowLine::KeepNeighbours(_)) => ", keeping neighbours",
-                        _ => "",
-                    },
-                    match radius_laws.len() {
-                        0 => String::new(),
-                        1 => ", 1 variable edge".into(),
-                        n => format!(", {n} variable edges"),
-                    },
-                    match corner {
-                        Some(soliddraft_model::FilletCorner::Smooth) => ", smooth corners",
-                        _ => "",
-                    }
-                ),
-            ),
+            Line::Fillet { edges, radius } => {
+                ("Fillet".into(), format!("R{} on {}", fmt_mm(*radius), edges.join(", ")))
+            }
             Line::Chamfer { edges, distance } => {
                 ("Chamfer".into(), format!("{} mm on {}", fmt_mm(*distance), edges.join(", ")))
             }
@@ -2243,7 +2002,7 @@ impl Line {
             Line::EditCut { feature, through_all, depth, flip } => {
                 (format!("Edit {feature}"), end(*through_all, *depth, *flip))
             }
-            Line::EditFillet { feature, radius, .. } => (format!("Edit {feature}"), format!("R{}", fmt_mm(*radius))),
+            Line::EditFillet { feature, radius } => (format!("Edit {feature}"), format!("R{}", fmt_mm(*radius))),
             Line::EditChamfer { feature, distance } => (format!("Edit {feature}"), format!("{} mm", fmt_mm(*distance))),
             Line::Suppress { feature, suppressed } => {
                 (if *suppressed { "Suppress" } else { "Unsuppress" }.into(), feature.clone())
@@ -2832,19 +2591,7 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
         FeatureKind::Revolve(r) => {
             json!({"type":"revolve","sketch":name(r.sketch.0 as u64),"axis_origin":r.axis_origin,"axis_direction":r.axis_direction,"angle_deg":r.angle_deg})
         }
-        FeatureKind::Fillet(p) => {
-            let mut v = json!({ "type": "fillet", "edges": labels(&p.edges), "radius": p.radius });
-            if let Some(o) = &p.overflow {
-                v["overflow"] = overflow_json(o, &p.edges);
-            }
-            if !p.laws.is_empty() {
-                v["radius_laws"] = laws_json(&p.laws, &p.edges);
-            }
-            if let Some(corner) = p.corner {
-                v["corner"] = json!(corner);
-            }
-            v
-        }
+        FeatureKind::Fillet(p) => json!({ "type": "fillet", "edges": labels(&p.edges), "radius": p.radius }),
         FeatureKind::Chamfer(p) => json!({ "type": "chamfer", "edges": labels(&p.edges), "distance": p.distance }),
         FeatureKind::Hole(h) => {
             let mut v = json!({
@@ -3558,24 +3305,6 @@ mod tests {
         }
         fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult> {
             self.0.fillet(tag, body, edges, radius)
-        }
-        fn fillet_with(
-            &self,
-            tag: &OpTag,
-            body: BodyId,
-            edges: &[EdgeId],
-            radius: f64,
-            policy: &soliddraft_kernel_api::FilletPolicy,
-        ) -> KernelResult<OpResult> {
-            self.0.fillet_with(tag, body, edges, radius, policy)
-        }
-        fn fillet_variable(
-            &self,
-            tag: &OpTag,
-            body: BodyId,
-            edges: &[soliddraft_kernel_api::VariableFilletEdge],
-        ) -> KernelResult<OpResult> {
-            self.0.fillet_variable(tag, body, edges)
         }
         fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {
             self.0.chamfer(tag, body, edges, distance)

@@ -125,129 +125,6 @@ fn before_all_faces(id: &str, current: &mut Value) {
     assert_eq!(added["type"], "boolean", "all_faces is one optional flag");
 }
 
-/// The `overflow` input `fillet` and `edit_fillet` gained with Catallax's fillet overflow
-/// policy: `"roll_over"` or `{"keep_neighbours": [{edge, at, setback}]}`.
-fn overflow_schema() -> Value {
-    let station = json!({
-        "type":"object", "additionalProperties":false, "required":["edge","at","setback"],
-        "properties": {"edge":{"type":"string"}, "at":{"type":"string"}, "setback":{"type":"number"}},
-    });
-    json!({"anyOf": [
-        {"type":"string", "const":"roll_over"},
-        {
-            "type":"object", "additionalProperties":false, "required":["keep_neighbours"],
-            "properties": {"keep_neighbours": {"type":"array", "items": station}},
-        },
-    ]})
-}
-
-/// The `radius_laws` input `fillet` and `edit_fillet` gained with Catallax's variable-radius
-/// laws: `[{edge, from, radius: {kind: "linear", start, end}}]`.
-fn radius_laws_schema() -> Value {
-    let linear = json!({
-        "type":"object", "additionalProperties":false, "required":["kind","start","end"],
-        "properties": {"kind":{"type":"string", "const":"linear"}, "start":{"type":"number"}, "end":{"type":"number"}},
-    });
-    json!({"type":"array", "items": {
-        "type":"object", "additionalProperties":false, "required":["edge","from","radius"],
-        "properties": {"edge":{"type":"string"}, "from":{"type":"string"}, "radius":{"anyOf":[linear]}},
-    }})
-}
-
-/// The `corner` input `fillet` and `edit_fillet` gained with Catallax's fillet corner
-/// choice: `"cliff"` or `"smooth"`.
-fn corner_schema() -> Value {
-    json!({"anyOf": [{"type":"string", "const":"cliff"}, {"type":"string", "const":"smooth"}]})
-}
-
-/// Removes the optional inputs one fillet line gained after the freeze, once each is still
-/// optional and matches its declared schema whole.
-fn take_fillet_additions(line: &mut Value) -> Result<(), String> {
-    for (name, declared) in
-        [("overflow", overflow_schema()), ("radius_laws", radius_laws_schema()), ("corner", corner_schema())]
-    {
-        if line["required"].as_array().is_some_and(|required| required.contains(&json!(name))) {
-            return Err(format!("{name} became required"));
-        }
-        let properties = line["properties"].as_object_mut().ok_or("the line has no properties")?;
-        let added = properties.remove(name).ok_or_else(|| format!("{name} is missing"))?;
-        if added != declared {
-            return Err(format!("{name} is not the declared schema: {added}"));
-        }
-    }
-    Ok(())
-}
-
-/// Takes away the inputs `fillet` and `edit_fillet` gained with Catallax's fillet recipe
-/// fields, here and in their `propose` lines.
-fn before_fillet_additions(id: &str, current: &mut Value) {
-    let lines: Vec<&mut Value> = match id {
-        "fillet" | "edit_fillet" => current.pointer_mut("/tool/input").into_iter().collect(),
-        "propose" => current
-            .pointer_mut("/tool/input/properties/commands/items/anyOf")
-            .and_then(Value::as_array_mut)
-            .map(|lines| {
-                lines
-                    .iter_mut()
-                    .filter(|line| matches!(line["properties"]["op"]["const"].as_str(), Some("fillet" | "edit_fillet")))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        _ => return,
-    };
-    assert!(!lines.is_empty(), "{id} has fillet inputs");
-    for line in lines {
-        take_fillet_additions(line).unwrap_or_else(|why| panic!("{id}: {why}"));
-    }
-}
-
-#[test]
-fn fillet_additions_are_checked_whole_before_they_are_removed() {
-    let line = || {
-        json!({
-            "type":"object", "additionalProperties":false, "required":["feature","radius"],
-            "properties": {
-                "feature":{"type":"string"}, "radius":{"type":"number"},
-                "overflow": overflow_schema(), "radius_laws": radius_laws_schema(), "corner": corner_schema(),
-            },
-        })
-    };
-    let mut declared = line();
-    assert_eq!(take_fillet_additions(&mut declared), Ok(()));
-    assert_eq!(declared["properties"], json!({"feature":{"type":"string"}, "radius":{"type":"number"}}));
-
-    // A station whose setback is no longer a number.
-    let mut station = line();
-    station["properties"]["overflow"]["anyOf"][1]["properties"]["keep_neighbours"]["items"]["properties"]["setback"] =
-        json!({"type":"string"});
-    assert!(take_fillet_additions(&mut station).unwrap_err().starts_with("overflow is not the declared schema"));
-
-    // A third overflow choice.
-    let mut extra = line();
-    extra["properties"]["overflow"]["anyOf"].as_array_mut().unwrap().push(json!({"type":"string", "const":"stop"}));
-    assert!(take_fillet_additions(&mut extra).unwrap_err().starts_with("overflow is not the declared schema"));
-
-    // A law that takes a field Catallax does not spell.
-    let mut law = line();
-    law["properties"]["radius_laws"]["items"]["properties"]["at"] = json!({"type":"string"});
-    assert!(take_fillet_additions(&mut law).unwrap_err().starts_with("radius_laws is not the declared schema"));
-
-    // A third corner choice.
-    let mut corner = line();
-    corner["properties"]["corner"]["anyOf"].as_array_mut().unwrap().push(json!({"type":"string", "const":"mitre"}));
-    assert!(take_fillet_additions(&mut corner).unwrap_err().starts_with("corner is not the declared schema"));
-
-    // The corner choice made required.
-    let mut needed = line();
-    needed["required"] = json!(["feature", "radius", "corner"]);
-    assert_eq!(take_fillet_additions(&mut needed), Err("corner became required".into()));
-
-    // Either input made required.
-    let mut required = line();
-    required["required"] = json!(["feature", "radius", "overflow"]);
-    assert_eq!(take_fillet_additions(&mut required), Err("overflow became required".into()));
-}
-
 fn before_trim_modes(id: &str, current: &mut Value) {
     let variants = match id {
         "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
@@ -425,7 +302,6 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         let mut current = configuration_registry::before_configurations(id, current, plain);
         before_all_faces(id, &mut current);
         before_trim_modes(id, &mut current);
-        before_fillet_additions(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

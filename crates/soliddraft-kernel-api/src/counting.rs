@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     BackendInfo, BodyId, BooleanOp, Draft, EdgeId, EdgePolyline, ExactAxisPlane, ExactSupport, Extrude, ExtrudeLimit,
-    FaceCarrier, FaceId, FilletPolicy, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh,
-    Mirror, OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve,
-    SupportEntity, TessellationParams, Topology, Validation, VariableFilletEdge, Vec3, drawing,
+    FaceCarrier, FaceId, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror,
+    OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve, SupportEntity,
+    TessellationParams, Topology, Validation, Vec3, drawing,
 };
 
 /// One piece of work a kernel was asked for.
@@ -110,23 +110,6 @@ impl Kernel for Counting {
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.fillet(tag, body, edges, radius)
-    }
-
-    fn fillet_with(
-        &self,
-        tag: &OpTag,
-        body: BodyId,
-        edges: &[EdgeId],
-        radius: f64,
-        policy: &FilletPolicy,
-    ) -> KernelResult<OpResult> {
-        self.op(tag);
-        self.inner.fillet_with(tag, body, edges, radius, policy)
-    }
-
-    fn fillet_variable(&self, tag: &OpTag, body: BodyId, edges: &[VariableFilletEdge]) -> KernelResult<OpResult> {
-        self.op(tag);
-        self.inner.fillet_variable(tag, body, edges)
     }
 
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {

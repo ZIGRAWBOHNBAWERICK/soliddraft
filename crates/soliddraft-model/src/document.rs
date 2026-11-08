@@ -513,24 +513,7 @@ impl Document {
         if chamfer {
             return self.kernel.chamfer(tag, body, edges, b.size).map_err(|e| e.to_string());
         }
-        let t = self.view_of(body).map_err(|e| e.to_string())?;
-        crate::evaluate::fillet(self.kernel.as_ref(), tag, b, edges, body, &t, &self.name_map())
-            .map_err(|e| e.message())?
-            .map_err(|e| e.to_string())
-    }
-
-    /// A variable fillet's edges on `body` with their laws, given the fillet's edges
-    /// resolved there and its constant radius for edges without a law.
-    pub fn resolve_variable(
-        &self,
-        laws: &[crate::feature::FilletLaw],
-        edges: &[EdgeId],
-        size: f64,
-        body: BodyId,
-    ) -> Result<Vec<soliddraft_kernel_api::VariableFilletEdge>, String> {
-        let t = self.view_of(body).map_err(|e| e.to_string())?;
-        crate::evaluate::variable_edges(laws, edges, size, &t, &View { topology: &t }, &self.name_map())
-            .map_err(|e| e.message())
+        self.kernel.fillet(tag, body, edges, b.size).map_err(|e| e.to_string())
     }
 
     /// Moves the rollback bar without an undo entry and rebuilds, for views that show

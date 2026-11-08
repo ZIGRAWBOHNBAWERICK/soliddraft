@@ -340,13 +340,7 @@ impl SolidDraftApp {
                 let params = if chamfer {
                     EditorParams::Chamfer(ChamferParams { edges: Vec::new(), distance: 2.0 })
                 } else {
-                    EditorParams::Fillet(FilletParams {
-                        edges: Vec::new(),
-                        radius: 4.0,
-                        overflow: None,
-                        laws: Vec::new(),
-                        corner: None,
-                    })
+                    EditorParams::Fillet(FilletParams { edges: Vec::new(), radius: 4.0 })
                 };
                 self.open_editor(None, params);
                 // A picked edge or face is the panel's first pick, as if made with it open.

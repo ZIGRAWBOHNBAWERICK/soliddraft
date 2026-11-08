@@ -58,7 +58,7 @@ arc traversed against its own direction, such as a concave bite out of an edge, 
 | Sketch | an origin plane, reference plane feature or planar face by persistent name, optionally offset along its normal, and a sketch |
 | Extrude | a profile (a sketch, or a built-in rectangle or circle on a reference plane), boss or cut, blind depth or through all, reversed or not |
 | Extrude end | blind, through all, up to the next boundary, or up to a face by persistent name |
-| Fillet, Chamfer | edges by persistent name, radius or distance; a fillet may also carry an overflow policy, roll over or keep neighbours with setback stations (Catallax recipe section 4.5.1). A station names one of the fillet's edges and the face that edge runs into at the end it is measured from. A fillet may also carry linear radius laws (Catallax recipe section 4.5.2), at most one per edge: a start and an end radius, from the end that a face the edge runs into names. Edges without a law keep the radius, and a variable fillet rolls over. A fillet may also carry a corner choice (Catallax recipe section 4.5.1) for a corner where only some of its edges are filleted: cliff, the default, closes the open side with a flat wall, and smooth continues the fillet across it at the same radius. A variable fillet closes its corners as cliffs |
+| Fillet, Chamfer | edges by persistent name, radius or distance |
 | Hole | a planar face by persistent name, centres in the face's sketch frame, diameter, blind depth or through, flat or drill-point tip, counterbore or countersink |
 | Linear and circular pattern | a direction and spacing, or an axis and angle, and the number of copies; copies the body and unites the copies with it |
 | Mirror | a reference plane or a planar face, and whether the original stays |
@@ -206,12 +206,7 @@ What a reference needs from those faces depends on its use:
 - a sketch plane needs one plane, so it accepts the pieces of a split face when they lie
   in one plane;
 - an appearance follows every piece;
-- a drawing anchor or a fillet edge needs exactly one face or edge;
-- a fillet's setback station, and the start of a variable fillet's radius law, needs its
-  end face to meet the edge at exactly one end. An end face that is gone, or meets the
-  edge at both ends or neither, asks for repair like a lost edge does. Its candidates are
-  the faces that meet one end each, and removing an edge from the fillet removes its
-  stations and law.
+- a drawing anchor or a fillet edge needs exactly one face or edge.
 
 The result is checked against a fingerprint taken when the reference was made: the
 surface or curve type must not change, and a planar face must still face the same way.

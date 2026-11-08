@@ -350,45 +350,12 @@ impl CutParams {
 pub struct FilletParams {
     pub edges: Vec<EdgeRef>,
     pub radius: f64,
-    /// The overflow policy; absent rolls over.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overflow: Option<model::FilletOverflow>,
-    /// Variable-radius laws, at most one per edge; an edge without one keeps `radius`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub laws: Vec<model::FilletLaw>,
-    /// How a partly filleted corner closes; absent closes it as a cliff.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub corner: Option<model::FilletCorner>,
 }
 
 impl FilletParams {
     /// The model's fillet these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature {
-            edges: self.edges.clone(),
-            size: self.radius,
-            overflow: self.overflow.clone(),
-            laws: self.laws.clone(),
-            corner: self.corner,
-        }
-    }
-
-    /// The radius as people read it: "R4", or for a variable fillet the range its laws
-    /// and its constant edges span, such as "R2 to R6".
-    pub fn radius_label(&self) -> String {
-        let mut radii: Vec<f64> = self
-            .laws
-            .iter()
-            .flat_map(|l| match l.radius {
-                soliddraft_kernel_api::RadiusLaw::Linear { start, end } => [start, end],
-            })
-            .collect();
-        if self.laws.len() < self.edges.len() || radii.is_empty() {
-            radii.push(self.radius);
-        }
-        let low = radii.iter().copied().fold(f64::INFINITY, f64::min);
-        let high = radii.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        if low == high { format!("R{}", fmt_mm(low)) } else { format!("R{} to R{}", fmt_mm(low), fmt_mm(high)) }
+        model::BlendFeature { edges: self.edges.clone(), size: self.radius }
     }
 }
 
@@ -401,13 +368,7 @@ pub struct ChamferParams {
 impl ChamferParams {
     /// The model's chamfer these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature {
-            edges: self.edges.clone(),
-            size: self.distance,
-            overflow: None,
-            laws: Vec::new(),
-            corner: None,
-        }
+        model::BlendFeature { edges: self.edges.clone(), size: self.distance }
     }
 }
 
@@ -679,13 +640,9 @@ impl FeatureKind {
                     }
                 }
             }
-            model::FeatureKind::Fillet(b) => FeatureKind::Fillet(FilletParams {
-                edges: b.edges.clone(),
-                radius: b.size,
-                overflow: b.overflow.clone(),
-                laws: b.laws.clone(),
-                corner: b.corner,
-            }),
+            model::FeatureKind::Fillet(b) => {
+                FeatureKind::Fillet(FilletParams { edges: b.edges.clone(), radius: b.size })
+            }
             model::FeatureKind::Chamfer(b) => {
                 FeatureKind::Chamfer(ChamferParams { edges: b.edges.clone(), distance: b.size })
             }
@@ -739,9 +696,7 @@ impl EntityRef {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RepairItem {
     /// Index into the feature's references: 0 for a sketch plane, the edge's
-    /// position for a fillet or chamfer, for a fillet's setback station the number of
-    /// edges plus its position, and for a radius law the number of edges and stations
-    /// plus its position.
+    /// position for a fillet or chamfer.
     pub index: usize,
     pub kind: RefKind,
     pub label: String,
@@ -816,7 +771,7 @@ impl Feature {
             },
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
             FeatureKind::Sweep(s) => format!("{} mm", fmt_mm(s.path.length())),
-            FeatureKind::Fillet(f) => f.radius_label(),
+            FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
             FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
             FeatureKind::Hole(h) => {
                 format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter))
@@ -2422,19 +2377,6 @@ impl Document {
                     (model::FeatureKind::Fillet(b) | model::FeatureKind::Chamfer(b), EntityRef::Edge(edge)) => {
                         *b.edges.get_mut(index).ok_or("no such reference")? = edge;
                     }
-                    // A fillet's end faces follow its edges: setback stations, then radius laws.
-                    (model::FeatureKind::Fillet(b), EntityRef::Face(face)) if index >= b.edges.len() => {
-                        let station = index - b.edges.len();
-                        let stations = b.stations().len();
-                        if station < stations {
-                            let Some(model::FilletOverflow::KeepNeighbours(list)) = &mut b.overflow else {
-                                unreachable!("a fillet with stations keeps its neighbours")
-                            };
-                            list[station].at = face;
-                        } else {
-                            b.laws.get_mut(station - stations).ok_or("no such reference")?.from = face;
-                        }
-                    }
                     (model::FeatureKind::Hole(h), EntityRef::Face(face)) if index == 0 => h.face = face,
                     (model::FeatureKind::Mirror(m), EntityRef::Face(face)) if index == 0 => {
                         m.plane = model::PlaneRef::Face { face };
@@ -3635,19 +3577,6 @@ fn view_status(
                             let label = b.edges.get(index as usize).map(|e| e.label.clone()).unwrap_or_default();
                             (index as usize, RefKind::Edge, label)
                         }
-                        (model::ReferenceSlot::Setback { index }, model::FeatureKind::Fillet(b)) => {
-                            let label = match &b.overflow {
-                                Some(model::FilletOverflow::KeepNeighbours(stations)) => {
-                                    stations.get(index as usize).map(|s| s.at.label.clone()).unwrap_or_default()
-                                }
-                                _ => String::new(),
-                            };
-                            (b.edges.len() + index as usize, RefKind::Face, label)
-                        }
-                        (model::ReferenceSlot::Law { index }, model::FeatureKind::Fillet(b)) => {
-                            let label = b.laws.get(index as usize).map(|l| l.from.label.clone()).unwrap_or_default();
-                            (b.edges.len() + b.stations().len() + index as usize, RefKind::Face, label)
-                        }
                         (model::ReferenceSlot::Face { index }, model::FeatureKind::Shell(s)) => {
                             let faces = s.open_faces.picked();
                             let label = faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
@@ -3698,12 +3627,7 @@ fn view_status(
                             | model::ReferenceSlot::Limit,
                             _,
                         ) => (0, RefKind::Face, String::new()),
-                        (
-                            model::ReferenceSlot::Face { index }
-                            | model::ReferenceSlot::Setback { index }
-                            | model::ReferenceSlot::Law { index },
-                            _,
-                        ) => (index as usize, RefKind::Face, String::new()),
+                        (model::ReferenceSlot::Face { index }, _) => (index as usize, RefKind::Face, String::new()),
                         (model::ReferenceSlot::Edge { index }, _) => (index as usize, RefKind::Edge, String::new()),
                     };
                     RepairItem { index, kind, label: if label.is_empty() { r.message.clone() } else { label } }
@@ -4005,12 +3929,8 @@ mod tests {
             .unwrap();
         let r = d.edge_ref(inside.id).unwrap();
         assert!(r.label.contains("Boss-Extrude2"), "{}", r.label);
-        let fillet = d
-            .apply(Command::AddFillet {
-                params: FilletParams { edges: vec![r], radius: 4.0, overflow: None, laws: Vec::new(), corner: None },
-            })
-            .unwrap()
-            .unwrap();
+        let fillet =
+            d.apply(Command::AddFillet { params: FilletParams { edges: vec![r], radius: 4.0 } }).unwrap().unwrap();
         let built = |d: &Document| {
             let status = &d.feature(fillet).unwrap().status;
             assert_eq!(*status, FeatureStatus::Ok, "{status:?}");
@@ -4047,120 +3967,5 @@ mod tests {
         assert_eq!(d.display_index(), Some(2));
         d.apply(Command::Rollback(None)).unwrap();
         built(&d);
-    }
-    #[test]
-    fn a_fillet_reads_as_its_radius_or_the_range_of_its_laws() {
-        let mut d = doc();
-        d.apply(Command::AddExtrude {
-            params: ExtrudeParams {
-                profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },
-                depth: 10.0,
-                ..Default::default()
-            },
-            via_assistant: false,
-        })
-        .unwrap();
-        let edges: Vec<EdgeRef> = d.edges.iter().take(2).map(|e| d.edge_ref(e.id).unwrap()).collect();
-        let face = d.any_face_ref(d.faces[0].id).unwrap();
-        let law = |edge: u32, start: f64, end: f64| model::FilletLaw {
-            edge,
-            from: face.clone(),
-            radius: soliddraft_kernel_api::RadiusLaw::Linear { start, end },
-        };
-        let fillet = |laws: Vec<model::FilletLaw>| FilletParams {
-            edges: edges.clone(),
-            radius: 4.0,
-            overflow: None,
-            laws,
-            corner: None,
-        };
-        assert_eq!(fillet(Vec::new()).radius_label(), "R4");
-        assert_eq!(fillet(vec![law(0, 2.0, 6.0)]).radius_label(), "R2 to R6", "the constant edge's R4 lies inside");
-        assert_eq!(fillet(vec![law(0, 0.0, 3.0), law(1, 1.0, 3.0)]).radius_label(), "R0 to R3", "every edge has a law");
-        assert_eq!(fillet(vec![law(0, 4.0, 4.0)]).radius_label(), "R4");
-    }
-
-    #[test]
-    fn a_setback_station_that_names_no_end_is_repaired_by_picking_an_end_face() {
-        end_face_repair(|at| {
-            let station = model::FilletSetback { edge: 0, at: at.clone(), setback: 5.0 };
-            (Some(model::FilletOverflow::KeepNeighbours(vec![station])), Vec::new())
-        });
-    }
-
-    #[test]
-    fn a_radius_law_that_names_no_end_is_repaired_by_picking_an_end_face() {
-        end_face_repair(|from| {
-            let radius = soliddraft_kernel_api::RadiusLaw::Linear { start: 1.0, end: 3.0 };
-            (None, vec![model::FilletLaw { edge: 0, from: from.clone(), radius }])
-        });
-    }
-
-    /// A fillet on one edge whose single end-face reference, made by `ends`, names a face
-    /// along the edge instead of at an end: it asks for repair after its edge, refuses a
-    /// wrong pick, and an end face places it so the fillet reaches Catallax.
-    fn end_face_repair(ends: impl Fn(&FaceRef) -> (Option<model::FilletOverflow>, Vec<model::FilletLaw>)) {
-        let mut d = doc();
-        d.apply(Command::AddExtrude {
-            params: ExtrudeParams {
-                profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },
-                depth: 10.0,
-                ..Default::default()
-            },
-            via_assistant: false,
-        })
-        .unwrap();
-        let t = d.kernel().topology(d.model.body().unwrap()).unwrap();
-        let edge = t
-            .edges
-            .iter()
-            .filter(|e| e.midpoint.z > 10.0 - 1e-6)
-            .max_by(|a, b| a.midpoint.y.total_cmp(&b.midpoint.y))
-            .unwrap();
-        let facing = |n: soliddraft_kernel_api::Vec3| {
-            let f = t.faces.iter().find(|f| f.normal.is_some_and(|m| (m - n).length() < 1e-9)).unwrap();
-            d.any_face_ref(f.id).unwrap()
-        };
-        let edge_ref = d.edge_ref(edge.id).unwrap();
-        let (end, along) = (facing(soliddraft_kernel_api::Vec3::X), facing(soliddraft_kernel_api::Vec3::Y));
-        let mut m = model::Document::from_bytes(&d.model.to_bytes().unwrap(), d.kernel().clone()).unwrap();
-        let (overflow, laws) = ends(&along);
-        let kind = model::FeatureKind::Fillet(model::BlendFeature {
-            edges: vec![edge_ref.clone()],
-            size: 2.0,
-            overflow,
-            laws,
-            corner: None,
-        });
-        let fillet =
-            m.execute(model::Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
-        let fillet = fillet.created.unwrap().0 as u64;
-        let mut d = Document::from_model(m);
-
-        // The back face runs along the edge, so the reference asks for an end face. Its item
-        // comes after the fillet's one edge and shows the face it named.
-        let FeatureStatus::NeedsRepair(items) = d.feature(fillet).unwrap().status.clone() else {
-            panic!("{:?}", d.feature(fillet).unwrap().status)
-        };
-        assert_eq!(items, vec![RepairItem { index: 1, kind: RefKind::Face, label: along.label.clone() }]);
-
-        // An edge is the wrong kind for an end, and a pick past the references names nothing.
-        let wrong = d.apply(Command::Repair { id: fillet, index: 1, replacement: EntityRef::Edge(edge_ref.clone()) });
-        assert!(wrong.is_err(), "{wrong:?}");
-        let past = d.apply(Command::Repair { id: fillet, index: 2, replacement: EntityRef::Face(end.clone()) });
-        assert!(past.is_err(), "{past:?}");
-
-        // The end face places the reference, and the fillet waits on Catallax instead.
-        let _ = d.apply(Command::Repair { id: fillet, index: 1, replacement: EntityRef::Face(end.clone()) });
-        match &d.model.feature(model_id(fillet)).unwrap().kind {
-            model::FeatureKind::Fillet(b) => {
-                assert_eq!((b.overflow.clone(), b.laws.clone()), ends(&end), "the reference names the end face")
-            }
-            other => panic!("{other:?}"),
-        }
-        match &d.feature(fillet).unwrap().status {
-            FeatureStatus::Error(why) => assert!(why.to_lowercase().contains("coming soon"), "{why}"),
-            other => panic!("the repaired reference reaches Catallax: {other:?}"),
-        }
     }
 }

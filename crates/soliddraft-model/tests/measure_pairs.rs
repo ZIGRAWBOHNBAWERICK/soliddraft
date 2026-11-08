@@ -78,16 +78,7 @@ fn refused(d: &mut Document, command: Command, message: &str) {
 }
 
 fn fillet(d: &mut Document, reference: EdgeRef) -> FeatureId {
-    add(
-        d,
-        FeatureKind::Fillet(BlendFeature {
-            edges: vec![reference],
-            size: 2.0,
-            overflow: None,
-            laws: Vec::new(),
-            corner: None,
-        }),
-    )
+    add(d, FeatureKind::Fillet(BlendFeature { edges: vec![reference], size: 2.0 }))
 }
 
 fn depth(d: &mut Document, id: FeatureId, depth: f64) {

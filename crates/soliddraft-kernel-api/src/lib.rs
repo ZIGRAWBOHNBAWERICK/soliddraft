@@ -180,79 +180,6 @@ pub enum HoleHead {
     },
 }
 
-/// What a fillet does when its rolling ball reaches a neighbouring face, as Catallax's
-/// recipe section 4.5.1 defines it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FilletOverflow {
-    /// Continue across the neighbours, trimming or consuming them. The default.
-    #[default]
-    RollOver,
-    /// Keep every unselected neighbour whole, and stop each run at its setback stations.
-    KeepNeighbours(Vec<FilletSetback>),
-}
-
-/// How a fillet closes the open side of a corner where only some of the corner's edges
-/// are filleted, as Catallax's recipe section 4.5.1 defines it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FilletCorner {
-    /// Close the corner's ball against a flat wall on its open side. The default.
-    #[default]
-    Cliff,
-    /// Continue the fillet across the open side at the same radius, as an exact
-    /// cylinder cut by the face it runs into.
-    Smooth,
-}
-
-/// A constant fillet's continuation choices. The default is what [`Kernel::fillet`]
-/// builds.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct FilletPolicy {
-    /// What the fillet does at a neighbouring face.
-    pub overflow: FilletOverflow,
-    /// How it closes a partly filleted corner.
-    pub corner: FilletCorner,
-}
-
-/// A station on one of a fillet's edges where its run stops, closed by the plane normal
-/// to the edge there.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FilletSetback {
-    /// One of the fillet's edges.
-    pub edge: EdgeId,
-    /// The end of that edge the distance is measured from.
-    pub at: VertexId,
-    /// Distance along the edge from `at`, in millimetres; positive.
-    pub setback: f64,
-}
-
-/// How a variable fillet's radius runs along one edge, as Catallax recipe section 4.5.2
-/// defines it. `u` is normalized arc length from the law's starting vertex.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RadiusLaw {
-    /// `r(u) = (1 - u) start + u end`, in millimetres. Both are non-negative and at least
-    /// one is positive; zero is an exact collapsed end.
-    Linear {
-        /// Radius at the starting vertex.
-        start: f64,
-        /// Radius at the other end.
-        end: f64,
-    },
-}
-
-/// One edge of a variable fillet: the edge, the end its law starts from, and the law.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct VariableFilletEdge {
-    /// An open edge of the body.
-    pub edge: EdgeId,
-    /// The endpoint where `u = 0`.
-    pub from: VertexId,
-    /// The radius along the edge.
-    pub radius: RadiusLaw,
-}
-
 /// Parameters of a set of holes drilled into a solid.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Hole {
@@ -886,35 +813,6 @@ pub trait Kernel: Send + Sync {
 
     /// Rounds the given edges with a circular cross section of `radius`.
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult>;
-
-    /// A fillet with explicit continuation choices. The default policy is what
-    /// [`Kernel::fillet`] builds; a backend that cannot build a choice refuses it rather
-    /// than building the default in its place.
-    fn fillet_with(
-        &self,
-        tag: &OpTag,
-        body: BodyId,
-        edges: &[EdgeId],
-        radius: f64,
-        policy: &FilletPolicy,
-    ) -> KernelResult<OpResult> {
-        if let FilletOverflow::KeepNeighbours(_) = policy.overflow {
-            return Err(KernelError::Unsupported(
-                "Keeping a fillet's neighbours at setback stations is coming soon.".into(),
-            ));
-        }
-        match policy.corner {
-            FilletCorner::Cliff => self.fillet(tag, body, edges, radius),
-            FilletCorner::Smooth => Err(KernelError::Unsupported("Smooth fillet corners are coming soon.".into())),
-        }
-    }
-
-    /// Rounds each edge by its own radius law, rolling over its neighbours. A backend
-    /// that cannot follow a law refuses it rather than building a constant radius.
-    fn fillet_variable(&self, tag: &OpTag, body: BodyId, edges: &[VariableFilletEdge]) -> KernelResult<OpResult> {
-        let _ = (tag, body, edges);
-        Err(KernelError::Unsupported("Variable-radius fillets are coming soon.".into()))
-    }
 
     /// Bevels the given edges with a flat cross section `distance` wide.
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult>;

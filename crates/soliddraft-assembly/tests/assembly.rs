@@ -678,6 +678,94 @@ fn undo_regrows_a_nested_sub_assembly_once_nothing_above_it_is_suppressed() {
     }
 }
 
+/// Every occurrence's world placement, by path.
+fn world_layout(doc: &AssemblyDocument) -> Vec<(OccurrencePath, Placement)> {
+    let t = doc.table();
+    let mut out: Vec<_> = t
+        .subtree(soliddraft_assembly::OccurrenceIndex::ROOT)
+        .into_iter()
+        .skip(1)
+        .filter(|r| !t.flags(*r).has(soliddraft_assembly::Flags::REMOVED))
+        .map(|r| (t.path(r), t.world(r)))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn same_pose(a: &Placement, b: &Placement) -> bool {
+    a.translation.distance(b.translation) <= 1e-9
+        && [DVec3::X, DVec3::Y].iter().all(|v| (a.rotation * *v).distance(b.rotation * *v) <= 1e-12)
+}
+
+/// One rigid motion in the root's frame moves everything it selects once, even when a
+/// selected sub-assembly holds other selected occurrences: S, S/T and S/T/C in any order
+/// and combination, translated or turned, all end where the motion takes them. Undo,
+/// Redo and a save and reopen agree.
+#[test]
+fn moving_a_sub_assembly_and_its_parts_together_moves_each_once() {
+    let dir = folder("move-nested-selection");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let make = |path: &Path, inner: &Path, at: Placement| {
+        let mut a = AssemblyDocument::new_with("Sub", with_kernel());
+        a.save(Some(path)).unwrap();
+        let id = a.insert(reference(path, inner), at).unwrap();
+        a.finish_loading();
+        a.save(None).unwrap();
+        id
+    };
+    let (t, s) = (dir.join("t.dwasm"), dir.join("s.dwasm"));
+    let c_id = make(&t, &part, Placement::translation(DVec3::new(20.0, 0.0, 0.0)));
+    let t_id = make(&s, &t, Placement::translation(DVec3::new(0.0, 5.0, 0.0)));
+    let turn = Placement::new(glam::DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2), DVec3::new(1.0, 2.0, 3.0));
+    let shift = Placement::translation(DVec3::new(10.0, 0.0, 0.0));
+    let selections: [&[usize]; 7] = [&[0, 1], &[1, 0], &[0, 2], &[2, 0], &[1, 2], &[0, 1, 2], &[2, 1, 0]];
+    for (n, picked) in selections.iter().enumerate() {
+        for (m, delta) in [shift, turn].into_iter().enumerate() {
+            let root = dir.join(format!("rig-{n}-{m}.dwasm"));
+            let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+            doc.save(Some(&root)).unwrap();
+            let s_id = doc.insert(reference(&root, &s), Placement::translation(DVec3::new(100.0, 0.0, 0.0))).unwrap();
+            let other =
+                doc.insert(reference(&root, &part), Placement::translation(DVec3::new(0.0, 50.0, 0.0))).unwrap();
+            doc.finish_loading();
+            let paths: Vec<OccurrencePath> =
+                [format!("{s_id}"), format!("{s_id}/{t_id}"), format!("{s_id}/{t_id}/{c_id}")]
+                    .iter()
+                    .map(|p| p.parse().unwrap())
+                    .collect();
+            let chosen: Vec<OccurrencePath> = picked.iter().map(|i| paths[*i].clone()).collect();
+            let top = chosen.iter().min_by_key(|p| p.steps().len()).unwrap().clone();
+            let before = world_layout(&doc);
+            doc.move_by(&chosen, &delta).unwrap();
+            let after = world_layout(&doc);
+            let what = format!("{chosen:?} by {delta:?}");
+            for ((path, was), (again, now)) in before.iter().zip(&after) {
+                assert_eq!(path, again, "{what}");
+                let wanted = if path.starts_with(&top) { delta.compose(was) } else { *was };
+                assert!(same_pose(now, &wanted), "{what}: {path} is at {now:?}, not {wanted:?}");
+            }
+            let unmoved: OccurrencePath = format!("{other}").parse().unwrap();
+            assert!(after.iter().any(|(p, w)| *p == unmoved && same_pose(w, &before.iter().find(|(q, _)| *q == unmoved).unwrap().1)));
+
+            let matches = |a: &[(OccurrencePath, Placement)], b: &[(OccurrencePath, Placement)], step: &str| {
+                assert_eq!(a.len(), b.len(), "{what}, {step}");
+                for ((p, x), (q, y)) in a.iter().zip(b) {
+                    assert!(p == q && same_pose(x, y), "{what}, {step}: {p} at {x:?} against {y:?}");
+                }
+            };
+            doc.save(None).unwrap();
+            let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+            back.finish_loading();
+            matches(&after, &world_layout(&back), "reopened");
+            assert!(doc.undo());
+            matches(&before, &world_layout(&doc), "undone");
+            assert!(doc.redo());
+            matches(&after, &world_layout(&doc), "redone");
+        }
+    }
+}
+
 #[test]
 fn references_resolve_from_the_file_that_holds_them() {
     // The sub-assembly and its part live outside the root's folder: the part's path is

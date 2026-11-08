@@ -794,10 +794,24 @@ impl AssemblyDocument {
     }
 
     /// Moves occurrences by `delta`, applied in the root's frame after their current
-    /// placement. One undo step.
+    /// placement. One undo step. An occurrence inside another one that is moved goes
+    /// with it, so it is moved once, not again on its own.
     pub fn move_by(&mut self, paths: &[OccurrencePath], delta: &Placement) -> Result<(), EditError> {
-        let mut moves = Vec::with_capacity(paths.len());
         for p in paths {
+            self.row(p)?;
+        }
+        let mut top: Vec<&OccurrencePath> = paths.iter().collect();
+        top.sort();
+        top.dedup();
+        // In path order an ancestor comes before everything under it.
+        let mut kept: Vec<&OccurrencePath> = Vec::with_capacity(top.len());
+        for p in top {
+            if !kept.last().is_some_and(|k| p.starts_with(k)) {
+                kept.push(p);
+            }
+        }
+        let mut moves = Vec::with_capacity(kept.len());
+        for p in kept {
             let row = self.row(p)?;
             let parent_world = self.table.parent(row).map(|r| self.table.world(r)).unwrap_or_default();
             let world = delta.compose(&self.table.world(row));

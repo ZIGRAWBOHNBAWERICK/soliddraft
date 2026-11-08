@@ -2173,7 +2173,7 @@ pub fn relations_menu(ui: &mut egui::Ui, s: &mut SketchSession) -> Option<AppAct
         ("Perpendicular", "Select two lines"),
         ("Coincident", "Select two points"),
         ("On line", "Select one point and one line"),
-        ("On curve", "Select one point and one arc or circle"),
+        ("On curve", "Select one point and one arc, circle or ellipse"),
         ("Tangent", "Select a line and an arc or circle, or two arcs or circles"),
         ("Equal", "Select two lines, two circular curves, or two ellipses"),
         ("Concentric", "Select two arcs, circles or ellipses"),

@@ -832,22 +832,36 @@ impl AssemblyDocument {
         let (comps, ovs) = split_owners(paths.iter());
         let before = self.image(&comps, &ovs);
         let rows_before = rows.iter().map(|r| self.row_state(*r)).collect();
-        let mut regrow = false;
         for (path, row) in paths.iter().zip(&rows) {
             match Self::owner(path) {
                 Ok(c) => self.assembly.component_mut(c).ok_or(EditError::NoComponent(c))?.suppressed = suppressed,
                 Err(p) => self.assembly.override_mut(&p).suppressed = Some(suppressed),
             }
-            let f = self.table.flags(*row);
-            regrow |= !suppressed && f.has(Flags::ASSEMBLY) && self.table.children(*row).next().is_none();
             let changed = self.table.set_suppressed(*row, suppressed);
             self.changes.flags.extend(changed);
         }
         self.record(if suppressed { "Suppress" } else { "Unsuppress" }, before, rows_before);
-        if regrow {
-            self.reflatten();
+        if !suppressed {
+            self.regrow();
         }
         Ok(())
+    }
+
+    /// Rereads the structure when a sub-assembly that is shown has no rows below it
+    /// though it places components: it was read while it, or an assembly above it, was
+    /// suppressed. Called after anything clears a suppression, at any depth.
+    fn regrow(&mut self) {
+        let unread = (1..self.table.len()).map(|r| OccurrenceIndex(r as u32)).any(|row| {
+            let f = self.table.flags(row);
+            f.has(Flags::ASSEMBLY)
+                && !f.has(Flags::SUPPRESSED)
+                && !f.has(Flags::REMOVED)
+                && self.table.children(row).next().is_none()
+                && self.store.get(self.table.definition(row)).assembly.as_ref().is_none_or(|a| !a.components.is_empty())
+        });
+        if unread {
+            self.reflatten();
+        }
     }
 
     /// Gives occurrences an assembly-level colour, or takes it away (`None`). In this
@@ -1192,7 +1206,7 @@ impl AssemblyDocument {
             self.reflatten();
             return;
         }
-        let mut regrow = false;
+        let mut unsuppressed = false;
         // An occurrence with no row now sits under a sub-assembly that was suppressed when
         // the structure was last read; the truth already holds its state.
         let found: Vec<(OccurrenceIndex, &RowState)> =
@@ -1209,14 +1223,13 @@ impl AssemblyDocument {
             if f.has(Flags::SUPPRESSED_SELF) != s.suppressed {
                 let changed = self.table.set_suppressed(row, s.suppressed);
                 self.changes.flags.extend(changed);
+                unsuppressed |= !s.suppressed;
             }
-            // As a direct Unsuppress does: a sub-assembly shown again with no rows below
-            // it was read while suppressed, so its occurrences are read now.
-            let f = self.table.flags(row);
-            regrow |= !f.has(Flags::SUPPRESSED) && f.has(Flags::ASSEMBLY) && self.table.children(row).next().is_none();
         }
-        if regrow {
-            self.reflatten();
+        // As a direct Unsuppress does: a sub-assembly read while suppressed is read again
+        // once it shows.
+        if unsuppressed {
+            self.regrow();
         }
         // A pattern's copies follow a seed the step moved.
         let seeds: Vec<ComponentId> = image.components.iter().map(|(c, _)| *c).collect();

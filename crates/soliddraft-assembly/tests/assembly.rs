@@ -605,6 +605,79 @@ fn undo_after_the_structure_is_reread_shows_what_the_file_holds() {
     }
 }
 
+/// Root, sub-assembly S, sub-assembly T inside it, and parts in T. S is suppressed, then
+/// T through S, then S shown again, and the viewport quality changed, which rereads the
+/// structure without T's parts. Undoing all four clears T's own suppression while S still
+/// hides it, then S's: T's parts must come back. After every Undo and Redo the document
+/// shows exactly what the saved file reopens with.
+#[test]
+fn undo_regrows_a_nested_sub_assembly_once_nothing_above_it_is_suppressed() {
+    let dir = folder("undo-nested-regrow");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let assembly = |path: &Path, inner: &Path, count: u32| {
+        let mut a = AssemblyDocument::new_with("Sub", with_kernel());
+        a.save(Some(path)).unwrap();
+        let ids: Vec<_> = (0..count)
+            .map(|i| {
+                let at = Placement::translation(DVec3::new(0.0, f64::from(i) * 30.0, 0.0));
+                a.insert(reference(path, inner), at).unwrap()
+            })
+            .collect();
+        a.finish_loading();
+        a.save(None).unwrap();
+        ids
+    };
+    for children in [1, 2, 5] {
+        let (t, s) = (dir.join(format!("t-{children}.dwasm")), dir.join(format!("s-{children}.dwasm")));
+        assembly(&t, &part, children);
+        let t_id = assembly(&s, &t, 1)[0];
+        let root = dir.join(format!("rig-{children}.dwasm"));
+        let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+        doc.save(Some(&root)).unwrap();
+        let s_id = doc.insert(reference(&root, &s), Placement::translation(DVec3::new(100.0, 0.0, 0.0))).unwrap();
+        doc.finish_loading();
+        let s_path: OccurrencePath = format!("{s_id}").parse().unwrap();
+        let t_path: OccurrencePath = format!("{s_id}/{t_id}").parse().unwrap();
+        assert_eq!(doc.table().counts().parts, children as usize);
+
+        let mut states = vec![shown_layout(&doc)];
+        doc.set_suppressed(std::slice::from_ref(&s_path), true).unwrap();
+        states.push(shown_layout(&doc));
+        doc.set_suppressed(std::slice::from_ref(&t_path), true).unwrap();
+        states.push(shown_layout(&doc));
+        doc.set_suppressed(std::slice::from_ref(&s_path), false).unwrap();
+        states.push(shown_layout(&doc));
+        doc.set_viewport_quality(Quality::Slider { value: 10 }).unwrap();
+        doc.finish_loading();
+        states.push(shown_layout(&doc));
+
+        let check = |doc: &mut AssemblyDocument, state: usize, step: &str| {
+            doc.finish_loading();
+            let live = shown_layout(doc);
+            doc.save(None).unwrap();
+            let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+            back.finish_loading();
+            assert_eq!(live, shown_layout(&back), "{children} children, {step}: live and saved differ");
+            assert_eq!(live, states[state], "{children} children, {step}");
+        };
+        check(&mut doc, 4, "after the quality change");
+        for (state, step) in
+            [(3, "undo quality"), (2, "undo unsuppress S"), (1, "undo suppress T"), (0, "undo suppress S")]
+        {
+            assert!(doc.undo(), "{step}");
+            check(&mut doc, state, step);
+        }
+        assert_eq!(doc.table().counts().parts, children as usize, "T's parts are back");
+        for (state, step) in
+            [(1, "redo suppress S"), (2, "redo suppress T"), (3, "redo unsuppress S"), (4, "redo quality")]
+        {
+            assert!(doc.redo(), "{step}");
+            check(&mut doc, state, step);
+        }
+    }
+}
+
 #[test]
 fn references_resolve_from_the_file_that_holds_them() {
     // The sub-assembly and its part live outside the root's folder: the part's path is

@@ -464,6 +464,14 @@ impl Assembly {
         self.snapshots.appearance(id)
     }
 
+    /// Takes away every colour on an occurrence of the components `gone`, or below one,
+    /// and the appearance copies nothing uses any more.
+    pub(crate) fn forget_colours_under(&mut self, gone: &HashSet<ComponentId>) {
+        self.appearances.retain(|c| !c.path.steps().first().is_some_and(|s| gone.contains(&s.component)));
+        let used: Vec<AppearanceId> = self.appearances.iter().map(|c| c.appearance.clone()).collect();
+        self.snapshots.retain_used(std::iter::empty(), used.iter());
+    }
+
     /// Gives the occurrence at `path` a colour for every configuration, or takes its
     /// colour away. Keeps a copy of the appearance and drops copies nothing uses.
     pub fn set_colour(&mut self, path: &OccurrencePath, appearance: Option<Appearance>) {

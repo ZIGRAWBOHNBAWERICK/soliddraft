@@ -152,7 +152,32 @@ fn the_hierarchy_answers_rays_and_regions_and_follows_moves() {
 
 /// An empty root, read from a package as the sample is.
 fn empty() -> AssemblyDocument {
-    let bytes = Assembly::new("Root").to_bytes(DocumentId::new(), None, &[]).unwrap();
+    read(&Assembly::new("Root"), &[])
+}
+
+/// A root placing sub-assembly S (component 2) whose own file colours its plate 3 red,
+/// and a brick beside it; with the display copies that read it again.
+fn coloured_sub() -> (AssemblyDocument, Vec<RefCopy>) {
+    let plate = (DocumentId::new(), ContentHash::of_bytes(b"plate"));
+    let mut sub = Assembly::new("Sub");
+    let s = sub.add_source(DocRef::new(plate.0, DocKind::Part, "plate.dwprt", plate.1.clone()));
+    sub.add_component(s, Placement::IDENTITY);
+    let three = sub.add_component(s, Placement::translation(DVec3::new(0.0, 0.0, 5.0)));
+    sub.set_colour(&OccurrencePath::root().child(Step::component(three)), Some(red()));
+    let sub_id = DocumentId::new();
+    let sub_rev = sub.semantic_hash();
+    let mut root = Assembly::new("Root");
+    let a = root.add_source(DocRef::new(sub_id, DocKind::Assembly, "sub.dwasm", sub_rev.clone()));
+    root.add_component(a, Placement::IDENTITY);
+    let copies = vec![
+        RefCopy::part(plate.0, plate.1, &DisplayMesh::cuboid(DVec3::ZERO, DVec3::new(50.0, 50.0, 2.0)), "test"),
+        RefCopy::assembly(sub_id, sub_rev, &sub.truth_entries()),
+    ];
+    (read(&root, &copies), copies)
+}
+
+fn read(root: &Assembly, copies: &[RefCopy]) -> AssemblyDocument {
+    let bytes = root.to_bytes(DocumentId::new(), None, copies).unwrap();
     let package = AssemblyPackage::from_bytes(bytes).unwrap();
     let mut doc = AssemblyDocument::open_package(package, None, OpenOptions::default()).unwrap();
     doc.finish_loading();
@@ -274,4 +299,118 @@ fn the_hierarchy_follows_suppression_and_deletion() {
     let table = late.table().clone();
     let ready = late.bvh_ready().expect("the background build is done");
     assert!(ready.along_ray(&table, &ray).iter().any(|h| h.0 == row), "the ready hierarchy finds it");
+}
+
+fn red() -> Appearance {
+    Appearance::new("red", "Red", Srgb::new(200, 20, 20))
+}
+
+/// The colour every occurrence shows, and whether it is its own, by path.
+fn colours(doc: &AssemblyDocument) -> Vec<(String, Option<String>, bool)> {
+    let t = doc.table();
+    (1..t.len() as u32)
+        .map(soliddraft_assembly::OccurrenceIndex)
+        .map(|r| {
+            let own = t.flags(r).has(soliddraft_assembly::Flags::COLOURED_SELF);
+            (t.path(r).to_string(), t.colour(r).map(|a| a.id.0.clone()), own)
+        })
+        .collect()
+}
+
+/// The root colours S's red plate blue, then takes that away, by Remove colour or Undo:
+/// the plate shows S's own red again, as the same truth read afresh does. A colour on S
+/// itself then leaves the red plate alone, and the scene shows what the table holds.
+#[test]
+fn taking_away_an_outer_colour_shows_the_inner_one_again() {
+    let (mut doc, copies) = coloured_sub();
+    let mut scene = Scene::new(&mut doc);
+    let plate: OccurrencePath = "2/3".parse().unwrap();
+    let s: OccurrencePath = "2".parse().unwrap();
+    let fresh = |doc: &AssemblyDocument| colours(&read(doc.assembly(), &copies));
+    let plate_colour =
+        |doc: &AssemblyDocument| doc.table().colour(doc.table().find(&plate).unwrap()).map(|a| a.id.0.clone());
+    assert_eq!(plate_colour(&doc).as_deref(), Some("red"), "S's own colour");
+    let start = colours(&doc);
+
+    let blue = Appearance::new("blue", "Blue", Srgb::new(20, 20, 200));
+    doc.set_colour(std::slice::from_ref(&plate), Some(blue)).unwrap();
+    scene.update(&mut doc);
+    assert_eq!(plate_colour(&doc).as_deref(), Some("blue"), "the outer assembly wins");
+    assert_eq!(colours(&doc), fresh(&doc));
+    assert!(doc.undo());
+    scene.update(&mut doc);
+    assert_eq!(colours(&doc), start, "undo shows red again");
+    assert_eq!(colours(&doc), fresh(&doc));
+    assert!(doc.redo());
+    scene.update(&mut doc);
+    assert_eq!(plate_colour(&doc).as_deref(), Some("blue"));
+    doc.set_colour(std::slice::from_ref(&plate), None).unwrap();
+    scene.update(&mut doc);
+    assert_eq!(colours(&doc), start, "Remove colour shows red again");
+    // Removing a colour the root never set changes nothing.
+    doc.set_colour(std::slice::from_ref(&plate), None).unwrap();
+    assert_eq!(colours(&doc), start);
+
+    // A colour on S reaches its uncoloured plate, not the red one, now or after a recolour.
+    let green = Appearance::new("green", "Green", Srgb::new(20, 200, 20));
+    doc.set_colour(std::slice::from_ref(&s), Some(green)).unwrap();
+    doc.set_colour(std::slice::from_ref(&s), Some(Appearance::new("grey", "Grey", Srgb::new(90, 90, 90)))).unwrap();
+    scene.update(&mut doc);
+    assert_eq!(plate_colour(&doc).as_deref(), Some("red"));
+    assert_eq!(colours(&doc), fresh(&doc));
+    let slot = scene.slot(doc.table().find(&plate).unwrap()).unwrap();
+    assert_eq!(scene.instances()[slot as usize].colour.to_le_bytes()[..3], [200, 20, 20], "the scene shows red");
+}
+
+/// The root colours brick 3's first pattern copy, the sub-assembly copy 23 and a plate
+/// inside it, and copy 24 with the same red. Deleting 3 and 23 takes their colours along,
+/// so the document still saves; Undo brings the colours back and Redo drops them again.
+/// 24 keeps its red throughout.
+#[test]
+fn deleting_a_coloured_component_takes_its_colours_along() {
+    let mut doc = sample();
+    let pattern = doc
+        .add_pattern(
+            vec![soliddraft_assembly::ComponentId(3)],
+            soliddraft_assembly::PatternRule::Linear {
+                direction: [0.0, 0.0, 1.0],
+                spacing: 30.0,
+                count: 2,
+                second: None,
+            },
+        )
+        .unwrap();
+    doc.finish_loading();
+    let paths: Vec<OccurrencePath> = [format!("3:{pattern}.1"), "23".into(), "23/2".into(), "24".into()]
+        .iter()
+        .map(|p| p.parse().unwrap())
+        .collect();
+    for p in &paths {
+        doc.set_colour(std::slice::from_ref(p), Some(red())).unwrap();
+    }
+    let saves = |doc: &AssemblyDocument| {
+        doc.assembly().to_bytes(DocumentId::new(), None, &[]).map(|_| ()).map_err(|e| e.to_string())
+    };
+    assert_eq!(saves(&doc), Ok(()));
+    let assigned =
+        |doc: &AssemblyDocument| doc.assembly().appearances.iter().map(|c| c.path.to_string()).collect::<Vec<_>>();
+    let before = assigned(&doc);
+
+    doc.delete(&[soliddraft_assembly::ComponentId(3), soliddraft_assembly::ComponentId(23)]).unwrap();
+    assert_eq!(saves(&doc), Ok(()), "the deleted components' colours went with them");
+    assert_eq!(assigned(&doc), ["24"]);
+    let row = doc.table().find(&paths[3]).unwrap();
+    assert_eq!(doc.table().colour(row).map(|a| a.id.0.as_str()), Some("red"), "24 keeps the shared red");
+    assert!(doc.undo());
+    doc.finish_loading();
+    assert_eq!(assigned(&doc), before, "undo brings every colour back");
+    assert_eq!(saves(&doc), Ok(()));
+    for p in &paths {
+        let row = doc.table().find(p).unwrap();
+        assert_eq!(doc.table().colour(row).map(|a| a.id.0.as_str()), Some("red"), "{p}");
+    }
+    assert!(doc.redo());
+    doc.finish_loading();
+    assert_eq!(assigned(&doc), ["24"]);
+    assert_eq!(saves(&doc), Ok(()));
 }

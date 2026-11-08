@@ -298,19 +298,23 @@ impl Recovery {
         &self.folder.dir
     }
 
-    /// Takes an offered copy back: returns its record and document bytes, and moves the
-    /// copy into this session's folder as the document's own, so it stays protected
-    /// until the restored document is saved. The caller opens the bytes and then
-    /// reports the edit count with [`Recovery::restored`].
-    pub fn restore(&mut self, file: &Path) -> Result<(Record, Vec<u8>), String> {
+    /// Opens an offered copy before adopting it as this session's own. A loader
+    /// refusal leaves the offer protected through quit. After installing the opened
+    /// document, report its edit count with [`Recovery::restored`].
+    pub fn restore<T>(
+        &mut self,
+        file: &Path,
+        open: impl FnOnce(&Record, &[u8]) -> Result<T, String>,
+    ) -> Result<(Record, T), String> {
         let (record, bytes) = recovery::read(file).map_err(|e| format!("cannot restore {}: {e}", file.display()))?;
+        let document = open(&record, &bytes).map_err(|e| format!("cannot restore {}: {e}", record.name))?;
         let own = self.folder.dir.join(recovery::file_name(record.id, record.kind));
         // The writer may hold an older copy of the same document; this one wins.
         self.flush();
         let _ = std::fs::remove_file(&own);
         std::fs::rename(file, &own).map_err(|e| format!("cannot restore {}: {e}", file.display()))?;
         self.offers.retain(|c| c.file != file);
-        Ok((record, bytes))
+        Ok((record, document))
     }
 
     /// Deletes an offered copy the user does not want.
@@ -543,17 +547,21 @@ impl Recovery {
         }
     }
 
-    /// Takes an offered copy back: returns its record and document bytes, and keeps the
-    /// copy as the document's own, so it stays protected until the restored document is
-    /// saved.
-    pub fn restore(&mut self, key: &Path) -> Result<(Record, Vec<u8>), String> {
+    /// Opens an offered copy before adopting it as this session's own. A loader
+    /// refusal leaves the offer protected for the next visit.
+    pub fn restore<T>(
+        &mut self,
+        key: &Path,
+        open: impl FnOnce(&Record, &[u8]) -> Result<T, String>,
+    ) -> Result<(Record, T), String> {
         let name = key.to_string_lossy().into_owned();
         let copy = crate::documents_browser::offered(&name).ok_or("this recovery copy is no longer here")?;
         let (record, bytes) =
             recovery::decode(std::io::Cursor::new(copy)).map_err(|e| format!("cannot restore {name}: {e}"))?;
+        let document = open(&record, &bytes).map_err(|e| format!("cannot restore {}: {e}", record.name))?;
         crate::documents_browser::adopt(&name, &recovery::file_name(record.id, record.kind));
         self.offers.retain(|c| c.file != key);
-        Ok((record, bytes))
+        Ok((record, document))
     }
 
     /// Deletes an offered copy the user does not want.

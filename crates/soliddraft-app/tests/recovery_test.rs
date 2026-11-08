@@ -66,6 +66,100 @@ fn sessions(root: &Path) -> Vec<PathBuf> {
     found
 }
 
+fn restore_then_quit(kind: DocKind, refused: bool) {
+    use egui_kittest::Harness;
+    use soliddraft_app::app::{Automation, SolidDraftApp};
+    use soliddraft_app::state::AppAction;
+    use soliddraft_document::manifest::{Entry, Manifest, Section, write_package};
+    use soliddraft_document::recovery::Record;
+    use std::io::{Cursor, Read};
+
+    let root = folder(&format!("restore-{kind:?}-{refused}"));
+    let doc = part();
+    let drawing = DrawingDoc::new(soliddraft_drawing::fixture::bracket_a3());
+    let bytes = match kind {
+        DocKind::Part => doc.model().to_bytes().unwrap(),
+        DocKind::Drawing => drawing.to_bytes(KERNEL, false).unwrap(),
+        _ => unreachable!(),
+    };
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let manifest: Manifest = serde_json::from_reader(zip.by_name("manifest.json").unwrap()).unwrap();
+    let record = Record::new(manifest.id, kind, "Future work", None, manifest.semantic_hash.clone());
+    let mut entries = Vec::new();
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).unwrap();
+        if entry.name().unwrap() == "manifest.json" {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).unwrap();
+        entries.push(Entry::new(entry.name().unwrap().into_owned(), bytes));
+    }
+    let mut manifest = manifest;
+    if refused {
+        manifest.sections.push(Section::required("future.json"));
+        entries.push(Entry::new("future.json", b"{}".as_slice()));
+    }
+    let bytes = write_package(&manifest, &entries).unwrap();
+    let ended = root.join("session-1-ended");
+    std::fs::create_dir_all(&ended).unwrap();
+    std::fs::write(ended.join("session.lock"), b"").unwrap();
+    let original = soliddraft_document::recovery::encode(&record, &bytes).unwrap();
+    std::fs::write(ended.join(file_name(record.id, kind)), &original).unwrap();
+
+    let mut app = Harness::builder().build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
+    app.state_mut().start_recovery(&root, AutosavePolicy::default());
+    app.run_steps(2);
+    let before = app.state().state.doc.model().semantic_hash();
+    let offer = app.state().state.recovery.as_ref().unwrap().offers[0].file.clone();
+    app.state_mut().state.push(AppAction::RestoreRecovery(offer));
+    app.run_steps(2);
+    if refused {
+        let note = &app.state().state.note.as_ref().unwrap().text;
+        assert!(note.contains("needs a newer SolidDraft"), "{note}");
+        assert_eq!(app.state().state.doc.model().semantic_hash(), before);
+        assert!(app.state().state.drawing.session.is_none());
+    } else {
+        assert!(app.state().state.recovery.as_ref().unwrap().offers.is_empty());
+        let saved = root.join(format!("restored.{}", kind.extension()));
+        let action = match kind {
+            DocKind::Part => AppAction::SaveAs(Some(saved.clone())),
+            DocKind::Drawing => AppAction::Drawing(soliddraft_app::drawing::DrawingAction::Save(Some(saved.clone()))),
+            _ => unreachable!(),
+        };
+        app.state_mut().state.push(action);
+        app.run_steps(2);
+        assert_eq!(soliddraft_document::identify_file(&saved).unwrap().id, record.id);
+    }
+    app.state_mut().state.recovery.take().unwrap().close();
+    drop(app);
+
+    let next = Recovery::start(&root, AutosavePolicy::default()).unwrap();
+    assert_eq!(next.offers.len(), usize::from(refused), "only refused Restore survives normal quit and restart");
+    if refused {
+        assert_eq!(std::fs::read(&next.offers[0].file).unwrap(), original);
+    }
+    next.close();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn refused_part_restore_survives_quit() {
+    restore_then_quit(DocKind::Part, true);
+}
+
+#[test]
+fn refused_drawing_restore_survives_quit() {
+    restore_then_quit(DocKind::Drawing, true);
+}
+
+#[test]
+fn restored_documents_can_be_saved_without_another_offer() {
+    for kind in [DocKind::Part, DocKind::Drawing] {
+        restore_then_quit(kind, false);
+    }
+}
+
 #[test]
 fn unchanged_dirty_document_retries_after_a_failed_recovery_write() {
     let root = folder("retry");
@@ -119,8 +213,9 @@ fn a_crash_leaves_copies_that_the_next_start_restores() {
 
     let offer = next.offers.iter().find(|c| c.record.kind == DocKind::Part).unwrap().clone();
     assert_eq!(offer.record.name, "Bracket");
-    let (record, bytes) = next.restore(&offer.file).unwrap();
-    let back = file::open_bytes(&record.name, &bytes, soliddraft_app::kernel(), None).unwrap();
+    let (record, back) = next
+        .restore(&offer.file, |record, bytes| file::open_bytes(&record.name, bytes, soliddraft_app::kernel(), None))
+        .unwrap();
     assert_eq!(back.model().id(), doc.model().id());
     assert_eq!(back.model().semantic_hash(), doc.model().semantic_hash());
     assert_eq!(back.features.len(), 1);
@@ -128,8 +223,7 @@ fn a_crash_leaves_copies_that_the_next_start_restores() {
     next.restored(record.id, DocKind::Part, back.edits);
 
     let offer = next.offers.iter().find(|c| c.record.kind == DocKind::Drawing).unwrap().clone();
-    let (_, bytes) = next.restore(&offer.file).unwrap();
-    let restored = DrawingDoc::from_bytes(&bytes).unwrap();
+    let (_, restored) = next.restore(&offer.file, |_, bytes| DrawingDoc::from_bytes(bytes)).unwrap();
     assert_eq!(restored.id, drawing.id);
     assert_eq!(restored.drawing.semantic_hash().unwrap(), drawing.drawing.semantic_hash().unwrap());
     assert!(next.offers.is_empty());
@@ -256,13 +350,13 @@ fn queued_recovery_keeps_the_part_and_drawing_at_the_enqueued_revision() {
 
     let mut recovered = Recovery::start(&root, policy).unwrap();
     let part_copy = recovered.offers.iter().find(|c| c.record.kind == DocKind::Part).unwrap().clone();
-    let (_, bytes) = recovered.restore(&part_copy.file).unwrap();
-    let back = file::open_bytes("Bracket", &bytes, soliddraft_app::kernel(), None).unwrap();
+    let (_, back) = recovered
+        .restore(&part_copy.file, |_, bytes| file::open_bytes("Bracket", bytes, soliddraft_app::kernel(), None))
+        .unwrap();
     assert_eq!(back.model().semantic_hash(), part_revision);
     assert_ne!(back.model().semantic_hash(), doc.model().semantic_hash());
     let drawing_copy = recovered.offers.iter().find(|c| c.record.kind == DocKind::Drawing).unwrap().clone();
-    let (_, bytes) = recovered.restore(&drawing_copy.file).unwrap();
-    let back = DrawingDoc::from_bytes(&bytes).unwrap();
+    let (_, back) = recovered.restore(&drawing_copy.file, |_, bytes| DrawingDoc::from_bytes(bytes)).unwrap();
     assert_eq!(back.drawing.semantic_hash().unwrap(), drawing_revision);
     assert_ne!(back.drawing.semantic_hash().unwrap(), drawing.drawing.semantic_hash().unwrap());
     recovered.close();

@@ -237,43 +237,41 @@ impl SolidDraftApp {
     /// Opens the document in a recovery copy in place of the open one of its kind.
     pub(super) fn restore(&mut self, file: &std::path::Path) {
         use soliddraft_document::DocKind;
+        enum Opened {
+            Part(Box<Document>),
+            Drawing(Box<crate::drawing::document::DrawingDoc>),
+        }
         let Some(recovery) = self.state.recovery.as_mut() else { return };
-        let (record, bytes) = match recovery.restore(file) {
-            Ok(taken) => taken,
+        let (record, opened) = match recovery.restore(file, |record, bytes| match record.kind {
+            DocKind::Drawing => {
+                crate::drawing::document::DrawingDoc::from_bytes(bytes).map(|doc| Opened::Drawing(Box::new(doc)))
+            }
+            _ => file::open_bytes(&record.name, bytes, self.state.doc.kernel().clone(), Some(self.state.doc.model()))
+                .map(|doc| Opened::Part(Box::new(doc))),
+        }) {
+            Ok(opened) => opened,
             Err(e) => return self.state.note(e, NoteKind::Error),
         };
-        match record.kind {
-            DocKind::Drawing => match crate::drawing::document::DrawingDoc::from_bytes(&bytes) {
-                Ok(mut doc) => {
-                    doc.path = record.path.clone();
-                    doc.touch();
-                    let edits = doc.edits;
-                    crate::drawing::restore(&mut self.state, &mut self.dock, doc);
-                    if let Some(r) = self.state.recovery.as_mut() {
-                        r.restored(record.id, DocKind::Drawing, edits);
-                    }
-                }
-                Err(e) => self.state.note(format!("cannot restore {}: {e}", record.name), NoteKind::Error),
-            },
-            _ => match file::open_bytes(
-                &record.name,
-                &bytes,
-                self.state.doc.kernel().clone(),
-                Some(self.state.doc.model()),
-            ) {
-                Ok(mut doc) => {
-                    doc.name = record.name.clone();
-                    doc.path = record.path.clone();
-                    doc.touch();
-                    let edits = doc.edits;
-                    self.opened(Ok(doc));
-                    self.state.note(format!("Restored {} · not saved yet", record.name), NoteKind::Ok);
-                    if let Some(r) = self.state.recovery.as_mut() {
-                        r.restored(record.id, DocKind::Part, edits);
-                    }
-                }
-                Err(e) => self.state.note(format!("cannot restore {}: {e}", record.name), NoteKind::Error),
-            },
+        let (kind, edits) = match opened {
+            Opened::Drawing(mut doc) => {
+                doc.path = record.path.clone();
+                doc.touch();
+                let edits = doc.edits;
+                crate::drawing::restore(&mut self.state, &mut self.dock, *doc);
+                (DocKind::Drawing, edits)
+            }
+            Opened::Part(mut doc) => {
+                doc.name = record.name.clone();
+                doc.path = record.path.clone();
+                doc.touch();
+                let edits = doc.edits;
+                self.opened(Ok(*doc));
+                self.state.note(format!("Restored {} · not saved yet", record.name), NoteKind::Ok);
+                (DocKind::Part, edits)
+            }
+        };
+        if let Some(r) = self.state.recovery.as_mut() {
+            r.restored(record.id, kind, edits);
         }
     }
 

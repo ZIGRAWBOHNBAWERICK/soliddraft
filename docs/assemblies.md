@@ -73,7 +73,9 @@ level of detail.
   labels. A component without a name shows as its source's file name and its id.
 - **Sources** are the documents the assembly places. Each is a `DocRef` (see
   [documents.md](documents.md#references)) with its pinned revision. A thousand
-  placements of one bolt share one source. A source's `configuration` picks the
+  placements of one bolt share one source. A source lives as long as a component places
+  it: deleting its last component removes it, and Undo brings both back. A hidden or
+  suppressed component still places its source. A source's `configuration` picks the
   configuration placed; it is reserved and always the default for now.
 - **Components** place a source. `placement` is rigid: `translation` in millimetres and
   `rotation` as a unit quaternion `[x, y, z, w]`, each left out when it is the identity's.
@@ -341,7 +343,9 @@ whose meshes arrived, rows that moved, rows whose flags changed, or a new struct
 ## Rebuild
 
 `AssemblyDocument::rebuild` implements the app's explicit Update. It resolves every
-source of the root and loads the proposed revisions before accepting any of them.
+source of the root that a component places and loads the proposed revisions before
+accepting any of them. A source no component places, which a file saved by an older
+version can hold, is not looked for: the Update drops it, and its undo step keeps it.
 If any source is missing or cannot be shown at its proposed revision, it refuses the
 whole Update. The report names the blocking files. Pins, displayed definitions,
 placements, dirty state and undo history stay unchanged.

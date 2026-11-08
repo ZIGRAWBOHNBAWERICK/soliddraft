@@ -287,9 +287,13 @@ fn deleting_one_placement_of_a_shared_part_keeps_its_source() {
     let second = doc.insert(reference(&root, &a), Placement::translation(DVec3::new(0.0, 50.0, 0.0))).unwrap();
     doc.insert(reference(&root, &b), Placement::translation(DVec3::new(50.0, 0.0, 0.0))).unwrap();
     doc.finish_loading();
+    // The other placement is suppressed, but it is still a component placing A.
+    let other = OccurrencePath::root().child(soliddraft_assembly::Step::component(second));
+    doc.set_suppressed(std::slice::from_ref(&other), true).unwrap();
     doc.delete(&[first]).unwrap();
     let paths: Vec<_> = doc.assembly().sources.iter().map(|s| s.document.path.clone()).collect();
     assert_eq!(paths, ["a.dwprt", "b.dwprt"], "A's source is still placed");
+    doc.set_suppressed(std::slice::from_ref(&other), false).unwrap();
     doc.save(None).unwrap();
 
     std::fs::rename(&a, elsewhere.join("a.dwprt")).unwrap();
@@ -345,29 +349,62 @@ fn an_update_drops_a_source_no_component_places() {
     assert_eq!(doc.assembly().sources.len(), 2, "undo restores the file as it was");
 }
 
-/// Placing a part a second time shares its source; undoing that insert must not take
-/// the source from the first placement.
+/// Placing a part or a sub-assembly again shares its source. Undoing that insert takes
+/// only the new component: every earlier placement keeps the source, the undone state
+/// saves and reopens whole, and Redo brings the new one back. Undoing the first insert,
+/// the control, does take the source.
 #[test]
-fn undoing_a_second_insert_keeps_the_shared_source() {
+fn undoing_a_repeated_insert_keeps_the_shared_source() {
     let dir = folder("insert-shared-source");
-    let a = dir.join("a.dwprt");
-    let root = dir.join("rig.dwasm");
-    save_block(&a, 40.0, 10.0);
-    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
-    doc.save(Some(&root)).unwrap();
-    let first = doc.insert(reference(&root, &a), Placement::IDENTITY).unwrap();
-    doc.insert(reference(&root, &a), Placement::translation(DVec3::new(50.0, 0.0, 0.0))).unwrap();
-    doc.finish_loading();
-    assert_eq!(doc.assembly().sources.len(), 1);
-    assert!(doc.undo());
-    doc.finish_loading();
-    let source = doc.assembly().component(first).unwrap().source;
-    assert!(doc.assembly().source(source).is_some(), "the first placement keeps its source");
-    assert_eq!(doc.table().counts().parts, 1);
-    doc.save(None).unwrap();
-    assert!(doc.redo());
-    doc.finish_loading();
-    assert_eq!((doc.assembly().sources.len(), doc.table().counts().parts), (1, 2));
+    let part = dir.join("a.dwprt");
+    save_block(&part, 40.0, 10.0);
+    let sub = dir.join("sub.dwasm");
+    let mut s = AssemblyDocument::new_with("Sub", with_kernel());
+    s.save(Some(&sub)).unwrap();
+    s.insert(reference(&sub, &part), Placement::IDENTITY).unwrap();
+    s.finish_loading();
+    s.save(None).unwrap();
+    for (what, file) in [("part", &part), ("sub-assembly", &sub)] {
+        for earlier in [1, 2, 5] {
+            let root = dir.join(format!("rig-{what}-{earlier}.dwasm"));
+            let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+            doc.save(Some(&root)).unwrap();
+            let at = |i: usize| Placement::translation(DVec3::new(i as f64 * 50.0, 0.0, 0.0));
+            let placed: Vec<_> = (0..earlier).map(|i| doc.insert(reference(&root, file), at(i)).unwrap()).collect();
+            doc.insert(reference(&root, file), at(earlier)).unwrap();
+            doc.finish_loading();
+            assert_eq!(doc.assembly().sources.len(), 1, "{what}, {earlier}");
+            assert_eq!(doc.table().counts().parts, earlier + 1, "{what}, {earlier}");
+
+            assert!(doc.undo());
+            doc.finish_loading();
+            let check = |doc: &AssemblyDocument| {
+                assert_eq!(doc.assembly().sources.len(), 1, "{what}, {earlier}: the shared source stays");
+                for (i, c) in placed.iter().enumerate() {
+                    let source = doc.assembly().component(*c).unwrap().source;
+                    assert!(doc.assembly().source(source).is_some(), "{what}, {earlier}: {c} keeps its source");
+                    let path = OccurrencePath::root().child(soliddraft_assembly::Step::component(*c));
+                    let row = doc.table().find(&path).unwrap_or_else(|| panic!("{what}, {earlier}: {c} is shown"));
+                    assert_eq!(doc.table().world(row), at(i));
+                }
+                assert_eq!(doc.table().counts().parts, earlier, "{what}, {earlier}");
+            };
+            check(&doc);
+            doc.save(None).unwrap();
+            let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+            back.finish_loading();
+            check(&back);
+            assert!(doc.redo());
+            doc.finish_loading();
+            assert_eq!((doc.assembly().sources.len(), doc.table().counts().parts), (1, earlier + 1));
+
+            // The control: undo back past the first insert, which takes the source.
+            while doc.undo() {}
+            doc.finish_loading();
+            assert!(doc.assembly().sources.is_empty() && doc.assembly().components.is_empty(), "{what}");
+            doc.save(None).unwrap();
+        }
+    }
 }
 
 #[test]

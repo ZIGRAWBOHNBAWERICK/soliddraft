@@ -74,8 +74,22 @@ impl Frustum {
     }
 }
 
-fn to_f32(p: DVec3, origin: DVec3) -> Vec3 {
-    (p - origin).as_vec3()
+/// The box from `min` to `max`, relative to `origin` in f32, rounded outward: read back
+/// as `stored + origin` in f64, as [`Bvh::node_box`] does, it holds the original. Rounding
+/// to nearest could shrink it, and a query would then prune a row it meets.
+fn to_f32(min: DVec3, max: DVec3, origin: DVec3) -> (Vec3, Vec3) {
+    let (mut lo, mut hi) = ((min - origin).as_vec3(), (max - origin).as_vec3());
+    for i in 0..3 {
+        // Each step moves one f32 ulp, and the nearest f32 is within one ulp of the
+        // f64 offset, so this loops at most twice for finite inputs.
+        while lo[i] > f32::MIN && lo[i] as f64 + origin[i] > min[i] {
+            lo[i] = lo[i].next_down();
+        }
+        while hi[i] < f32::MAX && (hi[i] as f64 + origin[i]) < max[i] {
+            hi[i] = hi[i].next_up();
+        }
+    }
+    (lo, hi)
 }
 
 impl Bvh {
@@ -104,7 +118,7 @@ impl Bvh {
         let boxes: Vec<(Vec3, Vec3)> = (0..len)
             .map(|r| {
                 let a = bounds[r];
-                if a.is_empty() { (Vec3::ZERO, Vec3::ZERO) } else { (to_f32(a.min, origin), to_f32(a.max, origin)) }
+                if a.is_empty() { (Vec3::ZERO, Vec3::ZERO) } else { to_f32(a.min, a.max, origin) }
             })
             .collect();
         if !b.items.is_empty() {
@@ -239,11 +253,15 @@ impl Bvh {
     /// Updates the boxes after the rows in `moved` changed bounds: each one's leaf and
     /// its ancestors. With many rows moved a full pass is cheaper and is used instead.
     pub fn refit(&mut self, table: &OccurrenceTable, moved: &[OccurrenceIndex]) {
+        self.refit_from(table.all_bounds(), moved);
+    }
+
+    fn refit_from(&mut self, bounds: &[Aabb], moved: &[OccurrenceIndex]) {
         if self.nodes.is_empty() {
             return;
         }
         if moved.len() * 16 > self.nodes.len() {
-            self.refit_all(table);
+            self.refit_all_from(bounds);
             return;
         }
         let mut dirty: Vec<u32> =
@@ -254,7 +272,7 @@ impl Bvh {
         // down visits every node after the nodes below it.
         let mut queue = std::collections::BTreeSet::from_iter(dirty);
         while let Some(n) = queue.pop_last() {
-            self.fit(n as usize, table);
+            self.fit(n as usize, bounds);
             let p = self.parent[n as usize];
             if p != u32::MAX {
                 queue.insert(p);
@@ -264,20 +282,25 @@ impl Bvh {
 
     /// Updates every box from the table.
     pub fn refit_all(&mut self, table: &OccurrenceTable) {
+        self.refit_all_from(table.all_bounds());
+    }
+
+    fn refit_all_from(&mut self, bounds: &[Aabb]) {
         for n in (0..self.nodes.len()).rev() {
-            self.fit(n, table);
+            self.fit(n, bounds);
         }
     }
 
-    fn fit(&mut self, n: usize, table: &OccurrenceTable) {
+    fn fit(&mut self, n: usize, bounds: &[Aabb]) {
         let node = self.nodes[n];
         let (mut lo, mut hi) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
         if node.count > 0 {
             for &r in &self.items[node.first as usize..(node.first + node.count) as usize] {
-                let b = table.bounds(OccurrenceIndex(r));
+                let b = bounds[r as usize];
                 if !b.is_empty() {
-                    lo = lo.min(to_f32(b.min, self.origin));
-                    hi = hi.max(to_f32(b.max, self.origin));
+                    let (a, b) = to_f32(b.min, b.max, self.origin);
+                    lo = lo.min(a);
+                    hi = hi.max(b);
                 }
             }
         } else {
@@ -381,17 +404,31 @@ fn live(table: &OccurrenceTable, r: u32) -> bool {
     }
 }
 
-/// Where a ray enters a box (0 when it starts inside), if it meets it ahead.
+/// Where a ray enters a box (0 when it starts inside), if it meets it ahead. The box is
+/// closed: a ray along a face or an edge meets it.
 pub fn ray_box(ray: &Ray, b: &Aabb) -> Option<f64> {
-    if b.is_empty() {
+    if b.is_empty() || !ray.origin.is_finite() || !ray.direction.is_finite() {
         return None;
     }
-    let inv = ray.direction.recip();
-    let t1 = (b.min - ray.origin) * inv;
-    let t2 = (b.max - ray.origin) * inv;
-    let near = t1.min(t2).max_element().max(0.0);
-    let far = t1.max(t2).min_element();
-    (near <= far && !near.is_nan()).then_some(near)
+    let (mut near, mut far) = (0.0f64, f64::INFINITY);
+    for i in 0..3 {
+        let (o, d) = (ray.origin[i], ray.direction[i]);
+        if d == 0.0 {
+            // Parallel to this slab: inside it for the whole ray, or never. Dividing
+            // would give 0 / 0 for an origin on a face.
+            if o < b.min[i] || o > b.max[i] {
+                return None;
+            }
+            continue;
+        }
+        // Divide rather than multiply by the reciprocal, which overflows for a tiny
+        // component and turns an origin on a face into 0 * infinity.
+        let (t1, t2) = ((b.min[i] - o) / d, (b.max[i] - o) / d);
+        let (t1, t2) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+        near = near.max(t1);
+        far = far.min(t2);
+    }
+    (near <= far).then_some(near)
 }
 
 #[cfg(test)]
@@ -407,6 +444,208 @@ mod tests {
         assert_eq!(ray_box(&away, &b), None);
         let inside = Ray { origin: DVec3::splat(0.5), direction: DVec3::Z };
         assert_eq!(ray_box(&inside, &b), Some(0.0));
+    }
+
+    /// A ray along one axis that lies on a face or an edge of the box, or runs through
+    /// it, enters it; one a hair outside a face does not. Both signs of zero in the
+    /// other components, and both directions along each axis.
+    #[test]
+    fn rays_parallel_to_faces_enter_boxes() {
+        let b = Aabb { min: DVec3::ZERO, max: DVec3::ONE };
+        let outside = [-f64::EPSILON, 1.0 + f64::EPSILON];
+        for axis in 0..3 {
+            let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
+            for sign in [1.0, -1.0] {
+                for zero in [0.0, -0.0] {
+                    let mut direction = DVec3::splat(zero);
+                    direction[axis] = sign;
+                    // On the min face, through the middle, on the max face.
+                    for cu in [0.0, 0.5, 1.0] {
+                        for cv in [0.0, 0.5, 1.0] {
+                            let mut origin = DVec3::ZERO;
+                            origin[u] = cu;
+                            origin[v] = cv;
+                            origin[axis] = if sign > 0.0 { -1.0 } else { 2.0 };
+                            let ray = Ray { origin, direction };
+                            assert_eq!(ray_box(&ray, &b), Some(1.0), "{ray:?}");
+                            origin[axis] = 0.5;
+                            assert_eq!(ray_box(&Ray { origin, direction }, &b), Some(0.0), "starts inside, {ray:?}");
+                            origin[axis] = if sign > 0.0 { 0.0 } else { 1.0 };
+                            assert_eq!(ray_box(&Ray { origin, direction }, &b), Some(0.0), "starts on a face, {ray:?}");
+                            origin[axis] = if sign > 0.0 { 2.0 } else { -1.0 };
+                            assert_eq!(ray_box(&Ray { origin, direction }, &b), None, "past the box, {ray:?}");
+                        }
+                    }
+                    for off in outside {
+                        let mut origin = DVec3::splat(0.5);
+                        origin[axis] = if sign > 0.0 { -1.0 } else { 2.0 };
+                        origin[u] = off;
+                        let ray = Ray { origin, direction };
+                        assert_eq!(ray_box(&ray, &b), None, "outside a face, {ray:?}");
+                    }
+                }
+            }
+        }
+        // A ray in a face plane but slanted across it still meets the face.
+        let slant = Ray { origin: DVec3::new(-1.0, 0.0, -1.0), direction: DVec3::new(1.0, 0.0, 1.0) };
+        assert_eq!(ray_box(&slant, &b), Some(1.0));
+        // A direction so small its reciprocal overflows, from a face.
+        let tiny = Ray { origin: DVec3::new(-1.0, 0.0, 0.5), direction: DVec3::new(1.0, 1e-320, 0.0) };
+        assert_eq!(ray_box(&tiny, &b), Some(1.0));
+    }
+
+    /// Every node's box, as the queries rebuild it in f64, holds the f64 bounds of every
+    /// row below it.
+    fn assert_encloses(bvh: &Bvh, bounds: &[Aabb]) {
+        let mut stack = vec![(0usize, Vec::new())];
+        while let Some((n, mut path)) = stack.pop() {
+            path.push(n);
+            let node = bvh.nodes[n];
+            if node.count > 0 {
+                for &r in &bvh.items[node.first as usize..(node.first + node.count) as usize] {
+                    for &a in &path {
+                        let b = bvh.node_box(a);
+                        let row = bounds[r as usize];
+                        assert!(
+                            b.min.cmple(row.min).all() && row.max.cmple(b.max).all(),
+                            "node {a} {b:?} does not hold row {r} {row:?}"
+                        );
+                    }
+                }
+            } else {
+                stack.push((node.first as usize, path.clone()));
+                stack.push((node.first as usize + 1, path));
+            }
+        }
+    }
+
+    fn rows_on_ray(bvh: &Bvh, bounds: &[Aabb], ray: &Ray) -> Vec<u32> {
+        let mut out = Vec::new();
+        bvh.visit(|b| ray_box(ray, b).is_some(), |r| out.extend(ray_box(ray, &bounds[r as usize]).map(|_| r)));
+        out.sort_unstable();
+        out
+    }
+
+    fn rows_in_box(bvh: &Bvh, bounds: &[Aabb], region: &Aabb) -> Vec<u32> {
+        let mut out = Vec::new();
+        bvh.visit(|b| b.intersects(region), |r| out.extend(bounds[r as usize].intersects(region).then_some(r)));
+        out.sort_unstable();
+        out
+    }
+
+    /// A box whose f64 bounds f32 rounds inward: x from -h to h with h = 1 + 2^-25,
+    /// stored relative to the origin as -1 to 1. A ray strictly inside the true x range
+    /// but outside the rounded one must still find it, after a build and after a refit.
+    /// Unit boxes further along y make enough nodes for a refit of one row to touch only
+    /// its own leaf and ancestors.
+    #[test]
+    fn stored_boxes_hold_their_rows_after_rounding() {
+        let unit = Aabb { min: -DVec3::ONE, max: DVec3::ONE };
+        let others = (1..64).map(|k| {
+            let y = DVec3::new(0.0, 10.0 * k as f64, 0.0);
+            Aabb { min: unit.min + y, max: unit.max + y }
+        });
+        let flags = vec![crate::occurrence::Flags::default(); 64];
+        for h in [1.0 + 2f64.powi(-25), 2f64.powi(20) + 2f64.powi(-5)] {
+            let row = Aabb { min: DVec3::new(-h, -1.0, -1.0), max: DVec3::new(h, 1.0, 1.0) };
+            let start: Vec<Aabb> = std::iter::once(unit).chain(others.clone()).collect();
+            let bounds: Vec<Aabb> = std::iter::once(row).chain(others.clone()).collect();
+            let x = (h + h as f32 as f64) / 2.0;
+            assert!(x < h && x > h as f32 as f64, "between the rounded and the true bound");
+            let ray = Ray { origin: DVec3::new(x, 0.0, 2.0), direction: -DVec3::Z };
+            let region = Aabb { min: DVec3::new(x, -0.5, -0.5), max: DVec3::new(x, 0.5, 0.5) };
+            let mirrored = Ray { origin: DVec3::new(-x, 0.0, 2.0), ..ray };
+            let check = |bvh: &Bvh| {
+                assert_encloses(bvh, &bounds);
+                assert_eq!(rows_on_ray(bvh, &bounds, &ray), vec![0], "h = {h}");
+                assert_eq!(rows_on_ray(bvh, &bounds, &mirrored), vec![0], "h = {h}, min side");
+                assert_eq!(rows_in_box(bvh, &bounds, &region), vec![0], "h = {h}");
+            };
+            check(&Bvh::build_from(&bounds, &flags, DVec3::ZERO));
+            // Built around a unit box, then refitted to the awkward one, by its own
+            // path up the tree and by a full pass.
+            let mut one = Bvh::build_from(&start, &flags, DVec3::ZERO);
+            assert!(one.nodes.len() > 16, "a refit of one row takes the partial path");
+            one.refit_from(&bounds, &[OccurrenceIndex(0)]);
+            check(&one);
+            let mut all = Bvh::build_from(&start, &flags, DVec3::ZERO);
+            all.refit_all_from(&bounds);
+            check(&all);
+        }
+    }
+
+    mod generated {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn config() -> ProptestConfig {
+            let cases = std::env::var("PROPTEST_CASES").ok().and_then(|c| c.parse().ok()).unwrap_or(200);
+            ProptestConfig { cases, ..ProptestConfig::default() }
+        }
+
+        /// A coordinate at a random scale, so that f32 cannot hold most of them.
+        fn coordinate() -> impl Strategy<Value = f64> {
+            (-1.0e7f64..1.0e7, 0u32..4).prop_map(|(x, scale)| x / 10f64.powi(scale as i32 * 2))
+        }
+
+        fn aabb() -> impl Strategy<Value = Aabb> {
+            (prop::array::uniform3(coordinate()), prop::array::uniform3(0.0f64..50.0)).prop_map(|(c, e)| {
+                let min = DVec3::from_array(c);
+                Aabb { min, max: min + DVec3::from_array(e) }
+            })
+        }
+
+        proptest! {
+            #![proptest_config(config())]
+
+            /// Queries through the hierarchy find exactly the rows a check of every row
+            /// finds, with rays and boxes placed on the rows' own faces and edges.
+            #[test]
+            fn queries_match_a_check_of_every_row(
+                bounds in prop::collection::vec(aabb(), 1..40),
+                moved in prop::collection::vec((any::<prop::sample::Index>(), aabb()), 0..6),
+                origin in prop::array::uniform3(coordinate()),
+                picks in prop::collection::vec((any::<prop::sample::Index>(), 0usize..3, any::<bool>(), 0u8..4), 1..12),
+            ) {
+                let flags = vec![crate::occurrence::Flags::default(); bounds.len()];
+                let mut bvh = Bvh::build_from(&bounds, &flags, DVec3::from_array(origin));
+                assert_encloses(&bvh, &bounds);
+                let mut bounds = bounds;
+                let rows: Vec<OccurrenceIndex> = moved
+                    .iter()
+                    .map(|(i, b)| {
+                        let r = i.index(bounds.len());
+                        bounds[r] = *b;
+                        OccurrenceIndex(r as u32)
+                    })
+                    .collect();
+                bvh.refit_from(&bounds, &rows);
+                assert_encloses(&bvh, &bounds);
+                for (i, axis, max_side, kind) in picks {
+                    let b = bounds[i.index(bounds.len())];
+                    // A point on a face or edge of a row's box.
+                    let mut p = (b.min + b.max) * 0.5;
+                    p[axis] = if max_side { b.max[axis] } else { b.min[axis] };
+                    if kind == 1 {
+                        p[(axis + 1) % 3] = b.min[(axis + 1) % 3];
+                    }
+                    let travel = (axis + 1 + kind as usize % 2) % 3;
+                    let mut direction = DVec3::ZERO;
+                    direction[travel] = if kind < 2 { 1.0 } else { -1.0 };
+                    let mut origin = p;
+                    origin[travel] -= direction[travel] * 100.0;
+                    let ray = Ray { origin, direction };
+                    let brute: Vec<u32> =
+                        (0..bounds.len() as u32).filter(|&r| ray_box(&ray, &bounds[r as usize]).is_some()).collect();
+                    prop_assert!(brute.contains(&(i.index(bounds.len()) as u32)), "the ray meets its own row");
+                    prop_assert_eq!(rows_on_ray(&bvh, &bounds, &ray), brute);
+                    let region = Aabb { min: p, max: p };
+                    let brute: Vec<u32> =
+                        (0..bounds.len() as u32).filter(|&r| bounds[r as usize].intersects(&region)).collect();
+                    prop_assert_eq!(rows_in_box(&bvh, &bounds, &region), brute);
+                }
+            }
+        }
     }
 
     #[test]

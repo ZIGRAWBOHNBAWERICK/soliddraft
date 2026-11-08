@@ -184,6 +184,32 @@ fn before_trim_modes(id: &str, current: &mut Value) {
         }),
         "only the declared bounded trim operation extends the frozen schema"
     );
+    let kinds = variants
+        .iter_mut()
+        .find(|v| v["properties"]["tool"]["const"] == "add")
+        .unwrap()
+        .pointer_mut("/properties/kind/anyOf")
+        .and_then(Value::as_array_mut)
+        .unwrap();
+    let point = json!({"type":"object", "properties":{"u":{"type":"number"}, "v":{"type":"number"}}, "required":["u","v"], "additionalProperties":false});
+    for (kind, fields) in [
+        ("ellipse", &["center", "major", "minor"][..]),
+        ("elliptic_arc", &["center", "major", "minor", "start", "end"][..]),
+    ] {
+        let index = kinds.iter().position(|v| v["properties"]["type"]["const"] == kind).unwrap();
+        let mut properties = Map::new();
+        properties.insert("type".into(), json!({"type":"string", "const":kind}));
+        let mut required = vec![json!("type")];
+        for field in fields {
+            properties.insert((*field).into(), point.clone());
+            required.push(json!(field));
+        }
+        assert_eq!(
+            kinds.remove(index),
+            json!({"type":"object", "additionalProperties":false, "properties":properties, "required":required}),
+            "the declared ellipse schema is the only geometry addition"
+        );
+    }
 }
 
 fn before_inference_snaps(id: &str, current: &mut Value) {
@@ -316,7 +342,16 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             ("Sketch", &["sketch", "exit_sketch"]),
             (
                 "Draw",
-                &["sketch_line", "sketch_circle", "sketch_rectangle", "sketch_arc", "sketch_slot", "sketch_point"],
+                &[
+                    "sketch_line",
+                    "sketch_circle",
+                    "sketch_ellipse",
+                    "sketch_partial_ellipse",
+                    "sketch_rectangle",
+                    "sketch_arc",
+                    "sketch_slot",
+                    "sketch_point",
+                ],
             ),
             (
                 "Modify",

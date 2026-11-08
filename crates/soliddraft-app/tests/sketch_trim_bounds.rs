@@ -272,6 +272,7 @@ fn outside_trim_keeps_an_analytic_arc_in_a_compact_dark_view() {
     mode(&mut app, "Outside");
     pick(&mut app, P2::new(11.0, 5.0));
     pick(&mut app, P2::new(5.0, 11.0));
+    frame(&mut app, "bounded-arc-small-dark-controls");
     assert!(
         ribbon::painted(&app).iter().any(|p| p.text == "Choose bounds again" && p.rect.contains_rect(p.full)),
         "the bounds reset control remains visible in the compact panel"

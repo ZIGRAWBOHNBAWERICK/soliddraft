@@ -185,6 +185,11 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             }
         }
         Tool::TrimInside | Tool::TrimOutside => {
+            if !s.trim_bounds.is_empty() && ui.button("Choose bounds again").clicked() {
+                s.trim_bounds.clear();
+                s.selection.clear();
+                s.preview = None;
+            }
             hint(
                 ui,
                 match s.trim_bounds.len() {
@@ -201,11 +206,6 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                     "Keep inside. Ignore other crossings."
                 },
             );
-            if !s.trim_bounds.is_empty() && ui.button("Choose bounds again").clicked() {
-                s.trim_bounds.clear();
-                s.selection.clear();
-                s.preview = None;
-            }
             if let Some(why) = s.preview.as_ref().and_then(|p| p.refused.as_deref()) {
                 ui.label(egui::RichText::new(why).size(11.0).color(theme::error()));
             }

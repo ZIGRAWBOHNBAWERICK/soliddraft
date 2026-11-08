@@ -624,6 +624,54 @@ impl Sketch {
     }
 }
 
+fn ellipse_span(center: Point2, axis: Point2, ratio: f64, ends: Option<(Point2, Point2, bool)>) -> (Ellipse, f64, f64) {
+    let center = p2(center);
+    let axis = p2(axis);
+    let ellipse = Ellipse { center, major: center + axis, minor: center + axis.perp().scale(ratio) };
+    let (start, sweep) = ends.map_or((0.0, TAU), |(from, to, clockwise)| {
+        let a = ellipse.parameter(p2(from));
+        let b = ellipse.parameter(p2(to));
+        (a, if clockwise { -(a - b).rem_euclid(TAU) } else { (b - a).rem_euclid(TAU) })
+    });
+    (ellipse, start, sweep)
+}
+
+fn ellipse_crossings(ellipse: Ellipse, start: f64, sweep: f64, p: P2) -> usize {
+    let axis = ellipse.axis();
+    let (c, d) = (axis.v, axis.u * ellipse.ratio());
+    let height = c.hypot(d);
+    let v = (p.v - ellipse.center.v) / height;
+    if v.abs() > 1.0 {
+        return 0;
+    }
+    let phase = d.atan2(c);
+    let offset = |t: f64| if sweep < 0.0 { (start - t).rem_euclid(TAU) } else { (t - start).rem_euclid(TAU) };
+    let mut cuts = vec![0.0, sweep.abs()];
+    for t in [phase, phase + PI] {
+        let u = offset(t);
+        if u > 0.0 && u < sweep.abs() {
+            cuts.push(u);
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    let roots = [phase + v.acos(), phase - v.acos()];
+    let mut crossings = 0;
+    for pair in cuts.windows(2) {
+        let a = ellipse.at(start + sweep.signum() * pair[0]);
+        let b = ellipse.at(start + sweep.signum() * pair[1]);
+        if (a.v > p.v) != (b.v > p.v) {
+            let t = roots.into_iter().find(|t| {
+                let u = offset(*t);
+                u >= pair[0] - 1e-12 && u <= pair[1] + 1e-12
+            });
+            if t.is_some_and(|t| ellipse.at(t).u > p.u) {
+                crossings += 1;
+            }
+        }
+    }
+    crossings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,52 +768,4 @@ mod tests {
         assert!(matches!(regions(&s), Err(ProfileError::Degenerate(_))));
         assert_eq!(regions(&Sketch::new()), Err(ProfileError::NoLoop));
     }
-}
-
-fn ellipse_span(center: Point2, axis: Point2, ratio: f64, ends: Option<(Point2, Point2, bool)>) -> (Ellipse, f64, f64) {
-    let center = p2(center);
-    let axis = p2(axis);
-    let ellipse = Ellipse { center, major: center + axis, minor: center + axis.perp().scale(ratio) };
-    let (start, sweep) = ends.map_or((0.0, TAU), |(from, to, clockwise)| {
-        let a = ellipse.parameter(p2(from));
-        let b = ellipse.parameter(p2(to));
-        (a, if clockwise { -(a - b).rem_euclid(TAU) } else { (b - a).rem_euclid(TAU) })
-    });
-    (ellipse, start, sweep)
-}
-
-fn ellipse_crossings(ellipse: Ellipse, start: f64, sweep: f64, p: P2) -> usize {
-    let axis = ellipse.axis();
-    let (c, d) = (axis.v, axis.u * ellipse.ratio());
-    let height = c.hypot(d);
-    let v = (p.v - ellipse.center.v) / height;
-    if v.abs() > 1.0 {
-        return 0;
-    }
-    let phase = d.atan2(c);
-    let offset = |t: f64| if sweep < 0.0 { (start - t).rem_euclid(TAU) } else { (t - start).rem_euclid(TAU) };
-    let mut cuts = vec![0.0, sweep.abs()];
-    for t in [phase, phase + PI] {
-        let u = offset(t);
-        if u > 0.0 && u < sweep.abs() {
-            cuts.push(u);
-        }
-    }
-    cuts.sort_by(f64::total_cmp);
-    let roots = [phase + v.acos(), phase - v.acos()];
-    let mut crossings = 0;
-    for pair in cuts.windows(2) {
-        let a = ellipse.at(start + sweep.signum() * pair[0]);
-        let b = ellipse.at(start + sweep.signum() * pair[1]);
-        if (a.v > p.v) != (b.v > p.v) {
-            let t = roots.into_iter().find(|t| {
-                let u = offset(*t);
-                u >= pair[0] - 1e-12 && u <= pair[1] + 1e-12
-            });
-            if t.is_some_and(|t| ellipse.at(t).u > p.u) {
-                crossings += 1;
-            }
-        }
-    }
-    crossings
 }

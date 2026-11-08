@@ -321,6 +321,20 @@ pub fn operation_schema() -> Value {
             ("start", point.clone()),
             ("end", point.clone()),
         ]),
+        object(&[
+            ("type", constant("ellipse")),
+            ("center", point.clone()),
+            ("major", point.clone()),
+            ("minor", point.clone()),
+        ]),
+        object(&[
+            ("type", constant("elliptic_arc")),
+            ("center", point.clone()),
+            ("major", point.clone()),
+            ("minor", point.clone()),
+            ("start", point.clone()),
+            ("end", point.clone()),
+        ]),
         object(&[("type", constant("circle")), ("center", point.clone()), ("radius", number("Positive radius, mm"))]),
     ]);
     any_of(vec![

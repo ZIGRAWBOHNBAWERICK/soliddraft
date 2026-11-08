@@ -100,6 +100,9 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
         }
     }
     let line = |id| sketch.entity(id).is_some_and(|e| e.is_line());
+    let ellipse = |id| sketch.entity(id).is_some_and(|e| crate::ellipse::Ellipse::of(e.kind).is_some());
+    let centered =
+        |id| sketch.entity(id).is_some_and(|e| e.is_curve() || crate::ellipse::Ellipse::of(e.kind).is_some());
     let circular = |id| sketch.entity(id).is_some_and(|e| tools::circle(e.kind).is_some());
     let reason = match constraint.geometry_kind() {
         ConstraintKind::Horizontal { target: Align::Line(id) }
@@ -130,11 +133,13 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
             Some("Fixed geometry no longer matches its recorded type")
         }
         ConstraintKind::Radius { entity, .. } if !circular(entity) => Some("Radius requires a circle or arc target"),
-        ConstraintKind::Concentric { a, b } if !circular(a) || !circular(b) => {
-            Some("Concentric requires two circular targets")
+        ConstraintKind::Concentric { a, b } if !centered(a) || !centered(b) => {
+            Some("Concentric requires two circle, arc or ellipse targets")
         }
-        ConstraintKind::Equal { a, b } if !((line(a) && line(b)) || (circular(a) && circular(b))) => {
-            Some("Equal requires two lines or two circular targets")
+        ConstraintKind::Equal { a, b }
+            if !((line(a) && line(b)) || (circular(a) && circular(b)) || (ellipse(a) && ellipse(b))) =>
+        {
+            Some("Equal requires two lines, two circular targets or two ellipses")
         }
         ConstraintKind::Tangent { a, b }
             if !((line(a) && circular(b)) || (circular(a) && line(b)) || (circular(a) && circular(b))) =>

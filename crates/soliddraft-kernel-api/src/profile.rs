@@ -37,22 +37,48 @@ pub enum Segment {
         /// Radius, greater than zero.
         radius: f64,
     },
+    /// A full ellipse. The second semi-axis is `axis.perp() * ratio`.
+    Ellipse {
+        /// Centre.
+        center: Point2,
+        /// First semi-axis vector.
+        axis: Point2,
+        /// Positive second-to-first semi-axis ratio.
+        ratio: f64,
+    },
+    /// An elliptical arc, with both endpoints on the ellipse.
+    EllipticArc {
+        /// Centre.
+        center: Point2,
+        /// First semi-axis vector.
+        axis: Point2,
+        /// Positive second-to-first semi-axis ratio.
+        ratio: f64,
+        /// Start point.
+        from: Point2,
+        /// End point.
+        to: Point2,
+        /// Clockwise travel when set.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        clockwise: bool,
+    },
 }
 
 impl Segment {
     /// Start point of the segment (for a circle, the point at angle zero).
     pub fn start(&self) -> Point2 {
         match *self {
-            Segment::Line { from, .. } | Segment::Arc { from, .. } => from,
+            Segment::Line { from, .. } | Segment::Arc { from, .. } | Segment::EllipticArc { from, .. } => from,
             Segment::Circle { center, radius } => Point2::new(center.u + radius, center.v),
+            Segment::Ellipse { center, axis, .. } => Point2::new(center.u + axis.u, center.v + axis.v),
         }
     }
 
     /// End point of the segment (for a circle, the same as the start).
     pub fn end(&self) -> Point2 {
         match *self {
-            Segment::Line { to, .. } | Segment::Arc { to, .. } => to,
-            Segment::Circle { .. } => self.start(),
+            Segment::Line { to, .. } | Segment::Arc { to, .. } | Segment::EllipticArc { to, .. } => to,
+            Segment::Circle { .. } | Segment::Ellipse { .. } => self.start(),
         }
     }
 }
@@ -85,7 +111,7 @@ pub enum ProfileError {
     #[error("loop {0} is empty")]
     EmptyLoop(usize),
     /// A loop mixes a full circle with other segments.
-    #[error("loop {0} mixes a full circle with other segments")]
+    #[error("loop {0} mixes a full circle or ellipse with other segments")]
     CircleNotAlone(usize),
     /// Two consecutive segments do not meet.
     #[error("loop {loop_index} is open between segment {segment} and the next one (gap {gap})")]
@@ -145,7 +171,7 @@ impl Profile {
             if segs.is_empty() {
                 return Err(ProfileError::EmptyLoop(li));
             }
-            let has_circle = segs.iter().any(|s| matches!(s, Segment::Circle { .. }));
+            let has_circle = segs.iter().any(|s| matches!(s, Segment::Circle { .. } | Segment::Ellipse { .. }));
             if has_circle && segs.len() > 1 {
                 return Err(ProfileError::CircleNotAlone(li));
             }
@@ -185,6 +211,30 @@ fn segment_is_degenerate(s: &Segment) -> bool {
                 || dist(from, to) <= PROFILE_JOIN_TOLERANCE
         }
         Segment::Circle { center, radius } => !finite(center) || !(radius.is_finite() && radius > 0.0),
+        Segment::Ellipse { center, axis, ratio } | Segment::EllipticArc { center, axis, ratio, .. } => {
+            let length = axis.u.hypot(axis.v);
+            if !finite(center)
+                || !finite(axis)
+                || !ratio.is_finite()
+                || ratio <= 0.0
+                || length.min(length * ratio) <= PROFILE_JOIN_TOLERANCE
+            {
+                return true;
+            }
+            if let Segment::EllipticArc { from, to, .. } = *s {
+                let on = |p: Point2| {
+                    let (x, y) = (p.u - center.u, p.v - center.v);
+                    let u = (axis.u * x + axis.v * y) / length.powi(2);
+                    let v = (axis.u * y - axis.v * x) / (length.powi(2) * ratio);
+                    finite(p)
+                        && (u.hypot(v) - 1.0).abs() * length.max(length * ratio)
+                            <= PROFILE_JOIN_TOLERANCE.max(length * 1e-9)
+                };
+                !on(from) || !on(to) || dist(from, to) <= PROFILE_JOIN_TOLERANCE
+            } else {
+                false
+            }
+        }
     }
 }
 

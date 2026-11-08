@@ -13,6 +13,8 @@ use ezpz::{CircleSide, Config, Constraint, ConstraintRequest, LineSide};
 use std::collections::HashMap;
 use std::ops::{Add, Sub};
 
+mod ellipse;
+
 /// A point the user is dragging: solved as a low-priority wish, so real
 /// constraints win and the rest of the sketch follows.
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +62,7 @@ enum Datum {
     Line(DatumLineSegment),
     Arc(DatumCircularArc, DatumCircle),
     Circle(DatumCircle),
+    Ellipse(ellipse::EllipseDatum),
 }
 
 impl Datum {
@@ -78,7 +81,10 @@ impl Datum {
     }
 
     fn center(self) -> Option<DatumPoint> {
-        self.circle().map(|c| c.center)
+        match self {
+            Datum::Ellipse(e) => Some(e.center),
+            _ => self.circle().map(|c| c.center),
+        }
     }
 }
 
@@ -117,6 +123,18 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
 
     for e in &sketch.entities {
         let d = match e.kind {
+            EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. } => {
+                let needed = matches!(e.kind, EntityKind::EllipticArc { .. })
+                    || sketch
+                        .constraints
+                        .iter()
+                        .any(|c| matches!(c.kind, ConstraintKind::PointOn { entity, .. } if entity == e.id));
+                let (datum, internal) = ellipse::datum(&mut vars, e, needed);
+                for req in internal {
+                    push(ConstraintRequest::highest_priority(req), None, &mut requests, &mut owners);
+                }
+                Datum::Ellipse(datum)
+            }
             EntityKind::Point { p } => Datum::Point(vars.point(PointRef::new(e.id, 0), p)),
             EntityKind::Line { a, b } => Datum::Line(DatumLineSegment::new(
                 vars.point(PointRef::new(e.id, 0), a),
@@ -187,6 +205,11 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
                         Datum::Arc(_, circle) | Datum::Circle(circle) => {
                             reqs.push(Constraint::DistanceVar(circle.center, p, circle.radius))
                         }
+                        Datum::Ellipse(datum) => {
+                            if let Some(at) = sketch.point(point) {
+                                reqs.extend(datum.point_on(&mut vars, p, at));
+                            }
+                        }
                         Datum::Point(q) => reqs.push(Constraint::PointsCoincident(p, *q)),
                     }
                 }
@@ -225,6 +248,10 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
                 }
             }
             ConstraintKind::Equal { a, b } => match (datums.get(&a), datums.get(&b)) {
+                (Some(Datum::Ellipse(a)), Some(Datum::Ellipse(b))) => {
+                    reqs.push(Constraint::LinesEqualLength(a.first, b.first));
+                    reqs.push(Constraint::LinesEqualLength(a.second, b.second));
+                }
                 (Some(Datum::Line(l0)), Some(Datum::Line(l1))) => reqs.push(Constraint::LinesEqualLength(*l0, *l1)),
                 (Some(x), Some(y)) => {
                     if let (Some(c0), Some(c1)) = (x.circle(), y.circle()) {
@@ -376,6 +403,19 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
             if r > 1e-9 {
                 *start = center.add(start.sub(*center).normalized().scale(r));
                 *end = center.add(end.sub(*center).normalized().scale(r));
+            }
+        }
+    }
+
+    for e in &mut sketch.entities {
+        if let Some(geometry) = crate::ellipse::Ellipse::of(e.kind) {
+            let minor =
+                geometry.center + geometry.axis().perp().normalized().scale(geometry.center.dist(geometry.minor));
+            e.set_point(2, minor);
+            let geometry = crate::ellipse::Ellipse::of(e.kind).unwrap();
+            if let EntityKind::EllipticArc { start, end, .. } = e.kind {
+                e.set_point(3, geometry.at(geometry.parameter(start)));
+                e.set_point(4, geometry.at(geometry.parameter(end)));
             }
         }
     }

@@ -251,6 +251,19 @@ fn entity(kind: EntityKind) -> Entity {
 
 pub(crate) fn valid(kind: EntityKind) -> bool {
     match kind {
+        kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+            let ellipse = crate::ellipse::Ellipse::of(kind).unwrap();
+            ellipse.valid()
+                && if let EntityKind::EllipticArc { start, end, .. } = kind {
+                    finite(start)
+                        && finite(end)
+                        && start.dist(end) > EPS
+                        && start.dist(ellipse.at(ellipse.parameter(start))) < EPS
+                        && end.dist(ellipse.at(ellipse.parameter(end))) < EPS
+                } else {
+                    true
+                }
+        }
         EntityKind::Point { p } => finite(p),
         EntityKind::Line { a, b } => finite(a) && finite(b) && a.dist(b).is_finite() && a.dist(b) > EPS,
         EntityKind::Arc { center, start, end } => {
@@ -638,6 +651,19 @@ impl Sketch {
             let map = transform(i);
             for e in &selected {
                 let kind = match e.kind {
+                    EntityKind::Ellipse { center, major, minor } => {
+                        EntityKind::Ellipse { center: map(center), major: map(major), minor: map(minor) }
+                    }
+                    EntityKind::EllipticArc { center, major, minor, start, end } => {
+                        let (start, end) = if reflect { (end, start) } else { (start, end) };
+                        EntityKind::EllipticArc {
+                            center: map(center),
+                            major: map(major),
+                            minor: map(minor),
+                            start: map(start),
+                            end: map(end),
+                        }
+                    }
                     EntityKind::Point { p } => EntityKind::Point { p: map(p) },
                     EntityKind::Line { a, b } => EntityKind::Line { a: map(a), b: map(b) },
                     EntityKind::Arc { center, start, end } => {
@@ -675,6 +701,9 @@ impl Sketch {
 
     fn trim_target(&self, id: EntityId, options: TrimOptions) -> Result<Entity> {
         let target = self.tool_entity(id)?;
+        if crate::ellipse::Ellipse::of(target.kind).is_some() {
+            return refuse("trim does not yet support ellipse targets");
+        }
         if target.construction && (options.ignore_construction || options.keep_as_construction) {
             return refuse("construction targets are kept by the current trim options");
         }
@@ -684,6 +713,9 @@ impl Sketch {
     /// What trimming `id` at `at` removes and keeps, without changing the sketch.
     pub fn trim_preview(&self, id: EntityId, at: P2, options: TrimOptions) -> Result<TrimPreview> {
         let target = self.trim_target(id, options)?;
+        if self.drawn().any(|e| crate::ellipse::Ellipse::of(e.kind).is_some()) {
+            return refuse("trim does not yet support ellipse boundaries");
+        }
         if !finite(at) || target.is_point() {
             return refuse("trim needs a line, arc or circle and a finite pick point");
         }
@@ -955,11 +987,19 @@ impl Sketch {
         let tangent = |kind: EntityKind, at: P2| match kind {
             EntityKind::Line { a, b } => (b - a).normalized(),
             EntityKind::Arc { center, .. } | EntityKind::Circle { center, .. } => (at - center).perp().normalized(),
+            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+                let ellipse = crate::ellipse::Ellipse::of(kind).unwrap();
+                let t = ellipse.parameter(at);
+                (ellipse.axis().scale(-t.sin()) + ellipse.axis().perp().scale(ellipse.ratio() * t.cos())).normalized()
+            }
             EntityKind::Point { .. } => P2::ZERO,
         };
         let mut cuts = Vec::with_capacity(2);
         for bound in [a, b] {
             let boundary = self.tool_entity(bound)?;
+            if crate::ellipse::Ellipse::of(boundary.kind).is_some() {
+                return refuse("bounded trim does not yet support ellipse boundaries");
+            }
             let mut hits: Vec<_> = intersections(target.kind, boundary.kind)
                 .into_iter()
                 .filter(|p| on_curve(target.kind, *p) && on_curve(boundary.kind, *p))
@@ -1052,6 +1092,9 @@ impl Sketch {
         }
         let target = self.tool_entity(id)?;
         let limit = self.tool_entity(boundary)?;
+        if crate::ellipse::Ellipse::of(limit.kind).is_some() {
+            return refuse("extend does not yet support ellipse boundaries");
+        }
         if ends(target.kind).is_none() {
             return refuse("extend needs a line or arc");
         }

@@ -1,0 +1,71 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-partial-ellipse",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "elliptic_arc",
+              "center": {
+                "u": 0,
+                "v": 0
+              },
+              "major": {
+                "u": 4,
+                "v": 0
+              },
+              "minor": {
+                "u": 0,
+                "v": 2
+              },
+              "start": {
+                "u": 4,
+                "v": 0
+              },
+              "end": {
+                "u": -4,
+                "v": 0
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -4,
+                "v": 0
+              },
+              "b": {
+                "u": 4,
+                "v": 0
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 2,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 25.132741228718345,
+          "tolerance": 1e-05
+        }
+      ]
+    }
+  ]
+}

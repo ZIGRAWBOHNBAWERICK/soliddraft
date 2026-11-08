@@ -1341,6 +1341,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::Line, Icon::Line, "Line (L)"),
                 (Tool::Rectangle, Icon::Rectangle, "Rectangle (R)"),
                 (Tool::Circle, Icon::Circle, "Circle (C)"),
+                (Tool::Ellipse, Icon::Circle, "Ellipse"),
+                (Tool::PartialEllipse, Icon::Arc, "Partial ellipse"),
                 (Tool::Arc, Icon::Arc, "Arc (A)"),
                 (Tool::Slot, Icon::Slot, "Slot (S)"),
                 (Tool::Point, Icon::Point, "Point (P)"),
@@ -1430,6 +1432,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                                     EntityKind::Line { a, b } => format!("{} mm long", fmt_value(a.dist(b))),
                                     EntityKind::Circle { radius, .. } => format!("Ø{} mm", fmt_value(radius * 2.0)),
                                     EntityKind::Arc { .. } => format!("R{} mm", fmt_value(e.radius().unwrap_or(0.0))),
+                                    EntityKind::Ellipse { center, major, minor } | EntityKind::EllipticArc { center, major, minor, .. } => format!("Semi-axes {} × {} mm", fmt_value(center.dist(major)), fmt_value(center.dist(minor))),
                                     EntityKind::Point { p } => format!("{}, {}", fmt_value(p.u), fmt_value(p.v)),
                                 };
                                 ui.horizontal(|ui| {

@@ -1579,6 +1579,7 @@ impl AssemblyDocument {
     ) -> Result<(Vec<ComponentId>, Vec<OccurrencePath>), MateRefusal> {
         let problem = self.gather(&Scope::new(&candidate.assembly, &candidate.table, &candidate.store))?;
         let solved = self.solve_problem(problem)?;
+        self.refresh_supports(candidate)?;
         let kept =
             bodies::locals(&Scope::new(&candidate.assembly, &candidate.table, &candidate.store), &solved.placements);
         let (mut components, mut overrides) = (Vec::new(), Vec::new());

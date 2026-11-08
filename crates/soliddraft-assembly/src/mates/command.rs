@@ -261,6 +261,32 @@ impl AssemblyDocument {
         self.solve_problem(problem)
     }
 
+    /// Stores on each root mate endpoint that reads an axis or a point the one proved at
+    /// `candidate`'s revisions. Update proves the new support to solve on it, and the
+    /// status reads what is stored, so the stored one must be the new one too.
+    pub(crate) fn refresh_supports(&mut self, candidate: &mut AssemblyDocument) -> Result<(), MateRefusal> {
+        let mut ends = Vec::new();
+        {
+            let scope = Scope::new(&candidate.assembly, &candidate.table, &candidate.store);
+            for (i, entry) in candidate.assembly.mates.iter().enumerate() {
+                let MateEntry::Known(m) = entry else { continue };
+                for (j, e) in m.faces().into_iter().enumerate() {
+                    if e.support.is_some() {
+                        ends.push((i, j, self.end_of(&scope, e.path.clone(), e, m.name())?));
+                    }
+                }
+            }
+        }
+        for (i, j, end) in ends {
+            let source = self.rebased(&end);
+            let support = self.prove_support(&source, &end.entity, end.support.as_ref())?.stored();
+            if let MateEntry::Known(m) = &mut candidate.assembly.mates[i] {
+                m.faces_mut()[j].support = support;
+            }
+        }
+        Ok(())
+    }
+
     /// Proves the faces `problem` reads and solves it.
     pub(crate) fn solve_problem(&mut self, problem: Problem) -> Result<Solved, MateRefusal> {
         let mut constraints = Vec::new();

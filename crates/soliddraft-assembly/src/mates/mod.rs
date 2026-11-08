@@ -554,6 +554,21 @@ impl Mate {
         }
     }
 
+    /// The same endpoints, to change.
+    pub(crate) fn faces_mut(&mut self) -> Vec<&mut FaceEndpoint> {
+        match self {
+            Mate::Distance { a, b, .. }
+            | Mate::Coincident { a, b, .. }
+            | Mate::Parallel { a, b, .. }
+            | Mate::Perpendicular { a, b, .. }
+            | Mate::Concentric { a, b, .. }
+            | Mate::Tangent { a, b, .. } => vec![a, b],
+            Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab).collect(),
+            Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes).collect(),
+            Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
+        }
+    }
+
     /// The two planes a mate measures between, when it fixes a distance between parallel
     /// planes or keeps them parallel: a Width measures from `groove[0]` to `tab[0]`.
     pub fn measured(&self) -> Option<[&FaceEndpoint; 2]> {

@@ -552,6 +552,10 @@ struct Search<'a> {
     locked: Vec<bool>,
     /// Groups whose axes or points a mate places: quarter turns only.
     positioned: Vec<bool>,
+    /// For each constraint that measures from a plane without relating a normal of the
+    /// other part to it, the plane's group and normal in its root frame. Which world axis
+    /// that normal takes decides the translation, so the group's turn is searched for it.
+    from_planes: Vec<Option<(usize, Normal)>>,
     /// Each rule with the mate that asks for it and the constraint it comes from.
     rules: Vec<(&'a str, usize, Rule)>,
     /// For each constraint, the groups whose turns decide the translations it asks for;
@@ -604,6 +608,7 @@ impl<'a> Search<'a> {
         let mut rules = Vec::new();
         let mut placed_by = Vec::new();
         let mut reads = vec![Vec::new(); roots.len()];
+        let mut from_planes = vec![None; constraints.len()];
         for (i, c) in constraints.iter().enumerate() {
             match c {
                 Constraint::Origin { mate, body, axes, at } => {
@@ -668,9 +673,12 @@ impl<'a> Search<'a> {
                 Constraint::FromPlane { mate, a, plane, b, direction, .. } => {
                     let ((ga, oa), (gb, ob)) = (of(a), of(b));
                     let u = own(oa, plane.normal, mate)?;
-                    if let Some(d) = direction {
-                        let w = own(ob, *d, mate)?;
-                        rules.push((mate.as_str(), i, Rule::Relate { a: ga, u, b: gb, w, sign: 0 }));
+                    match direction {
+                        Some(d) => {
+                            let w = own(ob, *d, mate)?;
+                            rules.push((mate.as_str(), i, Rule::Relate { a: ga, u, b: gb, w, sign: 0 }));
+                        }
+                        None => from_planes[i] = Some((ga, u)),
                     }
                     reads[ga].push(u);
                     reads[gb].extend(ALL);
@@ -705,6 +713,7 @@ impl<'a> Search<'a> {
             authored: roots.iter().map(|r| bodies[r].rotation).collect(),
             locked: roots.iter().map(|r| group.values().filter(|(x, _)| x == r).count() > 1).collect(),
             positioned: (0..roots.len()).map(|g| positioned.contains(&g)).collect(),
+            from_planes,
             member,
             rules,
             placed_by,
@@ -716,9 +725,9 @@ impl<'a> Search<'a> {
 
     /// Group `g`'s candidate turns under `active` rules, nearest its authored turn first
     /// and in a fixed order among equals. `locked_in` says an active lock places parts of
-    /// the group by its whole turn.
-    fn domain(&self, g: usize, active: &[usize], locked_in: bool) -> Vec<DQuat> {
-        let mut normals = Vec::new();
+    /// the group by its whole turn; `planes` are its normals that a point is measured from.
+    fn domain(&self, g: usize, active: &[usize], locked_in: bool, planes: &[Normal]) -> Vec<DQuat> {
+        let mut normals = planes.to_vec();
         for &i in active {
             match &self.rules[i].2 {
                 Rule::Fixed { g: f, rotation } if *f == g => return vec![*rotation],
@@ -781,9 +790,17 @@ impl<'a> Search<'a> {
                 locked_in[self.member[a].0] = true;
             }
         }
+        // A plane a point is measured from asks for its group's turn only through the
+        // translation, so only a search that checks translations tries turns for it.
+        let mut planes = vec![Vec::new(); groups];
+        for (from, on) in self.from_planes.iter().zip(active) {
+            if let (Some((g, n)), true) = (from, placing && *on) {
+                planes[*g].push(*n);
+            }
+        }
         let pass = Pass {
             active: active.to_vec(),
-            domains: (0..groups).map(|g| self.domain(g, &rules, placing && locked_in[g])).collect(),
+            domains: (0..groups).map(|g| self.domain(g, &rules, placing && locked_in[g], &planes[g])).collect(),
             touching: (0..groups)
                 .map(|g| rules.iter().copied().filter(|i| self.rules[*i].2.groups().contains(&g)).collect())
                 .collect(),
@@ -2442,5 +2459,42 @@ mod tests {
         };
         let solved = solve(&at, &[origin(true), parallel]).unwrap();
         assert!(same_turn(solved[&b()].rotation, off));
+    }
+
+    /// A's top is 10 mm from B's corner. Both origins hold, B's turn too, so A's top cannot
+    /// face B's corner while A keeps its turn: only turning A so its top faces world x
+    /// places the corner 10 mm out. No mate relates a normal of B to A's top, so the turn
+    /// comes from the distance alone.
+    #[test]
+    fn a_point_measured_from_a_plane_turns_the_plane() {
+        let corner = Placement::translation(DVec3::new(10.0, 0.0, 0.0));
+        let at: BTreeMap<Body, Placement> = [(a(), Placement::IDENTITY), (b(), corner)].into();
+        let mates = vec![
+            Constraint::Origin { mate: "OA".into(), body: a(), axes: false, at: Placement::IDENTITY },
+            Constraint::Origin { mate: "OB".into(), body: b(), axes: true, at: corner },
+            Constraint::FromPlane {
+                mate: "D".into(),
+                a: a(),
+                plane: plane([0, 0, 1], 0),
+                b: b(),
+                point: [0, 0, 0].map(q),
+                direction: None,
+                gap: q(10),
+                says: "10 mm".into(),
+            },
+        ];
+        for order in orders(&mates) {
+            let solved = solve(&at, &order).unwrap_or_else(|e| panic!("{order:?}: {e}"));
+            assert_eq!(turned(solved[&a()].rotation, [0, 0, 1]), Some([1, 0, 0]), "{order:?}");
+            assert_eq!(solved[&a()].translation, DVec3::ZERO);
+            assert_eq!(solved[&b()], corner);
+        }
+        // 11 mm cannot hold whichever way A's top faces.
+        let mut far = mates.clone();
+        if let Constraint::FromPlane { gap, .. } = &mut far[2] {
+            *gap = q(11);
+        }
+        let refused = solve(&at, &far).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::OverConstrained, "{refused}");
     }
 }

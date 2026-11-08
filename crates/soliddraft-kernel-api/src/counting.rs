@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     BackendInfo, BodyId, BooleanOp, Draft, EdgeId, EdgePolyline, ExactAxisPlane, Extrude, ExtrudeLimit, FaceCarrier,
-    FaceId, FilletOverflow, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror,
+    FaceId, FilletPolicy, HistoryRecord, Hole, Kernel, KernelResult, MassProperties, Measurement, Mesh, Mirror,
     OpResult, OpTag, PairEndpoint, PairQuantity, PatternLayout, Plane, PointProof, Profile, Revolve,
     TessellationParams, Topology, Validation, VariableFilletEdge, Vec3, drawing,
 };
@@ -112,16 +112,16 @@ impl Kernel for Counting {
         self.inner.fillet(tag, body, edges, radius)
     }
 
-    fn fillet_overflow(
+    fn fillet_with(
         &self,
         tag: &OpTag,
         body: BodyId,
         edges: &[EdgeId],
         radius: f64,
-        overflow: &FilletOverflow,
+        policy: &FilletPolicy,
     ) -> KernelResult<OpResult> {
         self.op(tag);
-        self.inner.fillet_overflow(tag, body, edges, radius, overflow)
+        self.inner.fillet_with(tag, body, edges, radius, policy)
     }
 
     fn fillet_variable(&self, tag: &OpTag, body: BodyId, edges: &[VariableFilletEdge]) -> KernelResult<OpResult> {

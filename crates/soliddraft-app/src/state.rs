@@ -385,10 +385,8 @@ impl FeatureEditor {
             EditorParams::Revolve(r) => doc.preview_revolve(r),
             EditorParams::Sweep(s) => doc.preview_sweep(s),
             EditorParams::Cut(p) => doc.preview_cut(p, before),
-            EditorParams::Fillet(f) => {
-                doc.preview_rounding(&f.edges, f.radius, false, f.overflow.as_ref(), &f.laws, before)
-            }
-            EditorParams::Chamfer(c) => doc.preview_rounding(&c.edges, c.distance, true, None, &[], before),
+            EditorParams::Fillet(f) => doc.preview_rounding(&f.blend(), false, before),
+            EditorParams::Chamfer(c) => doc.preview_rounding(&c.blend(), true, before),
             EditorParams::Shell(s) => doc.preview_shell(s, before),
             // These preview once applied; the interface half adds ghosts for them.
             EditorParams::Lattice(_)

@@ -90,6 +90,7 @@ fn fillet(edges: &[&EdgeRef], laws: Vec<FilletLaw>) -> FeatureKind {
         size: 2.0,
         overflow: None,
         laws,
+        corner: None,
     })
 }
 
@@ -180,6 +181,7 @@ fn bad_laws_and_policies_are_refused() {
         size: 2.0,
         overflow: Some(FilletOverflow::KeepNeighbours(Vec::new())),
         laws: vec![law(0, &p.high_x, 1.0, 3.0)],
+        corner: None,
     });
     assert!(invalid(add(&mut d, keep)), "a variable fillet rolls over");
     let chamfer = FeatureKind::Chamfer(BlendFeature {
@@ -187,6 +189,7 @@ fn bad_laws_and_policies_are_refused() {
         size: 1.0,
         overflow: None,
         laws: vec![law(0, &p.high_x, 1.0, 3.0)],
+        corner: None,
     });
     assert!(invalid(add(&mut d, chamfer)), "a chamfer has no radius laws");
     assert_eq!(d.features().len(), 2, "nothing was added");
@@ -204,6 +207,7 @@ fn removing_an_edge_takes_its_law_and_stations() {
         size: 2.0,
         overflow: Some(FilletOverflow::KeepNeighbours(vec![station(0), station(1), station(2)])),
         laws: vec![law(2, &p.high_x, 1.0, 3.0), law(1, &p.high_x, 2.0, 4.0)],
+        corner: None,
     };
     b.remove_edge(1);
     assert_eq!(b.edges.len(), 2);
@@ -304,6 +308,7 @@ fn a_setback_station_at_a_later_features_face_depends_on_that_feature() {
                 setback: 3.0,
             }])),
             laws: Vec::new(),
+            corner: None,
         })
     });
 }

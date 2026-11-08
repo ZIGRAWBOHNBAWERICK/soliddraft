@@ -853,22 +853,30 @@ pub fn part_context(state: &AppState) -> Option<PartContext<'_>> {
     PartContext::new(&state.doc)
 }
 
-/// Today's date as the title block writes it.
+/// Today's date as the title block writes it, or the date of `SOURCE_DATE_EPOCH` when
+/// that is set, so runs that must give the same answer, such as a reproducible build or
+/// two application revisions compared across midnight, can fix the date.
 pub fn today() -> String {
-    let secs = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let days = (secs / 86_400) as i64;
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = days + 719_468;
+    let secs =
+        std::env::var("SOURCE_DATE_EPOCH").ok().and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or_else(|| {
+            web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+        });
+    let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Proleptic Gregorian date of a day count from 1970-01-01 (Howard Hinnant's algorithm).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}")
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 /// Makes the drawing the New drawing PropertyManager describes.
@@ -1938,4 +1946,16 @@ fn model_items(ctx: &PartContext<'_>, drawing: &Drawing, sheet: usize) -> Result
         .into_iter()
         .filter(|a| !existing.iter().any(|e| same(a, e)))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::civil_from_days;
+
+    #[test]
+    fn dates_from_day_counts() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(20_740), (2026, 10, 14));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    }
 }

@@ -4,15 +4,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use soliddraft_kernel_api::{
-    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, Gyroid,
-    HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult,
-    Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, RadiusLaw, SurfaceKind, Vec3,
+    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FilletPolicy,
+    Gyroid, HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, Kernel,
+    KernelError, KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, RadiusLaw, SurfaceKind,
+    Vec3,
 };
 
 use crate::feature::{
-    BlendFeature, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId, FeatureKind, FilletLaw,
-    FilletOverflow, FilletSetback, GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature, MirrorFeature,
-    PatternFeature, PatternSpec, PlaneRef, ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
+    BlendFeature, DraftFeature, EndCondition, ExtrudeFeature, ExtrudeOp, Feature, FeatureId, FeatureKind, FilletCorner,
+    FilletLaw, FilletOverflow, FilletSetback, GyroidFeature, HoleFeature, ImportStepFeature, LatticeFeature,
+    MirrorFeature, PatternFeature, PatternSpec, PlaneRef, ProfileSource, RevolveFeature, SketchFeature, SketchPlane,
+    VARIABLE_CORNERS,
 };
 use crate::rebuild::BuildCache;
 use crate::reference::{self, FaceRef, Generator, NamedFace, ReferenceSlot, RepairNeeded, RepairReason, View};
@@ -691,39 +693,10 @@ impl Document {
         let tag = OpTag::new(format!("{}.blend", f.id));
         let result = if chamfer {
             self.kernel.chamfer(&tag, body, &ids, b.size)
-        } else if !b.laws.is_empty() {
-            if matches!(b.overflow, Some(FilletOverflow::KeepNeighbours(_))) {
-                return Built::failed(
-                    current,
-                    "a variable-radius fillet rolls over; it cannot keep its neighbours yet",
-                );
-            }
-            match placed(current, variable_edges(&b.laws, &ids, b.size, &t, &view, &names)) {
-                Ok(laws) => self.kernel.fillet_variable(&tag, body, &laws),
-                Err(built) => return *built,
-            }
         } else {
-            match &b.overflow {
-                None => self.kernel.fillet(&tag, body, &ids, b.size),
-                Some(FilletOverflow::RollOver) => self.kernel.fillet_overflow(
-                    &tag,
-                    body,
-                    &ids,
-                    b.size,
-                    &soliddraft_kernel_api::FilletOverflow::RollOver,
-                ),
-                Some(FilletOverflow::KeepNeighbours(stations)) => {
-                    match placed(current, setbacks(stations, &ids, &t, &view, &names)) {
-                        Ok(s) => self.kernel.fillet_overflow(
-                            &tag,
-                            body,
-                            &ids,
-                            b.size,
-                            &soliddraft_kernel_api::FilletOverflow::KeepNeighbours(s),
-                        ),
-                        Err(built) => return *built,
-                    }
-                }
+            match placed(current, fillet(self.kernel.as_ref(), &tag, b, &ids, body, &t, &names)) {
+                Ok(result) => result,
+                Err(built) => return *built,
             }
         };
         let result = match result {
@@ -1305,6 +1278,51 @@ fn edge_end(
         reason: RepairReason::Mismatch { detail },
         candidates,
     }]))
+}
+
+/// The kernel call that rounds `body`, given the fillet's edges resolved there. A fillet
+/// with radius laws is variable; otherwise its overflow and corner choices pick the
+/// call, and a fillet with neither is the kernel's plain fillet. The outer error is the
+/// definition's; the inner one is the kernel's.
+pub(crate) fn fillet(
+    kernel: &dyn Kernel,
+    tag: &OpTag,
+    b: &BlendFeature,
+    ids: &[EdgeId],
+    body: BodyId,
+    topology: &soliddraft_kernel_api::Topology,
+    names: &reference::NameMap,
+) -> Result<KernelResult<OpResult>, EndError> {
+    let view = View { topology };
+    if !b.laws.is_empty() {
+        if matches!(b.overflow, Some(FilletOverflow::KeepNeighbours(_))) {
+            return Err(EndError::Failed(
+                "a variable-radius fillet rolls over; it cannot keep its neighbours yet".into(),
+            ));
+        }
+        if b.corner == Some(FilletCorner::Smooth) {
+            return Err(EndError::Failed(VARIABLE_CORNERS.into()));
+        }
+        let laws = variable_edges(&b.laws, ids, b.size, topology, &view, names)?;
+        return Ok(kernel.fillet_variable(tag, body, &laws));
+    }
+    let overflow = match &b.overflow {
+        None => None,
+        Some(FilletOverflow::RollOver) => Some(soliddraft_kernel_api::FilletOverflow::RollOver),
+        Some(FilletOverflow::KeepNeighbours(stations)) => Some(soliddraft_kernel_api::FilletOverflow::KeepNeighbours(
+            setbacks(stations, ids, topology, &view, names)?,
+        )),
+    };
+    Ok(match (overflow, b.corner) {
+        (None, None) => kernel.fillet(tag, body, ids, b.size),
+        (overflow, corner) => kernel.fillet_with(
+            tag,
+            body,
+            ids,
+            b.size,
+            &FilletPolicy { overflow: overflow.unwrap_or_default(), corner: corner.unwrap_or_default() },
+        ),
+    })
 }
 
 /// A placement, or what the feature reports when it cannot be placed.

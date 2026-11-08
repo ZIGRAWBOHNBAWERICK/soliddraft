@@ -217,6 +217,9 @@ def run(args):
     for name, targets in TARGETS.items():
         source = json.loads((args.app / f"ci/scenarios/{name}.json").read_text())
         (scenarios / f"{name}.json").write_text(json.dumps(truncated(source, targets), indent=2) + "\n")
+    # Every run writes the same title block date, so a pairing that crosses midnight
+    # still compares like with like.
+    os.environ.setdefault("SOURCE_DATE_EPOCH", str(int(time.time())))
     samples, references = [], {}
     for pair in range(MEASURED_PAIRS + 1):
         for revision in (("baseline", "candidate") if pair % 2 == 0 else ("candidate", "baseline")):

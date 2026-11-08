@@ -154,10 +154,18 @@ fn radius_laws_schema() -> Value {
     }})
 }
 
+/// The `corner` input `fillet` and `edit_fillet` gained with Catallax's fillet corner
+/// choice: `"cliff"` or `"smooth"`.
+fn corner_schema() -> Value {
+    json!({"anyOf": [{"type":"string", "const":"cliff"}, {"type":"string", "const":"smooth"}]})
+}
+
 /// Removes the optional inputs one fillet line gained after the freeze, once each is still
 /// optional and matches its declared schema whole.
 fn take_fillet_additions(line: &mut Value) -> Result<(), String> {
-    for (name, declared) in [("overflow", overflow_schema()), ("radius_laws", radius_laws_schema())] {
+    for (name, declared) in
+        [("overflow", overflow_schema()), ("radius_laws", radius_laws_schema()), ("corner", corner_schema())]
+    {
         if line["required"].as_array().is_some_and(|required| required.contains(&json!(name))) {
             return Err(format!("{name} became required"));
         }
@@ -200,7 +208,7 @@ fn fillet_additions_are_checked_whole_before_they_are_removed() {
             "type":"object", "additionalProperties":false, "required":["feature","radius"],
             "properties": {
                 "feature":{"type":"string"}, "radius":{"type":"number"},
-                "overflow": overflow_schema(), "radius_laws": radius_laws_schema(),
+                "overflow": overflow_schema(), "radius_laws": radius_laws_schema(), "corner": corner_schema(),
             },
         })
     };
@@ -223,6 +231,16 @@ fn fillet_additions_are_checked_whole_before_they_are_removed() {
     let mut law = line();
     law["properties"]["radius_laws"]["items"]["properties"]["at"] = json!({"type":"string"});
     assert!(take_fillet_additions(&mut law).unwrap_err().starts_with("radius_laws is not the declared schema"));
+
+    // A third corner choice.
+    let mut corner = line();
+    corner["properties"]["corner"]["anyOf"].as_array_mut().unwrap().push(json!({"type":"string", "const":"mitre"}));
+    assert!(take_fillet_additions(&mut corner).unwrap_err().starts_with("corner is not the declared schema"));
+
+    // The corner choice made required.
+    let mut needed = line();
+    needed["required"] = json!(["feature", "radius", "corner"]);
+    assert_eq!(take_fillet_additions(&mut needed), Err("corner became required".into()));
 
     // Either input made required.
     let mut required = line();

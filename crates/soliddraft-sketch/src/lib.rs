@@ -12,6 +12,7 @@
 //! so another solver can take its place.
 
 mod dimension;
+pub mod inference;
 pub mod profile;
 mod references;
 mod shapes;

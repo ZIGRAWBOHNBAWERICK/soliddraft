@@ -5,8 +5,8 @@
 //! Inference happens while the pointer moves: a point within reach snaps to an
 //! existing point, the middle of a line or a curve, and a new line that is
 //! nearly level or plumb with its start snaps exactly and gets the relation.
-//! Every snap that lands a click becomes a relation, so what the user saw is
-//! what the solver keeps.
+//! New entity points keep their snap relations. Radius placements use the snapped
+//! coordinate and retain an on-circle relation when snapping to an existing point.
 
 use crate::document::{Command, Document};
 use crate::sketch::{
@@ -21,6 +21,7 @@ use crate::viewport::camera::Camera;
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 use glam::Vec3;
 use soliddraft_kernel_api::Plane;
+use soliddraft_sketch::inference::{self, InferenceOptions, SnapFilter, apply_snaps};
 use std::ops::{Add, Sub};
 
 const POINT_REACH: f32 = 8.0;
@@ -136,114 +137,6 @@ fn hit_curve(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, ignore_construction:
     best.map(|(_, id)| id)
 }
 
-/// Snaps a cursor position and names the inferences that moved it.
-fn infer(
-    frame: &Frame<'_>,
-    sketch: &Sketch,
-    pos: Pos2,
-    prev: Option<P2>,
-    ignore: &[EntityId],
-) -> Option<(P2, Vec<Snap>)> {
-    let raw = frame.plane_at(pos)?;
-    let mut snaps = Vec::new();
-    // 1. An existing point.
-    let mut best: Option<(f32, PointRef, P2)> = None;
-    for e in &sketch.entities {
-        if ignore.contains(&e.id) {
-            continue;
-        }
-        for i in 0..e.point_count() {
-            let Some(p) = e.point(i) else { continue };
-            let Some(sp) = frame.screen(p) else { continue };
-            let d = (sp - pos).length();
-            if d <= POINT_REACH && best.is_none_or(|(bd, _, _)| d < bd) {
-                best = Some((d, PointRef::new(e.id, i), p));
-            }
-        }
-    }
-    if let Some((_, r, p)) = best {
-        snaps.push(Snap::Point(r));
-        return Some((p, snaps));
-    }
-    // 2. The middle of a line.
-    for e in sketch.drawn() {
-        if ignore.contains(&e.id) {
-            continue;
-        }
-        if let EntityKind::Line { a, b } = e.kind {
-            let m = a.mid(b);
-            if frame.screen(m).is_some_and(|sp| (sp - pos).length() <= POINT_REACH) {
-                snaps.push(Snap::Midpoint(e.id));
-                return Some((m, snaps));
-            }
-        }
-    }
-    // 3. Level or plumb with the previous point.
-    let mut p = raw;
-    if let Some(prev) = prev
-        && let (Some(sp), Some(sprev)) = (frame.screen(raw), frame.screen(prev))
-    {
-        let far = (sp - sprev).length() > 14.0;
-        let dh = (frame.screen(P2::new(raw.u, prev.v)).unwrap_or(sp) - sp).length();
-        let dv = (frame.screen(P2::new(prev.u, raw.v)).unwrap_or(sp) - sp).length();
-        if far && dh <= ALIGN_REACH && dh <= dv {
-            p = P2::new(raw.u, prev.v);
-            snaps.push(Snap::Horizontal);
-        } else if far && dv <= ALIGN_REACH {
-            p = P2::new(prev.u, raw.v);
-            snaps.push(Snap::Vertical);
-        }
-    }
-    // 4. On a curve.
-    if snaps.is_empty() {
-        let mut best: Option<(f32, EntityId, P2)> = None;
-        for e in sketch.drawn() {
-            if ignore.contains(&e.id) || e.is_point() {
-                continue;
-            }
-            let (q, _) = e.nearest(raw);
-            let Some(sq) = frame.screen(q) else { continue };
-            let d = (sq - pos).length();
-            if d <= CURVE_REACH && best.is_none_or(|(bd, _, _)| d < bd) {
-                best = Some((d, e.id, q));
-            }
-        }
-        if let Some((_, id, q)) = best {
-            snaps.push(Snap::On(id));
-            p = q;
-        }
-    }
-    Some((p, snaps))
-}
-
-/// Adds the relations a snap implies for a newly placed point.
-fn apply_snaps(sketch: &mut Sketch, point: PointRef, snaps: &[Snap], new_line: Option<EntityId>) {
-    for s in snaps {
-        match s {
-            Snap::Point(r) if r.entity != point.entity => {
-                sketch.constrain(ConstraintKind::Coincident { a: point, b: *r });
-            }
-            Snap::Midpoint(e) => {
-                sketch.constrain(ConstraintKind::Midpoint { point, line: *e });
-            }
-            Snap::On(e) => {
-                sketch.constrain(ConstraintKind::PointOn { point, entity: *e });
-            }
-            Snap::Horizontal => {
-                if let Some(l) = new_line {
-                    sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(l) });
-                }
-            }
-            Snap::Vertical => {
-                if let Some(l) = new_line {
-                    sketch.constrain(ConstraintKind::Vertical { target: Align::Line(l) });
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 fn commit(s: &SketchSession, actions: &mut Vec<AppAction>) {
     actions.push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
 }
@@ -278,9 +171,21 @@ pub fn run(
     if let Some(pos) = hover_pos {
         if places || copy_places {
             let prev = s.pending.last().map(|(p, _)| *p);
-            let ignore: Vec<EntityId> = Vec::new();
-            if let (Some(raw), Some(inferred)) = (frame.plane_at(pos), infer(&frame, &s.sketch, pos, prev, &ignore)) {
-                let (p, snaps) = crate::measure::guides::offered(s.auto_relations, raw, inferred);
+            if let Some(raw) = frame.plane_at(pos) {
+                let filter = s.quick_snap.unwrap_or(if s.auto_relations { SnapFilter::All } else { SnapFilter::None });
+                let options = InferenceOptions {
+                    filter,
+                    directions: s.tool == Tool::Line,
+                    point_reach: f64::from(POINT_REACH),
+                    curve_reach: f64::from(CURVE_REACH),
+                    align_reach: f64::from(ALIGN_REACH),
+                    min_length: 14.0,
+                };
+                let (p, snaps) =
+                    inference::infer(&s.sketch, raw, prev, options, |a, b| match (frame.screen(a), frame.screen(b)) {
+                        (Some(a), Some(b)) => f64::from((a - b).length()),
+                        _ => f64::INFINITY,
+                    });
                 snapped = Some(p);
                 s.snaps = snaps;
             }
@@ -355,6 +260,7 @@ pub fn run(
             {
                 let snaps = s.snaps.clone();
                 tool_click(s, p, snaps, double, &mut actions);
+                s.quick_snap = None;
             }
         }
     }
@@ -367,6 +273,7 @@ pub fn run(
         } else {
             s.pending.clear();
             s.chain_from = None;
+            s.quick_snap = None;
         }
     }
 
@@ -1258,6 +1165,15 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
     if let Some(issue) = crate::sketch_diagnostics::selected(s) {
         relation_entities.extend(issue.entities.iter().copied());
     }
+    for snap in &s.snaps {
+        match snap {
+            Snap::Intersection(a, b) => relation_entities.extend([*a, *b]),
+            Snap::Parallel(entity) | Snap::Perpendicular(entity) | Snap::Tangent(entity) => {
+                relation_entities.insert(*entity);
+            }
+            _ => {}
+        }
+    }
     let replacing = s.preview.as_ref().and_then(|p| p.operation.as_ref()).and_then(|op| match op {
         Operation::Trim { entity, options, .. } | Operation::TrimBounded { entity, options, .. }
             if options.keep_as_construction =>
@@ -1924,7 +1840,10 @@ fn paint_snaps(
         && let Some(sprev) = frame.screen(*prev)
     {
         for snap in &s.snaps {
-            if matches!(snap, Snap::Horizontal | Snap::Vertical) {
+            if matches!(
+                snap,
+                Snap::Horizontal | Snap::Vertical | Snap::Parallel(_) | Snap::Perpendicular(_) | Snap::Tangent(_)
+            ) {
                 painter.add(egui::Shape::dashed_line(
                     &[sprev, sp],
                     Stroke::new(1.0, accent.gamma_multiply(0.6)),
@@ -1953,6 +1872,18 @@ fn paint_snaps(
                 painter.line_segment([g.left_bottom(), g.right_top()], st);
                 painter.circle_filled(g.center(), 1.8, accent);
             }
+            Snap::Intersection(_, _) => {
+                painter.line_segment([g.left_bottom(), g.right_top()], st);
+                painter.line_segment([g.left_top(), g.right_bottom()], st);
+            }
+            Snap::Parallel(_) | Snap::Perpendicular(_) | Snap::Tangent(_) => {
+                let text = match snap {
+                    Snap::Parallel(_) => "∥",
+                    Snap::Perpendicular(_) => "⊥",
+                    _ => "T",
+                };
+                painter.text(g.center(), Align2::CENTER_CENTER, text, theme::font_semibold(9.5), accent);
+            }
             Snap::Horizontal => {
                 painter.text(g.center(), Align2::CENTER_CENTER, "H", theme::font_semibold(9.5), accent);
             }
@@ -1962,7 +1893,8 @@ fn paint_snaps(
         }
         x += 18.0;
     }
-    if s.snaps.iter().any(|x| matches!(x, Snap::Point(_) | Snap::Midpoint(_) | Snap::On(_))) {
+    if s.snaps.iter().any(|x| matches!(x, Snap::Point(_) | Snap::Midpoint(_) | Snap::On(_) | Snap::Intersection(_, _)))
+    {
         painter.circle_stroke(sp, 6.0, Stroke::new(1.5, accent));
     } else {
         painter.line_segment([sp + vec2(-5.0, 0.0), sp + vec2(5.0, 0.0)], Stroke::new(1.0, accent));

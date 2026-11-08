@@ -1,0 +1,221 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-snaps",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 2,
+                "v": -2
+              },
+              "b": {
+                "u": 2,
+                "v": 12
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 12,
+                "v": -2
+              },
+              "b": {
+                "u": 12,
+                "v": 12
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -2,
+                "v": 2
+              },
+              "b": {
+                "u": 16,
+                "v": 2
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -2,
+                "v": 8
+              },
+              "b": {
+                "u": 16,
+                "v": 8
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 2.05,
+              "v": 2.04
+            },
+            "end": {
+              "u": 12.04,
+              "v": 2.05
+            },
+            "reach": 0.2,
+            "start_filter": "intersection",
+            "end_filter": "intersection"
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 12.05,
+              "v": 2.04
+            },
+            "end": {
+              "u": 12.04,
+              "v": 8.05
+            },
+            "reach": 0.2,
+            "start_filter": "intersection",
+            "end_filter": "intersection"
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 12.05,
+              "v": 8.04
+            },
+            "end": {
+              "u": 2.04,
+              "v": 8.05
+            },
+            "reach": 0.2,
+            "start_filter": "intersection",
+            "end_filter": "intersection"
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 2.05,
+              "v": 8.04
+            },
+            "end": {
+              "u": 2.04,
+              "v": 2.05
+            },
+            "reach": 0.2,
+            "start_filter": "intersection",
+            "end_filter": "intersection"
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 20,
+              "v": 14
+            },
+            "end": {
+              "u": 27,
+              "v": 14.05
+            },
+            "reach": 0.2,
+            "start_filter": "none",
+            "end_filter": "parallel",
+            "construction": true
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 35,
+              "v": 5
+            },
+            "end": {
+              "u": 35.05,
+              "v": 12
+            },
+            "reach": 0.2,
+            "start_filter": "none",
+            "end_filter": "perpendicular",
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 25,
+                "v": 20
+              },
+              "radius": 3
+            },
+            "construction": true
+          },
+          {
+            "tool": "snapped_line",
+            "start": {
+              "u": 28,
+              "v": 20
+            },
+            "end": {
+              "u": 28.05,
+              "v": 28
+            },
+            "reach": 0.2,
+            "start_filter": "on",
+            "end_filter": "tangent",
+            "construction": true
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 4,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 240,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/snaps.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/snaps.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 240,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

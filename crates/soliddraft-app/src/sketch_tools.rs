@@ -306,6 +306,49 @@ pub fn operation_schema() -> Value {
     any_of(vec![
         object(&[("tool", constant("add")), ("kind", geometry), ("construction", boolean("Exclude from profiles"))]),
         object(&[
+            ("tool", constant("snapped_line")),
+            ("start", point.clone()),
+            ("end", point.clone()),
+            ("reach", number("Positive snap reach in mm")),
+            (
+                "start_filter",
+                optional(one_of(
+                    &[
+                        "all",
+                        "point",
+                        "midpoint",
+                        "intersection",
+                        "on",
+                        "axes",
+                        "parallel",
+                        "perpendicular",
+                        "tangent",
+                        "none",
+                    ],
+                    "Snap class for the first placement",
+                )),
+            ),
+            (
+                "end_filter",
+                optional(one_of(
+                    &[
+                        "all",
+                        "point",
+                        "midpoint",
+                        "intersection",
+                        "on",
+                        "axes",
+                        "parallel",
+                        "perpendicular",
+                        "tangent",
+                        "none",
+                    ],
+                    "Snap class for the second placement",
+                )),
+            ),
+            ("construction", optional(boolean("Exclude from profiles"))),
+        ]),
+        object(&[
             ("tool", constant("polygon")),
             ("center", point.clone()),
             ("vertex", point.clone()),

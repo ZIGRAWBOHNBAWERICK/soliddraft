@@ -257,6 +257,179 @@
           }
         }
       ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "D"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_parallel",
+      "arguments": {
+        "name": "Right plane",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_parallel",
+      "arguments": {
+        "name": "Top plane",
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "D",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "0 mm",
+        "alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "solved"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "D"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Zero axes",
+        "a": {
+          "component": 2,
+          "edge": [
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "edge": [
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "0 mm",
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/free/0/motion",
+          "equals": "translate_z"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Axial",
+        "a": {
+          "component": 2,
+          "plane": "Top plane"
+        },
+        "b": {
+          "component": 4,
+          "plane": "Top plane"
+        },
+        "distance": "5 mm",
+        "alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 24,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "fresh_process": true
+    },
+    {
+      "tool": "assembly_update",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 0
+        }
+      ]
     }
   ]
 }

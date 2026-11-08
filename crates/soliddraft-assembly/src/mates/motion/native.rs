@@ -330,8 +330,12 @@ pub(super) fn residual<N: Number>(
             } else if *is_coincident {
                 coincident(out, a, b, *sign);
             } else if let Some(d) = distance {
-                if let (World::Axis { direction: u, through: p, .. }, World::Axis { direction: v, through: q, .. }) =
-                    (a, b)
+                if *d == 0.0 {
+                    coincident(out, a, b, *sign);
+                } else if let (
+                    World::Axis { direction: u, through: p, .. },
+                    World::Axis { direction: v, through: q, .. },
+                ) = (a, b)
                 {
                     aligned(out, u, v, *sign);
                     scalar(out, norm(cross(sub(q, p), u)) - N::f(*d), false);

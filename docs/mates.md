@@ -80,6 +80,9 @@ Point-point Distance fixes the Euclidean length between the selected points. Axi
 Distance keeps their directions parallel according to `alignment` and fixes the length
 perpendicular to the first axis. Both use nonnegative lengths and report bounded proofs.
 The point-on-axis and coincident-axis forms retain their existing meanings.
+At exactly zero distance, point pairs use coincidence equations and parallel axes use
+transverse equations, so the freedom count and strict admission keep all constraints.
+Positive distances keep their length equations.
 
 Curved Tangent accepts cylindrical and spherical faces with material sides. `alignment`
 relates their outward normals at contact. External contact uses the sum of radii; internal

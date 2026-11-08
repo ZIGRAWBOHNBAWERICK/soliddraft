@@ -268,6 +268,60 @@ fn point_point_distance_uses_persistent_vertices() {
 }
 
 #[test]
+fn zero_point_distance_accepts_a_strict_fully_constrained_assembly() {
+    let mut r = rig("zero-point-distance", Profile::Block);
+    for plane in ["Right plane", "Top plane"] {
+        r.doc.mate_parallel(plane, &datum(r.a, plane), &datum(r.b, plane), Alignment::Aligned, false).unwrap();
+    }
+    let vertex = |component| EndpointSelector {
+        component,
+        face: FaceSelector::Vertex(vec![
+            "Boss-Extrude1 · End cap".into(),
+            "Boss-Extrude1 · Side of line 2".into(),
+            "Boss-Extrude1 · Side of line 3".into(),
+        ]),
+    };
+    r.doc.mate_distance("D", &vertex(r.a), &vertex(r.b), "0 mm", Alignment::Aligned, true).unwrap();
+    assert_eq!(r.doc.solver().remaining_dof, 0);
+    bounded(&mut r.doc, "D");
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    assert_eq!(reopened.solver().remaining_dof, 0);
+    let update = reopened.rebuild();
+    assert!(update.mate_refusal.is_none(), "{update:?}");
+    reopened.finish_loading();
+    assert_eq!(reopened.solver().remaining_dof, 0);
+    bounded(&mut reopened, "D");
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn zero_axis_distance_leaves_only_the_axial_translation() {
+    let mut r = rig("zero-axis-distance", Profile::Circle);
+    for plane in ["Right plane", "Top plane"] {
+        r.doc.mate_parallel(plane, &datum(r.a, plane), &datum(r.b, plane), Alignment::Aligned, false).unwrap();
+    }
+    r.doc.mate_distance("D", &cylinder(r.a), &cylinder(r.b), "0 mm", Alignment::Aligned, false).unwrap();
+    let status = r.doc.solver();
+    assert_eq!(status.remaining_dof, 1, "{status:?}");
+    assert_eq!(status.free.iter().map(|f| f.motion.as_str()).collect::<Vec<_>>(), ["translate_z"]);
+    r.doc
+        .mate_distance("Axial", &datum(r.a, "Top plane"), &datum(r.b, "Top plane"), "5 mm", Alignment::Aligned, true)
+        .unwrap();
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    assert_eq!(reopened.solver().remaining_dof, 0);
+    let update = reopened.rebuild();
+    assert!(update.mate_refusal.is_none(), "{update:?}");
+    reopened.finish_loading();
+    assert_eq!(reopened.solver().remaining_dof, 0);
+    bounded(&mut reopened, "D");
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
 fn pre_b5_axis_aligned_assembly_keeps_exact_proofs_and_archive_bytes() {
     let dir = std::env::temp_dir().join(format!("soliddraft-motion-{}-exact-fixture", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

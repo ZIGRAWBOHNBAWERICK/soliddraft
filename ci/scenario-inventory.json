@@ -668,7 +668,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
-      "supported_limits": "B5: Euclidean point-point Distance between persistent vertices on rotated parts; residual bounds 1e-9 mm and 1e-9 rad; save, fresh reopen and negative-distance refusal without state changes.",
+      "supported_limits": "B5: Euclidean point-point Distance on persistent vertices; exact-zero point and axis Distance keep their translational constraints and support strict admission; residual bounds 1e-9 mm and 1e-9 rad; negative-distance refusal, save, fresh reopen and Update.",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
     },
     {

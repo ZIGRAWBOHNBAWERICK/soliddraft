@@ -11,6 +11,7 @@ use glam::{DQuat, DVec3};
 use interval::{Interval, Number, radians};
 pub(super) use native::{native_constraint, projection};
 use num_rational::BigRational;
+use num_traits::Zero;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -365,9 +366,32 @@ fn residual<N: Number>(c: &Constraint, poses: &BTreeMap<Body, Placement>, rank: 
                     if parallel.is_some() || norm(cross(un, vn)).middle() < 1e-7 {
                         let sign = parallel.unwrap_or_else(|| if dot(un, vn).middle() < 0.0 { -1 } else { 1 });
                         aligned(&mut out, un, vn, sign);
-                        scalar(&mut out, norm(cross(sub(vp, up), un)) - N::q(d), false);
+                        if d.is_zero() {
+                            on_axis(&mut out, un, up, vp);
+                        } else {
+                            scalar(&mut out, norm(cross(sub(vp, up), un)) - N::q(d), false);
+                        }
+                    } else if d.is_zero() {
+                        scalar(&mut out, dot(sub(vp, up), unit(cross(un, vn))), false);
                     } else {
                         scalar(&mut out, distance::<N>(ends, &poses[a], &poses[b]) - N::q(d), false);
+                    }
+                } else if d.is_zero() {
+                    // A norm has no centered derivative at zero. These equivalent
+                    // equations retain the coincidence constraints in the rank too.
+                    match ends.as_ref() {
+                        [DistanceEntity::Point(p), DistanceEntity::Point(q)] => {
+                            vector(&mut out, sub(point(&poses[b], q), point(&poses[a], p)), false);
+                        }
+                        [DistanceEntity::Axis(u), DistanceEntity::Point(q)] => {
+                            let (n, p) = axis::<N>(&poses[a], u);
+                            on_axis(&mut out, n, p, point(&poses[b], q));
+                        }
+                        [DistanceEntity::Point(p), DistanceEntity::Axis(v)] => {
+                            let (n, q) = axis::<N>(&poses[b], v);
+                            on_axis(&mut out, n, q, point(&poses[a], p));
+                        }
+                        [DistanceEntity::Axis(_), DistanceEntity::Axis(_)] => unreachable!("handled above"),
                     }
                 } else {
                     scalar(&mut out, distance::<N>(ends, &poses[a], &poses[b]) - N::q(d), false);
@@ -1104,6 +1128,80 @@ mod tests {
         assert_eq!(error.code, RefusalCode::Uncertified);
         assert!(error.mates.contains(&"bad reference".into()));
     }
+    #[test]
+    fn zero_distances_keep_rank_for_local_and_enclosed_supports() {
+        use super::super::{
+            bodies::Rule,
+            command::{Local, Read},
+        };
+        use soliddraft_kernel_api::{EnclosedSupport, ExactRational, SupportBounds};
+        let enclosed = |n: i8| {
+            let v = ExactRational { numerator: n.to_string(), denominator: "1".into() };
+            SupportBounds { lo: v.clone(), hi: v }
+        };
+        let mut observed = Vec::new();
+        for native in [false, true] {
+            for axes in [false, true] {
+                for distance in [0.0, 1e-8, 10.0] {
+                    let mut at = poses();
+                    at.get_mut(&body(2)).unwrap().translation.x = distance;
+                    let relation = if native {
+                        let reads = [1, 2].map(|i| Read {
+                            body: body(i),
+                            radius: None,
+                            local: Local::Native(Box::new(if axes {
+                                EnclosedSupport::Axis {
+                                    direction: [0, 0, 1].map(enclosed),
+                                    through: [0, 0, 0].map(enclosed),
+                                    radius_squared: None,
+                                    outward: None,
+                                }
+                            } else {
+                                EnclosedSupport::Point {
+                                    at: [0, 0, 0].map(enclosed),
+                                    radius_squared: None,
+                                    outward: None,
+                                }
+                            })),
+                        });
+                        Relation::Native {
+                            reads: reads.to_vec(),
+                            rule: Box::new(Rule::Parallel { sign: 1, distance: Some(distance), coincident: false }),
+                        }
+                    } else {
+                        let end = if axes {
+                            DistanceEntity::Axis(LocalAxis { direction: [0, 0, 1], through: p() })
+                        } else {
+                            DistanceEntity::Point(p())
+                        };
+                        Relation::Separation {
+                            a: body(1),
+                            b: body(2),
+                            ends: Box::new([end.clone(), end]),
+                            distance: solver::exact(distance).unwrap(),
+                            parallel: axes.then_some(1),
+                        }
+                    };
+                    let cs = [
+                        origin(),
+                        Constraint::Turn {
+                            mate: "Orientation".into(),
+                            a: body(1),
+                            b: body(2),
+                            relative: DQuat::IDENTITY,
+                        },
+                        Constraint::Motion { mate: "D".into(), relation: Box::new(relation) },
+                    ];
+                    certificates(&at, &cs).unwrap();
+                    let dof = freedoms(&at, &cs).unwrap().0;
+                    let expected = if distance > 0.0 { 2 } else { usize::from(axes) };
+                    observed.push((native, axes, distance, dof, expected));
+                }
+            }
+        }
+        assert!(observed.iter().all(|(_, _, _, actual, expected)| actual == expected), "{observed:?}");
+    }
+
     #[test]
     fn point_distance_is_euclidean_and_certified() {
         let mut at = poses();

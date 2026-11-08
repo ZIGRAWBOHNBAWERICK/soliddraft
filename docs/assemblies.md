@@ -279,7 +279,9 @@ Paths are what persists.
   suppressed when the file opened rereads the structure. Meshes already loaded are kept.
 
 A pattern member starts visible and unsuppressed whatever its seed is; an override hides
-or suppresses it.
+or suppresses it. Moving a seed, and undoing or redoing that move, moves its members with it
+at once, except a member with a placement override, which stays where the override puts
+it.
 
 ## Opening
 

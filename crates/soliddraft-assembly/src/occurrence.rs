@@ -602,28 +602,70 @@ impl OccurrenceTable {
     /// placements and bounds, and its ancestors' bounds. Returns the rows whose world
     /// placement changed.
     pub fn set_local(&mut self, i: OccurrenceIndex, local: Placement, store: &DefinitionStore) -> Vec<OccurrenceIndex> {
-        self.local[i.0 as usize] = local;
-        let rows = self.subtree(i);
-        for &r in &rows {
-            let parent = self.parent[r.0 as usize];
-            let parent_world = if parent == NONE { Placement::IDENTITY } else { self.world[parent as usize] };
-            self.world[r.0 as usize] = parent_world.compose(&self.local[r.0 as usize]);
+        self.set_locals(&[(i, local)], store)
+    }
+
+    /// Moves each row to its placement as [`OccurrenceTable::set_local`] does, with the
+    /// bounds of the assemblies above them redone once each, however many of their
+    /// children moved: moving many rows takes time in proportion to them. Returns the
+    /// rows whose world placement changed.
+    pub fn set_locals(
+        &mut self,
+        moves: &[(OccurrenceIndex, Placement)],
+        store: &DefinitionStore,
+    ) -> Vec<OccurrenceIndex> {
+        for (i, local) in moves {
+            self.local[i.0 as usize] = *local;
         }
-        // Bounds: parts first, then assemblies from their children, deepest first.
-        for &r in rows.iter().rev() {
-            let ri = r.0 as usize;
-            if self.flags[ri].has(Flags::ASSEMBLY) {
-                self.bounds[ri] = self.children_bounds(ri as u32);
-            } else {
-                self.bounds[ri] = store.get(self.definition[ri]).bounds.placed(&self.world[ri]);
+        let mut out = Vec::new();
+        let mut parents = Vec::new();
+        for (i, _) in moves {
+            let rows = self.subtree(*i);
+            for &r in &rows {
+                let parent = self.parent[r.0 as usize];
+                let parent_world = if parent == NONE { Placement::IDENTITY } else { self.world[parent as usize] };
+                self.world[r.0 as usize] = parent_world.compose(&self.local[r.0 as usize]);
+            }
+            // Bounds: parts first, then assemblies from their children, deepest first.
+            for &r in rows.iter().rev() {
+                let ri = r.0 as usize;
+                if self.flags[ri].has(Flags::ASSEMBLY) {
+                    self.bounds[ri] = self.children_bounds(ri as u32);
+                } else {
+                    self.bounds[ri] = store.get(self.definition[ri]).bounds.placed(&self.world[ri]);
+                }
+            }
+            parents.push(self.parent[i.0 as usize]);
+            out.extend(rows);
+        }
+        self.rebound_above(&parents);
+        out
+    }
+
+    /// Redoes the bounds of each of `rows` that is a row, and of every assembly above it,
+    /// once each and deepest first.
+    fn rebound_above(&mut self, rows: &[u32]) {
+        let depth = |mut r: u32| {
+            let mut d = 0;
+            while self.parent[r as usize] != NONE {
+                r = self.parent[r as usize];
+                d += 1;
+            }
+            d
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut above: Vec<(usize, u32)> = Vec::new();
+        for &row in rows {
+            let mut p = row;
+            while p != NONE && seen.insert(p) {
+                above.push((depth(p), p));
+                p = self.parent[p as usize];
             }
         }
-        let mut p = self.parent[i.0 as usize];
-        while p != NONE {
+        above.sort_unstable_by(|a, b| b.cmp(a));
+        for (_, p) in above {
             self.bounds[p as usize] = self.children_bounds(p);
-            p = self.parent[p as usize];
         }
-        rows
     }
 
     fn children_bounds(&self, row: u32) -> Aabb {
@@ -787,28 +829,8 @@ impl OccurrenceTable {
             self.first_child[parent as usize] = first;
             self.last_child[parent as usize] = last;
         }
-        // Redo the bounds of each parent and every assembly above it, deepest first, once.
-        let depth = |mut r: u32| {
-            let mut d = 0;
-            while self.parent[r as usize] != NONE {
-                r = self.parent[r as usize];
-                d += 1;
-            }
-            d
-        };
-        let mut above: Vec<(usize, u32)> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for &parent in &parents {
-            let mut p = parent;
-            while p != NONE && seen.insert(p) {
-                above.push((depth(p), p));
-                p = self.parent[p as usize];
-            }
-        }
-        above.sort_unstable_by(|a, b| b.cmp(a));
-        for (_, p) in above {
-            self.bounds[p as usize] = self.children_bounds(p);
-        }
+        // Redo the bounds of each parent and every assembly above it, once each.
+        self.rebound_above(&parents);
         removed
     }
 

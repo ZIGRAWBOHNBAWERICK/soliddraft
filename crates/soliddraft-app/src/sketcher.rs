@@ -1876,13 +1876,17 @@ fn paint_snaps(
                 painter.line_segment([g.left_bottom(), g.right_top()], st);
                 painter.line_segment([g.left_top(), g.right_bottom()], st);
             }
-            Snap::Parallel(_) | Snap::Perpendicular(_) | Snap::Tangent(_) => {
-                let text = match snap {
-                    Snap::Parallel(_) => "∥",
-                    Snap::Perpendicular(_) => "⊥",
-                    _ => "T",
-                };
-                painter.text(g.center(), Align2::CENTER_CENTER, text, theme::font_semibold(9.5), accent);
+            Snap::Parallel(_) => {
+                painter.line_segment([pos2(g.left() + 1.0, g.bottom()), pos2(g.center().x - 0.5, g.top())], st);
+                painter.line_segment([pos2(g.center().x + 1.5, g.bottom()), g.right_top()], st);
+            }
+            Snap::Perpendicular(_) => {
+                painter.line_segment([g.left_bottom(), g.right_bottom()], st);
+                painter.line_segment([g.center_bottom(), g.center_top()], st);
+            }
+            Snap::Tangent(_) => {
+                painter.circle_stroke(g.center() + vec2(0.0, 1.0), 3.0, st);
+                painter.line_segment([g.left_center() - vec2(0.0, 2.0), g.right_center() - vec2(0.0, 2.0)], st);
             }
             Snap::Horizontal => {
                 painter.text(g.center(), Align2::CENTER_CENTER, "H", theme::font_semibold(9.5), accent);

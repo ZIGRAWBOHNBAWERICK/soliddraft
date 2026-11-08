@@ -1065,3 +1065,96 @@ fn a_mesh_that_arrives_under_a_suppressed_assembly_counts_once_it_is_shown() {
     assert_eq!(live, shown_bounds(&back));
     assert!((live[0].1.min.x - 105.0).abs() < 1e-6, "{live:?}");
 }
+
+/// The x extent of the first definition's display mesh and of the root's bounds, with
+/// the definition's state and problem.
+fn shown_block(doc: &AssemblyDocument) -> (f64, f64, LoadState, Option<String>) {
+    let row = doc.table().children(soliddraft_assembly::OccurrenceIndex::ROOT).next().unwrap();
+    let d = doc.store().get(doc.table().definition(row));
+    assert!(d.mesh.is_some(), "a display mesh");
+    let mesh = d.bounds;
+    let all = doc.table().bounds(soliddraft_assembly::OccurrenceIndex::ROOT);
+    (mesh.max.x - mesh.min.x, all.max.x - all.min.x, d.state, d.problem.clone())
+}
+
+/// The assembly pins revision R1 of a block 10 wide and has no display copy of it; the
+/// file holds R2, 30 wide, so the block is shown stale from R2. R1's file comes back
+/// and the exact body is built at the pin. The display is then made at R1 too: the
+/// block shows 10 wide and is no longer stale, and Save writes R1's picture under R1's
+/// revision. Before, exact left R2's mesh in place, marked it exact-ready, and Save
+/// stored it as R1's copy, so a reopened assembly showed R2 with no warning.
+#[test]
+fn building_the_exact_body_of_a_stale_part_shows_and_saves_the_pinned_revision() {
+    use soliddraft_assembly::Assembly;
+    use soliddraft_document::DocumentId;
+    let source = KernelSource::new(kernel());
+    for release in [false, true] {
+        let dir = folder(&format!("stale-exact-{release}"));
+        let part = dir.join("block.dwprt");
+        save_block(&part, 10.0, 10.0);
+        let r1 = std::fs::read(&part).unwrap();
+        let root = dir.join("rig.dwasm");
+        let mut truth = Assembly::new("Rig");
+        let s = truth.add_source(reference(&root, &part));
+        truth.add_component(s, Placement::IDENTITY);
+        std::fs::write(&root, truth.to_bytes(DocumentId::new(), None, &[]).unwrap()).unwrap();
+        save_block(&part, 30.0, 10.0);
+
+        let mut doc = AssemblyDocument::open(&root, with_kernel()).unwrap();
+        doc.finish_loading();
+        let (mesh, all, state, problem) = shown_block(&doc);
+        assert_eq!((mesh.round(), all.round(), state), (30.0, 30.0, LoadState::Stale), "R2, stale");
+        assert!(problem.is_some());
+        let row = doc.table().children(soliddraft_assembly::OccurrenceIndex::ROOT).next().unwrap();
+        let def = doc.table().definition(row);
+        assert!(doc.exact(def, &source).is_err(), "R1 is not available yet");
+        assert_eq!(shown_block(&doc).2, LoadState::Stale);
+
+        std::fs::write(&part, &r1).unwrap();
+        doc.exact(def, &source).unwrap();
+        let (mesh, all, state, problem) = shown_block(&doc);
+        assert_eq!((mesh.round(), all.round(), state, problem), (10.0, 10.0, LoadState::ExactReady, None), "R1");
+        if release {
+            doc.release_exact(def);
+            assert_eq!(shown_block(&doc).2, LoadState::DisplayReady);
+        }
+        // Reread the structure: the R1 display is kept, not marked stale.
+        doc.set_viewport_quality(Quality::Slider { value: 10 }).unwrap();
+        doc.finish_loading();
+        doc.set_viewport_quality(Quality::default()).unwrap();
+        doc.finish_loading();
+        doc.save(None).unwrap();
+
+        // Reopen with R2 in the file again: the saved copy is R1's own picture.
+        save_block(&part, 30.0, 10.0);
+        let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+        back.finish_loading();
+        let (mesh, _, state, problem) = shown_block(&back);
+        assert_eq!((mesh.round(), state, problem), (10.0, LoadState::DisplayReady, None), "release {release}");
+    }
+}
+
+/// While the part cannot be rebuilt at its pin, releasing nothing keeps it stale: a
+/// stale definition never reads as display-ready, and Save writes no copy of it.
+#[test]
+fn a_stale_part_stays_stale_and_unsaved_without_its_pinned_revision() {
+    use soliddraft_assembly::Assembly;
+    use soliddraft_document::DocumentId;
+    let dir = folder("stale-unsaved");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let root = dir.join("rig.dwasm");
+    let mut truth = Assembly::new("Rig");
+    let s = truth.add_source(reference(&root, &part));
+    truth.add_component(s, Placement::IDENTITY);
+    std::fs::write(&root, truth.to_bytes(DocumentId::new(), None, &[]).unwrap()).unwrap();
+    save_block(&part, 30.0, 10.0);
+    let mut doc = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    doc.finish_loading();
+    let row = doc.table().children(soliddraft_assembly::OccurrenceIndex::ROOT).next().unwrap();
+    let def = doc.table().definition(row);
+    assert!(doc.exact(def, &KernelSource::new(kernel())).is_err());
+    doc.release_exact(def);
+    assert_eq!(shown_block(&doc).2, LoadState::Stale);
+    assert!(doc.copies().is_empty(), "no copy of R1 to write");
+}

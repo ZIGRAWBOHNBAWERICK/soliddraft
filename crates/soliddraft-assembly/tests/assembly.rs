@@ -868,3 +868,112 @@ fn deleting_many_placements_of_one_part_scales() {
     doc.finish_loading();
     assert_eq!((doc.assembly().sources.len(), doc.table().counts().parts), (1, COPIES as usize));
 }
+
+/// Every shown occurrence, the root included, with its bounds, in path order.
+fn shown_bounds(doc: &AssemblyDocument) -> Vec<(String, soliddraft_assembly::Aabb)> {
+    use soliddraft_assembly::Flags;
+    let t = doc.table();
+    let mut out: Vec<_> = t
+        .subtree(soliddraft_assembly::OccurrenceIndex::ROOT)
+        .into_iter()
+        .filter(|r| !t.flags(*r).has(Flags::REMOVED) && !t.flags(*r).has(Flags::SUPPRESSED))
+        .map(|r| (t.path(r).to_string(), t.bounds(r)))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Root R places S, S places T (at depth 3) or the part C directly (at depth 2). S is
+/// suppressed, then the part's own parent through S's retained rows, and both undone.
+/// Suppressing the inner one used to redo S's bounds from children that S itself kept
+/// suppressed, leaving it empty; undoing S's suppression then redid only R from that
+/// empty box, so R and S stayed empty while C was drawn. After every step the bounds
+/// of every shown occurrence match the saved file's.
+#[test]
+fn undoing_a_nested_suppression_restores_the_bounds_above_the_parts() {
+    let dir = folder("undo-nested-suppress-bounds");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let assembly = |path: &Path, inner: &Path, x: f64| {
+        let mut a = AssemblyDocument::new_with("Sub", with_kernel());
+        a.save(Some(path)).unwrap();
+        let id = a.insert(reference(path, inner), Placement::translation(DVec3::new(x, 0.0, 0.0))).unwrap();
+        a.finish_loading();
+        a.save(None).unwrap();
+        id
+    };
+    for depth in [2, 3] {
+        let s = dir.join(format!("s-{depth}.dwasm"));
+        let mut inner = vec![assembly(&s, &part, 10.0)];
+        if depth == 3 {
+            let t = dir.join("t.dwasm");
+            let c = assembly(&t, &part, 10.0);
+            inner = vec![assembly(&s, &t, 5.0), c];
+        }
+        let root = dir.join(format!("rig-{depth}.dwasm"));
+        let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+        doc.save(Some(&root)).unwrap();
+        let s_id = doc.insert(reference(&root, &s), Placement::translation(DVec3::new(100.0, 0.0, 0.0))).unwrap();
+        doc.finish_loading();
+        let s_path: OccurrencePath = format!("{s_id}").parse().unwrap();
+        let below: OccurrencePath = format!("{s_id}/{}", inner[0]).parse().unwrap();
+        let start = shown_bounds(&doc);
+        let root_box = start[0].1;
+        assert!(!root_box.is_empty() && (root_box.min.x - if depth == 2 { 105.0 } else { 110.0 }).abs() < 1e-6);
+
+        let check = |doc: &mut AssemblyDocument, step: &str| {
+            doc.finish_loading();
+            let live = shown_bounds(doc);
+            doc.save(None).unwrap();
+            let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+            back.finish_loading();
+            assert_eq!(live, shown_bounds(&back), "depth {depth}, {step}: live and saved differ");
+        };
+        doc.set_suppressed(std::slice::from_ref(&s_path), true).unwrap();
+        check(&mut doc, "suppress S");
+        doc.set_suppressed(std::slice::from_ref(&below), true).unwrap();
+        check(&mut doc, "suppress below S");
+        assert!(doc.undo());
+        check(&mut doc, "undo suppress below S");
+        assert!(doc.undo());
+        check(&mut doc, "undo suppress S");
+        assert_eq!(shown_bounds(&doc), start, "depth {depth}: back where it started");
+        assert!(doc.redo() && doc.redo());
+        check(&mut doc, "redo both");
+        // Shown again directly, not by Undo.
+        doc.set_suppressed(std::slice::from_ref(&s_path), false).unwrap();
+        doc.set_suppressed(std::slice::from_ref(&below), false).unwrap();
+        check(&mut doc, "unsuppress S, then below it");
+        assert_eq!(shown_bounds(&doc), start, "depth {depth}: shown again");
+    }
+}
+
+/// S is suppressed while its part's mesh is still loading. The mesh arrives while S is
+/// suppressed, and S is then shown again: S and the root take the part's box.
+#[test]
+fn a_mesh_that_arrives_under_a_suppressed_assembly_counts_once_it_is_shown() {
+    let dir = folder("suppressed-mesh-arrival");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let s = dir.join("s.dwasm");
+    let mut a = AssemblyDocument::new_with("Sub", with_kernel());
+    a.save(Some(&s)).unwrap();
+    a.insert(reference(&s, &part), Placement::translation(DVec3::new(10.0, 0.0, 0.0))).unwrap();
+    a.finish_loading();
+    a.save(None).unwrap();
+    let root = dir.join("rig.dwasm");
+    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+    doc.save(Some(&root)).unwrap();
+    let s_id = doc.insert(reference(&root, &s), Placement::translation(DVec3::new(100.0, 0.0, 0.0))).unwrap();
+    let s_path: OccurrencePath = format!("{s_id}").parse().unwrap();
+    doc.set_suppressed(std::slice::from_ref(&s_path), true).unwrap();
+    doc.finish_loading();
+    doc.set_suppressed(std::slice::from_ref(&s_path), false).unwrap();
+    doc.finish_loading();
+    let live = shown_bounds(&doc);
+    doc.save(None).unwrap();
+    let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    back.finish_loading();
+    assert_eq!(live, shown_bounds(&back));
+    assert!((live[0].1.min.x - 105.0).abs() < 1e-6, "{live:?}");
+}

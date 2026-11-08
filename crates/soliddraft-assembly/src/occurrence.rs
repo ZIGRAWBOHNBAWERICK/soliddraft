@@ -465,7 +465,9 @@ impl OccurrenceTable {
     }
 
     /// The box around the occurrence in the root's frame; empty until its parts'
-    /// meshes are loaded.
+    /// meshes are loaded. A sub-assembly's box holds every child not suppressed or
+    /// removed by its own component, however its ancestors are suppressed: suppressing
+    /// or showing an occurrence changes the boxes above it only.
     pub fn bounds(&self, i: OccurrenceIndex) -> Aabb {
         self.bounds[i.0 as usize]
     }
@@ -565,8 +567,7 @@ impl OccurrenceTable {
             self.bounds[r] = store.get(self.definition[r]).bounds.placed(&self.world[r]);
         }
         for r in (1..self.len()).rev() {
-            let f = self.flags[r];
-            if f.has(Flags::SUPPRESSED) || f.has(Flags::REMOVED) {
+            if !Self::counts_in_parent(self.flags[r]) {
                 continue;
             }
             let p = self.parent[r] as usize;
@@ -587,15 +588,28 @@ impl OccurrenceTable {
         }
     }
 
+    /// Adds `b` to the boxes above `row`, up to the first occurrence its own component
+    /// suppresses: that one's box holds it, but its parent's does not.
     fn grow_ancestors(&mut self, row: u32, b: &Aabb) {
-        if b.is_empty() || self.flags[row as usize].has(Flags::SUPPRESSED) {
+        if b.is_empty() {
             return;
         }
-        let mut p = self.parent[row as usize];
-        while p != NONE {
+        let mut c = row;
+        while Self::counts_in_parent(self.flags[c as usize]) {
+            let p = self.parent[c as usize];
+            if p == NONE {
+                break;
+            }
             self.bounds[p as usize].add(b);
-            p = self.parent[p as usize];
+            c = p;
         }
+    }
+
+    /// Whether a row's box counts in its parent's: not when its own component
+    /// suppresses it or it is removed. A row suppressed only through an ancestor still
+    /// counts, so its ancestors' boxes are right again the moment that ancestor is shown.
+    fn counts_in_parent(f: Flags) -> bool {
+        !f.has(Flags::SUPPRESSED_SELF) && !f.has(Flags::REMOVED)
     }
 
     /// Moves `i` to `local` (relative to its parent) and updates its subtree's world
@@ -672,8 +686,7 @@ impl OccurrenceTable {
         let mut b = Aabb::EMPTY;
         let mut c = self.first_child[row as usize];
         while c != NONE {
-            let f = self.flags[c as usize];
-            if !f.has(Flags::SUPPRESSED) && !f.has(Flags::REMOVED) {
+            if Self::counts_in_parent(self.flags[c as usize]) {
                 b.add(&self.bounds[c as usize]);
             }
             c = self.next_sibling[c as usize];

@@ -274,6 +274,10 @@ Paths are what persists.
 - Moving an occurrence updates the world placements and bounds of its subtree and the
   bounds of its ancestors, and nothing else.
 - Hiding or showing one updates the inherited flag of its subtree.
+- Suppressing or showing one updates the inherited flag of its subtree and the bounds of
+  its ancestors. A sub-assembly's bounds hold every child its own component does not
+  suppress, whatever is suppressed above it, so showing an ancestor again needs nothing
+  redone below it.
 - Deleting a component flags its rows removed instead of moving other rows.
 - Inserting a component, adding a pattern, or unsuppressing a sub-assembly that was
   suppressed when the file opened rereads the structure. Meshes already loaded are kept.

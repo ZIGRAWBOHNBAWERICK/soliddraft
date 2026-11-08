@@ -113,8 +113,9 @@ pub struct AssemblySession {
     pub draft: Option<PlacementDraft>,
     /// Sub-assemblies open in the tree.
     pub expanded: HashSet<OccurrencePath>,
-    /// What the scene shows as selected and hovered.
-    shown: (Option<OccurrenceIndex>, Option<OccurrenceIndex>),
+    /// What the scene shows as selected and hovered, by path: an undo or another edit
+    /// that rereads the structure renumbers the rows.
+    shown: (Option<OccurrencePath>, Option<OccurrencePath>),
     /// Meshes taken from the scene for the renderer, kept until a painted frame took them.
     outbox: Outbox,
     /// The camera frames the parts once the first meshes arrive.
@@ -220,9 +221,10 @@ impl AssemblySession {
         let mut scene = self.scene.lock().expect("the scene lock");
         scene.update(&mut self.doc);
         let selected = self.selected_row();
-        if self.shown.0 != selected {
+        let path = selected.map(|r| self.doc.table().path(r));
+        if self.shown.0 != path {
             scene.set_selection(self.doc.table(), selected.as_slice());
-            self.shown.0 = selected;
+            self.shown.0 = path;
         }
         drop(scene);
         if self.fit_pending && self.bounds().is_some() && !self.doc.is_loading() {
@@ -692,7 +694,7 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(s) = state.assembly.session.as_mut() else { return };
     let ctx = ui.ctx().clone();
     let frame = s.frame(&ctx);
-    let hover_label = s.shown.1.map(|r| s.doc.label(r));
+    let hover_label = s.shown.1.as_ref().and_then(|p| s.doc.table().find(p)).map(|r| s.doc.label(r));
     let empty = s.components().is_empty();
     let events = s.viewport.show_assembly(ui, frame, hover_label.as_deref(), nav);
     let picked = |s: &AssemblySession, texel: Option<[u32; 2]>| {
@@ -701,9 +703,10 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
     };
     let hovered = picked(s, events.hover_texel);
     let mate_open = state.assembly.mate.open;
-    if hovered != s.shown.1 {
+    let hovered_path = hovered.map(|r| s.doc.table().path(r));
+    if hovered_path != s.shown.1 {
         s.scene.lock().expect("the scene lock").set_hover(s.doc.table(), hovered);
-        s.shown.1 = hovered;
+        s.shown.1 = hovered_path;
     }
     let rect = s.viewport.rect;
     let mut actions = Vec::new();

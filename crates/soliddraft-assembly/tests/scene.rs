@@ -5,7 +5,7 @@ use glam::DVec3;
 use soliddraft_assembly::bvh::Ray;
 use soliddraft_assembly::{
     Aabb, Assembly, AssemblyDocument, AssemblyPackage, DisplayMesh, Instance, OccurrencePath, OpenOptions, Placement,
-    RefCopy, Scene,
+    RefCopy, Scene, Step,
 };
 use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
 use soliddraft_materials::{Appearance, Srgb};
@@ -143,4 +143,74 @@ fn the_hierarchy_answers_rays_and_regions_and_follows_moves() {
     assert!(doc.bvh().along_ray(&table, &ray).iter().all(|h| h.0 != row), "moved away");
     let there = Ray { origin: DVec3::new(505.0, 505.0, 100.0), direction: DVec3::NEG_Z };
     assert_eq!(doc.bvh().along_ray(&table, &there).first().map(|h| h.0), Some(row));
+}
+
+/// An empty root, read from a package as the sample is.
+fn empty() -> AssemblyDocument {
+    let bytes = Assembly::new("Root").to_bytes(DocumentId::new(), None, &[]).unwrap();
+    let package = AssemblyPackage::from_bytes(bytes).unwrap();
+    let mut doc = AssemblyDocument::open_package(package, None, OpenOptions::default()).unwrap();
+    doc.finish_loading();
+    doc
+}
+
+fn marked(scene: &Scene, flag: u32) -> Vec<u32> {
+    scene.instances().iter().filter(|i| i.flags & flag != 0).map(|i| i.row).collect()
+}
+
+/// A part is inserted, shown, selected and hovered, and the insert undone: the table
+/// shrinks under the scene's rows. The next update forgets what is gone instead of
+/// reading old rows in the new table, and Redo and fresh selections work again.
+#[test]
+fn undoing_an_insert_the_scene_selects_forgets_it() {
+    for (name, mut doc) in [("empty", empty()), ("sample", sample())] {
+        let mut scene = Scene::new(&mut doc);
+        let brick = DocRef::new(DocumentId::new(), DocKind::Part, "new.dwprt", ContentHash::of_bytes(b"new"));
+        let id = doc.insert(brick, Placement::translation(DVec3::new(0.0, -50.0, 0.0))).unwrap();
+        doc.finish_loading();
+        scene.update(&mut doc);
+        let path = OccurrencePath::root().child(Step::component(id));
+        let row = doc.table().find(&path).unwrap();
+        scene.set_selection(doc.table(), &[row]);
+        scene.set_hover(doc.table(), Some(row));
+
+        assert!(doc.undo(), "{name}");
+        scene.update(&mut doc);
+        assert!(marked(&scene, Instance::SELECTED | Instance::HOVERED).is_empty(), "{name}: nothing is marked");
+        scene.set_selection(doc.table(), &[]);
+        scene.set_hover(doc.table(), None);
+
+        assert!(doc.redo(), "{name}");
+        doc.finish_loading();
+        scene.update(&mut doc);
+        let row = doc.table().find(&path).unwrap();
+        scene.set_selection(doc.table(), &[row]);
+        scene.set_hover(doc.table(), Some(row));
+        assert_eq!(marked(&scene, Instance::SELECTED), [row.0], "{name}");
+        assert_eq!(marked(&scene, Instance::HOVERED), [row.0], "{name}");
+    }
+}
+
+/// Rereading the structure renumbers rows: what is selected and hovered stays on the
+/// same occurrence, found again by its path.
+#[test]
+fn a_reread_keeps_the_selection_on_the_same_occurrence() {
+    let mut doc = sample();
+    let mut scene = Scene::new(&mut doc);
+    let plate: OccurrencePath = "24/3".parse().unwrap();
+    let brick: OccurrencePath = "22".parse().unwrap();
+    let (p, b) = (doc.table().find(&plate).unwrap(), doc.table().find(&brick).unwrap());
+    scene.set_selection(doc.table(), &[p]);
+    scene.set_hover(doc.table(), Some(b));
+    // Deleting the first brick leaves its row; changing the quality rereads the table
+    // without it, so every later row moves down one.
+    doc.delete(&[soliddraft_assembly::ComponentId(3)]).unwrap();
+    scene.update(&mut doc);
+    doc.set_viewport_quality(soliddraft_tessellation::Quality::Slider { value: 10 }).unwrap();
+    doc.finish_loading();
+    scene.update(&mut doc);
+    let (p2, b2) = (doc.table().find(&plate).unwrap(), doc.table().find(&brick).unwrap());
+    assert_eq!((p2.0, b2.0), (p.0 - 1, b.0 - 1), "the rows moved");
+    assert_eq!(marked(&scene, Instance::SELECTED), [p2.0]);
+    assert_eq!(marked(&scene, Instance::HOVERED), [b2.0]);
 }

@@ -464,7 +464,7 @@ fn stored_bore(doc: &AssemblyDocument) -> [f64; 3] {
 
 /// A's bore moves 5 mm along x in a new revision of A's file. Update proves the new axis
 /// to put the shaft on it, and stores that axis too, so the status and a reopened file
-/// read the axis where it now is.
+/// read the axis where it now is. Undo and Redo carry the stored axis with the revision.
 #[test]
 fn update_stores_the_axis_it_proved() {
     let mut r = shaft_rig("update-axis");
@@ -495,4 +495,17 @@ fn update_stores_the_axis_it_proved() {
     close(r.placement(r.b).translation, [15.0, 5.0, 30.0]);
     r.doc.save(None).unwrap();
     assert_eq!(stored_bore(&r.reopened()), [15.0, 5.0, 0.0]);
+
+    // Undo puts back the axis Update replaced along with the old revision, Redo the new one,
+    // and a file saved after Undo stores the old axis.
+    assert_eq!(r.doc.undo_label(), Some("Update"));
+    assert!(r.doc.undo());
+    assert_eq!(stored_bore(&r.doc), [10.0, 5.0, 0.0], "Undo restores the stored axis");
+    close(r.placement(r.b).translation, [10.0, 5.0, 30.0]);
+    assert!(r.doc.redo());
+    assert_eq!(stored_bore(&r.doc), [15.0, 5.0, 0.0], "Redo stores the proved axis again");
+    close(r.placement(r.b).translation, [15.0, 5.0, 30.0]);
+    assert!(r.doc.undo());
+    r.doc.save(None).unwrap();
+    assert_eq!(stored_bore(&r.reopened()), [10.0, 5.0, 0.0], "a file saved after Undo");
 }

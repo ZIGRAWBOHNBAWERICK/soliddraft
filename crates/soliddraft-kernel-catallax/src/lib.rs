@@ -34,7 +34,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "b1452051a101198d7e1d528636301c240bda3d61";
+pub const CATALLAX_REVISION: &str = "d7da137395bee11ca839d62012efbf575e90d28f";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -317,6 +317,11 @@ impl CatallaxKernel {
         step: Value,
     ) -> KernelResult<OpResult> {
         let (mut state, evaluated) = self.evaluate(state, op, inputs, context, step)?;
+        if op == OpKind::Fillet
+            && let Some(refusal) = stopped_short(&evaluated.app, &evaluated.result)
+        {
+            return Err(refusal);
+        }
         let Evaluated { app, names, steps, mut history, parents, seq, result } = evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
         let tags: BTreeMap<String, OpTag> = names
@@ -471,6 +476,34 @@ struct Evaluated {
 }
 
 const NOTHING_LEFT: &str = "this would leave nothing of the part";
+
+/// A fillet whose rolling contact ended below the radius it was asked for. Catallax
+/// then builds the strip at the smaller radius where the ball reached a face boundary
+/// and keeps the request in `requested_radius`. SolidDraft never builds a radius other
+/// than the one the feature records, so it refuses as Catallax did before, naming the
+/// largest radius that fits. A radius that consumes a face exactly still builds.
+fn stopped_short(app: &EvaluatedApplicationBody, step: &str) -> Option<KernelError> {
+    let built = app.checkpoint.built();
+    let limit = built
+        .fillets
+        .iter()
+        .filter_map(|f| {
+            let requested = f.requested_radius.as_ref()?.to_f64();
+            let radius = f.radius.to_f64();
+            (radius < requested).then_some(radius)
+        })
+        .min_by(f64::total_cmp)?;
+    // Round down, so the advice is a radius that fits.
+    let shown = (limit * 1000.0).floor() / 1000.0;
+    Some(KernelError::Failed {
+        op: OpKind::Fillet,
+        code: 0,
+        message: format!(
+            "{}: step {step}: the ball of this radius reaches a face boundary before it can roll; radius limit {shown} mm",
+            catallax_features::fillet::RADIUS_TOO_LARGE
+        ),
+    })
+}
 
 fn is_empty(app: &EvaluatedApplicationBody) -> bool {
     let exact = app.checkpoint.built();
@@ -855,6 +888,10 @@ impl Kernel for CatallaxKernel {
                 body: state.step(body)?,
                 edges: catallax_recipe::EdgeSelection::Refs(refs),
                 radius: native::number(radius, "fillet radius")?,
+                // The user picks only edges and a radius. Continuation and corner
+                // closure stay at the recipe's defaults: roll over and cliff.
+                overflow: None,
+                corner: None,
             };
             self.native(state, tag, OpKind::Fillet, body, &[body], native, None, edges)
         })

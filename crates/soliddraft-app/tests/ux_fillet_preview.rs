@@ -1133,3 +1133,70 @@ fn unsupported_picks_and_radii_refuse_locally_then_recover() {
         );
     });
 }
+
+// ---------------------------------------------------------------------------
+// The partly filleted corner, which the kernel closes without asking.
+
+#[test]
+fn a_partly_filleted_corner_previews_what_ok_builds() {
+    let case = Case::start("a_partly_filleted_corner_previews_what_ok_builds");
+    let f = "/expected/box_partial_corner";
+    let picks: Vec<Vec3> = (0..2).map(|i| point(&format!("{f}/edge_midpoints/{i}"))).collect();
+    let original = num("/fixtures/B20/volume_mm3");
+    let r2 = num(&format!("{f}/volume_r2_mm3"));
+    let r4 = num(&format!("{f}/volume_r4_mm3"));
+
+    let mut app = launch(&case, b20());
+    case.run(&mut app, |app| {
+        assert_b20(&case, app, "B20 at launch");
+        let before = committed(app);
+
+        // Two top edges that meet at a corner whose vertical edge is left sharp.
+        click_fillet(&case, app);
+        pick(&case, app, "the 60 mm top edge", picks[0]);
+        pick(&case, app, "the 40 mm top edge", picks[1]);
+        let edges = held(app);
+        case.note(format!("held {edges:?}"));
+        assert_eq!(edges.len(), 2, "both picked edges are held: {edges:?}");
+        for (edge, at) in edges.iter().zip(&picks) {
+            assert!(edge.midpoint.distance(*at) < 1e-3, "the held edges are the picked ones: {edges:?}");
+        }
+        let mut lengths: Vec<f64> = edges.iter().map(|e| e.length).collect();
+        lengths.sort_by(f64::total_cmp);
+        let want: Vec<f64> =
+            at(&format!("{f}/edge_lengths_mm")).as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!(lengths.iter().zip(&want).all(|(a, b)| (a - b).abs() < 1e-6), "lengths {lengths:?}");
+        let names: Vec<String> = edges.iter().map(|e| e.label.clone()).collect();
+
+        // The previews close the corner as the commit will, with nothing asked.
+        type_radius(&case, app, "2");
+        previewed(app, 2.0);
+        let mesh = preview(app).expect("the R2 preview");
+        assert_mesh_volume(&case, mesh_volume(&mesh), original, r2, "R2 preview");
+        assert_eq!(committed(app), before, "a preview commits nothing");
+        type_radius(&case, app, "4");
+        previewed(app, 4.0);
+        pointer_off_model(app);
+        let last = preview(app).expect("the R4 preview");
+        assert_mesh_volume(&case, mesh_volume(&last), original, r4, "R4 preview");
+        assert_eq!(committed(app), before, "a preview commits nothing");
+        case.frame(app, "partial-corner-r4-preview");
+
+        // OK builds exactly what was previewed.
+        click_ok(&case, app);
+        pointer_off_model(app);
+        assert!(app.state().state.editor.is_none(), "OK closes the panel");
+        let (refs, radius) = the_fillet(app);
+        assert_eq!((refs, radius), (names, 4.0), "the fillet holds both edges at R4");
+        let v = volume(&app.state().state.doc);
+        case.note(format!("committed R4: volume {v}"));
+        assert!((v - r4).abs() <= num("/tolerances/box_volume_mm3"), "committed volume {v}, not {r4}");
+        assert_bounds(&app.state().state.doc, "B20");
+        assert_valid_drawn(app, "the committed corner");
+        assert_eq!(committed(app).undo, before.undo + 1, "one undo step");
+        let shown = shown_mesh_volume(app);
+        assert_mesh_volume(&case, shown, original, r4, "committed display");
+        assert_mesh_volume(&case, mesh_volume(&last), original, shown, "preview against the committed display");
+        case.frame(app, "partial-corner-r4-committed");
+    });
+}

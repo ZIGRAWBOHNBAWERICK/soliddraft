@@ -815,15 +815,16 @@ fn off_quarter_turns(mate: &str) -> MateRefusal {
     MateRefusal { mates: vec![mate.to_owned()], ..MateRefusal::new(RefusalCode::UnsupportedPlacement, message) }
 }
 
-/// `b`'s placement in `a`'s frame, when the turn between them is a quarter-turn rotation.
-/// The turn is stored as the rotation it rounds onto, and the offset is computed through
-/// that rotation's integer matrix, so the lock holds what the two placements say exactly.
+/// `b`'s placement in `a`'s frame, when both are exact quarter-turn rotations. The turn
+/// between them is the product of their integer matrices, and the offset is computed
+/// through `a`'s, so the lock holds what the two placements say exactly.
 fn relative_lock(mate: &str, a: &Placement, b: &Placement) -> Result<Placement, MateRefusal> {
-    let turn = a.rotation.inverse() * b.rotation;
-    let m = solver::cube_of(turn).ok_or_else(|| off_quarter_turns(mate))?;
-    let col = |c: usize| glam::DVec3::new(m[0][c] as f64, m[1][c] as f64, m[2][c] as f64);
-    let rotation = glam::DQuat::from_mat3(&glam::DMat3::from_cols(col(0), col(1), col(2)));
     let ra = solver::cube_of(a.rotation).ok_or_else(|| solver::unsupported_lock(mate))?;
+    let rb = solver::cube_of(b.rotation).ok_or_else(|| off_quarter_turns(mate))?;
+    // R_a^T R_b, in integers.
+    let m = |i: usize, j: usize| (0..3).map(|k| ra[k][i] * rb[k][j]).sum::<i8>();
+    let col = |c: usize| glam::DVec3::new(m(0, c) as f64, m(1, c) as f64, m(2, c) as f64);
+    let rotation = glam::DQuat::from_mat3(&glam::DMat3::from_cols(col(0), col(1), col(2)));
     let exact =
         |v: f64| solver::exact(v).ok_or_else(|| MateRefusal::invalid(format!("{mate}: a placement is not finite")));
     // r = R_a^T (t_b - t_a), each row of R_a^T picking one signed difference.
@@ -882,13 +883,10 @@ fn local_plane(mate: &str, proof: &PlaneProof) -> Result<LocalPlane, MateRefusal
 
 fn signed_gap(a: &PlaneProof, b: &PlaneProof, placements: &[Placement; 2]) -> Result<BigRational, MateRefusal> {
     let off = |_| MateRefusal::new(RefusalCode::UnsupportedPlacement, "a face is placed off the world axes");
+    // Only a placement that takes the normal exactly onto an axis is proved: one that
+    // lands within a tolerance of it is tilted, and far out the tilt is a real gap.
     let normal = |p: &PlaneProof, at: &Placement| {
-        let n = p.plane.normal().map(f64::from);
-        let v = at.rotate(glam::DVec3::from_array(n));
-        let rounded = v.to_array().map(f64::round);
-        (v.distance(glam::DVec3::from_array(rounded)) <= 1e-12 && rounded.iter().map(|c| c.abs()).sum::<f64>() == 1.0)
-            .then_some(rounded)
-            .ok_or(())
+        solver::turned(at.rotation, p.plane.normal()).map(|n| n.map(f64::from)).ok_or(())
     };
     let (na, nb) = (normal(a, &placements[0]).map_err(off)?, normal(b, &placements[1]).map_err(off)?);
     let axis = na.iter().position(|c| *c != 0.0).expect("a unit axis");

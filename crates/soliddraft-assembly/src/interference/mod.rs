@@ -25,9 +25,10 @@ use soliddraft_kernel_api::{Certainty, FaceId, KernelError, TessellationParams};
 
 use crate::document::AssemblyDocument;
 use crate::mates::bodies::Scope;
-use crate::mates::{Alignment, Entity, Mate, MateRefusal, RefusalCode};
+use crate::mates::{Alignment, Entity, FaceEndpoint, Mate, MateRefusal, RefusalCode, solver};
 use crate::occurrence::{Flags, OccurrenceIndex};
 use crate::path::{OccurrencePath, Step};
+use crate::placement::Placement;
 use geometry::Solid;
 
 /// The chord bound asked of the kernel unless a request names another, in millimetres.
@@ -605,10 +606,18 @@ impl AssemblyDocument {
                 let (Entity::Face(face_a), Entity::Face(face_b)) = (&a.entity, &b.entity) else { return None };
                 let (_, Ok(Some(measurement))) = measured.iter().find(|(id, _)| *id == m.id())? else { return None };
                 let exact = measurement.certainty == Certainty::Exact && measurement.rational == "0";
+                // The world axis both planes lie across, from turns that take each normal
+                // exactly onto it.
+                let axis = |e: &FaceEndpoint, at: &Placement| {
+                    solver::turned(at.rotation, e.entity.stored_normal()?)?.iter().position(|c| *c != 0)
+                };
+                let [pa, pb] = &measurement.placements;
+                let axis = axis(a, pa).filter(|x| axis(b, pb) == Some(*x))?;
                 (exact && *alignment == Alignment::Opposed).then(|| MateContact {
                     mate: m.name().to_owned(),
                     a: (a.path.clone(), face_a.clone()),
                     b: (b.path.clone(), face_b.clone()),
+                    axis,
                 })
             })
             .collect()
@@ -635,8 +644,11 @@ impl AssemblyDocument {
             let (Some(fa), Some(fb)) = (self.face_index(ra, ma, face_a), self.face_index(rb, mb, face_b)) else {
                 continue;
             };
-            let Some(axis) = plane_axis(sa, fa) else { continue };
-            if let Some(p) = geometry::shared_point(sa, fa, sb, fb, axis) {
+            // Both placed faces must lie across the axis the mate proved they share.
+            if plane_axis(sa, fa) != Some(c.axis) || plane_axis(sb, fb) != Some(c.axis) {
+                continue;
+            }
+            if let Some(p) = geometry::shared_point(sa, fa, sb, fb, c.axis) {
                 result.contact.push(Contact {
                     mate: c.mate.clone(),
                     a: ma.faces[fa as usize].1.clone(),
@@ -677,6 +689,8 @@ struct MateContact {
     mate: String,
     a: (OccurrencePath, soliddraft_model::FaceRef),
     b: (OccurrencePath, soliddraft_model::FaceRef),
+    /// The world axis normal to the plane they share.
+    axis: usize,
 }
 
 /// The world axis normal to a planar face, read from its placed triangles.

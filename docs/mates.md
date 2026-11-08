@@ -25,10 +25,15 @@ The commands below name the root's own part components; a mate read from a file 
 name a part inside a sub-assembly by its path, as forming one leaves it (see
 [subassemblies.md](subassemblies.md)). A mate may turn a part nothing else holds onto the
 axes, as it turns any part held by one face. A face that stays off the world axes is
-refused: one measured where it is placed, or one a frame fixes there. Only
-identity and exact half-turn placements carry the exact claim below: a quarter turn is
-accepted when its normals round onto the axes, but a later general rotation needs a bounded
-transform contract and does not inherit this one.
+refused: one measured where it is placed, or one a frame fixes there. A placement is on the
+axes only when its stored quaternion, read as the rationals its binary64 parts are, takes the
+normal exactly onto an axis. A turn within 1e-12 of a quarter turn is stored as that quarter
+turn's own quaternion whenever a placement is made, composed or read from a file, and that
+form is exact, since its nonzero parts share one magnitude. A spin about the face's own
+normal is exact too. A turn that lands only near an axis is not on it: far from the origin a
+tilt of 2^-42 is a real gap. It is refused when measured, and a solve turns the part exactly
+onto the axes instead of keeping the tilt. A later general rotation needs a bounded transform contract and does not
+inherit this one.
 
 A Lock's relative rotation must be a quarter-turn rotation, one that takes axes to axes. A
 Lock between parts turned 30 degrees apart is refused as `unsupported_placement`, never
@@ -120,8 +125,9 @@ centroid.
   A dimension is an expression and can be driven like a distance. The mid-plane of the
   groove and of the tab are averages of exact offsets, so a width is one exact difference.
 - **Lock** stores `b`'s placement in `a`'s frame, taken from where both are when it is added.
-  The rotation is stored as the quarter-turn rotation it rounds onto within 1e-12, and the
-  offset through that rotation's integer matrix, so no rounding enters the relation.
+  Both parts must be on exact quarter turns. The rotation is the product of their integer
+  matrices, and the offset is taken through the first one's, so no rounding enters the
+  relation.
 - **Values** use the part's expression grammar, units, decimal conversion and cycle checks
   (`soliddraft_model::ValueTable`). There is one evaluator. A value keeps its text as typed.
 - **A driver** is a distance whose expression reads a value. It reads by stable id, so

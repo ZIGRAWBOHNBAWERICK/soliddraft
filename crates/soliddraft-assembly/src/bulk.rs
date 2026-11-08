@@ -104,7 +104,8 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Component>, BinaryError> {
         if !t.iter().chain(&q).all(|v| v.is_finite()) || !length.is_finite() || length < 1e-12 {
             return Err(bad(&format!("component {id} has an invalid placement")));
         }
-        let rotation = if (length - 1.0).abs() < 1e-12 { rotation } else { rotation.normalize() };
+        let rotation =
+            crate::placement::canonical(if (length - 1.0).abs() < 1e-12 { rotation } else { rotation.normalize() });
         out.push(Component {
             id: ComponentId(id),
             name: None,

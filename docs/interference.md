@@ -84,7 +84,9 @@ pair stays undecided rather than clear.
 SolidWorks reports coincident faces as a sliver of interference. Here an exact mate settles
 them. When a root Coincident mate, or a Distance mate that measures zero, holds two opposed
 faces on one plane, and the mate's proof on the accepted placements reads exactly `0`, those
-faces lie on one plane. If the two faces' meshes overlap in that plane by more than their
+faces lie on one plane. The proof holds only when each placement takes its face's normal
+exactly onto the same world axis (see [mates.md](mates.md)), and both placed meshes must lie
+across that axis. If the two faces' meshes overlap in that plane by more than their
 bounds, the faces share a point, and the pair's result lists the contact with the mate, both
 faces and the shared point. Its distance is then exactly zero, so a clearance check reports
 it `below` any clearance.

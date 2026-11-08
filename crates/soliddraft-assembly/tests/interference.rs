@@ -381,3 +381,57 @@ fn bad_requests_are_refused_by_name() {
     assert_eq!(rig.doc.check_interference(&negative).unwrap_err().code, CheckCode::Invalid);
     assert_eq!(rig.doc.assembly(), &before);
 }
+
+/// A 2^24 x 16 x 16 slab from x = 2^24 to 2^25, y = 0 to 16 and z = 0 to 16.
+fn new_slab(path: &Path) {
+    let mut sketch = Sketch::new();
+    let (w, x) = (16_777_216.0, 25_165_824.0);
+    sketch.rectangle(P2::new(x, 8.0), w, 16.0).unwrap();
+    new_extrusion(path, DatumPlane::Top, sketch, 16.0);
+}
+
+/// B sits on A's top, turned 2^-42 about y: its underside's normal is 4.5e-13 from -z,
+/// and far out along x every point of B would be above A, by at least 2^-17 mm. A proof
+/// that read such a turn as the axis while the meshes kept the tilt would call a real gap
+/// exact touching. So a turn this near a quarter turn is stored as the quarter turn
+/// itself, and the proof, the solve and the meshes all read that one placement. The tilt
+/// is written into the component's fields directly here, as no constructor would store it.
+#[test]
+fn a_turn_near_an_axis_is_not_exactly_touching() {
+    let dir = folder("near-axis");
+    let (a_file, b_file, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("rig.dwasm"));
+    new_slab(&a_file);
+    new_slab(&b_file);
+    let mut doc = AssemblyDocument::new_with("Near", options());
+    doc.save(Some(&root)).unwrap();
+    let a = doc.insert(reference(&root, &a_file), Placement::translation(DVec3::new(0.0, 0.0, -16.0))).unwrap();
+    let tilt = DQuat::from_xyzw(0.0, -(2f64.powi(-42)), 0.0, 1.0).normalize();
+    assert_eq!(Placement::new(tilt, DVec3::ZERO), Placement::IDENTITY, "a constructor stores the quarter turn");
+    let b = doc.insert(reference(&root, &b_file), Placement { rotation: tilt, translation: DVec3::ZERO }).unwrap();
+    assert_eq!(doc.assembly().component(b).unwrap().placement.rotation, tilt);
+    doc.finish_loading();
+    let (top, bottom) = (face(a, GeneratorChoice::EndCap), face(b, GeneratorChoice::StartCap));
+    // Every world placement is composed, and composing stores the quarter turn: the
+    // proof reads B exactly level, as the meshes do.
+    let measured = doc.measure_planes(&top, &bottom).unwrap();
+    assert_eq!(measured.placements[1].rotation, DQuat::IDENTITY);
+    assert_eq!(measured.rational, "0");
+    let world = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(world.results.iter().all(|r| r.contact.is_empty()), "no mate, so no exact contact");
+
+    // A Coincident turns B exactly onto the axes, where it does touch A. The Origin mate
+    // brings A's base to z = 0, so the faces meet at z = 16.
+    let clearance = Some(2f64.powi(-18));
+    doc.mate_origin("O", a, true, false).unwrap();
+    doc.mate_coincident("Cz", &top, &bottom, Alignment::Opposed, false).unwrap();
+    let placed = doc.assembly().component(b).unwrap().placement;
+    assert_eq!(placed.rotation, DQuat::IDENTITY, "the solve keeps no tilt it cannot prove");
+    assert_eq!(placed.translation, DVec3::new(0.0, 0.0, 16.0));
+    let measured = doc.measure_planes(&top, &bottom).unwrap();
+    assert_eq!(measured.rational, "0");
+    let report = doc.check_interference(&CheckRequest { clearance, ..CheckRequest::default() }).unwrap();
+    let r = &report.results[0];
+    assert_eq!(r.contact.len(), 1, "{r:#?}");
+    assert_eq!(r.contact[0].point[2], 16.0);
+    assert_eq!(r.clearance, Some(ClearanceOutcome::Below));
+}

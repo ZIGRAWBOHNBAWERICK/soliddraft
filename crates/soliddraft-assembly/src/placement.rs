@@ -32,9 +32,10 @@ impl Placement {
         Placement { rotation: DQuat::IDENTITY, translation: t }
     }
 
-    /// A rotation and a translation. The rotation is normalised.
+    /// A rotation and a translation. The rotation is normalised, and one within 1e-12 of
+    /// a quarter turn is stored as that quarter turn (see [`canonical`]).
     pub fn new(rotation: DQuat, translation: DVec3) -> Placement {
-        Placement { rotation: rotation.normalize(), translation }
+        Placement { rotation: canonical(rotation.normalize()), translation }
     }
 
     /// True for the identity, exactly.
@@ -45,7 +46,7 @@ impl Placement {
     /// `self` after `inner`: a point placed by `inner` within a frame placed by `self`.
     pub fn compose(&self, inner: &Placement) -> Placement {
         Placement {
-            rotation: (self.rotation * inner.rotation).normalize(),
+            rotation: canonical((self.rotation * inner.rotation).normalize()),
             translation: self.translation + self.rotation * inner.translation,
         }
     }
@@ -70,6 +71,36 @@ impl Placement {
     pub fn matrix(&self) -> DMat3 {
         DMat3::from_quat(self.rotation)
     }
+}
+
+/// How far a turned axis may lie from an axis for the turn to be read as a quarter turn.
+const QUARTER_TURN: f64 = 1e-12;
+
+/// A unit rotation within [`QUARTER_TURN`] of a quarter-turn rotation, one that takes axes
+/// to axes, as that quarter turn's own quaternion; any other rotation as it is.
+///
+/// Mates prove planes only on placements that take normals exactly onto axes, reading the
+/// quaternion's binary64 parts as the rationals they are. A quarter turn written as
+/// `from_rotation_z(π/2)` does not quite: its sine and cosine round apart, and far from the
+/// origin the turn's error is a real gap. The quaternion built from the integer matrix has
+/// nonzero parts of one magnitude, which is exact, so storing that form makes the
+/// placement the quarter turn the proof reads. A turn already in that form is unchanged.
+pub(crate) fn canonical(rotation: DQuat) -> DQuat {
+    let mut columns = [DVec3::ZERO; 3];
+    for (column, axis) in columns.iter_mut().zip([DVec3::X, DVec3::Y, DVec3::Z]) {
+        let v = rotation * axis;
+        let n = v.round();
+        if n.abs().element_sum() != 1.0 || v.distance(n) > QUARTER_TURN {
+            return rotation;
+        }
+        *column = n;
+    }
+    let m = DMat3::from_cols(columns[0], columns[1], columns[2]);
+    if m.determinant() != 1.0 {
+        return rotation;
+    }
+    let q = DQuat::from_mat3(&m);
+    if q.dot(rotation) < 0.0 { -q } else { q }
 }
 
 /// The JSON shape: `{"translation": [x, y, z], "rotation": [x, y, z, w]}`, each left
@@ -108,8 +139,9 @@ impl<'de> Deserialize<'de> for Placement {
         if !(len.is_finite() && len > 1e-12) || j.translation.iter().any(|v| !v.is_finite()) {
             return Err(serde::de::Error::custom("a placement needs finite numbers and a non-zero rotation"));
         }
-        // Keep a written unit quaternion bit for bit, so files round-trip exactly.
-        let rotation = if (len - 1.0).abs() < 1e-12 { q } else { q / len };
+        // Keep a written unit quaternion bit for bit, so files round-trip exactly; a
+        // quarter turn is read as its canonical form, which then round-trips.
+        let rotation = canonical(if (len - 1.0).abs() < 1e-12 { q } else { q / len });
         Ok(Placement { rotation, translation: DVec3::from_array(j.translation) })
     }
 }
@@ -254,5 +286,28 @@ mod tests {
         }
         assert!(Aabb::EMPTY.placed(&p).is_empty());
         assert!(Aabb::EMPTY.union(&b) == b);
+    }
+
+    /// A turn within 1e-12 of a quarter turn is stored as the quarter turn's own
+    /// quaternion, which reads back bit for bit; any other turn is kept as it is.
+    #[test]
+    fn quarter_turns_are_stored_exactly() {
+        let q90 = DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
+        assert_ne!(q90.z, q90.w, "the sine and cosine round apart");
+        let stored = Placement::new(q90, DVec3::ZERO).rotation;
+        assert_eq!(stored.z, stored.w);
+        // angle_between rounds through acos; compare where the axes go instead.
+        assert!([DVec3::X, DVec3::Y].iter().all(|v| (stored * *v).distance(q90 * *v) < 1e-15));
+        let tilt = DQuat::from_xyzw(0.0, -(2f64.powi(-42)), 0.0, 1.0);
+        assert_eq!(Placement::new(tilt, DVec3::ZERO).rotation, DQuat::IDENTITY);
+        let general = DQuat::from_rotation_z(0.5);
+        assert_eq!(Placement::new(general, DVec3::ZERO).rotation, general.normalize());
+        let text = format!(r#"{{"rotation": [0, 0, {}, {}]}}"#, q90.z, q90.w);
+        let read: Placement = serde_json::from_str(&text).unwrap();
+        assert_eq!(read.rotation, stored);
+        let again: Placement = serde_json::from_str(&serde_json::to_string(&read).unwrap()).unwrap();
+        assert_eq!(again, read);
+        let composed = Placement::new(q90, DVec3::ZERO).compose(&Placement::new(q90, DVec3::ZERO));
+        assert_eq!(composed.rotation, canonical(composed.rotation));
     }
 }

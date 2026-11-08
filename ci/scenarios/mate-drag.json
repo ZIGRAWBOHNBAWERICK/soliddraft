@@ -381,6 +381,19 @@
           ]
         }
       ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "commit"
+      },
+      "refused": "invalid",
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid"
+        }
+      ]
     }
   ]
 }

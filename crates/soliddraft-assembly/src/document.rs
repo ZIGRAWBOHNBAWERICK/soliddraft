@@ -679,7 +679,9 @@ impl AssemblyDocument {
         let f = self.table.flags(row);
         RowState {
             path: self.table.path(row),
-            local: self.table.local(row),
+            local: Scope::new(&self.assembly, &self.table, &self.store)
+                .local(&self.table.path(row))
+                .unwrap_or(self.table.local(row)),
             hidden: f.has(Flags::HIDDEN_SELF),
             suppressed: f.has(Flags::SUPPRESSED_SELF),
         }
@@ -741,6 +743,7 @@ impl AssemblyDocument {
     /// Moves occurrences to new placements relative to the assembly that contains
     /// each. One undo step.
     pub fn move_to(&mut self, moves: &[(OccurrencePath, Placement)]) -> Result<(), EditError> {
+        self.cancel_drag();
         let rows: Vec<OccurrenceIndex> = moves.iter().map(|(p, _)| self.row(p)).collect::<Result<_, _>>()?;
         if moves.iter().any(|(p, _)| self.is_mated(p)) {
             return self.move_mated(moves);
@@ -799,6 +802,7 @@ impl AssemblyDocument {
     /// placement. One undo step. An occurrence inside another one that is moved goes
     /// with it, so it is moved once, not again on its own.
     pub fn move_by(&mut self, paths: &[OccurrencePath], delta: &Placement) -> Result<(), EditError> {
+        self.cancel_drag();
         for p in paths {
             self.row(p)?;
         }
@@ -824,6 +828,7 @@ impl AssemblyDocument {
 
     /// Hides or shows occurrences. One undo step.
     pub fn set_hidden(&mut self, paths: &[OccurrencePath], hidden: bool) -> Result<(), EditError> {
+        self.cancel_drag();
         let rows: Vec<OccurrenceIndex> = paths.iter().map(|p| self.row(p)).collect::<Result<_, _>>()?;
         let (comps, ovs) = split_owners(paths.iter());
         let before = self.image(&comps, &ovs);
@@ -844,6 +849,7 @@ impl AssemblyDocument {
     /// suppressed when the document opened has no rows below it; unsuppressing it
     /// rereads the structure.
     pub fn set_suppressed(&mut self, paths: &[OccurrencePath], suppressed: bool) -> Result<(), EditError> {
+        self.cancel_drag();
         let rows: Vec<OccurrenceIndex> = paths.iter().map(|p| self.row(p)).collect::<Result<_, _>>()?;
         let (comps, ovs) = split_owners(paths.iter());
         let before = self.image(&comps, &ovs);
@@ -885,6 +891,7 @@ impl AssemblyDocument {
     /// appearance, replacing the parts' own colours; the part files keep theirs. One
     /// undo step.
     pub fn set_colour(&mut self, paths: &[OccurrencePath], appearance: Option<Appearance>) -> Result<(), EditError> {
+        self.cancel_drag();
         let rows: Vec<OccurrenceIndex> = paths.iter().map(|p| self.row(p)).collect::<Result<_, _>>()?;
         if let Some(a) = &appearance
             && let Some(problem) = a.problems().first()
@@ -924,6 +931,7 @@ impl AssemblyDocument {
     /// for these occurrences only: other placements of the same parts keep their
     /// meshes. The assembly's revision does not change. One undo step.
     pub fn set_quality(&mut self, paths: &[OccurrencePath], quality: Option<Quality>) -> Result<(), EditError> {
+        self.cancel_drag();
         for p in paths {
             self.row(p)?;
         }
@@ -942,6 +950,7 @@ impl AssemblyDocument {
     /// own again with [`Quality::Auto`]. Overrides on components still win. One undo
     /// step; the revision does not change.
     pub fn set_viewport_quality(&mut self, quality: Quality) -> Result<(), EditError> {
+        self.cancel_drag();
         quality.check().map_err(EditError::Invalid)?;
         let next = Settings { viewport: quality, ..self.assembly.settings.clone() };
         self.change_settings("Assembly quality", next);
@@ -971,6 +980,7 @@ impl AssemblyDocument {
 
     /// Renames one of the root's components; `None` goes back to the source's name.
     pub fn rename(&mut self, component: ComponentId, name: Option<String>) -> Result<(), EditError> {
+        self.cancel_drag();
         let before = self.image(&[component], &[]);
         self.assembly.component_mut(component).ok_or(EditError::NoComponent(component))?.name =
             name.filter(|n| !n.trim().is_empty());
@@ -984,6 +994,7 @@ impl AssemblyDocument {
     /// edit is accepted: an assembly that would contain this one, at any depth, is refused
     /// and nothing changes.
     pub fn insert(&mut self, document: DocRef, placement: Placement) -> Result<ComponentId, EditError> {
+        self.cancel_drag();
         if !matches!(document.kind, DocKind::Part | DocKind::Assembly | DocKind::Mesh) || !document.is_bound() {
             return Err(EditError::Invalid(
                 "only a part, a mesh reference or an assembly with an id can be inserted".into(),
@@ -1032,6 +1043,7 @@ impl AssemblyDocument {
 
     /// Adds a pattern of the root's components. One undo step.
     pub fn add_pattern(&mut self, seeds: Vec<ComponentId>, rule: PatternRule) -> Result<PatternId, EditError> {
+        self.cancel_drag();
         if let Some(s) = seeds.iter().find(|s| self.assembly.component(**s).is_none()) {
             return Err(EditError::NoComponent(*s));
         }
@@ -1061,6 +1073,7 @@ impl AssemblyDocument {
     /// Deletes components of the root, with the patterns that only repeat them, the
     /// overrides below them and the sources no other component places. One undo step.
     pub fn delete(&mut self, components: &[ComponentId]) -> Result<(), EditError> {
+        self.cancel_drag();
         if let Some(c) = components.iter().find(|c| self.assembly.component(**c).is_none()) {
             return Err(EditError::NoComponent(*c));
         }
@@ -1684,6 +1697,7 @@ impl AssemblyDocument {
     /// shown and its mates solve on it. A refusal keeps the accepted truth, display and
     /// undo history.
     pub fn rebuild(&mut self) -> RebuildReport {
+        self.cancel_drag();
         let started = std::time::Instant::now();
         self.finish_loading();
         let resolver = self.resolver();

@@ -1719,7 +1719,7 @@
         {
           "pointer": "/summary/assembly/accepted_state/truth",
           "same_as": {
-            "step": 87,
+            "step": 86,
             "pointer": "/summary/assembly/accepted_state/truth"
           }
         },

@@ -506,3 +506,40 @@ fn dragging_either_end_of_a_floating_lock_moves_the_whole_group() {
     assert!(relative.rotation.angle_between(before.rotation) < 1e-7);
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+
+#[test]
+fn ordinary_edits_never_capture_a_drag_preview_in_history() {
+    for edit in ["hide", "suppress", "move", "move_by"] {
+        for cancel_explicitly in [false, true] {
+            let mut r = rig(&format!("drag-interleave-{edit}-{cancel_explicitly}"), Profile::Block);
+            let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+            let before = r.doc.assembly().clone();
+            r.doc.begin_drag(path.clone()).unwrap();
+            r.doc.preview_drag(Placement::translation(DVec3::new(10.0, 0.0, 0.0))).unwrap();
+            match edit {
+                "hide" => r.doc.set_hidden(std::slice::from_ref(&path), true).unwrap(),
+                "suppress" => r.doc.set_suppressed(std::slice::from_ref(&path), true).unwrap(),
+                "move" => r.doc.move_to(&[(path.clone(), Placement::translation(DVec3::new(20.0, 0.0, 0.0)))]).unwrap(),
+                "move_by" => r.doc.move_by(std::slice::from_ref(&path), &Placement::translation(DVec3::X)).unwrap(),
+                _ => unreachable!(),
+            }
+            if cancel_explicitly {
+                r.doc.cancel_drag();
+            }
+            assert!(r.doc.undo());
+            assert_eq!(&before, r.doc.assembly());
+            let row = r.doc.table().find(&path).unwrap();
+            let accepted = r.doc.assembly().component(r.b).unwrap().placement;
+            assert_eq!(r.doc.table().local(row), accepted, "{edit}, cancel {cancel_explicitly}");
+            assert_eq!(r.doc.table().world(row), accepted);
+            assert!(r.doc.redo());
+            let accepted = r.doc.assembly().component(r.b).unwrap().placement;
+            assert_eq!(r.doc.table().local(row), accepted);
+            assert_eq!(r.doc.table().world(row), accepted);
+            if edit == "move_by" {
+                assert_eq!(accepted.translation, before.component(r.b).unwrap().placement.translation + DVec3::X);
+            }
+            std::fs::remove_dir_all(r.dir).unwrap();
+        }
+    }
+}

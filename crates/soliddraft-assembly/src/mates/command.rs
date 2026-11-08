@@ -224,6 +224,7 @@ impl AssemblyDocument {
         strict: bool,
         edit: impl FnOnce(&mut AssemblyDocument, &mut Assembly) -> Result<T, MateRefusal>,
     ) -> Result<T, MateRefusal> {
+        self.cancel_drag();
         self.finish_loading();
         let mut candidate = self.assembly.clone();
         let out = edit(self, &mut candidate)?;

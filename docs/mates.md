@@ -118,7 +118,7 @@ drag, send `phase: "begin"` with the path, then `phase: "update"` with each targ
 then `phase: "commit"` on release or `phase: "cancel"` to restore the accepted pose.
 Updates change the displayed occurrence table. They leave saved truth and undo/redo history
 unchanged. A refused update retains the previous preview. Saving during a preview saves the
-accepted assembly. Editing the assembly during a drag invalidates that drag.
+accepted assembly. An ordinary assembly edit cancels the preview before reading placements or capturing history.
 
 Drag targets are wishes. Mates correct constrained motions, while free translations and
 turns follow the target. Limit Distance, Limit Angle, free Width and straight Slot bounds

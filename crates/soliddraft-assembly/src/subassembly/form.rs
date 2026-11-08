@@ -113,6 +113,7 @@ impl AssemblyDocument {
     /// Prepares forming the parts `request` names into a new file: makes and checks both
     /// candidate truths, reads their structures and solves them. Changes nothing.
     pub fn prepare_form(&mut self, request: &FormRequest) -> Result<FormPlan, FormRefusal> {
+        self.cancel_drag();
         self.finish_loading();
         let root_path = self
             .path()
@@ -339,6 +340,7 @@ impl AssemblyDocument {
     /// setup for the paths a full disk or a crash would take, never a command.
     #[doc(hidden)]
     pub fn commit_form_with(&mut self, plan: FormPlan, fault: Fault) -> Result<Formed, FormRefusal> {
+        self.cancel_drag();
         self.finish_loading();
         let now = self.revision();
         if now != plan.root_revision {

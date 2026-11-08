@@ -152,6 +152,13 @@ pub(in crate::mates) fn native_constraint(
         }
     }
     let valid = match rule {
+        Rule::Mechanical { mechanism, .. } => match mechanism {
+            super::super::Mechanism::Gear => kinds == [Kind::Axis; 4],
+            super::super::Mechanism::Screw => kinds == [Kind::Axis; 2],
+            super::super::Mechanism::RackAndPinion => {
+                kinds.len() == 3 && kinds[..2] == [Kind::Axis; 2] && directed(kinds[2])
+            }
+        },
         Rule::Angle { min, max, .. } => {
             if !min.is_finite() || !max.is_finite() || *min < -180.0 || *max > 180.0 || min > max {
                 return Err(MateRefusal {
@@ -224,6 +231,49 @@ pub(in crate::mates) fn native_constraint(
     }
     Ok(vec![Constraint::Motion { mate, relation: Box::new(Relation::Native { reads, rule: Box::new(rule.clone()) }) }])
 }
+fn clock<N: Number>(read: &Read, poses: &BTreeMap<Body, Placement>) -> V<N> {
+    let local = world::<N>(read, &BTreeMap::from([(read.body.clone(), Placement::IDENTITY)])).direction();
+    let index = (0..3).min_by(|i, j| local[*i].middle().abs().total_cmp(&local[*j].middle().abs())).unwrap();
+    let basis = std::array::from_fn(|k| N::f(if k == index { 1.0 } else { 0.0 }));
+    rotate(&poses[&read.body], unit(cross(local, basis)))
+}
+fn joint_angle<N: Number>(reads: &[Read], poses: &BTreeMap<Body, Placement>, center: f64) -> N {
+    let (u, v) = (clock(&reads[0], poses), clock(&reads[1], poses));
+    let n = world::<N>(&reads[0], poses).direction();
+    dot(n, cross(u, v)).atan2(dot(u, v), center)
+}
+fn mechanical<N: Number>(reads: &[Read], rule: &Rule, poses: &BTreeMap<Body, Placement>) -> (N, [N; 2]) {
+    let Rule::Mechanical { mechanism, factor, reverse, angles, reference, frame, .. } = rule else { unreachable!() };
+    let a = joint_angle::<N>(reads, poses, angles[0]);
+    let sign = N::f(if *reverse { -1.0 } else { 1.0 });
+    match mechanism {
+        super::super::Mechanism::Gear => {
+            let b = joint_angle::<N>(&reads[2..], poses, angles[1]);
+            (N::f(factor[0]) * b + sign * N::f(factor[1]) * a, [a, b])
+        }
+        super::super::Mechanism::Screw => {
+            let (a_axis, b_axis) = (world::<N>(&reads[0], poses), world::<N>(&reads[1], poses));
+            let travel = dot(a_axis.direction(), sub(b_axis.point(), a_axis.point()));
+            (travel - sign * N::f(factor[0]) * a / radians::<N>(360.0), [a, N::f(0.0)])
+        }
+        super::super::Mechanism::RackAndPinion => {
+            let rack = world::<N>(&reads[2], poses);
+            let from = reference
+                .as_ref()
+                .map_or_else(|| frame.each_ref().map(N::q), |body| poses[body].translation.to_array().map(N::f));
+            let travel = dot(rack.direction(), sub(rack.point(), from));
+            (travel - sign * N::f(factor[0]) * a / radians::<N>(360.0), [a, N::f(0.0)])
+        }
+    }
+}
+pub(in crate::mates) fn mechanical_value(
+    reads: &[Read],
+    rule: &Rule,
+    poses: &BTreeMap<Body, Placement>,
+) -> (f64, [f64; 2]) {
+    mechanical::<f64>(reads, rule, poses)
+}
+
 fn separation<N: Number>(a: World<N>, b: World<N>) -> N {
     let delta = sub(b.point(), a.point());
     match (a, b) {
@@ -310,6 +360,10 @@ pub(super) fn residual<N: Number>(
     let a = world::<N>(&reads[0], poses);
     let b = world::<N>(&reads[1], poses);
     match rule {
+        Rule::Mechanical { mechanism, offset, .. } => {
+            let (value, _) = mechanical::<N>(reads, rule, poses);
+            scalar(out, value - N::f(*offset), *mechanism == super::super::Mechanism::Gear);
+        }
         Rule::Angle { min, max, limit } => {
             let n = world::<N>(&reads[2], poses).direction();
             let projection = |u: V<N>| unit(sub(u, mul(n, dot(u, n))));

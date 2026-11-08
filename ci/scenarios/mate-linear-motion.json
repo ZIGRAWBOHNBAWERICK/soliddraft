@@ -1,0 +1,400 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-linear-motion",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 10,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/c.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/c.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/c.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            50,
+            -5,
+            2
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/path",
+          "equals": "6"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_linear_coupler",
+      "arguments": {
+        "name": "K",
+        "a": {
+          "component": 4,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 6,
+          "plane": "Right plane"
+        },
+        "reference_a": 2,
+        "reference_b": 2,
+        "ratio": [
+          1,
+          2
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "6",
+        "placement": {
+          "translation": [
+            60,
+            -5,
+            2
+          ],
+          "rotation": [
+            0,
+            0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 8,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_limit_distance",
+      "arguments": {
+        "name": "Stop",
+        "a": {
+          "component": 2,
+          "plane": "Right plane"
+        },
+        "b": {
+          "component": 6,
+          "plane": "Right plane"
+        },
+        "min": "0 mm",
+        "max": "64 mm",
+        "alignment": "aligned"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "6",
+        "placement": {
+          "translation": [
+            100,
+            -5,
+            2
+          ],
+          "rotation": [
+            0,
+            0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/translation/0",
+          "approx": 64,
+          "tolerance": 1e-08
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/translation/0",
+          "approx": 60,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/2/translation/0",
+          "approx": 64,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "K",
+        "ratio": [
+          0,
+          1
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid_value"
+        }
+      ],
+      "refused": "invalid_value"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    }
+  ]
+}

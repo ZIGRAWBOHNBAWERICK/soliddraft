@@ -24,6 +24,9 @@ pub struct PickedFace {
 /// Which mate the panel adds between its picked faces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
+    Gear,
+    RackAndPinion,
+    Screw,
     Angle,
     LimitAngle,
     Coincident,
@@ -53,7 +56,10 @@ pub enum Family {
 }
 
 impl Family {
-    const ALL: [Family; 16] = [
+    const ALL: [Family; 19] = [
+        Family::Gear,
+        Family::RackAndPinion,
+        Family::Screw,
         Family::Angle,
         Family::LimitAngle,
         Family::Coincident,
@@ -74,6 +80,9 @@ impl Family {
 
     fn label(self) -> &'static str {
         match self {
+            Family::Gear => "Gear",
+            Family::RackAndPinion => "Rack and Pinion",
+            Family::Screw => "Screw",
             Family::Angle => "Angle",
             Family::LimitAngle => "Limit Angle",
             Family::Coincident => "Coincident",
@@ -96,6 +105,8 @@ impl Family {
     /// How many faces it needs.
     fn picks(self) -> usize {
         match self {
+            Family::Gear | Family::Screw => 0,
+            Family::RackAndPinion => 1,
             Family::Width | Family::Hinge => 4,
             Family::Angle | Family::LimitAngle | Family::Symmetric => 3,
             _ => 2,
@@ -105,7 +116,14 @@ impl Family {
     fn has_alignment(self) -> bool {
         !matches!(
             self,
-            Family::Angle | Family::LimitAngle | Family::Perpendicular | Family::Lock | Family::LinearCoupler
+            Family::Gear
+                | Family::RackAndPinion
+                | Family::Screw
+                | Family::Angle
+                | Family::LimitAngle
+                | Family::Perpendicular
+                | Family::Lock
+                | Family::LinearCoupler
         )
     }
 }
@@ -137,6 +155,9 @@ pub struct Draft {
     pub c: Option<PickedFace>,
     pub d: Option<PickedFace>,
     pub family: Family,
+    pub joint_a: String,
+    pub joint_b: String,
+    pub travel: String,
     pub alignment: Alignment,
     /// A Hinge's planes' alignment.
     pub plane_alignment: Alignment,
@@ -175,6 +196,9 @@ impl Default for Draft {
             c: None,
             d: None,
             family: Family::Distance,
+            joint_a: String::new(),
+            joint_b: String::new(),
+            travel: "10".into(),
             alignment: Alignment::Opposed,
             plane_alignment: Alignment::Opposed,
             hinge_limits: false,
@@ -295,6 +319,10 @@ fn ratio(d: &Draft) -> Result<[f64; 2], String> {
 
 fn add(state: &mut AppState) {
     let family = state.assembly.mate.family;
+    if matches!(family, Family::Gear | Family::RackAndPinion | Family::Screw) {
+        add_mechanical(state);
+        return;
+    }
     let name = match state.assembly.mate.name.trim() {
         "" => next_name(&state.assembly, family.label()),
         n => n.to_owned(),
@@ -337,6 +365,7 @@ fn add(state: &mut AppState) {
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (a, b) = (&ends[0], &ends[1]);
     let done = match family {
+        Family::Gear | Family::RackAndPinion | Family::Screw => unreachable!("handled before face pairs"),
         Family::Angle => match distance.parse::<f64>() {
             Ok(v) => s.doc.mate_angle(&name, a, b, &ends[2], v, false),
             Err(_) => {
@@ -481,6 +510,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         p.as_ref().map_or("Pick a face".to_owned(), |p| format!("{}: {}", p.component, p.face.label))
     };
     let slots: &[&str] = match d.family {
+        Family::Gear | Family::Screw => &[],
+        Family::RackAndPinion => &["Rack direction"],
         Family::Width => &["Groove face", "Groove face", "Tab face", "Tab face"],
         Family::Lock => &["First component", "Second component"],
         Family::Tangent => &["Plane or curved face", "Curved face"],
@@ -574,11 +605,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         labelled(ui, &mut d.min, "Least distance, such as 0 mm", "Mate least distance");
         labelled(ui, &mut d.max, "Greatest distance, such as 10 mm", "Mate greatest distance");
     }
-    if d.family == Family::LinearCoupler {
+    if matches!(d.family, Family::Gear | Family::RackAndPinion | Family::Screw) {
+        labelled(ui, &mut d.joint_a, "Existing joint name", "First joint name");
+        if d.family == Family::Gear {
+            labelled(ui, &mut d.joint_b, "Second existing joint name", "Second joint name");
+        } else {
+            labelled(ui, &mut d.travel, "Millimetres per revolution", "Travel per turn");
+        }
+        if d.family != Family::Gear {
+            ui.checkbox(&mut d.reverse, "Reverse motion");
+        }
+    }
+    if matches!(d.family, Family::LinearCoupler | Family::Gear) {
         ui.horizontal(|ui| {
-            labelled(ui, &mut d.ratio_a, "First slides", "Mate ratio first");
+            let gear = d.family == Family::Gear;
+            labelled(ui, &mut d.ratio_a, if gear { "First turns" } else { "First slides" }, "Mate ratio first");
             ui.label(":");
-            labelled(ui, &mut d.ratio_b, "Second slides", "Mate ratio second");
+            labelled(ui, &mut d.ratio_b, if gear { "Second turns" } else { "Second slides" }, "Mate ratio second");
         });
         ui.checkbox(&mut d.reverse, "Reverse");
     }
@@ -649,6 +692,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some("coincident") => format!("{name}: coincident, {alignment}, {}", shown(gap(m), " apart")),
             Some("parallel") => format!("{name}: parallel, {alignment}, {}", shown(gap(m), " apart")),
             Some("perpendicular") => format!("{name}: perpendicular"),
+            Some("gear") => format!("{name}: gear ratio {} : {}", m["factor"][0], m["factor"][1]),
+            Some("rack_and_pinion" | "screw") => format!("{name}: {} mm per turn", m["factor"][0]),
             Some("angle") => format!("{name}: {} degrees", m["degrees"]),
             Some("limit_angle") => format!("{name}: {} to {} degrees", m["min_degrees"], m["max_degrees"]),
             Some("width") => {
@@ -774,4 +819,36 @@ fn conflicts(ui: &mut egui::Ui, c: &MateRefusal, mates: &serde_json::Value, acti
     if ui.button("Dismiss").clicked() {
         actions.push(MateAction::Dismiss);
     }
+}
+
+fn add_mechanical(state: &mut AppState) {
+    let d = &state.assembly.mate;
+    let family = d.family;
+    let name =
+        if d.name.trim().is_empty() { next_name(&state.assembly, family.label()) } else { d.name.trim().to_owned() };
+    let (a, b, reverse) = (d.joint_a.trim().to_owned(), d.joint_b.trim().to_owned(), d.reverse);
+    let ratio = ratio(d);
+    let travel = d.travel.trim().parse::<f64>();
+    let rack =
+        d.a.as_ref().map(|p| EndpointSelector { component: p.component, face: FaceSelector::Picked(p.face.clone()) });
+    let Some(session) = state.assembly.session.as_mut() else { return };
+    let invalid = |message| MateRefusal::new(soliddraft_assembly::RefusalCode::InvalidValue, message);
+    let result = match family {
+        Family::Gear => match ratio {
+            Ok(ratio) => session.doc.mate_gear(&name, [&a, &b], ratio, reverse, false),
+            Err(message) => Err(invalid(message)),
+        },
+        Family::Screw => match travel {
+            Ok(pitch) => session.doc.mate_screw(&name, &a, pitch, reverse, false),
+            Err(_) => Err(invalid("Pitch takes a positive number of millimetres".into())),
+        },
+        Family::RackAndPinion => match (rack, travel) {
+            (Some(rack), Ok(travel)) => {
+                session.doc.mate_rack_and_pinion(&name, &a, &rack, None, travel, reverse, false)
+            }
+            _ => Err(invalid("Pick the rack direction and enter millimetres per turn".into())),
+        },
+        _ => unreachable!(),
+    };
+    report(state, result.map(|_| ()), "Mechanical mate added");
 }

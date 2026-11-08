@@ -55,10 +55,11 @@ pub enum MateEdit {
     Min(String),
     /// A Limit Distance's new greatest distance.
     Max(String),
-    /// A Linear Coupler's new ratio; the parts' places become its zero.
+    /// A Linear Coupler or Gear's new ratio; the current pose becomes its zero.
     Ratio([f64; 2]),
-    /// Whether a Linear Coupler's second part slides the other way; the parts' places become
-    /// its zero.
+    /// Rack or Screw travel in positive millimetres per revolution.
+    Pitch(f64),
+    /// Reverses a Linear Coupler or mechanical relation; the current pose becomes its zero.
     Reverse(bool),
 }
 
@@ -242,6 +243,7 @@ impl AssemblyDocument {
         }
         let kept = crate::mates::bodies::locals(&Scope::new(&candidate, &self.table, &self.store), &solved.placements);
         crate::mates::bodies::keep(&mut candidate, kept);
+        self.refresh_mechanical(&mut candidate, None)?;
         if !solved.status.bounded.is_empty() {
             let problem = self.gather(&Scope::new(&candidate, &self.table, &self.store))?;
             self.verify_problem(problem)?;
@@ -409,7 +411,12 @@ impl AssemblyDocument {
         Ok(Solved { placements: moved, status })
     }
 
-    pub(crate) fn solve_drag_truth(&mut self, truth: &Assembly, path: &Body) -> Result<Solved, MateRefusal> {
+    pub(crate) fn solve_drag_truth(
+        &mut self,
+        truth: &Assembly,
+        path: &Body,
+        previous: Placement,
+    ) -> Result<Solved, MateRefusal> {
         let problem = self.gather(&Scope::new(truth, &self.table, &self.store))?;
         let p = self.prove_problem(problem)?;
         // Prove feasibility under the authored mates before trying the temporary wish.
@@ -419,6 +426,54 @@ impl AssemblyDocument {
             wished.push(Constraint::Origin { mate: "drag target".into(), body: path.clone(), axes: true, at: *at });
             if let Ok(preferred) = solver::solve(&p.bodies, &wished) {
                 placements = preferred;
+            } else if motion::needs_motion(&p.bodies, &p.constraints) {
+                let rotation = Constraint::Motion {
+                    mate: "drag turn".into(),
+                    relation: Box::new(Relation::Rotation { body: path.clone(), rotation: at.rotation }),
+                };
+                let translation =
+                    Constraint::Origin { mate: "drag slide".into(), body: path.clone(), axes: false, at: *at };
+                let rotation_changed = 1.0 - previous.rotation.dot(at.rotation).abs() > 1e-15;
+                let wishes = if rotation_changed { [rotation, translation] } else { [translation, rotation] };
+                for wish in wishes {
+                    let mut wished = p.constraints.clone();
+                    wished.push(wish);
+                    if let Ok(preferred) = solver::solve(&p.bodies, &wished) {
+                        placements = preferred;
+                        break;
+                    }
+                }
+            } else if solver::cube_of(previous.rotation).is_some() && previous.rotation == at.rotation {
+                // Keep the requested end of an exact coupler against its nearest feasible stop.
+                let (mut low, mut high) = (0.0, 1.0);
+                for _ in 0..56 {
+                    let fraction = (low + high) * 0.5;
+                    if fraction == low || fraction == high {
+                        break;
+                    }
+                    let target = Placement {
+                        rotation: at.rotation,
+                        translation: previous.translation.lerp(at.translation, fraction),
+                    };
+                    let mut wished = p.constraints.clone();
+                    wished.push(Constraint::Origin {
+                        mate: "drag stop".into(),
+                        body: path.clone(),
+                        axes: true,
+                        at: target,
+                    });
+                    if let Ok(preferred) = solver::solve(&p.bodies, &wished) {
+                        let preferred = solver::solve_exact(&preferred, &p.constraints)?;
+                        low = fraction;
+                        if preferred[path].translation.distance_squared(at.translation)
+                            < placements[path].translation.distance_squared(at.translation)
+                        {
+                            placements = preferred;
+                        }
+                    } else {
+                        high = fraction;
+                    }
+                }
             }
         }
         placements = solver::solve(&placements, &p.constraints)?;
@@ -1042,6 +1097,173 @@ impl AssemblyDocument {
         })
     }
 
+    /// Couples two Hinge or unlocked Concentric joints. Default motion is opposite.
+    pub fn mate_gear(
+        &mut self,
+        name: &str,
+        joints: [&str; 2],
+        ratio: [f64; 2],
+        reverse: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_mechanical(name, &joints, None, super::Mechanism::Gear, ratio, reverse, strict)
+    }
+
+    /// Couples a pinion joint to a rack's signed slide, in millimetres per revolution.
+    #[allow(clippy::too_many_arguments, reason = "each is one setting of the mate")]
+    pub fn mate_rack_and_pinion(
+        &mut self,
+        name: &str,
+        joint: &str,
+        rack: &EndpointSelector,
+        reference: Option<ComponentId>,
+        travel_per_turn: f64,
+        reverse: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_mechanical(
+            name,
+            &[joint],
+            Some((rack, reference)),
+            super::Mechanism::RackAndPinion,
+            [travel_per_turn, 1.0],
+            reverse,
+            strict,
+        )
+    }
+
+    /// Couples axial travel and rotation of an unlocked Concentric joint.
+    pub fn mate_screw(
+        &mut self,
+        name: &str,
+        joint: &str,
+        pitch: f64,
+        reverse: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.mate_mechanical(name, &[joint], None, super::Mechanism::Screw, [pitch, 1.0], reverse, strict)
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "shared implementation for the three authored mechanical relations")]
+    fn mate_mechanical(
+        &mut self,
+        name: &str,
+        sources: &[&str],
+        rack: Option<(&EndpointSelector, Option<ComponentId>)>,
+        mechanism: super::Mechanism,
+        factor: [f64; 2],
+        reverse: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Mechanical mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            check_ratio(factor)?;
+            let mut joints = Vec::new();
+            let mut ends = Vec::new();
+            for source in sources {
+                let (id, axes) = super::mechanical::joint_named(truth, source)?;
+                if joints.contains(&id) {
+                    return Err(MateRefusal::invalid("a gear needs two different joints"));
+                }
+                if mechanism == super::Mechanism::Screw
+                    && !matches!(truth.known_mates().find(|m| m.id() == id), Some(Mate::Concentric { .. }))
+                {
+                    return Err(MateRefusal::invalid("Screw needs an unlocked Concentric joint with axial travel"));
+                }
+                if mechanism == super::Mechanism::Gear && !ends.is_empty() {
+                    let previous: &[FaceEndpoint] = &ends;
+                    if (previous[0].path == axes[0].path && previous[1].path == axes[1].path)
+                        || (previous[0].path == axes[1].path && previous[1].path == axes[0].path)
+                    {
+                        return Err(MateRefusal::invalid("Gear needs two independent joint rotations"));
+                    }
+                }
+                joints.push(id);
+                ends.extend(axes);
+            }
+            let reference = if let Some((rack, reference)) = rack {
+                if reference == Some(rack.component) {
+                    return Err(MateRefusal::invalid("a rack slides relative to another part"));
+                }
+                ends.push(doc.endpoint(truth, rack)?);
+                reference
+                    .map(|id| {
+                        let source = Self::part_source(truth, id)?;
+                        Ok(PartEndpoint {
+                            path: component_path(id),
+                            document: source.id.ok_or_else(|| MateRefusal::invalid("source has no document id"))?,
+                            configuration: source.configuration,
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::Mechanical {
+                id,
+                name: name.into(),
+                mechanism,
+                joints,
+                ends,
+                reference,
+                factor,
+                reverse,
+                offset: 0.0,
+                angles: [0.0; 2],
+            }));
+            doc.refresh_mechanical(truth, Some(name))?;
+            Ok(id)
+        })
+    }
+
+    pub(crate) fn refresh_mechanical(
+        &mut self,
+        truth: &mut Assembly,
+        initialize: Option<&str>,
+    ) -> Result<(), MateRefusal> {
+        let mut problem = self.gather(&Scope::new(truth, &self.table, &self.store))?;
+        problem.mates.retain(|m| matches!(m, Gathered::Between { rule: Rule::Mechanical { .. }, .. }));
+        if problem.mates.is_empty() {
+            return Ok(());
+        }
+        let p = self.prove_problem(problem)?;
+        for c in &p.constraints {
+            if let Constraint::Motion { mate, relation } = c
+                && let Relation::Native { reads, rule } = relation.as_ref()
+                && let Rule::Mechanical { id, scope, angles: previous, .. } = rule.as_ref()
+            {
+                let (value, measured) = motion::mechanical_value(reads, rule, &p.bodies);
+                if !value.is_finite() || !measured.iter().all(|v| v.is_finite()) {
+                    return Err(MateRefusal::new(RefusalCode::Uncertified, "the joint angle cannot be measured"));
+                }
+                let initializing = scope.is_root() && initialize == Some(mate.as_str());
+                if !initializing && measured.iter().zip(previous).all(|(a, b)| (a - b).abs() <= 1e-12) {
+                    continue;
+                }
+                if scope.is_root() {
+                    if let Some(Mate::Mechanical { offset, angles, .. }) = truth
+                        .mates
+                        .iter_mut()
+                        .filter_map(|e| match e {
+                            MateEntry::Known(m) => Some(m),
+                            _ => None,
+                        })
+                        .find(|m| m.id() == *id)
+                    {
+                        if initializing {
+                            *offset = value;
+                        }
+                        *angles = measured;
+                    }
+                } else {
+                    truth.override_mut(scope).mechanical_angles.insert(*id, measured);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Holds the signed distance from `a`'s plane to `b`, as a Distance measures it, anywhere
     /// from `min` to `max`. One undo step.
     #[allow(clippy::too_many_arguments, reason = "each is one setting of the mate")]
@@ -1365,6 +1587,21 @@ impl AssemblyDocument {
                     }
                     (Mate::LimitDistance { min, .. }, MateEdit::Min(text)) => *min = literal(text)?,
                     (Mate::LimitDistance { max, .. }, MateEdit::Max(text)) => *max = literal(text)?,
+                    (Mate::Mechanical { mechanism: super::Mechanism::Gear, factor, .. }, MateEdit::Ratio(r)) => {
+                        *factor = check_ratio(*r)?
+                    }
+                    (Mate::Mechanical { reverse, .. }, MateEdit::Reverse(on)) => *reverse = *on,
+                    (
+                        Mate::Mechanical {
+                            mechanism: super::Mechanism::Screw | super::Mechanism::RackAndPinion,
+                            factor,
+                            ..
+                        },
+                        MateEdit::Pitch(pitch),
+                    ) => {
+                        check_ratio([*pitch, 1.0])?;
+                        factor[0] = *pitch;
+                    }
                     (Mate::LinearCoupler { ratio, .. }, MateEdit::Ratio(r)) => *ratio = check_ratio(*r)?,
                     (Mate::LinearCoupler { reverse, .. }, MateEdit::Reverse(on)) => *reverse = *on,
                     (Mate::Slot { constraint: SlotConstraint::Percent { percent, .. }, .. }, MateEdit::Percent(p)) => {
@@ -1433,6 +1670,13 @@ impl AssemblyDocument {
                 let turn = doc.solved_turn(truth, &paths, &name)?;
                 if let Some(lock) = locked_turn(mate_named(truth, &name)?) {
                     *lock = Some(turn);
+                }
+            }
+            for (name, edit) in edits {
+                if matches!(edit, MateEdit::Ratio(_) | MateEdit::Reverse(_) | MateEdit::Pitch(_))
+                    && matches!(mate_named(truth, name)?, Mate::Mechanical { .. })
+                {
+                    doc.refresh_mechanical(truth, Some(name))?;
                 }
             }
             Ok(())
@@ -1778,7 +2022,7 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
             (Local::Plane(p), Local::Plane(q)) => p.normal.iter().zip(q.normal).any(|(x, y)| x.abs() != y.abs()),
             _ => false,
         });
-    if matches!(rule, Rule::Hinge { limits: Some(_), .. })
+    if matches!(rule, Rule::Mechanical { .. } | Rule::Hinge { limits: Some(_), .. })
         || nonparallel_width
         || reads.iter().any(|r| matches!(r.local, Local::Native(_)))
     {
@@ -1789,6 +2033,7 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
     let second = reads.next().expect("two ends");
     let (a, b) = (first.body, second.body);
     let out = match rule {
+        Rule::Mechanical { .. } => unreachable!("mechanical relations use bounded residuals"),
         Rule::Angle { min, max, limit } => {
             check_angle_limits([*min, *max])?;
             let third = reads.next().expect("reference direction");

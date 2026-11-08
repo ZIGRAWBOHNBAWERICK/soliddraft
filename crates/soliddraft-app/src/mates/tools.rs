@@ -134,13 +134,7 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
 
     if matches!(
         name,
-        "assembly_mate_gear"
-            | "assembly_mate_rack_and_pinion"
-            | "assembly_mate_screw"
-            | "assembly_mate_path"
-            | "assembly_mate_cam"
-            | "assembly_mate_universal_joint"
-            | "assembly_physical_dynamics"
+        "assembly_mate_path" | "assembly_mate_cam" | "assembly_mate_universal_joint" | "assembly_physical_dynamics"
     ) {
         return Some(Err(refused(MateRefusal::new(
             soliddraft_assembly::RefusalCode::UnsupportedMotion,
@@ -149,7 +143,10 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
     }
     let known = matches!(
         name,
-        "assembly_mate_angle"
+        "assembly_mate_gear"
+            | "assembly_mate_rack_and_pinion"
+            | "assembly_mate_screw"
+            | "assembly_mate_angle"
             | "assembly_mate_limit_angle"
             | "assembly_measure_planes"
             | "assembly_mate_origin"
@@ -190,6 +187,44 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
         "assembly_measure_planes" => {
             let m = doc.measure_planes(&selector(&input["a"])?, &selector(&input["b"])?).map_err(refused)?;
             return Ok(json!({ "measurement": m }));
+        }
+        "assembly_mate_gear" => {
+            let ratio = if input["ratio"].is_null() { [1.0, 1.0] } else { ratio(&input["ratio"])? };
+            doc.mate_gear(
+                text(input, "name")?,
+                [text(input, "joint_a")?, text(input, "joint_b")?],
+                ratio,
+                input["reverse"].as_bool().unwrap_or(false),
+                strict,
+            )
+            .map(|id| json!({"mate":id}))
+        }
+        "assembly_mate_rack_and_pinion" => {
+            let rack = selector(&input["rack"])?;
+            let reference = optional_component(&input["reference"], "reference")?;
+            let travel =
+                input["travel_per_turn"].as_f64().ok_or("travel_per_turn is a positive number in millimetres")?;
+            doc.mate_rack_and_pinion(
+                text(input, "name")?,
+                text(input, "joint")?,
+                &rack,
+                reference,
+                travel,
+                input["reverse"].as_bool().unwrap_or(false),
+                strict,
+            )
+            .map(|id| json!({"mate":id}))
+        }
+        "assembly_mate_screw" => {
+            let pitch = input["pitch"].as_f64().ok_or("pitch is a positive number in millimetres per turn")?;
+            doc.mate_screw(
+                text(input, "name")?,
+                text(input, "joint")?,
+                pitch,
+                input["reverse"].as_bool().unwrap_or(false),
+                strict,
+            )
+            .map(|id| json!({"mate":id}))
         }
         "assembly_mate_angle" | "assembly_mate_limit_angle" => {
             let (a, b, reference) = (selector(&input["a"])?, selector(&input["b"])?, selector(&input["reference"])?);
@@ -359,6 +394,9 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             if let Some(d) = input["max"].as_str() {
                 edits.push((mate.clone(), MateEdit::Max(d.to_owned())));
             }
+            if let Some(pitch) = input["pitch"].as_f64() {
+                edits.push((mate.clone(), MateEdit::Pitch(pitch)));
+            }
             if !input["ratio"].is_null() {
                 edits.push((mate.clone(), MateEdit::Ratio(ratio(&input["ratio"])?)));
             }
@@ -509,6 +547,15 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                     if let Some(turn) = lock_rotation {
                         row["locked_turn"] = json!(turn);
                     }
+                }
+                Mate::Mechanical { mechanism, joints, factor, reverse, offset, angles, reference, .. } => {
+                    row["mechanism"] = json!(mechanism);
+                    row["joints"] = json!(joints);
+                    row["factor"] = json!(factor);
+                    row["reverse"] = json!(reverse);
+                    row["offset"] = json!(offset);
+                    row["angles"] = json!(angles);
+                    row["reference"] = json!(reference.as_ref().map(|r| r.path.to_string()));
                 }
                 Mate::Hinge { axes, planes, plane_alignment, angle_limits, .. } => {
                     row["angle_limits"] = json!(angle_limits);

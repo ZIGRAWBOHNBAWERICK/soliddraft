@@ -666,6 +666,212 @@ fn unrestricted_hinge_stops_preserve_non_axial_plane_alignment() {
     std::fs::remove_dir_all(r.dir).unwrap();
 }
 
+fn occurrence(c: ComponentId) -> soliddraft_assembly::OccurrencePath {
+    soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(c))
+}
+fn hinge(doc: &mut AssemblyDocument, name: &str, a: ComponentId, b: ComponentId) {
+    doc.mate_hinge(
+        name,
+        [&cylinder(a), &cylinder(b)],
+        [&datum(a, "Top plane"), &datum(b, "Top plane")],
+        Alignment::Aligned,
+        Alignment::Aligned,
+        false,
+    )
+    .unwrap();
+}
+fn move_under_mates(doc: &mut AssemblyDocument, component: ComponentId, target: Placement) {
+    doc.begin_drag(occurrence(component)).unwrap();
+    doc.preview_drag(target).unwrap();
+    doc.commit_drag().unwrap();
+}
+#[test]
+fn gear_is_driven_from_either_joint_and_preserves_its_phase_after_reopen() {
+    let mut r = rig("gear-motion", Profile::Circle);
+    let reference = r.doc.assembly().sources[0].document.clone();
+    let c = r.doc.insert(reference, Placement::IDENTITY).unwrap();
+    r.doc.finish_loading();
+    hinge(&mut r.doc, "H1", r.a, r.b);
+    hinge(&mut r.doc, "H2", r.a, c);
+    let initial = r.doc.assembly().component(r.b).unwrap().placement.rotation.to_euler(glam::EulerRot::XYZ).2;
+    r.doc.mate_gear("G", ["H1", "H2"], [2.0, 1.0], false, false).unwrap();
+    move_under_mates(
+        &mut r.doc,
+        r.b,
+        Placement::new(DQuat::from_rotation_z(initial + std::f64::consts::FRAC_PI_2), DVec3::ZERO),
+    );
+    assert!(
+        r.doc
+            .assembly()
+            .component(c)
+            .unwrap()
+            .placement
+            .rotation
+            .angle_between(DQuat::from_rotation_z(-std::f64::consts::FRAC_PI_4))
+            < 1e-7
+    );
+    move_under_mates(&mut r.doc, c, Placement::new(DQuat::from_rotation_z(-std::f64::consts::FRAC_PI_2), DVec3::ZERO));
+    assert!(
+        r.doc
+            .assembly()
+            .component(r.b)
+            .unwrap()
+            .placement
+            .rotation
+            .angle_between(DQuat::from_rotation_z(initial + std::f64::consts::PI))
+            < 1e-7
+    );
+    bounded(&mut r.doc, "G");
+    let before = r.doc.assembly().clone();
+    assert!(r.doc.delete_mate("H1").is_err());
+    assert_eq!(&before, r.doc.assembly());
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    bounded(&mut reopened, "G");
+    assert_eq!(reopened.assembly(), &before);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+#[test]
+fn screw_tracks_multiple_turns_and_can_be_driven_by_axial_travel() {
+    let mut r = rig("screw-motion", Profile::Circle);
+    r.doc.mate_concentric("C", &cylinder(r.a), &cylinder(r.b), Alignment::Aligned, false, false).unwrap();
+    let initial = r.doc.assembly().component(r.b).unwrap().placement;
+    let initial_angle = initial.rotation.to_euler(glam::EulerRot::XYZ).2;
+    r.doc.mate_screw("S", "C", 8.0, false, false).unwrap();
+    let depth = r.doc.undo_depth();
+    r.doc.begin_drag(occurrence(r.b)).unwrap();
+    for quarter in 1..=10 {
+        let shown = r.doc.table().local(r.doc.table().find(&occurrence(r.b)).unwrap());
+        let target = Placement::new(
+            DQuat::from_rotation_z(initial_angle + quarter as f64 * std::f64::consts::FRAC_PI_2),
+            shown.translation,
+        );
+        r.doc.preview_drag(target).unwrap();
+        let shown = r.doc.table().local(r.doc.table().find(&occurrence(r.b)).unwrap());
+        assert!(
+            (shown.translation.z - (initial.translation.z + quarter as f64 * 2.0)).abs() < 1e-8,
+            "quarter {quarter}: {shown:?}"
+        );
+    }
+    r.doc.commit_drag().unwrap();
+    assert_eq!(r.doc.undo_depth(), depth + 1);
+    bounded(&mut r.doc, "S");
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    bounded(&mut reopened, "S");
+    let before = reopened.assembly().component(r.b).unwrap().placement;
+    move_under_mates(&mut reopened, r.b, Placement::new(before.rotation, before.translation + DVec3::Z * 2.0));
+    let after = reopened.assembly().component(r.b).unwrap().placement;
+    assert!((after.translation.z - before.translation.z - 2.0).abs() < 1e-8);
+    assert!(after.rotation.angle_between(before.rotation * DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2)) < 1e-7);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+#[test]
+fn rack_and_pinion_moves_in_both_directions_and_reverse_changes_sign() {
+    let mut r = rig("rack-motion", Profile::Circle);
+    let reference = r.doc.assembly().sources[0].document.clone();
+    let rack = r.doc.insert(reference, Placement::IDENTITY).unwrap();
+    r.doc.finish_loading();
+    hinge(&mut r.doc, "H", r.a, r.b);
+    r.doc
+        .mate_parallel("PX", &datum(r.a, "Right plane"), &datum(rack, "Right plane"), Alignment::Aligned, false)
+        .unwrap();
+    r.doc.mate_parallel("P", &datum(r.a, "Top plane"), &datum(rack, "Top plane"), Alignment::Aligned, false).unwrap();
+    let initial = r.doc.assembly().component(r.b).unwrap().placement.rotation.to_euler(glam::EulerRot::XYZ).2;
+    r.doc.mate_rack_and_pinion("R", "H", &datum(rack, "Right plane"), Some(r.a), 40.0, true, false).unwrap();
+    move_under_mates(
+        &mut r.doc,
+        r.b,
+        Placement::new(DQuat::from_rotation_z(initial + std::f64::consts::FRAC_PI_2), DVec3::ZERO),
+    );
+    assert!((r.doc.assembly().component(rack).unwrap().placement.translation.x + 10.0).abs() < 1e-8);
+    let old = r.doc.assembly().component(rack).unwrap().placement;
+    move_under_mates(&mut r.doc, rack, Placement::new(old.rotation, DVec3::new(-20.0, 0.0, 0.0)));
+    assert!(
+        r.doc
+            .assembly()
+            .component(r.b)
+            .unwrap()
+            .placement
+            .rotation
+            .angle_between(DQuat::from_rotation_z(initial + std::f64::consts::PI))
+            < 1e-7
+    );
+    bounded(&mut r.doc, "R");
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+#[test]
+fn linear_coupler_can_be_dragged_from_either_end_and_stops_at_a_limit() {
+    let mut r = rig("linear-motion", Profile::Block);
+    let reference = r.doc.assembly().sources[0].document.clone();
+    let c = r.doc.insert(reference, Placement::IDENTITY).unwrap();
+    r.doc.finish_loading();
+    r.doc.move_to(&[(occurrence(r.b), Placement::translation(DVec3::new(3.0, 4.0, 20.0)))]).unwrap();
+    r.doc
+        .mate_linear_coupler(
+            "L",
+            &datum(r.b, "Right plane"),
+            &datum(c, "Right plane"),
+            [Some(r.a), Some(r.a)],
+            [1.0, 2.0],
+            false,
+            false,
+        )
+        .unwrap();
+    let b = r.doc.assembly().component(r.b).unwrap().placement;
+    move_under_mates(&mut r.doc, c, Placement::translation(DVec3::new(10.0, 0.0, 0.0)));
+    assert!((r.doc.assembly().component(r.b).unwrap().placement.translation.x - (b.translation.x + 5.0)).abs() < 1e-8);
+    r.doc
+        .mate_limit_distance(
+            "Stop",
+            &datum(r.a, "Right plane"),
+            &datum(c, "Right plane"),
+            ["0 mm", "12 mm"],
+            Alignment::Aligned,
+            false,
+        )
+        .unwrap();
+    move_under_mates(&mut r.doc, c, Placement::translation(DVec3::new(100.0, 0.0, 0.0)));
+    assert!((r.doc.assembly().component(c).unwrap().placement.translation.x - 12.0).abs() < 1e-8);
+    let at_stop = r.doc.assembly().component(r.b).unwrap().placement.translation.x;
+    let stop = r.doc.assembly().component(c).unwrap().placement.translation.x;
+    r.doc.edit_mates(&[("L".into(), MateEdit::Reverse(true))]).unwrap();
+    move_under_mates(&mut r.doc, c, Placement::IDENTITY);
+    assert!((r.doc.assembly().component(r.b).unwrap().placement.translation.x - at_stop - stop / 2.0).abs() < 1e-8);
+    assert!(r.doc.solver().bounded.is_empty());
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn mechanical_settings_reject_invalid_values_and_capture_the_current_phase() {
+    let mut r = rig("mechanical-settings", Profile::Circle);
+    r.doc.mate_concentric("C", &cylinder(r.a), &cylinder(r.b), Alignment::Aligned, false, false).unwrap();
+    let before = r.doc.assembly().clone();
+    assert_eq!(r.doc.mate_screw("Bad", "C", 0.0, false, false).unwrap_err().code, RefusalCode::InvalidValue);
+    assert_eq!(r.doc.assembly(), &before);
+    r.doc.mate_screw("S", "C", 8.0, false, false).unwrap();
+    let pose = r.doc.assembly().component(r.b).unwrap().placement;
+    r.doc.edit_mates(&[("S".into(), MateEdit::Reverse(true)), ("S".into(), MateEdit::Pitch(16.0))]).unwrap();
+    assert_eq!(r.doc.assembly().component(r.b).unwrap().placement, pose);
+    move_under_mates(
+        &mut r.doc,
+        r.b,
+        Placement::new(pose.rotation * DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2), pose.translation),
+    );
+    assert!((r.doc.assembly().component(r.b).unwrap().placement.translation.z - pose.translation.z + 4.0).abs() < 1e-8);
+    let before = r.doc.assembly().clone();
+    assert_eq!(
+        r.doc.edit_mates(&[("S".into(), MateEdit::Pitch(f64::NAN))]).unwrap_err().code,
+        RefusalCode::InvalidValue
+    );
+    assert!(r.doc.edit_mates(&[("C".into(), MateEdit::LockRotation(true))]).is_err());
+    assert_eq!(r.doc.assembly(), &before);
+    bounded(&mut r.doc, "S");
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
 #[test]
 fn an_exact_plane_group_stays_canonical_after_a_free_spin_drag() {
     let mut r = rig("drag-exact-free-spin", Profile::Block);
@@ -676,10 +882,7 @@ fn an_exact_plane_group_stays_canonical_after_a_free_spin_drag() {
         .mate_distance("D", &datum(r.b, "Top plane"), &datum(c, "Top plane"), "0.2 mm", Alignment::Aligned, false)
         .unwrap();
     for z in [0.1, 0.01, 0.3, 1.234, 0.6789, -0.1, 100.123] {
-        let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
-        r.doc.begin_drag(path).unwrap();
-        r.doc.preview_drag(Placement::new(DQuat::from_rotation_z(0.7), DVec3::new(3.0, 4.0, z))).unwrap();
-        r.doc.commit_drag().unwrap();
+        move_under_mates(&mut r.doc, r.b, Placement::new(DQuat::from_rotation_z(0.7), DVec3::new(3.0, 4.0, z)));
         assert!(r.doc.solver().bounded.is_empty());
         let before = r.doc.assembly().clone();
         let depth = r.doc.undo_depth();
@@ -687,5 +890,91 @@ fn an_exact_plane_group_stays_canonical_after_a_free_spin_drag() {
         assert_eq!(r.doc.assembly(), &before, "a free-spin drag at {z} must retain the original exact solve");
         assert_eq!(r.doc.undo_depth(), depth);
     }
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn nested_screw_winding_belongs_to_the_parent_occurrence() {
+    let mut r = rig("nested-screw-motion", Profile::Circle);
+    r.doc.mate_concentric("C", &cylinder(r.a), &cylinder(r.b), Alignment::Aligned, false, false).unwrap();
+    r.doc.mate_screw("S", "C", 8.0, false, false).unwrap();
+    let initial = r.doc.assembly().component(r.b).unwrap().placement;
+    let initial_angle = initial.rotation.to_euler(glam::EulerRot::XYZ).2;
+    r.doc.save(None).unwrap();
+    let child_bytes = std::fs::read(&r.file).unwrap();
+    let parent_file = r.dir.join("parent.dwasm");
+    let mut parent = AssemblyDocument::new_with("Parent", options());
+    parent.save(Some(&parent_file)).unwrap();
+    let identity = identify_file(&r.file).unwrap();
+    let mut reference = DocRef::new(identity.id, identity.kind, "", identity.revision);
+    reference.set_path(&parent_file, &r.file);
+    let child = parent.insert(reference.clone(), Placement::IDENTITY).unwrap();
+    let other = parent.insert(reference, Placement::new(DQuat::IDENTITY, DVec3::X * 100.0)).unwrap();
+    parent.finish_loading();
+    let path = occurrence(child).child(soliddraft_assembly::Step::component(r.b));
+    let depth = parent.undo_depth();
+    parent.begin_drag(path.clone()).unwrap();
+    for quarter in 1..=10 {
+        let shown = parent.table().local(parent.table().find(&path).unwrap());
+        parent
+            .preview_drag(Placement::new(
+                DQuat::from_rotation_z(initial_angle + quarter as f64 * std::f64::consts::FRAC_PI_2),
+                shown.translation,
+            ))
+            .unwrap();
+        let shown = parent.table().local(parent.table().find(&path).unwrap());
+        assert!(
+            (shown.translation.z - (initial.translation.z + quarter as f64 * 2.0)).abs() < 1e-8,
+            "quarter {quarter}: {shown:?}"
+        );
+    }
+    parent.commit_drag().unwrap();
+    assert_eq!(parent.undo_depth(), depth + 1);
+    let other_path = occurrence(other).child(soliddraft_assembly::Step::component(r.b));
+    assert_eq!(parent.table().local(parent.table().find(&other_path).unwrap()), initial);
+    let accepted = parent.assembly().clone();
+    assert!(parent.undo());
+    assert!(parent.redo());
+    assert_eq!(parent.assembly(), &accepted);
+    parent.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&parent_file, options()).unwrap();
+    reopened.finish_loading();
+    assert_eq!(reopened.assembly(), &accepted);
+    let before = reopened.table().local(reopened.table().find(&path).unwrap());
+    reopened.begin_drag(path.clone()).unwrap();
+    reopened
+        .preview_drag(Placement::new(
+            DQuat::from_rotation_z(initial_angle + 11.0 * std::f64::consts::FRAC_PI_2),
+            before.translation,
+        ))
+        .unwrap();
+    reopened.commit_drag().unwrap();
+    let after = reopened.table().local(reopened.table().find(&path).unwrap());
+    assert!((after.translation.z - initial.translation.z - 22.0).abs() < 1e-8);
+    reopened.save(None).unwrap();
+    let grandparent_file = r.dir.join("grandparent.dwasm");
+    let mut grandparent = AssemblyDocument::new_with("Grandparent", options());
+    grandparent.save(Some(&grandparent_file)).unwrap();
+    let identity = identify_file(&parent_file).unwrap();
+    let mut reference = DocRef::new(identity.id, identity.kind, "", identity.revision);
+    reference.set_path(&grandparent_file, &parent_file);
+    let parent_id = grandparent.insert(reference, Placement::IDENTITY).unwrap();
+    grandparent.finish_loading();
+    let nested = occurrence(parent_id)
+        .child(soliddraft_assembly::Step::component(child))
+        .child(soliddraft_assembly::Step::component(r.b));
+    let before = grandparent.table().local(grandparent.table().find(&nested).unwrap());
+    grandparent.begin_drag(nested.clone()).unwrap();
+    grandparent
+        .preview_drag(Placement::new(
+            DQuat::from_rotation_z(initial_angle + 12.0 * std::f64::consts::FRAC_PI_2),
+            before.translation,
+        ))
+        .unwrap();
+    grandparent.commit_drag().unwrap();
+    let after = grandparent.table().local(grandparent.table().find(&nested).unwrap());
+    assert!((after.translation.z - initial.translation.z - 24.0).abs() < 1e-8);
+    grandparent.save(None).unwrap();
+    assert_eq!(std::fs::read(&r.file).unwrap(), child_bytes);
     std::fs::remove_dir_all(r.dir).unwrap();
 }

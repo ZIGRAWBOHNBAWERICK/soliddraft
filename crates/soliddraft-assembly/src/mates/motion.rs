@@ -9,7 +9,7 @@ use super::{MateRefusal, RefusalCode};
 use crate::placement::Placement;
 use glam::{DQuat, DVec3};
 use interval::{Interval, Number, radians};
-pub(super) use native::{native_constraint, projection};
+pub(super) use native::{mechanical_value, native_constraint, projection};
 use num_rational::BigRational;
 use num_traits::Zero;
 use serde::Serialize;
@@ -26,6 +26,7 @@ pub(crate) enum DistanceEntity {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Relation {
+    Rotation { body: Body, rotation: DQuat },
     Native { reads: Vec<super::command::Read>, rule: Box<super::bodies::Rule> },
     Angle { a: Body, b: Body, reference: Body, directions: [[i8; 3]; 3], min: f64, max: f64, limit: bool },
     Separation { a: Body, b: Body, ends: Box<[DistanceEntity; 2]>, distance: BigRational, parallel: Option<i8> },
@@ -33,8 +34,12 @@ pub(crate) enum Relation {
 impl Relation {
     pub fn bodies(&self) -> Vec<&Body> {
         match self {
+            Self::Rotation { body, .. } => vec![body],
             Self::Native { reads, rule } => {
                 let mut bodies: Vec<_> = reads.iter().map(|r| &r.body).collect();
+                if let super::bodies::Rule::Mechanical { reference: Some(body), .. } = rule.as_ref() {
+                    bodies.push(body);
+                }
                 if let super::bodies::Rule::Coupler { references, .. } = rule.as_ref() {
                     bodies.extend(references.iter().flatten());
                 }
@@ -358,6 +363,7 @@ fn residual<N: Number>(c: &Constraint, poses: &BTreeMap<Body, Placement>, rank: 
             }
         }
         Constraint::Motion { relation, .. } => match relation.as_ref() {
+            Relation::Rotation { body, rotation } => turn(&mut out, &Placement::IDENTITY, &poses[body], *rotation),
             Relation::Native { reads, rule } => native::residual(&mut out, reads, rule, poses, rank),
             Relation::Separation { a, b, ends, distance: d, parallel } => {
                 if let [DistanceEntity::Axis(u), DistanceEntity::Axis(v)] = ends.as_ref() {
@@ -677,6 +683,7 @@ fn seed(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> BTreeMap<Body,
                 }
             }
             Constraint::Motion { relation, .. } => match relation.as_ref() {
+                Relation::Rotation { .. } => {}
                 Relation::Angle { a, b, reference, directions, min, max, limit } => {
                     let n = out[reference].rotation * DVec3::from_array(directions[2].map(|x| x as f64));
                     let project = |v: DVec3| (v - n * v.dot(n)).normalize();

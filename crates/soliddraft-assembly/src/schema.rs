@@ -29,7 +29,7 @@
 //!
 //! Units are millimetres and degrees.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
@@ -285,7 +285,8 @@ fn unit(d: &[f64; 3]) -> DVec3 {
 }
 
 /// A change to one occurrence below the assembly's own components, or to one pattern
-/// member. Unset fields leave the occurrence as its own assembly has it.
+/// member. Mechanical winding can also be kept on a root sub-assembly occurrence.
+/// Unset fields leave the occurrence as its own assembly has it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Override {
@@ -300,17 +301,23 @@ pub struct Override {
     /// Place it here instead, relative to the assembly that contains it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<Placement>,
+    /// Accepted winding of mechanical mates owned by this sub-assembly occurrence.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mechanical_angles: BTreeMap<crate::mates::MateId, [f64; 2]>,
 }
 
 impl Override {
     /// An override that changes nothing yet.
     pub fn at(path: OccurrencePath) -> Override {
-        Override { path, hidden: None, suppressed: None, placement: None }
+        Override { path, hidden: None, suppressed: None, placement: None, mechanical_angles: BTreeMap::new() }
     }
 
     /// True when it changes nothing.
     pub fn is_empty(&self) -> bool {
-        self.hidden.is_none() && self.suppressed.is_none() && self.placement.is_none()
+        self.hidden.is_none()
+            && self.suppressed.is_none()
+            && self.placement.is_none()
+            && self.mechanical_angles.is_empty()
     }
 }
 
@@ -572,8 +579,23 @@ impl Assembly {
                     o.path, first.component
                 ));
             }
+            if !o.mechanical_angles.values().flatten().all(|v| v.is_finite()) {
+                return bad(format!("override {} has non-finite mechanical angles", o.path));
+            }
+            if !o.mechanical_angles.is_empty() && o.path.steps().iter().any(|s| s.member.is_some()) {
+                return bad(format!("override {} stores mechanical angles on a pattern member", o.path));
+            }
             match first.member {
                 None if o.path.steps().len() == 1 => {
+                    let component = self.component(first.component).expect("checked above");
+                    if o.hidden.is_none()
+                        && o.suppressed.is_none()
+                        && o.placement.is_none()
+                        && self.source(component.source).is_some_and(|s| s.document.kind == DocKind::Assembly)
+                        && !o.mechanical_angles.is_empty()
+                    {
+                        continue;
+                    }
                     return bad(format!(
                         "override {} names a component of this assembly; change the component",
                         o.path

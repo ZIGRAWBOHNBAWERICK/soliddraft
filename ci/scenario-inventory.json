@@ -1250,6 +1250,66 @@
       "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
       "supported_limits": "B6: bounded Hinge stops in both directions during rotation, undo/redo and save/reopen; no collision checks.",
       "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-gear-motion",
+      "file": "ci/scenarios/mate-gear-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-rack-motion",
+      "file": "ci/scenarios/mate-rack-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-screw-motion",
+      "file": "ci/scenarios/mate-screw-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-linear-motion",
+      "file": "ci/scenarios/mate-linear-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
     }
   ]
 }

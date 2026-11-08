@@ -13,6 +13,10 @@ fn call(state: &mut AppState, name: &str, args: Value) -> (bool, Value) {
 fn drag_and_hinge_limit_application_loops() {
     for source in [
         include_str!("../../../ci/scenarios/mate-drag.json"),
+        include_str!("../../../ci/scenarios/mate-gear-motion.json"),
+        include_str!("../../../ci/scenarios/mate-rack-motion.json"),
+        include_str!("../../../ci/scenarios/mate-screw-motion.json"),
+        include_str!("../../../ci/scenarios/mate-linear-motion.json"),
         include_str!("../../../ci/scenarios/mate-drag-hinge.json"),
     ] {
         let spec: Value = serde_json::from_str(source).unwrap();

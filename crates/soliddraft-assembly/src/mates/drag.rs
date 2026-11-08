@@ -51,6 +51,7 @@ impl AssemblyDocument {
         }
         let path = drag.path.clone();
         let mut candidate = drag.candidate.clone();
+        let previous = Scope::new(&candidate, &self.table, &self.store).world(&path).unwrap_or(target);
         match Self::owner(&path) {
             Ok(id) => {
                 candidate
@@ -60,9 +61,10 @@ impl AssemblyDocument {
             }
             Err(p) => candidate.override_mut(&p).placement = Some(target),
         }
-        let solved = self.solve_drag_truth(&candidate, &path)?;
+        let solved = self.solve_drag_truth(&candidate, &path, previous)?;
         let kept = bodies::locals(&Scope::new(&candidate, &self.table, &self.store), &solved.placements);
         bodies::keep(&mut candidate, kept);
+        self.refresh_mechanical(&mut candidate, None)?;
         self.verify_problem(self.gather(&Scope::new(&candidate, &self.table, &self.store))?)?;
         let scope = Scope::new(&candidate, &self.table, &self.store);
         let placed: Vec<_> = (1..self.table.len() as u32)

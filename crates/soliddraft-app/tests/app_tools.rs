@@ -517,7 +517,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("assembly_mate_limit_distance", limit);
     s.call("assembly_edit_mate", json!({ "mate": "LD", "max": "60 mm" }));
     s.call("assembly_delete_mate", json!({ "mate": "LD" }));
-    let profile = json!({ "name": "PC", "a": top, "b": bottom, "alignment": "opposed", "distance": "1 mm" });
+    let profile = json!({ "name": "PC", "a": top, "b": bottom, "alignment": "opposed", "distance": "0 mm" });
     let centred = s.call("assembly_mate_profile_center", profile);
     let row = centred["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PC").unwrap().clone();
     assert_eq!(row["b"]["support"]["kind"], "profile");

@@ -552,7 +552,7 @@
       ],
       "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
       "route": "MCP assembly and Symmetric mate commands -> assembly transaction -> proven plane queries -> exact mirror relation -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B4: Symmetric between two axis-aligned planar faces about a part's Right plane: the later part mirrored exactly, a distance that disagrees refused naming both, the alignment flipped turning the image over, undo, redo, save and reopen.",
+      "supported_limits": "B4: Symmetric between two axis-aligned planar faces about a part's Right plane: the image part mirrored exactly, a second Symmetric about the Front plane that asks the image to face the other way refused naming the mates that cannot hold together, the alignment flipped turning the image over, undo, redo, save and reopen.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
     },
     {

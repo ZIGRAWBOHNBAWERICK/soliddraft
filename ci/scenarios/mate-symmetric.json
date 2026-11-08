@@ -243,6 +243,39 @@
       ]
     },
     {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "OB",
+        "component": 4,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
       "tool": "assembly_mate_symmetric",
       "arguments": {
         "name": "S",
@@ -275,7 +308,7 @@
       "checks": [
         {
           "pointer": "/summary/assembly/solver/remaining_dof",
-          "equals": 9
+          "equals": 3
         },
         {
           "pointer": "/summary/assembly/solver/state",
@@ -283,22 +316,22 @@
         },
         {
           "pointer": "/summary/assembly/components/1/translation/0",
-          "approx": 3,
+          "approx": 0,
           "tolerance": 1e-09
         },
         {
           "pointer": "/summary/assembly/components/1/translation/1",
-          "approx": 7,
+          "approx": 0,
           "tolerance": 1e-09
         },
         {
           "pointer": "/summary/assembly/components/1/translation/2",
-          "approx": 30,
+          "approx": 0,
           "tolerance": 1e-09
         },
         {
           "pointer": "/summary/assembly/components/2/translation/0",
-          "approx": -3,
+          "approx": 0,
           "tolerance": 1e-09
         },
         {
@@ -312,25 +345,25 @@
           "tolerance": 1e-09
         },
         {
-          "pointer": "/summary/assembly/mates/1/kind",
+          "pointer": "/summary/assembly/mates/2/kind",
           "equals": "symmetric"
         },
         {
-          "pointer": "/summary/assembly/mates/1/plane/plane/datum",
+          "pointer": "/summary/assembly/mates/2/plane/plane/datum",
           "equals": "right"
         }
       ]
     },
     {
-      "tool": "assembly_mate_distance",
+      "tool": "assembly_mate_symmetric",
       "arguments": {
-        "name": "D",
+        "name": "S2",
         "a": {
-          "component": 2,
+          "component": 4,
           "feature": "Boss-Extrude1",
           "generator": "side",
           "normal": [
-            1,
+            -1,
             0,
             0
           ]
@@ -345,7 +378,10 @@
             0
           ]
         },
-        "distance": "0 mm",
+        "plane": {
+          "component": 2,
+          "plane": "Front plane"
+        },
         "alignment": "aligned"
       },
       "checks": [
@@ -356,14 +392,16 @@
         {
           "pointer": "/result/mates",
           "equals": [
-            "D",
-            "S"
+            "O",
+            "OB",
+            "S",
+            "S2"
           ]
         },
         {
           "pointer": "/summary/assembly/accepted_state",
           "same_as": {
-            "step": 18,
+            "step": 19,
             "pointer": "/summary/assembly/accepted_state"
           }
         }
@@ -379,7 +417,7 @@
       "checks": [
         {
           "pointer": "/summary/assembly/solver/remaining_dof",
-          "equals": 9
+          "equals": 3
         },
         {
           "pointer": "/summary/assembly/solver/state",
@@ -387,7 +425,7 @@
         },
         {
           "pointer": "/summary/assembly/components/2/translation/0",
-          "approx": 7,
+          "approx": 10,
           "tolerance": 1e-09
         },
         {
@@ -408,7 +446,7 @@
       "checks": [
         {
           "pointer": "/summary/assembly/components/2/translation/0",
-          "approx": -3,
+          "approx": 0,
           "tolerance": 1e-09
         },
         {
@@ -429,7 +467,7 @@
       "checks": [
         {
           "pointer": "/summary/assembly/components/2/translation/0",
-          "approx": 7,
+          "approx": 10,
           "tolerance": 1e-09
         },
         {
@@ -452,7 +490,7 @@
       "checks": [
         {
           "pointer": "/summary/assembly/solver/remaining_dof",
-          "equals": 9
+          "equals": 3
         },
         {
           "pointer": "/summary/assembly/solver/state",
@@ -460,7 +498,7 @@
         },
         {
           "pointer": "/summary/assembly/components/2/translation/0",
-          "approx": 7,
+          "approx": 10,
           "tolerance": 1e-09
         },
         {
@@ -495,20 +533,20 @@
         {
           "pointer": "/summary/assembly/accepted_state/truth",
           "same_as": {
-            "step": 23,
+            "step": 24,
             "pointer": "/summary/assembly/accepted_state/truth"
           }
         },
         {
           "pointer": "/summary/assembly/accepted_state/revision",
           "same_as": {
-            "step": 23,
+            "step": 24,
             "pointer": "/summary/assembly/accepted_state/revision"
           }
         },
         {
           "pointer": "/summary/assembly/solver/remaining_dof",
-          "equals": 9
+          "equals": 3
         },
         {
           "pointer": "/summary/assembly/solver/state",
@@ -516,7 +554,7 @@
         },
         {
           "pointer": "/summary/assembly/components/2/translation/0",
-          "approx": 7,
+          "approx": 10,
           "tolerance": 1e-09
         },
         {

@@ -148,7 +148,9 @@ Plane normals are exact signed axes, which splits a solve in two:
    relates two normals: equal or opposite for a Distance, Coincident, Parallel or Width, at
    right angles for a Perpendicular. Every turn the exact solver can prove takes the normals
    it reads onto axes, so each group's candidates are the 24 quarter-turn rotations. One
-   unlocked part held along a single axis may also keep its own spin about that axis. All
+   unlocked part held along a single axis may also keep its own spin about that axis. A
+   group no mate between planes turns keeps its authored turn, unless a lock in it places
+   parts by that turn; it then tries its authored turn and then every quarter turn. All
    groups are solved together, as a search over those candidates. Each group tries its
    candidates nearest its authored turn first, in a fixed order among equals, so an
    authored pose that already holds is kept and one that does not moves by the smallest

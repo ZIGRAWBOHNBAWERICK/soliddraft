@@ -20,7 +20,9 @@
 //! they leave can hold, checking each mate's translation as soon as its turns are chosen,
 //! and the assembly is over-constrained only when no supported turns work. Turns that take
 //! a group's read normals onto the same axes decide the same, so the search tries one of
-//! them only.
+//! them only. A group no mate between planes turns may still need a turn when a lock in it
+//! places a part along an axis, so such a group tries every quarter turn after its
+//! authored one.
 //!
 //! What is not constrained keeps its authored value. Nothing is fixed behind the user's
 //! back: an unanchored group keeps its first body's position only because something must
@@ -610,8 +612,9 @@ impl<'a> Search<'a> {
     }
 
     /// Group `g`'s candidate turns under `active` rules, nearest its authored turn first
-    /// and in a fixed order among equals.
-    fn domain(&self, g: usize, active: &[usize]) -> Vec<DQuat> {
+    /// and in a fixed order among equals. `locked_in` says an active lock places parts of
+    /// the group by its whole turn.
+    fn domain(&self, g: usize, active: &[usize], locked_in: bool) -> Vec<DQuat> {
         let mut normals = Vec::new();
         for &i in active {
             match &self.rules[i].2 {
@@ -628,11 +631,19 @@ impl<'a> Search<'a> {
             }
         }
         let authored = self.authored[g];
-        let Some(&u0) = normals.first() else { return vec![authored] };
         let mut out = Vec::new();
-        if !self.locked[g] && normals.iter().all(|n| dot(*n, u0).abs() == 1) {
-            for v in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
-                out.extend(spun(authored, u0, v));
+        match normals.first() {
+            // Nothing asks anything of the group's turn: it keeps the authored one.
+            None if !locked_in => return vec![authored],
+            // No mate relates its normals, but a lock's offset turns with it, so the
+            // translations may need any quarter turn. The authored turn still comes first.
+            None => out.push(authored),
+            Some(&u0) => {
+                if !self.locked[g] && normals.iter().all(|n| dot(*n, u0).abs() == 1) {
+                    for v in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+                        out.extend(spun(authored, u0, v));
+                    }
+                }
             }
         }
         out.extend(self.cubes.iter().copied());
@@ -660,9 +671,15 @@ impl<'a> Search<'a> {
         self.steps = 0;
         let groups = self.authored.len();
         let rules: Vec<usize> = (0..self.rules.len()).filter(|i| active[self.rules[*i].1]).collect();
+        let mut locked_in = vec![false; groups];
+        for (c, on) in self.constraints.iter().zip(active) {
+            if let (Constraint::Lock { a, .. }, true) = (c, on) {
+                locked_in[self.member[a].0] = true;
+            }
+        }
         let pass = Pass {
             active: active.to_vec(),
-            domains: (0..groups).map(|g| self.domain(g, &rules)).collect(),
+            domains: (0..groups).map(|g| self.domain(g, &rules, placing && locked_in[g])).collect(),
             touching: (0..groups)
                 .map(|g| rules.iter().copied().filter(|i| self.rules[*i].2.groups().contains(&g)).collect())
                 .collect(),
@@ -1858,6 +1875,81 @@ mod tests {
         assert_eq!(refused.code, RefusalCode::OverConstrained);
         assert_eq!(refused.mates, ["D", "OA", "OB", "OC", "P"]);
         assert!(refused.message.contains("no quarter-turn pose") && refused.message.contains("D (10 mm)"), "{refused}");
+    }
+
+    /// A on the root's origin, B on its frame's origin `frame_y` along y, and B locked
+    /// 10 mm along A's x. No mate relates their normals; `parallel` adds one that the lock
+    /// already implies.
+    fn locked_apart(
+        frame_y: f64,
+        parallel: bool,
+        a_id: u32,
+        b_id: u32,
+    ) -> (BTreeMap<Body, Placement>, Vec<Constraint>) {
+        let (pa, pb) = (body(a_id), body(b_id));
+        let frame = Placement::translation(DVec3::new(0.0, frame_y, 0.0));
+        let at: BTreeMap<Body, Placement> = [(pa.clone(), Placement::IDENTITY), (pb.clone(), frame)].into();
+        let mut mates = vec![
+            Constraint::Origin { mate: "OA".into(), body: pa.clone(), axes: false, at: Placement::IDENTITY },
+            Constraint::Origin { mate: "OB".into(), body: pb.clone(), axes: false, at: frame },
+            Constraint::Lock {
+                mate: "L".into(),
+                a: pa.clone(),
+                b: pb.clone(),
+                relative: Placement::translation(DVec3::new(10.0, 0.0, 0.0)),
+            },
+        ];
+        if parallel {
+            mates.push(Constraint::Parallel {
+                mate: "P".into(),
+                a: pa,
+                b: pb,
+                plane_a: plane([0, 0, 1], 0),
+                plane_b: plane([0, 0, 1], 0),
+                sign: 1,
+                along: None,
+            });
+        }
+        (at, mates)
+    }
+
+    /// The lock's 10 mm along A's x can only land on B's frame, 10 mm along y, once the
+    /// pair turns a quarter. No mate relates their normals, so only the lock asks for that
+    /// turn; the search must still try it, with or without a redundant Parallel.
+    #[test]
+    fn a_lock_turns_its_group_when_only_a_turn_places_it() {
+        for parallel in [false, true] {
+            for (a_id, b_id) in [(2, 4), (4, 2)] {
+                let (at, mates) = locked_apart(10.0, parallel, a_id, b_id);
+                let mut answers = Vec::new();
+                for order in orders(&mates) {
+                    let solved = solve(&at, &order).unwrap_or_else(|e| panic!("A {a_id}, B {b_id}, {order:?}: {e}"));
+                    let (qa, qb) = (solved[&body(a_id)].rotation, solved[&body(b_id)].rotation);
+                    assert_eq!(snapped(qa * DVec3::X), Some([0, 1, 0]), "A's x faces world y");
+                    assert!(same_turn(qa, qb), "the lock keeps them together");
+                    assert_eq!(solved[&body(a_id)].translation, DVec3::ZERO, "OA holds");
+                    assert_eq!(solved[&body(b_id)].translation, DVec3::new(0.0, 10.0, 0.0), "OB holds");
+                    answers.push((qa.to_array(), qb.to_array()));
+                }
+                answers.dedup();
+                assert_eq!(answers.len(), 1, "A {a_id}, B {b_id}: one answer for every order: {answers:?}");
+            }
+        }
+    }
+
+    /// No turn puts a 10 mm lock offset on a frame 11 mm away: still refused.
+    #[test]
+    fn a_lock_no_turn_can_place_is_still_over_constrained() {
+        for parallel in [false, true] {
+            for (a_id, b_id) in [(2, 4), (4, 2)] {
+                let (at, mates) = locked_apart(11.0, parallel, a_id, b_id);
+                for order in orders(&mates) {
+                    let refused = solve(&at, &order).unwrap_err();
+                    assert_eq!(refused.code, RefusalCode::OverConstrained, "{order:?}");
+                    assert_eq!(refused.mates, ["L", "OA", "OB"], "{order:?}");
+                }
+            }
+        }
     }
 
     /// Many parts that keep a free spin each, then a conflict found only when the last part

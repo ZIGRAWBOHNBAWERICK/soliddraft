@@ -421,6 +421,7 @@ impl AssemblyDocument {
                 placements = preferred;
             }
         }
+        placements = solver::solve(&placements, &p.constraints)?;
         let (dof, free) = solver::freedoms(&placements, &p.constraints)?;
         let mut status = status_of(dof + 6 * p.parts.saturating_sub(p.bodies.len()), free);
         status.bounded = motion::certificates(&placements, &p.constraints)?;

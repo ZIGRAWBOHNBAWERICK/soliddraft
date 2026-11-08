@@ -665,3 +665,27 @@ fn unrestricted_hinge_stops_preserve_non_axial_plane_alignment() {
     assert!(r.doc.assembly().component(r.b).unwrap().placement.rotation.angle_between(DQuat::IDENTITY) < 1e-7);
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+
+#[test]
+fn an_exact_plane_group_stays_canonical_after_a_free_spin_drag() {
+    let mut r = rig("drag-exact-free-spin", Profile::Block);
+    let reference = r.doc.assembly().sources[0].document.clone();
+    let c = r.doc.insert(reference, Placement::IDENTITY).unwrap();
+    r.doc.finish_loading();
+    r.doc
+        .mate_distance("D", &datum(r.b, "Top plane"), &datum(c, "Top plane"), "0.2 mm", Alignment::Aligned, false)
+        .unwrap();
+    for z in [0.1, 0.01, 0.3, 1.234, 0.6789, -0.1, 100.123] {
+        let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+        r.doc.begin_drag(path).unwrap();
+        r.doc.preview_drag(Placement::new(DQuat::from_rotation_z(0.7), DVec3::new(3.0, 4.0, z))).unwrap();
+        r.doc.commit_drag().unwrap();
+        assert!(r.doc.solver().bounded.is_empty());
+        let before = r.doc.assembly().clone();
+        let depth = r.doc.undo_depth();
+        r.doc.edit_mates(&[]).unwrap();
+        assert_eq!(r.doc.assembly(), &before, "a free-spin drag at {z} must retain the original exact solve");
+        assert_eq!(r.doc.undo_depth(), depth);
+    }
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

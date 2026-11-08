@@ -29,6 +29,7 @@ use crate::mates::{Alignment, Entity, FaceEndpoint, Mate, MateRefusal, RefusalCo
 use crate::occurrence::{Flags, OccurrenceIndex};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::Placement;
+use crate::store::LoadState;
 use geometry::Solid;
 
 /// The chord bound asked of the kernel unless a request names another, in millimetres.
@@ -486,8 +487,8 @@ impl AssemblyDocument {
     }
 
     /// The part occurrences a request names, in table order, each once, and the
-    /// sub-assemblies in scope whose structure could not be read, so whose parts are not
-    /// known. Suppressed branches are left out, and hidden ones unless asked for, as their
+    /// sub-assemblies in scope or above it whose pinned structure could not be read, so
+    /// whose parts are not known. Suppressed branches are left out, and hidden ones unless asked for, as their
     /// parts are.
     fn scope_parts(&self, request: &CheckRequest) -> Result<(Vec<Entry>, Vec<SkippedPart>), CheckRefusal> {
         let roots: Vec<OccurrenceIndex> = match &request.scope {
@@ -507,25 +508,50 @@ impl AssemblyDocument {
             .collect();
         rows.sort();
         rows.dedup();
-        let (branches, parts): (Vec<_>, Vec<_>) =
-            rows.into_iter().partition(|row| self.table.flags(*row).has(Flags::ASSEMBLY));
-        let unread = branches
+        // A sub-assembly is known only at its pinned revision. One whose structure could
+        // not be read hides its parts; one shown from another revision places them where
+        // that revision does, not where the pin does. Either way its parts are left out
+        // and it is listed, whether it is in the scope or above it.
+        let unknown = |row: OccurrenceIndex| -> Option<String> {
+            if row == OccurrenceIndex::ROOT || !self.table.flags(row).has(Flags::ASSEMBLY) {
+                return None;
+            }
+            let def = self.store.get(self.table.definition(row));
+            let cause = def.problem.as_ref().map(|p| format!(": {p}")).unwrap_or_default();
+            match (&def.assembly, def.state) {
+                (None, _) => Some(format!("its structure could not be read, so its parts are not known{cause}")),
+                (Some(_), LoadState::Stale) => {
+                    Some(format!("its pinned revision could not be read, so where its parts sit is not known{cause}"))
+                }
+                _ => None,
+            }
+        };
+        let mut unread: BTreeMap<OccurrenceIndex, String> = BTreeMap::new();
+        let mut parts = Vec::new();
+        for row in rows {
+            let mut known = true;
+            let mut at = Some(row);
+            while let Some(r) = at {
+                if let Some(why) = unknown(r) {
+                    unread.entry(r).or_insert(why);
+                    known = false;
+                }
+                at = self.table.parent(r);
+            }
+            if known && !self.table.flags(row).has(Flags::ASSEMBLY) {
+                parts.push(Entry { row, path: self.table.path(row), label: self.label(row) });
+            }
+        }
+        let unread = unread
             .into_iter()
-            .filter_map(|row| {
-                let def = self.store.get(self.table.definition(row));
-                def.assembly.is_none().then(|| SkippedPart {
-                    path: self.table.path(row),
-                    label: self.label(row),
-                    code: CheckCode::ProofUnavailable,
-                    message: match &def.problem {
-                        Some(p) => format!("its structure could not be read, so its parts are not known: {p}"),
-                        None => "its structure could not be read, so its parts are not known".to_owned(),
-                    },
-                })
+            .map(|(row, message)| SkippedPart {
+                path: self.table.path(row),
+                label: self.label(row),
+                code: CheckCode::ProofUnavailable,
+                message,
             })
             .collect();
-        let parts = parts.into_iter().map(|row| Entry { row, path: self.table.path(row), label: self.label(row) });
-        Ok((parts.collect(), unread))
+        Ok((parts, unread))
     }
 
     /// A part occurrence's certified mesh, placed in the root's frame.

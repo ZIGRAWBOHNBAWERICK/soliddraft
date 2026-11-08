@@ -116,8 +116,11 @@ A part that cannot be proven is left out by name in `skipped`, the rest are comp
 | `unsupported_configuration` | The part is in a configuration other than the default |
 | `proof_unavailable` | The pinned revision's bytes, a kernel or a body are not available, or a sub-assembly's structure cannot be read |
 
-A sub-assembly in scope whose structure cannot be read is listed in `skipped` too, by its
-path and the reason, since nobody knows which parts it holds. A check is `complete` only when
+A sub-assembly whose structure cannot be read at its pinned revision is listed in `skipped`
+too, by its path and the reason, and its parts are left out. That covers one with no copy at
+all, since nobody knows which parts it holds, and one shown from another revision of its
+file, since that revision may place its parts elsewhere than the pin does. It is listed
+whether it is in the scope or above an occurrence the request names. Update repins it. A check is `complete` only when
 every part in scope is known and compared. A suppressed sub-assembly is out of scope, and so
 is a hidden one unless `include_hidden` asks for hidden parts. When a check is not complete,
 the Interference panel says only that the pairs of the checked parts are clear.

@@ -445,6 +445,11 @@ struct Nested {
 }
 
 fn nested(name: &str) -> Nested {
+    nested_at(name, 200.0)
+}
+
+/// The same, with C `c_x` mm along x inside S.
+fn nested_at(name: &str, c_x: f64) -> Nested {
     let dir = folder(name);
     let (a_file, b_file, c_file) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("c.dwprt"));
     let (sub, root) = (dir.join("sub.dwasm"), dir.join("root.dwasm"));
@@ -453,7 +458,7 @@ fn nested(name: &str) -> Nested {
     }
     let mut s = AssemblyDocument::new_with("Sub", options());
     s.save(Some(&sub)).unwrap();
-    s.insert(reference(&sub, &c_file), Placement::translation(DVec3::new(200.0, 0.0, 0.0))).unwrap();
+    s.insert(reference(&sub, &c_file), Placement::translation(DVec3::new(c_x, 0.0, 0.0))).unwrap();
     s.finish_loading();
     s.save(None).unwrap();
     let mut doc = AssemblyDocument::new_with("Root", options());
@@ -542,4 +547,50 @@ fn a_missing_part_leaves_the_check_incomplete() {
     assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
     assert_eq!(report.skipped[0].path, path(ComponentId(report.skipped[0].path.steps()[0].component.0)));
     assert_eq!(report.parts.len(), 2);
+}
+
+/// S pins C on top of A. S's file then moves C 200 mm away in a new revision, and the root
+/// keeps its pin with no copy of the pinned structure. Shown from the new revision, S
+/// would put C clear of everything; the pinned assembly has it inside A. The check leaves
+/// S's parts out and says why, even when C is asked for by its own path. With the pinned
+/// structure at hand, or after Update repins S, the check is complete again.
+#[test]
+fn a_sub_assembly_shown_from_another_revision_leaves_the_check_incomplete() {
+    let fx = nested_at("stale-sub", 0.0);
+    let mut doc = fx.open();
+    let branch = Nested::branch(&doc);
+    // Control: the pinned structure is at hand, and C overlaps A where the pin puts it.
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(report.complete, "{:?}", report.skipped);
+    assert_eq!((report.parts.len(), report.interferes), (3, 1));
+    let inside = doc.table().subtree(doc.table().find(&branch).unwrap())[1];
+    let c_path = doc.table().path(inside);
+
+    let id = doc.id();
+    doc.assembly().save(&fx.root, id, None, &[]).unwrap();
+    let mut s = AssemblyDocument::open(&fx.sub, options()).unwrap();
+    let c = s.assembly().components[0].id;
+    s.move_to(&[(path(c), Placement::translation(DVec3::new(200.0, 0.0, 0.0)))]).unwrap();
+    s.save(None).unwrap();
+
+    let mut doc = fx.open();
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(!report.complete);
+    assert_eq!((report.parts.len(), report.pairs, report.clear), (2, 1, 1));
+    assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+    assert_eq!((report.skipped[0].path.clone(), report.skipped[0].code), (branch.clone(), CheckCode::ProofUnavailable));
+    assert!(report.skipped[0].message.contains("pinned revision"), "{}", report.skipped[0].message);
+    // Asked for by its own path, C is still left out, and S is named above it.
+    let a = doc.assembly().components[0].id;
+    let scope = CheckScope::Occurrences(vec![path(a), c_path.clone()]);
+    let refused = doc.check_interference(&CheckRequest { scope, ..CheckRequest::default() }).unwrap_err();
+    assert_eq!(refused.code, CheckCode::TooFewParts);
+    assert!(refused.message.contains("pinned revision"), "{}", refused.message);
+
+    // Update repins S at the new revision: C is clear of everything, and the check is complete.
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(report.complete, "{:?}", report.skipped);
+    assert_eq!((report.parts.len(), report.clear), (3, 3));
 }

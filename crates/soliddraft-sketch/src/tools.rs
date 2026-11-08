@@ -300,6 +300,18 @@ pub(crate) fn ends(kind: EntityKind) -> Option<[P2; 2]> {
     }
 }
 
+fn copy_endpoints(entity: &Entity) -> Option<[(PointRef, P2); 2]> {
+    let indices = match entity.kind {
+        EntityKind::Line { .. } => [0, 1],
+        EntityKind::Arc { .. } => [1, 2],
+        EntityKind::EllipticArc { .. } => [3, 4],
+        _ => return None,
+    };
+    Some(indices.map(|index| {
+        (PointRef::new(entity.id, index), entity.point(index).expect("endpoint index matches entity kind"))
+    }))
+}
+
 fn reversed(kind: EntityKind) -> EntityKind {
     match kind {
         EntityKind::Line { a, b } => EntityKind::Line { a: b, b: a },
@@ -522,17 +534,14 @@ impl Sketch {
         // Copied curves own their points. Join matching endpoints within this new geometry only.
         for (i, &a) in ids.iter().enumerate() {
             let Some(ea) = self.entity(a).copied() else { continue };
-            let Some(pa) = ends(ea.kind) else { continue };
+            let Some(pa) = copy_endpoints(&ea) else { continue };
             for &b in &ids[i + 1..] {
                 let eb = *self.entity(b).expect("new entity");
-                let Some(pb) = ends(eb.kind) else { continue };
-                for (ia, p) in pa.iter().enumerate() {
-                    for (ib, q) in pb.iter().enumerate() {
-                        if p.dist(*q) <= EPS {
-                            self.constrain(ConstraintKind::Coincident {
-                                a: PointRef::new(a, ia as u8 + u8::from(ea.is_curve())),
-                                b: PointRef::new(b, ib as u8 + u8::from(eb.is_curve())),
-                            });
+                let Some(pb) = copy_endpoints(&eb) else { continue };
+                for &(a, p) in &pa {
+                    for &(b, q) in &pb {
+                        if p.dist(q) <= EPS {
+                            self.constrain(ConstraintKind::Coincident { a, b });
                         }
                     }
                 }

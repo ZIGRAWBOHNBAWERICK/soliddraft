@@ -141,3 +141,138 @@ fn equal_and_concentric_ellipses_share_axes_and_center() {
     assert!((c.dist(e.point(1).unwrap()) - 4.0).abs() < 1e-6);
     assert!((c.dist(e.point(2).unwrap()) - 2.0).abs() < 1e-6);
 }
+
+fn check_copied_profile_joins(elliptic: bool) {
+    use soliddraft_sketch::tools::Operation;
+    for tool in 0..3 {
+        let mut sketch = Sketch::new();
+        let start = P2::new(4.0, 0.0);
+        let end = P2::new(-4.0, 0.0);
+        let (kind, indices) = if elliptic {
+            (EntityKind::EllipticArc { center: P2::ZERO, major: start, minor: P2::new(0.0, 2.0), start, end }, [3, 4])
+        } else {
+            (EntityKind::Arc { center: P2::ZERO, start, end }, [1, 2])
+        };
+        let curve = sketch.add(kind, false);
+        let line = sketch.add(EntityKind::Line { a: end, b: start }, false);
+        for (a, b) in [(indices[0], 1), (indices[1], 0)] {
+            sketch.constrain(ConstraintKind::Coincident { a: PointRef::new(curve, a), b: PointRef::new(line, b) });
+        }
+        let entities = vec![curve, line];
+        let operation = match tool {
+            0 => Operation::Mirror { entities, axis_start: P2::new(10.0, 0.0), axis_end: P2::new(10.0, 1.0) },
+            1 => Operation::LinearPattern { entities, step: P2::new(20.0, 0.0), count: 3 },
+            _ => Operation::CircularPattern { entities, center: P2::new(10.0, 0.0), angle_degrees: 90.0, count: 3 },
+        };
+        let copies = sketch.apply_operation(&operation).unwrap();
+        assert_eq!(copies.len(), if tool == 0 { 2 } else { 4 });
+        let regions = 1 + copies.len() / 2;
+        assert_eq!(sketch.regions().unwrap().len(), regions, "{operation:?}");
+        for &[curve, line] in copies.as_chunks::<2>().0 {
+            let expected: Vec<_> = indices
+                .into_iter()
+                .map(|index| {
+                    let a = PointRef::new(curve, index);
+                    let b = (0..2)
+                        .map(|i| PointRef::new(line, i))
+                        .find(|b| sketch.point(a).unwrap().dist(sketch.point(*b).unwrap()) < 1e-8)
+                        .unwrap();
+                    (a, b)
+                })
+                .collect();
+            let actual: Vec<_> = sketch
+                .constraints
+                .iter()
+                .filter_map(|constraint| match constraint.kind {
+                    ConstraintKind::Coincident { a, b }
+                        if (a.entity == curve && b.entity == line) || (a.entity == line && b.entity == curve) =>
+                    {
+                        Some((a, b))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(actual.len(), 2, "copied {operation:?}: {actual:?}");
+            for &(a, b) in &expected {
+                assert!(actual.contains(&(a, b)) || actual.contains(&(b, a)), "{operation:?}: missing {a:?} = {b:?}");
+            }
+            let moved = PointRef::new(line, 0);
+            let before = sketch.point(moved).unwrap();
+            solve::solve(&mut sketch, Some(solve::Drag { point: moved, to: before + P2::new(0.75, 0.5) }), true);
+            assert!(
+                !matches!(sketch.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }),
+                "{operation:?}: {:?}",
+                sketch.status
+            );
+            assert!(sketch.point(moved).unwrap().dist(before) > 0.05, "{operation:?}: drag did not move its endpoint");
+            for &(a, b) in &expected {
+                assert!(
+                    sketch.point(a).unwrap().dist(sketch.point(b).unwrap()) < 1e-6,
+                    "{operation:?}: drag opened the join"
+                );
+            }
+            assert_eq!(sketch.regions().unwrap().len(), regions, "{operation:?}: drag opened the profile");
+            let dimension = if elliptic {
+                ConstraintKind::Distance {
+                    a: PointRef::new(curve, 0),
+                    b: PointRef::new(curve, 1),
+                    kind: DistanceKind::Aligned,
+                    value: 6.0,
+                    label: P2::ZERO,
+                }
+            } else {
+                ConstraintKind::Radius { entity: curve, value: 6.0, diameter: false, label: P2::ZERO }
+            };
+            sketch.constrain(dimension);
+            solve::solve(&mut sketch, None, true);
+            assert!(
+                !matches!(sketch.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }),
+                "{operation:?}: {:?}",
+                sketch.status
+            );
+            for &(a, b) in &expected {
+                assert!(
+                    sketch.point(a).unwrap().dist(sketch.point(b).unwrap()) < 1e-6,
+                    "{operation:?}: dimension opened the join"
+                );
+            }
+            assert_eq!(sketch.regions().unwrap().len(), regions, "{operation:?}: dimension opened the profile");
+        }
+    }
+}
+
+#[test]
+fn partial_ellipse_copies_keep_joins_through_drags_and_dimensions() {
+    check_copied_profile_joins(true);
+}
+
+#[test]
+fn circular_arc_copies_keep_joins_through_drags_and_dimensions() {
+    check_copied_profile_joins(false);
+}
+
+#[test]
+fn partial_ellipse_trim_extend_and_offset_refuse_atomically() {
+    use soliddraft_sketch::tools::{End, Operation, TrimOptions};
+    let mut sketch = Sketch::new();
+    let curve = sketch.add(
+        EntityKind::EllipticArc {
+            center: P2::ZERO,
+            major: P2::new(4.0, 0.0),
+            minor: P2::new(0.0, 2.0),
+            start: P2::new(4.0, 0.0),
+            end: P2::new(-4.0, 0.0),
+        },
+        false,
+    );
+    let boundary = sketch.add(EntityKind::Line { a: P2::new(10.0, -5.0), b: P2::new(10.0, 5.0) }, true);
+    for operation in [
+        Operation::Trim { entity: curve, at: P2::new(0.0, 2.0), options: TrimOptions::default() },
+        Operation::Extend { entity: curve, end: End::Start, boundary },
+        Operation::Offset { entities: vec![curve], distance: 1.0 },
+    ] {
+        let before = sketch.clone();
+        assert!(sketch.apply_operation(&operation).is_err(), "{operation:?}");
+        assert_eq!(sketch, before, "{operation:?} mutated the refused sketch");
+    }
+}

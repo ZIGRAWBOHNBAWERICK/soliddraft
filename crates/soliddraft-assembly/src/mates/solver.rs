@@ -743,14 +743,12 @@ impl<'a> Search<'a> {
             // No mate relates its normals, but a lock's offset turns with it, so the
             // translations may need any quarter turn. The authored turn still comes first.
             None if !positioned => out.push(authored),
-            None => {}
-            Some(&u0) => {
-                if !self.locked[g] && !positioned && normals.iter().all(|n| dot(*n, u0).abs() == 1) {
-                    for v in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
-                        out.extend(spun(authored, u0, v));
-                    }
+            Some(&u0) if !self.locked[g] && !positioned && normals.iter().all(|n| dot(*n, u0).abs() == 1) => {
+                for v in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+                    out.extend(spun(authored, u0, v));
                 }
             }
+            _ => {}
         }
         out.extend(self.cubes.iter().copied());
         let near = |q: &DQuat| q.dot(authored).abs();

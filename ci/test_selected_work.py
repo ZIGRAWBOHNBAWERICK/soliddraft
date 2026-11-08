@@ -100,6 +100,42 @@ class WorkPlan(unittest.TestCase):
         self.assertEqual(set(selector.select(changes, 'pull_request', '', {}, sources)),
                          {'lint', 'application-loop', 'test-linux'})
 
+    def mixed_fixture_changes(self):
+        scenarios = ('p5-flanged-housing', 'sphere-revolve')
+        rust_paths = ('crates/soliddraft-cli/src/main.rs',
+                      'crates/soliddraft-cli/tests/independent_cli.rs')
+        for name in scenarios:
+            self.write(f'ci/scenarios/{name}.json', '{}')
+        for path in rust_paths:
+            self.write(path, '// independent CLI edit\n')
+        self.write('crates/soliddraft-app/tests/scenario_reader.rs',
+                   '\n'.join(f'const _: &str = include_str!("../../../ci/scenarios/{name}.json");'
+                             for name in scenarios))
+        self.base = self.commit()
+        return ((['M', f'ci/scenarios/{name}.json'], [status, path])
+                for name in scenarios for path in rust_paths for status in ('M', 'A', 'D'))
+
+    def test_adding_rust_to_scenario_diff_cannot_drop_fixture_test_coverage(self):
+        for scenario, rust in self.mixed_fixture_changes():
+            with self.subTest(scenario=scenario, rust=rust):
+                scenario_only = self.plan([scenario])
+                self.assertEqual(runner.cargo_args(scenario_only),
+                                 ['--workspace', '--all-features', '--locked'])
+                mixed = self.plan([scenario, rust])
+                self.assertEqual(mixed, selector.FULL_WORK)
+                self.assertEqual(runner.cargo_args(mixed), runner.cargo_args(scenario_only))
+
+    def test_accepted_work_plans_preserve_mixed_scenario_fixture_coverage(self):
+        # Both policies support sub-job plans; the older-policy full fallback cannot mask this test.
+        accepted = (ROOT / 'ci/select-checks.py').read_text()
+        self.assertIn('def work_plan(', accepted)
+        for scenario, rust in self.mixed_fixture_changes():
+            with self.subTest(scenario=scenario, rust=rust):
+                mixed = selector.accepted_work(self.root, self.base, 'HEAD', [scenario, rust],
+                                               'pull_request', self.packages, accepted)
+                self.assertEqual(mixed, selector.FULL_WORK)
+                self.assertEqual(runner.cargo_args(mixed), ['--workspace', '--all-features', '--locked'])
+
     def test_source_helpers_policy_and_unknown_changes_cannot_drop_scenarios(self):
         scenario = ['M', 'ci/scenarios/bracket.json']
         for path in ('crates/soliddraft-app/src/lib.rs', 'ci/run-scenarios.py', 'ci/run-selected.py',

@@ -481,7 +481,11 @@ def work_plan(root, base, head, changes, event, packages):
         else:
             # Policy, manifests, dependencies, helpers, fixtures, removed scenarios and unknown data.
             return full
-    if scenarios and not rust:
+    if scenarios:
+        if rust:
+            # Scenario fixtures also feed Rust regressions outside the changed crate's consumers.
+            # Adding a Rust edit must not narrow the archive required by a scenario-only diff.
+            return full
         full['scenarios'] = sorted(scenarios)
     if not rust:
         return full

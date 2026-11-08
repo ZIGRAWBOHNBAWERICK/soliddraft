@@ -14,13 +14,14 @@ use soliddraft_model::ValueTable;
 
 use crate::document::{AssemblyDocument, EditError, key_of};
 use crate::mates::bodies::{End, Gathered, Problem, Rule, Scope};
-use crate::mates::reference::check_endpoint;
+use crate::mates::reference::{Shape, ShapeKind, check_endpoint};
 use crate::mates::solver::{
-    self, Along, Body, Constraint, FreeMotion, LocalAxis, LocalPlane, LocalPoint, SolverState, SolverStatus,
+    self, Along, Body, Constraint, FreeMotion, LocalAxis, LocalPlane, LocalPoint, LocalSlot, Mirrored, Slide,
+    SolverState, SolverStatus,
 };
 use crate::mates::{
-    Alignment, EndpointSelector, FaceEndpoint, Mate, MateEntry, MateId, MateRefusal, PartEndpoint, PlaneProof,
-    RefusalCode, StoredSupport, SupportProof, WidthConstraint,
+    Alignment, EndpointSelector, Entity, FaceEndpoint, Mate, MateEntry, MateId, MateRefusal, PartEndpoint, PlaneProof,
+    RefusalCode, SlotConstraint, StoredSupport, SupportProof, WidthConstraint,
 };
 use crate::path::{ComponentId, OccurrencePath, Step};
 use crate::placement::Placement;
@@ -42,13 +43,48 @@ pub enum MateEdit {
     Flipped(bool),
     /// How a Hinge's planes relate.
     PlaneAlignment(Alignment),
-    /// Whether a Concentric holds the turn about its axis where it is.
+    /// Whether a Concentric, a Profile Center between circles or a Slot holds the turn where
+    /// it is.
     LockRotation(bool),
+    /// A Limit Distance's new least distance.
+    Min(String),
+    /// A Limit Distance's new greatest distance.
+    Max(String),
+    /// A Linear Coupler's new ratio; the parts' places become its zero.
+    Ratio([f64; 2]),
+    /// Whether a Linear Coupler's second part slides the other way; the parts' places become
+    /// its zero.
+    Reverse(bool),
+}
+
+/// Where a new Slot mate puts the pin along the slot.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SlotInput {
+    /// Anywhere between the round ends' centres.
+    Free,
+    /// Halfway between them.
+    Center,
+    /// A literal distance from the first end's centre, or the second's when `flipped`.
+    Distance {
+        /// The distance, as a length such as 3 mm.
+        distance: String,
+        /// Measured from the second end.
+        flipped: bool,
+    },
+    /// That distance as a percentage of the run between the centres.
+    Percent {
+        /// From 0 to 100.
+        percent: f64,
+        /// Measured from the second end.
+        flipped: bool,
+    },
 }
 
 /// Where a new Width mate puts the tab.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WidthInput {
+    /// Anywhere between the groove's faces.
+    Free,
     /// Centred in the groove.
     Centered,
     /// A literal gap from the first groove face, or the second when `flipped`, to the
@@ -279,7 +315,7 @@ impl AssemblyDocument {
         }
         for (i, j, end) in ends {
             let source = self.rebased(&end);
-            let support = self.prove_support(&source, &end.entity, end.support.as_ref())?.stored();
+            let support = self.stored_end(&source, &end.entity, end.support.as_ref())?;
             if let MateEntry::Known(m) = &mut candidate.assembly.mates[i] {
                 m.faces_mut()[j].support = support;
             }
@@ -306,8 +342,8 @@ impl AssemblyDocument {
                     let mut planes = Vec::new();
                     for end in &ends {
                         let source = self.rebased(end);
-                        match self.prove_support(&source, &end.entity, end.support.as_ref()) {
-                            Ok(proof) => planes.push(read_of(&mate, end.body.clone(), &proof)?),
+                        match self.read_end(&mate, &source, end) {
+                            Ok(read) => planes.push(read),
                             Err(r) if r.code == RefusalCode::DanglingReference => {
                                 let at = format!(
                                     "{}: occurrence {}, {}: {}",
@@ -370,16 +406,54 @@ impl AssemblyDocument {
         Ok(status_of(dof + 6 * problem.parts.saturating_sub(problem.bodies.len()), free))
     }
 
+    /// What `end` reads at `source`: its profile or slot when it stored one, else its
+    /// plane, axis or point.
+    fn read_end(&mut self, mate: &str, source: &DocRef, end: &End) -> Result<Read, MateRefusal> {
+        match end.support.as_ref().and_then(StoredSupport::shape) {
+            Some(kind) => {
+                Ok(read_shape(end.body.clone(), self.prove_shape(source, &end.entity, kind, end.support.as_ref())?))
+            }
+            None => read_of(mate, end.body.clone(), &self.prove_support(source, &end.entity, end.support.as_ref())?),
+        }
+    }
+
+    /// What a mate stores for `entity` at `source`, proving it as `stored` was proved.
+    fn stored_end(
+        &mut self,
+        source: &DocRef,
+        entity: &Entity,
+        stored: Option<&StoredSupport>,
+    ) -> Result<Option<StoredSupport>, MateRefusal> {
+        match stored.and_then(StoredSupport::shape) {
+            Some(kind) => Ok(Some(self.prove_shape(source, entity, kind, stored)?.stored())),
+            None => Ok(self.prove_support(source, entity, stored)?.stored()),
+        }
+    }
+
     /// How many parts were rebuilt so far to prove planes.
     pub fn parts_rebuilt_for_proofs(&self) -> usize {
         self.proofs.built
     }
 
     fn endpoint(&mut self, truth: &Assembly, selector: &EndpointSelector) -> Result<FaceEndpoint, MateRefusal> {
+        self.endpoint_as(truth, selector, None)
+    }
+
+    /// An endpoint that reads a profile or a slot when `shape` says so, else its plane, axis
+    /// or point.
+    fn endpoint_as(
+        &mut self,
+        truth: &Assembly,
+        selector: &EndpointSelector,
+        shape: Option<ShapeKind>,
+    ) -> Result<FaceEndpoint, MateRefusal> {
         let source = Self::part_source(truth, selector.component)?;
         let entity = self.select(&source, &selector.face)?;
         let document = source.id.ok_or_else(|| MateRefusal::invalid("the source has no document id"))?;
-        let support = self.stored_support(&source, &entity)?;
+        let support = match shape {
+            Some(kind) => Some(self.prove_shape(&source, &entity, kind, None)?.stored()),
+            None => self.stored_support(&source, &entity)?,
+        };
         Ok(FaceEndpoint {
             path: component_path(selector.component),
             document,
@@ -489,7 +563,7 @@ impl AssemblyDocument {
         };
         for end in &ends {
             let source = self.rebased(end);
-            self.prove_support(&source, &end.entity, end.support.as_ref())?;
+            self.stored_end(&source, &end.entity, end.support.as_ref())?;
         }
         Ok(())
     }
@@ -587,6 +661,7 @@ impl AssemblyDocument {
                 return Err(MateRefusal::invalid("a mate ties two different components"));
             }
             let constraint = match width {
+                WidthInput::Free => WidthConstraint::Free,
                 WidthInput::Centered => WidthConstraint::Centered,
                 WidthInput::Dimension { distance, flipped } => {
                     WidthConstraint::Dimension { distance: literal(distance)?, flipped: *flipped }
@@ -738,6 +813,248 @@ impl AssemblyDocument {
         })
     }
 
+    /// Mirrors `b` of `a` about `plane`: two planes, two axes or two points, on two
+    /// components, about a plane of any component. `alignment` relates two planes' normals or
+    /// two axes' directions and is not stored for points. One undo step.
+    pub fn mate_symmetric(
+        &mut self,
+        name: &str,
+        [a, b, plane]: [&EndpointSelector; 3],
+        alignment: Alignment,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Symmetric mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if a.component == b.component {
+                return Err(MateRefusal::invalid("a Symmetric mirrors one component's entity onto another's"));
+            }
+            let (a, b, plane) = (doc.endpoint(truth, a)?, doc.endpoint(truth, b)?, doc.endpoint(truth, plane)?);
+            let points = matches!(a.support, Some(StoredSupport::Point { .. }));
+            let id = MateId(truth.take_id());
+            let alignment = (!points).then_some(alignment);
+            truth.mates.push(MateEntry::Known(Mate::Symmetric { id, name: name.into(), a, b, plane, alignment }));
+            Ok(id)
+        })
+    }
+
+    /// Couples how far `b` slides along its plane's normal or axis's direction to how far
+    /// `a` slides along its own: `a` sliding `ratio[0]` slides `b` `ratio[1]`, the other way
+    /// with `reverse`. Each is measured from its reference component's origin, or the
+    /// assembly's, and the parts' places now are its zero. One undo step.
+    #[allow(clippy::too_many_arguments, reason = "each is one setting of the mate")]
+    pub fn mate_linear_coupler(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        references: [Option<ComponentId>; 2],
+        ratio: [f64; 2],
+        reverse: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        self.transact("Linear Coupler mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if a.component == b.component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            for (side, reference) in [a, b].into_iter().zip(references) {
+                if reference == Some(side.component) {
+                    return Err(MateRefusal::invalid("a part slides relative to another part, not to itself"));
+                }
+            }
+            let ratio = check_ratio(ratio)?;
+            let (ea, eb) = (doc.endpoint(truth, a)?, doc.endpoint(truth, b)?);
+            let part = |c: ComponentId| -> Result<PartEndpoint, MateRefusal> {
+                let source = Self::part_source(truth, c)?;
+                let document = source.id.ok_or_else(|| MateRefusal::invalid("the source has no document id"))?;
+                Ok(PartEndpoint { path: component_path(c), document, configuration: source.configuration })
+            };
+            let reference_a = references[0].map(part).transpose()?;
+            let reference_b = references[1].map(part).transpose()?;
+            let offset = doc.coupler_offset(truth, name, [&ea, &eb], references, ratio, reverse)?;
+            let id = MateId(truth.take_id());
+            truth.mates.push(MateEntry::Known(Mate::LinearCoupler {
+                id,
+                name: name.into(),
+                a: ea,
+                b: eb,
+                reference_a,
+                reference_b,
+                ratio,
+                reverse,
+                offset,
+            }));
+            Ok(id)
+        })
+    }
+
+    /// Holds the signed distance from `a`'s plane to `b`, as a Distance measures it, anywhere
+    /// from `min` to `max`. One undo step.
+    #[allow(clippy::too_many_arguments, reason = "each is one setting of the mate")]
+    pub fn mate_limit_distance(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        [min, max]: [&str; 2],
+        alignment: Alignment,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        let (min, max) = (literal(min)?, literal(max)?);
+        check_limits(&min, &max)?;
+        self.mate_between("Limit Distance mate", name, [a, b], strict, |id, name, [a, b]| {
+            Ok(Mate::LimitDistance { id, name, a, b, alignment, min, max })
+        })
+    }
+
+    /// Centres two profiles, rectangles, regular polygons or circles, on each other, their
+    /// planes `distance` apart. Polygons line their edges up; with `lock_rotation` two circles
+    /// hold their turn where the solve leaves it. One undo step.
+    #[allow(clippy::too_many_arguments, reason = "each is one setting of the mate")]
+    pub fn mate_profile_center(
+        &mut self,
+        name: &str,
+        a: &EndpointSelector,
+        b: &EndpointSelector,
+        alignment: Alignment,
+        distance: &str,
+        lock_rotation: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        let distance = literal(distance)?;
+        self.transact("Profile Center mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if a.component == b.component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let profile = Some(ShapeKind::Profile);
+            let (a, b) = (doc.endpoint_as(truth, a, profile)?, doc.endpoint_as(truth, b, profile)?);
+            let circles =
+                [&a, &b].iter().all(|e| matches!(e.support, Some(StoredSupport::Profile { sides: None, .. })));
+            if lock_rotation && !circles {
+                return Err(MateRefusal::invalid(
+                    "Lock rotation holds two circles' turn; polygons are held by their edges",
+                ));
+            }
+            let id = MateId(truth.take_id());
+            let paths = [a.path.clone(), b.path.clone()];
+            truth.mates.push(MateEntry::Known(Mate::ProfileCenter {
+                id,
+                name: name.into(),
+                a,
+                b,
+                alignment,
+                distance,
+                lock_rotation: None,
+            }));
+            if lock_rotation {
+                let turn = doc.solved_turn(truth, &paths, name)?;
+                if let Some(lock) = locked_turn(mate_named(truth, name)?) {
+                    *lock = Some(turn);
+                }
+            }
+            Ok(id)
+        })
+    }
+
+    /// Puts the pin's axis in a straight slot: square to its run, on its mid-plane, and along
+    /// it as `position` says. `alignment` relates the pin's direction to the slot's round
+    /// ends' axes; with `lock_rotation` the pin's turn is held where the solve leaves it. One
+    /// undo step.
+    #[allow(clippy::too_many_arguments, reason = "each is one setting of the mate")]
+    pub fn mate_slot(
+        &mut self,
+        name: &str,
+        slot: &EndpointSelector,
+        pin: &EndpointSelector,
+        alignment: Alignment,
+        position: &SlotInput,
+        lock_rotation: bool,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        let constraint = match position {
+            SlotInput::Free => SlotConstraint::Free,
+            SlotInput::Center => SlotConstraint::Center,
+            SlotInput::Distance { distance, flipped } => {
+                SlotConstraint::Distance { distance: literal(distance)?, flipped: *flipped }
+            }
+            SlotInput::Percent { percent, flipped } => {
+                SlotConstraint::Percent { percent: check_percent(*percent)?, flipped: *flipped }
+            }
+        };
+        self.transact("Slot mate", strict, |doc, truth| {
+            check_new_name(truth, name)?;
+            if slot.component == pin.component {
+                return Err(MateRefusal::invalid("a mate ties two different components"));
+            }
+            let (slot, pin) = (doc.endpoint_as(truth, slot, Some(ShapeKind::Slot))?, doc.endpoint(truth, pin)?);
+            let id = MateId(truth.take_id());
+            let paths = [slot.path.clone(), pin.path.clone()];
+            truth.mates.push(MateEntry::Known(Mate::Slot {
+                id,
+                name: name.into(),
+                slot,
+                pin,
+                alignment,
+                constraint,
+                lock_rotation: None,
+            }));
+            if lock_rotation {
+                let turn = doc.solved_turn(truth, &paths, name)?;
+                if let Some(lock) = locked_turn(mate_named(truth, name)?) {
+                    *lock = Some(turn);
+                }
+            }
+            Ok(id)
+        })
+    }
+
+    /// A Linear Coupler's offset at the placements `truth` holds: `ratio[0]` times how far
+    /// `b`'s plane or axis lies along its direction, less (plus, with `reverse`) `ratio[1]`
+    /// times how far `a`'s does, each from its reference component's origin or the
+    /// assembly's, exactly.
+    fn coupler_offset(
+        &mut self,
+        truth: &Assembly,
+        mate: &str,
+        [a, b]: [&FaceEndpoint; 2],
+        references: [Option<ComponentId>; 2],
+        ratio: [f64; 2],
+        reverse: bool,
+    ) -> Result<String, MateRefusal> {
+        let exact =
+            |v: f64| solver::exact(v).ok_or_else(|| MateRefusal::invalid(format!("{mate}: a value is not finite")));
+        let mut value = BigRational::zero();
+        let ca = if reverse { exact(ratio[1])? } else { -exact(ratio[1])? };
+        for ((end, reference), c) in [(b, references[1]), (a, references[0])].into_iter().zip([exact(ratio[0])?, ca]) {
+            let component = end
+                .component()
+                .ok_or_else(|| MateRefusal::invalid(format!("{mate}: a coupler reaches the root's own parts")))?;
+            let source = Self::part_source(truth, component)?;
+            let read =
+                read_of(mate, end.path.clone(), &self.prove_support(&source, &end.entity, end.support.as_ref())?)?;
+            let (direction, along) = slide_of(mate, read.local)?;
+            let at = truth.component(component).map(|c| c.placement).unwrap_or_default();
+            let n = solver::turned(at.rotation, direction).ok_or_else(|| {
+                let message = format!(
+                    "{mate}: a part is turned off the world axes; this version couples axis-aligned slides only"
+                );
+                MateRefusal {
+                    mates: vec![mate.to_owned()],
+                    ..MateRefusal::new(RefusalCode::UnsupportedPlacement, message)
+                }
+            })?;
+            let k = n.iter().position(|x| *x != 0).expect("a signed axis");
+            let origin = match reference {
+                Some(r) => truth.component(r).map_or(0.0, |c| c.placement.translation[k]),
+                None => 0.0,
+            };
+            let sigma = BigRational::from_integer(BigInt::from(n[k]));
+            value += c * (sigma * (exact(at.translation[k])? - exact(origin)?) + along);
+        }
+        Ok(solver::text(&value))
+    }
+
     /// The quarter-turn rotation of the part at `paths[1]` in the frame of the part at
     /// `paths[0]`, once `truth` is solved.
     fn solved_turn(
@@ -832,14 +1149,52 @@ impl AssemblyDocument {
                         | Mate::Width { alignment, .. }
                         | Mate::Tangent { alignment, .. }
                         | Mate::Hinge { alignment, .. }
+                        | Mate::LimitDistance { alignment, .. }
+                        | Mate::ProfileCenter { alignment, .. }
+                        | Mate::Slot { alignment, .. }
+                        | Mate::Symmetric { alignment: Some(alignment), .. }
                         | Mate::Concentric { alignment: Some(alignment), .. },
                         MateEdit::Alignment(a),
                     ) => *alignment = *a,
                     (Mate::Hinge { plane_alignment, .. }, MateEdit::PlaneAlignment(a)) => *plane_alignment = *a,
-                    (Mate::Concentric { lock_rotation, .. }, MateEdit::LockRotation(false)) => *lock_rotation = None,
+                    (
+                        Mate::Concentric { lock_rotation, .. }
+                        | Mate::ProfileCenter { lock_rotation, .. }
+                        | Mate::Slot { lock_rotation, .. },
+                        MateEdit::LockRotation(false),
+                    ) => *lock_rotation = None,
                     (Mate::Concentric { a, b, alignment: Some(_), .. }, MateEdit::LockRotation(true)) => {
                         locks.push((name.clone(), [a.path.clone(), b.path.clone()]));
                     }
+                    (Mate::ProfileCenter { a, b, .. }, MateEdit::LockRotation(true)) => {
+                        let circles = [&*a, &*b]
+                            .iter()
+                            .all(|e| matches!(e.support, Some(StoredSupport::Profile { sides: None, .. })));
+                        if !circles {
+                            return Err(MateRefusal::invalid(format!(
+                                "{name}: Lock rotation holds two circles' turn; polygons are held by their edges"
+                            )));
+                        }
+                        locks.push((name.clone(), [a.path.clone(), b.path.clone()]));
+                    }
+                    (Mate::Slot { slot, pin, .. }, MateEdit::LockRotation(true)) => {
+                        locks.push((name.clone(), [slot.path.clone(), pin.path.clone()]));
+                    }
+                    (Mate::LimitDistance { min, .. }, MateEdit::Min(text)) => *min = literal(text)?,
+                    (Mate::LimitDistance { max, .. }, MateEdit::Max(text)) => *max = literal(text)?,
+                    (Mate::LinearCoupler { ratio, .. }, MateEdit::Ratio(r)) => *ratio = check_ratio(*r)?,
+                    (Mate::LinearCoupler { reverse, .. }, MateEdit::Reverse(on)) => *reverse = *on,
+                    (Mate::Slot { constraint: SlotConstraint::Percent { percent, .. }, .. }, MateEdit::Percent(p)) => {
+                        *percent = check_percent(*p)?
+                    }
+                    (
+                        Mate::Slot {
+                            constraint:
+                                SlotConstraint::Distance { flipped, .. } | SlotConstraint::Percent { flipped, .. },
+                            ..
+                        },
+                        MateEdit::Flipped(on),
+                    ) => *flipped = *on,
                     (Mate::Origin { align_axes, .. }, MateEdit::AlignAxes(on)) => *align_axes = *on,
                     (
                         Mate::Width { constraint: WidthConstraint::Percent { percent, .. }, .. },
@@ -859,14 +1214,42 @@ impl AssemblyDocument {
                     (_, _) => return Err(MateRefusal::invalid(format!("{name} has no such setting"))),
                 }
             }
+            for (name, mate) in edits {
+                if let (Mate::LimitDistance { min, max, .. }, MateEdit::Min(_) | MateEdit::Max(_)) =
+                    (mate_named(truth, name)?, mate)
+                {
+                    check_limits(min, max)?;
+                }
+            }
+            // A coupler whose ratio or direction changed takes the parts' places as its zero.
+            let mut zeroed: Vec<&String> = edits
+                .iter()
+                .filter(|(_, e)| matches!(e, MateEdit::Ratio(_) | MateEdit::Reverse(_)))
+                .map(|(n, _)| n)
+                .collect();
+            zeroed.dedup();
+            for name in zeroed {
+                let Mate::LinearCoupler { a, b, reference_a, reference_b, ratio, reverse, .. } =
+                    mate_named(truth, name)?.clone()
+                else {
+                    continue;
+                };
+                let component = |r: &Option<PartEndpoint>| r.as_ref().and_then(|r| crate::mates::holder(&r.path));
+                let references = [component(&reference_a), component(&reference_b)];
+                let snapshot = truth.clone();
+                let value = doc.coupler_offset(&snapshot, name, [&a, &b], references, ratio, reverse)?;
+                if let Mate::LinearCoupler { offset, .. } = mate_named(truth, name)? {
+                    *offset = value;
+                }
+            }
             // A turn is locked where the other edits leave it.
             for (name, paths) in locks {
-                if let Mate::Concentric { lock_rotation, .. } = mate_named(truth, &name)? {
-                    *lock_rotation = None;
+                if let Some(lock) = locked_turn(mate_named(truth, &name)?) {
+                    *lock = None;
                 }
                 let turn = doc.solved_turn(truth, &paths, &name)?;
-                if let Mate::Concentric { lock_rotation, .. } = mate_named(truth, &name)? {
-                    *lock_rotation = Some(turn);
+                if let Some(lock) = locked_turn(mate_named(truth, &name)?) {
+                    *lock = Some(turn);
                 }
             }
             Ok(())
@@ -971,15 +1354,47 @@ fn status_of(remaining: usize, free: Vec<FreeMotion>) -> SolverStatus {
     SolverStatus { state, remaining_dof: remaining, free, diagnostics: Vec::new() }
 }
 
-/// A percentage a Width can hold.
+/// A percentage a Width or a Slot can hold.
 fn check_percent(percent: f64) -> Result<f64, MateRefusal> {
     if (0.0..=100.0).contains(&percent) {
         Ok(percent)
     } else {
+        Err(MateRefusal::new(RefusalCode::InvalidValue, format!("a percentage is from 0 to 100, not {percent}")))
+    }
+}
+
+/// A Linear Coupler's ratio: two positive finite numbers.
+fn check_ratio(ratio: [f64; 2]) -> Result<[f64; 2], MateRefusal> {
+    if ratio.iter().all(|r| r.is_finite() && *r > 0.0) {
+        Ok(ratio)
+    } else {
         Err(MateRefusal::new(
             RefusalCode::InvalidValue,
-            format!("a width's percentage is from 0 to 100, not {percent}"),
+            format!("a coupler's ratio is two positive numbers, not {} : {}", ratio[0], ratio[1]),
         ))
+    }
+}
+
+/// A Limit Distance's least distance must not pass its greatest.
+fn check_limits(min: &soliddraft_model::Expression, max: &soliddraft_model::Expression) -> Result<(), MateRefusal> {
+    let none = ValueTable::default();
+    let (lo, hi) = (none.length(min), none.length(max));
+    match (lo, hi) {
+        (Ok(lo), Ok(hi)) if lo > hi => Err(MateRefusal::new(
+            RefusalCode::InvalidValue,
+            format!("a limit's least distance, {}, is more than its greatest, {}", min.text(), max.text()),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The turn a mate with Lock rotation holds, to change.
+fn locked_turn(mate: &mut Mate) -> Option<&mut Option<[[i8; 3]; 3]>> {
+    match mate {
+        Mate::Concentric { lock_rotation, .. }
+        | Mate::ProfileCenter { lock_rotation, .. }
+        | Mate::Slot { lock_rotation, .. } => Some(lock_rotation),
+        _ => None,
     }
 }
 
@@ -1018,6 +1433,54 @@ pub(crate) enum Local {
     Plane(LocalPlane),
     Axis(LocalAxis),
     Point(LocalPoint),
+    Profile(LocalProfile),
+    Slot(LocalSlot),
+}
+
+/// A profile in its part's frame.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LocalProfile {
+    pub plane: LocalPlane,
+    pub centre: LocalPoint,
+    /// A polygon's number of sides; `None` for a circle.
+    pub sides: Option<u32>,
+    /// A polygon's edge directions, when a proof read them; the status has none.
+    pub edges: Option<Vec<glam::DVec3>>,
+}
+
+/// What a proven profile or slot reads.
+fn read_shape(body: Body, shape: Shape) -> Read {
+    let local = match shape {
+        Shape::Profile(p) => Local::Profile(LocalProfile {
+            plane: LocalPlane { normal: p.normal, offset: p.offset },
+            centre: p.centre,
+            sides: p.sides,
+            edges: Some(p.edges),
+        }),
+        Shape::Slot(s) => Local::Slot(LocalSlot { depth: s.depth, ends: s.ends }),
+    };
+    Read { body, local, radius: None }
+}
+
+/// The way an end slides and how far it lies that way from its part's origin: a plane's
+/// normal and offset, or an axis's direction and its point's place along it.
+fn slide_of(mate: &str, local: Local) -> Result<([i8; 3], BigRational), MateRefusal> {
+    match local {
+        Local::Plane(p) => Ok((p.normal, p.offset)),
+        Local::Axis(x) => {
+            let along = (0..3).map(|k| BigRational::from_integer(BigInt::from(x.direction[k])) * &x.through[k]).sum();
+            Ok((x.direction, along))
+        }
+        _ => Err(MateRefusal {
+            mates: vec![mate.to_owned()],
+            ..MateRefusal::new(
+                RefusalCode::UnsupportedReference,
+                format!(
+                    "{mate}: a Linear Coupler reads a plane or an axis, whose normal or direction is the way its part slides"
+                ),
+            )
+        }),
+    }
 }
 
 /// A radius a curved face or circle has.
@@ -1087,6 +1550,13 @@ fn stored_read(end: &End) -> Option<Read> {
             (Local::Axis(LocalAxis { direction: *direction, through: through.map(exact) }), radius(r, outward))
         }
         Some(StoredSupport::Point { at, radius: r, outward }) => (Local::Point(at.map(exact)), radius(r, outward)),
+        Some(StoredSupport::Profile { normal, centre, sides }) => {
+            let plane = LocalPlane { normal: *normal, offset: BigRational::zero() };
+            (Local::Profile(LocalProfile { plane, centre: centre.map(exact), sides: *sides, edges: None }), None)
+        }
+        Some(StoredSupport::Slot { depth, ends, .. }) => {
+            (Local::Slot(LocalSlot { depth: *depth, ends: ends.map(|e| e.map(exact)) }), None)
+        }
         None => {
             let normal = end.entity.stored_normal()?;
             (Local::Plane(LocalPlane { normal, offset: BigRational::zero() }), None)
@@ -1255,7 +1725,9 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
                 Local::Point(point) => {
                     vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, upto: None, says }]
                 }
-                Local::Plane(_) => return Err(unsupported("a Tangent's second end is a cylinder or a sphere")),
+                Local::Plane(_) | Local::Profile(_) | Local::Slot(_) => {
+                    return Err(unsupported("a Tangent's second end is a cylinder or a sphere"));
+                }
             }
         }
         Rule::Hinge { sign, plane_sign } => {
@@ -1278,6 +1750,154 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
                     along: Some(Along::Distance(0.0)),
                 },
             ]
+        }
+        Rule::Symmetric { sign } => {
+            let third = reads.next().expect("three ends");
+            let Local::Plane(plane) = third.local else {
+                return Err(unsupported(
+                    "a Symmetric's third end is the symmetry plane: a planar face or a reference plane",
+                ));
+            };
+            if let (Some(ra), Some(rb)) = (&first.radius, &second.radius)
+                && ra.value != rb.value
+            {
+                return Err(unsupported("the two have different radii; a Symmetric mirrors equal ones"));
+            }
+            let directed =
+                || sign.ok_or_else(|| MateRefusal::invalid(format!("{mate}: two planes or axes need an alignment")));
+            let (ends, sign) = match (first.local, second.local) {
+                (Local::Plane(p), Local::Plane(q)) => (Mirrored::Planes(p, q), directed()?),
+                (Local::Axis(p), Local::Axis(q)) => (Mirrored::Axes(p, q), directed()?),
+                (Local::Point(p), Local::Point(q)) => (Mirrored::Points(p, q), 1),
+                _ => return Err(unsupported("Symmetric mirrors two planes, two axes or two points, of one kind")),
+            };
+            vec![Constraint::Symmetric { mate, a, b, s: third.body, plane, ends, sign }]
+        }
+        Rule::Coupler { ratio, reverse, offset, references, frame } => {
+            let slide = |body: Body, local: Local, from: &Option<Body>| -> Result<Slide, MateRefusal> {
+                let (direction, offset) = slide_of(&mate, local)?;
+                Ok(Slide { body, direction, offset, from: from.clone(), frame: frame.clone() })
+            };
+            let (sa, sb) = (slide(a, first.local, &references[0])?, slide(b, second.local, &references[1])?);
+            vec![Constraint::Coupler {
+                mate,
+                a: sa,
+                b: sb,
+                ratio: ratio.clone(),
+                reverse: *reverse,
+                offset: offset.clone(),
+            }]
+        }
+        Rule::Limit { sign, min, max } => {
+            let (gap, upto) = (exact(*min)?, Some(exact(*max)?));
+            let says = format!("from {min} mm to {max} mm");
+            match (first.local, second.local) {
+                (Local::Plane(plane_a), Local::Plane(plane_b)) => {
+                    let along = Some(Along::Range(*min, *max));
+                    vec![Constraint::Parallel { mate, a, b, plane_a, plane_b, sign: *sign, along }]
+                }
+                (Local::Plane(plane), Local::Axis(axis)) => {
+                    let (point, direction) = (axis.through, Some(axis.direction));
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, upto, says }]
+                }
+                (Local::Axis(axis), Local::Plane(plane)) => {
+                    let (point, direction) = (axis.through, Some(axis.direction));
+                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction, gap, upto, says }]
+                }
+                (Local::Plane(plane), Local::Point(point)) => {
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, upto, says }]
+                }
+                (Local::Point(point), Local::Plane(plane)) => {
+                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction: None, gap, upto, says }]
+                }
+                _ => {
+                    return Err(unsupported(
+                        "a Limit Distance measures from a plane to a plane, an axis or a point; a length across two axes or points is not solved exactly in this version",
+                    ));
+                }
+            }
+        }
+        Rule::Profile { sign, distance, lock } => {
+            let (Local::Profile(pa), Local::Profile(pb)) = (first.local, second.local) else {
+                return Err(unsupported("Profile Center reads two profiles: planar faces or circular edges"));
+            };
+            let kind = |sides: Option<u32>| match sides {
+                None => "a circle".to_owned(),
+                Some(4) => "a rectangle".to_owned(),
+                Some(n) => format!("a {n}-sided polygon"),
+            };
+            if pa.sides != pb.sides {
+                return Err(unsupported(&format!(
+                    "Profile Center centres two profiles of one kind, not {} and {}",
+                    kind(pa.sides),
+                    kind(pb.sides)
+                )));
+            }
+            let axis = LocalAxis { direction: pa.plane.normal, through: pa.centre };
+            let normal = pa.plane.normal;
+            let mut out = vec![
+                Constraint::Parallel {
+                    mate: mate.clone(),
+                    a: a.clone(),
+                    b: b.clone(),
+                    plane_a: pa.plane,
+                    plane_b: pb.plane,
+                    sign: *sign,
+                    along: Some(Along::Distance(*distance)),
+                },
+                Constraint::OnAxis { mate: mate.clone(), a: a.clone(), axis, b: b.clone(), point: pb.centre },
+            ];
+            match (pa.sides, lock) {
+                (Some(_), Some(_)) => {
+                    return Err(MateRefusal::invalid(format!(
+                        "{mate}: Lock rotation holds two circles' turn; polygons are held by their edges"
+                    )));
+                }
+                (Some(_), None) => {
+                    let edges = pa.edges.zip(pb.edges);
+                    out.push(Constraint::Spin { mate, a, b, normal, edges });
+                }
+                (None, Some(turn)) => {
+                    if !solver::cube_rotations().contains(turn) {
+                        return Err(off_quarter_turns(&mate));
+                    }
+                    out.push(Constraint::Turn { mate, a, b, relative: solver::quaternion(turn) });
+                }
+                (None, None) => {}
+            }
+            out
+        }
+        Rule::Slot { sign, mode, lock } => {
+            let Local::Slot(slot) = first.local else {
+                return Err(unsupported("a Slot's first end is the slot"));
+            };
+            let axis = match second.local {
+                Local::Axis(axis) => axis,
+                Local::Slot(_) => {
+                    return Err(unsupported("a slot in a slot is not supported in this version; mate a pin's axis"));
+                }
+                _ => {
+                    return Err(unsupported(
+                        "a Slot's second end is the pin's axis: a cylinder, or a circular or straight edge",
+                    ));
+                }
+            };
+            let mut out = vec![Constraint::Slot {
+                mate: mate.clone(),
+                a: a.clone(),
+                slot,
+                b: b.clone(),
+                axis,
+                sign: *sign,
+                mode: mode.clone(),
+            }];
+            if let Some(turn) = lock {
+                if !solver::cube_rotations().contains(turn) {
+                    return Err(off_quarter_turns(&mate));
+                }
+                out.push(Constraint::Turn { mate, a, b, relative: solver::quaternion(turn) });
+            }
+            out
         }
     };
     Ok(out)

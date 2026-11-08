@@ -15,6 +15,7 @@ mod dimension;
 pub mod inference;
 pub mod profile;
 mod references;
+pub mod relations;
 mod shapes;
 pub mod solve;
 pub mod tools;
@@ -463,6 +464,22 @@ pub enum ConstraintKind {
         /// Second curve.
         b: EntityId,
     },
+    /// Two points stay reflected across an infinite line.
+    Symmetric {
+        /// First point.
+        a: PointRef,
+        /// Reflected point.
+        b: PointRef,
+        /// Line defining the reflection axis.
+        axis: EntityId,
+    },
+    /// All coordinates and the radius stay at their recorded values.
+    FixEntity {
+        /// The fixed entity.
+        entity: EntityId,
+        /// Geometry at the time Fix was applied.
+        at: EntityKind,
+    },
     /// The point stays where it is.
     Fix {
         /// The point.
@@ -607,7 +624,8 @@ impl Constraint {
             ConstraintKind::Equal { .. } => "Equal",
             ConstraintKind::Midpoint { .. } => "Midpoint",
             ConstraintKind::Concentric { .. } => "Concentric",
-            ConstraintKind::Fix { .. } => "Fixed",
+            ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => "Fixed",
+            ConstraintKind::Symmetric { .. } => "Symmetric",
             ConstraintKind::Distance { kind: DistanceKind::Aligned, .. } => "Distance",
             ConstraintKind::Distance { kind: DistanceKind::Horizontal, .. } => "Horizontal distance",
             ConstraintKind::Distance { kind: DistanceKind::Vertical, .. } => "Vertical distance",
@@ -636,6 +654,8 @@ impl Constraint {
             | ConstraintKind::Angle { a, b, .. } => vec![a, b],
             ConstraintKind::Midpoint { point, line } => vec![point.entity, line],
             ConstraintKind::Fix { point, .. } => vec![point.entity],
+            ConstraintKind::FixEntity { entity, .. } => vec![entity],
+            ConstraintKind::Symmetric { a, b, axis } => vec![a.entity, b.entity, axis],
             ConstraintKind::Distance { a, b, .. } => vec![a.entity, b.entity],
             ConstraintKind::PointLineDistance { point, line, .. } => vec![point.entity, line],
             ConstraintKind::Radius { entity, .. } => vec![entity],
@@ -648,7 +668,13 @@ impl Constraint {
     pub fn points(&self) -> Vec<PointRef> {
         match self.kind {
             ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.points(),
-            ConstraintKind::Coincident { a, b } | ConstraintKind::Distance { a, b, .. } => vec![a, b],
+            ConstraintKind::Coincident { a, b }
+            | ConstraintKind::Symmetric { a, b, .. }
+            | ConstraintKind::Distance { a, b, .. } => vec![a, b],
+            ConstraintKind::FixEntity { entity, at } => (0..Entity { id: entity, kind: at, construction: false }
+                .point_count())
+                .map(|index| PointRef::new(entity, index))
+                .collect(),
             ConstraintKind::PointOn { point, .. }
             | ConstraintKind::Midpoint { point, .. }
             | ConstraintKind::Fix { point, .. }

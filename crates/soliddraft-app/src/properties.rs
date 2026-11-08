@@ -1654,20 +1654,21 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 });
             }
             // Relations that can be added.
-            let applicable = sketcher::applicable_relations(&s.sketch, &selection);
+            let applicable = sketcher::applicable_relation_sets(&s.sketch, &selection);
             if !applicable.is_empty() {
                 ui.add_space(6.0);
                 theme::section_label(ui, "Add relation");
                 let mut add = None;
                 ui.horizontal_wrapped(|ui| {
-                    for (name, kind) in applicable {
-                        if ui.button(name).clicked() {
-                            add = Some(kind);
+                    for (name, kinds) in applicable {
+                        let applied = kinds.iter().all(|kind| s.sketch.constraints.iter().any(|c| c.kind == *kind));
+                        if ui.add_enabled(!applied, egui::Button::new(name)).on_disabled_hover_text("Already applied").clicked() {
+                            add = Some(kinds);
                         }
                     }
                 });
                 if let Some(kind) = add {
-                    actions.push(sketcher::add_relation(s, kind));
+                    actions.push(sketcher::add_relations(s, &kind));
                 }
             }
             let mut changed = false;

@@ -1284,6 +1284,8 @@ fn glyph_anchors(sketch: &Sketch, c: &Constraint) -> Vec<(P2, egui::Vec2)> {
     let at_point = |r: PointRef| sketch.point(r).map(|p| (p, vec2(10.0, -10.0)));
     match c.kind {
         ConstraintKind::Coincident { a, .. } => at_point(a).into_iter().collect(),
+        ConstraintKind::Symmetric { a, b, .. } => at_point(a).into_iter().chain(at_point(b)).collect(),
+        ConstraintKind::FixEntity { entity, .. } => beside(entity).into_iter().collect(),
         ConstraintKind::PointOn { point, .. }
         | ConstraintKind::Midpoint { point, .. }
         | ConstraintKind::Fix { point, .. } => at_point(point).into_iter().collect(),
@@ -1369,7 +1371,13 @@ fn paint_glyphs(painter: &egui::Painter, s: &SketchSession, glyphs: &[(Constrain
                 painter.line_segment([pos2(l, b - 1.0), pos2(rr, t + 1.0)], st);
                 painter.circle_filled(g.center(), 1.8, fg);
             }
-            ConstraintKind::Fix { .. } => {
+            ConstraintKind::Symmetric { .. } => {
+                painter.line_segment([pos2(cx, t), pos2(cx, b)], st);
+                painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
+                painter.circle_filled(pos2(l, cy), 1.5, fg);
+                painter.circle_filled(pos2(rr, cy), 1.5, fg);
+            }
+            ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => {
                 painter.rect_stroke(
                     Rect::from_min_max(pos2(l + 1.0, cy - 0.5), pos2(rr - 1.0, b)),
                     CornerRadius::same(1),
@@ -2090,7 +2098,16 @@ pub fn paint_passive(
 
 /// Adds one relation through the same solve and undo path in both sketch controls.
 pub fn add_relation(s: &mut SketchSession, kind: ConstraintKind) -> AppAction {
-    s.sketch.constrain(kind);
+    add_relations(s, &[kind])
+}
+
+/// Add a composite relation with one solve and one document undo step.
+pub fn add_relations(s: &mut SketchSession, kinds: &[ConstraintKind]) -> AppAction {
+    for &kind in kinds {
+        if !s.sketch.constraints.iter().any(|c| c.kind == kind) {
+            s.sketch.constrain(kind);
+        }
+    }
     solve::solve(&mut s.sketch, None, true);
     AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() })
 }
@@ -2105,7 +2122,7 @@ pub fn relations_menu(ui: &mut egui::Ui, s: &mut SketchSession) -> Option<AppAct
     }
     ui.separator();
     ui.label("Add relation to selection");
-    let applicable = applicable_relations(&s.sketch, &s.selection);
+    let applicable = applicable_relation_sets(&s.sketch, &s.selection);
     let mut chosen = None;
     for (name, hint) in [
         ("Horizontal", "Select one line or two points"),
@@ -2118,22 +2135,27 @@ pub fn relations_menu(ui: &mut egui::Ui, s: &mut SketchSession) -> Option<AppAct
         ("Tangent", "Select a line and an arc or circle, or two arcs or circles"),
         ("Equal", "Select two lines or two arcs or circles"),
         ("Concentric", "Select two arcs or circles"),
+        ("Collinear", "Select two lines"),
+        ("Symmetric", "Select two points or matching entities, then the axis line last"),
+        ("Coradial", "Select two arcs or circles"),
+        ("Intersection", "Select one point and two lines"),
         ("Midpoint", "Select one point and one line"),
-        ("Fix", "Select one point other than the origin"),
+        ("Fix", "Select one point or entity other than the origin"),
     ] {
-        let kind = applicable.iter().find(|(label, _)| *label == name).map(|(_, kind)| *kind);
-        let already_applied = kind.is_some_and(|kind| s.sketch.constraints.iter().any(|c| c.kind == kind));
+        let kinds = applicable.iter().find(|(label, _)| *label == name).map(|(_, kinds)| kinds);
+        let already_applied =
+            kinds.is_some_and(|kinds| kinds.iter().all(|kind| s.sketch.constraints.iter().any(|c| c.kind == *kind)));
         if ui
-            .add_enabled(kind.is_some() && !already_applied, egui::Button::new(name))
+            .add_enabled(kinds.is_some() && !already_applied, egui::Button::new(name))
             .on_hover_text(hint)
             .on_disabled_hover_text(if already_applied { "Already applied" } else { hint })
             .clicked()
         {
-            chosen = kind;
+            chosen = kinds.cloned();
             ui.close();
         }
     }
-    chosen.map(|kind| add_relation(s, kind))
+    chosen.map(|kinds| add_relations(s, &kinds))
 }
 
 /// Relations that can be added to the current selection, for the property panel.
@@ -2191,6 +2213,55 @@ pub fn applicable_relations(sketch: &Sketch, selection: &[SketchSel]) -> Vec<(&'
         }
         (0, 1, 1) => out.push(("On curve", ConstraintKind::PointOn { point: points[0], entity: curves[0] })),
         _ => {}
+    }
+    if let [SketchSel::Entity(id)] = selection
+        && sketch.entity(*id).is_some_and(|e| !e.is_point())
+        && let Ok(kinds) = sketch.relation_constraints(&crate::sketch::relations::Relation::FixEntity { entity: *id })
+    {
+        out.push(("Fix", kinds[0]));
+    }
+    out
+}
+
+/// Selection choices, including choices that store more than one solver relation.
+pub fn applicable_relation_sets(sketch: &Sketch, selection: &[SketchSel]) -> Vec<(&'static str, Vec<ConstraintKind>)> {
+    use crate::sketch::relations::Relation;
+    let mut out: Vec<_> =
+        applicable_relations(sketch, selection).into_iter().map(|(name, kind)| (name, vec![kind])).collect();
+    let mut requests = Vec::new();
+    if let [SketchSel::Entity(a), SketchSel::Entity(b)] = selection {
+        requests.push(("Collinear", Relation::Collinear { a: *a, b: *b }));
+        requests.push(("Coradial", Relation::Coradial { a: *a, b: *b }));
+    }
+    let point = |sel: &SketchSel| match sel {
+        SketchSel::Point(p) => Some(*p),
+        SketchSel::Entity(id) if sketch.entity(*id).is_some_and(|e| e.is_point()) => Some(PointRef::new(*id, 0)),
+        _ => None,
+    };
+    if let [first, second, SketchSel::Entity(axis)] = selection {
+        if let (Some(a), Some(b)) = (point(first), point(second)) {
+            requests.push(("Symmetric", Relation::SymmetricPoints { a, b, axis: *axis }));
+        } else if let (SketchSel::Entity(a), SketchSel::Entity(b)) = (first, second) {
+            requests.push(("Symmetric", Relation::SymmetricEntities { a: *a, b: *b, axis: *axis }));
+        }
+    }
+    if selection.len() == 3 {
+        let points: Vec<_> = selection.iter().filter_map(point).collect();
+        let lines: Vec<_> = selection
+            .iter()
+            .filter_map(|sel| match sel {
+                SketchSel::Entity(id) if sketch.entity(*id).is_some_and(|e| e.is_line()) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        if let ([p], [a, b]) = (points.as_slice(), lines.as_slice()) {
+            requests.push(("Intersection", Relation::Intersection { point: *p, a: *a, b: *b }));
+        }
+    }
+    for (name, request) in requests {
+        if let Ok(kinds) = sketch.relation_constraints(&request) {
+            out.push((name, kinds));
+        }
     }
     out
 }

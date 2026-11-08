@@ -290,6 +290,26 @@ pub fn operation_schema() -> Value {
         ),
     ]));
     let id = integer("An existing entity id, greater than 0");
+    let point_ref =
+        object(&[("entity", id.clone()), ("index", integer("Point index within its entity, starting at 0"))]);
+    let relation = any_of(vec![
+        object(&[("type", constant("collinear")), ("a", id.clone()), ("b", id.clone())]),
+        object(&[("type", constant("coradial")), ("a", id.clone()), ("b", id.clone())]),
+        object(&[
+            ("type", constant("intersection")),
+            ("point", point_ref.clone()),
+            ("a", id.clone()),
+            ("b", id.clone()),
+        ]),
+        object(&[
+            ("type", constant("symmetric_points")),
+            ("a", point_ref.clone()),
+            ("b", point_ref),
+            ("axis", id.clone()),
+        ]),
+        object(&[("type", constant("symmetric_entities")), ("a", id.clone()), ("b", id.clone()), ("axis", id.clone())]),
+        object(&[("type", constant("fix_entity")), ("entity", id.clone())]),
+    ]);
     let ids = non_empty_array(id.clone(), "Distinct entity ids, in selection order");
     let count = integer("Instances including the seed, from 2 to 1000");
     let geometry = any_of(vec![
@@ -304,6 +324,7 @@ pub fn operation_schema() -> Value {
         object(&[("type", constant("circle")), ("center", point.clone()), ("radius", number("Positive radius, mm"))]),
     ]);
     any_of(vec![
+        object(&[("tool", constant("relate")), ("relation", relation)]),
         object(&[("tool", constant("add")), ("kind", geometry), ("construction", boolean("Exclude from profiles"))]),
         object(&[
             ("tool", constant("snapped_line")),

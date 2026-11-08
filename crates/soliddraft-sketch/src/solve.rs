@@ -245,6 +245,27 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
                     reqs.push(Constraint::PointsCoincident(p, q));
                 }
             }
+            ConstraintKind::Symmetric { a, b, axis } => {
+                if let (Some(p), Some(q), Some(line)) =
+                    (pt(&vars, a), pt(&vars, b), datums.get(&axis).and_then(|d| d.line()))
+                {
+                    reqs.push(Constraint::Symmetric(line, p, q));
+                }
+            }
+            ConstraintKind::FixEntity { entity, at } => {
+                let snapshot = Entity { id: entity, kind: at, construction: false };
+                for index in 0..snapshot.point_count() {
+                    if let (Some(p), Some(at)) = (pt(&vars, PointRef::new(entity, index)), snapshot.point(index)) {
+                        reqs.push(Constraint::Fixed(p.id_x(), at.u));
+                        reqs.push(Constraint::Fixed(p.id_y(), at.v));
+                    }
+                }
+                if let EntityKind::Circle { radius, .. } = at
+                    && let Some(circle) = datums.get(&entity).and_then(|d| d.circle())
+                {
+                    reqs.push(Constraint::Fixed(circle.radius.id, radius));
+                }
+            }
             ConstraintKind::Fix { point, at } => {
                 if let Some(p) = pt(&vars, point) {
                     reqs.push(Constraint::Fixed(p.id_x(), at.u));

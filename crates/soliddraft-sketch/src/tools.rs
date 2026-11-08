@@ -66,6 +66,11 @@ pub enum Operation {
         #[serde(default)]
         construction: bool,
     },
+    /// Add a validated relation or a set of equivalent solver relations atomically.
+    Relate {
+        /// Relation and its selected geometry.
+        relation: crate::relations::Relation,
+    },
     /// A regular polygon, counter-clockwise from its first vertex.
     Polygon {
         /// Circumcentre.
@@ -540,6 +545,15 @@ impl Sketch {
                 apply_snaps(self, PointRef::new(ids[0], 0), &first, Some(ids[0]));
                 apply_snaps(self, PointRef::new(ids[0], 1), &last, Some(ids[0]));
                 Ok(ids)
+            }
+            Operation::Relate { relation } => {
+                let kinds = self.relation_constraints(relation)?;
+                for kind in kinds {
+                    if !self.constraints.iter().any(|c| c.kind == kind) {
+                        self.constrain(kind);
+                    }
+                }
+                Ok(Vec::new())
             }
             Operation::Polygon { center, vertex, sides } => {
                 let corners = polygon_corners(*center, *vertex, *sides)?;

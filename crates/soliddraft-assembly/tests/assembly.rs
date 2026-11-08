@@ -226,6 +226,150 @@ fn deleting_and_suppressing_keep_the_rest_in_place() {
     assert!(doc.is_dirty());
 }
 
+/// Rig with parts A and B, each its own source. Deleting B takes its source along, so a
+/// B file that has since gone cannot block A's Update. Undo brings the source back with B,
+/// Redo drops it again, and the file saved after the delete no longer names B.
+#[test]
+fn deleting_the_last_placement_of_a_part_drops_its_source() {
+    let dir = folder("delete-source");
+    let elsewhere = folder("delete-source-elsewhere");
+    let (a, b, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("rig.dwasm"));
+    save_block(&a, 40.0, 10.0);
+    save_block(&b, 10.0, 10.0);
+    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+    doc.save(Some(&root)).unwrap();
+    let ca = doc.insert(reference(&root, &a), Placement::IDENTITY).unwrap();
+    let cb = doc.insert(reference(&root, &b), Placement::translation(DVec3::new(50.0, 0.0, 0.0))).unwrap();
+    doc.finish_loading();
+    let source_b = doc.assembly().component(cb).unwrap().source;
+    let paths =
+        |doc: &AssemblyDocument| doc.assembly().sources.iter().map(|s| s.document.path.clone()).collect::<Vec<_>>();
+    assert_eq!(paths(&doc), ["a.dwprt", "b.dwprt"]);
+
+    doc.delete(&[cb]).unwrap();
+    assert_eq!(paths(&doc), ["a.dwprt"], "B's source goes with its last component");
+    assert!(doc.undo());
+    doc.finish_loading();
+    assert_eq!(paths(&doc), ["a.dwprt", "b.dwprt"], "undo brings B's source back");
+    assert_eq!(doc.assembly().component(cb).unwrap().source, source_b);
+    assert_eq!(doc.table().counts().parts, 2);
+    assert!(doc.redo());
+    doc.finish_loading();
+    assert_eq!(paths(&doc), ["a.dwprt"], "redo drops it again");
+    doc.save(None).unwrap();
+
+    let mut doc = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    doc.finish_loading();
+    assert_eq!(paths(&doc), ["a.dwprt"], "the saved file no longer names B");
+    std::fs::rename(&b, elsewhere.join("b.dwprt")).unwrap();
+    save_block(&a, 60.0, 10.0);
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    assert_eq!((report.updated(), report.missing()), (1, 0));
+    doc.finish_loading();
+    let path = OccurrencePath::root().child(soliddraft_assembly::Step::component(ca));
+    let row = doc.table().find(&path).unwrap();
+    assert!((doc.table().bounds(row).max.x - 30.0).abs() < 1e-3, "A takes its new revision");
+}
+
+/// The control: deleting one of two placements of A keeps A's source, which the other
+/// still places, so Update still needs A's file and still takes its new revision.
+#[test]
+fn deleting_one_placement_of_a_shared_part_keeps_its_source() {
+    let dir = folder("delete-shared-source");
+    let elsewhere = folder("delete-shared-source-elsewhere");
+    let (a, b, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("rig.dwasm"));
+    save_block(&a, 40.0, 10.0);
+    save_block(&b, 10.0, 10.0);
+    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+    doc.save(Some(&root)).unwrap();
+    let first = doc.insert(reference(&root, &a), Placement::IDENTITY).unwrap();
+    let second = doc.insert(reference(&root, &a), Placement::translation(DVec3::new(0.0, 50.0, 0.0))).unwrap();
+    doc.insert(reference(&root, &b), Placement::translation(DVec3::new(50.0, 0.0, 0.0))).unwrap();
+    doc.finish_loading();
+    doc.delete(&[first]).unwrap();
+    let paths: Vec<_> = doc.assembly().sources.iter().map(|s| s.document.path.clone()).collect();
+    assert_eq!(paths, ["a.dwprt", "b.dwprt"], "A's source is still placed");
+    doc.save(None).unwrap();
+
+    std::fs::rename(&a, elsewhere.join("a.dwprt")).unwrap();
+    let report = doc.rebuild();
+    assert!(report.refusal.as_ref().is_some_and(|r| r.contains("a.dwprt")), "{report:?}");
+    std::fs::rename(elsewhere.join("a.dwprt"), &a).unwrap();
+    save_block(&a, 60.0, 10.0);
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    assert_eq!(report.updated(), 1);
+    doc.finish_loading();
+    let path = OccurrencePath::root().child(soliddraft_assembly::Step::component(second));
+    let row = doc.table().find(&path).unwrap();
+    assert!((doc.table().bounds(row).max.x - 30.0).abs() < 1e-3, "the other A takes the new revision");
+}
+
+/// A file saved before deletes dropped sources still names B's after B is gone. Update
+/// leaves that source out instead of looking for B, and Undo puts it back.
+#[test]
+fn an_update_drops_a_source_no_component_places() {
+    let dir = folder("orphan-source");
+    let elsewhere = folder("orphan-source-elsewhere");
+    let (a, b, root) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("rig.dwasm"));
+    save_block(&a, 40.0, 10.0);
+    save_block(&b, 10.0, 10.0);
+    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+    doc.save(Some(&root)).unwrap();
+    let ca = doc.insert(reference(&root, &a), Placement::IDENTITY).unwrap();
+    doc.finish_loading();
+    doc.save(None).unwrap();
+    // The old file: A placed, and B's source left behind with no component.
+    let package = soliddraft_assembly::AssemblyPackage::open(&root).unwrap();
+    let mut old = (**package.assembly()).clone();
+    let id = soliddraft_assembly::SourceId(old.take_id());
+    old.sources.push(soliddraft_assembly::Source { id, document: reference(&root, &b) });
+    old.save(&root, package.id(), None, &[]).unwrap();
+
+    let mut doc = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    doc.finish_loading();
+    assert_eq!(doc.assembly().sources.len(), 2);
+    std::fs::rename(&b, elsewhere.join("b.dwprt")).unwrap();
+    save_block(&a, 60.0, 10.0);
+    let report = doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    assert_eq!((report.updated(), report.missing(), report.sources.len()), (1, 0, 1));
+    doc.finish_loading();
+    let paths: Vec<_> = doc.assembly().sources.iter().map(|s| s.document.path.clone()).collect();
+    assert_eq!(paths, ["a.dwprt"]);
+    let path = OccurrencePath::root().child(soliddraft_assembly::Step::component(ca));
+    let row = doc.table().find(&path).unwrap();
+    assert!((doc.table().bounds(row).max.x - 30.0).abs() < 1e-3);
+    assert!(doc.undo());
+    assert_eq!(doc.assembly().sources.len(), 2, "undo restores the file as it was");
+}
+
+/// Placing a part a second time shares its source; undoing that insert must not take
+/// the source from the first placement.
+#[test]
+fn undoing_a_second_insert_keeps_the_shared_source() {
+    let dir = folder("insert-shared-source");
+    let a = dir.join("a.dwprt");
+    let root = dir.join("rig.dwasm");
+    save_block(&a, 40.0, 10.0);
+    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+    doc.save(Some(&root)).unwrap();
+    let first = doc.insert(reference(&root, &a), Placement::IDENTITY).unwrap();
+    doc.insert(reference(&root, &a), Placement::translation(DVec3::new(50.0, 0.0, 0.0))).unwrap();
+    doc.finish_loading();
+    assert_eq!(doc.assembly().sources.len(), 1);
+    assert!(doc.undo());
+    doc.finish_loading();
+    let source = doc.assembly().component(first).unwrap().source;
+    assert!(doc.assembly().source(source).is_some(), "the first placement keeps its source");
+    assert_eq!(doc.table().counts().parts, 1);
+    doc.save(None).unwrap();
+    assert!(doc.redo());
+    doc.finish_loading();
+    assert_eq!((doc.assembly().sources.len(), doc.table().counts().parts), (1, 2));
+}
+
 #[test]
 fn references_resolve_from_the_file_that_holds_them() {
     // The sub-assembly and its part live outside the root's folder: the part's path is

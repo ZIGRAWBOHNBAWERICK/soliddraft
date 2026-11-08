@@ -829,28 +829,8 @@ impl OccurrenceTable {
             self.first_child[parent as usize] = first;
             self.last_child[parent as usize] = last;
         }
-        // Redo the bounds of each parent and every assembly above it, deepest first, once.
-        let depth = |mut r: u32| {
-            let mut d = 0;
-            while self.parent[r as usize] != NONE {
-                r = self.parent[r as usize];
-                d += 1;
-            }
-            d
-        };
-        let mut above: Vec<(usize, u32)> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for &parent in &parents {
-            let mut p = parent;
-            while p != NONE && seen.insert(p) {
-                above.push((depth(p), p));
-                p = self.parent[p as usize];
-            }
-        }
-        above.sort_unstable_by(|a, b| b.cmp(a));
-        for (_, p) in above {
-            self.bounds[p as usize] = self.children_bounds(p);
-        }
+        // Redo the bounds of each parent and every assembly above it, once each.
+        self.rebound_above(&parents);
         removed
     }
 

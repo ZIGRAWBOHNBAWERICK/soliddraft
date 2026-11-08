@@ -82,6 +82,7 @@ pub(crate) enum Rule {
     Hinge {
         sign: i8,
         plane_sign: i8,
+        limits: Option<[f64; 2]>,
     },
     /// The ends are the entity, its mirror image and the mirror plane. `sign` relates two
     /// planes' normals or two lines' directions.
@@ -445,9 +446,11 @@ impl AssemblyDocument {
                                 Rule::Concentric { sign: alignment.as_ref().map(sign), lock: *lock_rotation }
                             }
                             Mate::Tangent { alignment, .. } => Rule::Tangent { sign: sign(alignment) },
-                            Mate::Hinge { alignment, plane_alignment, .. } => {
-                                Rule::Hinge { sign: sign(alignment), plane_sign: sign(plane_alignment) }
-                            }
+                            Mate::Hinge { alignment, plane_alignment, angle_limits, .. } => Rule::Hinge {
+                                sign: sign(alignment),
+                                plane_sign: sign(plane_alignment),
+                                limits: *angle_limits,
+                            },
                             Mate::Symmetric { alignment, .. } => Rule::Symmetric { sign: alignment.as_ref().map(sign) },
                             Mate::LinearCoupler { a, reference_a, reference_b, ratio, reverse, offset, .. } => {
                                 let exact = |v: f64| {

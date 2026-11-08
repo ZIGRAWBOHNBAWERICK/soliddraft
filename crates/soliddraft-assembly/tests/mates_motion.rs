@@ -365,3 +365,144 @@ fn orthogonal_width_keeps_its_bisector_choice_while_the_part_turns() {
     assert!(measurements.into_iter().find(|(id, _)| *id == width).unwrap().1.unwrap().is_none());
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+
+#[test]
+fn drag_previews_stop_at_distance_limits_and_release_is_one_undo_step() {
+    let mut r = rig("drag-distance", Profile::Block);
+    r.doc
+        .mate_limit_distance(
+            "L",
+            &datum(r.a, "Top plane"),
+            &datum(r.b, "Top plane"),
+            ["0 mm", "10 mm"],
+            Alignment::Aligned,
+            false,
+        )
+        .unwrap();
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+    let before = r.doc.assembly().clone();
+    let depth = r.doc.undo_depth();
+    r.doc.begin_drag(path.clone()).unwrap();
+    for z in [3.0, 5.0, 40.0] {
+        r.doc.preview_drag(Placement::translation(DVec3::new(4.0, 7.0, z))).unwrap();
+        assert_eq!(&before, r.doc.assembly());
+        assert_eq!(depth, r.doc.undo_depth());
+    }
+    let row = r.doc.table().find(&path).unwrap();
+    assert_eq!(r.doc.table().local(row).translation, DVec3::new(4.0, 7.0, 10.0));
+    r.doc.commit_drag().unwrap();
+    assert_eq!(r.doc.undo_depth(), depth + 1);
+    assert_eq!(r.doc.assembly().component(r.b).unwrap().placement.translation.z, 10.0);
+    assert!(r.doc.undo());
+    assert_eq!(&before, r.doc.assembly());
+    let redo = r.doc.redo_depth();
+    r.doc.begin_drag(path.clone()).unwrap();
+    r.doc.preview_drag(Placement::translation(DVec3::new(9.0, 5.0, -20.0))).unwrap();
+    r.doc.cancel_drag();
+    assert_eq!(&before, r.doc.assembly());
+    assert_eq!(r.doc.redo_depth(), redo);
+    assert_eq!(r.doc.table().local(row), before.component(r.b).unwrap().placement);
+    assert!(r.doc.redo());
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn hinge_stops_hold_during_rotation_and_invalid_updates_keep_the_preview() {
+    let mut r = rig("drag-hinge", Profile::Circle);
+    r.doc
+        .mate_hinge(
+            "H",
+            [&cylinder(r.a), &cylinder(r.b)],
+            [&datum(r.a, "Top plane"), &datum(r.b, "Top plane")],
+            Alignment::Aligned,
+            Alignment::Aligned,
+            false,
+        )
+        .unwrap();
+    r.doc.edit_mates(&[("H".into(), MateEdit::AngleLimits([-30.0, 30.0]))]).unwrap();
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+    let depth = r.doc.undo_depth();
+    r.doc.begin_drag(path.clone()).unwrap();
+    for degrees in [15.0_f64, 80.0, -70.0] {
+        r.doc
+            .preview_drag(Placement::new(DQuat::from_rotation_z(degrees.to_radians()), DVec3::new(20.0, 10.0, 9.0)))
+            .unwrap();
+        let row = r.doc.table().find(&path).unwrap();
+        let pose = r.doc.table().local(row);
+        let expected = degrees.clamp(-30.0, 30.0).to_radians();
+        assert!(pose.rotation.angle_between(DQuat::from_rotation_z(expected)) < 1e-7, "{pose:?}");
+        assert!(pose.translation.length() < 1e-8);
+    }
+    let row = r.doc.table().find(&path).unwrap();
+    let shown = r.doc.table().local(row);
+    assert_eq!(
+        r.doc.preview_drag(Placement { rotation: DQuat::IDENTITY, translation: DVec3::NAN }).unwrap_err().code,
+        RefusalCode::InvalidValue
+    );
+    assert_eq!(shown, r.doc.table().local(row));
+    r.doc.commit_drag().unwrap();
+    assert_eq!(r.doc.undo_depth(), depth + 1);
+    bounded(&mut r.doc, "H");
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    bounded(&mut reopened, "H");
+    assert_eq!(r.doc.assembly(), reopened.assembly());
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn limit_angle_drag_and_saving_a_preview_keep_accepted_truth() {
+    let mut r = rig("drag-angle", Profile::Block);
+    r.doc
+        .mate_limit_angle(
+            "A",
+            &datum(r.a, "Right plane"),
+            &datum(r.b, "Right plane"),
+            &datum(r.a, "Top plane"),
+            [-10.0, 15.0],
+            false,
+        )
+        .unwrap();
+    let before = r.doc.assembly().clone();
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+    r.doc.begin_drag(path.clone()).unwrap();
+    r.doc.preview_drag(Placement::new(DQuat::from_rotation_z(70_f64.to_radians()), DVec3::new(6.0, 7.0, 8.0))).unwrap();
+    let row = r.doc.table().find(&path).unwrap();
+    assert!(r.doc.table().local(row).rotation.angle_between(DQuat::from_rotation_z(15_f64.to_radians())) < 1e-7);
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+    reopened.finish_loading();
+    assert_eq!(reopened.assembly(), &before);
+    r.doc.cancel_drag();
+    assert_eq!(r.doc.table().local(row), before.component(r.b).unwrap().placement);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn dragging_either_end_of_a_floating_lock_moves_the_whole_group() {
+    let mut r = rig("drag-floating", Profile::Block);
+    r.doc.delete_mate("O").unwrap();
+    r.doc.mate_lock("Lock", r.a, r.b, false).unwrap();
+    let before = r
+        .doc
+        .assembly()
+        .component(r.a)
+        .unwrap()
+        .placement
+        .inverse()
+        .compose(&r.doc.assembly().component(r.b).unwrap().placement);
+    let path = soliddraft_assembly::OccurrencePath::root().child(soliddraft_assembly::Step::component(r.b));
+    let target = Placement::new(DQuat::from_rotation_z(0.7), DVec3::new(20.0, 25.0, 30.0));
+    r.doc.begin_drag(path).unwrap();
+    r.doc.preview_drag(target).unwrap();
+    r.doc.commit_drag().unwrap();
+    let a = r.doc.assembly().component(r.a).unwrap().placement;
+    let b = r.doc.assembly().component(r.b).unwrap().placement;
+    assert!(b.translation.distance(target.translation) < 1e-8);
+    assert!(b.rotation.angle_between(target.rotation) < 1e-7);
+    let relative = a.inverse().compose(&b);
+    assert!(relative.translation.distance(before.translation) < 1e-8);
+    assert!(relative.rotation.angle_between(before.rotation) < 1e-7);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

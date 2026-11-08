@@ -162,6 +162,7 @@ pub struct AssemblyDocument {
     /// Loads coarse and fine meshes on request, for the current generation.
     levels: Option<LevelWorker>,
     exact: HashMap<DefinitionIndex, Arc<Mutex<PartDocument>>>,
+    pub(crate) drag: Option<crate::mates::drag::Drag>,
     undo: Vec<Record>,
     redo: Vec<Record>,
     pub(crate) changes: Changes,
@@ -253,6 +254,7 @@ impl AssemblyDocument {
             loading: None,
             levels: None,
             exact: HashMap::new(),
+            drag: None,
             undo: Vec::new(),
             redo: Vec::new(),
             changes: Changes::default(),
@@ -1168,6 +1170,7 @@ impl AssemblyDocument {
 
     /// Reverts the last edit.
     pub fn undo(&mut self) -> bool {
+        self.cancel_drag();
         let Some(r) = self.undo.pop() else { return false };
         self.apply_record(&r, true);
         self.redo.push(r);
@@ -1176,6 +1179,7 @@ impl AssemblyDocument {
 
     /// Repeats the last undone edit.
     pub fn redo(&mut self) -> bool {
+        self.cancel_drag();
         let Some(r) = self.redo.pop() else { return false };
         self.apply_record(&r, false);
         self.undo.push(r);

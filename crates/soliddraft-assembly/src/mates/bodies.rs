@@ -11,13 +11,15 @@ use crate::document::AssemblyDocument;
 use crate::mates::reference::check_endpoint;
 use crate::mates::solver::{self, Body};
 use crate::mates::{
-    Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, StoredSupport, WidthConstraint,
+    Alignment, Entity, FaceEndpoint, Mate, MateEntry, MateRefusal, RefusalCode, SlotConstraint, StoredSupport,
+    WidthConstraint,
 };
 use crate::occurrence::{Flags, OccurrenceIndex, OccurrenceTable};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::Placement;
 use crate::schema::Assembly;
 use crate::store::DefinitionStore;
+use num_rational::BigRational;
 use soliddraft_document::resolve::{Location, Resolution, Resolver};
 use soliddraft_document::{DocKind, DocRef};
 
@@ -43,6 +45,7 @@ pub(crate) struct End {
 }
 
 /// What a mate between faces, edges or vertices asks of what they support.
+#[allow(clippy::large_enum_variant, reason = "a solve holds one per mate, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Rule {
     /// Parallel by `sign`, and a distance apart when there is one. A Coincident is a
@@ -75,6 +78,40 @@ pub(crate) enum Rule {
         sign: i8,
         plane_sign: i8,
     },
+    /// The ends are the entity, its mirror image and the mirror plane. `sign` relates two
+    /// planes' normals or two lines' directions.
+    Symmetric {
+        sign: Option<i8>,
+    },
+    /// `ratio[0]` times how far `b` lies along its direction, less (plus, when `reverse`)
+    /// `ratio[1]` times how far `a` does, is `offset`. Each is measured from its reference
+    /// part's origin, or from `frame`, the origin of the assembly holding the mate.
+    Coupler {
+        ratio: [BigRational; 2],
+        reverse: bool,
+        offset: BigRational,
+        references: [Option<Body>; 2],
+        frame: [BigRational; 3],
+    },
+    /// A distance anywhere from `min` to `max`, as a Distance reads its ends.
+    Limit {
+        sign: i8,
+        min: f64,
+        max: f64,
+    },
+    /// Two profiles centred on each other, their planes `distance` apart; `lock` holds two
+    /// circles' turn.
+    Profile {
+        sign: i8,
+        distance: f64,
+        lock: Option<[[i8; 3]; 3]>,
+    },
+    /// The ends are the slot, then the pin.
+    Slot {
+        sign: i8,
+        mode: solver::SlotMode,
+        lock: Option<[[i8; 3]; 3]>,
+    },
 }
 
 /// A mate, read from the assembly that holds it and placed in the root.
@@ -90,7 +127,13 @@ impl Gathered {
     fn bodies(&self) -> Vec<&Body> {
         match self {
             Gathered::Origin { body, .. } => vec![body],
-            Gathered::Between { ends, .. } => ends.iter().map(|e| &e.body).collect(),
+            Gathered::Between { ends, rule, .. } => {
+                let mut out: Vec<&Body> = ends.iter().map(|e| &e.body).collect();
+                if let Rule::Coupler { references, .. } = rule {
+                    out.extend(references.iter().flatten());
+                }
+                out
+            }
             Gathered::Lock { a, b, .. } => vec![a, b],
         }
     }
@@ -374,6 +417,7 @@ impl AssemblyDocument {
                             Mate::Perpendicular { .. } => Rule::Perpendicular,
                             Mate::Width { alignment, constraint, .. } => {
                                 let mode = match constraint {
+                                    WidthConstraint::Free => solver::WidthMode::Free,
                                     WidthConstraint::Centered => solver::WidthMode::Centered,
                                     WidthConstraint::Dimension { distance, flipped } => {
                                         solver::WidthMode::Gap { distance: length(distance)?, flipped: *flipped }
@@ -394,6 +438,71 @@ impl AssemblyDocument {
                             Mate::Tangent { alignment, .. } => Rule::Tangent { sign: sign(alignment) },
                             Mate::Hinge { alignment, plane_alignment, .. } => {
                                 Rule::Hinge { sign: sign(alignment), plane_sign: sign(plane_alignment) }
+                            }
+                            Mate::Symmetric { alignment, .. } => Rule::Symmetric { sign: alignment.as_ref().map(sign) },
+                            Mate::LinearCoupler { a, reference_a, reference_b, ratio, reverse, offset, .. } => {
+                                let exact = |v: f64| {
+                                    solver::exact(v)
+                                        .filter(|r| *r > BigRational::from_integer(0.into()))
+                                        .ok_or_else(|| invalid(format!("{name}: a ratio is a positive number")))
+                                };
+                                let offset = parse_rational(offset)
+                                    .ok_or_else(|| invalid(format!("{name}: the offset {offset} is not a rational")))?;
+                                let mut references = [None, None];
+                                for (slot, reference) in references.iter_mut().zip([reference_a, reference_b]) {
+                                    if let Some(r) = reference {
+                                        let body = under(&prefix, &r.path);
+                                        place(&body)?;
+                                        let source = scope
+                                            .part_source(&body)
+                                            .map_err(|e| MateRefusal { mates: vec![name.clone()], ..e })?;
+                                        if source.id != Some(r.document) {
+                                            return Err(MateRefusal {
+                                                mates: vec![name.clone()],
+                                                ..invalid(format!("{name}: {body} places another document"))
+                                            });
+                                        }
+                                        *slot = Some(body);
+                                    }
+                                }
+                                let at = under(&prefix, &a.path);
+                                let frame =
+                                    scope.frame(&at).ok_or_else(|| invalid(format!("{name}: no frame for {at}")))?;
+                                let frame = frame.translation.to_array().map(|v| solver::exact(v).unwrap_or_default());
+                                Rule::Coupler {
+                                    ratio: [exact(ratio[0])?, exact(ratio[1])?],
+                                    reverse: *reverse,
+                                    offset,
+                                    references,
+                                    frame,
+                                }
+                            }
+                            Mate::LimitDistance { alignment, min, max, .. } => {
+                                Rule::Limit { sign: sign(alignment), min: length(min)?, max: length(max)? }
+                            }
+                            Mate::ProfileCenter { alignment, distance, lock_rotation, .. } => Rule::Profile {
+                                sign: sign(alignment),
+                                distance: length(distance)?,
+                                lock: *lock_rotation,
+                            },
+                            Mate::Slot { alignment, constraint, lock_rotation, .. } => {
+                                let exact = |v: f64, what: &str| {
+                                    solver::exact(v).ok_or_else(|| invalid(format!("{name}: {what} is not finite")))
+                                };
+                                let hundred = BigRational::from_integer(100.into());
+                                let mode = match constraint {
+                                    SlotConstraint::Free => solver::SlotMode::Free,
+                                    SlotConstraint::Center => solver::SlotMode::Centre,
+                                    SlotConstraint::Distance { distance, flipped } => solver::SlotMode::Distance {
+                                        distance: exact(length(distance)?, "the distance")?,
+                                        flipped: *flipped,
+                                    },
+                                    SlotConstraint::Percent { percent, flipped } => solver::SlotMode::Share {
+                                        fraction: exact(*percent, "the percentage")? / hundred,
+                                        flipped: *flipped,
+                                    },
+                                };
+                                Rule::Slot { sign: sign(alignment), mode, lock: *lock_rotation }
                             }
                             Mate::Origin { .. } | Mate::Lock { .. } => unreachable!("handled above"),
                         };
@@ -461,4 +570,11 @@ impl AssemblyDocument {
         r.set_path(root, &target);
         r
     }
+}
+
+/// A rational written as `n` or `n/d`, as a Linear Coupler stores its offset.
+pub(crate) fn parse_rational(text: &str) -> Option<BigRational> {
+    let (n, d) = text.trim().split_once('/').unwrap_or((text.trim(), "1"));
+    let (n, d): (num_bigint::BigInt, num_bigint::BigInt) = (n.trim().parse().ok()?, d.trim().parse().ok()?);
+    (d != 0.into()).then(|| BigRational::new(n, d))
 }

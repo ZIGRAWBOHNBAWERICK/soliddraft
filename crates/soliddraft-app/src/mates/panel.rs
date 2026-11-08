@@ -1,14 +1,16 @@
 //! The Mate panel: picked faces held parallel, at right angles, on one plane, at a
-//! distance, on one axis, tangent, hinged or as a tab in a groove, two components locked
-//! together, the assembly's values, what the solver says, and the conflicts a refusal
-//! named. Everything goes through the same commands as the MCP tools.
+//! distance or within limits, on one axis, tangent, hinged, mirrored, coupled, centred as
+//! profiles, as a tab in a groove or a pin in a slot, two components locked together, the
+//! assembly's values, what the solver says, and the conflicts a refusal named. Everything
+//! goes through the same commands as the MCP tools.
 
 use crate::assembly::AssemblyState;
 use crate::mates::tools::rows;
 use crate::state::{AppState, NoteKind};
 use crate::theme;
 use soliddraft_assembly::{
-    Alignment, ComponentId, EndpointSelector, FaceSelector, MateEdit, MateRefusal, OccurrencePath, WidthInput,
+    Alignment, ComponentId, EndpointSelector, FaceSelector, MateEdit, MateRefusal, OccurrencePath, SlotInput,
+    WidthInput,
 };
 use soliddraft_model::FaceRef;
 
@@ -36,10 +38,20 @@ pub enum Family {
     Tangent,
     /// The first two picks are the axes, the last two the planes.
     Hinge,
+    /// An entity, its mirror image, then the symmetry plane.
+    Symmetric,
+    /// Two planes or axes whose slides are coupled by a ratio.
+    LinearCoupler,
+    /// A distance held between a least and a greatest value.
+    LimitDistance,
+    /// Two profiles, rectangles, regular polygons or circles, centred on each other.
+    ProfileCenter,
+    /// A wall or round end of a slot, then the pin's cylinder.
+    Slot,
 }
 
 impl Family {
-    const ALL: [Family; 9] = [
+    const ALL: [Family; 14] = [
         Family::Coincident,
         Family::Distance,
         Family::Parallel,
@@ -49,6 +61,11 @@ impl Family {
         Family::Concentric,
         Family::Tangent,
         Family::Hinge,
+        Family::Symmetric,
+        Family::LinearCoupler,
+        Family::LimitDistance,
+        Family::ProfileCenter,
+        Family::Slot,
     ];
 
     fn label(self) -> &'static str {
@@ -62,24 +79,43 @@ impl Family {
             Family::Concentric => "Concentric",
             Family::Tangent => "Tangent",
             Family::Hinge => "Hinge",
+            Family::Symmetric => "Symmetric",
+            Family::LinearCoupler => "Linear Coupler",
+            Family::LimitDistance => "Limit Distance",
+            Family::ProfileCenter => "Profile Center",
+            Family::Slot => "Slot",
         }
     }
 
     /// How many faces it needs.
     fn picks(self) -> usize {
-        if matches!(self, Family::Width | Family::Hinge) { 4 } else { 2 }
+        match self {
+            Family::Width | Family::Hinge => 4,
+            Family::Symmetric => 3,
+            _ => 2,
+        }
     }
 
     fn has_alignment(self) -> bool {
-        !matches!(self, Family::Perpendicular | Family::Lock)
+        !matches!(self, Family::Perpendicular | Family::Lock | Family::LinearCoupler)
     }
 }
 
 /// Where the panel's Width puts the tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WidthMode {
+    Free,
     Centered,
     Dimension,
+    Percent,
+}
+
+/// Where the panel's Slot puts the pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotMode {
+    Free,
+    Center,
+    Distance,
     Percent,
 }
 
@@ -100,8 +136,18 @@ pub struct Draft {
     pub name: String,
     pub distance: String,
     pub width_mode: WidthMode,
+    pub slot_mode: SlotMode,
     pub percent: String,
     pub flipped: bool,
+    /// A Limit Distance's least and greatest distances.
+    pub min: String,
+    pub max: String,
+    /// A Linear Coupler's ratio: the first part slides this much ...
+    pub ratio_a: String,
+    /// ... while the second slides this much.
+    pub ratio_b: String,
+    /// A Linear Coupler's second part slides the other way.
+    pub reverse: bool,
     pub value_name: String,
     pub value_expression: String,
     /// The last refusal, shown until something works.
@@ -125,8 +171,14 @@ impl Default for Draft {
             name: String::new(),
             distance: "0 mm".into(),
             width_mode: WidthMode::Centered,
+            slot_mode: SlotMode::Free,
             percent: "50".into(),
             flipped: false,
+            min: "0 mm".into(),
+            max: "10 mm".into(),
+            ratio_a: "1".into(),
+            ratio_b: "1".into(),
+            reverse: false,
             value_name: String::new(),
             value_expression: String::new(),
             error: None,
@@ -203,15 +255,31 @@ fn pick(state: &mut AppState, path: &OccurrencePath, name: &str) {
     }
 }
 
+fn percent(d: &Draft) -> Result<f64, String> {
+    d.percent.trim().trim_end_matches('%').trim().parse::<f64>().map_err(|_| "the percentage is a number".into())
+}
+
 fn width_input(d: &Draft) -> Result<WidthInput, String> {
     Ok(match d.width_mode {
+        WidthMode::Free => WidthInput::Free,
         WidthMode::Centered => WidthInput::Centered,
         WidthMode::Dimension => WidthInput::Dimension { distance: d.distance.clone(), flipped: d.flipped },
-        WidthMode::Percent => {
-            let percent = d.percent.trim().trim_end_matches('%').trim().parse::<f64>();
-            WidthInput::Percent { percent: percent.map_err(|_| "the percentage is a number")?, flipped: d.flipped }
-        }
+        WidthMode::Percent => WidthInput::Percent { percent: percent(d)?, flipped: d.flipped },
     })
+}
+
+fn slot_input(d: &Draft) -> Result<SlotInput, String> {
+    Ok(match d.slot_mode {
+        SlotMode::Free => SlotInput::Free,
+        SlotMode::Center => SlotInput::Center,
+        SlotMode::Distance => SlotInput::Distance { distance: d.distance.clone(), flipped: d.flipped },
+        SlotMode::Percent => SlotInput::Percent { percent: percent(d)?, flipped: d.flipped },
+    })
+}
+
+fn ratio(d: &Draft) -> Result<[f64; 2], String> {
+    let number = |t: &str| t.trim().parse::<f64>().map_err(|_| "each side of the ratio is a number".to_owned());
+    Ok([number(&d.ratio_a)?, number(&d.ratio_b)?])
 }
 
 fn add(state: &mut AppState) {
@@ -220,25 +288,34 @@ fn add(state: &mut AppState) {
         "" => next_name(&state.assembly, family.label()),
         n => n.to_owned(),
     };
-    let (picked, distance, alignment, width) = {
+    let (picked, distance, alignment) = {
         let d = &state.assembly.mate;
         let picked: Vec<PickedFace> =
             [&d.a, &d.b, &d.c, &d.d].into_iter().take(family.picks()).flatten().cloned().collect();
-        (picked, d.distance.clone(), d.alignment, (family == Family::Width).then(|| width_input(d)))
+        (picked, d.distance.clone(), d.alignment)
     };
-    let (plane_alignment, lock_rotation) = (state.assembly.mate.plane_alignment, state.assembly.mate.lock_rotation);
+    let d = &state.assembly.mate;
+    let (plane_alignment, lock_rotation, reverse) = (d.plane_alignment, d.lock_rotation, d.reverse);
+    let (limits, width, slot, ratio) = (
+        [d.min.clone(), d.max.clone()],
+        (family == Family::Width).then(|| width_input(d)),
+        (family == Family::Slot).then(|| slot_input(d)),
+        (family == Family::LinearCoupler).then(|| ratio(d)),
+    );
     if picked.len() < family.picks() {
         let wanted = match family {
             Family::Width => "Pick the groove's two faces, then the tab's",
             Family::Hinge => "Pick the two axes' faces, then the two planes",
+            Family::Symmetric => "Pick the face, its mirror image, then the symmetry plane",
+            Family::Slot => "Pick a wall or round end of the slot, then the pin",
             _ => "Pick two faces first",
         };
         state.assembly.mate.error = Some(wanted.into());
         return;
     }
-    let width = match width.transpose() {
-        Ok(w) => w,
-        Err(e) => {
+    let (width, slot, ratio) = match (width.transpose(), slot.transpose(), ratio.transpose()) {
+        (Ok(w), Ok(s), Ok(r)) => (w, s, r),
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
             state.assembly.mate.error = Some(e);
             return;
         }
@@ -260,6 +337,19 @@ fn add(state: &mut AppState) {
         Family::Concentric => s.doc.mate_concentric(&name, a, b, alignment, lock_rotation, false),
         Family::Tangent => s.doc.mate_tangent(&name, a, b, alignment, false),
         Family::Hinge => s.doc.mate_hinge(&name, [a, b], [&ends[2], &ends[3]], alignment, plane_alignment, false),
+        Family::Symmetric => s.doc.mate_symmetric(&name, [a, b, &ends[2]], alignment, false),
+        Family::LinearCoupler => {
+            let ratio = ratio.expect("made above");
+            s.doc.mate_linear_coupler(&name, a, b, [None, None], ratio, reverse, false)
+        }
+        Family::LimitDistance => {
+            s.doc.mate_limit_distance(&name, a, b, [limits[0].as_str(), limits[1].as_str()], alignment, false)
+        }
+        Family::ProfileCenter => s.doc.mate_profile_center(&name, a, b, alignment, &distance, lock_rotation, false),
+        Family::Slot => {
+            let slot = slot.expect("made above");
+            s.doc.mate_slot(&name, a, b, alignment, &slot, lock_rotation, false)
+        }
     };
     report(state, done.map(|_| ()), "Mate added");
 }
@@ -316,7 +406,7 @@ fn headline(r: &MateRefusal) -> &'static str {
         C::DanglingReference => "A mated face is gone",
         C::UnsupportedPlacement => "A part is turned off the quarter turns",
         C::UnsupportedPlane | C::NotParallel => "A face cannot be proved for this mate",
-        C::UnsupportedReference => "An axis or point cannot be proved for this mate",
+        C::UnsupportedReference => "An axis, point, profile or slot cannot be proved for this mate",
         _ => "Refused",
     }
 }
@@ -357,6 +447,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         Family::Lock => &["First component", "Second component"],
         Family::Tangent => &["Plane", "Cylinder or sphere"],
         Family::Hinge => &["First axis", "Second axis", "First plane", "Second plane"],
+        Family::Symmetric => &["Face", "Mirror image", "Symmetry plane"],
+        Family::Slot => &["Slot", "Pin"],
         _ => &["First face", "Second face"],
     };
     for (label, slot) in slots.iter().zip([&d.a, &d.b, &d.c, &d.d]) {
@@ -380,27 +472,56 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.selectable_value(&mut d.plane_alignment, Alignment::Aligned, "Planes aligned");
         });
     }
-    if d.family == Family::Concentric {
+    if matches!(d.family, Family::Concentric | Family::ProfileCenter | Family::Slot) {
         ui.checkbox(&mut d.lock_rotation, "Lock rotation");
     }
     labelled(ui, &mut d.name, "Name", "Mate name");
     if d.family == Family::Width {
         ui.horizontal(|ui| {
+            ui.selectable_value(&mut d.width_mode, WidthMode::Free, "Free");
             ui.selectable_value(&mut d.width_mode, WidthMode::Centered, "Centred");
             ui.selectable_value(&mut d.width_mode, WidthMode::Dimension, "Gap");
             ui.selectable_value(&mut d.width_mode, WidthMode::Percent, "Percent");
         });
         match d.width_mode {
-            WidthMode::Centered => {}
+            WidthMode::Free | WidthMode::Centered => {}
             WidthMode::Dimension => labelled(ui, &mut d.distance, "Gap, such as 1 mm", "Mate distance"),
             WidthMode::Percent => labelled(ui, &mut d.percent, "Percent of the play", "Mate percent"),
         }
-        if d.width_mode != WidthMode::Centered {
+        if matches!(d.width_mode, WidthMode::Dimension | WidthMode::Percent) {
             ui.checkbox(&mut d.flipped, "From the second groove face");
         }
     }
-    if d.family == Family::Distance {
+    if d.family == Family::Slot {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Free, "Free");
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Center, "Centre in slot");
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Distance, "Distance along slot");
+            ui.selectable_value(&mut d.slot_mode, SlotMode::Percent, "Percent along slot");
+        });
+        match d.slot_mode {
+            SlotMode::Free | SlotMode::Center => {}
+            SlotMode::Distance => labelled(ui, &mut d.distance, "Distance, such as 4 mm", "Mate distance"),
+            SlotMode::Percent => labelled(ui, &mut d.percent, "Percent of the run", "Mate percent"),
+        }
+        if matches!(d.slot_mode, SlotMode::Distance | SlotMode::Percent) {
+            ui.checkbox(&mut d.flipped, "From the second end");
+        }
+    }
+    if matches!(d.family, Family::Distance | Family::ProfileCenter) {
         labelled(ui, &mut d.distance, "Distance, such as 5 mm", "Mate distance");
+    }
+    if d.family == Family::LimitDistance {
+        labelled(ui, &mut d.min, "Least distance, such as 0 mm", "Mate least distance");
+        labelled(ui, &mut d.max, "Greatest distance, such as 10 mm", "Mate greatest distance");
+    }
+    if d.family == Family::LinearCoupler {
+        ui.horizontal(|ui| {
+            labelled(ui, &mut d.ratio_a, "First slides", "Mate ratio first");
+            ui.label(":");
+            labelled(ui, &mut d.ratio_b, "Second slides", "Mate ratio second");
+        });
+        ui.checkbox(&mut d.reverse, "Reverse");
     }
     ui.horizontal(|ui| {
         if ui.button("Add mate").clicked() {
@@ -472,6 +593,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     Some("percent") => {
                         format!("{}% of the play", m["width"]["percent"].as_f64().unwrap_or(f64::NAN))
                     }
+                    Some("free") => "free".to_owned(),
                     _ => "centred".to_owned(),
                 };
                 format!("{name}: width, {alignment}, {how}")
@@ -487,6 +609,38 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some("tangent") => format!("{name}: tangent, {alignment}"),
             Some("hinge") => {
                 format!("{name}: hinge, axes {alignment}, planes {}", m["plane_alignment"].as_str().unwrap_or("?"))
+            }
+            Some("symmetric") => match m["alignment"].as_str() {
+                Some(a) => format!("{name}: symmetric, {a}"),
+                None => format!("{name}: symmetric"),
+            },
+            Some("linear_coupler") => {
+                let ratio = &m["ratio"];
+                let reverse = if m["reverse"].as_bool() == Some(true) { ", reversed" } else { "" };
+                format!("{name}: coupled {} : {}{reverse}", ratio[0], ratio[1])
+            }
+            Some("limit_distance") => format!(
+                "{name}: from {} to {}, {}",
+                shown(m["min"]["value"].as_f64(), ""),
+                shown(m["max"]["value"].as_f64(), ""),
+                shown(gap(m), " now")
+            ),
+            Some("profile_center") => {
+                let locked = if m["lock_rotation"].as_bool() == Some(true) { ", rotation locked" } else { "" };
+                format!(
+                    "{name}: profile centre, {alignment}, {}{locked}",
+                    shown(m["distance"]["value"].as_f64(), " apart")
+                )
+            }
+            Some("slot") => {
+                let how = match m["position"]["mode"].as_str() {
+                    Some("center") => "centred".to_owned(),
+                    Some("distance") => shown(m["position"]["distance"]["value"].as_f64(), " along"),
+                    Some("percent") => format!("{}% along", m["position"]["percent"].as_f64().unwrap_or(f64::NAN)),
+                    _ => "free".to_owned(),
+                };
+                let locked = if m["lock_rotation"].as_bool() == Some(true) { ", rotation locked" } else { "" };
+                format!("{name}: in the slot, {how}{locked}")
             }
             Some("origin") => format!("{name}: on the origin"),
             _ => {

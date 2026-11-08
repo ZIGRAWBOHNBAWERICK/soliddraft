@@ -501,6 +501,55 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     });
     s.call("assembly_mate_hinge", hinge);
     s.call("assembly_delete_mate", json!({ "mate": "H" }));
+    // The B4 families: each added, edited where it has something to edit, and taken away.
+    let below = cap(pins[0], "Boss-Extrude1", "start_cap");
+    let mirror = json!({ "component": parts[0], "plane": "Top plane" });
+    let symmetric = json!({ "name": "S", "a": bottom, "b": below, "plane": mirror, "alignment": "opposed" });
+    s.call("assembly_mate_symmetric", symmetric);
+    s.call("assembly_delete_mate", json!({ "mate": "S" }));
+    let coupler = json!({ "name": "K", "a": bottom, "b": shaft(pins[0]), "ratio": [1, 2] });
+    let coupled = s.call("assembly_mate_linear_coupler", coupler);
+    let row = coupled["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "K").unwrap().clone();
+    assert_eq!((row["kind"].as_str(), &row["ratio"]), (Some("linear_coupler"), &json!([1.0, 2.0])));
+    s.call("assembly_edit_mate", json!({ "mate": "K", "reverse": true }));
+    s.call("assembly_delete_mate", json!({ "mate": "K" }));
+    let limit = json!({ "name": "LD", "a": top, "b": bottom, "min": "0 mm", "max": "50 mm", "alignment": "opposed" });
+    s.call("assembly_mate_limit_distance", limit);
+    s.call("assembly_edit_mate", json!({ "mate": "LD", "max": "60 mm" }));
+    s.call("assembly_delete_mate", json!({ "mate": "LD" }));
+    let profile = json!({ "name": "PC", "a": top, "b": bottom, "alignment": "opposed", "distance": "0 mm" });
+    let centred = s.call("assembly_mate_profile_center", profile);
+    let row = centred["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "PC").unwrap().clone();
+    assert_eq!(row["b"]["support"]["kind"], "profile");
+    s.call("assembly_delete_mate", json!({ "mate": "PC" }));
+    s.call("assembly_show_part", json!({}));
+    s.call("new_part", json!({}));
+    let block = json!({ "shape": "rectangle", "center": [0, 0, 0], "width": 60, "height": 30 });
+    s.call("sketch", json!({ "plane": "top", "shapes": [block] }));
+    s.call("extrude", json!({ "sketch": "Sketch1", "depth": 10, "flip": false }));
+    let slot = json!({ "shape": "slot", "start": [-11, 0, 0], "end": [11, 0, 0], "width": 8 });
+    s.call("sketch", json!({ "plane": "top", "shapes": [slot] }));
+    s.call("cut", json!({ "sketch": "Sketch2", "through_all": true, "depth": 10, "flip": true }));
+    let slotted = s.path("slotted.dwprt");
+    s.call("save", json!({ "path": slotted }));
+    s.call("show_assembly", json!({}));
+    let placed = s.call("insert_component", json!({ "paths": [slotted] }));
+    let slotted =
+        placed["assembly"]["components"].as_array().unwrap().last().unwrap()["path"].as_str().unwrap().to_owned();
+    let wall = json!({
+        "component": slotted.parse::<u64>().unwrap(),
+        "feature": "Cut-Extrude1",
+        "generator": "side",
+        "normal": [0, 1, 0],
+    });
+    let slot = json!({ "name": "SL", "slot": wall, "pin": shaft(pins[1]), "mode": "center" });
+    let slotted = s.call("assembly_mate_slot", slot);
+    let row = slotted["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "SL").unwrap().clone();
+    assert_eq!(
+        (row["slot"]["support"]["kind"].as_str(), row["position"]["mode"].as_str()),
+        (Some("slot"), Some("center"))
+    );
+    s.call("assembly_delete_mate", json!({ "mate": "SL" }));
 
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();

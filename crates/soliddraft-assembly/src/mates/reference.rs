@@ -17,11 +17,12 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use num_rational::BigRational;
+use num_traits::{Signed, Zero};
 use serde::Serialize;
 use soliddraft_document::{ConfigurationId, ContentHash, DocKind, DocRef, DocumentId};
 use soliddraft_kernel_api::{
-    Axis, EdgeId, ExactAxisPlane, ExactRadius, ExactRational, ExactSupport, FaceId, KernelError, SupportEntity,
-    SurfaceKind,
+    Axis, CurveKind, EdgeId, ExactAxisPlane, ExactRadius, ExactRational, ExactSupport, FaceId, KernelError,
+    SupportEntity, SupportSource, SurfaceKind, Topology, VertexId,
 };
 use soliddraft_model::{
     DatumPlane, Document as PartDocument, EdgeRef, FaceRef, FeatureId, FeatureKind, Generator, RepairNeeded,
@@ -150,6 +151,81 @@ impl SupportProof {
     }
 }
 
+/// A profile proven on one revision of a part: the centre of a planar face's outline, a
+/// rectangle, a regular polygon or a circle, or of a circular edge, with its plane.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ProfileProof {
+    /// The plane's outward normal, or a circular edge's direction.
+    pub normal: [i8; 3],
+    /// Where the plane lies along `normal`.
+    pub offset: BigRational,
+    /// The centre: a circle's, or the average of a polygon's corners.
+    pub centre: [BigRational; 3],
+    /// A polygon's number of sides; `None` for a circle.
+    pub sides: Option<u32>,
+    /// A polygon's edge directions, for lining two up: from corners the sketch placed, so
+    /// read as doubles.
+    pub edges: Vec<glam::DVec3>,
+    /// The entity's label at that revision.
+    pub label: String,
+}
+
+/// A straight slot proven on one revision of a part: two parallel walls closed by two round
+/// ends.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SlotProof {
+    /// The direction the round ends' axes run: the first end's cylinder's own.
+    pub depth: [i8; 3],
+    /// A point on each round end's axis, the one nearer the negative side of the run first.
+    pub ends: [[BigRational; 3]; 2],
+    /// The round ends' radius squared.
+    pub radius_squared: BigRational,
+    /// The face's label at that revision.
+    pub label: String,
+}
+
+/// What a Profile Center or a Slot reads of a face or edge.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Shape {
+    Profile(ProfileProof),
+    Slot(SlotProof),
+}
+
+/// Which shape to read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ShapeKind {
+    Profile,
+    Slot,
+}
+
+impl StoredSupport {
+    /// The shape this stored support asks a proof to read, when it is one.
+    pub(crate) fn shape(&self) -> Option<ShapeKind> {
+        match self {
+            StoredSupport::Profile { .. } => Some(ShapeKind::Profile),
+            StoredSupport::Slot { .. } => Some(ShapeKind::Slot),
+            StoredSupport::Axis { .. } | StoredSupport::Point { .. } => None,
+        }
+    }
+}
+
+impl Shape {
+    /// What a mate stores of it for the solver's status, as doubles.
+    pub(crate) fn stored(&self) -> StoredSupport {
+        use crate::mates::solver::nearest;
+        match self {
+            Shape::Profile(p) => {
+                StoredSupport::Profile { normal: p.normal, centre: p.centre.each_ref().map(nearest), sides: p.sides }
+            }
+            Shape::Slot(s) => StoredSupport::Slot {
+                depth: s.depth,
+                ends: s.ends.each_ref().map(|e| e.each_ref().map(nearest)),
+                radius: nearest(&s.radius_squared).sqrt(),
+            },
+        }
+    }
+}
+
 /// What a proof is of on its part.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Proved {
@@ -168,6 +244,7 @@ type PlaneKey = (DocumentId, ContentHash, Proved);
 pub(crate) struct Proofs {
     parts: HashMap<(DocumentId, ContentHash), Arc<Mutex<PartDocument>>>,
     supports: HashMap<PlaneKey, SupportProof>,
+    shapes: HashMap<(DocumentId, ContentHash, ShapeKind, String), Shape>,
     /// How many parts were rebuilt for proofs.
     pub built: usize,
 }
@@ -328,6 +405,62 @@ impl AssemblyDocument {
     /// The axis or point a mate stores for `entity`, proven at the revision `r` pins.
     pub(crate) fn stored_support(&mut self, r: &DocRef, entity: &Entity) -> Result<Option<StoredSupport>, MateRefusal> {
         Ok(self.prove_support(r, entity, None)?.stored())
+    }
+
+    /// The profile or slot `entity` bounds at the revision `r` pins. `stored` is what the
+    /// mate recorded when it was made; one whose plane or slot now faces another way refuses
+    /// as `dangling_reference`.
+    pub(crate) fn prove_shape(
+        &mut self,
+        r: &DocRef,
+        entity: &Entity,
+        kind: ShapeKind,
+        stored: Option<&StoredSupport>,
+    ) -> Result<Shape, MateRefusal> {
+        let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
+        let key = (id, r.pinned.clone(), kind, format!("{entity:?}"));
+        let shape = match self.proofs.shapes.get(&key) {
+            Some(shape) => shape.clone(),
+            None => {
+                let part = self.proof_part(r)?;
+                let part = part.lock().expect("the part lock");
+                let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+                let found = match entity {
+                    Entity::Face(face) => part.resolve_face(face, body).map(SupportEntity::Face),
+                    Entity::Edge(edge) => part.resolve_edge(edge, body).map(SupportEntity::Edge),
+                    Entity::Vertex(vertex) => part.resolve_vertex(vertex, body).map(SupportEntity::Vertex),
+                    Entity::Plane(_) => {
+                        let what = match kind {
+                            ShapeKind::Profile => "Profile Center reads a planar face or a circular edge",
+                            ShapeKind::Slot => "Slot reads a wall or a round end of a straight slot",
+                        };
+                        return Err(MateRefusal::new(
+                            RefusalCode::UnsupportedReference,
+                            format!("{}: {what}, not a reference plane", r.path),
+                        ));
+                    }
+                }
+                .map_err(repair_refusal)?;
+                let shape = match kind {
+                    ShapeKind::Profile => Shape::Profile(profile_of(&part, r, found)?),
+                    ShapeKind::Slot => Shape::Slot(slot_of(&part, r, found)?),
+                };
+                drop(part);
+                self.proofs.shapes.insert(key, shape.clone());
+                shape
+            }
+        };
+        let changed = match (stored, &shape) {
+            (Some(StoredSupport::Profile { normal, .. }), Shape::Profile(p)) => p.normal != *normal,
+            (Some(StoredSupport::Slot { depth, .. }), Shape::Slot(s)) => s.depth != *depth,
+            (None, _) => false,
+            (Some(_), _) => true,
+        };
+        if changed {
+            let message = format!("{} now lies another way than when it was mated", entity.describe());
+            return Err(MateRefusal::new(RefusalCode::DanglingReference, message));
+        }
+        Ok(shape)
     }
 
     /// The persistent name of the face or plane `selector` finds on the part `r` pins.
@@ -642,4 +775,318 @@ fn feature_plane(part: &PartDocument, id: FeatureId, depth: usize) -> Result<([i
             ),
         )),
     }
+}
+
+/// A rational read from the kernel, or the refusal `refuse` makes of what it was.
+fn exact_of(value: &ExactRational, refuse: &impl Fn(String) -> MateRefusal) -> Result<BigRational, MateRefusal> {
+    crate::mates::solver::rational(value).ok_or_else(|| refuse("a value is not rational".into()))
+}
+
+fn exact_point(
+    p: &[ExactRational; 3],
+    refuse: &impl Fn(String) -> MateRefusal,
+) -> Result<[BigRational; 3], MateRefusal> {
+    Ok([exact_of(&p[0], refuse)?, exact_of(&p[1], refuse)?, exact_of(&p[2], refuse)?])
+}
+
+fn dot3(a: &[BigRational; 3], b: &[BigRational; 3]) -> BigRational {
+    &a[0] * &b[0] + &a[1] * &b[1] + &a[2] * &b[2]
+}
+
+fn signed_axis(n: [i8; 3]) -> [BigRational; 3] {
+    n.map(|c| BigRational::from_integer(c.into()))
+}
+
+/// How far apart a polygon's side lengths or corner radii may be, relative to them, and the
+/// polygon still be read as regular: its corners come from a sketch, placed by turns that
+/// round.
+const REGULAR_TOLERANCE: f64 = 1e-9;
+
+/// A face's boundary split into its loops, each as its edges.
+fn loops(t: &Topology, edges: &[EdgeId]) -> Vec<Vec<EdgeId>> {
+    let mut out: Vec<(Vec<EdgeId>, Vec<VertexId>)> = Vec::new();
+    for &e in edges {
+        let vertices = t.edge(e).map(|e| e.vertices.clone()).unwrap_or_default();
+        let joined: Vec<usize> = (0..out.len()).filter(|i| out[*i].1.iter().any(|v| vertices.contains(v))).collect();
+        let mut merged = (vec![e], vertices);
+        for i in joined.into_iter().rev() {
+            let (es, vs) = out.remove(i);
+            merged.0.extend(es);
+            merged.1.extend(vs);
+        }
+        out.push(merged);
+    }
+    out.into_iter().map(|(es, _)| es).collect()
+}
+
+/// The loop that encloses the others: the one whose bounds reach furthest.
+fn outer(t: &Topology, loops: Vec<Vec<EdgeId>>) -> Option<Vec<EdgeId>> {
+    let reach = |l: &Vec<EdgeId>| {
+        let boxes: Vec<_> = l.iter().filter_map(|e| t.edge(*e)).map(|e| e.bbox).collect();
+        let lo = boxes.iter().fold(glam::DVec3::INFINITY, |m, b| m.min(glam::DVec3::new(b.min.x, b.min.y, b.min.z)));
+        let hi =
+            boxes.iter().fold(glam::DVec3::NEG_INFINITY, |m, b| m.max(glam::DVec3::new(b.max.x, b.max.y, b.max.z)));
+        (hi - lo).length()
+    };
+    loops.into_iter().max_by(|a, b| reach(a).total_cmp(&reach(b)))
+}
+
+/// A closed chain of edges' corners in order round it, or `None` when it is not one chain.
+fn corners(t: &Topology, chain: &[EdgeId]) -> Option<Vec<VertexId>> {
+    let ends = |e: EdgeId| -> Option<[VertexId; 2]> {
+        match t.edge(e)?.vertices[..] {
+            [a, b] if a != b => Some([a, b]),
+            _ => None,
+        }
+    };
+    let first = ends(chain[0])?;
+    let mut order = vec![first[0]];
+    let (mut at, mut via) = (first[1], chain[0]);
+    while at != first[0] {
+        if order.len() > chain.len() {
+            return None;
+        }
+        order.push(at);
+        let next = chain.iter().copied().filter(|e| *e != via).find(|e| ends(*e).is_some_and(|v| v.contains(&at)))?;
+        let [p, q] = ends(next)?;
+        at = if p == at { q } else { p };
+        via = next;
+    }
+    (order.len() == chain.len()).then_some(order)
+}
+
+/// The profile a planar face's outline or a circular edge makes, read exactly.
+fn profile_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<ProfileProof, MateRefusal> {
+    let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+    let kernel = part.kernel();
+    let label = match entity {
+        SupportEntity::Face(face) => part.face_label(face).map(|l| l.text).unwrap_or_default(),
+        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
+        SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
+    };
+    let named = if label.is_empty() { String::new() } else { format!(", {label}") };
+    let refuse = |m: String| MateRefusal::new(RefusalCode::UnsupportedReference, format!("{}{named}: {m}", r.path));
+    let support = |e: SupportEntity| {
+        kernel.entity_support(body, e).map_err(|err| match err {
+            KernelError::Unsupported(_) => refuse(err.to_string()),
+            _ => unavailable(format!("{}{named}: {err}", r.path)),
+        })
+    };
+    let circle = |edge: EdgeId| -> Result<([i8; 3], [BigRational; 3]), MateRefusal> {
+        match support(SupportEntity::Edge(edge))? {
+            ExactSupport::Axis(a) if a.source == SupportSource::Circle => {
+                Ok((a.direction(), exact_point(&a.through, &refuse)?))
+            }
+            _ => Err(refuse("a straight edge does not say which face's outline it bounds; mate the face".into())),
+        }
+    };
+    match entity {
+        SupportEntity::Vertex(_) => {
+            Err(refuse("Profile Center reads a planar face or a circular edge, not a vertex".into()))
+        }
+        SupportEntity::Edge(edge) => {
+            let (normal, centre) = circle(edge)?;
+            let offset = dot3(&signed_axis(normal), &centre);
+            Ok(ProfileProof { normal, offset, centre, sides: None, edges: Vec::new(), label })
+        }
+        SupportEntity::Face(face) => {
+            let ExactSupport::Plane(plane) = support(entity)? else {
+                return Err(refuse("Profile Center reads a planar face or a circular edge".into()));
+            };
+            let (normal, offset) = (plane.normal(), exact_of(&plane.offset, &refuse)?);
+            let t = kernel.topology(body).map_err(|e| unavailable(e.to_string()))?;
+            let edges = t.face(face).map(|f| f.edges.clone()).unwrap_or_default();
+            let outline = outer(&t, loops(&t, &edges)).ok_or_else(|| refuse("the face has no outline".into()))?;
+            let kinds: Vec<CurveKind> = outline.iter().filter_map(|e| t.edge(*e)).map(|e| e.curve).collect();
+            if kinds.iter().all(|k| *k == CurveKind::Circle) {
+                // One circle, whole or in arcs: each arc has its centre and its radius.
+                let mut found: Option<([BigRational; 3], ExactRational)> = None;
+                for edge in &outline {
+                    let ExactSupport::Axis(a) = support(SupportEntity::Edge(*edge))? else {
+                        return Err(refuse("an edge of its outline is not a circle".into()));
+                    };
+                    if a.direction().map(i8::abs) != normal.map(i8::abs) {
+                        return Err(refuse("its circle does not lie in its plane".into()));
+                    }
+                    let centre = exact_point(&a.through, &refuse)?;
+                    let squared = a.radius.map(|r| r.squared).ok_or_else(|| refuse("a circle has no radius".into()))?;
+                    match &found {
+                        Some((c, r)) if *c != centre || *r != squared => {
+                            return Err(refuse("its outline's arcs are not one circle".into()));
+                        }
+                        Some(_) => {}
+                        None => found = Some((centre, squared)),
+                    }
+                }
+                let (centre, _) = found.expect("an outline has an edge");
+                return Ok(ProfileProof { normal, offset, centre, sides: None, edges: Vec::new(), label });
+            }
+            if kinds.iter().any(|k| *k != CurveKind::Line) {
+                return Err(refuse(
+                    "its outline mixes lines with arcs or curves: Profile Center reads a rectangle, a regular polygon or a circle, and a rounded or chamfered outline is none of them".into(),
+                ));
+            }
+            let order = corners(&t, &outline).ok_or_else(|| refuse("its outline is not one closed chain".into()))?;
+            let mut points = Vec::with_capacity(order.len());
+            for v in order {
+                match support(SupportEntity::Vertex(v))? {
+                    ExactSupport::Point(p) => points.push(exact_point(&p.at, &refuse)?),
+                    _ => return Err(refuse("a corner is not a point".into())),
+                }
+            }
+            let n = points.len();
+            let count = BigRational::from_integer((n as i64).into());
+            let centre: [BigRational; 3] =
+                std::array::from_fn(|k| points.iter().map(|p| p[k].clone()).sum::<BigRational>() / &count);
+            let sides: Vec<[BigRational; 3]> =
+                (0..n).map(|i| std::array::from_fn(|k| &points[(i + 1) % n][k] - &points[i][k])).collect();
+            let rectangle = n == 4 && (0..n).all(|i| dot3(&sides[i], &sides[(i + 1) % n]).is_zero());
+            let even = |values: Vec<BigRational>| {
+                let values: Vec<f64> = values.iter().map(crate::mates::solver::nearest).collect();
+                let (lo, hi) = values.iter().fold((f64::INFINITY, 0.0_f64), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+                lo > 0.0 && (hi - lo) <= REGULAR_TOLERANCE * hi
+            };
+            let regular = even(sides.iter().map(|e| dot3(e, e)).collect())
+                && even(
+                    points
+                        .iter()
+                        .map(|p| {
+                            let d: [BigRational; 3] = std::array::from_fn(|k| &p[k] - &centre[k]);
+                            dot3(&d, &d)
+                        })
+                        .collect(),
+                );
+            if !rectangle && !regular {
+                return Err(refuse(format!(
+                    "its outline has {n} straight sides but is neither a rectangle nor a regular polygon"
+                )));
+            }
+            let edges = sides
+                .iter()
+                .map(|e| glam::DVec3::from_array(e.each_ref().map(crate::mates::solver::nearest)).normalize())
+                .collect();
+            Ok(ProfileProof { normal, offset, centre, sides: Some(n as u32), edges, label })
+        }
+    }
+}
+
+/// The straight slot a wall or round end belongs to: walking from it across edges that run
+/// along the round ends' axes, two parallel walls and two round ends, read exactly.
+fn slot_of(part: &PartDocument, r: &DocRef, entity: SupportEntity) -> Result<SlotProof, MateRefusal> {
+    let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+    let kernel = part.kernel();
+    let SupportEntity::Face(face) = entity else {
+        return Err(MateRefusal::new(
+            RefusalCode::UnsupportedReference,
+            format!("{}: Slot reads a wall or a round end of a straight slot, a face", r.path),
+        ));
+    };
+    let label = part.face_label(face).map(|l| l.text).unwrap_or_default();
+    let named = if label.is_empty() { String::new() } else { format!(", {label}") };
+    let refuse = |m: String| MateRefusal::new(RefusalCode::UnsupportedReference, format!("{}{named}: {m}", r.path));
+    let support = |e: SupportEntity| {
+        kernel.entity_support(body, e).map_err(|err| match err {
+            KernelError::Unsupported(_) => refuse(format!("the slot is not read exactly: {err}")),
+            _ => unavailable(format!("{}{named}: {err}", r.path)),
+        })
+    };
+    let t = kernel.topology(body).map_err(|e| unavailable(e.to_string()))?;
+    let across = |f: FaceId| -> Vec<(EdgeId, FaceId)> {
+        t.face(f)
+            .into_iter()
+            .flat_map(|info| info.edges.iter())
+            .filter_map(|e| Some((*e, t.edge(*e)?.faces.iter().copied().find(|g| *g != f)?)))
+            .collect()
+    };
+    let not_a_slot = || {
+        refuse(
+            "Slot reads a wall or a round end of a straight slot: two parallel walls closed by two round ends".into(),
+        )
+    };
+    let round = |s: &ExactSupport| match s {
+        ExactSupport::Axis(a) if a.source == SupportSource::Cylinder => Some(a.clone()),
+        _ => None,
+    };
+    // The round ends' axis direction: the face's own when it is one, else a neighbour's.
+    let first = support(SupportEntity::Face(face))?;
+    let depth = match (&first, round(&first)) {
+        (_, Some(a)) => a.direction(),
+        (ExactSupport::Plane(p), None) => {
+            let n = p.normal();
+            let mut found = None;
+            for (_, g) in across(face) {
+                if t.face(g).is_some_and(|i| i.surface == SurfaceKind::Cylinder)
+                    && let Some(a) = round(&support(SupportEntity::Face(g))?)
+                    && a.direction().iter().zip(n).all(|(x, y)| x * y == 0)
+                {
+                    found = Some(a.direction());
+                    break;
+                }
+            }
+            found.ok_or_else(not_a_slot)?
+        }
+        _ => return Err(not_a_slot()),
+    };
+    let k_depth = depth.iter().position(|c| *c != 0).expect("a signed axis");
+    // The faces joined to it by straight edges along the depth.
+    let mut ring = vec![face];
+    let mut i = 0;
+    while i < ring.len() {
+        for (e, g) in across(ring[i]) {
+            if ring.contains(&g) || t.edge(e).is_none_or(|info| info.curve != CurveKind::Line) {
+                continue;
+            }
+            if let ExactSupport::Axis(a) = support(SupportEntity::Edge(e))?
+                && a.direction()[k_depth] != 0
+            {
+                ring.push(g);
+            }
+        }
+        i += 1;
+        if ring.len() > 8 {
+            return Err(not_a_slot());
+        }
+    }
+    let mut walls = Vec::new();
+    let mut ends = Vec::new();
+    for f in &ring {
+        match support(SupportEntity::Face(*f))? {
+            ExactSupport::Plane(p) => walls.push((p.normal(), exact_of(&p.offset, &refuse)?)),
+            s => match round(&s) {
+                Some(a) => ends.push(a),
+                None => return Err(not_a_slot()),
+            },
+        }
+    }
+    if walls.is_empty() && ends.len() == 4 {
+        return Err(refuse("an arc slot, whose walls are round, is not supported in this version".into()));
+    }
+    let ([(n0, o0), (n1, o1)], [e0, e1]) = (&walls[..], &ends[..]) else { return Err(not_a_slot()) };
+    if n1.map(|c| -c) != *n0 || n0[k_depth] != 0 {
+        return Err(refuse("the slot's walls are not two parallel faces across its round ends".into()));
+    }
+    let k_across = n0.iter().position(|c| *c != 0).expect("a signed axis");
+    let k_along = 3 - k_depth - k_across;
+    let squared = |a: &soliddraft_kernel_api::ExactAxis| {
+        a.radius.as_ref().map(|r| exact_of(&r.squared, &refuse)).transpose()?.ok_or_else(not_a_slot)
+    };
+    let (r0, r1) = (squared(e0)?, squared(e1)?);
+    let same_side = e0.radius.as_ref().map(|r| r.outward) == e1.radius.as_ref().map(|r| r.outward);
+    if e0.direction()[k_depth] == 0 || e1.direction()[k_depth] == 0 || r0 != r1 || !same_side {
+        return Err(refuse("the slot's round ends are not two equal half-cylinders along one direction".into()));
+    }
+    // Each wall's place across the run, from the part's origin.
+    let place = |n: &[i8; 3], o: &BigRational| BigRational::from_integer(n[k_across].into()) * o;
+    let (w0, w1) = (place(n0, o0), place(n1, o1));
+    let four = BigRational::from_integer(4.into());
+    let mid = (&w0 + &w1) / BigRational::from_integer(2.into());
+    let (p0, p1) = (exact_point(&e0.through, &refuse)?, exact_point(&e1.through, &refuse)?);
+    if (&w0 - &w1).abs() * (&w0 - &w1).abs() != four * &r0 || p0[k_across] != mid || p1[k_across] != mid {
+        return Err(refuse("the slot's walls are not tangent to its round ends".into()));
+    }
+    if p0[k_along] == p1[k_along] {
+        return Err(not_a_slot());
+    }
+    let (first, second, own) = if p0[k_along] < p1[k_along] { (p0, p1, e0) } else { (p1, p0, e1) };
+    Ok(SlotProof { depth: own.direction(), ends: [first, second], radius_squared: r0, label })
 }

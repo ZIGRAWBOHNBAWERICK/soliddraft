@@ -16,7 +16,8 @@
 //!   part occurrences they move, by path.
 //!
 //! The families are Origin, Distance, Coincident, Parallel, Perpendicular, Width, Lock,
-//! Concentric, Tangent and Hinge. They cover axis-aligned planes, axes and points with exact
+//! Concentric, Tangent, Hinge, Symmetric, Linear Coupler, Limit Distance, Profile Center and
+//! Slot. They cover axis-aligned planes, axes, points, profiles and straight slots with exact
 //! coordinates, and quarter-turn rotations; see `docs/mates.md`.
 
 pub(crate) mod bodies;
@@ -34,7 +35,7 @@ use soliddraft_model::{DatumPlane, EdgeRef, Expression, FaceRef, FeatureId, Vert
 use crate::path::{ComponentId, OccurrencePath};
 use crate::placement::Placement;
 
-pub use command::{MateEdit, PlaneMeasurement, ProofIdentity, WidthInput};
+pub use command::{MateEdit, PlaneMeasurement, ProofIdentity, SlotInput, WidthInput};
 pub use reference::{EndpointSelector, FaceSelector, GeneratorChoice, PlaneProof, SupportProof};
 pub use solver::{FreeMotion, SolverState, SolverStatus};
 
@@ -178,6 +179,28 @@ pub enum StoredSupport {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outward: Option<bool>,
     },
+    /// The centre of a planar face's outline, a rectangle, a regular polygon or a circle, or
+    /// of a circular edge.
+    Profile {
+        /// The plane's outward normal, or a circular edge's direction: each component -1,
+        /// 0 or 1.
+        normal: [i8; 3],
+        /// The centre.
+        centre: [f64; 3],
+        /// A polygon's number of sides; absent for a circle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sides: Option<u32>,
+    },
+    /// A straight slot: two parallel walls closed by two round ends.
+    Slot {
+        /// The direction the round ends' axes run, each component -1, 0 or 1.
+        depth: [i8; 3],
+        /// A point on each round end's axis, the end nearer the negative side of the slot's
+        /// run first.
+        ends: [[f64; 3]; 2],
+        /// The round ends' radius.
+        radius: f64,
+    },
 }
 
 /// One side of a mate between planes: a face or a reference plane of one placed part.
@@ -272,6 +295,8 @@ pub struct PartEndpoint {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WidthConstraint {
+    /// Anywhere between the groove's faces.
+    Free,
     /// The tab's mid-plane on the groove's.
     Centered,
     /// The gap from the first groove face (the second with `flipped`) to the tab face
@@ -289,6 +314,32 @@ pub enum WidthConstraint {
         /// The percentage.
         percent: f64,
         /// Measured from the second groove face.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flipped: bool,
+    },
+}
+
+/// Where a Slot mate puts the pin along the slot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SlotConstraint {
+    /// Anywhere between the round ends' centres.
+    Free,
+    /// Halfway between them.
+    Center,
+    /// The distance from the first end's centre, or the second's with `flipped`.
+    Distance {
+        /// The distance. An expression that reads values is driven by them.
+        distance: Expression,
+        /// Measured from the second end.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flipped: bool,
+    },
+    /// That distance as a percentage of the run between the ends' centres.
+    Percent {
+        /// The percentage, 0 to 100.
+        percent: f64,
+        /// Measured from the second end.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flipped: bool,
     },
@@ -461,6 +512,110 @@ pub enum Mate {
         /// How the planes' outward normals relate.
         plane_alignment: Alignment,
     },
+    /// `b` is `a` mirrored about `plane`: two planes, two lines or two points, on two parts,
+    /// about a plane of any part.
+    Symmetric {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first entity.
+        a: FaceEndpoint,
+        /// Its mirror image.
+        b: FaceEndpoint,
+        /// The symmetry plane.
+        plane: FaceEndpoint,
+        /// How `b`'s outward normal or direction relates to `a`'s mirrored; absent for
+        /// points.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alignment: Option<Alignment>,
+    },
+    /// How far `b` slides along its entity's direction is a ratio of how far `a` does along
+    /// its own, each measured from a reference part's origin or the assembly's.
+    LinearCoupler {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first part's plane or axis: its normal or direction is the way it slides.
+        a: FaceEndpoint,
+        /// The second's.
+        b: FaceEndpoint,
+        /// The part `a` slides relative to; absent for the assembly.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference_a: Option<PartEndpoint>,
+        /// The part `b` slides relative to; absent for the assembly.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference_b: Option<PartEndpoint>,
+        /// `a` slides `ratio[0]` while `b` slides `ratio[1]`.
+        ratio: [f64; 2],
+        /// `b` slides the other way.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        /// `ratio[0]` times how far `b` lies along its direction, less `ratio[1]` times how
+        /// far `a` does (plus, when `reverse`), taken where the parts were when the mate was
+        /// made: an exact rational such as `-381/5`.
+        offset: String,
+    },
+    /// The signed distance from `a`'s plane to `b`, as a Distance measures it, anywhere from
+    /// `min` to `max`.
+    LimitDistance {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The plane the distance is measured from.
+        a: FaceEndpoint,
+        /// The plane, axis or point it is measured to.
+        b: FaceEndpoint,
+        /// How their outward normals relate.
+        alignment: Alignment,
+        /// The least distance.
+        min: Expression,
+        /// The greatest distance.
+        max: Expression,
+    },
+    /// Two profiles, rectangles, regular polygons or circles, centred on each other with
+    /// their planes `distance` apart. Polygons line their edges up; circles keep their spin
+    /// unless `lock_rotation` holds it.
+    ProfileCenter {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first profile.
+        a: FaceEndpoint,
+        /// The second.
+        b: FaceEndpoint,
+        /// How their planes' outward normals relate.
+        alignment: Alignment,
+        /// The signed distance from `a`'s plane to `b`'s, along `a`'s outward normal.
+        distance: Expression,
+        /// For circles, `b`'s turn in `a`'s frame as a quarter-turn matrix by rows. Absent
+        /// leaves the spin free.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lock_rotation: Option<[[i8; 3]; 3]>,
+    },
+    /// A pin in a straight slot: square to the slot's run, on its mid-plane, and along it as
+    /// `constraint` says.
+    Slot {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// A wall or a round end of the slot.
+        slot: FaceEndpoint,
+        /// The pin's axis: a cylinder, or a circular or straight edge.
+        pin: FaceEndpoint,
+        /// How the pin's direction relates to the slot's round ends' axes.
+        alignment: Alignment,
+        /// Where the pin sits along the slot.
+        constraint: SlotConstraint,
+        /// The pin's turn in the slot's part's frame, as a quarter-turn matrix by rows.
+        /// Absent leaves the spin free.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lock_rotation: Option<[[i8; 3]; 3]>,
+    },
 }
 
 impl Mate {
@@ -476,7 +631,12 @@ impl Mate {
             | Mate::Lock { id, .. }
             | Mate::Concentric { id, .. }
             | Mate::Tangent { id, .. }
-            | Mate::Hinge { id, .. } => *id,
+            | Mate::Hinge { id, .. }
+            | Mate::Symmetric { id, .. }
+            | Mate::LinearCoupler { id, .. }
+            | Mate::LimitDistance { id, .. }
+            | Mate::ProfileCenter { id, .. }
+            | Mate::Slot { id, .. } => *id,
         }
     }
 
@@ -492,7 +652,12 @@ impl Mate {
             | Mate::Lock { name, .. }
             | Mate::Concentric { name, .. }
             | Mate::Tangent { name, .. }
-            | Mate::Hinge { name, .. } => name,
+            | Mate::Hinge { name, .. }
+            | Mate::Symmetric { name, .. }
+            | Mate::LinearCoupler { name, .. }
+            | Mate::LimitDistance { name, .. }
+            | Mate::ProfileCenter { name, .. }
+            | Mate::Slot { name, .. } => name,
         }
     }
 
@@ -509,6 +674,11 @@ impl Mate {
             Mate::Concentric { .. } => "concentric",
             Mate::Tangent { .. } => "tangent",
             Mate::Hinge { .. } => "hinge",
+            Mate::Symmetric { .. } => "symmetric",
+            Mate::LinearCoupler { .. } => "linear_coupler",
+            Mate::LimitDistance { .. } => "limit_distance",
+            Mate::ProfileCenter { .. } => "profile_center",
+            Mate::Slot { .. } => "slot",
         }
     }
 
@@ -525,7 +695,9 @@ impl Mate {
     pub fn expression(&self) -> Option<&Expression> {
         match self {
             Mate::Distance { distance, .. }
-            | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. } => Some(distance),
+            | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. }
+            | Mate::ProfileCenter { distance, .. }
+            | Mate::Slot { constraint: SlotConstraint::Distance { distance, .. }, .. } => Some(distance),
             _ => None,
         }
     }
@@ -534,7 +706,9 @@ impl Mate {
     pub(crate) fn expression_mut(&mut self) -> Option<&mut Expression> {
         match self {
             Mate::Distance { distance, .. }
-            | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. } => Some(distance),
+            | Mate::Width { constraint: WidthConstraint::Dimension { distance, .. }, .. }
+            | Mate::ProfileCenter { distance, .. }
+            | Mate::Slot { constraint: SlotConstraint::Distance { distance, .. }, .. } => Some(distance),
             _ => None,
         }
     }
@@ -547,7 +721,12 @@ impl Mate {
             | Mate::Parallel { a, b, .. }
             | Mate::Perpendicular { a, b, .. }
             | Mate::Concentric { a, b, .. }
-            | Mate::Tangent { a, b, .. } => vec![a, b],
+            | Mate::Tangent { a, b, .. }
+            | Mate::LinearCoupler { a, b, .. }
+            | Mate::LimitDistance { a, b, .. }
+            | Mate::ProfileCenter { a, b, .. } => vec![a, b],
+            Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
+            Mate::Slot { slot, pin, .. } => vec![slot, pin],
             Mate::Width { groove, tab, .. } => groove.iter().chain(tab).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
@@ -562,10 +741,23 @@ impl Mate {
             | Mate::Parallel { a, b, .. }
             | Mate::Perpendicular { a, b, .. }
             | Mate::Concentric { a, b, .. }
-            | Mate::Tangent { a, b, .. } => vec![a, b],
+            | Mate::Tangent { a, b, .. }
+            | Mate::LinearCoupler { a, b, .. }
+            | Mate::LimitDistance { a, b, .. }
+            | Mate::ProfileCenter { a, b, .. } => vec![a, b],
+            Mate::Symmetric { a, b, plane, .. } => vec![a, b, plane],
+            Mate::Slot { slot, pin, .. } => vec![slot, pin],
             Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
+        }
+    }
+
+    /// The parts a Linear Coupler measures from, as it names them.
+    pub fn references(&self) -> Vec<&PartEndpoint> {
+        match self {
+            Mate::LinearCoupler { reference_a, reference_b, .. } => reference_a.iter().chain(reference_b).collect(),
+            _ => Vec::new(),
         }
     }
 
@@ -573,14 +765,21 @@ impl Mate {
     /// planes or keeps them parallel: a Width measures from `groove[0]` to `tab[0]`.
     pub fn measured(&self) -> Option<[&FaceEndpoint; 2]> {
         match self {
-            Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } | Mate::Parallel { a, b, .. } => Some([a, b]),
+            Mate::Distance { a, b, .. }
+            | Mate::Coincident { a, b, .. }
+            | Mate::Parallel { a, b, .. }
+            | Mate::LimitDistance { a, b, .. } => Some([a, b]),
             Mate::Width { groove, tab, .. } => Some([&groove[0], &tab[0]]),
             Mate::Origin { .. }
             | Mate::Perpendicular { .. }
             | Mate::Lock { .. }
             | Mate::Concentric { .. }
             | Mate::Tangent { .. }
-            | Mate::Hinge { .. } => None,
+            | Mate::Hinge { .. }
+            | Mate::Symmetric { .. }
+            | Mate::LinearCoupler { .. }
+            | Mate::ProfileCenter { .. }
+            | Mate::Slot { .. } => None,
         }
     }
 
@@ -592,24 +791,28 @@ impl Mate {
             | Mate::Parallel { alignment, .. }
             | Mate::Width { alignment, .. }
             | Mate::Tangent { alignment, .. }
-            | Mate::Hinge { alignment, .. } => Some(*alignment),
-            Mate::Concentric { alignment, .. } => *alignment,
-            Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } => None,
+            | Mate::Hinge { alignment, .. }
+            | Mate::LimitDistance { alignment, .. }
+            | Mate::ProfileCenter { alignment, .. }
+            | Mate::Slot { alignment, .. } => Some(*alignment),
+            Mate::Concentric { alignment, .. } | Mate::Symmetric { alignment, .. } => *alignment,
+            Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } | Mate::LinearCoupler { .. } => None,
         }
     }
 
     /// The part occurrences the mate reads, in order. An Origin names a component and has
     /// none.
     pub fn ends(&self) -> Vec<EndView<'_>> {
+        fn part(e: &PartEndpoint) -> EndView<'_> {
+            EndView { path: &e.path, document: e.document, configuration: e.configuration.as_ref() }
+        }
         match self {
-            Mate::Lock { a, b, .. } => [a, b]
-                .into_iter()
-                .map(|e| EndView { path: &e.path, document: e.document, configuration: e.configuration.as_ref() })
-                .collect(),
+            Mate::Lock { a, b, .. } => [a, b].into_iter().map(part).collect(),
             _ => self
                 .faces()
                 .into_iter()
                 .map(|e| EndView { path: &e.path, document: e.document, configuration: e.configuration.as_ref() })
+                .chain(self.references().into_iter().map(part))
                 .collect(),
         }
     }
@@ -622,7 +825,16 @@ impl Mate {
             | Mate::Parallel { a, b, .. }
             | Mate::Perpendicular { a, b, .. }
             | Mate::Concentric { a, b, .. }
-            | Mate::Tangent { a, b, .. } => vec![&mut a.path, &mut b.path],
+            | Mate::Tangent { a, b, .. }
+            | Mate::LimitDistance { a, b, .. }
+            | Mate::ProfileCenter { a, b, .. } => vec![&mut a.path, &mut b.path],
+            Mate::Symmetric { a, b, plane, .. } => vec![&mut a.path, &mut b.path, &mut plane.path],
+            Mate::Slot { slot, pin, .. } => vec![&mut slot.path, &mut pin.path],
+            Mate::LinearCoupler { a, b, reference_a, reference_b, .. } => [&mut a.path, &mut b.path]
+                .into_iter()
+                .chain(reference_a.iter_mut().map(|r| &mut r.path))
+                .chain(reference_b.iter_mut().map(|r| &mut r.path))
+                .collect(),
             Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab.iter_mut()).map(|e| &mut e.path).collect(),
             Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes.iter_mut()).map(|e| &mut e.path).collect(),
             Mate::Lock { a, b, .. } => vec![&mut a.path, &mut b.path],

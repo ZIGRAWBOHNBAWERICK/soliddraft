@@ -219,6 +219,44 @@
         }
       ],
       "fresh_process": true
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Invalid",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 End cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 \u00b7 Start cap",
+            "Boss-Extrude1 \u00b7 Side of line 2",
+            "Boss-Extrude1 \u00b7 Side of line 3"
+          ]
+        },
+        "distance": "-1 mm",
+        "alignment": "aligned"
+      },
+      "refused": "invalid_value",
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid_value"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 15,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ]
     }
   ]
 }

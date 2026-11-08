@@ -215,7 +215,12 @@ fn ellipse_scenario_profiles_extrude_and_measure_over_stdio() {
         include_str!("../../../ci/scenarios/sketch-partial-ellipse.json"),
     ] {
         let scenario: Value = serde_json::from_str(source).unwrap();
-        let mut client = Client::start(&["mcp"]);
+        let proof = std::env::var_os("SOLIDDRAFT_ELLIPSE_PROOF_DIR").map(std::path::PathBuf::from);
+        let dir = proof
+            .clone()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!("mcp-ellipse-{}", soliddraft_document::DocumentId::new()));
+        let mut client = Client::start(&["mcp", "--bundle", dir.to_str().unwrap()]);
         client.request(
             "initialize",
             json!({
@@ -228,13 +233,23 @@ fn ellipse_scenario_profiles_extrude_and_measure_over_stdio() {
             let result = client.call(step["tool"].as_str().unwrap(), step["arguments"].clone());
             assert_eq!(result["isError"], false, "{}: {result}", scenario["name"]);
             if let Some(checks) = step["checks"].as_array() {
-                let measured = client.call("mass_properties", json!({"name":"Boss-Extrude1"}));
+                let measured = client.call("scenario_measure", json!({}));
                 assert_eq!(measured["isError"], false, "{measured}");
                 let actual = measured["structuredContent"]["volume_mm3"].as_f64().unwrap();
                 let expected = checks[0]["approx"].as_f64().unwrap();
                 let tolerance = checks[0]["tolerance"].as_f64().unwrap();
                 assert!((actual - expected).abs() <= tolerance, "{}: {actual} != {expected}", scenario["name"]);
+                let request = measured["structuredContent"]["request"].as_u64().unwrap();
+                let saved: Value = serde_json::from_str(
+                    &std::fs::read_to_string(dir.join(format!("{request:04}/measurement.json"))).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(saved["volume_mm3"], measured["structuredContent"]["volume_mm3"]);
             }
+        }
+        drop(client);
+        if proof.is_none() {
+            std::fs::remove_dir_all(dir).unwrap();
         }
     }
 }

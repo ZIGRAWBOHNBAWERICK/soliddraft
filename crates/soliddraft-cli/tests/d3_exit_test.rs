@@ -222,7 +222,15 @@ fn bracket_sections_details_and_sheets() {
     assert_eq!(pdf.get_pages().len(), 2);
     assert!(dir.join("two-2.dxf").is_file(), "one DXF per sheet");
     let counts = dxf_counts(&dir.join("two-2.dxf"));
-    assert!(counts.get("HATCH/HATCH").is_some_and(|n| *n == 3), "{counts:?}");
+    let (saved, _) = soliddraft_drawing::file::read(&dir.join("two.dwdrw")).unwrap();
+    let views = &saved.sheets[1].views;
+    let detail = views.iter().find(|v| matches!(v.kind, soliddraft_drawing::ViewKind::Detail { .. })).unwrap();
+    let section = views.iter().find(|v| matches!(v.kind, soliddraft_drawing::ViewKind::Section { .. })).unwrap();
+    // The detail inherits the broken-out hatching added to its parent after placement.
+    assert_eq!(detail.geometry.hatch.len(), 2);
+    assert_eq!(section.geometry.hatch.len(), 3);
+    let hatches: usize = views.iter().map(|v| v.geometry.hatch.len()).sum();
+    assert_eq!(counts.get("HATCH/HATCH"), Some(&hatches), "{counts:?}");
 
     // The plate gets thicker: every view is remade, the cut faces with it.
     let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&recipe).unwrap()).unwrap();

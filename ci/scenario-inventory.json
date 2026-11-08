@@ -1245,7 +1245,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "catallax_revision": "d7da137395bee11ca839d62012efbf575e90d28f",
       "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
       "supported_limits": "B6: drag previews and cancel, distance stops, one-step commit, undo/redo and save/reopen; no collision checks.",
       "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
@@ -1260,7 +1260,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "catallax_revision": "d7da137395bee11ca839d62012efbf575e90d28f",
       "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
       "supported_limits": "B6: bounded Hinge stops in both directions during rotation, undo/redo and save/reopen; no collision checks.",
       "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"

@@ -85,10 +85,11 @@ pub enum EditError {
     Cycle(OccurrencePath),
 }
 
-/// One row's editable state, for undo.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// One occurrence's editable state, for undo. It names the occurrence by path, since
+/// rereading the structure renumbers the rows.
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RowState {
-    row: OccurrenceIndex,
+    path: OccurrencePath,
     local: Placement,
     hidden: bool,
     suppressed: bool,
@@ -675,7 +676,7 @@ impl AssemblyDocument {
     pub(crate) fn row_state(&self, row: OccurrenceIndex) -> RowState {
         let f = self.table.flags(row);
         RowState {
-            row,
+            path: self.table.path(row),
             local: self.table.local(row),
             hidden: f.has(Flags::HIDDEN_SELF),
             suppressed: f.has(Flags::SUPPRESSED_SELF),
@@ -707,7 +708,7 @@ impl AssemblyDocument {
     pub(crate) fn record(&mut self, label: &str, before: TruthImage, rows_before: Vec<RowState>) {
         self.solver_status = None;
         let after = self.reimage(&before);
-        let rows_after = rows_before.iter().map(|r| self.row_state(r.row)).collect();
+        let rows_after = rows_before.iter().filter_map(|r| Some(self.row_state(self.table.find(&r.path)?))).collect();
         self.undo.push(Record {
             label: label.to_owned(),
             before,
@@ -1191,19 +1192,31 @@ impl AssemblyDocument {
             self.reflatten();
             return;
         }
+        let mut regrow = false;
+        // An occurrence with no row now sits under a sub-assembly that was suppressed when
+        // the structure was last read; the truth already holds its state.
+        let found: Vec<(OccurrenceIndex, &RowState)> =
+            rows.iter().filter_map(|s| Some((self.table.find(&s.path)?, s))).collect();
         let placed: Vec<_> =
-            rows.iter().filter(|s| self.table.local(s.row) != s.local).map(|s| (s.row, s.local)).collect();
+            found.iter().filter(|(row, s)| self.table.local(*row) != s.local).map(|(row, s)| (*row, s.local)).collect();
         self.place_rows(&placed);
-        for s in rows {
-            let f = self.table.flags(s.row);
+        for (row, s) in found {
+            let f = self.table.flags(row);
             if f.has(Flags::HIDDEN_SELF) != s.hidden {
-                let changed = self.table.set_hidden(s.row, s.hidden);
+                let changed = self.table.set_hidden(row, s.hidden);
                 self.changes.flags.extend(changed);
             }
             if f.has(Flags::SUPPRESSED_SELF) != s.suppressed {
-                let changed = self.table.set_suppressed(s.row, s.suppressed);
+                let changed = self.table.set_suppressed(row, s.suppressed);
                 self.changes.flags.extend(changed);
             }
+            // As a direct Unsuppress does: a sub-assembly shown again with no rows below
+            // it was read while suppressed, so its occurrences are read now.
+            let f = self.table.flags(row);
+            regrow |= !f.has(Flags::SUPPRESSED) && f.has(Flags::ASSEMBLY) && self.table.children(row).next().is_none();
+        }
+        if regrow {
+            self.reflatten();
         }
         // A pattern's copies follow a seed the step moved.
         let seeds: Vec<ComponentId> = image.components.iter().map(|(c, _)| *c).collect();

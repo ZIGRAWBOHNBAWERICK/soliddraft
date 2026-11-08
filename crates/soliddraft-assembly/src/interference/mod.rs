@@ -276,9 +276,10 @@ pub struct CheckReport {
     pub rounding_mm: f64,
     /// The parts compared.
     pub parts: Vec<CheckedPart>,
-    /// The parts in scope that could not be compared, each refused by name.
+    /// The parts in scope that could not be compared, each refused by name, and the
+    /// sub-assemblies in scope whose structure could not be read, whose parts are unknown.
     pub skipped: Vec<SkippedPart>,
-    /// True when every part in scope was compared.
+    /// True when every part in scope is known and was compared.
     pub complete: bool,
     /// Pairs compared.
     pub pairs: usize,
@@ -373,9 +374,13 @@ impl AssemblyDocument {
             return Err(invalid("a clearance is a length of zero or more"));
         }
         self.finish_loading();
-        let entries = self.scope_parts(request)?;
+        let (entries, unread) = self.scope_parts(request)?;
         if entries.len() < 2 {
-            return Err(CheckRefusal::new(CheckCode::TooFewParts, "a check compares two parts or more"));
+            let mut message = "a check compares two parts or more".to_owned();
+            for branch in &unread {
+                message += &format!("; {}: {}", branch.label, branch.message);
+            }
+            return Err(CheckRefusal::new(CheckCode::TooFewParts, message));
         }
         if entries.len() > MAX_PARTS {
             return Err(CheckRefusal::new(
@@ -384,7 +389,9 @@ impl AssemblyDocument {
             ));
         }
         let mut parts = Vec::new();
-        let mut skipped = Vec::new();
+        // A sub-assembly whose structure could not be read hides parts nobody knows of, so
+        // the check is not complete; it is listed as it stands, by path and cause.
+        let mut skipped = unread;
         let mut solids: Vec<(Entry, Solid, Arc<LocalMesh>, DocRef)> = Vec::new();
         for entry in entries {
             match self.placed(&entry, request.chord) {
@@ -478,8 +485,11 @@ impl AssemblyDocument {
         })
     }
 
-    /// The part occurrences a request names, in table order, each once.
-    fn scope_parts(&self, request: &CheckRequest) -> Result<Vec<Entry>, CheckRefusal> {
+    /// The part occurrences a request names, in table order, each once, and the
+    /// sub-assemblies in scope whose structure could not be read, so whose parts are not
+    /// known. Suppressed branches are left out, and hidden ones unless asked for, as their
+    /// parts are.
+    fn scope_parts(&self, request: &CheckRequest) -> Result<(Vec<Entry>, Vec<SkippedPart>), CheckRefusal> {
         let roots: Vec<OccurrenceIndex> = match &request.scope {
             CheckScope::Assembly => vec![OccurrenceIndex::ROOT],
             CheckScope::Occurrences(paths) => paths
@@ -492,15 +502,30 @@ impl AssemblyDocument {
             .flat_map(|r| self.table.subtree(r))
             .filter(|row| {
                 let f = self.table.flags(*row);
-                !f.has(Flags::ASSEMBLY)
-                    && !f.has(Flags::SUPPRESSED)
-                    && !f.has(Flags::REMOVED)
-                    && (request.include_hidden || !f.has(Flags::HIDDEN))
+                !f.has(Flags::SUPPRESSED) && !f.has(Flags::REMOVED) && (request.include_hidden || !f.has(Flags::HIDDEN))
             })
             .collect();
         rows.sort();
         rows.dedup();
-        Ok(rows.into_iter().map(|row| Entry { row, path: self.table.path(row), label: self.label(row) }).collect())
+        let (branches, parts): (Vec<_>, Vec<_>) =
+            rows.into_iter().partition(|row| self.table.flags(*row).has(Flags::ASSEMBLY));
+        let unread = branches
+            .into_iter()
+            .filter_map(|row| {
+                let def = self.store.get(self.table.definition(row));
+                def.assembly.is_none().then(|| SkippedPart {
+                    path: self.table.path(row),
+                    label: self.label(row),
+                    code: CheckCode::ProofUnavailable,
+                    message: match &def.problem {
+                        Some(p) => format!("its structure could not be read, so its parts are not known: {p}"),
+                        None => "its structure could not be read, so its parts are not known".to_owned(),
+                    },
+                })
+            })
+            .collect();
+        let parts = parts.into_iter().map(|row| Entry { row, path: self.table.path(row), label: self.label(row) });
+        Ok((parts.collect(), unread))
     }
 
     /// A part occurrence's certified mesh, placed in the root's frame.

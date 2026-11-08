@@ -434,4 +434,112 @@ fn a_turn_near_an_axis_is_not_exactly_touching() {
     assert_eq!(r.contact.len(), 1, "{r:#?}");
     assert_eq!(r.contact[0].point[2], 16.0);
     assert_eq!(r.clearance, Some(ClearanceOutcome::Below));
+
+/// A root with A at the origin, B 100 mm along x and a sub-assembly S holding C 200 mm
+/// along x, all apart, saved. Returns the files and the root's components.
+struct Nested {
+    dir: PathBuf,
+    root: PathBuf,
+    sub: PathBuf,
+    b_file: PathBuf,
+}
+
+fn nested(name: &str) -> Nested {
+    let dir = folder(name);
+    let (a_file, b_file, c_file) = (dir.join("a.dwprt"), dir.join("b.dwprt"), dir.join("c.dwprt"));
+    let (sub, root) = (dir.join("sub.dwasm"), dir.join("root.dwasm"));
+    for f in [&a_file, &b_file, &c_file] {
+        new_block(f, 10.0, 10.0, 10.0);
+    }
+    let mut s = AssemblyDocument::new_with("Sub", options());
+    s.save(Some(&sub)).unwrap();
+    s.insert(reference(&sub, &c_file), Placement::translation(DVec3::new(200.0, 0.0, 0.0))).unwrap();
+    s.finish_loading();
+    s.save(None).unwrap();
+    let mut doc = AssemblyDocument::new_with("Root", options());
+    doc.save(Some(&root)).unwrap();
+    doc.insert(reference(&root, &a_file), Placement::IDENTITY).unwrap();
+    doc.insert(reference(&root, &b_file), Placement::translation(DVec3::new(100.0, 0.0, 0.0))).unwrap();
+    doc.insert(reference(&root, &sub), Placement::IDENTITY).unwrap();
+    doc.finish_loading();
+    doc.save(None).unwrap();
+    Nested { dir, root, sub, b_file }
+}
+
+impl Nested {
+    fn open(&self) -> AssemblyDocument {
+        AssemblyDocument::open(&self.root, options()).unwrap()
+    }
+
+    /// The root's sub-assembly occurrence.
+    fn branch(doc: &AssemblyDocument) -> OccurrencePath {
+        let c = doc.assembly().components.iter().find(|c| {
+            doc.assembly().source(c.source).is_some_and(|s| s.document.kind == soliddraft_document::DocKind::Assembly)
+        });
+        path(c.expect("the sub-assembly").id)
+    }
+}
+
+impl Drop for Nested {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// A whole-assembly check is complete only when every part in scope is known: a
+/// sub-assembly whose structure cannot be read is listed by path and cause, never dropped,
+/// unless it is suppressed, or hidden and hidden parts are not asked for.
+#[test]
+fn an_unreadable_sub_assembly_leaves_the_check_incomplete() {
+    // Healthy control: all three parts, nested C among them, are compared.
+    let fx = nested("unread-sub");
+    let mut doc = fx.open();
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert_eq!((report.parts.len(), report.pairs, report.clear), (3, 3, 3));
+    assert!(report.complete && report.skipped.is_empty(), "{:?}", report.skipped);
+
+    // The sub-assembly's file is gone, and the root is written without the copy of its
+    // structure a save carries, so nothing holds it.
+    let id = doc.id();
+    doc.assembly().save(&fx.root, id, None, &[]).unwrap();
+    std::fs::remove_file(&fx.sub).unwrap();
+    let mut doc = fx.open();
+    let branch = Nested::branch(&doc);
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert_eq!((report.parts.len(), report.pairs, report.clear), (2, 1, 1));
+    assert!(!report.complete);
+    assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+    assert_eq!(report.skipped[0].path, branch);
+    assert_eq!(report.skipped[0].code, CheckCode::ProofUnavailable);
+    assert!(report.skipped[0].message.contains("structure could not be read"), "{}", report.skipped[0].message);
+    let clearance = CheckRequest { clearance: Some(1.0), ..CheckRequest::default() };
+    let report = doc.check_interference(&clearance).unwrap();
+    assert!(!report.complete && report.skipped[0].path == branch);
+
+    // Hidden, it is out of scope like any hidden part, until hidden parts are asked for.
+    doc.set_hidden(std::slice::from_ref(&branch), true).unwrap();
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(report.complete && report.skipped.is_empty());
+    let hidden = CheckRequest { include_hidden: true, ..CheckRequest::default() };
+    let report = doc.check_interference(&hidden).unwrap();
+    assert!(!report.complete && report.skipped[0].path == branch);
+    doc.set_hidden(std::slice::from_ref(&branch), false).unwrap();
+
+    // Suppressed, it is not in the assembly's scope at all.
+    doc.set_suppressed(std::slice::from_ref(&branch), true).unwrap();
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(report.complete && report.skipped.is_empty());
+}
+
+/// Control: a missing leaf part was already listed, and still is.
+#[test]
+fn a_missing_part_leaves_the_check_incomplete() {
+    let fx = nested("missing-leaf");
+    std::fs::remove_file(&fx.b_file).unwrap();
+    let mut doc = fx.open();
+    let report = doc.check_interference(&CheckRequest::default()).unwrap();
+    assert!(!report.complete);
+    assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+    assert_eq!(report.skipped[0].path, path(ComponentId(report.skipped[0].path.steps()[0].component.0)));
+    assert_eq!(report.parts.len(), 2);
 }

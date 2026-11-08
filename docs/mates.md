@@ -518,3 +518,31 @@ sub-assembly for a new mate; mates on pattern members; configurations; dragging 
 general rotations, including a Lock off the quarter turns, every family on parts placed off
 the world axes, and axes, points or profiles read off the world axes or at algebraic
 coordinates; torus and spline faces. See M6 in the plan.
+
+
+## Static assembly checks
+
+The Assembly tab's Interference button opens the check panel. Interference Detection and
+Clearance Verification use certified meshes from the pinned part revisions. Each result
+says clear, interferes, or touching or undecided; clearance results state met, below, or
+undecided. Exact overlap volumes and exact touching without a mate remain follow-up Catallax
+work. See [interference.md](interference.md) for the mesh bounds and refusals.
+
+Choose Hole alignment in the same panel to inspect internal cylindrical axes, including
+native cylinders in imported parts. Set the maximum lateral deviation and check the whole
+assembly or chosen components. Results identify coaxial axes as aligned and parallel axes
+with nonzero offsets within the maximum as misaligned. Clicking a row selects both parts.
+The command is `assembly_check_hole_alignment`, with `max_deviation` as a length, optional
+`paths`, and `include_hidden`. The check changes no placements, mates, pins or undo history.
+
+Hole results use the `exact_axes` tier. Cylinder definitions and the stored placements are
+read as rationals, so zero offset and the maximum-deviation boundary are exact comparisons.
+Only axes exactly parallel to a world axis are supported. Nonparallel pairs and pairs beyond
+the maximum are counted separately. Coaxial faces of one part share a single axis entry.
+External cylinders are excluded. An unsupported cylinder, configuration or unavailable pin
+marks its part unchecked and the report incomplete. Suppressed parts are excluded; hidden
+parts are optional. One check takes at most 128 parts and 512 distinct bore axes.
+
+This compares infinite bore axes, so separated holes on one line are aligned regardless of
+their depth. It does not certify hole fit, diameter, fastener passage, angular deviation or
+contact. Collision while dragging belongs to a later batch.

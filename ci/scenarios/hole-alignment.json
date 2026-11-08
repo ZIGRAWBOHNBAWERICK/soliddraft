@@ -1,0 +1,298 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "hole-alignment",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              5,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ]
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/a.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            0.25,
+            0,
+            20
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/a.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            0,
+            0,
+            40
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "0.25 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/tier",
+          "equals": "exact_axes"
+        },
+        {
+          "pointer": "/result/report/parts",
+          "equals": 3
+        },
+        {
+          "pointer": "/result/report/aligned",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/misaligned",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/report/complete",
+          "equals": true
+        },
+        {
+          "pointer": "/result/report/results/0/deviation_squared",
+          "equals": "1/16"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 9,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "0.24 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/aligned",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/misaligned",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/beyond",
+          "equals": 2
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "0 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/aligned",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/misaligned",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "1 mm",
+        "paths": [
+          "2",
+          "3"
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/parts",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/report/aligned",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/misaligned",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "-1 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid"
+        }
+      ],
+      "refused": "invalid"
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "1 mm",
+        "paths": [
+          "2"
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "too_few_parts"
+        }
+      ],
+      "refused": "too_few_parts"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "fresh_process": true
+    },
+    {
+      "tool": "assembly_check_hole_alignment",
+      "arguments": {
+        "max_deviation": "0.25 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/parts",
+          "equals": 3
+        },
+        {
+          "pointer": "/result/report/aligned",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/misaligned",
+          "equals": 2
+        },
+        {
+          "pointer": "/result/report/complete",
+          "equals": true
+        }
+      ]
+    }
+  ]
+}

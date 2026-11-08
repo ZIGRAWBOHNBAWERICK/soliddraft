@@ -5,7 +5,8 @@
   "tests": [
     "edge_radius_changes_the_visible_preview_before_commit",
     "faces_collect_complete_boundaries_and_the_slot_stays_drawable",
-    "unsupported_picks_and_radii_refuse_locally_then_recover"
+    "unsupported_picks_and_radii_refuse_locally_then_recover",
+    "a_partly_filleted_corner_previews_what_ok_builds"
   ],
   "author": {
     "expected_results": "Codex test designer, 'Tree visibility, in-place dimensions and fillet acceptance', 31 October 2026, Merge F manifest; hand-derived oracle SHA-256 e36959963a0b4f5c4bc9708fca143d2a53645a9d186548f707a6112d13fa562b",
@@ -62,6 +63,13 @@
       "boundary_edges": 4,
       "edge_lengths_mm": [40.0, 40.0, 60.0, 60.0],
       "plane_z": 20.0
+    },
+    "box_partial_corner": {
+      "edge_midpoints": [[0.0, 20.0, 20.0], [30.0, 0.0, 20.0]],
+      "edge_lengths_mm": [40.0, 60.0],
+      "volume_r2_mm3": 47914.92622807795,
+      "volume_r4_mm3": 47662.77276318771,
+      "note": "Added with the Catallax d7da137395bee11ca839d62012efbf575e90d28f pin by the builder, derived by hand, not read from the kernel. The 60 mm and 40 mm top edges meet at (30, 20, 20), where the vertical edge stays sharp. Each edge prism removes (1 - pi/4) r^2 per millimetre. The two prisms overlap in the corner cube, and the overlap holds the integral of (r - sqrt(r^2 - w^2))^2 over w from 0 to r, (5/3 - pi/2) r^3. V = 48000 - 100 (1 - pi/4) r^2 + (5/3 - pi/2) r^3, the closure the fillet-corner scenario checks on its 40 x 30 x 10 block."
     },
     "slot_top_face": {
       "interior": [0.0, 0.0, 10.0],

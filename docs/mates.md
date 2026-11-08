@@ -158,8 +158,17 @@ Plane normals are exact signed axes, which splits a solve in two:
 2. **Translations.** Each distance, width and lock becomes an exact difference of one world
    coordinate, so each axis is a graph of differences. A lock adds one on each axis. Walking
    the graph places everything connected to the origin, or to the group's first component.
-   An edge that disagrees by more than 1e-9 mm is an over-constrained set of mates, and
-   every mate on that cycle is named.
+   An edge that disagrees by more than 1e-9 mm is a conflict.
+
+The two steps are solved together. Which axis a distance's planes face decides which
+coordinate it moves, so a turn that keeps every normal right can still leave a distance
+that cannot hold, while another turn holds it exactly. The search therefore accepts turns
+only when the translations they leave also hold, checking each mate's translation as soon
+as its parts' turns are chosen, and backtracks otherwise. Turns that take a group's mated
+normals onto the same axes decide the same, so only one of them is tried. An assembly is
+over-constrained only when no supported turns work. The refusal then names a smallest set
+of mates that cannot hold together under any of them, with what each mate asks in the pose
+nearest the authored one.
 
 An unconstrained coordinate keeps its authored value. A group with no Origin mate keeps its
 first component where it is, because something has to stay put, and it still reports its

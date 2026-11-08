@@ -15,6 +15,13 @@
 //!    graph's first body, and a closing edge that disagrees is an over-constrained set of
 //!    mates.
 //!
+//! The two steps are not independent: which axis a distance's planes face decides which
+//! coordinate it moves. So the search accepts a set of turns only when the translations
+//! they leave can hold, checking each mate's translation as soon as its turns are chosen,
+//! and the assembly is over-constrained only when no supported turns work. Turns that take
+//! a group's read normals onto the same axes decide the same, so the search tries one of
+//! them only.
+//!
 //! What is not constrained keeps its authored value. Nothing is fixed behind the user's
 //! back: an unanchored group keeps its first body's position only because something must
 //! stay put, and it still counts its freedoms ([`freedoms`] works on the whole Jacobian of
@@ -225,8 +232,34 @@ fn snapped(v: DVec3) -> Option<Normal> {
 /// opens a real gap. Every quarter turn's quaternion has nonzero parts of one magnitude,
 /// and a spin about an axis has its vector part on that axis, so both are exact however
 /// their parts round.
+///
+/// A solve asks this of the same few dozen turns many times over, so each answer is kept,
+/// by the quaternion's bits and the axis, for the rest of the thread's solves.
 pub(crate) fn turned(rotation: DQuat, n: Normal) -> Option<Normal> {
+    /// How many answers a thread keeps before it starts again.
+    const KEPT: usize = 4096;
+    type Key = ([u64; 4], Normal);
+    thread_local! {
+        static KNOWN: std::cell::RefCell<std::collections::HashMap<Key, Option<Normal>>> = Default::default();
+    }
     let axis = snapped(rotation * vector(n))?;
+    let key = (rotation.to_array().map(f64::to_bits), n);
+    if let Some(known) = KNOWN.with(|k| k.borrow().get(&key).copied()) {
+        return known;
+    }
+    let answer = exactly_turned(rotation, n, axis);
+    KNOWN.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.len() >= KEPT {
+            k.clear();
+        }
+        k.insert(key, answer);
+    });
+    answer
+}
+
+/// Whether `rotation` takes `n` exactly onto `axis`, in rationals: [`turned`]'s proof.
+fn exactly_turned(rotation: DQuat, n: Normal, axis: Normal) -> Option<Normal> {
     let [x, y, z, w] = [rotation.x, rotation.y, rotation.z, rotation.w].map(exact);
     let (x, y, z, w) = (x?, y?, z?, w?);
     let int = |c: i8| BigRational::from_integer(BigInt::from(c));
@@ -439,25 +472,149 @@ fn same_turn(p: DQuat, q: DQuat) -> bool {
 /// The search over the groups' turns. Every turn the exact solver can prove takes the
 /// normals it reads onto axes, so each group's candidates are the 24 quarter-turn
 /// rotations; one unlocked part held along a single axis may also keep its own spin.
+///
+/// A turn is accepted only when the translations it leaves can hold too: a distance whose
+/// planes face one way may be impossible and the same distance facing another way exact.
 struct Search<'a> {
+    bodies: &'a BTreeMap<Body, Placement>,
+    constraints: &'a [Constraint],
+    /// Each body's group, and the turn `offset` with `rotation(body) = rotation(group) *
+    /// offset`.
+    member: BTreeMap<Body, (usize, DQuat)>,
     authored: Vec<DQuat>,
     locked: Vec<bool>,
-    /// Each rule with the mate that asks for it.
-    rules: Vec<(&'a str, Rule)>,
+    /// Each rule with the mate that asks for it and the constraint it comes from.
+    rules: Vec<(&'a str, usize, Rule)>,
+    /// For each constraint, the groups whose turns decide the translations it asks for;
+    /// `None` when it asks for none.
+    placed_by: Vec<Option<Vec<usize>>>,
+    /// Each group's normals, in its root frame, whose world directions decide everything
+    /// its mates ask: two turns that take them onto the same axes are interchangeable.
+    reads: Vec<Vec<Normal>>,
     cubes: Vec<DQuat>,
     steps: usize,
 }
 
-/// A search that ran past [`SEARCH_STEPS`].
-struct TooLong;
+/// Why a search stopped before deciding.
+enum Stop {
+    /// It ran past [`SEARCH_STEPS`].
+    TooLong,
+    /// A mate cannot be read.
+    Refused(MateRefusal),
+}
 
-impl Search<'_> {
-    /// Group `g`'s candidate turns under `active`, nearest its authored turn first and in a
-    /// fixed order among equals.
+impl From<MateRefusal> for Stop {
+    fn from(refusal: MateRefusal) -> Stop {
+        Stop::Refused(refusal)
+    }
+}
+
+/// One search over some of the constraints.
+struct Pass {
+    /// Which constraints take part.
+    active: Vec<bool>,
+    domains: Vec<Vec<DQuat>>,
+    /// Each group's active rules.
+    touching: Vec<Vec<usize>>,
+    /// Each group's active constraints that ask for translations, when a turn must also
+    /// leave the translations solvable; empty otherwise.
+    moves: Vec<Vec<usize>>,
+}
+
+impl<'a> Search<'a> {
+    fn new(bodies: &'a BTreeMap<Body, Placement>, constraints: &'a [Constraint]) -> Result<Search<'a>, MateRefusal> {
+        // Locked parts turn as one, so the unknowns are the lock groups' turns, solved
+        // together as one finite search.
+        let group = lock_groups(bodies, constraints);
+        let roots: Vec<Body> = group.values().map(|(r, _)| r.clone()).collect::<BTreeSet<_>>().into_iter().collect();
+        let index: BTreeMap<&Body, usize> = roots.iter().zip(0..).collect();
+        let member: BTreeMap<Body, (usize, DQuat)> =
+            group.iter().map(|(body, (root, offset))| (body.clone(), (index[root], *offset))).collect();
+        let of = |body: &Body| member[body];
+        let own = |offset: DQuat, n: Normal, mate: &str| turned(offset, n).ok_or_else(|| unsupported_lock(mate));
+        let mut rules = Vec::new();
+        let mut placed_by = Vec::new();
+        let mut reads = vec![Vec::new(); roots.len()];
+        for (i, c) in constraints.iter().enumerate() {
+            match c {
+                Constraint::Origin { mate, body, axes, at } => {
+                    if *axes {
+                        let (g, offset) = of(body);
+                        let rotation = canonical((at.rotation * offset.inverse()).normalize());
+                        rules.push((mate.as_str(), i, Rule::Fixed { g, rotation }));
+                    }
+                    placed_by.push(Some(Vec::new()));
+                }
+                Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, along } => {
+                    let ((ga, oa), (gb, ob)) = (of(a), of(b));
+                    let (u, w) = (own(oa, plane_a.normal, mate)?, own(ob, plane_b.normal, mate)?);
+                    rules.push((mate.as_str(), i, Rule::Relate { a: ga, u, b: gb, w, sign: *sign }));
+                    reads[ga].push(u);
+                    reads[gb].push(w);
+                    if let Some(Along::Width { groove, tab, .. }) = along {
+                        for (g, offset, n) in [(ga, oa, groove.normal), (gb, ob, tab.normal)] {
+                            match turned(offset, n) {
+                                Some(n) => reads[g].push(n),
+                                None => reads[g].extend([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+                            }
+                        }
+                    }
+                    placed_by.push(along.is_some().then(|| vec![ga, gb]));
+                }
+                Constraint::Perpendicular { mate, a, b, plane_a, plane_b } => {
+                    let ((ga, oa), (gb, ob)) = (of(a), of(b));
+                    let (u, w) = (own(oa, plane_a.normal, mate)?, own(ob, plane_b.normal, mate)?);
+                    rules.push((mate.as_str(), i, Rule::Relate { a: ga, u, b: gb, w, sign: 0 }));
+                    reads[ga].push(u);
+                    reads[gb].push(w);
+                    placed_by.push(None);
+                }
+                Constraint::Lock { a, .. } => {
+                    // A lock's offset turns with its first part, whole.
+                    let g = of(a).0;
+                    reads[g].extend([[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+                    placed_by.push(Some(vec![g]));
+                }
+            }
+        }
+        for r in &mut reads {
+            r.sort();
+            r.dedup();
+        }
+        // A normal a fixed frame puts off the axes cannot be proved: refused as before.
+        for (mate, _, rule) in &rules {
+            if let Rule::Relate { a, u, b, w, .. } = rule {
+                for (g, n) in [(*a, *u), (*b, *w)] {
+                    let fixed = rules.iter().find_map(|(_, _, r)| match r {
+                        Rule::Fixed { g: f, rotation } if *f == g => Some(*rotation),
+                        _ => None,
+                    });
+                    if let Some(rotation) = fixed {
+                        world(rotation, n, mate)?;
+                    }
+                }
+            }
+        }
+        Ok(Search {
+            bodies,
+            constraints,
+            authored: roots.iter().map(|r| bodies[r].rotation).collect(),
+            locked: roots.iter().map(|r| group.values().filter(|(x, _)| x == r).count() > 1).collect(),
+            member,
+            rules,
+            placed_by,
+            reads,
+            cubes: cube_rotations().iter().map(quaternion).collect(),
+            steps: 0,
+        })
+    }
+
+    /// Group `g`'s candidate turns under `active` rules, nearest its authored turn first
+    /// and in a fixed order among equals.
     fn domain(&self, g: usize, active: &[usize]) -> Vec<DQuat> {
         let mut normals = Vec::new();
         for &i in active {
-            match &self.rules[i].1 {
+            match &self.rules[i].2 {
                 Rule::Fixed { g: f, rotation } if *f == g => return vec![*rotation],
                 Rule::Relate { a, u, b, w, .. } => {
                     if *a == g {
@@ -491,38 +648,59 @@ impl Search<'_> {
         unique
     }
 
-    /// Turns for every group that keep every rule in `active`, or `None` when there are
-    /// none. The answer does not depend on the order of the mates.
-    fn solve(&mut self, groups: usize, active: &[usize]) -> Result<Option<Vec<DQuat>>, TooLong> {
-        let domains: Vec<Vec<DQuat>> = (0..groups).map(|g| self.domain(g, active)).collect();
-        let touching: Vec<Vec<usize>> = (0..groups)
-            .map(|g| active.iter().copied().filter(|i| self.rules[*i].1.groups().contains(&g)).collect())
-            .collect();
+    /// Where `q` takes group `g`'s read normals, or `None` when one leaves the axes.
+    fn signature(&self, g: usize, q: DQuat) -> Option<Vec<Normal>> {
+        self.reads[g].iter().map(|n| turned(q, *n)).collect()
+    }
+
+    /// Turns for every group that keep every `active` constraint: its rules, and, when
+    /// `placing`, its translations too. `None` when there are none. The answer does not
+    /// depend on the order of the mates.
+    fn run(&mut self, active: &[bool], placing: bool) -> Result<Option<Vec<DQuat>>, MateRefusal> {
+        self.steps = 0;
+        let groups = self.authored.len();
+        let rules: Vec<usize> = (0..self.rules.len()).filter(|i| active[self.rules[*i].1]).collect();
+        let pass = Pass {
+            active: active.to_vec(),
+            domains: (0..groups).map(|g| self.domain(g, &rules)).collect(),
+            touching: (0..groups)
+                .map(|g| rules.iter().copied().filter(|i| self.rules[*i].2.groups().contains(&g)).collect())
+                .collect(),
+            moves: (0..groups)
+                .map(|g| {
+                    (0..self.constraints.len())
+                        .filter(|c| {
+                            placing && active[*c] && self.placed_by[*c].as_ref().is_some_and(|gs| gs.contains(&g))
+                        })
+                        .collect()
+                })
+                .collect(),
+        };
         let mut at = vec![None; groups];
-        if self.fill(&domains, &touching, &mut at)? {
-            Ok(Some(at.into_iter().map(|q| q.expect("every group is turned")).collect()))
-        } else {
-            Ok(None)
+        // Origin mates ask for translations before any turn is chosen.
+        if placing && self.conflict(active, &at)?.is_some() {
+            return Ok(None);
+        }
+        match self.fill(&pass, &mut at) {
+            Ok(true) => Ok(Some(at.into_iter().map(|q| q.expect("every group is turned")).collect())),
+            Ok(false) => Ok(None),
+            Err(Stop::TooLong) => Err(self.too_long()),
+            Err(Stop::Refused(refusal)) => Err(refusal),
         }
     }
 
     /// Backtracking with forward checking: the open group with the fewest candidates left,
     /// first by index among equals, tries each in order.
-    fn fill(
-        &mut self,
-        domains: &[Vec<DQuat>],
-        touching: &[Vec<usize>],
-        at: &mut [Option<DQuat>],
-    ) -> Result<bool, TooLong> {
+    fn fill(&mut self, pass: &Pass, at: &mut [Option<DQuat>]) -> Result<bool, Stop> {
         let mut best: Option<(usize, Vec<DQuat>)> = None;
         for g in 0..at.len() {
             if at[g].is_some() {
                 continue;
             }
             let mut left = Vec::new();
-            for q in &domains[g] {
+            for q in &pass.domains[g] {
                 at[g] = Some(*q);
-                if touching[g].iter().all(|i| self.rules[*i].1.holds(at) != Some(false)) {
+                if pass.touching[g].iter().all(|i| self.rules[*i].2.holds(at) != Some(false)) {
                     left.push(*q);
                 }
             }
@@ -535,76 +713,58 @@ impl Search<'_> {
             }
         }
         let Some((g, left)) = best else { return Ok(true) };
+        // Turns that take the group's normals onto the same axes decide the same: once
+        // one has failed, the rest are not tried again.
+        let mut failed: Vec<Vec<Normal>> = Vec::new();
         for q in left {
+            let signature = self.signature(g, q);
+            if signature.as_ref().is_some_and(|s| failed.contains(s)) {
+                continue;
+            }
             self.steps += 1;
             if self.steps > SEARCH_STEPS {
-                return Err(TooLong);
+                return Err(Stop::TooLong);
             }
             at[g] = Some(q);
-            if self.fill(domains, touching, at)? {
+            // A translation can only start to disagree when a mate asking for one has all
+            // its turns.
+            let placed = pass.moves[g].iter().any(|c| self.placed_by[*c].iter().flatten().all(|h| at[*h].is_some()));
+            if (!placed || self.conflict(&pass.active, at)?.is_none()) && self.fill(pass, at)? {
                 return Ok(true);
             }
+            failed.extend(signature);
         }
         at[g] = None;
         Ok(false)
     }
-}
 
-fn rotations(
-    bodies: &BTreeMap<Body, Placement>,
-    constraints: &[Constraint],
-) -> Result<BTreeMap<Body, DQuat>, MateRefusal> {
-    // Locked parts turn as one, so the unknowns are the lock groups' turns, solved
-    // together as one finite search.
-    let group = lock_groups(bodies, constraints);
-    let roots: Vec<Body> = group.values().map(|(r, _)| r.clone()).collect::<BTreeSet<_>>().into_iter().collect();
-    let index: BTreeMap<&Body, usize> = roots.iter().zip(0..).collect();
-    let of = |body: &Body| (index[&group[body].0], group[body].1);
-    let mut rules = Vec::new();
-    for c in constraints {
-        let own = |offset: DQuat, n: Normal, mate: &str| turned(offset, n).ok_or_else(|| unsupported_lock(mate));
-        match c {
-            Constraint::Origin { mate, body, axes: true, at } => {
-                let (g, offset) = of(body);
-                let rotation = canonical((at.rotation * offset.inverse()).normalize());
-                rules.push((mate.as_str(), Rule::Fixed { g, rotation }));
-            }
-            Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, .. } => {
-                let ((ga, oa), (gb, ob)) = (of(a), of(b));
-                let (u, w) = (own(oa, plane_a.normal, mate)?, own(ob, plane_b.normal, mate)?);
-                rules.push((mate.as_str(), Rule::Relate { a: ga, u, b: gb, w, sign: *sign }));
-            }
-            Constraint::Perpendicular { mate, a, b, plane_a, plane_b } => {
-                let ((ga, oa), (gb, ob)) = (of(a), of(b));
-                let (u, w) = (own(oa, plane_a.normal, mate)?, own(ob, plane_b.normal, mate)?);
-                rules.push((mate.as_str(), Rule::Relate { a: ga, u, b: gb, w, sign: 0 }));
-            }
-            Constraint::Origin { .. } | Constraint::Lock { .. } => {}
-        }
-    }
-    // A normal a fixed frame puts off the axes cannot be proved: refused as before.
-    for (mate, rule) in &rules {
-        if let Rule::Relate { a, u, b, w, .. } = rule {
-            for (g, n) in [(*a, *u), (*b, *w)] {
-                let fixed = rules.iter().find_map(|(_, r)| match r {
-                    Rule::Fixed { g: f, rotation } if *f == g => Some(*rotation),
-                    _ => None,
-                });
-                if let Some(rotation) = fixed {
-                    world(rotation, n, mate)?;
-                }
+    /// The first disagreement among the translations the `active` constraints ask for,
+    /// counting only those whose turns are all chosen in `at`.
+    fn conflict(&self, active: &[bool], at: &[Option<DQuat>]) -> Result<Option<MateRefusal>, MateRefusal> {
+        let turn = |body: &Body| {
+            let (g, offset) = self.member[body];
+            canonical((at[g].expect("a mate is placed only once its turns are chosen") * offset).normalize())
+        };
+        let ready: Vec<&Constraint> = self
+            .constraints
+            .iter()
+            .zip(&self.placed_by)
+            .zip(active)
+            .filter(|((_, by), on)| **on && by.as_ref().is_some_and(|gs| gs.iter().all(|g| at[*g].is_some())))
+            .map(|((c, _), _)| c)
+            .collect();
+        for axis in 0..3 {
+            match walk(self.bodies, &edges(ready.iter().copied(), &turn, axis)?, axis) {
+                Ok(_) => {}
+                Err(r) if r.code == RefusalCode::OverConstrained => return Ok(Some(r)),
+                Err(r) => return Err(r),
             }
         }
+        Ok(None)
     }
-    let mut search = Search {
-        authored: roots.iter().map(|r| bodies[r].rotation).collect(),
-        locked: roots.iter().map(|r| group.values().filter(|(x, _)| x == r).count() > 1).collect(),
-        rules,
-        cubes: cube_rotations().iter().map(quaternion).collect(),
-        steps: 0,
-    };
-    let too_long = |rules: &[(&str, Rule)]| {
-        let mut names: Vec<String> = rules.iter().map(|(m, _)| (*m).to_owned()).collect();
+
+    fn too_long(&self) -> MateRefusal {
+        let mut names: Vec<String> = self.rules.iter().map(|(m, _, _)| (*m).to_owned()).collect();
         names.sort();
         names.dedup();
         MateRefusal {
@@ -614,37 +774,67 @@ fn rotations(
                 format!("these mates' turns take more than {SEARCH_STEPS} steps to decide"),
             )
         }
-    };
-    let all: Vec<usize> = (0..search.rules.len()).collect();
-    let turns = match search.solve(roots.len(), &all) {
-        Ok(Some(turns)) => turns,
-        Err(TooLong) => return Err(too_long(&search.rules)),
-        Ok(None) => {
-            // Name a smallest set that still cannot hold: drop each mate in name order
-            // while what is left still fails.
-            let mut names: Vec<&str> = search.rules.iter().map(|(m, _)| *m).collect();
-            names.sort();
-            names.dedup();
-            let mut keep = all.clone();
-            for name in names {
-                let trial: Vec<usize> = keep.iter().copied().filter(|i| search.rules[*i].0 != name).collect();
-                search.steps = 0;
-                match search.solve(roots.len(), &trial) {
-                    Ok(None) => keep = trial,
-                    Ok(Some(_)) => {}
-                    Err(TooLong) => return Err(too_long(&search.rules)),
-                }
-            }
-            let mut named: Vec<String> = keep.iter().map(|i| search.rules[*i].0.to_owned()).collect();
-            named.sort();
-            named.dedup();
-            return Err(incompatible(named));
-        }
-    };
-    let mut known = BTreeMap::new();
-    for (body, (root, offset)) in &group {
-        known.insert(body.clone(), canonical((turns[index[root]] * *offset).normalize()));
     }
+
+    /// Why no turns let every mate hold: a smallest set of mates that cannot hold
+    /// together, found by dropping each mate in name order while what is left still fails.
+    /// When the turns alone cannot hold, it names a set whose turns conflict; otherwise
+    /// one that no choice of turns lets hold with its translations.
+    fn refusal(&mut self) -> Result<MateRefusal, MateRefusal> {
+        let all = vec![true; self.constraints.len()];
+        let placing = self.run(&all, false)?.is_some();
+        let mut names: Vec<&str> = self.constraints.iter().map(Constraint::mate).collect();
+        names.sort();
+        names.dedup();
+        let mut keep = all;
+        for name in names {
+            let trial: Vec<bool> = keep.iter().zip(self.constraints).map(|(k, c)| *k && c.mate() != name).collect();
+            if self.run(&trial, placing)?.is_none() {
+                keep = trial;
+            }
+        }
+        let mut named: Vec<String> =
+            self.constraints.iter().zip(&keep).filter(|(_, k)| **k).map(|(c, _)| c.mate().to_owned()).collect();
+        named.sort();
+        named.dedup();
+        if !placing {
+            return Ok(incompatible(named));
+        }
+        // Say what the mates ask for in the pose nearest the authored one.
+        let nearest = match self.run(&keep, false)? {
+            Some(turns) => self.conflict(&keep, &turns.into_iter().map(Some).collect::<Vec<_>>())?,
+            None => None,
+        };
+        Ok(match nearest {
+            Some(refusal) if refusal.mates == named => refusal,
+            Some(refusal) => {
+                let message = format!(
+                    "{}: no quarter-turn pose lets them all hold; nearest the authored pose, {}",
+                    named.join(", "),
+                    refusal.message
+                );
+                conflict(named, message)
+            }
+            None => {
+                let message = format!("{}: no quarter-turn pose lets them all hold", named.join(", "));
+                conflict(named, message)
+            }
+        })
+    }
+}
+
+/// Each body's turn, chosen so that every mate holds, the translations included.
+fn rotations(
+    bodies: &BTreeMap<Body, Placement>,
+    constraints: &[Constraint],
+) -> Result<BTreeMap<Body, DQuat>, MateRefusal> {
+    let mut search = Search::new(bodies, constraints)?;
+    let Some(turns) = search.run(&vec![true; constraints.len()], true)? else { return Err(search.refusal()?) };
+    let known: BTreeMap<Body, DQuat> = search
+        .member
+        .iter()
+        .map(|(body, (g, offset))| (body.clone(), canonical((turns[*g] * *offset).normalize())))
+        .collect();
     for c in constraints {
         match c {
             Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, .. } => {
@@ -672,12 +862,12 @@ fn rotations(
                 let off =
                     [DVec3::X, DVec3::Y].iter().any(|v| (at.rotation * *v).distance(known[body] * *v) > AXIS_TOLERANCE);
                 if off {
-                    let root = &group[body].0;
+                    let g = search.member[body].0;
                     let mut names: Vec<String> = constraints
                         .iter()
                         .filter(|c| match c {
-                            Constraint::Origin { body, axes: true, .. } => group[body].0 == *root,
-                            Constraint::Lock { a, .. } => group[a].0 == *root,
+                            Constraint::Origin { body, axes: true, .. } => search.member[body].0 == g,
+                            Constraint::Lock { a, .. } => search.member[a].0 == g,
                             _ => false,
                         })
                         .map(|c| c.mate().to_owned())
@@ -705,8 +895,8 @@ struct Edge<'a> {
 }
 
 fn edges<'a>(
-    constraints: &'a [Constraint],
-    turned: &BTreeMap<Body, DQuat>,
+    constraints: impl IntoIterator<Item = &'a Constraint>,
+    turned: &impl Fn(&Body) -> DQuat,
     axis: usize,
 ) -> Result<Vec<Edge<'a>>, MateRefusal> {
     let mut out = Vec::new();
@@ -718,7 +908,7 @@ fn edges<'a>(
                 out.push(Edge { from: None, to: body, gap, mate, says: "at the origin".into() })
             }
             Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, along: Some(along) } => {
-                let n = world(turned[a], plane_a.normal, mate)?;
+                let n = world(turned(a), plane_a.normal, mate)?;
                 if n[axis] == 0 {
                     continue;
                 }
@@ -745,8 +935,8 @@ fn edges<'a>(
                             }
                             Ok(BigRational::from_integer(BigInt::from(w[axis])) * &p.offset)
                         };
-                        let g = [at(turned[a], plane_a)?, at(turned[a], groove)?];
-                        let h = [at(turned[b], plane_b)?, at(turned[b], tab)?];
+                        let g = [at(turned(a), plane_a)?, at(turned(a), groove)?];
+                        let h = [at(turned(b), plane_b)?, at(turned(b), tab)?];
                         let two = BigRational::from_integer(BigInt::from(2));
                         let (h_lo, h_hi) = if h[0] <= h[1] { (&h[0], &h[1]) } else { (&h[1], &h[0]) };
                         let gap_from = |from: &BigRational, other: &BigRational, gap: BigRational| {
@@ -773,7 +963,7 @@ fn edges<'a>(
                 out.push(Edge { from: Some(a), to: b, gap, mate, says });
             }
             Constraint::Lock { mate, a, b, relative } => {
-                let m = cube_of(turned[a]).ok_or_else(|| unsupported_lock(mate))?;
+                let m = cube_of(turned(a)).ok_or_else(|| unsupported_lock(mate))?;
                 let t = relative.translation.to_array();
                 let j = (0..3).find(|j| m[axis][*j] != 0).expect("a signed permutation");
                 let offset =
@@ -881,7 +1071,7 @@ pub(crate) fn solve(
     let turned = rotations(bodies, constraints)?;
     let mut coordinates = Vec::with_capacity(3);
     for axis in 0..3 {
-        coordinates.push(walk(bodies, &edges(constraints, &turned, axis)?, axis)?);
+        coordinates.push(walk(bodies, &edges(constraints, &|b: &Body| turned[b], axis)?, axis)?);
     }
     Ok(bodies
         .iter()
@@ -1581,5 +1771,131 @@ mod tests {
                 (RefusalCode::OverConstrained, vec!["P".to_owned(), "R".to_owned()])
             );
         }
+    }
+
+    /// Two parts on their own frames' origins, the second frame 10 mm along x, and an
+    /// aligned distance between their z = 0 planes.
+    fn frames_apart(gap: f64, a_id: u32, b_id: u32) -> (BTreeMap<Body, Placement>, Vec<Constraint>) {
+        let (pa, pb) = (body(a_id), body(b_id));
+        let frame = Placement::translation(DVec3::new(10.0, 0.0, 0.0));
+        let at: BTreeMap<Body, Placement> = [(pa.clone(), Placement::IDENTITY), (pb.clone(), frame)].into();
+        let mates = vec![
+            Constraint::Origin { mate: "OA".into(), body: pa.clone(), axes: false, at: Placement::IDENTITY },
+            Constraint::Origin { mate: "OB".into(), body: pb.clone(), axes: false, at: frame },
+            Constraint::Parallel {
+                mate: "D".into(),
+                a: pa,
+                b: pb,
+                plane_a: plane([0, 0, 1], 0),
+                plane_b: plane([0, 0, 1], 0),
+                sign: 1,
+                along: Some(Along::Distance(gap)),
+            },
+        ];
+        (at, mates)
+    }
+
+    /// Kept as they are, both origins put z at 0 and the distance cannot hold. Turning both
+    /// parts so their z faces world x holds all three exactly, so the solver must find that
+    /// turn rather than stop at the first one that keeps the normals.
+    #[test]
+    fn a_distance_turns_the_parts_when_their_turn_alone_cannot_place_them() {
+        for (a_id, b_id) in [(2, 4), (4, 2)] {
+            let (at, mates) = frames_apart(10.0, a_id, b_id);
+            let mut answers = Vec::new();
+            for order in orders(&mates) {
+                let solved = solve(&at, &order).unwrap_or_else(|e| panic!("A {a_id}, B {b_id}, {order:?}: {e}"));
+                let (qa, qb) = (solved[&body(a_id)].rotation, solved[&body(b_id)].rotation);
+                assert_eq!(snapped(qa * DVec3::Z), Some([1, 0, 0]), "A's top faces world x");
+                assert_eq!(snapped(qb * DVec3::Z), Some([1, 0, 0]), "B's top faces world x");
+                assert_eq!(solved[&body(a_id)].translation, DVec3::ZERO, "OA holds");
+                assert_eq!(solved[&body(b_id)].translation, DVec3::new(10.0, 0.0, 0.0), "OB holds");
+                answers.push((qa.to_array(), qb.to_array()));
+            }
+            answers.dedup();
+            assert_eq!(answers.len(), 1, "A {a_id}, B {b_id}: one answer for every order: {answers:?}");
+        }
+    }
+
+    /// The frames are 10 mm apart, so no turn holds an 11 mm distance: still refused, with
+    /// every mate on the cycle named.
+    #[test]
+    fn a_distance_no_turn_can_hold_is_still_over_constrained() {
+        for (a_id, b_id) in [(2, 4), (4, 2)] {
+            let (at, mates) = frames_apart(11.0, a_id, b_id);
+            for order in orders(&mates) {
+                let refused = solve(&at, &order).unwrap_err();
+                assert_eq!(refused.code, RefusalCode::OverConstrained, "{order:?}");
+                assert_eq!(refused.mates, ["D", "OA", "OB"], "{order:?}");
+                assert!(refused.message.contains("D (11 mm)"), "{refused}");
+            }
+        }
+    }
+
+    /// Once a third part holds A's top up, the only turn that would place the distance is
+    /// gone. The refusal names every mate it needs, and says what the nearest pose asks.
+    #[test]
+    fn a_distance_whose_turn_another_mate_forbids_names_both() {
+        let (mut at, mut mates) = frames_apart(10.0, 2, 4);
+        let pc = body(6);
+        at.insert(pc.clone(), Placement::translation(DVec3::new(0.0, 50.0, 0.0)));
+        mates.push(Constraint::Origin {
+            mate: "OC".into(),
+            body: pc.clone(),
+            axes: true,
+            at: Placement::translation(DVec3::new(0.0, 50.0, 0.0)),
+        });
+        mates.push(Constraint::Parallel {
+            mate: "P".into(),
+            a: pc,
+            b: body(2),
+            plane_a: plane([0, 0, 1], 0),
+            plane_b: plane([0, 0, 1], 0),
+            sign: 1,
+            along: None,
+        });
+        let refused = solve(&at, &mates).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::OverConstrained);
+        assert_eq!(refused.mates, ["D", "OA", "OB", "OC", "P"]);
+        assert!(refused.message.contains("no quarter-turn pose") && refused.message.contains("D (10 mm)"), "{refused}");
+    }
+
+    /// Many parts that keep a free spin each, then a conflict found only when the last part
+    /// is turned. Spins that read the same axes are tried once, so the search still ends
+    /// in a few steps and names the conflict instead of giving up as too large.
+    #[test]
+    fn a_late_conflict_behind_many_free_spins_is_named_quickly() {
+        // The last part in path order, so it is turned after every spinning one.
+        let last = body(200);
+        let mut at: BTreeMap<Body, Placement> =
+            [(a(), Placement::IDENTITY), (last.clone(), Placement::translation(DVec3::new(0.0, 0.0, 30.0)))].into();
+        let gap = |mate: &str, d: f64| Constraint::Parallel {
+            mate: mate.into(),
+            a: a(),
+            b: last.clone(),
+            plane_a: plane([0, 0, 1], 10),
+            plane_b: plane([0, 0, -1], 0),
+            sign: -1,
+            along: Some(Along::Distance(d)),
+        };
+        let mut mates = vec![origin(true), gap("Z", 5.0), gap("Conflict", 6.0)];
+        for id in 100..112 {
+            let spin = body(id);
+            at.insert(spin.clone(), Placement::translation(DVec3::new(f64::from(id), 0.0, 0.0)));
+            mates.push(Constraint::Parallel {
+                mate: format!("S{id}"),
+                a: a(),
+                b: spin,
+                plane_a: plane([0, 0, 1], 0),
+                plane_b: plane([0, 0, 1], 0),
+                sign: 1,
+                along: None,
+            });
+        }
+        let refused = solve(&at, &mates).unwrap_err();
+        assert_eq!(
+            (refused.code, refused.mates.clone()),
+            (RefusalCode::OverConstrained, vec!["Conflict".to_owned(), "Z".to_owned()])
+        );
     }
 }

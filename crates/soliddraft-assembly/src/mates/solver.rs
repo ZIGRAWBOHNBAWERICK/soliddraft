@@ -319,6 +319,27 @@ fn shortest_arc(from: DVec3, to: DVec3) -> DQuat {
     DQuat::from_rotation_arc(from, to)
 }
 
+/// The turn nearest `authored` that takes the axis `u` exactly onto the axis `v`, keeping
+/// the spin about `v` that `authored` has: the quarter turn `c` taking `u` to `v`, then
+/// the turn about `v` nearest `authored` once `c` is undone. A turn about `v` has its
+/// vector part on `v` alone, so `u` lands on `v` exactly however the parts round; a
+/// shortest arc from where `authored` puts `u` would leave residuals off it. `None` if
+/// rounding still leaves it off.
+fn spun(authored: DQuat, u: Normal, v: Normal) -> Option<DQuat> {
+    let c = canonical(shortest_arc(vector(u), vector(v)));
+    let rest = authored * c.inverse();
+    let k = v.iter().position(|x| *x != 0)?;
+    let mut parts = [0.0; 4];
+    parts[k] = rest.xyz()[k];
+    parts[3] = rest.w;
+    let about = DQuat::from_array(parts);
+    if about.length() == 0.0 {
+        return None;
+    }
+    let q = canonical((about.normalize() * c).normalize());
+    (turned(q, u) == Some(v)).then_some(q)
+}
+
 /// The names of every mate between `a` and `b`, sorted.
 fn between(constraints: &[Constraint], a: &Body, b: &Body) -> Vec<String> {
     let mut names: Vec<String> = constraints
@@ -454,7 +475,7 @@ impl Search<'_> {
         let mut out = Vec::new();
         if !self.locked[g] && normals.iter().all(|n| dot(*n, u0).abs() == 1) {
             for v in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
-                out.push(canonical((shortest_arc(authored * vector(u0), vector(v)) * authored).normalize()));
+                out.extend(spun(authored, u0, v));
             }
         }
         out.extend(self.cubes.iter().copied());
@@ -1210,6 +1231,28 @@ mod tests {
         assert_eq!(dof, 4);
         let names: Vec<_> = free.iter().map(|f| f.motion.as_str()).collect();
         assert_eq!(names, ["translate_x", "translate_y", "translate_z", "spin_z"]);
+    }
+
+    /// A part tilted off the axis it is held along is turned onto it exactly, and keeps
+    /// the spin about it, an eighth of a turn here, that nothing holds; one already on the
+    /// axis keeps its spin as it is.
+    #[test]
+    fn a_tilted_part_keeps_its_free_spin_exactly() {
+        let mut at = bodies();
+        let eighth = DQuat::from_rotation_y(0.1) * DQuat::from_rotation_z(std::f64::consts::FRAC_PI_4);
+        at.get_mut(&b()).unwrap().rotation = eighth;
+        let constraints = [origin(true), parallel("P", plane([0, 0, 1], 10), plane([0, 0, -1], 0), -1)];
+        let solved = solve(&at, &constraints).unwrap();
+        let r = solved[&b()].rotation;
+        assert_eq!(turned(r, [0, 0, -1]), Some([0, 0, -1]), "{r}");
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((r * DVec3::X).distance(DVec3::new(h, h, 0.0)) < 1e-12, "{r}: the eighth turn stays");
+        assert_eq!(freedoms(&solved, &constraints).unwrap().0, 4);
+        let spin = DQuat::from_rotation_z(0.5);
+        at.get_mut(&b()).unwrap().rotation = spin;
+        let r = solve(&at, &constraints).unwrap()[&b()].rotation;
+        assert!([DVec3::X, DVec3::Y].iter().all(|v| (r * *v).distance(spin * *v) < 1e-15), "{r}");
+        assert_eq!(turned(r, [0, 0, 1]), Some([0, 0, 1]));
     }
 
     #[test]

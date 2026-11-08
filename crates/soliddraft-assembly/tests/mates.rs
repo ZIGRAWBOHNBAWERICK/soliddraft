@@ -1059,3 +1059,42 @@ fn a_free_spin_is_solved_jointly() {
         check(&mut r);
     }
 }
+
+/// B is tilted 0.1 rad about y and spun an eighth of a turn about z. An opposed
+/// Coincident on A's top and B's underside turns the tilt out exactly and leaves the
+/// eighth turn, which nothing holds, where it was, through save and reopen. A second B
+/// already level at half a radian keeps its spin.
+#[test]
+fn a_coincident_keeps_a_free_eighth_turn() {
+    let mut r = rig("free-eighth", 10.0);
+    let eighth = DQuat::from_rotation_y(0.1) * DQuat::from_rotation_z(std::f64::consts::FRAC_PI_4);
+    let tilted =
+        r.doc.insert(reference(&r.root, &r.b_file), Placement::new(eighth, DVec3::new(60.0, 0.0, 30.0))).unwrap();
+    let spin = DQuat::from_rotation_z(0.5);
+    let level =
+        r.doc.insert(reference(&r.root, &r.b_file), Placement::new(spin, DVec3::new(-60.0, 0.0, 30.0))).unwrap();
+    r.doc.finish_loading();
+    r.doc.mate_origin("O", r.a, true, false).unwrap();
+    r.doc.mate_coincident("Ct", &top(r.a), &bottom(tilted), Alignment::Opposed, false).unwrap();
+    r.doc.mate_coincident("Cl", &top(r.a), &bottom(level), Alignment::Opposed, false).unwrap();
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let check = |doc: &mut AssemblyDocument| {
+        let at = |c: ComponentId| doc.assembly().component(c).unwrap().placement;
+        let q = at(tilted).rotation;
+        assert!((q * DVec3::Z).distance(DVec3::Z) < 1e-15, "{q}: level");
+        assert!((q * DVec3::X).distance(DVec3::new(h, h, 0.0)) < 1e-12, "{q}: the eighth turn stays");
+        assert_eq!(at(tilted).translation.z, 10.0);
+        let q = at(level).rotation;
+        assert!([DVec3::X, DVec3::Y].iter().all(|v| (q * *v).distance(spin * *v) < 1e-15), "{q}");
+        // Both Coincident mates prove their planes exactly on the placements kept.
+        let measured = doc.mate_measurements();
+        assert_eq!(measured.len(), 2);
+        for (_, m) in measured {
+            assert_eq!(m.unwrap().unwrap().rational, "0");
+        }
+    };
+    check(&mut r.doc);
+    r.doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&r.root, options()).unwrap();
+    check(&mut reopened);
+}

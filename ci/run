@@ -12,22 +12,28 @@ case "${1:-}" in
     python3 -m unittest discover -s ci -p 'test_*.py'
     ;;
   test-build)
-    [[ $# -eq 2 ]]
+    [[ $# -eq 2 || $# -eq 3 ]]
     export CARGO_PROFILE_TEST_OPT_LEVEL=2
-    cargo nextest archive --workspace --all-features --locked --archive-file "$2"
+    selection=()
+    if [[ $# -eq 3 ]]; then selection=(--selection "$3"); fi
+    python3 ci/run-selected.py test-build "$2" "${selection[@]}"
     ;;
   test-doc)
     export CARGO_PROFILE_TEST_OPT_LEVEL=2
-    cargo test --workspace --all-features --locked --doc --no-fail-fast
+    [[ $# -eq 1 || $# -eq 2 ]]
+    selection=()
+    if [[ $# -eq 2 ]]; then selection=(--selection "$2"); fi
+    python3 ci/run-selected.py test-doc "${selection[@]}"
     ;;
   test-shard)
     [[ $# -eq 3 ]]
+    # A small selected archive can leave one partition empty.
     cargo nextest run --config-file "$root/ci/nextest.toml" --profile ci \
       --archive-file "$2" --workspace-remap "$root" --extract-to "$root" --extract-overwrite \
-      --partition "slice:$3" --no-fail-fast
+      --partition "slice:$3" --no-tests pass --no-fail-fast
     ;;
   *)
-    echo "Usage: ci/run lint | test-build ARCHIVE | test-doc | test-shard ARCHIVE K/N" >&2
+    echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N" >&2
     exit 2
     ;;
 esac

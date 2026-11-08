@@ -692,6 +692,15 @@ class WindowsDeferred(unittest.TestCase):
         self.assertEqual(set(union), self.NATIVE)
 
 
+class NightlyRouting(unittest.TestCase):
+    def test_schedule_ignores_empty_docs_and_ci_only_diffs(self):
+        sources = lambda path: [selector.content(ROOT, path)] * 2
+        for changes in (None, [], [['M', 'docs/ci.md']], [['M', 'ci/select-checks.py']]):
+            with self.subTest(changes=changes):
+                result = selector.select(changes, 'schedule', 'refs/heads/main', {}, sources)
+                self.assertEqual(set(result), qualified())
+
+
 class Gate(unittest.TestCase):
     def gate_exit(self, selected, needs):
         with tempfile.TemporaryDirectory() as directory:
@@ -737,6 +746,21 @@ class Gate(unittest.TestCase):
                         needs[shard] = shard_result
                     self.assertEqual(self.gate_exit(['lint', shard], needs), expected)
 
+    def test_every_selected_job_rejects_a_silent_skip(self):
+        registry = read('check-registry.json')['jobs']
+        selected = sorted(set(registry) - {'select', *WINDOWS})
+        needs = {job: 'success' for definition in registry.values()
+                 for job in ([definition] if isinstance(definition, str) else definition)}
+        self.assertEqual(self.gate_exit(selected, needs), 0)
+        for unit in selected:
+            definition = registry[unit]
+            for job in ([definition] if isinstance(definition, str) else definition):
+                with self.subTest(unit=unit, job=job):
+                    self.assertEqual(self.gate_exit(selected, dict(needs, **{job: 'skipped'})), 1)
+                    missing = dict(needs)
+                    del missing[job]
+                    self.assertEqual(self.gate_exit(selected, missing), 1)
+
     def test_gate_fixture(self):
         fixture = read('gate-cases.json')
         for case in fixture['cases']:
@@ -776,6 +800,22 @@ class Wiring(unittest.TestCase):
                 self.assertNotIn('ci/run test-build', shards)
                 self.assertNotIn('cargo test', shards)
                 self.assertNotIn('Swatinem/rust-cache', shards)
+
+    def test_selected_work_consumes_the_selection_artifact_in_each_job(self):
+        parsed = jobs((ROOT / '.github/workflows/hosted.yml').read_text())
+        for name in ('build-linux', 'build-macos', 'application-loop'):
+            with self.subTest(job=name):
+                body = parsed[name]
+                self.assertIn('actions/download-artifact@v4', body)
+                self.assertIn('name: check-selection', body)
+                self.assertIn('"$RUNNER_TEMP/check-selection/selection.json"', body)
+                self.assertNotIn('ci/select-checks.py', body)
+        for name in ('build-linux', 'build-macos'):
+            self.assertIn('ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"', parsed[name])
+        self.assertIn('ci/run-selected.py scenarios --selection', parsed['application-loop'])
+        # Local lint and the PR lint job execute all selector/runner guard tests.
+        self.assertIn('python3 -m unittest discover -s ci', (ROOT / 'ci/run').read_text())
+        self.assertIn('ci/run lint', parsed['lint'])
 
     def test_windows_jobs_stay_defined_behind_one_manual_input(self):
         hosted = (ROOT / '.github/workflows/hosted.yml').read_text()

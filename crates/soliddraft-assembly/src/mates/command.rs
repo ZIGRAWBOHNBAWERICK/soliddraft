@@ -1123,20 +1123,30 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
                 (Local::Plane(plane), Local::Axis(axis), Some(d)) => {
                     let (gap, says) = (exact(*d)?, at(*d));
                     let (point, direction) = (axis.through, Some(axis.direction));
-                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, says }]
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, upto: None, says }]
                 }
                 (Local::Axis(axis), Local::Plane(plane), Some(d)) => {
                     let (gap, says) = (exact(*d)?, at(*d));
                     let (point, direction) = (axis.through, Some(axis.direction));
-                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction, gap, says }]
+                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction, gap, upto: None, says }]
                 }
                 (Local::Plane(plane), Local::Point(point), Some(d)) => {
                     let (gap, says) = (exact(*d)?, at(*d));
-                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, says }]
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, upto: None, says }]
                 }
                 (Local::Point(point), Local::Plane(plane), Some(d)) => {
                     let (gap, says) = (exact(*d)?, at(*d));
-                    vec![Constraint::FromPlane { mate, a: b, plane, b: a, point, direction: None, gap, says }]
+                    vec![Constraint::FromPlane {
+                        mate,
+                        a: b,
+                        plane,
+                        b: a,
+                        point,
+                        direction: None,
+                        gap,
+                        upto: None,
+                        says,
+                    }]
                 }
                 (Local::Axis(axis_a), Local::Axis(axis_b), Some(_)) if *coincident => {
                     vec![Constraint::Axes { mate, a, b, axis_a, axis_b, sign: *sign, coaxial: true }]
@@ -1240,10 +1250,10 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
             match second.local {
                 Local::Axis(axis) => {
                     let (point, direction) = (axis.through, Some(axis.direction));
-                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, says }]
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction, gap, upto: None, says }]
                 }
                 Local::Point(point) => {
-                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, says }]
+                    vec![Constraint::FromPlane { mate, a, plane, b, point, direction: None, gap, upto: None, says }]
                 }
                 Local::Plane(_) => return Err(unsupported("a Tangent's second end is a cylinder or a sphere")),
             }

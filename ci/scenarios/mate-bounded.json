@@ -1604,6 +1604,30 @@
       "checks": []
     },
     {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "L",
+        "angle_limits": [
+          10,
+          -10
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid_value"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 81,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        }
+      ],
+      "refused": "invalid_value"
+    },
+    {
       "tool": "redo",
       "arguments": {},
       "checks": [
@@ -1665,7 +1689,7 @@
         {
           "pointer": "/summary/assembly/accepted_state/truth",
           "same_as": {
-            "step": 83,
+            "step": 84,
             "pointer": "/summary/assembly/accepted_state/truth"
           }
         },

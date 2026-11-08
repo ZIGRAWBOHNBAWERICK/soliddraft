@@ -709,6 +709,14 @@ fn numeric(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<BTre
         return Ok(bodies.clone());
     }
     let mut poses = seed(bodies, cs);
+    let mut origins = BTreeMap::new();
+    for c in cs {
+        if let Constraint::Origin { body, axes, .. } = c {
+            *origins.entry(body).or_insert(false) |= axes;
+        }
+    }
+    let movable: Vec<bool> =
+        bodies.keys().flat_map(|body| (0..6).map(|k| origins.get(body).is_none_or(|axes| k >= 3 && !axes))).collect();
     let mut damping = 1e-6;
     for _ in 0..ITERATIONS {
         let r = values(&poses, cs, false);
@@ -722,7 +730,15 @@ fn numeric(bodies: &BTreeMap<Body, Placement>, cs: &[Constraint]) -> Result<BTre
         if r.iter().all(|x| x.abs() < 1e-12) && certify(&poses, cs).is_ok() {
             return Ok(poses);
         }
-        let j = jacobian(&poses, cs, false);
+        let mut j = jacobian(&poses, cs, false);
+        // Origin coordinates are fixed data, rather than soft equations in the step.
+        for row in &mut j {
+            for (value, movable) in row.iter_mut().zip(&movable) {
+                if !movable {
+                    *value = 0.0;
+                }
+            }
+        }
         let n = poses.len() * 6;
         let mut a = vec![vec![0.0; n]; n];
         let mut b = vec![0.0; n];
@@ -1017,6 +1033,7 @@ mod tests {
         let mut locked = cs.to_vec();
         locked.push(Constraint::Turn { mate: "SL".into(), a: body(1), b: body(2), relative: out[&body(2)].rotation });
         assert_eq!(solve(&out, &locked).unwrap(), out);
+        solve(&at, &locked).unwrap();
     }
 
     #[test]

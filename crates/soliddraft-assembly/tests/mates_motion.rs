@@ -124,6 +124,49 @@ fn bounded(doc: &mut AssemblyDocument, name: &str) {
     assert!(p.residual_mm <= 1e-9 && p.residual_angle <= 1e-9);
 }
 #[test]
+fn angle_with_rotation_locked_slot_replays_the_application_request() {
+    use soliddraft_assembly::SlotInput;
+    let dir = std::env::temp_dir().join(format!("soliddraft-angle-slot-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("rig.dwasm");
+    let mut doc = AssemblyDocument::new_with("Rig", options());
+    doc.save(Some(&file)).unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mates-angle-slot");
+    let mut parts = Vec::new();
+    for (name, at) in
+        [("plate.dwprt", Placement::IDENTITY), ("pin.dwprt", Placement::translation(DVec3::new(40.0, 7.0, 30.0)))]
+    {
+        let path = dir.join(name);
+        std::fs::copy(source.join(name), &path).unwrap();
+        let id = identify_file(&path).unwrap();
+        let mut reference = DocRef::new(id.id, id.kind, "", id.revision);
+        reference.set_path(&file, &path);
+        parts.push(doc.insert(reference, at).unwrap());
+    }
+    doc.finish_loading();
+    let (a, b) = (parts[0], parts[1]);
+    doc.mate_origin("O", a, true, false).unwrap();
+    doc.mate_angle("A", &datum(a, "Right plane"), &datum(b, "Right plane"), &datum(a, "Top plane"), 30.0, false)
+        .unwrap();
+    let slot = EndpointSelector {
+        component: a,
+        face: FaceSelector::Generator {
+            feature: "Cut-Extrude1".into(),
+            generator: GeneratorChoice::Side,
+            normal: Some([0.0, 1.0, 0.0]),
+        },
+    };
+    doc.mate_slot("SL", &slot, &cylinder(b), Alignment::Aligned, &SlotInput::Free, true, false).unwrap();
+    bounded(&mut doc, "SL");
+    assert_eq!(doc.assembly().component(a).unwrap().placement, Placement::IDENTITY);
+    doc.save(None).unwrap();
+    let mut reopened = AssemblyDocument::open(&file, options()).unwrap();
+    reopened.finish_loading();
+    bounded(&mut reopened, "SL");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn signed_angle_edits_and_reopens_with_a_bound_on_the_stored_pose() {
     let mut r = rig("angle", Profile::Block);
     let a = datum(r.a, "Right plane");
@@ -259,9 +302,12 @@ fn orthogonal_width_keeps_its_bisector_choice_while_the_part_turns() {
     let mut r = rig("orthogonal-width", Profile::Block);
     let (g0, g1, t0, t1) =
         (datum(r.a, "Right plane"), datum(r.a, "Top plane"), datum(r.b, "Right plane"), datum(r.b, "Top plane"));
-    r.doc
+    let width = r
+        .doc
         .mate_width("W", [&g0, &g1], [&t0, &t1], Alignment::Aligned, &soliddraft_assembly::WidthInput::Centered, false)
         .unwrap();
     bounded(&mut r.doc, "W");
+    let measurements = r.doc.mate_measurements();
+    assert!(measurements.into_iter().find(|(id, _)| *id == width).unwrap().1.unwrap().is_none());
     std::fs::remove_dir_all(r.dir).unwrap();
 }

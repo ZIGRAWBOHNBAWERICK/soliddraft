@@ -841,7 +841,14 @@ impl Mate {
             | Mate::Coincident { a, b, .. }
             | Mate::Parallel { a, b, .. }
             | Mate::LimitDistance { a, b, .. } => Some([a, b]),
-            Mate::Width { groove, tab, .. } => Some([&groove[0], &tab[0]]),
+            Mate::Width { groove, tab, .. } => {
+                let parallel =
+                    |pair: &[FaceEndpoint; 2]| match (pair[0].entity.stored_normal(), pair[1].entity.stored_normal()) {
+                        (Some(a), Some(b)) => a == b || a == b.map(|x| -x),
+                        _ => false,
+                    };
+                (parallel(groove) && parallel(tab)).then_some([&groove[0], &tab[0]])
+            }
             Mate::Angle { .. }
             | Mate::LimitAngle { .. }
             | Mate::Origin { .. }

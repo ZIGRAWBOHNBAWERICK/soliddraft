@@ -4,8 +4,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -225,7 +228,10 @@ class Runner(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 args = argparse.Namespace(command=command, selection=None, archive='archive.tar.zst')
                 self.assertEqual(runner.run(args), 7)
-                self.assertIn('--workspace', invoke.call_args.args[0])
+                if command == 'test-build':
+                    self.assertIn('--workspace', invoke.call_args.args[0])
+                else:
+                    self.assertEqual(invoke.call_args.args[0][0:2], ['cargo', 'metadata'])
 
     def test_archive_cannot_succeed_with_no_tests(self):
         args = argparse.Namespace(command='test-build', selection=None, archive='archive.tar.zst')
@@ -241,6 +247,78 @@ class Runner(unittest.TestCase):
                 subprocess.CompletedProcess([], 0)]) as invoke, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.run(args), 0)
             self.assertEqual(invoke.call_args.args[0][1:3], ['nextest', 'archive'])
+
+
+class DoctestFixtures(unittest.TestCase):
+    """Real runner/Cargo checks on tiny dependency-free fixtures, one library at a time."""
+
+    def fixture(self, members, selected, library_doc='assert_eq!(2 + 2, 4);', library_doctest=True):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        (root / 'ci').mkdir()
+        shutil.copy2(ROOT / 'ci/run-selected.py', root / 'ci/run-selected.py')
+        (root / 'Cargo.toml').write_text('[workspace]\nresolver = "2"\nmembers = ' + json.dumps(members) + '\n')
+        for kind in members:
+            package = root / kind
+            (package / 'src').mkdir(parents=True)
+            (package / 'Cargo.toml').write_text(
+                f'[package]\nname = "soliddraft-doc-{kind}"\nversion = "0.1.0"\nedition = "2021"\n'
+                + ('[lib]\ndoctest = false\n' if kind == 'lib' and not library_doctest else ''))
+            source = ('/// ```\n/// ' + library_doc + '\n/// ```\npub fn answer() {}\n'
+                      if kind == 'lib' else 'fn main() {}\n')
+            (package / 'src' / ('lib.rs' if kind == 'lib' else 'main.rs')).write_text(source)
+        env = dict(os.environ, CARGO_BUILD_JOBS='1', CARGO_NET_OFFLINE='true',
+                   CARGO_TARGET_DIR=str(root / 'target'))
+        subprocess.run(['cargo', 'generate-lockfile', '--offline'], cwd=root, env=env,
+                       capture_output=True, text=True, check=True, timeout=30)
+        plan = dict(selector.FULL_WORK, packages=None if selected is None else [
+            f'soliddraft-doc-{kind}' for kind in selected])
+        selection = root / 'selection.json'
+        selection.write_text(json.dumps({'work': plan}))
+        return subprocess.run([sys.executable, str(root / 'ci/run-selected.py'), 'test-doc',
+                               '--selection', str(selection)], cwd=root, env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_binary_only_workspace_has_no_doctest_roots(self):
+        for selected in (['bin'], None):
+            with self.subTest(selected=selected):
+                result = self.fixture(['bin'], selected)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('No selected library doctest targets', result.stdout)
+
+    def test_unselected_library_does_not_make_a_selected_binary_doc_eligible(self):
+        result = self.fixture(['lib', 'bin'], ['bin'])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('No selected library doctest targets', result.stdout)
+        self.assertNotIn('Doc-tests', result.stdout + result.stderr)
+
+    def test_library_only_and_mixed_selections_run_library_doctests(self):
+        for members, selected in ((['lib'], ['lib']), (['lib', 'bin'], ['lib', 'bin']),
+                                  (['lib', 'bin'], None)):
+            with self.subTest(members=members, selected=selected):
+                result = self.fixture(members, selected)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('Doc-tests', result.stdout + result.stderr)
+                self.assertIn('1 passed', result.stdout + result.stderr)
+
+    def test_library_doctest_failure_is_not_swallowed(self):
+        result = self.fixture(['lib', 'bin'], ['lib', 'bin'], 'assert_eq!(2 + 2, 5);')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('doctest failed', result.stdout + result.stderr)
+
+    def test_unknown_selected_package_is_not_treated_as_no_doctests(self):
+        result = self.fixture(['lib', 'bin'], ['missing'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unknown selected workspace packages', result.stdout + result.stderr)
+        self.assertNotIn('No selected library doctest targets', result.stdout)
+
+    def test_library_doctest_settings_are_left_to_cargo(self):
+        result = self.fixture(['lib'], ['lib'], library_doctest=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Selected library doctest packages', result.stdout)
+        self.assertIn('"cargo", "test"', result.stdout)
+        self.assertNotIn('No selected library doctest targets', result.stdout)
 
 
 if __name__ == '__main__':

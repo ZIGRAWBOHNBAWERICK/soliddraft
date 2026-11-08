@@ -38,6 +38,20 @@ def cargo_args(plan, docs=False):
     return args + ['--all-features', '--locked']
 
 
+def doctest_packages(plan, metadata):
+    """Find selected library roots; Cargo still decides which doctests to execute."""
+    members = set(metadata['workspace_members'])
+    packages = {p['name']: p for p in metadata['packages'] if p['id'] in members}
+    selected = set(packages) if plan['packages'] is None else set(plan['packages'])
+    missing = selected - packages.keys()
+    if missing:
+        raise ValueError(f'unknown selected workspace packages: {", ".join(sorted(missing))}')
+    library_kinds = {'lib', 'rlib', 'dylib', 'cdylib', 'staticlib', 'proc-macro'}
+    return sorted(name for name in selected if any(
+        library_kinds.intersection(target['kind'])
+        for target in packages[name]['targets']))
+
+
 def scenario_paths(plan, root):
     all_paths = sorted(str(p.relative_to(root)) for p in (root / 'ci/scenarios').glob('*.json'))
     paths = all_paths if plan['scenarios'] is None else plan['scenarios']
@@ -65,6 +79,18 @@ def run(args):
         print(json.dumps(command), flush=True)
         return subprocess.run(command, cwd=ROOT).returncode
     if args.command == 'test-doc':
+        command = ['cargo', 'metadata', '--format-version', '1', '--no-deps', '--locked']
+        print(json.dumps(command), flush=True)
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+        if result.stderr:
+            print(result.stderr, end='', file=sys.stderr)
+        if result.returncode:
+            return result.returncode
+        eligible = doctest_packages(plan, json.loads(result.stdout))
+        if not eligible:
+            print('No selected library doctest targets; documentation tests are not applicable.', flush=True)
+            return 0
+        print('Selected library doctest packages: ' + json.dumps(eligible), flush=True)
         command = ['cargo', 'test', *cargo_args(plan, docs=True), '--doc', '--no-fail-fast']
         print(json.dumps(command), flush=True)
         return subprocess.run(command, cwd=ROOT).returncode

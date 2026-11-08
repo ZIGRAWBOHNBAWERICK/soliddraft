@@ -220,6 +220,52 @@ fn before_inference_snaps(id: &str, current: &mut Value) {
     );
 }
 
+fn before_composite_relations(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == "relate").expect("relation operation");
+    let entity = json!({"type":"integer"});
+    let point = json!({"type":"object", "additionalProperties":false,
+        "properties":{"entity":entity,"index":{"type":"integer"}}, "required":["entity","index"]});
+    let pair = |kind| {
+        json!({"type":"object", "additionalProperties":false,
+        "properties":{"type":{"type":"string","const":kind},"a":entity,"b":entity}, "required":["type","a","b"]})
+    };
+    let symmetric = |kind, member: &Value| {
+        json!({"type":"object", "additionalProperties":false,
+        "properties":{"type":{"type":"string","const":kind},"a":member,"b":member,"axis":entity}, "required":["type","a","b","axis"]})
+    };
+    assert_eq!(
+        variants.remove(index),
+        json!({
+            "type":"object", "additionalProperties":false,
+            "properties": {
+                "tool":{"type":"string","const":"relate"},
+                "relation":{"anyOf":[
+                    pair("collinear"), pair("coradial"),
+                    {"type":"object", "additionalProperties":false,
+                     "properties":{"type":{"type":"string","const":"intersection"}, "point":point,"a":entity,"b":entity},
+                     "required":["type","point","a","b"]},
+                    symmetric("symmetric_points", &point), symmetric("symmetric_entities", &entity),
+                    {"type":"object", "additionalProperties":false,
+                     "properties":{"type":{"type":"string","const":"fix_entity"}, "entity":entity}, "required":["type","entity"]}
+                ]}
+            },
+            "required":["tool","relation"]
+        }),
+        "only the declared relation requests extend the frozen schema"
+    );
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -337,6 +383,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_all_faces(id, &mut current);
         before_trim_modes(id, &mut current);
         before_inference_snaps(id, &mut current);
+        before_composite_relations(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

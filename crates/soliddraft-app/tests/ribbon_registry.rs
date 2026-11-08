@@ -186,6 +186,40 @@ fn before_trim_modes(id: &str, current: &mut Value) {
     );
 }
 
+fn before_inference_snaps(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let index = variants
+        .iter()
+        .position(|v| v["properties"]["tool"]["const"] == "snapped_line")
+        .expect("snapped line operation");
+    let point = json!({"type":"object", "properties":{"u":{"type":"number"}, "v":{"type":"number"}}, "required":["u","v"], "additionalProperties":false});
+    let filter = json!({"type":"string", "enum":["all", "point", "midpoint", "intersection", "on", "axes", "parallel", "perpendicular", "tangent", "none"]});
+    assert_eq!(
+        variants.remove(index),
+        json!({
+            "type":"object", "additionalProperties":false,
+            "properties": {
+                "tool":{"type":"string","const":"snapped_line"},
+                "start":point.clone(), "end":point, "reach":{"type":"number"},
+                "start_filter":filter.clone(), "end_filter":filter,
+                "construction":{"type":"boolean"},
+            },
+            "required":["tool","start","end","reach"]
+        }),
+        "only the declared snapped line operation extends the frozen schema"
+    );
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -302,6 +336,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         let mut current = configuration_registry::before_configurations(id, current, plain);
         before_all_faces(id, &mut current);
         before_trim_modes(id, &mut current);
+        before_inference_snaps(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

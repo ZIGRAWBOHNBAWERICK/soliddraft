@@ -539,7 +539,7 @@ fn create(o: &Options) -> Result<(), String> {
             number: o.number.clone(),
             revision: "A".into(),
             designer: o.designer.clone(),
-            date: o.date.clone().unwrap_or_else(today),
+            date: o.date.clone().unwrap_or_else(soliddraft_app::drawing::today),
             units: Default::default(),
         };
         let new = NewDrawing {
@@ -1123,42 +1123,9 @@ fn capitalise(s: &str) -> String {
     }
 }
 
-/// Today's date, or the date of `SOURCE_DATE_EPOCH` when set, so builds can be
-/// reproducible.
-fn today() -> String {
-    let secs =
-        std::env::var("SOURCE_DATE_EPOCH").ok().and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or_else(|| {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
-        });
-    let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-/// Proleptic Gregorian date of a day count from 1970-01-01 (Howard Hinnant's algorithm).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
-}
-
-/// `target` relative to the directory `base`, with forward slashes.
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dates_from_day_counts() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(20_740), (2026, 10, 14));
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
-    }
 
     #[test]
     fn the_bracket_recipe_defines_its_dimensions() {

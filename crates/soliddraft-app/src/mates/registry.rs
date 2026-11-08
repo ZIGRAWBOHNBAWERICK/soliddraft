@@ -96,7 +96,13 @@ fn width_params() -> Vec<(&'static str, Value)> {
             "alignment",
             one_of(&["aligned", "opposed"], "How the tab's first face's outward normal relates to the groove's first"),
         ),
-        ("mode", optional(one_of(&["centered", "dimension", "percent"], "Where the tab sits; centered by default"))),
+        (
+            "mode",
+            optional(one_of(
+                &["free", "centered", "dimension", "percent"],
+                "Where the tab sits: anywhere between the groove's faces, centred (the default), at a gap or a percentage",
+            )),
+        ),
         ("distance", optional(string("With dimension: the gap from the first groove face to the tab face nearest it"))),
         ("percent", optional(number("With percent: that gap as a percentage of the play, 0 to 100"))),
         ("flipped", optional(boolean("true measures from the second groove face"))),
@@ -147,6 +153,93 @@ fn hinge_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
+fn symmetric_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("The first planar face, plane, axis or point")),
+        ("b", face("Its mirror image on another component: the same kind")),
+        ("plane", face("The symmetry plane: a planar face or a reference plane of any component")),
+        (
+            "alignment",
+            optional(one_of(
+                &["aligned", "opposed"],
+                "For planes or axes: aligned when b's normal or direction is a's mirrored, opposed when it is reversed; aligned by default",
+            )),
+        ),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+fn linear_coupler_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("The first part's planar face or axis: its normal or direction is the way it slides")),
+        ("b", face("The second part's, on another component")),
+        ("reference_a", optional(integer("The component a slides relative to; the assembly by default"))),
+        ("reference_b", optional(integer("The component b slides relative to; the assembly by default"))),
+        (
+            "ratio",
+            optional(array(
+                number("A distance"),
+                "[first, second]: a slides first while b slides second; [1, 1] by default",
+            )),
+        ),
+        ("reverse", optional(boolean("true slides b the other way"))),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+fn limit_distance_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("The face the distance is measured from, along its outward normal")),
+        ("b", face("The face, axis or point the distance is measured to")),
+        ("min", string("The least distance, such as 0 mm")),
+        ("max", string("The greatest distance, such as 10 mm")),
+        ("alignment", one_of(&["aligned", "opposed"], ALIGNMENT)),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+fn profile_center_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("A planar face bounded by a rectangle, a regular polygon or a circle, or a circular edge")),
+        ("b", face("Another of the same kind, centred on the first")),
+        ("alignment", one_of(&["aligned", "opposed"], ALIGNMENT)),
+        ("distance", optional(string("The distance between their planes, such as 2 mm; 0 mm by default"))),
+        ("lock_rotation", optional(boolean("For circles: true holds the turn where the solve leaves it"))),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+fn slot_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("slot", face("A wall or a round end of a straight slot")),
+        ("pin", face("The pin's cylinder, or a circular or straight edge, on another component")),
+        (
+            "alignment",
+            optional(one_of(
+                &["aligned", "opposed"],
+                "How the pin's direction relates to the slot's round ends' axes; aligned by default",
+            )),
+        ),
+        (
+            "mode",
+            optional(one_of(
+                &["free", "center", "distance", "percent"],
+                "Where the pin sits along the slot: anywhere between the ends (the default), centred, at a distance or a percentage",
+            )),
+        ),
+        ("distance", optional(string("With distance: from the first end's centre, such as 4 mm"))),
+        ("percent", optional(number("With percent: of the run between the ends' centres, 0 to 100"))),
+        ("flipped", optional(boolean("true measures from the second end"))),
+        ("lock_rotation", optional(boolean("true holds the pin's turn where the solve leaves it"))),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
 fn lock_params() -> Vec<(&'static str, Value)> {
     vec![
         ("name", string("A name for the mate")),
@@ -175,13 +268,30 @@ fn edit_params() -> Vec<(&'static str, Value)> {
         ("distance", optional(string("A new literal length"))),
         ("alignment", optional(one_of(&["aligned", "opposed"], ALIGNMENT))),
         ("align_axes", optional(boolean("For an Origin mate: whether the axes match too"))),
-        ("percent", optional(number("For a Width by percent: the new percentage, 0 to 100"))),
+        ("percent", optional(number("For a Width or a Slot by percent: the new percentage, 0 to 100"))),
         (
             "flipped",
-            optional(boolean("For a Width by dimension or percent: true measures from the second groove face")),
+            optional(boolean(
+                "For a Width or a Slot by dimension, distance or percent: true measures from the second face or end",
+            )),
         ),
         ("plane_alignment", optional(one_of(&["aligned", "opposed"], "For a Hinge: how its planes relate"))),
-        ("lock_rotation", optional(boolean("For a Concentric between axes: whether the turn about the axis is held"))),
+        (
+            "lock_rotation",
+            optional(boolean(
+                "For a Concentric between axes, a Profile Center between circles or a Slot: whether the turn is held",
+            )),
+        ),
+        ("min", optional(string("For a Limit Distance: the new least distance"))),
+        ("max", optional(string("For a Limit Distance: the new greatest distance"))),
+        (
+            "ratio",
+            optional(array(
+                number("A distance"),
+                "For a Linear Coupler: the new ratio; the parts' places become its zero",
+            )),
+        ),
+        ("reverse", optional(boolean("For a Linear Coupler: whether b slides the other way"))),
     ]
 }
 
@@ -271,6 +381,41 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_mate_hinge", "Hinge mate", "Put two axes on one line and two planes on one plane")
             .agents(Agents::Mcp, "A Concentric and a Coincident under one name; no limits.", hinge_params)
             .undo(Undo::Step),
+        row("assembly_mate_symmetric", "Symmetric mate", "Mirror a face, axis or point of one component onto another's")
+            .agents(
+                Agents::Mcp,
+                "About a plane of any component; two planes, axes or points of one kind, exact or refused.",
+                symmetric_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_linear_coupler", "Linear Coupler mate", "Couple one component's slide to another's by a ratio")
+            .agents(
+                Agents::Mcp,
+                "The parts' places when it is made are its zero; the relation is solved exactly, across axes too.",
+                linear_coupler_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_limit_distance", "Limit Distance mate", "Hold a distance between a least and a greatest value")
+            .agents(
+                Agents::Mcp,
+                "Keeps the faces parallel and leaves the slide free within the range; a move past an end stops there.",
+                limit_distance_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_profile_center", "Profile Center mate", "Centre two rectangles, regular polygons or circles")
+            .agents(
+                Agents::Mcp,
+                "The centre is read exactly from the outline's corners or circle; a rounded outline is refused.",
+                profile_center_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_slot", "Slot mate", "Put a pin in a straight slot")
+            .agents(
+                Agents::Mcp,
+                "Free, centred, at a distance or a percentage along the slot; arc slots are refused.",
+                slot_params,
+            )
+            .undo(Undo::Step),
         row("assembly_set_value", "Set value", "Add or change an assembly value")
             .agents(Agents::Mcp, "Solves everything the value drives in the same step.", value_params)
             .undo(Undo::Step),
@@ -280,7 +425,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_drive_mate", "Drive mate", "Bind a mate's distance to assembly values")
             .agents(Agents::Mcp, "A distance has one driver.", drive_params)
             .undo(Undo::Step),
-        row("assembly_edit_mate", "Edit mate", "Change a mate's distance, alignment, axes, percentage, side or rotation lock")
+        row("assembly_edit_mate", "Edit mate", "Change a mate's distance, limits, ratio, alignment, axes, percentage, side or rotation lock")
             .agents(Agents::Mcp, "A driven distance is refused: edit the value that drives it.", edit_params)
             .undo(Undo::Step),
         row("assembly_delete_mate", "Delete mate", "Remove a mate and leave the components where they are")

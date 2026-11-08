@@ -5,7 +5,7 @@ use crate::state::AppState;
 use serde_json::{Value, json};
 use soliddraft_assembly::{
     Alignment, ComponentId, EndpointSelector, Entity, FaceEndpoint, FaceSelector, GeneratorChoice, Mate, MateEdit,
-    MateRefusal, WidthConstraint, WidthInput,
+    MateRefusal, SlotConstraint, SlotInput, WidthConstraint, WidthInput,
 };
 
 /// A refusal as a tool's error: typed JSON, with what it involved.
@@ -86,14 +86,40 @@ fn pair(v: &Value, what: &str) -> Result<[EndpointSelector; 2], String> {
 fn width(input: &Value) -> Result<WidthInput, String> {
     let flipped = input["flipped"].as_bool().unwrap_or(false);
     match input["mode"].as_str().unwrap_or("centered") {
+        "free" => Ok(WidthInput::Free),
         "centered" => Ok(WidthInput::Centered),
         "dimension" => Ok(WidthInput::Dimension { distance: text(input, "distance")?.to_owned(), flipped }),
         "percent" => {
             let percent = input["percent"].as_f64().ok_or("percent is a number from 0 to 100")?;
             Ok(WidthInput::Percent { percent, flipped })
         }
-        _ => Err("the mode is centered, dimension or percent".into()),
+        _ => Err("the mode is free, centered, dimension or percent".into()),
     }
+}
+
+fn slot(input: &Value) -> Result<SlotInput, String> {
+    let flipped = input["flipped"].as_bool().unwrap_or(false);
+    match input["mode"].as_str().unwrap_or("free") {
+        "free" => Ok(SlotInput::Free),
+        "center" => Ok(SlotInput::Center),
+        "distance" => Ok(SlotInput::Distance { distance: text(input, "distance")?.to_owned(), flipped }),
+        "percent" => {
+            let percent = input["percent"].as_f64().ok_or("percent is a number from 0 to 100")?;
+            Ok(SlotInput::Percent { percent, flipped })
+        }
+        _ => Err("the mode is free, center, distance or percent".into()),
+    }
+}
+
+fn ratio(v: &Value) -> Result<[f64; 2], String> {
+    match v.as_array().map(|r| r.iter().map(Value::as_f64).collect::<Vec<_>>()).as_deref() {
+        Some([Some(a), Some(b)]) => Ok([*a, *b]),
+        _ => Err("the ratio is two numbers: how far the first part slides while the second slides the other".into()),
+    }
+}
+
+fn optional_component(v: &Value, what: &str) -> Result<Option<ComponentId>, String> {
+    if v.is_null() { Ok(None) } else { component(v, what).map(Some) }
 }
 
 fn text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
@@ -115,6 +141,11 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             | "assembly_mate_concentric"
             | "assembly_mate_tangent"
             | "assembly_mate_hinge"
+            | "assembly_mate_symmetric"
+            | "assembly_mate_linear_coupler"
+            | "assembly_mate_limit_distance"
+            | "assembly_mate_profile_center"
+            | "assembly_mate_slot"
             | "assembly_set_value"
             | "assembly_rename_value"
             | "assembly_drive_mate"
@@ -194,6 +225,43 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             doc.mate_hinge(text(input, "name")?, [&a0, &a1], [&p0, &p1], side, planes, strict)
                 .map(|id| json!({ "mate": id }))
         }
+        "assembly_mate_symmetric" => {
+            let (a, b, plane) = (selector(&input["a"])?, selector(&input["b"])?, selector(&input["plane"])?);
+            let side = optional_alignment(&input["alignment"])?;
+            doc.mate_symmetric(text(input, "name")?, [&a, &b, &plane], side, strict).map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_linear_coupler" => {
+            let (a, b) = (selector(&input["a"])?, selector(&input["b"])?);
+            let references = [
+                optional_component(&input["reference_a"], "reference_a")?,
+                optional_component(&input["reference_b"], "reference_b")?,
+            ];
+            let ratio = if input["ratio"].is_null() { [1.0, 1.0] } else { ratio(&input["ratio"])? };
+            let reverse = input["reverse"].as_bool().unwrap_or(false);
+            doc.mate_linear_coupler(text(input, "name")?, &a, &b, references, ratio, reverse, strict)
+                .map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_limit_distance" => {
+            let (a, b) = (selector(&input["a"])?, selector(&input["b"])?);
+            let side = alignment(&input["alignment"])?;
+            let limits = [text(input, "min")?, text(input, "max")?];
+            doc.mate_limit_distance(text(input, "name")?, &a, &b, limits, side, strict).map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_profile_center" => {
+            let (a, b) = (selector(&input["a"])?, selector(&input["b"])?);
+            let side = alignment(&input["alignment"])?;
+            let distance = input["distance"].as_str().unwrap_or("0 mm");
+            let lock = input["lock_rotation"].as_bool().unwrap_or(false);
+            doc.mate_profile_center(text(input, "name")?, &a, &b, side, distance, lock, strict)
+                .map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_slot" => {
+            let (at, pin) = (selector(&input["slot"])?, selector(&input["pin"])?);
+            let side = optional_alignment(&input["alignment"])?;
+            let lock = input["lock_rotation"].as_bool().unwrap_or(false);
+            doc.mate_slot(text(input, "name")?, &at, &pin, side, &slot(input)?, lock, strict)
+                .map(|id| json!({ "mate": id }))
+        }
         "assembly_set_value" => doc.set_value(text(input, "name")?, text(input, "expression")?).map(|()| json!({})),
         "assembly_rename_value" => doc.rename_value(text(input, "name")?, text(input, "to")?).map(|()| json!({})),
         "assembly_drive_mate" => {
@@ -227,9 +295,21 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             if let Some(on) = input["lock_rotation"].as_bool() {
                 edits.push((mate.clone(), MateEdit::LockRotation(on)));
             }
+            if let Some(d) = input["min"].as_str() {
+                edits.push((mate.clone(), MateEdit::Min(d.to_owned())));
+            }
+            if let Some(d) = input["max"].as_str() {
+                edits.push((mate.clone(), MateEdit::Max(d.to_owned())));
+            }
+            if !input["ratio"].is_null() {
+                edits.push((mate.clone(), MateEdit::Ratio(ratio(&input["ratio"])?)));
+            }
+            if let Some(on) = input["reverse"].as_bool() {
+                edits.push((mate.clone(), MateEdit::Reverse(on)));
+            }
             if edits.is_empty() {
                 return Err(
-                    "name what to change: distance, alignment, align_axes, percent, flipped, plane_alignment or lock_rotation"
+                    "name what to change: distance, alignment, align_axes, percent, flipped, plane_alignment, lock_rotation, min, max, ratio or reverse"
                         .into(),
                 );
             }
@@ -316,6 +396,54 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                         row["locked_turn"] = json!(turn);
                     }
                 }
+                Mate::Symmetric { a, b, plane, .. } => {
+                    row["a"] = endpoint(root, a);
+                    row["b"] = endpoint(root, b);
+                    row["plane"] = endpoint(root, plane);
+                }
+                Mate::LinearCoupler { a, b, reference_a, reference_b, ratio, reverse, offset, .. } => {
+                    row["a"] = endpoint(root, a);
+                    row["b"] = endpoint(root, b);
+                    let part = |r: &soliddraft_assembly::PartEndpoint| json!({ "root": root, "path": r.path, "document": r.document });
+                    row["reference_a"] = reference_a.as_ref().map_or(Value::Null, part);
+                    row["reference_b"] = reference_b.as_ref().map_or(Value::Null, part);
+                    row["ratio"] = json!(ratio);
+                    row["reverse"] = json!(reverse);
+                    row["offset"] = json!(offset);
+                }
+                Mate::LimitDistance { a, b, min, max, .. } => {
+                    row["a"] = endpoint(root, a);
+                    row["b"] = endpoint(root, b);
+                    row["min"] = distance(min);
+                    row["max"] = distance(max);
+                }
+                Mate::ProfileCenter { a, b, distance: d, lock_rotation, .. } => {
+                    row["a"] = endpoint(root, a);
+                    row["b"] = endpoint(root, b);
+                    row["distance"] = distance(d);
+                    row["lock_rotation"] = json!(lock_rotation.is_some());
+                    if let Some(turn) = lock_rotation {
+                        row["locked_turn"] = json!(turn);
+                    }
+                }
+                Mate::Slot { slot, pin, constraint, lock_rotation, .. } => {
+                    row["slot"] = endpoint(root, slot);
+                    row["pin"] = endpoint(root, pin);
+                    row["position"] = match constraint {
+                        SlotConstraint::Free => json!({ "mode": "free" }),
+                        SlotConstraint::Center => json!({ "mode": "center" }),
+                        SlotConstraint::Distance { distance: d, flipped } => {
+                            json!({ "mode": "distance", "distance": distance(d), "flipped": flipped })
+                        }
+                        SlotConstraint::Percent { percent, flipped } => {
+                            json!({ "mode": "percent", "percent": percent, "flipped": flipped })
+                        }
+                    };
+                    row["lock_rotation"] = json!(lock_rotation.is_some());
+                    if let Some(turn) = lock_rotation {
+                        row["locked_turn"] = json!(turn);
+                    }
+                }
                 Mate::Hinge { axes, planes, plane_alignment, .. } => {
                     row["axes"] = json!(axes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["planes"] = json!(planes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
@@ -325,6 +453,7 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                     row["groove"] = json!(groove.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["tab"] = json!(tab.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["width"] = match constraint {
+                        WidthConstraint::Free => json!({ "mode": "free" }),
                         WidthConstraint::Centered => json!({ "mode": "centered" }),
                         WidthConstraint::Dimension { distance: d, flipped } => {
                             json!({ "mode": "dimension", "distance": distance(d), "flipped": flipped })

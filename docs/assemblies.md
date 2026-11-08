@@ -202,7 +202,9 @@ In that assembly, every face of every part under the occurrence shows the colour
 replacing the parts' own colours; opened on its own, a part shows its own.
 The nearest occurrence with a colour wins, so a part coloured inside a coloured
 sub-assembly keeps its own. Like overrides, a colour set in an outer assembly wins over
-one the sub-assembly's file sets on the same occurrence.
+one the sub-assembly's file sets on the same occurrence. Taking the outer colour away, or undoing it, shows the
+sub-assembly's own again. Deleting a component takes away every colour the assembly set on
+it or below it, and Undo brings them back.
 
 ```json
 "appearances": [

@@ -893,11 +893,28 @@ impl AssemblyDocument {
         before.colours = Some((self.assembly.appearances.clone(), self.assembly.snapshots.clone(), paths.to_vec()));
         for (path, row) in paths.iter().zip(&rows) {
             self.assembly.set_colour(path, appearance.clone());
-            let changed = self.table.set_colour(*row, appearance.as_ref());
+            // Without the root's colour the occurrence shows one an assembly inside sets.
+            let shown = self.own_colour(path);
+            let changed = self.table.set_colour(*row, shown.as_ref());
             self.changes.colours.extend(changed);
         }
         self.record(if appearance.is_some() { "Colour" } else { "Remove colour" }, before, Vec::new());
         Ok(())
+    }
+
+    /// The colour the occurrence at `path` has of its own, as reading the file would give
+    /// it: the root's, or else that of the outermost sub-assembly on the way that colours
+    /// it. `None` when it shows what is above it.
+    fn own_colour(&self, path: &OccurrencePath) -> Option<Appearance> {
+        if let Some(a) = self.assembly.colour_at(path, None) {
+            return Some(a.clone());
+        }
+        let steps = path.steps();
+        (1..steps.len()).find_map(|k| {
+            let holder = self.table.find(&OccurrencePath(steps[..k].to_vec()))?;
+            let sub = self.store.get(self.table.definition(holder)).assembly.as_deref()?;
+            sub.colour_at(&OccurrencePath(steps[k..].to_vec()), None).cloned()
+        })
     }
 
     /// Shows occurrences, and everything under them, at `quality` instead of their
@@ -1080,6 +1097,13 @@ impl AssemblyDocument {
             .collect();
         before.sources =
             self.assembly.sources.iter().filter(|s| sources.contains(&s.id)).map(|s| (s.id, Some(s.clone()))).collect();
+        // The root's colours on what goes, at any depth, go too: a colour must name an
+        // occurrence of the assembly for it to save.
+        if self.assembly.appearances.iter().any(|c| c.path.steps().first().is_some_and(|s| gone.contains(&s.component)))
+        {
+            before.colours = Some((self.assembly.appearances.clone(), self.assembly.snapshots.clone(), Vec::new()));
+            self.assembly.forget_colours_under(&gone);
+        }
         self.assembly.components.retain(|c| !gone.contains(&c.id));
         self.assembly.sources.retain(|s| !sources.contains(&s.id));
         self.assembly.overrides.retain(|o| !overrides.contains(&o.path));
@@ -1190,7 +1214,7 @@ impl AssemblyDocument {
             self.assembly.snapshots = snapshots.clone();
             for p in paths {
                 if let Some(row) = self.table.find(p) {
-                    let a = self.assembly.colour_at(p, None).cloned();
+                    let a = self.own_colour(p);
                     let changed = self.table.set_colour(row, a.as_ref());
                     self.changes.colours.extend(changed);
                 }

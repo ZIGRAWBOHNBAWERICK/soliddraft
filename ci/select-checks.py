@@ -371,6 +371,8 @@ def ci_only_selection(changes, event, ref, read_sources):
     reasons = {'lint': ['CI-only change: formatting, lint and CI tooling tests']}
     registries = [json.loads(text)['jobs'] for text in read_sources('ci/check-registry.json') if text]
     for path in sorted(paths):
+        if re.fullmatch(r'ci/scenarios/[^/]+\.json', path):
+            reasons.setdefault('application-loop', []).append(f'changed scenario: {path}')
         if not path.startswith('.github/workflows/'):
             continue
         sources = read_sources(path)
@@ -412,6 +414,10 @@ def select(changes, event, ref, packages, read_sources, windows=False):
     reasons = ci_only_selection(changes, event, ref, read_sources)
     if reasons is None:
         reasons = route(changes, event, ref, packages, read_sources)
+    if changes and any(re.fullmatch(r'ci/scenarios/[^/]+\.json', path)
+                       for change in changes for path in change[1:]):
+        # App regression binaries also include and replay scenario JSON as fixtures.
+        reasons.setdefault('test-linux', []).append('scenario fixtures consumed by Rust regressions')
     return reasons if windows else {unit: why for unit, why in reasons.items() if unit not in WINDOWS}
 
 
@@ -451,6 +457,88 @@ def with_base_rules(result, base_script, changes, event, ref, packages, sources)
     return result
 
 
+# None means full coverage. Empty lists are never valid archive or scenario plans.
+FULL_WORK = {'packages': None, 'test_targets': None, 'scenarios': None}
+
+
+def work_plan(root, base, head, changes, event, packages):
+    """Only understood PR source/test/scenario edits may reduce work inside selected jobs."""
+    full = dict(FULL_WORK)
+    if event != 'pull_request' or not changes:
+        return full
+    paths = {path for change in changes for path in change[1:]}
+    rust = {}
+    scenarios = set()
+    for path in paths:
+        if ((path.startswith('docs/') and path.endswith('.md') and path != 'docs/RELEASING.md')
+                or path in {'README.md', 'LICENSE', 'NOTICE'}):
+            continue
+        match = re.fullmatch(r'crates/(soliddraft-[a-z0-9-]+)/(src|tests)/(.+\.rs)', path)
+        if match and match[1] in packages:
+            rust[path] = match
+        elif re.fullmatch(r'ci/scenarios/[a-z0-9-]+\.json', path) and content(root, path, head):
+            scenarios.add(path)
+        else:
+            # Policy, manifests, dependencies, helpers, fixtures, removed scenarios and unknown data.
+            return full
+    if scenarios and not rust:
+        full['scenarios'] = sorted(scenarios)
+    if not rust:
+        return full
+    affected = {match[1] for match in rust.values()}
+    while True:
+        consumers = {package for package, deps in packages.items() if deps & affected}
+        if consumers <= affected:
+            break
+        affected |= consumers
+    full['packages'] = sorted(affected)
+    # A single crate's independent, existing integration targets can build only those binaries.
+    # Add/delete/rename, nested helpers and imports from any other Rust file keep package coverage.
+    owners = {match[1] for match in rust.values()}
+    if (len(owners) != 1 or any(change[0] != 'M' for change in changes)
+            or any(match[2] != 'tests' or '/' in match[3] for match in rust.values())):
+        return full
+    owner = next(iter(owners))
+    manifest = tomllib.loads(content(root, f'crates/{owner}/Cargo.toml', head))
+    if manifest.get('package', {}).get('autotests') is False or manifest.get('test'):
+        return full
+    targets = {pathlib.PurePosixPath(path).stem for path in rust}
+    # Scan both trees: a former import must also prevent an unsafe binary-only selection.
+    for revision in (base, head):
+        tracked = git(root, 'ls-tree', '-r', '--name-only', revision).decode().splitlines()
+        for path in tracked:
+            if path.endswith('.rs') and path not in rust:
+                source = content(root, path, revision)
+                if any(re.search(r'\b' + re.escape(name) + r'\b', source) for name in targets):
+                    return full
+    full['packages'] = [owner]
+    full['test_targets'] = sorted(targets)
+    return full
+
+
+def union_work(candidate, accepted):
+    """Full coverage wins; target filters are safe only for the same one-package selection."""
+    result = {}
+    for key in ('packages', 'scenarios'):
+        left, right = candidate[key], accepted[key]
+        result[key] = None if left is None or right is None else sorted(set(left) | set(right))
+    left, right = candidate['test_targets'], accepted['test_targets']
+    result['test_targets'] = (sorted(set(left) | set(right)) if left is not None and right is not None
+                              and candidate['packages'] == accepted['packages'] else None)
+    return result
+
+
+def accepted_work(root, base, head, changes, event, packages, base_script):
+    candidate = work_plan(root, base, head, changes, event, packages)
+    namespace = {'__name__': 'base_work_selector', '__file__': str(root / 'ci/select-checks.py')}
+    if base_script:
+        exec(compile(base_script, '<base work selector>', 'exec'), namespace)
+    if 'work_plan' not in namespace:
+        # A policy that predates sub-job selection required the complete selected job.
+        return dict(FULL_WORK)
+    return union_work(candidate, namespace['work_plan'](root, base, head, changes, event, packages))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=pathlib.Path, default=ROOT)
@@ -476,7 +564,8 @@ def main():
         result = with_base_rules(result, base_script, changes, args.event, args.ref, packages, sources)
     except PolicyError as error:
         sys.exit(f'select-checks: {error}')
-    args.output.write_text(json.dumps({'selected': sorted(result), 'reasons': result}, indent=2) + '\n')
+    work = accepted_work(args.root, args.base, args.head, changes, args.event, packages, base_script)
+    args.output.write_text(json.dumps({'selected': sorted(result), 'reasons': result, 'work': work}, indent=2) + '\n')
 
 
 if __name__ == '__main__':

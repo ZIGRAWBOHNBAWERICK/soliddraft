@@ -801,6 +801,22 @@ class Wiring(unittest.TestCase):
                 self.assertNotIn('cargo test', shards)
                 self.assertNotIn('Swatinem/rust-cache', shards)
 
+    def test_selected_work_consumes_the_selection_artifact_in_each_job(self):
+        parsed = jobs((ROOT / '.github/workflows/hosted.yml').read_text())
+        for name in ('build-linux', 'build-macos', 'application-loop'):
+            with self.subTest(job=name):
+                body = parsed[name]
+                self.assertIn('actions/download-artifact@v4', body)
+                self.assertIn('name: check-selection', body)
+                self.assertIn('"$RUNNER_TEMP/check-selection/selection.json"', body)
+                self.assertNotIn('ci/select-checks.py', body)
+        for name in ('build-linux', 'build-macos'):
+            self.assertIn('ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"', parsed[name])
+        self.assertIn('ci/run-selected.py scenarios --selection', parsed['application-loop'])
+        # Local lint and the PR lint job execute all selector/runner guard tests.
+        self.assertIn('python3 -m unittest discover -s ci', (ROOT / 'ci/run').read_text())
+        self.assertIn('ci/run lint', parsed['lint'])
+
     def test_windows_jobs_stay_defined_behind_one_manual_input(self):
         hosted = (ROOT / '.github/workflows/hosted.yml').read_text()
         self.assertEqual(re.findall(r'^      (\w+):\n        description:', hosted, re.M),

@@ -74,6 +74,10 @@ jobs:
               summary.write("## Selected checks\n\n")
               for unit, reasons in sorted(result["reasons"].items()):
                   summary.write(f"- {unit}: {'; '.join(reasons)}\n")
+              if "work" in result:
+                  summary.write("\n## Work inside selected jobs\n\n")
+                  for kind, values in result["work"].items():
+                      summary.write(f"- {kind}: {', '.join(values) if values is not None else 'full'}\n")
           PYTHON
       - uses: actions/upload-artifact@v4
         with:
@@ -182,10 +186,14 @@ jobs:
         run: |
           ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
           echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
-      - name: Build the workspace test archive once
-        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst"
+      - uses: actions/download-artifact@v4
+        with:
+          name: check-selection
+          path: ${{ runner.temp }}/check-selection
+      - name: Build the selected test archive once
+        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/check-selection/selection.json"
       - name: Run workspace documentation tests
-        run: ci/run test-doc
+        run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-tests-linux
@@ -253,10 +261,14 @@ jobs:
         run: |
           ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
           echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
-      - name: Build the workspace test archive once
-        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst"
+      - uses: actions/download-artifact@v4
+        with:
+          name: check-selection
+          path: ${{ runner.temp }}/check-selection
+      - name: Build the selected test archive once
+        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/check-selection/selection.json"
       - name: Run workspace documentation tests
-        run: ci/run test-doc
+        run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-tests-macos
@@ -640,14 +652,12 @@ jobs:
               assert response["work"]["limit"] == 100_000_000, response["work"]
               print(f"{name} answered with its original geometry: {response['work']}")
           PYTHON
-      - name: Run every application scenario and the feature-count latency trends
-        run: |
-          status=0
-          for scenario in ci/scenarios/*.json; do
-            name=$(basename "$scenario" .json)
-            python3 ci/run-scenarios.py "$scenario" --soliddraft target/release/soliddraft --catallax-verify target/release/catallax-verify --out "$RUNNER_TEMP/application-loop/$name" || status=1
-          done
-          exit "$status"
+      - uses: actions/download-artifact@v4
+        with:
+          name: check-selection
+          path: ${{ runner.temp }}/check-selection
+      - name: Run the selected application scenarios and feature-count latency trends
+        run: python3 ci/run-selected.py scenarios --selection "$RUNNER_TEMP/check-selection/selection.json" --out "$RUNNER_TEMP/application-loop"
       - name: Publish click-budget and trend evidence
         if: always()
         run: |

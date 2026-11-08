@@ -179,8 +179,9 @@ class NightlyQualification(unittest.TestCase):
                        GITHUB_STEP_SUMMARY=str(temporary / 'summary'))
             subprocess.run(['bash', '-e', '-c', script], cwd=root, env=env,
                            check=True, capture_output=True, text=True)
-            selected = json.loads((temporary / 'check-selection/selection.json').read_text())['selected']
-            self.assertEqual(set(selected), set(registry) - {'select', 'test-windows', 'package-windows'})
+            selection = json.loads((temporary / 'check-selection/selection.json').read_text())
+            self.assertEqual(set(selection['selected']), set(registry) - {'select', 'test-windows', 'package-windows'})
+            self.assertEqual(selection['work'], dict.fromkeys(('packages', 'test_targets', 'scenarios')))
             self.assertIn('packaging=true', (temporary / 'output').read_text())
 
 

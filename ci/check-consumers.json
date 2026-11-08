@@ -8,6 +8,8 @@
     "ci/cargo-cache.sh": [],
     "ci/bootstrap": ["lint", "test-linux", "test-macos"],
     "ci/hooks/pre-push": ["lint"],
+    "ci/run-selected.py": ["lint", "test-linux", "test-macos", "application-loop"],
+    "ci/test_selected_work.py": ["lint"],
     "ci/run": ["lint", "test-linux", "test-macos"],
     "ci/tools": ["lint", "test-linux", "test-macos"],
     "ci/nextest.toml": ["lint", "test-linux", "test-macos"],

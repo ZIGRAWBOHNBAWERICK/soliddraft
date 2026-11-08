@@ -29,6 +29,7 @@ use crate::mates::{Alignment, Entity, FaceEndpoint, Mate, MateRefusal, RefusalCo
 use crate::occurrence::{Flags, OccurrenceIndex};
 use crate::path::{OccurrencePath, Step};
 use crate::placement::Placement;
+use crate::store::LoadState;
 use geometry::Solid;
 
 /// The chord bound asked of the kernel unless a request names another, in millimetres.
@@ -276,9 +277,10 @@ pub struct CheckReport {
     pub rounding_mm: f64,
     /// The parts compared.
     pub parts: Vec<CheckedPart>,
-    /// The parts in scope that could not be compared, each refused by name.
+    /// The parts in scope that could not be compared, each refused by name, and the
+    /// sub-assemblies in scope whose structure could not be read, whose parts are unknown.
     pub skipped: Vec<SkippedPart>,
-    /// True when every part in scope was compared.
+    /// True when every part in scope is known and was compared.
     pub complete: bool,
     /// Pairs compared.
     pub pairs: usize,
@@ -373,9 +375,13 @@ impl AssemblyDocument {
             return Err(invalid("a clearance is a length of zero or more"));
         }
         self.finish_loading();
-        let entries = self.scope_parts(request)?;
+        let (entries, unread) = self.scope_parts(request)?;
         if entries.len() < 2 {
-            return Err(CheckRefusal::new(CheckCode::TooFewParts, "a check compares two parts or more"));
+            let mut message = "a check compares two parts or more".to_owned();
+            for branch in &unread {
+                message += &format!("; {}: {}", branch.label, branch.message);
+            }
+            return Err(CheckRefusal::new(CheckCode::TooFewParts, message));
         }
         if entries.len() > MAX_PARTS {
             return Err(CheckRefusal::new(
@@ -384,7 +390,9 @@ impl AssemblyDocument {
             ));
         }
         let mut parts = Vec::new();
-        let mut skipped = Vec::new();
+        // A sub-assembly whose structure could not be read hides parts nobody knows of, so
+        // the check is not complete; it is listed as it stands, by path and cause.
+        let mut skipped = unread;
         let mut solids: Vec<(Entry, Solid, Arc<LocalMesh>, DocRef)> = Vec::new();
         for entry in entries {
             match self.placed(&entry, request.chord) {
@@ -478,8 +486,11 @@ impl AssemblyDocument {
         })
     }
 
-    /// The part occurrences a request names, in table order, each once.
-    fn scope_parts(&self, request: &CheckRequest) -> Result<Vec<Entry>, CheckRefusal> {
+    /// The part occurrences a request names, in table order, each once, and the
+    /// sub-assemblies in scope or above it whose pinned structure could not be read, so
+    /// whose parts are not known. Suppressed branches are left out, and hidden ones unless asked for, as their
+    /// parts are.
+    fn scope_parts(&self, request: &CheckRequest) -> Result<(Vec<Entry>, Vec<SkippedPart>), CheckRefusal> {
         let roots: Vec<OccurrenceIndex> = match &request.scope {
             CheckScope::Assembly => vec![OccurrenceIndex::ROOT],
             CheckScope::Occurrences(paths) => paths
@@ -487,20 +498,68 @@ impl AssemblyDocument {
                 .map(|p| self.table.find(p).ok_or_else(|| invalid(format!("the assembly has no occurrence {p}"))))
                 .collect::<Result<_, _>>()?,
         };
-        let mut rows: Vec<OccurrenceIndex> = roots
-            .into_iter()
-            .flat_map(|r| self.table.subtree(r))
-            .filter(|row| {
-                let f = self.table.flags(*row);
-                !f.has(Flags::ASSEMBLY)
-                    && !f.has(Flags::SUPPRESSED)
-                    && !f.has(Flags::REMOVED)
-                    && (request.include_hidden || !f.has(Flags::HIDDEN))
-            })
-            .collect();
+        let mut rows: Vec<OccurrenceIndex> = roots.into_iter().flat_map(|r| self.table.subtree(r)).collect();
         rows.sort();
         rows.dedup();
-        Ok(rows.into_iter().map(|row| Entry { row, path: self.table.path(row), label: self.label(row) }).collect())
+        // A sub-assembly is known only at its pinned revision. One whose structure could
+        // not be read hides its parts; one shown from another revision places them where
+        // that revision does, not where the pin does. Either way its parts are left out
+        // and it is listed, whether it is in the scope or above it.
+        let unknown = |row: OccurrenceIndex| -> Option<String> {
+            if !self.table.flags(row).has(Flags::ASSEMBLY) {
+                return None;
+            }
+            let def = self.store.get(self.table.definition(row));
+            let cause = def.problem.as_ref().map(|p| format!(": {p}")).unwrap_or_default();
+            match (&def.assembly, def.state) {
+                (None, _) => Some(format!("its structure could not be read, so its parts are not known{cause}")),
+                (Some(_), LoadState::Stale) => {
+                    Some(format!("its pinned revision could not be read, so where its parts sit is not known{cause}"))
+                }
+                _ => None,
+            }
+        };
+        // Down from the root, an occurrence's own hidden or suppressed flag is trusted only
+        // while every assembly above it is known at its pin, since an unknown one supplied
+        // the flag. The first unknown assembly on the way is listed instead.
+        let mut unread: BTreeMap<OccurrenceIndex, String> = BTreeMap::new();
+        let mut parts = Vec::new();
+        for row in rows {
+            let mut chain = vec![row];
+            while let Some(up) = self.table.parent(*chain.last().expect("one row")) {
+                chain.push(up);
+            }
+            chain.pop(); // the root: always known, never hidden
+            let mut in_scope = true;
+            for &r in chain.iter().rev() {
+                let f = self.table.flags(r);
+                let out = f.has(Flags::REMOVED)
+                    || f.has(Flags::SUPPRESSED_SELF)
+                    || (!request.include_hidden && f.has(Flags::HIDDEN_SELF));
+                if out {
+                    in_scope = false;
+                    break;
+                }
+                if let Some(why) = unknown(r) {
+                    unread.entry(r).or_insert(why);
+                    in_scope = false;
+                    break;
+                }
+            }
+            if in_scope && !self.table.flags(row).has(Flags::ASSEMBLY) {
+                parts.push(Entry { row, path: self.table.path(row), label: self.label(row) });
+            }
+        }
+        let unread = unread
+            .into_iter()
+            .map(|(row, message)| SkippedPart {
+                path: self.table.path(row),
+                label: self.label(row),
+                code: CheckCode::ProofUnavailable,
+                message,
+            })
+            .collect();
+        Ok((parts, unread))
     }
 
     /// A part occurrence's certified mesh, placed in the root's frame.

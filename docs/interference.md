@@ -114,7 +114,16 @@ A part that cannot be proven is left out by name in `skipped`, the rest are comp
 | `mesh_reference` | A mesh reference body has no exact solid |
 | `unsupported_body` | The kernel will not give the body a certified mesh, such as a lattice |
 | `unsupported_configuration` | The part is in a configuration other than the default |
-| `proof_unavailable` | The pinned revision's bytes, a kernel or a body are not available |
+| `proof_unavailable` | The pinned revision's bytes, a kernel or a body are not available, or a sub-assembly's structure cannot be read |
+
+A sub-assembly whose structure cannot be read at its pinned revision is listed in `skipped`
+too, by its path and the reason, and its parts are left out. That covers one with no copy at
+all, since nobody knows which parts it holds, and one shown from another revision of its
+file, since that revision may place its parts elsewhere than the pin does. It is listed
+whether it is in the scope or above an occurrence the request names. Update repins it. A check is `complete` only when
+every part in scope is known and compared. A suppressed sub-assembly is out of scope, and so
+is a hidden one unless `include_hidden` asks for hidden parts. When a check is not complete,
+the Interference panel says only that the pairs of the checked parts are clear.
 
 Every report also lists what this tier does not report, in `refused`: overlap volumes, and
 exact touching without a mate. Both need the exact tier.

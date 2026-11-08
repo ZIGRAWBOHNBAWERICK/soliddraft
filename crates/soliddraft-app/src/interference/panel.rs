@@ -178,10 +178,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.colored_label(theme::error(), format!("Not checked: {}. {}", part.label, part.message));
         }
         if report.results.is_empty() {
-            ui.label(match report.clearance_mm {
-                Some(_) => "Every pair is proven clear of the clearance",
-                None => "Every pair is proven clear",
-            });
+            ui.label(all_clear(report));
         }
         for r in &report.results {
             let words = match r.clearance {
@@ -210,5 +207,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
     for a in actions {
         apply(state, a);
+    }
+}
+
+/// What an empty result list proves: every pair, or with anything skipped, only the pairs
+/// of the parts that were checked.
+fn all_clear(report: &CheckReport) -> &'static str {
+    match (report.clearance_mm, report.complete) {
+        (Some(_), true) => "Every pair is proven clear of the clearance",
+        (None, true) => "Every pair is proven clear",
+        (Some(_), false) => {
+            "Every pair of the checked parts is proven clear of the clearance; the parts not checked are unknown"
+        }
+        (None, false) => "Every pair of the checked parts is proven clear; the parts not checked are unknown",
     }
 }

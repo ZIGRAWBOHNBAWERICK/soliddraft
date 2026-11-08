@@ -315,7 +315,7 @@ def route(changes, event, ref, packages, read_sources):
 
     base_map, head_map = read_sources(POLICY)
     mapped = parse_consumers(head_map)
-    if changes is None or event == 'workflow_dispatch' or ref.startswith('refs/heads/release/'):
+    if changes is None or event in {'workflow_dispatch', 'schedule'} or ref.startswith('refs/heads/release/'):
         add(UNITS | PACKAGES, 'full qualification or unavailable diff')
         return reasons
     if event == 'push' and ref == 'refs/heads/main':
@@ -361,7 +361,7 @@ def route(changes, event, ref, packages, read_sources):
 
 
 def ci_only_selection(changes, event, ref, read_sources):
-    if not changes or event == 'workflow_dispatch' or ref.startswith('refs/heads/release/'):
+    if not changes or event in {'workflow_dispatch', 'schedule'} or ref.startswith('refs/heads/release/'):
         return None
     paths = {path for change in changes for path in change[1:]}
     if not all(path.startswith(('ci/', '.github/workflows/')) or path == 'docs/ci.md' for path in paths):

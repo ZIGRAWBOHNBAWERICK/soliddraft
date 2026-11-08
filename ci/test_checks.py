@@ -692,6 +692,15 @@ class WindowsDeferred(unittest.TestCase):
         self.assertEqual(set(union), self.NATIVE)
 
 
+class NightlyRouting(unittest.TestCase):
+    def test_schedule_ignores_empty_docs_and_ci_only_diffs(self):
+        sources = lambda path: [selector.content(ROOT, path)] * 2
+        for changes in (None, [], [['M', 'docs/ci.md']], [['M', 'ci/select-checks.py']]):
+            with self.subTest(changes=changes):
+                result = selector.select(changes, 'schedule', 'refs/heads/main', {}, sources)
+                self.assertEqual(set(result), qualified())
+
+
 class Gate(unittest.TestCase):
     def gate_exit(self, selected, needs):
         with tempfile.TemporaryDirectory() as directory:
@@ -736,6 +745,21 @@ class Gate(unittest.TestCase):
                     if shard_result is not None:
                         needs[shard] = shard_result
                     self.assertEqual(self.gate_exit(['lint', shard], needs), expected)
+
+    def test_every_selected_job_rejects_a_silent_skip(self):
+        registry = read('check-registry.json')['jobs']
+        selected = sorted(set(registry) - {'select', *WINDOWS})
+        needs = {job: 'success' for definition in registry.values()
+                 for job in ([definition] if isinstance(definition, str) else definition)}
+        self.assertEqual(self.gate_exit(selected, needs), 0)
+        for unit in selected:
+            definition = registry[unit]
+            for job in ([definition] if isinstance(definition, str) else definition):
+                with self.subTest(unit=unit, job=job):
+                    self.assertEqual(self.gate_exit(selected, dict(needs, **{job: 'skipped'})), 1)
+                    missing = dict(needs)
+                    del missing[job]
+                    self.assertEqual(self.gate_exit(selected, missing), 1)
 
     def test_gate_fixture(self):
         fixture = read('gate-cases.json')

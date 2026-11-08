@@ -163,6 +163,27 @@ class BaselineRefresh(unittest.TestCase):
                               (temporary / 'output').read_text())
 
 
+class NightlyQualification(unittest.TestCase):
+    def test_nightly_uses_the_full_selector_and_normal_gate(self):
+        root = pathlib.Path(__file__).resolve().parent.parent
+        text = (root / '.github/workflows/hosted.yml').read_text()
+        self.assertIn("  schedule:\n    - cron: '17 23 * * *'\n", text)
+        block = text.split('      - id: select\n', 1)[1].split('      - uses:', 1)[0]
+        script = textwrap.dedent(block.split('        run: |\n', 1)[1])
+        registry = json.loads((root / 'ci/check-registry.json').read_text())['jobs']
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = pathlib.Path(directory)
+            env = dict(os.environ, RUNNER_TEMP=directory, BASE_SHA='HEAD', EVENT='schedule',
+                       REF=MAIN, WINDOWS='', REFRESH_CATALLAX_VIEWS='false',
+                       GITHUB_OUTPUT=str(temporary / 'output'),
+                       GITHUB_STEP_SUMMARY=str(temporary / 'summary'))
+            subprocess.run(['bash', '-e', '-c', script], cwd=root, env=env,
+                           check=True, capture_output=True, text=True)
+            selected = json.loads((temporary / 'check-selection/selection.json').read_text())['selected']
+            self.assertEqual(set(selected), set(registry) - {'select', 'test-windows', 'package-windows'})
+            self.assertIn('packaging=true', (temporary / 'output').read_text())
+
+
 class BoatRunners(unittest.TestCase):
     def test_only_owner_runs_from_this_repository_use_boat(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()

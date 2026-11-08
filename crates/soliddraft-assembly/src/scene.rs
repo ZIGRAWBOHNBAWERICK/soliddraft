@@ -23,6 +23,7 @@ use glam::{DMat3, DVec3};
 
 use crate::document::{AssemblyDocument, Changes};
 use crate::occurrence::{Flags, OccurrenceIndex, OccurrenceTable};
+use crate::path::OccurrencePath;
 use crate::placement::Placement;
 use crate::store::{DefinitionIndex, DefinitionStore};
 use soliddraft_tessellation::Level;
@@ -93,8 +94,12 @@ pub struct Scene {
     all_dirty: bool,
     /// Bumped when every instance and draw must be taken again.
     generation: u64,
+    /// The selection and the hovered occurrence, named by path: rereading the structure
+    /// renumbers rows, so the rows beside them are found again from the paths.
     selected: Vec<OccurrenceIndex>,
+    selected_paths: Vec<OccurrencePath>,
     hovered: Option<OccurrenceIndex>,
+    hovered_path: Option<OccurrencePath>,
 }
 
 const NO_SLOT: u32 = u32::MAX;
@@ -190,8 +195,14 @@ impl Scene {
     pub fn update(&mut self, doc: &mut AssemblyDocument) {
         let changes: Changes = doc.take_changes();
         if changes.structure {
-            self.selected.retain(|r| doc.table().find(&doc.table().path(*r)) == Some(*r));
-            self.rebuild(doc.table(), doc.store());
+            // The old rows mean nothing in the new table; the paths still name what was
+            // selected and hovered, if it is there.
+            let table = doc.table();
+            self.selected_paths.retain(|p| table.find(p).is_some());
+            self.selected = self.selected_paths.iter().filter_map(|p| table.find(p)).collect();
+            self.hovered_path = self.hovered_path.take().filter(|p| table.find(p).is_some());
+            self.hovered = self.hovered_path.as_ref().and_then(|p| table.find(p));
+            self.rebuild(table, doc.store());
             return;
         }
         for d in changes.meshes {
@@ -214,7 +225,9 @@ impl Scene {
 
     /// Marks occurrences selected (replacing the selection), updating their instances.
     pub fn set_selection(&mut self, table: &OccurrenceTable, selected: &[OccurrenceIndex]) {
-        let old = std::mem::replace(&mut self.selected, selected.to_vec());
+        let old: Vec<OccurrenceIndex> = self.selected_paths.iter().filter_map(|p| table.find(p)).collect();
+        self.selected = selected.to_vec();
+        self.selected_paths = selected.iter().map(|r| table.path(*r)).collect();
         for r in old.iter().chain(selected) {
             for part in parts_under(table, *r) {
                 self.refresh_flags(table, part);
@@ -224,10 +237,13 @@ impl Scene {
 
     /// Marks the occurrence under the cursor.
     pub fn set_hover(&mut self, table: &OccurrenceTable, hovered: Option<OccurrenceIndex>) {
-        if self.hovered == hovered {
+        let path = hovered.map(|r| table.path(r));
+        if self.hovered == hovered && self.hovered_path == path {
             return;
         }
-        let old = std::mem::replace(&mut self.hovered, hovered);
+        let old = self.hovered_path.as_ref().and_then(|p| table.find(p));
+        self.hovered = hovered;
+        self.hovered_path = path;
         for r in old.into_iter().chain(hovered) {
             for part in parts_under(table, r) {
                 self.refresh_flags(table, part);

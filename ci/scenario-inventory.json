@@ -540,6 +540,86 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
+      "id": "mate-symmetric",
+      "file": "ci/scenarios/mate-symmetric.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Symmetric mate commands -> assembly transaction -> proven plane queries -> exact mirror relation -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Symmetric between two axis-aligned planar faces about a part's Right plane: the later part mirrored exactly, a distance that disagrees refused naming both, the alignment flipped turning the image over, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-linear-coupler",
+      "file": "ci/scenarios/mate-linear-coupler.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Linear Coupler mate commands -> assembly transaction -> proven plane queries -> exact elimination across axes -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Linear Coupler between one part's slide along X and another's along Y at a ratio of one to two: the exact offset stored where the parts are, a distance moving the first part moving the second by twice as much, a ratio of zero refused as invalid_value, reverse taking the parts' places as its zero, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-limit-distance",
+      "file": "ci/scenarios/mate-limit-distance.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly, Limit Distance and Width mate commands -> assembly transaction -> proven plane queries -> exact bounds by Bellman-Ford -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Limit Distance between two axis-aligned planar faces: the gap brought to the nearest end of the range, kept inside a wider one, a distance outside it refused naming both, a least distance past the greatest refused as invalid_value; a free Width keeping the tab between the groove's faces; undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-profile-center",
+      "file": "ci/scenarios/mate-profile-center.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Profile Center mate commands -> assembly transaction -> exact profile centre from native vertices and circles -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Profile Center between two rectangles, the second placed a quarter turn round, centred and fully defined; a rectangle with a circle refused as unsupported_reference by name; Lock rotation on polygons refused as invalid; the offset edited; two shafts' circular caps centred with the spin left, then locked; undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/s1.dwprt, work/s2.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-slot",
+      "file": "ci/scenarios/mate-slot.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Slot mate commands -> assembly transaction -> slot recognition from proven walls and round ends -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Slot between a straight, axis-aligned slot cut through a block and a pin's cylinder: a block's top refused as unsupported_reference by name, the pin free and stopped at the far end, Lock rotation, a distance along the slot edited and flipped, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/pin.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "mate-reference-plane",
       "file": "ci/scenarios/mate-reference-plane.json",
       "acceptance": true,

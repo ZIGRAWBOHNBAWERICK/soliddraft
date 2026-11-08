@@ -15,11 +15,16 @@ are in `crates/soliddraft-app/src/mates/`.
 | Coincident | The same as a distance of zero: two planar faces on one supporting plane |
 | Parallel | The relation between two planar faces' normals, and no translation: two turns |
 | Perpendicular | One turn: two planar faces' normals at right angles |
-| Width | A tab's two parallel faces between a groove's two parallel faces: two turns and the translation across the groove |
+| Width | A tab's two parallel faces between a groove's two parallel faces: two turns and the translation across the groove, or with `free` the two turns only, the tab kept between the groove's faces |
 | Lock | Every motion of one component relative to another: its relative placement is stored |
 | Concentric | Two axes on one line (two turns, two translations), a point on an axis (two translations) or two points on one (three translations). With Lock rotation, the turn about the axis too |
 | Tangent | A cylinder lying against a plane (one turn, one translation) or a sphere touching it (one translation), one radius away |
 | Hinge | A Concentric between two axes and a Coincident between two planes, under one name: everything but the turn about the axis |
+| Symmetric | One part's plane, line or point the mirror image of another's about a plane: two turns and a translation for planes, two turns and two translations for lines, three translations for points |
+| Linear Coupler | One translation: how far one part slides along its plane's normal or axis is a ratio of how far another slides |
+| Limit Distance | The turns a Distance fixes; its translation stays free between a least and a greatest distance |
+| Profile Center | Two rectangles, regular polygons or circles centred on each other, their planes a distance apart: everything for polygons, everything but the spin for circles unless Lock rotation holds it |
+| Slot | A pin's axis in a straight slot: two turns and the translation across the slot, and along it a bound between the ends or a position |
 
 Coincident and Distance also take a plane with an axis or a point: the axis lies parallel to
 the plane, or the point sits on it or a distance in front of it. Coincident also takes two
@@ -57,6 +62,24 @@ A Lock's relative rotation must be a quarter-turn rotation, one that takes axes 
 Lock between parts turned 30 degrees apart is refused as `unsupported_placement`, never
 rounded, and so is one whose first part is turned off the quarter turns, because its offset
 would no longer be an exact difference along the world axes.
+
+A profile is a planar face's outline or a circular edge. The outline is the face's outer loop;
+holes inside it are ignored. It is a circle when its edges are one circle, whole or in arcs, and
+its centre is the circle's. It is a polygon when its edges are straight: a rectangle when it has
+four corners and each side is exactly square to the next, a regular polygon when its sides, and
+its corners' distances from their average, agree to 1e-9 of their size. A sketched hexagon's
+corners are rounded, so regularity is read to that tolerance; the centre is still exact, the
+average of the corners as the part stores them, in rationals. An outline that mixes lines and
+arcs, such as a rounded or chamfered rectangle, or one with straight sides that is neither, is
+refused as `unsupported_reference`. A straight edge does not say which face it bounds, so it
+is refused; mate the face.
+
+A slot is found from a wall or a round end. The round ends' axes give its depth; walking from
+the picked face across straight edges along that depth gives the faces round it. They must be
+two parallel planar walls and two half-cylinders of one radius, with the walls exactly two radii
+apart and each end's axis exactly on their mid-plane. The ends' centres, ordered along the
+slot's run, are its first and second end. Arc slots, whose walls are round, slots off the world
+axes, and any other ring of faces are refused as `unsupported_reference`.
 
 A file may carry a configuration on an endpoint or on the reference a mate reads. It is kept as
 read and refused as `unsupported_configuration`: nothing solves on the default instead, and an
@@ -135,6 +158,48 @@ centroid.
       "planes": [{ "path": "2", "...": "..." }, { "path": "6", "...": "..." }],
       "alignment": "aligned",
       "plane_alignment": "aligned"
+    },
+    {
+      "kind": "symmetric", "id": 18, "name": "S",
+      "a": { "path": "4", "...": "a plane, an axis or a point" },
+      "b": { "path": "6", "...": "one of the same kind" },
+      "plane": { "path": "2", "document": "3f0c...", "plane": { "on": "datum", "datum": "right" } },
+      "alignment": "aligned"
+    },
+    {
+      "kind": "linear_coupler", "id": 19, "name": "K",
+      "a": { "path": "4", "...": "a plane or an axis" },
+      "b": { "path": "6", "...": "a plane or an axis" },
+      "reference_a": { "path": "2", "document": "3f0c..." },
+      "ratio": [1.0, 2.0],
+      "reverse": true,
+      "offset": "-381/5"
+    },
+    {
+      "kind": "limit_distance", "id": 20, "name": "L",
+      "a": { "path": "2", "...": "a plane" },
+      "b": { "path": "4", "...": "a plane, an axis or a point" },
+      "alignment": "opposed",
+      "min": { "text": "5 mm", "tree": { "Number": [5.0, 1, 0] } },
+      "max": { "text": "1 cm", "tree": { "Number": [10.0, 1, 0] } }
+    },
+    {
+      "kind": "profile_center", "id": 21, "name": "P",
+      "a": { "path": "2", "document": "3f0c...", "face": { "...": "..." },
+             "support": { "kind": "profile", "normal": [0, 0, 1], "centre": [0.0, 0.0, 10.0], "sides": 4 } },
+      "b": { "path": "4", "document": "91ab...", "face": { "...": "..." },
+             "support": { "kind": "profile", "normal": [0, 0, -1], "centre": [0.0, 0.0, 0.0], "sides": 4 } },
+      "alignment": "opposed",
+      "distance": { "text": "2 mm", "tree": { "Number": [2.0, 1, 0] } }
+    },
+    {
+      "kind": "slot", "id": 22, "name": "SL",
+      "slot": { "path": "2", "document": "3f0c...", "face": { "...": "a wall or a round end" },
+                "support": { "kind": "slot", "depth": [0, 0, 1], "ends": [[-11.0, 0.0, 0.0], [11.0, 0.0, 0.0]], "radius": 4.0 } },
+      "pin": { "path": "4", "...": "an axis" },
+      "alignment": "aligned",
+      "constraint": { "mode": "distance", "distance": { "text": "4 mm", "tree": { "Number": [4.0, 1, 0] } }, "flipped": true },
+      "lock_rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
     }
   ],
   "values": [
@@ -156,7 +221,9 @@ centroid.
   and its material side where there is one. They are the nearest doubles and only the
   solver's status reads them, so the status needs no part. A solve reads exact values from a
   new proof, and a proof whose kind or direction differs from the stored one is refused as
-  `dangling_reference`. A planar face keeps none.
+  `dangling_reference`. A profile keeps its plane's normal, its centre and a polygon's number
+  of sides; a slot keeps its depth, its two ends' centres and its radius. A planar face keeps
+  none.
 - **Plane endpoints** carry `plane` instead of `face`: a datum by name, or a plane feature by
   id with the normal it had when it was mated. A plane feature that now faces another way is
   refused as `dangling_reference`, as a face whose normal changed is. A plane feature built on
@@ -180,6 +247,7 @@ centroid.
 - **Width** names the groove's two faces, on one part, and the tab's two, on another. The four
   must be parallel planes, or the mate is refused as `not_parallel`. `alignment` relates
   `tab[0]`'s normal to `groove[0]`'s; flipping it turns the tab round. `constraint` is
+  `free`, which keeps the tab's faces between the groove's and fixes no translation;
   `centered`, which puts the tab's mid-plane on the groove's; `dimension`, the gap from
   `groove[0]` to the tab face nearest it; or `percent`, that gap as a share of the play, the
   groove's width less the tab's, so 0 is against `groove[0]`, 50 is centred and 100 is
@@ -205,6 +273,37 @@ centroid.
   an axis also lies parallel to the plane. Their `alignment` is kept but reads nothing. A
   Distance between two axes or two points fixes a length across them, which this version does
   not solve exactly, so it is refused as `unsupported_reference`.
+- **Symmetric** reads `a` and `b` as two planes, two axes or two points, of one kind, on two
+  parts, and `plane` as a planar face or reference plane of any part. `b` is `a` mirrored
+  about it. `alignment` relates `b`'s outward normal or direction to `a`'s mirrored: `aligned`
+  for two faces that look away from each other across the mirror, as a mirrored part's do.
+  It is absent for points. A plane or line square to the mirror is its own image, so `b`
+  lies on `a`'s and the mirror may slide along its normal. Two cylinders or spheres must have
+  equal radii.
+- **Linear Coupler** reads `a` and `b` as planes or axes. Each part slides along its plane's
+  outward normal or its axis's direction, measured from `reference_a` or `reference_b`'s
+  origin when one is named, else from the origin of the assembly that holds the mate.
+  `ratio[0]` of `a`'s slide goes with `ratio[1]` of `b`'s, the other way with `reverse`.
+  `offset` is `ratio[0]` times how far `b` lies along its direction, less (plus, with
+  `reverse`) `ratio[1]` times how far `a` does, taken where the parts are when it is made and
+  written as an exact rational. Editing the ratio or `reverse` takes it again where the parts
+  are then. The two directions may lie on different world axes.
+- **Limit Distance** reads its ends as a Distance does: a plane, and a plane, an axis or a
+  point. The signed distance from `a`'s plane may be anywhere from `min` to `max`, literal
+  lengths with `min` no more than `max`. Planes are kept parallel as `alignment` says.
+- **Profile Center** reads two profiles of one kind: two circles, or two polygons with as many
+  sides. `b`'s centre goes on the line through `a`'s along `a`'s plane normal, and `b`'s plane
+  `distance` from `a`'s, signed along `a`'s outward normal, the normals as `alignment` says.
+  A polygon's edges line up with the other's: the solve takes the quarter turn about the
+  normal nearest the authored one that does. Two circles keep their spin unless
+  `lock_rotation` holds `b`'s turn in `a`'s frame, as a Concentric's does. The `distance` is
+  an expression and can be driven.
+- **Slot** reads `slot` as a straight slot and `pin` as an axis. The pin is parallel to the
+  slot's round ends' axes, its direction as `alignment` says, and on the slot's mid-plane.
+  Along the slot `constraint` is `free`, anywhere from the first end's centre to the second's;
+  `center`, halfway; `distance`, that far from the first end's centre towards the second, or
+  from the second with `flipped`; or `percent` of the run between them. `lock_rotation` holds
+  the pin's turn in the slot part's frame. A distance is an expression and can be driven.
 - **Lock** stores `b`'s placement in `a`'s frame, taken from where both are when it is added.
   Both parts must be on exact quarter turns. The rotation is the product of their integer
   matrices, and the offset is taken through the first one's, so no rounding enters the
@@ -229,7 +328,10 @@ Plane normals are exact signed axes, which splits a solve in two:
    group's turn. Each mate between planes relates two normals: equal or opposite for a
    Distance, Coincident, Parallel or Width, at right angles for a Perpendicular. Two axes
    relate their directions the same way, and an axis held in or at a distance from a plane,
-   or a Tangent cylinder, lies at right angles to the plane's normal. Every turn the exact solver can prove takes the normals
+   or a Tangent cylinder, lies at right angles to the plane's normal. A Symmetric relates
+   three groups: `b`'s normal or direction is `a`'s mirrored across the mirror's normal, by
+   its alignment. A Slot relates the pin's direction to the slot's depth, and a Profile
+   Center between polygons asks that some edge of `b` lie along some edge of `a`. Every turn the exact solver can prove takes the normals
    it reads onto axes, so each group's candidates are the 24 quarter-turn rotations. One
    unlocked part held along a single axis may also keep its own spin about that axis, unless
    a mate places one of its axes or points: then it takes quarter turns only. A group no
@@ -245,10 +347,27 @@ Plane normals are exact signed axes, which splits a solve in two:
    coordinate, so each axis is a graph of differences. A lock adds one on each axis. Two axes
    on one line add one on each of the two world axes across their direction, a point on an
    axis does the same, two points on one add one on each world axis, and a point or axis at a
-   distance from a plane adds one along the plane's normal. Each reads the quarter-turn matrix
-   of its part's turn, so the difference stays rational. Walking
-   the graph places everything connected to the origin, or to the group's first component.
-   An edge that disagrees by more than 1e-9 mm is a conflict.
+   distance from a plane adds one along the plane's normal. A Slot adds one across the slot
+   and, with a position, one along it; a Profile Center adds a distance and a point on an axis;
+   a Symmetric between points adds one on each world axis along the mirror. Each reads the
+   quarter-turn matrix of its part's turn, so the difference stays rational. Walking the graph
+   places everything connected to the origin, or to the group's first component. An edge that
+   disagrees by more than 1e-9 mm is a conflict.
+
+   Some relations are not differences. A Symmetric puts `a + b = 2 s` along the mirror's
+   normal, three parts at once, and a Linear Coupler relates two parts by a ratio, across two
+   world axes when their directions differ. These are solved over the graphs' roots by exact
+   elimination in rationals, the unknowns ordered so that a later component's root moves
+   before an earlier one's; whatever stays free keeps its authored place. A relation that
+   reduces to a nonzero constant is a conflict, named with the mates it came from.
+
+   Bounds come last: a Limit Distance, a free Width and a free Slot each ask `lo <= t_b - t_a
+   <= hi` along one world axis. Over what elimination leaves free these are difference
+   constraints, decided exactly by Bellman-Ford; a negative cycle is a conflict that names its
+   mates. Each free coordinate then keeps its authored value where the bounds allow it and
+   otherwise takes the nearest value they allow, earlier components first, so the same file
+   always gives the same placements. A bound on a coordinate a relation moves by a ratio other
+   than one is not a difference and is refused as `unsupported_reference`.
 
 The two steps are solved together. Which axis a distance's planes face decides which
 coordinate it moves, so a turn that keeps every normal right can still leave a distance
@@ -268,6 +387,9 @@ The root solves its own mates and those of every sub-assembly in it, each with t
 sub-assembly's path in front, over part occurrences at any depth. A sub-assembly's frame
 stays where it is authored; a part inside it that a solve moves is kept as an override in
 the root, never written to the sub-assembly's file.
+
+A bound fixes no motion: a Limit Distance, a free Width or a free Slot counts the slide it
+bounds as free.
 
 Freedoms come from the rank of the rigid-body constraint Jacobian at the solved pose, so a
 shared rotation about an anchored origin counts. Every part occurrence that moves on its own
@@ -290,7 +412,12 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 | `assembly_mate_concentric` | Puts two axes on one line, a point on an axis or two points on one; `alignment` between axes, optional `lock_rotation` |
 | `assembly_mate_tangent` | Lays a cylinder or sphere against a plane, `aligned` or `opposed` |
 | `assembly_mate_hinge` | Puts two axes on one line and two planes on one plane, under one name |
-| `assembly_edit_mate` | Changes a literal distance, an alignment, `align_axes`, a width's `percent` or `flipped`, a hinge's `plane_alignment` or a concentric's `lock_rotation` |
+| `assembly_mate_symmetric` | Mirrors `a` onto `b` about `plane`; `alignment` between planes or axes |
+| `assembly_mate_linear_coupler` | Couples `b`'s slide to `a`'s by `ratio`, with `reverse` and optional `reference_a` and `reference_b` components |
+| `assembly_mate_limit_distance` | Holds a distance between `min` and `max`, `aligned` or `opposed` |
+| `assembly_mate_profile_center` | Centres two profiles `distance` apart; `lock_rotation` for circles |
+| `assembly_mate_slot` | Puts `pin` in `slot`: `free`, `center`, `distance` or `percent`, with `flipped` and `lock_rotation` |
+| `assembly_edit_mate` | Changes a literal distance, an alignment, `align_axes`, a width's or slot's `percent` or `flipped`, a hinge's `plane_alignment`, a `lock_rotation`, a limit's `min` or `max`, or a coupler's `ratio` or `reverse` |
 | `assembly_delete_mate` | Removes a mate; components stay where they are |
 | `assembly_set_value` | Adds or changes a value |
 | `assembly_rename_value` | Renames a value |
@@ -318,26 +445,30 @@ the redo stack. Refusals are JSON: `refused` holds the code, with `message`, `ma
 | `no_such_face` | A selector finds nothing |
 | `unsupported_configuration` | A mate or its source names a configuration other than the default |
 | `unsupported_plane` | The kernel will not prove this face's plane |
-| `unsupported_reference` | The kernel will not prove this axis or point (off the world axes, or not rational), or the family does not take this pair, such as a Distance between two points |
+| `unsupported_reference` | The kernel will not prove this axis, point, profile or slot (off the world axes, not rational, or not a rectangle, regular polygon, circle or straight slot), the family does not take this pair, such as a Distance between two points, or a bound falls on a coordinate a relation scales |
 | `unsupported_placement` | A placed normal is off the world axes, or a Lock's or Lock rotation's turn is off the quarter turns |
 | `not_parallel` | The two planes are not parallel, or a Width's groove or tab faces are not |
 | `proof_unavailable` | The pinned revision's bytes or a kernel are not available |
 | `unknown_mate` | The assembly holds a mate this version cannot solve |
 | `driven_input` | A literal edit of a driven distance |
 | `already_driven` | A second driver, without `replace` |
-| `unit_mismatch`, `value_cycle`, `invalid_value` | The expression cannot be used |
+| `unit_mismatch`, `value_cycle`, `invalid_value` | The expression cannot be used, a percentage is outside 0 to 100, a coupler's ratio is not positive, or a limit's least distance passes its greatest |
 | `too_large` | More than 128 mated components, or turns that take too long to decide |
-| `invalid` | A request that names nothing usable, such as a distance edit of a mate without one |
+| `invalid` | A request that names nothing usable, such as a distance edit of a mate without one, or Lock rotation on a polygon's Profile Center |
 
 ## The Mate panel
 
 The panel offers every family above except Origin, which has its own button for the selected
-component. Coincident, Distance, Parallel, Perpendicular and Concentric take two picked faces,
-and Tangent takes the plane, then the cylinder or sphere. Width takes four: the groove's two,
+component. Coincident, Distance, Parallel, Perpendicular, Concentric, Linear Coupler, Limit
+Distance and Profile Center take two picked faces, and Tangent takes the plane, then the
+cylinder or sphere. Slot takes a wall or round end of the slot, then the pin. Symmetric takes
+three: the face, its mirror image, then the symmetry plane. Width takes four: the groove's two,
 then the tab's. Hinge takes four too: the two axes' faces, then the two planes. Lock takes one
 face on each component. Alignment shows for the families that have one; Hinge also shows its
-planes' alignment, and Concentric a Lock rotation box. The panel picks faces; edges and
-vertices are named through the MCP tools.
+planes' alignment, and Concentric, Profile Center and Slot a Lock rotation box. Width and Slot
+choose where the tab or pin sits, Limit Distance takes its least and greatest distances, and
+Linear Coupler its ratio and Reverse. The panel picks faces; edges, vertices and a coupler's
+reference components are named through the MCP tools.
 
 The Conflicts list shows the last refusal that named mates or freedoms, from a mate command or
 from Update. It says what kind of refusal it was, lists each named mate with its family, and
@@ -352,11 +483,12 @@ rebuilt from that revision's bytes on the kernel, through `Kernel::entity_suppor
 the native definition exactly and costs no numerical work: a plane's equation, a cylinder's
 axis origin, direction and squared radius, a cone's apex and direction, a sphere's centre and
 radius, a circle's centre, normal and squared radius, a line's origin and direction, or a
-vertex's explicit point. A value that is not structurally rational, a direction off the world
-axes, or a vertex defined only where surfaces meet is refused with `unsupported_reference`,
-and the message names the part and the face, edge or vertex: a hole copied 60 degrees round
-an axis reads `tabs.dwprt, CirPattern1 · Copy 1 face 7: ... the axis of ... is not
-structurally rational`. Gaps are computed in rationals from those offsets and the stored
+vertex's explicit point. A profile or a slot is read from the part's topology, its faces,
+edges and vertices, each proved the same way. A value that is not structurally rational, a
+direction off the world axes, or a vertex defined only where surfaces meet is refused with
+`unsupported_reference`, and the message names the part and the face, edge or vertex: a
+hole copied 60 degrees round an axis reads `tabs.dwprt, CirPattern1 · Copy 1 face 7: ... the
+axis of ... is not structurally rational`. Gaps are computed in rationals from those offsets and the stored
 placements. `measurement.rational` holds the exact value;
 `lo` and `hi` are rounded outward. A Coincident is measured the same way, and reads `"0"` while
 it holds.
@@ -373,10 +505,13 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Angle, Symmetric, the Width `free` mode, limit mates, hinge limits and the mechanical
-families; Tangent between two curved faces, and Distance between two axes or two points;
-the misaligned Concentric option, which needs an explicit tolerance; Parallel or Perpendicular
-between a plane and an axis; picking edges and vertices in the Mate panel; picking a face
-inside a sub-assembly for a new mate; mates on pattern members; configurations; dragging;
-general rotations, including a Lock off the quarter turns, and axes or points read off the
-world axes or at algebraic coordinates; torus and spline faces. See M6 in the plan.
+Angle and Limit Angle, hinge limits and the mechanical families; Tangent between two curved
+faces, and Distance or Limit Distance between two axes or two points; Width between faces
+that are not parallel; the misaligned Concentric option, which needs an explicit tolerance;
+Parallel or Perpendicular between a plane and an axis; arc slots, slots off the world axes and
+a slot in a slot; rounded or chamfered profiles; a bound on a coordinate a Symmetric or Linear
+Coupler moves by a ratio; picking edges and vertices in the Mate panel; picking a face inside a
+sub-assembly for a new mate; mates on pattern members; configurations; dragging under mates;
+general rotations, including a Lock off the quarter turns, every family on parts placed off
+the world axes, and axes, points or profiles read off the world axes or at algebraic
+coordinates; torus and spline faces. See M6 in the plan.

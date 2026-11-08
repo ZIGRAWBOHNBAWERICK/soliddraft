@@ -356,12 +356,36 @@ fn tangent_shadow_and_ambiguous_equal_crossing_preserve_the_part() {
 }
 
 #[test]
-fn unequal_radius_mitre_reports_the_typed_corner_refusal() {
+fn narrower_uprights_roll_over_an_equal_round_top_mitre() {
     let mut state = block();
     let top = edges(&state, |e| (e.midpoint.z - 12.0).abs() < 1e-6);
     round(&mut state, top, 2.0);
+    let volume =
+        |state: &AppState| state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap().volume;
+    let before = volume(&state);
     let uprights = edges(&state, |e| e.curve == CurveKind::Line && e.bbox.max.z - e.bbox.min.z > 5.0);
-    refused(&mut state, uprights, 1.0, "fillet.unsupported-corner");
+    assert_eq!(uprights.len(), 4);
+    round(&mut state, uprights, 1.0);
+    // Below z = 10, where the R2 top round starts, each upright is a plain R1 quarter round;
+    // above it the R1 ball removes no more than a full-height quarter round would.
+    let removed = before - volume(&state);
+    let strip = 4.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    assert!(removed >= strip * 10.0 && removed <= strip * 12.0, "R1 uprights removed {removed} mm3");
+    // The body is valid, every face is named, the screen shows it through Catallax's
+    // unproved preview mesh and it exports as one solid within tolerance. Its certified
+    // mesh still exceeds the application's work allowance; see docs/needs-catallax.md.
+    let doc = &state.doc;
+    let body = doc.display_body().unwrap();
+    assert!(doc.kernel().validate(body).unwrap().valid);
+    let preview = doc.kernel().preview(body, &Default::default()).unwrap();
+    assert!(!preview.indices.is_empty());
+    for face in &doc.kernel().topology(body).unwrap().faces {
+        assert!(doc.named_face(face.id).is_some(), "unnamed face: {face:?}");
+    }
+    let dir = std::env::temp_dir().join(format!("soliddraft-release-mitre-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    export(&state, &dir, "build");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[path = "support/ribbon.rs"]

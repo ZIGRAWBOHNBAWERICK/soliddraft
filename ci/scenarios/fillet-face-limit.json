@@ -1,0 +1,118 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "fillet-face-limit",
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              20,
+              15,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12000,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude1 · Edge 7"
+        ],
+        "radius": 50
+      },
+      "refused": "radius limit 10 mm",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12000,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "R50 on a top edge of a 10 mm high block is refused with the 10 mm limit, never built at a smaller radius"
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Boss-Extrude1 · Edge 7"
+        ],
+        "radius": 10
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11141.592654,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "R10 consumes the whole side face and builds"
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 50
+      },
+      "refused": "radius limit 10 mm",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11141.592654,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "an edit to R50 is refused and leaves the R10 fillet"
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 9
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 11304.690049,
+          "tolerance": 0.005
+        }
+      ],
+      "label": "an edit below the limit builds"
+    },
+    {
+      "tool": "feature",
+      "arguments": {
+        "name": "Fillet1"
+      },
+      "checks": [
+        {
+          "pointer": "/result/radius",
+          "equals": 9
+        }
+      ],
+      "label": "the fillet records the radius it was built at"
+    }
+  ]
+}

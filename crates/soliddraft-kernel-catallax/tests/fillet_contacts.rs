@@ -144,3 +144,24 @@ fn oblique_rim_measures_and_exports() {
     }
     assert_eq!(k.mass_properties(cut).unwrap(), before);
 }
+
+#[test]
+fn a_radius_past_the_face_limit_is_refused_not_built_smaller() {
+    let k = CatallaxKernel::with_diagnostics(20_000_000);
+    let block = contract::block(&k);
+    let topology = k.topology(block).unwrap();
+    let edge = topology.edges.iter().find(|e| e.midpoint.distance(Vec3::new(0.0, 15.0, 10.0)) < 1e-6).unwrap().id;
+    let before = k.mass_properties(block).unwrap();
+    // Catallax builds R50 here as the R10 strip that consumes the 10 mm side face.
+    for radius in [10.5, 50.0] {
+        let refused = k.fillet(&OpTag::new("round"), block, &[edge], radius).unwrap_err().to_string();
+        assert!(refused.contains("fillet.radius-too-large"), "R{radius}: {refused}");
+        assert!(refused.contains("; radius limit 10 mm"), "R{radius}: {refused}");
+    }
+    assert_eq!(k.mass_properties(block).unwrap(), before);
+    // R10 consumes the face exactly and builds: 12000 - 4000 (1 - pi/4) mm3.
+    let rounded = k.fillet(&OpTag::new("round"), block, &[edge], 10.0).unwrap();
+    let volume = k.mass_properties(rounded.body).unwrap().volume;
+    let exact = 12000.0 - 4000.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    assert!((volume - exact).abs() < 1e-6, "{volume} != {exact}");
+}

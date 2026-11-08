@@ -255,6 +255,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; the refused step keeps the R3 volume"
     },
     {
+      "id": "fillet-face-limit",
+      "file": "ci/scenarios/fillet-face-limit.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "d7da137395bee11ca839d62012efbf575e90d28f",
+      "route": "MCP sketch, extrude, fillet and edit_fillet -> real document rebuild -> pinned Catallax roll-over fillet; the adapter refuses a strip Catallax stopped below the requested radius",
+      "supported_limits": "One top edge of a 40 x 30 x 10 block. R50, built by Catallax as R10 with the request kept in requested_radius, is refused as fillet.radius-too-large with radius limit 10 mm, as a fillet and as an edit, leaving the part unchanged. R10 consumes the side face and builds at 12000 - 4000 (1 - pi/4) mm3; R9 builds at 12000 - 3240 (1 - pi/4) mm3",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; each refused step keeps the volume before it"
+    },
+    {
       "id": "graded-fields",
       "file": "ci/scenarios/graded-fields.json",
       "acceptance": true,

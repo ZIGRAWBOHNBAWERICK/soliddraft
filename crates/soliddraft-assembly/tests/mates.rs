@@ -1004,7 +1004,9 @@ fn a_locked_pair_turns_as_one() {
         r.doc.mate_perpendicular("R", &side(r.a, X), &side(second, X), false).unwrap();
         let check = |r: &mut Rig| {
             let (qb, qc) = (r.placement(r.b).rotation, r.placement(c).rotation);
-            assert!(qb.angle_between(qc) < 1e-12, "the lock turns them together: {qb} {qc}");
+            // angle_between rounds through acos, so compare where the axes go.
+            let same = [DVec3::X, DVec3::Y].iter().all(|v| (qb * *v).distance(qc * *v) < 1e-12);
+            assert!(same, "the lock turns them together: {qb} {qc}");
             assert!((qb * DVec3::Z).distance(DVec3::Z) < 1e-12, "{qb}");
             assert!((qb * DVec3::X).x.abs() < 1e-12, "{qb}");
             let offset = r.placement(c).translation - r.placement(r.b).translation;

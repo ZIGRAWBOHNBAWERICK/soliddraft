@@ -31,7 +31,7 @@ use soliddraft_kernel_api::ExactRational;
 
 use crate::mates::{MateRefusal, RefusalCode};
 use crate::path::{ComponentId, OccurrencePath};
-use crate::placement::Placement;
+use crate::placement::{Placement, canonical};
 
 /// Two mates agree within this, in millimetres; a difference above it is a conflict.
 const CONFLICT_MM: f64 = 1e-9;
@@ -216,8 +216,34 @@ fn snapped(v: DVec3) -> Option<Normal> {
     (on_axis && v.distance(DVec3::from_array(n)) <= AXIS_TOLERANCE).then(|| n.map(|c| c as i8))
 }
 
+/// The signed axis `rotation` takes the axis `n` to, exactly, or `None`.
+///
+/// A placement stores a binary64 quaternion, and each component is read as the rational
+/// it is. Its turn takes `v` to `((w² - b·b) v + 2 (b·v) b + 2 w (b × v)) / (w² + b·b)`,
+/// with `b` its vector part, and that is compared with the axis in rationals. A turn that
+/// lands within a tolerance of an axis is not on it: far from the origin a tilt of 2^-42
+/// opens a real gap. Every quarter turn's quaternion has nonzero parts of one magnitude,
+/// and a spin about an axis has its vector part on that axis, so both are exact however
+/// their parts round.
+pub(crate) fn turned(rotation: DQuat, n: Normal) -> Option<Normal> {
+    let axis = snapped(rotation * vector(n))?;
+    let [x, y, z, w] = [rotation.x, rotation.y, rotation.z, rotation.w].map(exact);
+    let (x, y, z, w) = (x?, y?, z?, w?);
+    let int = |c: i8| BigRational::from_integer(BigInt::from(c));
+    let v = n.map(int);
+    let b = [x, y, z];
+    let bb = &b[0] * &b[0] + &b[1] * &b[1] + &b[2] * &b[2];
+    let ww = &w * &w;
+    let bv = &b[0] * &v[0] + &b[1] * &v[1] + &b[2] * &v[2];
+    let cross = [&b[1] * &v[2] - &b[2] * &v[1], &b[2] * &v[0] - &b[0] * &v[2], &b[0] * &v[1] - &b[1] * &v[0]];
+    let two = int(2);
+    let scale = &ww + &bb;
+    let along = &ww - &bb;
+    (0..3).all(|i| &along * &v[i] + &two * &bv * &b[i] + &two * &w * &cross[i] == &scale * int(axis[i])).then_some(axis)
+}
+
 fn world(rotation: DQuat, n: Normal, mate: &str) -> Result<Normal, MateRefusal> {
-    snapped(rotation * vector(n)).ok_or_else(|| {
+    turned(rotation, n).ok_or_else(|| {
         let message = format!(
             "{mate}: a face is placed off the world axes; this version proves planes on axis-aligned placements only"
         );
@@ -271,7 +297,7 @@ fn quaternion(m: &Cube) -> DQuat {
 pub(crate) fn cube_of(rotation: DQuat) -> Option<Cube> {
     let mut m = [[0i8; 3]; 3];
     for (c, axis) in [[1, 0, 0], [0, 1, 0], [0, 0, 1]].into_iter().enumerate() {
-        let n = snapped(rotation * vector(axis))?;
+        let n = turned(rotation, axis)?;
         for r in 0..3 {
             m[r][c] = n[r];
         }
@@ -374,7 +400,7 @@ impl Rule {
         match self {
             Rule::Relate { a, u, b, w, sign } => {
                 let (ra, rb) = (at[*a]?, at[*b]?);
-                Some(match (snapped(ra * vector(*u)), snapped(rb * vector(*w))) {
+                Some(match (turned(ra, *u), turned(rb, *w)) {
                     (Some(na), Some(nb)) if *sign == 0 => dot(na, nb) == 0,
                     (Some(na), Some(nb)) => nb == na.map(|c| c * sign),
                     _ => false,
@@ -428,7 +454,7 @@ impl Search<'_> {
         let mut out = Vec::new();
         if !self.locked[g] && normals.iter().all(|n| dot(*n, u0).abs() == 1) {
             for v in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
-                out.push((shortest_arc(authored * vector(u0), vector(v)) * authored).normalize());
+                out.push(canonical((shortest_arc(authored * vector(u0), vector(v)) * authored).normalize()));
             }
         }
         out.extend(self.cubes.iter().copied());
@@ -515,12 +541,12 @@ fn rotations(
     let of = |body: &Body| (index[&group[body].0], group[body].1);
     let mut rules = Vec::new();
     for c in constraints {
-        let own =
-            |offset: DQuat, n: Normal, mate: &str| snapped(offset * vector(n)).ok_or_else(|| unsupported_lock(mate));
+        let own = |offset: DQuat, n: Normal, mate: &str| turned(offset, n).ok_or_else(|| unsupported_lock(mate));
         match c {
             Constraint::Origin { mate, body, axes: true, at } => {
                 let (g, offset) = of(body);
-                rules.push((mate.as_str(), Rule::Fixed { g, rotation: (at.rotation * offset.inverse()).normalize() }));
+                let rotation = canonical((at.rotation * offset.inverse()).normalize());
+                rules.push((mate.as_str(), Rule::Fixed { g, rotation }));
             }
             Constraint::Parallel { mate, a, b, plane_a, plane_b, sign, .. } => {
                 let ((ga, oa), (gb, ob)) = (of(a), of(b));
@@ -596,7 +622,7 @@ fn rotations(
     };
     let mut known = BTreeMap::new();
     for (body, (root, offset)) in &group {
-        known.insert(body.clone(), (turns[index[root]] * *offset).normalize());
+        known.insert(body.clone(), canonical((turns[index[root]] * *offset).normalize()));
     }
     for c in constraints {
         match c {
@@ -1240,7 +1266,7 @@ mod tests {
         let constraints = [origin(true), lock(relative)];
         let solved = solve(&bodies(), &constraints).unwrap();
         let placed = solved[&b()];
-        assert!(placed.rotation.angle_between(q90z()) < 1e-12);
+        assert!(same_turn(placed.rotation, q90z()));
         assert_eq!(placed.translation, DVec3::new(1.0, 2.0, 3.0));
         assert_eq!(freedoms(&solved, &constraints).unwrap().0, 0);
         // Without the origin the pair moves as one body.
@@ -1310,6 +1336,33 @@ mod tests {
         assert_eq!(cube_of(DQuat::from_rotation_z(0.5)), None);
     }
 
+    /// A turn is on an axis only when its quaternion, read as rationals, puts it there:
+    /// every quarter turn and every spin about its own axis is, and a turn within the old
+    /// tolerance of an axis is not.
+    #[test]
+    fn only_exact_turns_land_on_axes() {
+        for m in &cube_rotations() {
+            for q in [quaternion(m), -quaternion(m), quaternion(m).normalize()] {
+                for (c, axis) in [[1, 0, 0], [0, 1, 0], [0, 0, 1]].into_iter().enumerate() {
+                    assert_eq!(turned(q, axis), Some([m[0][c], m[1][c], m[2][c]]), "{q} on {axis:?}");
+                }
+            }
+        }
+        for angle in [0.1, 0.5, 1.0, 2.5] {
+            let spin = DQuat::from_rotation_z(angle);
+            assert_eq!(turned(spin, [0, 0, 1]), Some([0, 0, 1]));
+            assert_eq!(turned(spin, [1, 0, 0]), None);
+        }
+        // Tilted 2^-42 about y: -z lands 4.5e-13 from -z, which the old test took as -z.
+        let tilt = DQuat::from_xyzw(0.0, -(2f64.powi(-42)), 0.0, 1.0).normalize();
+        assert!(snapped(tilt * DVec3::NEG_Z).is_some());
+        assert_eq!(turned(tilt, [0, 0, -1]), None);
+        assert_eq!(turned(tilt, [0, 1, 0]), Some([0, 1, 0]), "y is the turn's own axis");
+        assert_eq!(cube_of(tilt), None);
+        let refused = world(tilt, [0, 0, -1], "M").unwrap_err();
+        assert_eq!(refused.code, RefusalCode::UnsupportedPlacement);
+    }
+
     /// A locked pair turns as one: a Parallel on one member and a Perpendicular on the
     /// other leave it a quarter turn about z, whichever member comes first.
     #[test]
@@ -1348,7 +1401,7 @@ mod tests {
             let constraints = [origin, lock, p, r];
             let solved = solve(&at, &constraints).unwrap_or_else(|e| panic!("B {b_id}, C {c_id}: {e}"));
             let (qb, qc) = (solved[&pb].rotation, solved[&pc].rotation);
-            assert!(qb.angle_between(qc) < 1e-12, "B {b_id}, C {c_id}: the lock keeps them together");
+            assert!(same_turn(qb, qc), "B {b_id}, C {c_id}: the lock keeps them together");
             assert_eq!(snapped(qb * DVec3::Z), Some([0, 0, 1]));
             assert_eq!(snapped(qc * DVec3::X).map(|n| n[0]), Some(0), "C's x is at right angles to A's");
             // C sits at B's placement composed with the lock: [0, 5, 0] turned a quarter.

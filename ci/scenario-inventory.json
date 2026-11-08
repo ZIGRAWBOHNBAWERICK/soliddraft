@@ -476,6 +476,70 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
+      "id": "mate-concentric",
+      "file": "ci/scenarios/mate-concentric.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Concentric mate commands -> assembly transaction -> proven axis query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Concentric mates between axes read exactly from cylinders on root part components: a shaft in a bore placed exactly, a strict refusal naming what stays free, Lock rotation stored as a quarter-turn matrix, a distance edit refused, save and reopen; a hole copied by a 60 degree circular pattern refused as unsupported_reference by name, the original hole taking a pin exactly, undo and redo.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt, work/tabs.dwprt, work/pin.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-tangent",
+      "file": "ci/scenarios/mate-tangent.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Tangent mate commands -> assembly transaction -> proven plane and axis queries -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Tangent mates from an axis-aligned planar face to a cylinder with a rational radius: the shaft turned flat one radius above the plane, flipped behind it, a planar second end refused as unsupported_reference, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-hinge",
+      "file": "ci/scenarios/mate-hinge.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Hinge mate commands -> assembly transaction -> proven axis and plane queries -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Hinge mates without limits, a Concentric between two cylinders and a Coincident between two planes under one name: the shaft seated flush in the bore with only its spin left, a strict refusal, a plane flip alone refused naming the hinge, both flips turning the shaft over, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-axes-points",
+      "file": "ci/scenarios/mate-axes-points.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly and Coincident, Distance, Parallel and Perpendicular mate commands on edges and vertices -> assembly transaction -> proven axis and point queries -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Coincident between two vertices, a straight edge in a plane, a vertex at a distance from a plane and its edit, Parallel between two straight edges, a Perpendicular against it refused naming both, a distance between two vertices refused as unsupported_reference, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "mate-reference-plane",
       "file": "ci/scenarios/mate-reference-plane.json",
       "acceptance": true,

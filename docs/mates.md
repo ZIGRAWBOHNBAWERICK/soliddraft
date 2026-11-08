@@ -17,6 +17,14 @@ are in `crates/soliddraft-app/src/mates/`.
 | Perpendicular | One turn: two planar faces' normals at right angles |
 | Width | A tab's two parallel faces between a groove's two parallel faces: two turns and the translation across the groove |
 | Lock | Every motion of one component relative to another: its relative placement is stored |
+| Concentric | Two axes on one line (two turns, two translations), a point on an axis (two translations) or two points on one (three translations). With Lock rotation, the turn about the axis too |
+| Tangent | A cylinder lying against a plane (one turn, one translation) or a sphere touching it (one translation), one radius away |
+| Hinge | A Concentric between two axes and a Coincident between two planes, under one name: everything but the turn about the axis |
+
+Coincident and Distance also take a plane with an axis or a point: the axis lies parallel to
+the plane, or the point sits on it or a distance in front of it. Coincident also takes two
+axes, which is the same as a Concentric between them, an axis and a point, and two points.
+Parallel and Perpendicular also take two axes.
 
 A mate's planes are faces or reference planes. A reference plane is one of the part's Top,
 Front and Right planes, or a plane feature built on one of them, with its offsets. Faces and
@@ -34,6 +42,16 @@ normal is exact too. A turn that lands only near an axis is not on it: far from 
 tilt of 2^-42 is a real gap. It is refused when measured, and a solve turns the part exactly
 onto the axes instead of keeping the tilt. A later general rotation needs a bounded transform contract and does not
 inherit this one.
+
+An axis is read from a cylindrical or conical face, a circular edge or a straight edge, and a
+point from a spherical face's centre or a vertex. Each is read from the kernel's own definition
+(see [Proofs and Update](#proofs-and-update)): its direction must lie on a world axis and its
+coordinates must be rational. A hole copied by a circular pattern at anything but quarter turns
+has an algebraic centre, so a mate on it is refused as `unsupported_reference`, never rounded.
+A part whose axis or point a mate places takes quarter-turn rotations only, so the coordinates
+it reads stay rational: the solve keeps its authored turn when that is one, and otherwise turns
+it onto the nearest. A part held by planes or by an axis's direction alone keeps its own spin,
+as before.
 
 A Lock's relative rotation must be a quarter-turn rotation, one that takes axes to axes. A
 Lock between parts turned 30 degrees apart is refused as `unsupported_placement`, never
@@ -83,6 +101,40 @@ centroid.
       "a": { "path": "2", "document": "3f0c..." },
       "b": { "path": "4", "document": "91ab..." },
       "relative": { "rotation": [0.0, 0.0, 0.7071067811865476, 0.7071067811865476], "translation": [10.0, 10.0, 30.0] }
+    },
+    {
+      "kind": "concentric", "id": 14, "name": "C",
+      "a": {
+        "path": "2", "document": "3f0c...", "face": { "feature": 5, "generator": { "kind": "side", "entity": 1 } },
+        "support": { "kind": "axis", "direction": [0, 0, 1], "through": [10.0, 5.0, 0.0], "radius": 4.0, "outward": false }
+      },
+      "b": {
+        "path": "6", "document": "77de...", "face": { "feature": 3, "generator": { "kind": "side", "entity": 1 } },
+        "support": { "kind": "axis", "direction": [0, 0, 1], "through": [0.0, 0.0, 0.0], "radius": 4.0, "outward": true }
+      },
+      "alignment": "aligned",
+      "lock_rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    },
+    {
+      "kind": "coincident", "id": 15, "name": "P",
+      "a": { "path": "2", "document": "3f0c...", "vertex": { "faces": ["..."], "position": [20.0, 15.0, 10.0] },
+             "support": { "kind": "point", "at": [20.0, 15.0, 10.0] } },
+      "b": { "path": "4", "document": "91ab...", "edge": { "faces": ["...", "..."], "fingerprint": { "...": "..." } },
+             "support": { "kind": "axis", "direction": [1, 0, 0], "through": [0.0, -5.0, 0.0] } },
+      "alignment": "aligned"
+    },
+    {
+      "kind": "tangent", "id": 16, "name": "T",
+      "a": { "path": "2", "...": "a planar face" },
+      "b": { "path": "6", "...": "a cylinder or sphere, with its support" },
+      "alignment": "opposed"
+    },
+    {
+      "kind": "hinge", "id": 17, "name": "H",
+      "axes": [{ "path": "2", "...": "..." }, { "path": "6", "...": "..." }],
+      "planes": [{ "path": "2", "...": "..." }, { "path": "6", "...": "..." }],
+      "alignment": "aligned",
+      "plane_alignment": "aligned"
     }
   ],
   "values": [
@@ -95,6 +147,16 @@ centroid.
   the part's persistent `FaceRef`, which is a feature id and what that feature made. Labels
   and kernel handles are never saved as identities. The face reference's own label and
   fingerprint are kept as written; only a repair message reads them.
+- **Edge and vertex endpoints** carry `edge` or `vertex` instead of `face`. An edge is named
+  by the two faces it separates, as a fillet names one. A vertex is named by every face that
+  meets at it, and resolves to the one vertex all of them touch; its `position` is kept for
+  messages only.
+- **Supports.** An endpoint read as an axis or a point keeps what its proof found when the
+  mate was made: the axis's signed direction and a point on it, or the point, with a radius
+  and its material side where there is one. They are the nearest doubles and only the
+  solver's status reads them, so the status needs no part. A solve reads exact values from a
+  new proof, and a proof whose kind or direction differs from the stored one is refused as
+  `dangling_reference`. A planar face keeps none.
 - **Plane endpoints** carry `plane` instead of `face`: a datum by name, or a plane feature by
   id with the normal it had when it was mated. A plane feature that now faces another way is
   refused as `dangling_reference`, as a face whose normal changed is. A plane feature built on
@@ -124,6 +186,25 @@ centroid.
   against `groove[1]`. With `flipped` the gap and the share are measured from `groove[1]`.
   A dimension is an expression and can be driven like a distance. The mid-plane of the
   groove and of the tab are averages of exact offsets, so a width is one exact difference.
+- **Concentric** reads each end as an axis or a point. Between two axes `alignment` relates
+  their directions, as a cylinder's or circle's direction is the kernel's own; it is absent
+  where a point is involved. `lock_rotation`, when present, is `b`'s turn in `a`'s frame as
+  the integer matrix of a quarter-turn rotation, by rows, taken where the solve leaves it
+  when Lock rotation is turned on. It is allowed between two axes only. Planes are refused.
+- **Tangent** reads `a` as a plane and `b` as a cylinder or a sphere. The radius is the
+  kernel's square root of its squared radius, which must be a rational square, or the mate is
+  refused as `unsupported_reference` with the square it found. `alignment` relates the
+  curved face's outward normal at the contact to the plane's: `opposed` for a shaft lying on a
+  table, `aligned` for one pressed against the plane from behind it. A bore's wall looks
+  towards its axis, so the side flips for it.
+- **Hinge** reads `axes` as a Concentric between two axes and `planes` as a Coincident, the
+  first of each on one part and the second on the other. `alignment` relates the axes and
+  `plane_alignment` the planes. Angle limits are not supported.
+- **Coincident and Distance with an axis or a point** put the point, or the axis through its
+  point, at the signed distance along the plane's outward normal, whichever end the plane is;
+  an axis also lies parallel to the plane. Their `alignment` is kept but reads nothing. A
+  Distance between two axes or two points fixes a length across them, which this version does
+  not solve exactly, so it is refused as `unsupported_reference`.
 - **Lock** stores `b`'s placement in `a`'s frame, taken from where both are when it is added.
   Both parts must be on exact quarter turns. The rotation is the product of their integer
   matrices, and the offset is taken through the first one's, so no rounding enters the
@@ -143,14 +224,17 @@ hashed. An assembly with neither writes neither key, so old files keep their has
 
 Plane normals are exact signed axes, which splits a solve in two:
 
-1. **Rotations.** Parts joined by Locks turn as one rigid group, so the unknowns are the
-   groups' turns. An Origin mate with axes fixes a group's turn. Each mate between planes
-   relates two normals: equal or opposite for a Distance, Coincident, Parallel or Width, at
-   right angles for a Perpendicular. Every turn the exact solver can prove takes the normals
+1. **Rotations.** Parts joined by Locks, or by a Concentric with Lock rotation, turn as one
+   rigid group, so the unknowns are the groups' turns. An Origin mate with axes fixes a
+   group's turn. Each mate between planes relates two normals: equal or opposite for a
+   Distance, Coincident, Parallel or Width, at right angles for a Perpendicular. Two axes
+   relate their directions the same way, and an axis held in or at a distance from a plane,
+   or a Tangent cylinder, lies at right angles to the plane's normal. Every turn the exact solver can prove takes the normals
    it reads onto axes, so each group's candidates are the 24 quarter-turn rotations. One
-   unlocked part held along a single axis may also keep its own spin about that axis. A
-   group no mate between planes turns keeps its authored turn, unless a lock in it places
-   parts by that turn; it then tries its authored turn and then every quarter turn. All
+   unlocked part held along a single axis may also keep its own spin about that axis, unless
+   a mate places one of its axes or points: then it takes quarter turns only. A group no
+   mate turns keeps its authored turn, unless a lock in it places parts by that turn; it
+   then tries its authored turn and then every quarter turn. All
    groups are solved together, as a search over those candidates. Each group tries its
    candidates nearest its authored turn first, in a fixed order among equals, so an
    authored pose that already holds is kept and one that does not moves by the smallest
@@ -158,7 +242,11 @@ Plane normals are exact signed axes, which splits a solve in two:
    assignment exists, the refusal names a smallest set of mates that still cannot hold
    together. The search refuses as `too_large` past 200,000 steps.
 2. **Translations.** Each distance, width and lock becomes an exact difference of one world
-   coordinate, so each axis is a graph of differences. A lock adds one on each axis. Walking
+   coordinate, so each axis is a graph of differences. A lock adds one on each axis. Two axes
+   on one line add one on each of the two world axes across their direction, a point on an
+   axis does the same, two points on one add one on each world axis, and a point or axis at a
+   distance from a plane adds one along the plane's normal. Each reads the quarter-turn matrix
+   of its part's turn, so the difference stays rational. Walking
    the graph places everything connected to the origin, or to the group's first component.
    An edge that disagrees by more than 1e-9 mm is a conflict.
 
@@ -199,7 +287,10 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 | `assembly_mate_perpendicular` | Keeps two planar faces at right angles |
 | `assembly_mate_width` | Holds a tab's two faces between a groove's, `centered`, by `dimension` or by `percent` |
 | `assembly_mate_lock` | Locks a component where it is relative to another |
-| `assembly_edit_mate` | Changes a literal distance, an alignment, `align_axes`, a width's `percent` or `flipped` |
+| `assembly_mate_concentric` | Puts two axes on one line, a point on an axis or two points on one; `alignment` between axes, optional `lock_rotation` |
+| `assembly_mate_tangent` | Lays a cylinder or sphere against a plane, `aligned` or `opposed` |
+| `assembly_mate_hinge` | Puts two axes on one line and two planes on one plane, under one name |
+| `assembly_edit_mate` | Changes a literal distance, an alignment, `align_axes`, a width's `percent` or `flipped`, a hinge's `plane_alignment` or a concentric's `lock_rotation` |
 | `assembly_delete_mate` | Removes a mate; components stay where they are |
 | `assembly_set_value` | Adds or changes a value |
 | `assembly_rename_value` | Renames a value |
@@ -208,8 +299,10 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 
 A face is named by its label, or by `feature`, `generator` and, for a side, `normal`. A
 reference plane is named by `plane`: "Top plane", "Front plane", "Right plane" (or the name
-the part gave its datum) or a plane feature's name. Each must find exactly one face or plane.
-The stored result is the `FaceRef` or the plane's reference.
+the part gave its datum) or a plane feature's name. An edge is named by `edge`, the labels of
+the two faces it separates, and a vertex by `vertex`, the labels of the faces that meet there.
+Each must find exactly one face, plane, edge or vertex. The stored result is the `FaceRef`,
+the plane's reference, the `EdgeRef` or the `VertexRef`, with the support its proof found.
 
 Every change runs one transaction: copy the truth, change the copy, prove and solve it, then
 publish truth, placements and display as one undo step. A refusal changes nothing and keeps
@@ -225,7 +318,8 @@ the redo stack. Refusals are JSON: `refused` holds the code, with `message`, `ma
 | `no_such_face` | A selector finds nothing |
 | `unsupported_configuration` | A mate or its source names a configuration other than the default |
 | `unsupported_plane` | The kernel will not prove this face's plane |
-| `unsupported_placement` | A placed normal is off the world axes, or a Lock's turn is off the quarter turns |
+| `unsupported_reference` | The kernel will not prove this axis or point (off the world axes, or not rational), or the family does not take this pair, such as a Distance between two points |
+| `unsupported_placement` | A placed normal is off the world axes, or a Lock's or Lock rotation's turn is off the quarter turns |
 | `not_parallel` | The two planes are not parallel, or a Width's groove or tab faces are not |
 | `proof_unavailable` | The pinned revision's bytes or a kernel are not available |
 | `unknown_mate` | The assembly holds a mate this version cannot solve |
@@ -238,9 +332,12 @@ the redo stack. Refusals are JSON: `refused` holds the code, with `message`, `ma
 ## The Mate panel
 
 The panel offers every family above except Origin, which has its own button for the selected
-component. Coincident, Distance, Parallel and Perpendicular take two picked faces. Width takes
-four: the groove's two, then the tab's. Lock takes one face on each component. Alignment shows
-for the families that have one.
+component. Coincident, Distance, Parallel, Perpendicular and Concentric take two picked faces,
+and Tangent takes the plane, then the cylinder or sphere. Width takes four: the groove's two,
+then the tab's. Hinge takes four too: the two axes' faces, then the two planes. Lock takes one
+face on each component. Alignment shows for the families that have one; Hinge also shows its
+planes' alignment, and Concentric a Lock rotation box. The panel picks faces; edges and
+vertices are named through the MCP tools.
 
 The Conflicts list shows the last refusal that named mates or freedoms, from a mate command or
 from Update. It says what kind of refusal it was, lists each named mate with its family, and
@@ -250,10 +347,17 @@ own. A success clears it.
 
 ## Proofs and Update
 
-A proof belongs to a document, a revision and a face. It comes from the part rebuilt from that
-revision's bytes on the kernel, through `Kernel::face_support_plane`, which reads the native
-plane definition exactly and costs no numerical work. Gaps are computed in rationals from
-those offsets and the stored placements. `measurement.rational` holds the exact value;
+A proof belongs to a document, a revision and a face, edge or vertex. It comes from the part
+rebuilt from that revision's bytes on the kernel, through `Kernel::entity_support`, which reads
+the native definition exactly and costs no numerical work: a plane's equation, a cylinder's
+axis origin, direction and squared radius, a cone's apex and direction, a sphere's centre and
+radius, a circle's centre, normal and squared radius, a line's origin and direction, or a
+vertex's explicit point. A value that is not structurally rational, a direction off the world
+axes, or a vertex defined only where surfaces meet is refused with `unsupported_reference`,
+and the message names the part and the face, edge or vertex: a hole copied 60 degrees round
+an axis reads `tabs.dwprt, CirPattern1 · Copy 1 face 7: ... the axis of ... is not
+structurally rational`. Gaps are computed in rationals from those offsets and the stored
+placements. `measurement.rational` holds the exact value;
 `lo` and `hi` are rounded outward. A Coincident is measured the same way, and reads `"0"` while
 it holds.
 
@@ -269,7 +373,10 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Concentric, Angle, Tangent, Symmetric, the Width `free` mode, limit mates and the mechanical
-families; mates on axes, edges and points; picking a face inside a sub-assembly for a new mate;
-mates on pattern members; configurations; dragging; general rotations, including a Lock off
-the quarter turns; and curved faces. See M6 in the plan.
+Angle, Symmetric, the Width `free` mode, limit mates, hinge limits and the mechanical
+families; Tangent between two curved faces, and Distance between two axes or two points;
+the misaligned Concentric option, which needs an explicit tolerance; Parallel or Perpendicular
+between a plane and an axis; picking edges and vertices in the Mate panel; picking a face
+inside a sub-assembly for a new mate; mates on pattern members; configurations; dragging;
+general rotations, including a Lock off the quarter turns, and axes or points read off the
+world axes or at algebraic coordinates; torus and spline faces. See M6 in the plan.

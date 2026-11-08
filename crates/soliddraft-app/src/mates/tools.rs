@@ -16,10 +16,24 @@ pub(crate) fn refused(r: MateRefusal) -> String {
 fn selector(v: &Value) -> Result<EndpointSelector, String> {
     let component = v["component"].as_u64().and_then(|c| u32::try_from(c).ok()).map(ComponentId);
     let component = component.ok_or("a face names its component by id")?;
-    let face = match (v["face"].as_str(), v["feature"].as_str(), v["plane"].as_str()) {
-        (None, None, Some(plane)) => FaceSelector::Plane(plane.to_owned()),
-        (Some(label), None, None) => FaceSelector::Label(label.to_owned()),
-        (None, Some(feature), None) => {
+    let labels = |key: &str| -> Option<Vec<String>> {
+        v.get(key)
+            .filter(|l| !l.is_null())
+            .map(|l| l.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect())
+    };
+    let (edge, vertex) = (labels("edge"), labels("vertex"));
+    let face = match (v["face"].as_str(), v["feature"].as_str(), v["plane"].as_str(), edge, vertex) {
+        (None, None, None, Some(edge), None) => match <[String; 2]>::try_from(edge) {
+            Ok(pair) => FaceSelector::Edge(pair),
+            Err(_) => return Err("an edge names the labels of the two faces it separates".into()),
+        },
+        (None, None, None, None, Some(vertex)) if vertex.len() >= 2 => FaceSelector::Vertex(vertex),
+        (None, None, None, None, Some(_)) => {
+            return Err("a vertex names the labels of the faces that meet there".into());
+        }
+        (None, None, Some(plane), None, None) => FaceSelector::Plane(plane.to_owned()),
+        (Some(label), None, None, None, None) => FaceSelector::Label(label.to_owned()),
+        (None, Some(feature), None, None, None) => {
             let generator = match v["generator"].as_str() {
                 Some("start_cap") => GeneratorChoice::StartCap,
                 Some("end_cap") => GeneratorChoice::EndCap,
@@ -36,7 +50,11 @@ fn selector(v: &Value) -> Result<EndpointSelector, String> {
             };
             FaceSelector::Generator { feature: feature.to_owned(), generator, normal }
         }
-        _ => return Err("a face gives its label, its feature or a reference plane: one of them".into()),
+        _ => {
+            return Err(
+                "a face gives its label, its feature, a reference plane, an edge or a vertex: one of them".into()
+            );
+        }
     };
     Ok(EndpointSelector { component, face })
 }
@@ -47,6 +65,11 @@ fn alignment(v: &Value) -> Result<Alignment, String> {
         Some("opposed") => Ok(Alignment::Opposed),
         _ => Err("the alignment is aligned or opposed".into()),
     }
+}
+
+/// An alignment that defaults to aligned.
+fn optional_alignment(v: &Value) -> Result<Alignment, String> {
+    if v.is_null() { Ok(Alignment::Aligned) } else { alignment(v) }
 }
 
 fn component(v: &Value, what: &str) -> Result<ComponentId, String> {
@@ -89,6 +112,9 @@ pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Res
             | "assembly_mate_perpendicular"
             | "assembly_mate_width"
             | "assembly_mate_lock"
+            | "assembly_mate_concentric"
+            | "assembly_mate_tangent"
+            | "assembly_mate_hinge"
             | "assembly_set_value"
             | "assembly_rename_value"
             | "assembly_drive_mate"
@@ -150,6 +176,24 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             let (a, b) = (component(&input["a"], "a")?, component(&input["b"], "b")?);
             doc.mate_lock(text(input, "name")?, a, b, strict).map(|id| json!({ "mate": id }))
         }
+        "assembly_mate_concentric" => {
+            let (a, b) = (selector(&input["a"])?, selector(&input["b"])?);
+            let side = optional_alignment(&input["alignment"])?;
+            let lock = input["lock_rotation"].as_bool().unwrap_or(false);
+            doc.mate_concentric(text(input, "name")?, &a, &b, side, lock, strict).map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_tangent" => {
+            let (a, b) = (selector(&input["a"])?, selector(&input["b"])?);
+            let side = alignment(&input["alignment"])?;
+            doc.mate_tangent(text(input, "name")?, &a, &b, side, strict).map(|id| json!({ "mate": id }))
+        }
+        "assembly_mate_hinge" => {
+            let ([a0, a1], [p0, p1]) = (pair(&input["axes"], "axes")?, pair(&input["planes"], "planes")?);
+            let (side, planes) =
+                (optional_alignment(&input["alignment"])?, optional_alignment(&input["plane_alignment"])?);
+            doc.mate_hinge(text(input, "name")?, [&a0, &a1], [&p0, &p1], side, planes, strict)
+                .map(|id| json!({ "mate": id }))
+        }
         "assembly_set_value" => doc.set_value(text(input, "name")?, text(input, "expression")?).map(|()| json!({})),
         "assembly_rename_value" => doc.rename_value(text(input, "name")?, text(input, "to")?).map(|()| json!({})),
         "assembly_drive_mate" => {
@@ -177,8 +221,17 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             if let Some(on) = input["flipped"].as_bool() {
                 edits.push((mate.clone(), MateEdit::Flipped(on)));
             }
+            if !input["plane_alignment"].is_null() {
+                edits.push((mate.clone(), MateEdit::PlaneAlignment(alignment(&input["plane_alignment"])?)));
+            }
+            if let Some(on) = input["lock_rotation"].as_bool() {
+                edits.push((mate.clone(), MateEdit::LockRotation(on)));
+            }
             if edits.is_empty() {
-                return Err("name what to change: distance, alignment, align_axes, percent or flipped".into());
+                return Err(
+                    "name what to change: distance, alignment, align_axes, percent, flipped, plane_alignment or lock_rotation"
+                        .into(),
+                );
             }
             doc.edit_mates(&edits).map(|()| json!({}))
         }
@@ -193,6 +246,11 @@ fn endpoint(root: impl serde::Serialize, e: &FaceEndpoint) -> Value {
     match &e.entity {
         Entity::Face(face) => out["face"] = json!(face),
         Entity::Plane(plane) => out["plane"] = json!(plane),
+        Entity::Edge(edge) => out["edge"] = json!(edge),
+        Entity::Vertex(vertex) => out["vertex"] = json!(vertex),
+    }
+    if let Some(support) = &e.support {
+        out["support"] = json!(support);
     }
     out
 }
@@ -243,9 +301,25 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                     row["a"] = endpoint(root, a);
                     row["b"] = endpoint(root, b);
                 }
-                Mate::Coincident { a, b, .. } | Mate::Parallel { a, b, .. } | Mate::Perpendicular { a, b, .. } => {
+                Mate::Coincident { a, b, .. }
+                | Mate::Parallel { a, b, .. }
+                | Mate::Perpendicular { a, b, .. }
+                | Mate::Tangent { a, b, .. } => {
                     row["a"] = endpoint(root, a);
                     row["b"] = endpoint(root, b);
+                }
+                Mate::Concentric { a, b, lock_rotation, .. } => {
+                    row["a"] = endpoint(root, a);
+                    row["b"] = endpoint(root, b);
+                    row["lock_rotation"] = json!(lock_rotation.is_some());
+                    if let Some(turn) = lock_rotation {
+                        row["locked_turn"] = json!(turn);
+                    }
+                }
+                Mate::Hinge { axes, planes, plane_alignment, .. } => {
+                    row["axes"] = json!(axes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
+                    row["planes"] = json!(planes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
+                    row["plane_alignment"] = json!(plane_alignment);
                 }
                 Mate::Width { groove, tab, constraint, .. } => {
                     row["groove"] = json!(groove.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());

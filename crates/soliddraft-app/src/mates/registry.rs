@@ -9,7 +9,7 @@ use soliddraft_assistant::tools::schema::{
     array, boolean, described, integer, number, object, one_of, optional, string,
 };
 
-/// A face of a root component, as a tool takes it.
+/// A face, plane, edge or vertex of a root component, as a tool takes it.
 fn face(what: &str) -> Value {
     described(
         object(&[
@@ -22,6 +22,11 @@ fn face(what: &str) -> Value {
             ("feature", optional(string("Or the name of the feature that made it"))),
             ("generator", optional(one_of(&["start_cap", "end_cap", "side"], "With feature: which of its faces"))),
             ("normal", optional(array(number("A direction"), "With a side: its outward normal [x, y, z]"))),
+            ("edge", optional(array(string("A face label"), "Or the edge between two faces, by their labels"))),
+            (
+                "vertex",
+                optional(array(string("A face label"), "Or the vertex where these faces meet, by their labels")),
+            ),
         ]),
         what,
     )
@@ -46,7 +51,7 @@ fn distance_params() -> Vec<(&'static str, Value)> {
     vec![
         ("name", string("A name for the mate")),
         ("a", face("The face the distance is measured from, along its outward normal")),
-        ("b", face("The face the distance is measured to")),
+        ("b", face("The face, axis or point the distance is measured to; an axis lies parallel to the plane")),
         ("distance", string("A length such as 5 mm or 1.2 cm")),
         ("alignment", one_of(&["aligned", "opposed"], ALIGNMENT)),
         ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
@@ -56,8 +61,8 @@ fn distance_params() -> Vec<(&'static str, Value)> {
 fn coincident_params() -> Vec<(&'static str, Value)> {
     vec![
         ("name", string("A name for the mate")),
-        ("a", face("The first planar face")),
-        ("b", face("The planar face put on the first one's plane")),
+        ("a", face("The first planar face, plane, axis or point")),
+        ("b", face("The one put on the first: in its plane, on its axis or on its point")),
         ("alignment", one_of(&["aligned", "opposed"], ALIGNMENT)),
         ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
     ]
@@ -66,8 +71,8 @@ fn coincident_params() -> Vec<(&'static str, Value)> {
 fn parallel_params() -> Vec<(&'static str, Value)> {
     vec![
         ("name", string("A name for the mate")),
-        ("a", face("The first planar face or plane")),
-        ("b", face("The planar face or plane kept parallel to the first")),
+        ("a", face("The first planar face or plane, or axis")),
+        ("b", face("The one kept parallel to the first: two planes or two axes")),
         ("alignment", one_of(&["aligned", "opposed"], ALIGNMENT)),
         ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
     ]
@@ -76,8 +81,8 @@ fn parallel_params() -> Vec<(&'static str, Value)> {
 fn perpendicular_params() -> Vec<(&'static str, Value)> {
     vec![
         ("name", string("A name for the mate")),
-        ("a", face("The first planar face or plane")),
-        ("b", face("The planar face or plane kept at right angles to the first")),
+        ("a", face("The first planar face or plane, or axis")),
+        ("b", face("The one kept at right angles to the first: two planes or two axes")),
         ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
     ]
 }
@@ -95,6 +100,49 @@ fn width_params() -> Vec<(&'static str, Value)> {
         ("distance", optional(string("With dimension: the gap from the first groove face to the tab face nearest it"))),
         ("percent", optional(number("With percent: that gap as a percentage of the play, 0 to 100"))),
         ("flipped", optional(boolean("true measures from the second groove face"))),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+fn concentric_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("The first cylinder, cone, sphere, circular or straight edge, or vertex")),
+        ("b", face("The second, put on the first one's axis or centre")),
+        ("alignment", optional(one_of(&["aligned", "opposed"], AXES))),
+        ("lock_rotation", optional(boolean("true holds the turn about the axis where the solve leaves it"))),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+const AXES: &str = "For two axes: aligned when their directions agree, opposed when they oppose; aligned by default";
+
+fn tangent_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        ("a", face("The planar face or plane")),
+        ("b", face("The cylinder or sphere laid against it")),
+        (
+            "alignment",
+            one_of(
+                &["aligned", "opposed"],
+                "How the curved face's outward normal at the contact relates to the plane's: opposed for a shaft lying on a table",
+            ),
+        ),
+        ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
+    ]
+}
+
+fn hinge_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("A name for the mate")),
+        (
+            "axes",
+            array(face("A cylinder, cone, circular or straight edge"), "Two axes put on one line, as a Concentric"),
+        ),
+        ("planes", array(face("A planar face or plane"), "Two planes put on one plane, as a Coincident")),
+        ("alignment", optional(one_of(&["aligned", "opposed"], AXES))),
+        ("plane_alignment", optional(one_of(&["aligned", "opposed"], ALIGNMENT))),
         ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
     ]
 }
@@ -132,6 +180,8 @@ fn edit_params() -> Vec<(&'static str, Value)> {
             "flipped",
             optional(boolean("For a Width by dimension or percent: true measures from the second groove face")),
         ),
+        ("plane_alignment", optional(one_of(&["aligned", "opposed"], "For a Hinge: how its planes relate"))),
+        ("lock_rotation", optional(boolean("For a Concentric between axes: whether the turn about the axis is held"))),
     ]
 }
 
@@ -146,7 +196,7 @@ fn rename_params() -> Vec<(&'static str, Value)> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     let row = |id, label, doc| CommandSpec::new(id, label, Icon::Tree, doc).assembly();
     vec![
-        row("assembly_mate", "Mate", "Tie two components by their faces, planes or a lock")
+        row("assembly_mate", "Mate", "Tie two components by their faces, planes, axes, points or a lock")
             .on(Tab::Assembly, "Component", Size::Large)
             .run(|_| AppAction::Assembly(AssemblyAction::Mate(crate::mates::MateAction::Toggle)))
             .app_only("It opens the Mate panel; the assembly_mate tools add mates without it"),
@@ -204,6 +254,23 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
                 lock_params,
             )
             .undo(Undo::Step),
+        row("assembly_mate_concentric", "Concentric mate", "Put two axes on one line, or a point on an axis")
+            .agents(
+                Agents::Mcp,
+                "Axes and points are read exactly from the part's definitions; one off the world axes or not rational is refused.",
+                concentric_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_tangent", "Tangent mate", "Lay a cylinder or sphere against a plane")
+            .agents(
+                Agents::Mcp,
+                "The axis or centre sits one radius from the plane; the radius must be rational.",
+                tangent_params,
+            )
+            .undo(Undo::Step),
+        row("assembly_mate_hinge", "Hinge mate", "Put two axes on one line and two planes on one plane")
+            .agents(Agents::Mcp, "A Concentric and a Coincident under one name; no limits.", hinge_params)
+            .undo(Undo::Step),
         row("assembly_set_value", "Set value", "Add or change an assembly value")
             .agents(Agents::Mcp, "Solves everything the value drives in the same step.", value_params)
             .undo(Undo::Step),
@@ -213,7 +280,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_drive_mate", "Drive mate", "Bind a mate's distance to assembly values")
             .agents(Agents::Mcp, "A distance has one driver.", drive_params)
             .undo(Undo::Step),
-        row("assembly_edit_mate", "Edit mate", "Change a mate's distance, alignment, axes, percentage or side")
+        row("assembly_edit_mate", "Edit mate", "Change a mate's distance, alignment, axes, percentage, side or rotation lock")
             .agents(Agents::Mcp, "A driven distance is refused: edit the value that drives it.", edit_params)
             .undo(Undo::Step),
         row("assembly_delete_mate", "Delete mate", "Remove a mate and leave the components where they are")

@@ -205,7 +205,8 @@ fn faces_are_found_or_refused_by_what_they_are() {
     assert!(malformed.to_string().contains("alignment"), "{malformed}");
     assert_eq!(r.accepted(), before);
 
-    // A curved face has no plane, and a face placed off the world axes is not proved.
+    // A curved face has no plane to measure, and a face placed off the world axes is not
+    // proved.
     let (round, turned) = (r.dir.join("round.dwprt"), r.dir.join("b.dwprt"));
     r.ok("new_part", json!({}));
     let circle = json!({ "shape": "circle", "center": [0, 0, 0], "diameter": 10 });
@@ -230,9 +231,17 @@ fn faces_are_found_or_refused_by_what_they_are() {
         .map(|c| c["path"].as_str().unwrap().parse().unwrap())
         .collect();
     let [_, _, round, turned, upright] = paths[..] else { panic!("{paths:?}") };
-    let curved = coincident("C", read(round, "side"), side(2, x), "aligned");
-    let said = r.refused(tool, curved, "unsupported_plane");
-    assert_eq!(said["mates"], json!(["C"]), "{said}");
+    let curved = json!({ "a": read(round, "side"), "b": side(2, x) });
+    r.refused("assembly_measure_planes", curved, "unsupported_plane");
+    // A Coincident between a cylinder and a plane puts the axis in the plane.
+    let mated = r.ok(tool, coincident("C", read(round, "side"), side(2, x), "aligned"));
+    let at = |m: &Value, path: u64| {
+        let all = m["assembly"]["components"].as_array().unwrap();
+        all.iter().find(|c| c["path"].as_str().and_then(|p| p.parse().ok()) == Some(path)).unwrap()["translation"]
+            .clone()
+    };
+    assert_eq!(at(&mated, round), json!([20.0, 80.0, 0.0]));
+    r.ok("assembly_delete_mate", json!({ "mate": "C" }));
     // Measuring reads the placements as they stand, so a face placed off the world axes is
     // not proved.
     let measured = json!({ "a": side(turned, x), "b": side(upright, x) });

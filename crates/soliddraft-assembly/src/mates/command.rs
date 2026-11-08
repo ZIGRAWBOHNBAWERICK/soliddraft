@@ -1267,3 +1267,105 @@ fn signed_gap(a: &PlaneProof, b: &PlaneProof, placements: &[Placement; 2]) -> Re
     };
     Ok(side * (tb - ta) + relation * offset(b)? - offset(a)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::path::Step;
+
+    fn q(n: i64, d: i64) -> BigRational {
+        BigRational::new(BigInt::from(n), BigInt::from(d))
+    }
+
+    fn body(id: u32) -> Body {
+        OccurrencePath::root().child(Step::component(ComponentId(id)))
+    }
+
+    fn plane(normal: [i8; 3], offset: i64) -> Read {
+        Read { body: body(2), local: Local::Plane(LocalPlane { normal, offset: q(offset, 1) }), radius: None }
+    }
+
+    fn shaft(squared: BigRational, outward: Option<bool>) -> Read {
+        let value = rational_root(&squared).ok_or(squared);
+        Read {
+            body: body(4),
+            local: Local::Axis(LocalAxis { direction: [0, 0, 1], through: [q(0, 1), q(0, 1), q(0, 1)] }),
+            radius: Some(Radius { value, outward }),
+        }
+    }
+
+    fn gap(c: &[Constraint]) -> BigRational {
+        let [Constraint::FromPlane { gap, .. }] = c else { panic!("one constraint from the plane: {c:?}") };
+        gap.clone()
+    }
+
+    #[test]
+    fn rational_roots_are_exact_or_absent() {
+        assert_eq!(rational_root(&q(16, 9)), Some(q(4, 3)));
+        assert_eq!(rational_root(&q(0, 1)), Some(q(0, 1)));
+        assert_eq!(rational_root(&q(2, 1)), None);
+        assert_eq!(rational_root(&q(-4, 1)), None);
+    }
+
+    /// A shaft lies in front of a plane it meets opposed, a bore's wall behind it, and the
+    /// other way round when aligned.
+    #[test]
+    fn a_tangent_puts_the_axis_one_radius_from_the_plane_on_the_right_side() {
+        let tangent = |outward: bool, sign: i8| {
+            let reads = vec![plane([0, 0, 1], 10), shaft(q(16, 1), Some(outward))];
+            gap(&constraint("T".into(), reads, &Rule::Tangent { sign }).unwrap())
+        };
+        assert_eq!(tangent(true, -1), q(4, 1));
+        assert_eq!(tangent(true, 1), q(-4, 1));
+        assert_eq!(tangent(false, -1), q(-4, 1));
+        assert_eq!(tangent(false, 1), q(4, 1));
+    }
+
+    #[test]
+    fn a_tangent_refuses_an_irrational_radius_and_an_edge_by_name() {
+        let reads = vec![plane([0, 0, 1], 10), shaft(q(2, 1), Some(true))];
+        let refused = constraint("T".into(), reads, &Rule::Tangent { sign: -1 }).unwrap_err();
+        assert_eq!((refused.code, refused.mates.clone()), (RefusalCode::UnsupportedReference, vec!["T".to_owned()]));
+        assert!(refused.message.contains("radius squared is 2"), "{}", refused.message);
+        let reads = vec![plane([0, 0, 1], 10), shaft(q(16, 1), None)];
+        let refused = constraint("T".into(), reads, &Rule::Tangent { sign: -1 }).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::UnsupportedReference);
+    }
+
+    #[test]
+    fn a_distance_across_two_axes_is_refused_and_a_coincident_one_is_coaxial() {
+        let axes = || vec![shaft(q(16, 1), Some(true)), Read { body: body(2), ..shaft(q(16, 1), Some(false)) }];
+        let distance = Rule::Parallel { sign: 1, distance: Some(5.0), coincident: false };
+        let refused = constraint("D".into(), axes(), &distance).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::UnsupportedReference);
+        let coincident = Rule::Parallel { sign: 1, distance: Some(0.0), coincident: true };
+        let made = constraint("C".into(), axes(), &coincident).unwrap();
+        assert!(matches!(made[..], [Constraint::Axes { coaxial: true, sign: 1, .. }]));
+    }
+
+    #[test]
+    fn a_plane_and_an_axis_read_from_either_end_measure_from_the_plane() {
+        let rule = Rule::Parallel { sign: 1, distance: Some(3.0), coincident: false };
+        for reads in [
+            vec![plane([0, 0, 1], 10), shaft(q(16, 1), Some(true))],
+            vec![shaft(q(16, 1), Some(true)), plane([0, 0, 1], 10)],
+        ] {
+            let made = constraint("D".into(), reads, &rule).unwrap();
+            let [Constraint::FromPlane { a, b, gap, direction, .. }] = &made[..] else { panic!("{made:?}") };
+            assert_eq!((a, b, gap, direction), (&body(2), &body(4), &q(3, 1), &Some([0, 0, 1])));
+        }
+    }
+
+    #[test]
+    fn concentric_takes_no_planes_and_locks_quarter_turns_only() {
+        let rule = Rule::Concentric { sign: Some(1), lock: None };
+        let refused = constraint("C".into(), vec![plane([0, 0, 1], 0), shaft(q(1, 1), Some(true))], &rule).unwrap_err();
+        assert_eq!(refused.code, RefusalCode::UnsupportedReference);
+        let axes = || vec![Read { body: body(2), ..shaft(q(16, 1), Some(false)) }, shaft(q(16, 1), Some(true))];
+        let skew = Rule::Concentric { sign: Some(1), lock: Some([[1, 1, 0], [0, 1, 0], [0, 0, 1]]) };
+        assert_eq!(constraint("C".into(), axes(), &skew).unwrap_err().code, RefusalCode::UnsupportedPlacement);
+        let quarter = Rule::Concentric { sign: Some(1), lock: Some([[0, -1, 0], [1, 0, 0], [0, 0, 1]]) };
+        let made = constraint("C".into(), axes(), &quarter).unwrap();
+        assert!(matches!(made[..], [Constraint::Axes { .. }, Constraint::Turn { .. }]));
+    }
+}

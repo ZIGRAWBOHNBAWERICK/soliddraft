@@ -269,8 +269,8 @@ impl AssemblyDocument {
             Entity::Face(face) => Proved::Face(face.feature, face.generator.clone(), face.ordinal),
             Entity::Plane(PartPlane::Datum { datum }) => Proved::Datum(*datum),
             Entity::Plane(PartPlane::Feature { feature, .. }) => Proved::Plane(*feature),
-            Entity::Edge(edge) => Proved::Named(serde_json::to_string(&edge.faces).unwrap_or_default()),
-            Entity::Vertex(vertex) => Proved::Named(serde_json::to_string(&vertex.faces).unwrap_or_default()),
+            Entity::Edge(edge) => Proved::Named(serde_json::to_string(edge).unwrap_or_default()),
+            Entity::Vertex(vertex) => Proved::Named(serde_json::to_string(vertex).unwrap_or_default()),
         };
         let key = (id, r.pinned.clone(), what);
         let proof = match self.proofs.supports.get(&key) {
@@ -524,6 +524,11 @@ fn support_of(
     entity: SupportEntity,
 ) -> Result<SupportProof, MateRefusal> {
     let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+    let label = match entity {
+        SupportEntity::Face(face) => part.face_label(face).map(|l| l.text).unwrap_or_default(),
+        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
+        SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
+    };
     let support = part.kernel().entity_support(body, entity).map_err(|e| {
         let planar = match entity {
             SupportEntity::Face(face) => part
@@ -539,13 +544,9 @@ fn support_of(
             KernelError::Unsupported(_) => RefusalCode::UnsupportedReference,
             _ => RefusalCode::ProofUnavailable,
         };
-        MateRefusal::new(code, format!("{}: {e}", r.path))
+        let named = if label.is_empty() { String::new() } else { format!(", {label}") };
+        MateRefusal::new(code, format!("{}{named}: {e}", r.path))
     })?;
-    let label = match entity {
-        SupportEntity::Face(face) => part.face_label(face).map(|l| l.text).unwrap_or_default(),
-        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
-        SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
-    };
     Ok(SupportProof { document, revision: r.pinned.clone(), geometry: part.geometry_hash(), support, label })
 }
 

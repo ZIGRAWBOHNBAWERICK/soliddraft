@@ -17,6 +17,11 @@ fn refused(what: String) -> KernelError {
     KernelError::Unsupported(format!("proven support plane: {what}"))
 }
 
+/// A refusal of an exact axis or point.
+fn unsupported(what: String) -> KernelError {
+    KernelError::Unsupported(format!("exact support: {what}"))
+}
+
 fn exact(value: &Rational) -> ExactRational {
     ExactRational { numerator: value.numerator().to_string(), denominator: value.denominator().to_string() }
 }
@@ -80,17 +85,17 @@ fn axis_support(
     radius: Option<ExactRadius>,
     source: SupportSource,
 ) -> KernelResult<ExactSupport> {
-    let not_rational = || refused(format!("the axis of {what} is not structurally rational"));
+    let not_rational = || unsupported(format!("the axis of {what} is not structurally rational"));
     let (axis, positive) = direction_of(direction)
         .ok_or_else(not_rational)?
-        .ok_or_else(|| refused(format!("{what} is not axis-aligned")))?;
+        .ok_or_else(|| unsupported(format!("{what} is not axis-aligned")))?;
     let through = point_of(through).ok_or_else(not_rational)?;
     Ok(ExactSupport::Axis(ExactAxis { axis, positive, through, radius, source }))
 }
 
 fn radius(what: &str, squared: &Real, outward: Option<bool>) -> KernelResult<ExactRadius> {
     let squared =
-        rational(squared).ok_or_else(|| refused(format!("the radius of {what} is not structurally rational")))?;
+        rational(squared).ok_or_else(|| unsupported(format!("the radius of {what} is not structurally rational")))?;
     Ok(ExactRadius { squared: exact(&squared), outward })
 }
 
@@ -119,14 +124,14 @@ pub(super) fn entity_support(k: &CatallaxKernel, body: BodyId, entity: SupportEn
                 Surface::Cone(c) => axis_support(&what, &c.axis, &c.apex, None, SupportSource::Cone),
                 Surface::Sphere(s) => {
                     let r = rational(&s.radius)
-                        .ok_or_else(|| refused(format!("the radius of {what} is not structurally rational")))?;
+                        .ok_or_else(|| unsupported(format!("the radius of {what} is not structurally rational")))?;
                     let squared = exact(&(&r * &r));
                     let at = point_of(&s.center)
-                        .ok_or_else(|| refused(format!("the centre of {what} is not structurally rational")))?;
+                        .ok_or_else(|| unsupported(format!("the centre of {what} is not structurally rational")))?;
                     let radius = Some(ExactRadius { squared, outward });
                     Ok(ExactSupport::Point(ExactPoint { at, radius, source: SupportSource::Sphere }))
                 }
-                _ => Err(refused(format!("{what} is not a plane, cylinder, cone or sphere"))),
+                _ => Err(unsupported(format!("{what} is not a plane, cylinder, cone or sphere"))),
             }
         }
         SupportEntity::Edge(edge) => {
@@ -143,7 +148,7 @@ pub(super) fn entity_support(k: &CatallaxKernel, body: BodyId, entity: SupportEn
                     let r = radius(&what, &c.radius_sq, None)?;
                     axis_support(&what, &c.normal, &c.center, Some(r), SupportSource::Circle)
                 }
-                _ => Err(refused(format!("{what} is not a line or a circle"))),
+                _ => Err(unsupported(format!("{what} is not a line or a circle"))),
             }
         }
         SupportEntity::Vertex(vertex) => {
@@ -156,10 +161,10 @@ pub(super) fn entity_support(k: &CatallaxKernel, body: BodyId, entity: SupportEn
             let what = vertex.to_string();
             match model.geom().point(model.vertex(id).point) {
                 PointDef::Explicit(p) => {
-                    let at = point_of(p).ok_or_else(|| refused(format!("{what} is not structurally rational")))?;
+                    let at = point_of(p).ok_or_else(|| unsupported(format!("{what} is not structurally rational")))?;
                     Ok(ExactSupport::Point(ExactPoint { at, radius: None, source: SupportSource::Vertex }))
                 }
-                PointDef::Meet(_) => Err(refused(format!("{what} is defined where surfaces meet, not as a point"))),
+                PointDef::Meet(_) => Err(unsupported(format!("{what} is defined where surfaces meet, not as a point"))),
             }
         }
     }
@@ -184,7 +189,7 @@ mod tests {
     }
 
     fn extruded(k: &CatallaxKernel, tag: &str, profile: &Profile, depth: f64) -> BodyId {
-        let base = k.create_body_from_profile(&OpTag::new(&format!("{tag}-p")), profile).unwrap();
+        let base = k.create_body_from_profile(&OpTag::new(format!("{tag}-p")), profile).unwrap();
         k.extrude(&OpTag::new(tag), base.body, &Extrude { distance: depth, direction: None }).unwrap().body
     }
 

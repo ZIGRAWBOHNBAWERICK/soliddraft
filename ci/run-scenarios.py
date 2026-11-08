@@ -30,7 +30,8 @@ PHASES = ("construction", "edit", "display", "measurement", "refusal")
 DISPLAY = {"mesh", "display", "tessellate", "tessellate_edges", "preview", "preview_edges", "view_curves",
            "section_view"}
 MEASUREMENT = {"mass_properties", "measured_topology", "face_area", "face_centroid", "face_bounding_box",
-               "bounding_box", "edge_length", "edge_midpoint", "inertia", "field_mass", "face_support_plane"}
+               "bounding_box", "edge_length", "edge_midpoint", "inertia", "field_mass", "face_support_plane",
+               "entity_support"}
 TREND_NOISE_MS = 25
 # The one hang guard for every MCP request and CLI command: generous, never a speed limit.
 HANG_TIMEOUT_S = 600

@@ -468,6 +468,40 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     );
     let clearance = s.call("assembly_check_clearance", json!({ "clearance": "0.5 mm" }));
     assert_eq!(clearance["report"]["clearance_mm"], 0.5);
+    // The B2 families, on two pins: each added and taken away again.
+    s.call("assembly_show_part", json!({}));
+    s.call("new_part", json!({}));
+    s.call("sketch", json!({ "plane": "top", "shapes": [{ "shape": "circle", "center": [0, 0, 0], "diameter": 8 }] }));
+    s.call("extrude", json!({ "sketch": "Sketch1", "depth": 30, "flip": false }));
+    let pin = s.path("pin.dwprt");
+    s.call("save", json!({ "path": pin }));
+    s.call("show_assembly", json!({}));
+    s.call("insert_component", json!({ "paths": [pin] }));
+    let pins = s.call("insert_component", json!({ "paths": [pin] }));
+    let pins: Vec<u64> = pins["assembly"]["components"].as_array().unwrap()[2..]
+        .iter()
+        .map(|c| c["path"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let shaft = |c: u64| json!({ "component": c, "feature": "Boss-Extrude1", "generator": "side" });
+    let concentric = json!({ "name": "CC", "a": shaft(pins[0]), "b": shaft(pins[1]), "lock_rotation": true });
+    let held = s.call("assembly_mate_concentric", concentric);
+    let row = held["assembly"]["mates"].as_array().unwrap().iter().find(|m| m["name"] == "CC").unwrap().clone();
+    assert_eq!((row["kind"].as_str(), row["lock_rotation"].as_bool()), (Some("concentric"), Some(true)));
+    assert_eq!(row["a"]["support"]["kind"], "axis");
+    s.call("assembly_edit_mate", json!({ "mate": "CC", "lock_rotation": false }));
+    s.call("assembly_delete_mate", json!({ "mate": "CC" }));
+    let tangent = json!({ "name": "T", "a": top, "b": shaft(pins[0]), "alignment": "opposed" });
+    s.call("assembly_mate_tangent", tangent);
+    s.call("assembly_delete_mate", json!({ "mate": "T" }));
+    let hinge = json!({
+        "name": "H",
+        "axes": [shaft(pins[0]), shaft(pins[1])],
+        "planes": [cap(pins[0], "Boss-Extrude1", "end_cap"), cap(pins[1], "Boss-Extrude1", "start_cap")],
+        "plane_alignment": "opposed",
+    });
+    s.call("assembly_mate_hinge", hinge);
+    s.call("assembly_delete_mate", json!({ "mate": "H" }));
+
     // The second part moves into a file of its own, placed where it was, in one undo step.
     let at = parts[1].to_string();
     let module = s.path("module.dwasm");

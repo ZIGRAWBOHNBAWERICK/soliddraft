@@ -73,9 +73,12 @@ fn click_at(h: &mut App<'_>, pos: Pos2) {
     h.run_steps(3);
 }
 
+/// Scrolls the button into view before sending a real pointer click.
 fn button(h: &mut App<'_>, name: &str) {
-    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().click();
-    h.run_steps(4);
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().scroll_to_me();
+    h.run_steps(24);
+    let pos = h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().rect().center();
+    click_at(h, pos);
 }
 
 /// The tree row of the occurrence called `name`.

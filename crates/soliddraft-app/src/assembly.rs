@@ -165,6 +165,8 @@ struct Outbox {
     meshes: Vec<(DefinitionIndex, SharedMesh)>,
     levels: Vec<(DefinitionIndex, Level, SharedMesh)>,
     deviations: Vec<(DefinitionIndex, [f32; 3])>,
+    /// The scene generation the indices above belong to.
+    generation: u64,
     /// The pass the last batch went with.
     sent_at: Option<u64>,
 }
@@ -245,15 +247,18 @@ impl AssemblySession {
     fn frame(&mut self, ctx: &egui::Context) -> AssemblyFrame {
         let pass = ctx.cumulative_pass_nr();
         let resend = ctx.current_pass_index() > 0 && self.outbox.sent_at.is_some_and(|p| p + 1 == pass);
-        if !resend {
+        let (meshes, levels, generation) = {
+            let mut scene = self.scene.lock().expect("the scene lock");
+            (scene.take_new_meshes(MESHES_PER_FRAME), scene.take_new_levels(), scene.generation())
+        };
+        // A batch from before the scene was rebuilt names definitions by old numbers; the
+        // rebuild queued every mesh again under the new ones.
+        if !resend || self.outbox.generation != generation {
             self.outbox.meshes.clear();
             self.outbox.levels.clear();
             self.outbox.deviations.clear();
+            self.outbox.generation = generation;
         }
-        let (meshes, levels) = {
-            let mut scene = self.scene.lock().expect("the scene lock");
-            (scene.take_new_meshes(MESHES_PER_FRAME), scene.take_new_levels())
-        };
         let store = self.doc.store();
         for d in meshes {
             if let Some(m) = store.get(d).mesh.clone() {
@@ -272,6 +277,7 @@ impl AssemblySession {
         self.outbox.sent_at = Some(pass);
         AssemblyFrame {
             scene: self.scene.clone(),
+            generation,
             meshes: self.outbox.meshes.clone(),
             // The viewport sets the camera.
             view_proj: DMat4::IDENTITY,

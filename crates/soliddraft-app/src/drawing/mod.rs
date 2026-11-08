@@ -1628,17 +1628,38 @@ pub(crate) fn run_command(state: &mut AppState, cmd: Command) -> Result<(), Stri
 
 /// Undoes the drawing's last step, returning its label.
 pub(crate) fn undo(s: &mut DrawingSession) -> Option<String> {
+    let sheet = s.doc.drawing.sheets.get(s.sheet).map(|sheet| sheet.name.clone());
     let label = s.doc.undo();
-    s.selection = None;
-    s.fold_cache.clear();
+    if label.is_some() {
+        after_history(s, sheet);
+    }
     label
 }
 
 /// Redoes the drawing's last undone step, returning its label.
 pub(crate) fn redo(s: &mut DrawingSession) -> Option<String> {
+    let sheet = s.doc.drawing.sheets.get(s.sheet).map(|sheet| sheet.name.clone());
     let label = s.doc.redo();
-    s.selection = None;
+    if label.is_some() {
+        after_history(s, sheet);
+    }
     label
+}
+
+fn after_history(s: &mut DrawingSession, sheet: Option<String>) {
+    let index = sheet
+        .and_then(|name| s.doc.drawing.sheets.iter().position(|sheet| sheet.name == name))
+        .unwrap_or_else(|| s.sheet.min(s.doc.drawing.sheets.len() - 1));
+    s.needs_fit |= index != s.sheet;
+    s.sheet = index;
+    s.set_tool(DrawingTool::Select);
+    s.selection = None;
+    s.hover = None;
+    s.hover_label = None;
+    s.drag = None;
+    s.note_edit = None;
+    s.sheet_rename = None;
+    s.attention_focus = None;
 }
 
 /// Model items: imports the part's own dimensions into the current sheet's views, one
@@ -1759,6 +1780,9 @@ pub(crate) fn write_sheet(
     format: export::Format,
     path: &Path,
 ) -> Result<SheetExport, String> {
+    if !matches!(format, export::Format::Pdf) && s.doc.drawing.sheets.get(s.sheet).is_none() {
+        return Err("The current sheet is no longer available; select a sheet before exporting".into());
+    }
     let stale = s.doc.stale_views();
     let (drawing, redrawn) = certified(&s.doc.drawing, part)?;
     let drawing = drawing.as_ref().unwrap_or(&s.doc.drawing);

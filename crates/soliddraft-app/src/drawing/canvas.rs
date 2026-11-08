@@ -825,6 +825,10 @@ fn place_tool(
 ) {
     let Some(p) = pointer else { return };
     let sheet_i = s.sheet;
+    if s.doc.drawing.sheets.get(sheet_i).is_none() {
+        s.pending = None;
+        return;
+    }
     // Work out the view at the pointer, projecting (and caching) as needed.
     let pending: Option<PendingView> = match &kind {
         PlaceKind::Standard(v) => {

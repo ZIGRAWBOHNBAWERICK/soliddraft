@@ -451,3 +451,48 @@ fn axes_held_parallel_and_square() {
     assert!((p.rotation * DVec3::Z).z.abs() < 1e-12);
     assert_eq!(r.free().0, 5);
 }
+
+/// The bore's axis as the Concentric `C` stores it on A's end.
+fn stored_bore(doc: &AssemblyDocument) -> [f64; 3] {
+    let c = doc.assembly().known_mates().find(|m| m.name() == "C").expect("C");
+    let soliddraft_assembly::Mate::Concentric { a, .. } = c else { panic!("a Concentric") };
+    match &a.support {
+        Some(soliddraft_assembly::StoredSupport::Axis { through, .. }) => *through,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A's bore moves 5 mm along x in a new revision of A's file. Update proves the new axis
+/// to put the shaft on it, and stores that axis too, so the status and a reopened file
+/// read the axis where it now is.
+#[test]
+fn update_stores_the_axis_it_proved() {
+    let mut r = shaft_rig("update-axis");
+    let (bore, shaft) = (r.bore(), r.shaft());
+    r.doc.mate_concentric("C", &bore, &shaft, Alignment::Aligned, false, false).unwrap();
+    assert_eq!(stored_bore(&r.doc), [10.0, 5.0, 0.0]);
+    let a_file = r.dir.join("a.dwprt");
+    let mut part = Document::open(&a_file, kernel()).unwrap();
+    let id = part.features()[2].id;
+    let FeatureKind::Sketch(mut s) = part.feature(id).unwrap().kind.clone() else { panic!("the bore's sketch") };
+    // The circle and the point its centre is fixed at, 5 mm along x.
+    let along = P2::new(5.0, 0.0);
+    for e in s.sketch.entities.iter_mut().filter(|e| !e.construction) {
+        e.translate(along);
+    }
+    for c in &mut s.sketch.constraints {
+        if let soliddraft_model::sketch::ConstraintKind::Fix { at, .. } = &mut c.kind {
+            *at = P2::new(at.u + along.u, at.v + along.v);
+        }
+    }
+    solve(&mut s.sketch, None, true);
+    part.execute(Command::EditFeature { id, kind: FeatureKind::Sketch(s) }).unwrap();
+    part.save(&a_file).unwrap();
+
+    let report = r.doc.rebuild();
+    assert!(report.refusal.is_none(), "{report:?}");
+    assert_eq!(stored_bore(&r.doc), [15.0, 5.0, 0.0], "the stored axis is the one Update proved");
+    close(r.placement(r.b).translation, [15.0, 5.0, 30.0]);
+    r.doc.save(None).unwrap();
+    assert_eq!(stored_bore(&r.reopened()), [15.0, 5.0, 0.0]);
+}

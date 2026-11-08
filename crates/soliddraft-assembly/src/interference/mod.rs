@@ -498,14 +498,7 @@ impl AssemblyDocument {
                 .map(|p| self.table.find(p).ok_or_else(|| invalid(format!("the assembly has no occurrence {p}"))))
                 .collect::<Result<_, _>>()?,
         };
-        let mut rows: Vec<OccurrenceIndex> = roots
-            .into_iter()
-            .flat_map(|r| self.table.subtree(r))
-            .filter(|row| {
-                let f = self.table.flags(*row);
-                !f.has(Flags::SUPPRESSED) && !f.has(Flags::REMOVED) && (request.include_hidden || !f.has(Flags::HIDDEN))
-            })
-            .collect();
+        let mut rows: Vec<OccurrenceIndex> = roots.into_iter().flat_map(|r| self.table.subtree(r)).collect();
         rows.sort();
         rows.dedup();
         // A sub-assembly is known only at its pinned revision. One whose structure could
@@ -513,7 +506,7 @@ impl AssemblyDocument {
         // that revision does, not where the pin does. Either way its parts are left out
         // and it is listed, whether it is in the scope or above it.
         let unknown = |row: OccurrenceIndex| -> Option<String> {
-            if row == OccurrenceIndex::ROOT || !self.table.flags(row).has(Flags::ASSEMBLY) {
+            if !self.table.flags(row).has(Flags::ASSEMBLY) {
                 return None;
             }
             let def = self.store.get(self.table.definition(row));
@@ -526,19 +519,34 @@ impl AssemblyDocument {
                 _ => None,
             }
         };
+        // Down from the root, an occurrence's own hidden or suppressed flag is trusted only
+        // while every assembly above it is known at its pin, since an unknown one supplied
+        // the flag. The first unknown assembly on the way is listed instead.
         let mut unread: BTreeMap<OccurrenceIndex, String> = BTreeMap::new();
         let mut parts = Vec::new();
         for row in rows {
-            let mut known = true;
-            let mut at = Some(row);
-            while let Some(r) = at {
+            let mut chain = vec![row];
+            while let Some(up) = self.table.parent(*chain.last().expect("one row")) {
+                chain.push(up);
+            }
+            chain.pop(); // the root: always known, never hidden
+            let mut in_scope = true;
+            for &r in chain.iter().rev() {
+                let f = self.table.flags(r);
+                let out = f.has(Flags::REMOVED)
+                    || f.has(Flags::SUPPRESSED_SELF)
+                    || (!request.include_hidden && f.has(Flags::HIDDEN_SELF));
+                if out {
+                    in_scope = false;
+                    break;
+                }
                 if let Some(why) = unknown(r) {
                     unread.entry(r).or_insert(why);
-                    known = false;
+                    in_scope = false;
+                    break;
                 }
-                at = self.table.parent(r);
             }
-            if known && !self.table.flags(row).has(Flags::ASSEMBLY) {
+            if in_scope && !self.table.flags(row).has(Flags::ASSEMBLY) {
                 parts.push(Entry { row, path: self.table.path(row), label: self.label(row) });
             }
         }

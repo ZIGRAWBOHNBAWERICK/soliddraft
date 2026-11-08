@@ -434,6 +434,7 @@ fn a_turn_near_an_axis_is_not_exactly_touching() {
     assert_eq!(r.contact.len(), 1, "{r:#?}");
     assert_eq!(r.contact[0].point[2], 16.0);
     assert_eq!(r.clearance, Some(ClearanceOutcome::Below));
+}
 
 /// A root with A at the origin, B 100 mm along x and a sub-assembly S holding C 200 mm
 /// along x, all apart, saved. Returns the files and the root's components.
@@ -593,4 +594,41 @@ fn a_sub_assembly_shown_from_another_revision_leaves_the_check_incomplete() {
     let report = doc.check_interference(&CheckRequest::default()).unwrap();
     assert!(report.complete, "{:?}", report.skipped);
     assert_eq!((report.parts.len(), report.clear), (3, 3));
+}
+
+/// S pins C, visible, on top of A. S's file then hides or suppresses C in a new revision,
+/// and the root keeps its pin with no copy of the pinned structure. Asked for A, B and C by
+/// path, the check must not take C's flag from the new revision as a reason to leave it
+/// out quietly: it names S, and the check is not complete.
+#[test]
+fn a_part_hidden_or_suppressed_only_by_another_revision_is_not_left_out_quietly() {
+    for suppress in [false, true] {
+        let fx = nested_at(&format!("stale-flag-{suppress}"), 0.0);
+        let mut doc = fx.open();
+        let branch = Nested::branch(&doc);
+        let c_path = doc.table().path(doc.table().subtree(doc.table().find(&branch).unwrap())[1]);
+        let id = doc.id();
+        doc.assembly().save(&fx.root, id, None, &[]).unwrap();
+        let mut s = AssemblyDocument::open(&fx.sub, options()).unwrap();
+        let c = path(s.assembly().components[0].id);
+        match suppress {
+            true => s.set_suppressed(&[c], true).unwrap(),
+            false => s.set_hidden(&[c], true).unwrap(),
+        }
+        s.save(None).unwrap();
+
+        let mut doc = fx.open();
+        let ids: Vec<ComponentId> = doc.assembly().components.iter().map(|c| c.id).collect();
+        let mut named: Vec<OccurrencePath> = ids.iter().map(|c| path(*c)).filter(|p| *p != branch).collect();
+        named.push(c_path.clone());
+        let request = CheckRequest { scope: CheckScope::Occurrences(named), ..CheckRequest::default() };
+        let report = doc.check_interference(&request).unwrap();
+        assert!(!report.complete, "suppress {suppress}: {report:?}");
+        assert_eq!(report.parts.len(), 2, "suppress {suppress}");
+        assert_eq!(report.skipped.len(), 1, "suppress {suppress}: {:?}", report.skipped);
+        assert_eq!(report.skipped[0].path, branch, "suppress {suppress}");
+        // The whole assembly says the same.
+        let report = doc.check_interference(&CheckRequest::default()).unwrap();
+        assert!(!report.complete && report.skipped[0].path == branch, "suppress {suppress}");
+    }
 }

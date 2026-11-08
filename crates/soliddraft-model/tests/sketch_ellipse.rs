@@ -5,8 +5,8 @@ use std::sync::Arc;
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::sketch::{EntityKind, P2, Sketch, solve};
 use soliddraft_model::{
-    Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, FeatureStatus, ProfileSource,
-    SketchFeature, SketchPlane,
+    BuiltinShape, Command, DatumPlane, Document, EndCondition, ExtrudeFeature, ExtrudeOp, FeatureKind, FeatureStatus,
+    ProfileSource, SketchFeature, SketchPlane,
 };
 
 #[test]
@@ -29,37 +29,61 @@ fn ellipse_and_partial_ellipse_sketches_build_with_their_analytic_volumes() {
         [("Ellipse", ellipse, 16.0 * std::f64::consts::PI), ("Partial ellipse", half, 8.0 * std::f64::consts::PI)]
     {
         solve::solve(&mut sketch, None, true);
-        let mut doc = Document::new(name, Arc::new(CatallaxKernel::new()));
-        let sketch_id = doc
-            .execute(Command::AddFeature {
-                kind: FeatureKind::Sketch(SketchFeature {
-                    plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 },
-                    sketch,
-                }),
-                name: None,
-                position: None,
-                via_assistant: false,
-            })
-            .unwrap()
-            .created
-            .unwrap();
-        let extrude_id = doc
-            .execute(Command::AddFeature {
-                kind: FeatureKind::Extrude(ExtrudeFeature {
-                    profile: ProfileSource::Sketch { feature: sketch_id },
-                    operation: ExtrudeOp::Boss,
-                    end: EndCondition::Blind { depth: 2.0 },
-                    reverse: false,
-                }),
-                name: None,
-                position: None,
-                via_assistant: false,
-            })
-            .unwrap()
-            .created
-            .unwrap();
-        assert_eq!(doc.status(extrude_id), Some(&FeatureStatus::Ok), "{name}");
-        let actual = doc.kernel().mass_properties(doc.body().unwrap()).unwrap().volume;
-        assert!((actual - expected).abs() < 1e-5, "{name}: {actual} != {expected}");
+        for cut in [false, true] {
+            let mut doc = Document::new(name, Arc::new(CatallaxKernel::new()));
+            if cut {
+                doc.execute(Command::AddFeature {
+                    kind: FeatureKind::Extrude(ExtrudeFeature {
+                        profile: ProfileSource::Shape {
+                            datum: DatumPlane::Top,
+                            shape: BuiltinShape::Rectangle { width: 12.0, height: 8.0 },
+                        },
+                        operation: ExtrudeOp::Boss,
+                        end: EndCondition::Blind { depth: 2.0 },
+                        reverse: false,
+                    }),
+                    name: None,
+                    position: None,
+                    via_assistant: false,
+                })
+                .unwrap();
+            }
+            let sketch_id = doc
+                .execute(Command::AddFeature {
+                    kind: FeatureKind::Sketch(SketchFeature {
+                        plane: SketchPlane::Datum { datum: DatumPlane::Top, offset: 0.0 },
+                        sketch: sketch.clone(),
+                    }),
+                    name: None,
+                    position: None,
+                    via_assistant: false,
+                })
+                .unwrap()
+                .created
+                .unwrap();
+            let extrude_id = doc
+                .execute(Command::AddFeature {
+                    kind: FeatureKind::Extrude(ExtrudeFeature {
+                        profile: ProfileSource::Sketch { feature: sketch_id },
+                        operation: if cut { ExtrudeOp::Cut } else { ExtrudeOp::Boss },
+                        end: EndCondition::Blind { depth: 2.0 },
+                        reverse: false,
+                    }),
+                    name: None,
+                    position: None,
+                    via_assistant: false,
+                })
+                .unwrap()
+                .created
+                .unwrap();
+            assert_eq!(doc.status(extrude_id), Some(&FeatureStatus::Ok), "{name}");
+            let expected = if cut { 12.0 * 8.0 * 2.0 - expected } else { expected };
+            let actual = doc.kernel().mass_properties(doc.body().unwrap()).unwrap().volume;
+            assert!((actual - expected).abs() < 1e-5, "{name} cut={cut}: {actual} != {expected}");
+            let reopened = Document::from_part_json(&doc.part_json(), Arc::new(CatallaxKernel::new())).unwrap();
+            assert_eq!(reopened.status(extrude_id), Some(&FeatureStatus::Ok));
+            let actual = reopened.kernel().mass_properties(reopened.body().unwrap()).unwrap().volume;
+            assert!((actual - expected).abs() < 1e-5, "reopened {name} cut={cut}: {actual} != {expected}");
+        }
     }
 }

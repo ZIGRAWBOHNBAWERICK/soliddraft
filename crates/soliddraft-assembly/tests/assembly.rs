@@ -560,3 +560,40 @@ fn the_first_save_changes_only_the_stored_path() {
     assert_ne!(doc.revision(), saved);
     assert_eq!(doc.assembly().geometry_hash(), before.geometry_hash());
 }
+
+/// Deleting many placements of one part takes time in proportion to the placements, not
+/// their square: twenty thousand copies, all but the first deleted at once, keep the
+/// shared source, and Undo brings every copy back.
+#[test]
+fn deleting_many_placements_of_one_part_scales() {
+    const COPIES: u32 = 20_000;
+    let dir = folder("delete-many");
+    let part = dir.join("a.dwprt");
+    let root = dir.join("rig.dwasm");
+    save_block(&part, 10.0, 10.0);
+    let mut truth = soliddraft_assembly::Assembly::new("Rig");
+    let source = truth.add_source(reference(&root, &part));
+    let ids: Vec<_> = (0..COPIES)
+        .map(|i| truth.add_component(source, Placement::translation(DVec3::new(f64::from(i) * 20.0, 0.0, 0.0))))
+        .collect();
+    truth.save(&root, soliddraft_document::DocumentId::new(), None, &[]).unwrap();
+    let mut doc = AssemblyDocument::open(&root, with_kernel()).unwrap();
+    doc.finish_loading();
+    assert_eq!(doc.table().counts().parts, COPIES as usize);
+
+    let started = std::time::Instant::now();
+    doc.delete(&ids[1..]).unwrap();
+    let took = started.elapsed();
+    assert_eq!(doc.assembly().sources.len(), 1, "the first copy still places the part");
+    assert_eq!(doc.table().counts().parts, 1);
+    let all = doc.table().bounds(soliddraft_assembly::OccurrenceIndex::ROOT);
+    assert!(
+        (all.max.x - 5.0).abs() < 1e-3 && (all.min.x + 5.0).abs() < 1e-3,
+        "only the first copy is bounded: {all:?}"
+    );
+    // Checking every copy against every other is 4e8 steps, which takes far longer.
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    assert!(doc.undo());
+    doc.finish_loading();
+    assert_eq!((doc.assembly().sources.len(), doc.table().counts().parts), (1, COPIES as usize));
+}

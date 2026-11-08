@@ -739,36 +739,77 @@ impl OccurrenceTable {
     /// Removes `i` and its subtree. Their rows stay, flagged removed, so other row
     /// numbers do not move. Returns the removed rows.
     pub fn remove(&mut self, i: OccurrenceIndex) -> Vec<OccurrenceIndex> {
-        let rows = self.subtree(i);
-        for r in &rows {
-            self.flags[r.0 as usize].set(Flags::REMOVED, true);
+        self.remove_all(&[i])
+    }
+
+    /// Removes each of `rows` with its subtree, as [`OccurrenceTable::remove`] does. Each
+    /// parent's children are relinked and its bounds redone once, however many of its
+    /// children go, so removing many rows takes time in proportion to them. Returns the
+    /// removed rows.
+    pub fn remove_all(&mut self, rows: &[OccurrenceIndex]) -> Vec<OccurrenceIndex> {
+        let mut removed = Vec::new();
+        let mut parents = Vec::new();
+        for &i in rows {
+            if self.flags[i.0 as usize].has(Flags::REMOVED) {
+                continue;
+            }
+            let subtree = self.subtree(i);
+            for r in &subtree {
+                self.flags[r.0 as usize].set(Flags::REMOVED, true);
+            }
+            removed.extend(subtree);
+            let parent = self.parent[i.0 as usize];
+            if parent != NONE {
+                self.by_step.remove(&(parent, self.step[i.0 as usize]));
+                parents.push(parent);
+            }
         }
-        let parent = self.parent[i.0 as usize];
-        if parent != NONE {
-            self.by_step.remove(&(parent, self.step[i.0 as usize]));
-            // Unlink from the parent's children.
-            let mut prev = NONE;
+        parents.sort_unstable();
+        parents.dedup();
+        // Unlink the removed children, one pass over each parent's list.
+        for &parent in &parents {
+            let (mut first, mut last) = (NONE, NONE);
             let mut c = self.first_child[parent as usize];
-            while c != NONE && c != i.0 {
-                prev = c;
-                c = self.next_sibling[c as usize];
+            while c != NONE {
+                let next = self.next_sibling[c as usize];
+                if !self.flags[c as usize].has(Flags::REMOVED) {
+                    match last {
+                        NONE => first = c,
+                        l => self.next_sibling[l as usize] = c,
+                    }
+                    last = c;
+                }
+                c = next;
             }
-            let next = self.next_sibling[i.0 as usize];
-            if prev == NONE {
-                self.first_child[parent as usize] = next;
-            } else {
-                self.next_sibling[prev as usize] = next;
+            if last != NONE {
+                self.next_sibling[last as usize] = NONE;
             }
-            if self.last_child[parent as usize] == i.0 {
-                self.last_child[parent as usize] = prev;
+            self.first_child[parent as usize] = first;
+            self.last_child[parent as usize] = last;
+        }
+        // Redo the bounds of each parent and every assembly above it, deepest first, once.
+        let depth = |mut r: u32| {
+            let mut d = 0;
+            while self.parent[r as usize] != NONE {
+                r = self.parent[r as usize];
+                d += 1;
             }
+            d
+        };
+        let mut above: Vec<(usize, u32)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for &parent in &parents {
             let mut p = parent;
-            while p != NONE {
-                self.bounds[p as usize] = self.children_bounds(p);
+            while p != NONE && seen.insert(p) {
+                above.push((depth(p), p));
                 p = self.parent[p as usize];
             }
         }
-        rows
+        above.sort_unstable_by(|a, b| b.cmp(a));
+        for (_, p) in above {
+            self.bounds[p as usize] = self.children_bounds(p);
+        }
+        removed
     }
 
     /// Counts: rows that are parts and drawn, parts in all, and sub-assemblies.

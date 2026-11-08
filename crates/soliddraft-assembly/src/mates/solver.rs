@@ -1055,15 +1055,19 @@ impl<'a> Search<'a> {
             let (g, offset) = self.member[body];
             canonical((at[g].expect("a mate is placed only once its turns are chosen") * offset).normalize())
         };
-        let ready: Vec<&Constraint> = self
-            .constraints
-            .iter()
-            .zip(&self.placed_by)
-            .zip(active)
-            .filter(|((_, by), on)| **on && by.as_ref().is_some_and(|gs| gs.iter().all(|g| at[*g].is_some())))
-            .map(|((c, _), _)| c)
-            .collect();
-        match place(self.bodies, &asks(ready.iter().copied(), &turn)?) {
+        let mut ready: Vec<&Constraint> = Vec::new();
+        let mut waiting = false;
+        for ((c, by), on) in self.constraints.iter().zip(&self.placed_by).zip(active) {
+            match by {
+                Some(gs) if *on && gs.iter().all(|g| at[*g].is_some()) => ready.push(c),
+                Some(_) if *on => waiting = true,
+                _ => {}
+            }
+        }
+        // While a mate still waits for its turns, a bound may read a ratio that the mate
+        // would cancel: it is left out here and decided once every mate is in.
+        let scaled = if waiting { Scaled::Skip } else { Scaled::Refuse };
+        match place(self.bodies, &asks(ready.iter().copied(), &turn)?, scaled) {
             Ok(_) => Ok(None),
             Err(r) if r.code == RefusalCode::OverConstrained => Ok(Some(r)),
             Err(r) => Err(r),
@@ -1727,6 +1731,17 @@ fn shortest(nodes: usize, leqs: &[Leq], source: Option<usize>) -> Result<Vec<Opt
     Ok(dist)
 }
 
+/// What [`place`] does with a bound that reduces to a coordinate moving by a ratio.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scaled {
+    /// Refuse it by name: every mate is in, so nothing will reduce it further.
+    Refuse,
+    /// Leave it out: some mates are not in yet, and one may make it a difference or a
+    /// constant. Leaving a bound out only lets more through, so a conflict found without
+    /// it is still a conflict.
+    Skip,
+}
+
 /// Every body's coordinates along the three world axes, exactly, or why they cannot hold.
 ///
 /// Differences are walked per axis as a graph, each graph keeping its root where it is.
@@ -1738,6 +1753,7 @@ fn shortest(nodes: usize, leqs: &[Leq], source: Option<usize>) -> Result<Vec<Opt
 fn place<'a>(
     bodies: &'a BTreeMap<Body, Placement>,
     asks: &Asks<'a>,
+    scaled: Scaled,
 ) -> Result<[BTreeMap<&'a Body, BigRational>; 3], MateRefusal> {
     let mut trees = Vec::with_capacity(3);
     for axis in 0..3 {
@@ -1903,6 +1919,7 @@ fn place<'a>(
                 [(k, c)] if *c == -&one => (0, node_of[k]),
                 [(j, c), (k, d)] if *c == one && *d == -&one => (node_of[j], node_of[k]),
                 [(j, c), (k, d)] if *c == -&one && *d == one => (node_of[k], node_of[j]),
+                _ if scaled == Scaled::Skip => continue,
                 _ => {
                     let message = format!(
                         "{}: it bounds a coordinate that {} also move by a ratio; this version bounds only coordinates that move one for one",
@@ -1974,7 +1991,7 @@ pub(crate) fn solve(
     constraints: &[Constraint],
 ) -> Result<BTreeMap<Body, Placement>, MateRefusal> {
     let turned = rotations(bodies, constraints)?;
-    let coordinates = place(bodies, &asks(constraints, &|b: &Body| turned[b])?)?;
+    let coordinates = place(bodies, &asks(constraints, &|b: &Body| turned[b])?, Scaled::Refuse)?;
     Ok(bodies
         .iter()
         .map(|(body, authored)| {

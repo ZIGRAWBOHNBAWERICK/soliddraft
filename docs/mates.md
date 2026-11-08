@@ -373,7 +373,10 @@ The two steps are solved together. Which axis a distance's planes face decides w
 coordinate it moves, so a turn that keeps every normal right can still leave a distance
 that cannot hold, while another turn holds it exactly. The search therefore accepts turns
 only when the translations they leave also hold, checking each mate's translation as soon
-as its parts' turns are chosen, and backtracks otherwise. Turns that take a group's mated
+as its parts' turns are chosen, and backtracks otherwise. While some mates still wait for
+their parts' turns, a bound that reads a ratio is left out of that check, because a mate not
+yet in may make it a difference or a constant; it is refused only if it still reads a ratio
+once every mate is in. Turns that take a group's mated
 normals onto the same axes decide the same, so only one of them is tried. An assembly is
 over-constrained only when no supported turns work. The refusal then names a smallest set
 of mates that cannot hold together under any of them, with what each mate asks in the pose

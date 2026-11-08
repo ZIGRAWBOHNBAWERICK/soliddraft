@@ -167,6 +167,15 @@ type Inserted<'a> = (&'a dyn Fn(&Path), Placement);
 /// Each part made by its maker and inserted where it says; the first is held at the
 /// origin by O.
 fn rig(name: &str, parts: &[Inserted]) -> Rig {
+    let mut rig = loose(name, parts);
+    let first = rig.ids[0];
+    rig.doc.mate_origin("O", first, true, false).unwrap();
+    rig.doc.save(None).unwrap();
+    rig
+}
+
+/// Each part made by its maker and inserted where it says, with no mate yet.
+fn loose(name: &str, parts: &[Inserted]) -> Rig {
     let dir = folder(name);
     let root = dir.join("rig.dwasm");
     let mut doc = AssemblyDocument::new_with("Rig", options());
@@ -179,7 +188,6 @@ fn rig(name: &str, parts: &[Inserted]) -> Rig {
         opened.push(Part::open(&file));
     }
     doc.finish_loading();
-    doc.mate_origin("O", ids[0], true, false).unwrap();
     doc.save(None).unwrap();
     Rig { dir, root, doc, ids, parts: opened }
 }
@@ -327,6 +335,43 @@ fn a_linear_coupler_moves_one_part_by_a_ratio_of_another() {
     // C rides along with B (10) and slides on by as much again (10).
     assert_eq!(s.placement(2), at(70.0, -5.0, 2.0));
     s.reopen();
+}
+
+/// A slides three for B's one, B one for C's one, and C is held where it is, so all three
+/// stay put. A limit on B less A reads 2A only while C's turn is unchosen; with every mate
+/// it is 0 to 20 around zero, and holds. A Parallel that changes which turn the search
+/// picks first must not trip on that half-way form. The parts take every component order.
+#[test]
+fn a_limit_a_later_coupler_makes_constant_holds_in_any_component_order() {
+    let cube = block(10.0, 10.0, 10.0);
+    let three: [Inserted; 3] = [(&cube, Placement::IDENTITY); 3];
+    for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+        let mut r = loose(&format!("limit-coupled-{order:?}"), &three);
+        // A, B and C by the order they were inserted in.
+        let [a, b, c] = order.map(|k| r.face(k, X));
+        let held = r.ids[order[2]];
+        r.doc.mate_origin("O", held, false, false).unwrap();
+        r.doc.mate_linear_coupler("K1", &a, &b, [None, None], [1.0, 3.0], false, false).unwrap();
+        r.doc.mate_linear_coupler("K2", &b, &c, [None, None], [1.0, 1.0], false, false).unwrap();
+        r.doc.mate_limit_distance("L", &a, &b, ["0 mm", "20 mm"], Alignment::Aligned, false).unwrap();
+        r.doc.mate_parallel("P", &a, &c, Alignment::Aligned, false).unwrap_or_else(|e| panic!("{order:?}: {e}"));
+        for i in 0..3 {
+            assert_eq!(r.placement(i), Placement::IDENTITY, "{order:?}: nothing moves");
+        }
+        r.reopen();
+    }
+    // Without K2 nothing makes the bound constant: a limit on a coordinate that a coupler
+    // scales is still refused by name.
+    let mut r = loose("limit-scaled", &three);
+    let [a, b, c] = [0, 1, 2].map(|k| r.face(k, X));
+    r.doc.mate_origin("O", r.ids[2], false, false).unwrap();
+    r.doc.mate_linear_coupler("K1", &a, &b, [None, None], [1.0, 3.0], false, false).unwrap();
+    r.doc.mate_parallel("P", &a, &c, Alignment::Aligned, false).unwrap();
+    let before = r.doc.assembly().clone();
+    let refused = r.doc.mate_limit_distance("L", &a, &b, ["0 mm", "20 mm"], Alignment::Aligned, false).unwrap_err();
+    assert_eq!(refused.code, RefusalCode::UnsupportedReference, "{}", refused.message);
+    assert!(refused.message.contains("one for one"), "{}", refused.message);
+    assert_eq!(r.doc.assembly(), &before);
 }
 
 /// B's bottom stays 5 to 10 above A's top: brought down to 10, kept where a move inside the

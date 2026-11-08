@@ -41,7 +41,12 @@ fn interference_clearance_and_hole_alignment_application_loops() {
                     .pointer(pointer)
                     .unwrap_or_else(|| panic!("{name} step {}: missing {pointer}: {output}", index + 1));
                 if let Some(expected) = check.get("equals") {
-                    assert_eq!(actual, expected, "{name} step {} {pointer}", index + 1);
+                    assert!(
+                        actual == expected
+                            || (actual.is_number() && expected.is_number() && actual.as_f64() == expected.as_f64()),
+                        "{name} step {} {pointer}: {actual} != {expected}",
+                        index + 1
+                    );
                 } else if let Some(expected) = check.get("approx") {
                     let delta = (actual.as_f64().unwrap() - expected.as_f64().unwrap()).abs();
                     assert!(

@@ -74,14 +74,21 @@ fn snapshot(h: &mut App<'_>, name: &str) {
     h.render().unwrap().save(dir.join(format!("{name}.png"))).unwrap();
 }
 
-#[test]
-fn check_interference_and_clearance_from_the_panel() {
-    let _guard = PANEL_TEST.lock().unwrap();
+fn gpu_available() -> bool {
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
         assert!(std::env::var_os("SOLIDDRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable");
         eprintln!("no GPU adapter; skipping");
+        return false;
+    }
+    true
+}
+
+#[test]
+fn check_interference_and_clearance_from_the_panel() {
+    let _guard = PANEL_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !gpu_available() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("soliddraft-interference-panel-{}", std::process::id()));
@@ -196,13 +203,17 @@ fn check_interference_and_clearance_from_the_panel() {
 
 #[test]
 fn check_hole_alignment_from_the_panel() {
-    let _guard = PANEL_TEST.lock().unwrap();
+    let _guard = PANEL_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !gpu_available() {
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("soliddraft-hole-panel-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let mut h: App<'static> = Harness::builder()
         .with_size(vec2(1600.0, 1000.0))
         .with_step_dt(1.0 / 60.0)
+        .wgpu()
         .build_eframe(|cc| SolidDraftApp::new(cc, soliddraft_app::new_document(), Automation::default()));
     h.run_steps(3);
     let a = dir.join("plate.dwprt");
@@ -219,11 +230,14 @@ fn check_hole_alignment_from_the_panel() {
         tool(st, "make_assembly", json!({}));
         tool(st, "assembly_save", json!({ "path": dir.join("rig.dwasm") }));
         tool(st, "insert_component", json!({ "paths": [a], "placement": { "translation": [0.25, 0, 10] } }));
+        st.push(AppAction::Assembly(AssemblyAction::Show));
+        st.push(AppAction::Assembly(AssemblyAction::ZoomFit));
     }
     settle(&mut h);
     button(&mut h, "Interference");
     h.get_by_label("Hole alignment").click();
     h.run_steps(3);
+    assert_eq!(h.state().state.assembly.interference.mode, Mode::HoleAlignment, "{:?}", texts(&h));
     h.state_mut().state.assembly.interference.max_deviation = "0.25 mm".into();
     button(&mut h, "Check");
     settle(&mut h);
@@ -232,6 +246,7 @@ fn check_hole_alignment_from_the_panel() {
     let (report, _) = draft.hole_report.as_ref().unwrap();
     assert_eq!((report.aligned, report.misaligned), (0, 1));
     assert!(has(&h, "0 aligned, 1 misaligned within 0.25 mm"), "{:?}", texts(&h));
+    snapshot(&mut h, "4-hole-alignment");
     let row = texts(&h).into_iter().find(|t| t.starts_with("Misaligned holes: ")).unwrap();
     h.get_by_value(&row).click();
     h.run_steps(3);

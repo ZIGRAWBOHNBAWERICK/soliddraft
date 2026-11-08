@@ -153,7 +153,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let d = &mut state.assembly.interference;
     ui.add_space(8.0);
     theme::section_label(ui, "Interference");
-    ui.horizontal_wrapped(|ui| {
+    // Wrapping can move a hovered choice to another row before the click releases.
+    ui.vertical(|ui| {
         ui.selectable_value(&mut d.mode, Mode::Interference, "Detect interference");
         ui.selectable_value(&mut d.mode, Mode::Clearance, "Verify clearance");
         ui.selectable_value(&mut d.mode, Mode::HoleAlignment, "Hole alignment");

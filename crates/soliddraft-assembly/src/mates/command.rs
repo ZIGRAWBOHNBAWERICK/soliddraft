@@ -731,7 +731,10 @@ impl AssemblyDocument {
                 .ok_or_else(|| MateRefusal::invalid(format!("no occurrence at {p}")))
         };
         let (a, b) = (at(&paths[0])?, at(&paths[1])?);
-        solver::cube_of(a.rotation.inverse() * b.rotation).ok_or_else(|| off_quarter_turns(mate))
+        // The product rounds even when both turns are exact, so it is read as the quarter
+        // turn it lies within 1e-12 of; the lock then holds that turn exactly.
+        let turn = crate::placement::canonical((a.rotation.inverse() * b.rotation).normalize());
+        solver::cube_of(turn).ok_or_else(|| off_quarter_turns(mate))
     }
 
     /// Adds a mate between two faces: a distance when one is given, else a Coincident.

@@ -969,7 +969,7 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
                 _ => "Pick a second point or line, or click to place a distance to the origin",
             });
         }
-        (None, None) => s.say("Pick a line, arc, circle or point to dimension"),
+        (None, None) => s.say("Pick a line, arc, circle, ellipse or point to dimension"),
         (Some(first), Some(second)) if second != first && s.dim_second.is_none() && !is_curve_sel(&s.sketch, first) => {
             s.dim_second = Some(second);
             s.say("Click to place the dimension");
@@ -2175,8 +2175,8 @@ pub fn relations_menu(ui: &mut egui::Ui, s: &mut SketchSession) -> Option<AppAct
         ("On line", "Select one point and one line"),
         ("On curve", "Select one point and one arc or circle"),
         ("Tangent", "Select a line and an arc or circle, or two arcs or circles"),
-        ("Equal", "Select two lines or two arcs or circles"),
-        ("Concentric", "Select two arcs or circles"),
+        ("Equal", "Select two lines, two circular curves, or two ellipses"),
+        ("Concentric", "Select two arcs, circles or ellipses"),
         ("Collinear", "Select two lines"),
         ("Symmetric", "Select two points or matching entities, then the axis line last"),
         ("Coradial", "Select two arcs or circles"),

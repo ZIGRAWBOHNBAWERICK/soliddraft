@@ -53,11 +53,12 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     assert_eq!(session(&app).sketch, before);
 
     ribbon::click_ribbon(&mut app, "Ellipse");
-    for p in [P2::ZERO, P2::new(30.0, 0.0), P2::new(0.0, 12.0)] {
+    for p in [P2::ZERO, P2::new(30.0, 0.0), P2::new(0.0, -12.0)] {
         pick(&mut app, p);
     }
     assert_eq!(session(&app).sketch.drawn().count(), 1);
     assert!(matches!(session(&app).sketch.drawn().next().unwrap().kind, EntityKind::Ellipse { .. }));
+    assert!(session(&app).sketch.drawn().next().unwrap().point(2).unwrap().v < 0.0);
     let saved = session(&app).sketch.clone();
     app.state_mut().state.push(AppAction::Undo);
     app.run_steps(6);
@@ -65,6 +66,17 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     app.state_mut().state.push(AppAction::Redo);
     app.run_steps(6);
     assert_eq!(session(&app).sketch, saved);
+
+    app.key_press(Key::D);
+    app.run_steps(4);
+    assert_eq!(session(&app).tool, Tool::Dimension);
+    for label in [P2::new(-45.0, 0.0), P2::new(0.0, 25.0)] {
+        pick(&mut app, P2::new(-30.0, 0.0));
+        pick(&mut app, label);
+    }
+    assert_eq!(session(&app).sketch.constraints.iter().filter(|c| c.is_dimension()).count(), 2);
+    assert_eq!(session(&app).sketch.status, soliddraft_app::sketch::SolveStatus::FullyDefined);
+    assert!(session(&app).sketch.drawn().next().unwrap().point(2).unwrap().v < 0.0);
 
     ribbon::click_ribbon(&mut app, "Partial ellipse");
     for p in [P2::new(60.0, 0.0), P2::new(80.0, 0.0), P2::new(60.0, 10.0), P2::new(80.0, 0.0), P2::new(40.0, 0.0)] {

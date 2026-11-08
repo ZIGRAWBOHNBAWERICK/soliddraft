@@ -124,12 +124,7 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
     for e in &sketch.entities {
         let d = match e.kind {
             EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. } => {
-                let needed = matches!(e.kind, EntityKind::EllipticArc { .. })
-                    || sketch
-                        .constraints
-                        .iter()
-                        .any(|c| matches!(c.kind, ConstraintKind::PointOn { entity, .. } if entity == e.id));
-                let (datum, internal) = ellipse::datum(&mut vars, e, needed);
+                let (datum, internal) = ellipse::datum(&mut vars, e);
                 for req in internal {
                     push(ConstraintRequest::highest_priority(req), None, &mut requests, &mut owners);
                 }
@@ -409,8 +404,10 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
 
     for e in &mut sketch.entities {
         if let Some(geometry) = crate::ellipse::Ellipse::of(e.kind) {
-            let minor =
-                geometry.center + geometry.axis().perp().normalized().scale(geometry.center.dist(geometry.minor));
+            let perpendicular = geometry.axis().perp().normalized();
+            let length =
+                geometry.center.dist(geometry.minor).copysign((geometry.minor - geometry.center).dot(perpendicular));
+            let minor = geometry.center + perpendicular.scale(length);
             e.set_point(2, minor);
             let geometry = crate::ellipse::Ellipse::of(e.kind).unwrap();
             if let EntityKind::EllipticArc { start, end, .. } = e.kind {
@@ -522,6 +519,7 @@ fn curve_point(datums: &HashMap<EntityId, Datum>, r: PointRef) -> Option<DatumPo
         Datum::Line(l) => Some(if r.index == 0 { l.p0 } else { l.p1 }),
         Datum::Point(p) => Some(*p),
         Datum::Circle(c) => Some(c.center),
+        Datum::Ellipse(_) => None,
     }
 }
 

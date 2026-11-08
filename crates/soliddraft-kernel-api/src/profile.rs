@@ -265,6 +265,30 @@ mod tests {
     }
 
     #[test]
+    fn ellipse_axes_and_partial_endpoints_are_checked() {
+        let center = Point2::new(0.0, 0.0);
+        let axis = Point2::new(4.0, 0.0);
+        let mut profile = Profile {
+            plane: Plane::XY,
+            outer: Loop(vec![Segment::Ellipse { center, axis, ratio: 0.5 }]),
+            holes: Vec::new(),
+        };
+        profile.check().unwrap();
+        profile.outer.0[0] = Segment::Ellipse { center, axis, ratio: -0.5 };
+        assert!(matches!(profile.check(), Err(ProfileError::Degenerate { .. })));
+        let from = Point2::new(4.0, 0.0);
+        let to = Point2::new(-4.0, 0.0);
+        profile.outer.0 = vec![
+            Segment::EllipticArc { center, axis, ratio: 0.5, from, to, clockwise: false },
+            Segment::Line { from: to, to: from },
+        ];
+        profile.check().unwrap();
+        profile.outer.0[0] =
+            Segment::EllipticArc { center, axis, ratio: 0.5, from: Point2::new(5.0, 0.0), to, clockwise: false };
+        assert!(matches!(profile.check(), Err(ProfileError::Degenerate { .. })));
+    }
+
+    #[test]
     fn profile_round_trips_through_json() {
         let p = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 10.0, 4.0);
         let text = serde_json::to_string(&p).unwrap();

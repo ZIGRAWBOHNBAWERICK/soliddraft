@@ -207,3 +207,34 @@ fn replay_sketch_volume_scenario(source: &str) {
         }
     }
 }
+
+#[test]
+fn ellipse_scenario_profiles_extrude_and_measure_over_stdio() {
+    for source in [
+        include_str!("../../../ci/scenarios/sketch-ellipse.json"),
+        include_str!("../../../ci/scenarios/sketch-partial-ellipse.json"),
+    ] {
+        let scenario: Value = serde_json::from_str(source).unwrap();
+        let mut client = Client::start(&["mcp"]);
+        client.request(
+            "initialize",
+            json!({
+                "protocolVersion":"2025-06-18", "capabilities":{},
+                "clientInfo":{"name":"ellipse-scenario-test","version":"1"}
+            }),
+        );
+        client.send(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+        for step in scenario["steps"].as_array().unwrap() {
+            let result = client.call(step["tool"].as_str().unwrap(), step["arguments"].clone());
+            assert_eq!(result["isError"], false, "{}: {result}", scenario["name"]);
+            if let Some(checks) = step["checks"].as_array() {
+                let measured = client.call("mass_properties", json!({"name":"Boss-Extrude1"}));
+                assert_eq!(measured["isError"], false, "{measured}");
+                let actual = measured["structuredContent"]["volume_mm3"].as_f64().unwrap();
+                let expected = checks[0]["approx"].as_f64().unwrap();
+                let tolerance = checks[0]["tolerance"].as_f64().unwrap();
+                assert!((actual - expected).abs() <= tolerance, "{}: {actual} != {expected}", scenario["name"]);
+            }
+        }
+    }
+}

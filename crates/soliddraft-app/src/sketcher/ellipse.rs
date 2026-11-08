@@ -11,8 +11,8 @@ fn geometry(s: &SketchSession, p: P2) -> Option<Ellipse> {
         return None;
     }
     let minor_pick = s.pending.get(2).map_or(p, |(p, _)| *p);
-    let length = (minor_pick - *center).dot(axis.perp().normalized()).abs();
-    if length <= 1e-6 {
+    let length = (minor_pick - *center).dot(axis.perp().normalized());
+    if length.abs() <= 1e-6 {
         return None;
     }
     Some(Ellipse { center: *center, major: *major, minor: *center + axis.perp().normalized().scale(length) })
@@ -60,20 +60,28 @@ pub(super) fn click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, actions: &mu
     let mut picks = s.pending.clone();
     picks.push((p, snaps));
     for (index, (_, snaps)) in picks.iter().enumerate() {
-        // Axis projection can move the pick. Keep only exact point snaps there.
-        let point = s.sketch.point(PointRef::new(id, index as u8)).unwrap();
-        let snaps: Vec<_> = snaps
-            .iter()
-            .filter(|snap| match snap {
-                Snap::Point(r) => s.sketch.point(*r).is_some_and(|q| point.dist(q) < 1e-6),
-                _ => false,
-            })
-            .cloned()
-            .collect();
-        apply_snaps(&mut s.sketch, PointRef::new(id, index as u8), &snaps, None);
+        let point = PointRef::new(id, index as u8);
+        apply_snaps(&mut s.sketch, point, snaps, None);
+        if index == 1 {
+            let target = Align::Points(PointRef::new(id, 0), point);
+            for snap in snaps {
+                match snap {
+                    Snap::Horizontal => {
+                        s.sketch.constrain(ConstraintKind::Horizontal { target });
+                    }
+                    Snap::Vertical => {
+                        s.sketch.constrain(ConstraintKind::Vertical { target });
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
     solve::solve(&mut s.sketch, None, true);
-    if matches!(s.sketch.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }) {
+    let kind = s.sketch.entity(id).unwrap().kind;
+    let valid = Ellipse::of(kind).is_some_and(Ellipse::valid)
+        && !matches!(kind, EntityKind::EllipticArc { start, end, .. } if start.dist(end) <= 1e-6);
+    if !valid || matches!(s.sketch.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }) {
         s.sketch = before;
         return;
     }

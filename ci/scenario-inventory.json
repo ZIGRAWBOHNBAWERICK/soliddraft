@@ -870,6 +870,17 @@
       ]
     },
     {
+      "id": "sketch-ellipse",
+      "file": "ci/scenarios/sketch-ellipse.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-sketch",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-extend",
       "file": "ci/scenarios/sketch-extend.json",
       "acceptance": false,
@@ -906,6 +917,17 @@
       "owners": [
         "soliddraft-app",
         "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
+      "id": "sketch-partial-ellipse",
+      "file": "ci/scenarios/sketch-partial-ellipse.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-sketch",
         "soliddraft-kernel-catallax"
       ]
     },

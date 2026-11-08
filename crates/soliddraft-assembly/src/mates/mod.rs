@@ -1,20 +1,23 @@
 //! Mates: authored relationships that decide where components sit.
 //!
-//! A mate names faces by occurrence path and the part's persistent [`FaceRef`], or a part's
-//! reference plane by its datum or feature id, never by label or kernel handle. Distances
+//! A mate names faces, edges and vertices by occurrence path and the part's persistent
+//! [`FaceRef`], [`EdgeRef`] or [`VertexRef`], or a part's reference plane by its datum or
+//! feature id, never by label or kernel handle. Distances
 //! are typed expressions; one that reads an assembly value is driven by it. Definitions are
 //! the assembly's truth. Proofs, solver status and diagnostics are derived and stay out of
 //! it.
 //!
-//! - [`solver`] places components from proven plane equations and counts what stays free.
-//! - [`reference`] finds faces and planes and proves them at a pinned revision.
+//! - [`solver`] places components from proven planes, axes and points and counts what
+//!   stays free.
+//! - [`reference`] finds faces, edges, vertices and planes and proves what they support
+//!   at a pinned revision.
 //! - [`command`] runs every change as one candidate: preview, prove, solve, then commit.
 //! - [`bodies`] reads the mates of the root and of every sub-assembly in it, and the
 //!   part occurrences they move, by path.
 //!
-//! The families are Origin, Distance, Coincident, Parallel, Perpendicular, Width and Lock.
-//! They cover axis-aligned planes with exact offsets and quarter-turn rotations; see
-//! `docs/mates.md`.
+//! The families are Origin, Distance, Coincident, Parallel, Perpendicular, Width, Lock,
+//! Concentric, Tangent and Hinge. They cover axis-aligned planes, axes and points with exact
+//! coordinates, and quarter-turn rotations; see `docs/mates.md`.
 
 pub(crate) mod bodies;
 pub(crate) mod command;
@@ -26,13 +29,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use soliddraft_document::{ConfigurationId, DocumentId};
-use soliddraft_model::{DatumPlane, Expression, FaceRef, FeatureId};
+use soliddraft_model::{DatumPlane, EdgeRef, Expression, FaceRef, FeatureId, VertexRef};
 
 use crate::path::{ComponentId, OccurrencePath};
 use crate::placement::Placement;
 
 pub use command::{MateEdit, PlaneMeasurement, ProofIdentity, WidthInput};
-pub use reference::{EndpointSelector, FaceSelector, GeneratorChoice, PlaneProof};
+pub use reference::{EndpointSelector, FaceSelector, GeneratorChoice, PlaneProof, SupportProof};
 pub use solver::{FreeMotion, SolverState, SolverStatus};
 
 pub(crate) use reference::Proofs;
@@ -106,13 +109,17 @@ pub(crate) fn datum_normal(datum: DatumPlane) -> [i8; 3] {
     }
 }
 
-/// What a mate endpoint names on its part: a planar face or a reference plane.
+/// What a mate endpoint names on its part: a face, a reference plane, an edge or a vertex.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Entity {
-    /// A face, by the part's persistent name.
+    /// A face, by the part's persistent name: a plane, cylinder, cone or sphere.
     Face(FaceRef),
     /// A reference plane.
     Plane(PartPlane),
+    /// An edge, by the faces it separates: a line or a circle.
+    Edge(EdgeRef),
+    /// A vertex, by the faces that meet at it.
+    Vertex(VertexRef),
 }
 
 impl Entity {
@@ -124,6 +131,7 @@ impl Entity {
                 Some([n.x, n.y, n.z].map(|c| c.round() as i8))
             }
             Entity::Plane(plane) => Some(plane.normal()),
+            Entity::Edge(_) | Entity::Vertex(_) => None,
         }
     }
 
@@ -133,8 +141,43 @@ impl Entity {
             Entity::Face(face) => format!("{} of feature {}", face.label, face.feature),
             Entity::Plane(PartPlane::Datum { datum }) => datum.label().to_owned(),
             Entity::Plane(PartPlane::Feature { feature, .. }) => format!("reference plane feature {feature}"),
+            Entity::Edge(edge) => format!("edge {}", edge.label),
+            Entity::Vertex(vertex) => format!("vertex {}", vertex.label),
         }
     }
+}
+
+/// The axis or point a proof found on an endpoint when it was mated, in the part's frame.
+/// The solver's status reads it, so it needs no part; a proof refuses an endpoint whose
+/// direction or kind has changed since. The coordinates are the nearest doubles, for the
+/// status only: a solve reads the exact values from the proof.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StoredSupport {
+    /// The axis of a cylinder, cone or circle, or a line.
+    Axis {
+        /// The direction, each component -1, 0 or 1.
+        direction: [i8; 3],
+        /// A point on the line.
+        through: [f64; 3],
+        /// A cylinder's or circle's radius.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        /// For a face with a radius, whether its outward side looks away from the axis.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outward: Option<bool>,
+    },
+    /// A sphere's centre or a vertex.
+    Point {
+        /// The point.
+        at: [f64; 3],
+        /// A sphere's radius.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        /// For a sphere, whether its outward side looks away from the centre.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outward: Option<bool>,
+    },
 }
 
 /// One side of a mate between planes: a face or a reference plane of one placed part.
@@ -147,11 +190,14 @@ pub struct FaceEndpoint {
     pub document: DocumentId,
     /// The part's configuration; absent for the default.
     pub configuration: Option<ConfigurationId>,
-    /// The face or plane. Saved as `face` or `plane`.
+    /// The face, plane, edge or vertex. Saved as `face`, `plane`, `edge` or `vertex`.
     pub entity: Entity,
+    /// The axis or point it was mated as; absent for a plane.
+    pub support: Option<StoredSupport>,
 }
 
-/// A face endpoint as `assembly.json` holds it: exactly one of `face` and `plane`.
+/// A face endpoint as `assembly.json` holds it: exactly one of `face`, `plane`, `edge` and
+/// `vertex`.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawEndpoint {
@@ -163,28 +209,49 @@ struct RawEndpoint {
     face: Option<FaceRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plane: Option<PartPlane>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edge: Option<EdgeRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vertex: Option<VertexRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    support: Option<StoredSupport>,
 }
 
 impl TryFrom<RawEndpoint> for FaceEndpoint {
     type Error = String;
 
     fn try_from(raw: RawEndpoint) -> Result<FaceEndpoint, String> {
-        let entity = match (raw.face, raw.plane) {
-            (Some(face), None) => Entity::Face(face),
-            (None, Some(plane)) => Entity::Plane(plane),
-            _ => return Err("an endpoint names a face or a plane".into()),
+        let entity = match (raw.face, raw.plane, raw.edge, raw.vertex) {
+            (Some(face), None, None, None) => Entity::Face(face),
+            (None, Some(plane), None, None) => Entity::Plane(plane),
+            (None, None, Some(edge), None) => Entity::Edge(edge),
+            (None, None, None, Some(vertex)) => Entity::Vertex(vertex),
+            _ => return Err("an endpoint names one face, plane, edge or vertex".into()),
         };
-        Ok(FaceEndpoint { path: raw.path, document: raw.document, configuration: raw.configuration, entity })
+        let (path, document, configuration, support) = (raw.path, raw.document, raw.configuration, raw.support);
+        Ok(FaceEndpoint { path, document, configuration, entity, support })
     }
 }
 
 impl From<FaceEndpoint> for RawEndpoint {
     fn from(e: FaceEndpoint) -> RawEndpoint {
-        let (face, plane) = match e.entity {
-            Entity::Face(face) => (Some(face), None),
-            Entity::Plane(plane) => (None, Some(plane)),
+        let mut raw = RawEndpoint {
+            path: e.path,
+            document: e.document,
+            configuration: e.configuration,
+            face: None,
+            plane: None,
+            edge: None,
+            vertex: None,
+            support: e.support,
         };
-        RawEndpoint { path: e.path, document: e.document, configuration: e.configuration, face, plane }
+        match e.entity {
+            Entity::Face(face) => raw.face = Some(face),
+            Entity::Plane(plane) => raw.plane = Some(plane),
+            Entity::Edge(edge) => raw.edge = Some(edge),
+            Entity::Vertex(vertex) => raw.vertex = Some(vertex),
+        }
+        raw
     }
 }
 
@@ -342,6 +409,58 @@ pub enum Mate {
         /// `b`'s placement in `a`'s frame.
         relative: Placement,
     },
+    /// `b`'s axis on `a`'s line, or a point on a line or on another point: two cylinders,
+    /// cones or circles share an axis, a point lies on an axis, or two spheres share a
+    /// centre. Planes are refused.
+    Concentric {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The first face, edge or vertex.
+        a: FaceEndpoint,
+        /// The second.
+        b: FaceEndpoint,
+        /// How the two axes' directions relate; absent where a point is involved.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alignment: Option<Alignment>,
+        /// With Lock rotation, `b`'s turn in `a`'s frame: a quarter-turn rotation, as its
+        /// integer matrix by rows. Absent leaves the spin about the axis free.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lock_rotation: Option<[[i8; 3]; 3]>,
+    },
+    /// A cylinder or sphere touching a plane: the axis lies parallel to the plane, or the
+    /// centre in front of it, one radius away. The radius must be rational.
+    Tangent {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The plane.
+        a: FaceEndpoint,
+        /// The cylinder or sphere.
+        b: FaceEndpoint,
+        /// How the curved face's outward normal at the contact relates to the plane's:
+        /// `opposed` for a shaft lying on a table, `aligned` for a shaft pressed against the
+        /// plane from behind it.
+        alignment: Alignment,
+    },
+    /// A concentric pair and a coincident pair under one name: a pin turning in a hole,
+    /// with its shoulder on the face round the hole. Limits are not supported.
+    Hinge {
+        /// The mate's id.
+        id: MateId,
+        /// A label; commands find a mate by it.
+        name: String,
+        /// The two axes, as a Concentric reads them.
+        axes: [FaceEndpoint; 2],
+        /// The two planes, as a Coincident reads them.
+        planes: [FaceEndpoint; 2],
+        /// How the axes' directions relate.
+        alignment: Alignment,
+        /// How the planes' outward normals relate.
+        plane_alignment: Alignment,
+    },
 }
 
 impl Mate {
@@ -354,7 +473,10 @@ impl Mate {
             | Mate::Parallel { id, .. }
             | Mate::Perpendicular { id, .. }
             | Mate::Width { id, .. }
-            | Mate::Lock { id, .. } => *id,
+            | Mate::Lock { id, .. }
+            | Mate::Concentric { id, .. }
+            | Mate::Tangent { id, .. }
+            | Mate::Hinge { id, .. } => *id,
         }
     }
 
@@ -367,7 +489,10 @@ impl Mate {
             | Mate::Parallel { name, .. }
             | Mate::Perpendicular { name, .. }
             | Mate::Width { name, .. }
-            | Mate::Lock { name, .. } => name,
+            | Mate::Lock { name, .. }
+            | Mate::Concentric { name, .. }
+            | Mate::Tangent { name, .. }
+            | Mate::Hinge { name, .. } => name,
         }
     }
 
@@ -381,6 +506,9 @@ impl Mate {
             Mate::Perpendicular { .. } => "perpendicular",
             Mate::Width { .. } => "width",
             Mate::Lock { .. } => "lock",
+            Mate::Concentric { .. } => "concentric",
+            Mate::Tangent { .. } => "tangent",
+            Mate::Hinge { .. } => "hinge",
         }
     }
 
@@ -417,8 +545,26 @@ impl Mate {
             Mate::Distance { a, b, .. }
             | Mate::Coincident { a, b, .. }
             | Mate::Parallel { a, b, .. }
-            | Mate::Perpendicular { a, b, .. } => vec![a, b],
+            | Mate::Perpendicular { a, b, .. }
+            | Mate::Concentric { a, b, .. }
+            | Mate::Tangent { a, b, .. } => vec![a, b],
             Mate::Width { groove, tab, .. } => groove.iter().chain(tab).collect(),
+            Mate::Hinge { axes, planes, .. } => axes.iter().chain(planes).collect(),
+            Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
+        }
+    }
+
+    /// The same endpoints, to change.
+    pub(crate) fn faces_mut(&mut self) -> Vec<&mut FaceEndpoint> {
+        match self {
+            Mate::Distance { a, b, .. }
+            | Mate::Coincident { a, b, .. }
+            | Mate::Parallel { a, b, .. }
+            | Mate::Perpendicular { a, b, .. }
+            | Mate::Concentric { a, b, .. }
+            | Mate::Tangent { a, b, .. } => vec![a, b],
+            Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab).collect(),
+            Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes).collect(),
             Mate::Origin { .. } | Mate::Lock { .. } => Vec::new(),
         }
     }
@@ -429,7 +575,12 @@ impl Mate {
         match self {
             Mate::Distance { a, b, .. } | Mate::Coincident { a, b, .. } | Mate::Parallel { a, b, .. } => Some([a, b]),
             Mate::Width { groove, tab, .. } => Some([&groove[0], &tab[0]]),
-            Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } => None,
+            Mate::Origin { .. }
+            | Mate::Perpendicular { .. }
+            | Mate::Lock { .. }
+            | Mate::Concentric { .. }
+            | Mate::Tangent { .. }
+            | Mate::Hinge { .. } => None,
         }
     }
 
@@ -439,7 +590,10 @@ impl Mate {
             Mate::Distance { alignment, .. }
             | Mate::Coincident { alignment, .. }
             | Mate::Parallel { alignment, .. }
-            | Mate::Width { alignment, .. } => Some(*alignment),
+            | Mate::Width { alignment, .. }
+            | Mate::Tangent { alignment, .. }
+            | Mate::Hinge { alignment, .. } => Some(*alignment),
+            Mate::Concentric { alignment, .. } => *alignment,
             Mate::Origin { .. } | Mate::Perpendicular { .. } | Mate::Lock { .. } => None,
         }
     }
@@ -466,8 +620,11 @@ impl Mate {
             Mate::Distance { a, b, .. }
             | Mate::Coincident { a, b, .. }
             | Mate::Parallel { a, b, .. }
-            | Mate::Perpendicular { a, b, .. } => vec![&mut a.path, &mut b.path],
+            | Mate::Perpendicular { a, b, .. }
+            | Mate::Concentric { a, b, .. }
+            | Mate::Tangent { a, b, .. } => vec![&mut a.path, &mut b.path],
             Mate::Width { groove, tab, .. } => groove.iter_mut().chain(tab.iter_mut()).map(|e| &mut e.path).collect(),
+            Mate::Hinge { axes, planes, .. } => axes.iter_mut().chain(planes.iter_mut()).map(|e| &mut e.path).collect(),
             Mate::Lock { a, b, .. } => vec![&mut a.path, &mut b.path],
             Mate::Origin { .. } => Vec::new(),
         }
@@ -546,6 +703,8 @@ pub enum RefusalCode {
     UnsupportedConfiguration,
     /// The kernel will not prove this face's plane.
     UnsupportedPlane,
+    /// The kernel will not prove this axis or point, or the family does not take it.
+    UnsupportedReference,
     /// A placed plane's normal is not on a world axis.
     UnsupportedPlacement,
     /// The two faces' planes are not parallel.
@@ -581,6 +740,7 @@ impl RefusalCode {
             RefusalCode::NoSuchFace => "no_such_face",
             RefusalCode::UnsupportedConfiguration => "unsupported_configuration",
             RefusalCode::UnsupportedPlane => "unsupported_plane",
+            RefusalCode::UnsupportedReference => "unsupported_reference",
             RefusalCode::UnsupportedPlacement => "unsupported_placement",
             RefusalCode::NotParallel => "not_parallel",
             RefusalCode::ProofUnavailable => "proof_unavailable",

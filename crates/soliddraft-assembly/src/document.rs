@@ -1579,6 +1579,7 @@ impl AssemblyDocument {
     ) -> Result<(Vec<ComponentId>, Vec<OccurrencePath>), MateRefusal> {
         let problem = self.gather(&Scope::new(&candidate.assembly, &candidate.table, &candidate.store))?;
         let solved = self.solve_problem(problem)?;
+        self.refresh_supports(candidate)?;
         let kept =
             bodies::locals(&Scope::new(&candidate.assembly, &candidate.table, &candidate.store), &solved.placements);
         let (mut components, mut overrides) = (Vec::new(), Vec::new());
@@ -1683,6 +1684,9 @@ impl AssemblyDocument {
                     if problems.is_empty() && changes {
                         let mut before = self.image(&moved.0, &moved.1);
                         before.sources = self.assembly.sources.iter().map(|s| (s.id, Some(s.clone()))).collect();
+                        // Update stores the axes and points it proved on the mates, so
+                        // Undo restores the mates as they were too.
+                        before.design = Some(Design::of(&self.assembly));
                         self.adopt("Update", candidate, before);
                     }
                 }

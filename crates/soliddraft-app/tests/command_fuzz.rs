@@ -607,7 +607,7 @@ fn mated_state() -> AppState {
     state
 }
 
-const MATE_TOOLS: [&str; 15] = [
+const MATE_TOOLS: [&str; 18] = [
     "insert_component",
     "assembly_form_subassembly",
     "assembly_measure_planes",
@@ -618,6 +618,9 @@ const MATE_TOOLS: [&str; 15] = [
     "assembly_mate_perpendicular",
     "assembly_mate_width",
     "assembly_mate_lock",
+    "assembly_mate_concentric",
+    "assembly_mate_tangent",
+    "assembly_mate_hinge",
     "assembly_set_value",
     "assembly_rename_value",
     "assembly_drive_mate",

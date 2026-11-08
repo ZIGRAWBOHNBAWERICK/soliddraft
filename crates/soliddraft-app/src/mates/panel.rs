@@ -1,7 +1,7 @@
 //! The Mate panel: picked faces held parallel, at right angles, on one plane, at a
-//! distance or as a tab in a groove, two components locked together, the assembly's values,
-//! what the solver says, and the conflicts a refusal named. Everything goes through the same
-//! commands as the MCP tools.
+//! distance, on one axis, tangent, hinged or as a tab in a groove, two components locked
+//! together, the assembly's values, what the solver says, and the conflicts a refusal
+//! named. Everything goes through the same commands as the MCP tools.
 
 use crate::assembly::AssemblyState;
 use crate::mates::tools::rows;
@@ -30,11 +30,26 @@ pub enum Family {
     Width,
     /// Locks the components of the two picked faces together.
     Lock,
+    /// Two cylinders, cones or spheres on one axis or centre.
+    Concentric,
+    /// A plane, then a cylinder or sphere laid against it.
+    Tangent,
+    /// The first two picks are the axes, the last two the planes.
+    Hinge,
 }
 
 impl Family {
-    const ALL: [Family; 6] =
-        [Family::Coincident, Family::Distance, Family::Parallel, Family::Perpendicular, Family::Width, Family::Lock];
+    const ALL: [Family; 9] = [
+        Family::Coincident,
+        Family::Distance,
+        Family::Parallel,
+        Family::Perpendicular,
+        Family::Width,
+        Family::Lock,
+        Family::Concentric,
+        Family::Tangent,
+        Family::Hinge,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -44,12 +59,15 @@ impl Family {
             Family::Perpendicular => "Perpendicular",
             Family::Width => "Width",
             Family::Lock => "Lock",
+            Family::Concentric => "Concentric",
+            Family::Tangent => "Tangent",
+            Family::Hinge => "Hinge",
         }
     }
 
     /// How many faces it needs.
     fn picks(self) -> usize {
-        if self == Family::Width { 4 } else { 2 }
+        if matches!(self, Family::Width | Family::Hinge) { 4 } else { 2 }
     }
 
     fn has_alignment(self) -> bool {
@@ -75,6 +93,10 @@ pub struct Draft {
     pub d: Option<PickedFace>,
     pub family: Family,
     pub alignment: Alignment,
+    /// A Hinge's planes' alignment.
+    pub plane_alignment: Alignment,
+    /// A Concentric holds the turn about its axis.
+    pub lock_rotation: bool,
     pub name: String,
     pub distance: String,
     pub width_mode: WidthMode,
@@ -98,6 +120,8 @@ impl Default for Draft {
             d: None,
             family: Family::Distance,
             alignment: Alignment::Opposed,
+            plane_alignment: Alignment::Opposed,
+            lock_rotation: false,
             name: String::new(),
             distance: "0 mm".into(),
             width_mode: WidthMode::Centered,
@@ -202,11 +226,12 @@ fn add(state: &mut AppState) {
             [&d.a, &d.b, &d.c, &d.d].into_iter().take(family.picks()).flatten().cloned().collect();
         (picked, d.distance.clone(), d.alignment, (family == Family::Width).then(|| width_input(d)))
     };
+    let (plane_alignment, lock_rotation) = (state.assembly.mate.plane_alignment, state.assembly.mate.lock_rotation);
     if picked.len() < family.picks() {
-        let wanted = if family == Family::Width {
-            "Pick the groove's two faces, then the tab's"
-        } else {
-            "Pick two faces first"
+        let wanted = match family {
+            Family::Width => "Pick the groove's two faces, then the tab's",
+            Family::Hinge => "Pick the two axes' faces, then the two planes",
+            _ => "Pick two faces first",
         };
         state.assembly.mate.error = Some(wanted.into());
         return;
@@ -232,6 +257,9 @@ fn add(state: &mut AppState) {
             s.doc.mate_width(&name, [a, b], [&ends[2], &ends[3]], alignment, &width, false)
         }
         Family::Lock => s.doc.mate_lock(&name, picked[0].component, picked[1].component, false),
+        Family::Concentric => s.doc.mate_concentric(&name, a, b, alignment, lock_rotation, false),
+        Family::Tangent => s.doc.mate_tangent(&name, a, b, alignment, false),
+        Family::Hinge => s.doc.mate_hinge(&name, [a, b], [&ends[2], &ends[3]], alignment, plane_alignment, false),
     };
     report(state, done.map(|_| ()), "Mate added");
 }
@@ -288,6 +316,7 @@ fn headline(r: &MateRefusal) -> &'static str {
         C::DanglingReference => "A mated face is gone",
         C::UnsupportedPlacement => "A part is turned off the quarter turns",
         C::UnsupportedPlane | C::NotParallel => "A face cannot be proved for this mate",
+        C::UnsupportedReference => "An axis or point cannot be proved for this mate",
         _ => "Refused",
     }
 }
@@ -326,6 +355,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let slots: &[&str] = match d.family {
         Family::Width => &["Groove face", "Groove face", "Tab face", "Tab face"],
         Family::Lock => &["First component", "Second component"],
+        Family::Tangent => &["Plane", "Cylinder or sphere"],
+        Family::Hinge => &["First axis", "Second axis", "First plane", "Second plane"],
         _ => &["First face", "Second face"],
     };
     for (label, slot) in slots.iter().zip([&d.a, &d.b, &d.c, &d.d]) {
@@ -341,6 +372,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.selectable_value(&mut d.alignment, Alignment::Opposed, "Opposed");
             ui.selectable_value(&mut d.alignment, Alignment::Aligned, "Aligned");
         });
+    }
+    if d.family == Family::Hinge {
+        ui.horizontal(|ui| {
+            ui.label("Planes");
+            ui.selectable_value(&mut d.plane_alignment, Alignment::Opposed, "Planes opposed");
+            ui.selectable_value(&mut d.plane_alignment, Alignment::Aligned, "Planes aligned");
+        });
+    }
+    if d.family == Family::Concentric {
+        ui.checkbox(&mut d.lock_rotation, "Lock rotation");
     }
     labelled(ui, &mut d.name, "Name", "Mate name");
     if d.family == Family::Width {
@@ -436,6 +477,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 format!("{name}: width, {alignment}, {how}")
             }
             Some("lock") => format!("{name}: locked"),
+            Some("concentric") => {
+                let locked = if m["lock_rotation"].as_bool() == Some(true) { ", rotation locked" } else { "" };
+                match m["alignment"].as_str() {
+                    Some(a) => format!("{name}: concentric, {a}{locked}"),
+                    None => format!("{name}: concentric{locked}"),
+                }
+            }
+            Some("tangent") => format!("{name}: tangent, {alignment}"),
+            Some("hinge") => {
+                format!("{name}: hinge, axes {alignment}, planes {}", m["plane_alignment"].as_str().unwrap_or("?"))
+            }
             Some("origin") => format!("{name}: on the origin"),
             _ => {
                 ui.colored_label(theme::error(), format!("{name}: this version cannot solve it"));

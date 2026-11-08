@@ -1,4 +1,5 @@
-//! Finding faces and reference planes and proving their planes at a pinned revision.
+//! Finding faces, edges, vertices and reference planes, and proving what they support at a
+//! pinned revision: a plane, an axis or a point.
 //!
 //! A proof belongs to a document, a revision and a face. It comes from the part rebuilt on
 //! the kernel from that revision's bytes, never from a display copy, so a cached picture
@@ -7,7 +8,9 @@
 //!
 //! A reference plane is proved from its definition: a datum plane is exact, and a plane
 //! feature is its datum or source plane moved by its stored offset, added in rationals. A
-//! plane feature on a face is refused; the face itself can be mated.
+//! plane feature on a face is refused; the face itself can be mated. A face's axis or a
+//! point comes from [`Kernel::entity_support`](soliddraft_kernel_api::Kernel::entity_support),
+//! which reads the native definition exactly or refuses.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -16,13 +19,17 @@ use std::sync::{Arc, Mutex};
 use num_rational::BigRational;
 use serde::Serialize;
 use soliddraft_document::{ConfigurationId, ContentHash, DocKind, DocRef, DocumentId};
-use soliddraft_kernel_api::{Axis, ExactAxisPlane, ExactRational, FaceId, KernelError};
+use soliddraft_kernel_api::{
+    Axis, EdgeId, ExactAxisPlane, ExactRadius, ExactRational, ExactSupport, FaceId, KernelError, SupportEntity,
+    SurfaceKind,
+};
 use soliddraft_model::{
-    DatumPlane, Document as PartDocument, FaceRef, FeatureId, FeatureKind, Generator, RepairReason, SketchPlane,
+    DatumPlane, Document as PartDocument, EdgeRef, FaceRef, FeatureId, FeatureKind, Generator, RepairNeeded,
+    RepairReason, SketchPlane, VertexRef,
 };
 
 use crate::document::AssemblyDocument;
-use crate::mates::{EndView, Entity, FaceEndpoint, MateRefusal, PartPlane, RefusalCode, datum_normal};
+use crate::mates::{EndView, Entity, FaceEndpoint, MateRefusal, PartPlane, RefusalCode, StoredSupport, datum_normal};
 use crate::path::ComponentId;
 use crate::schema::Assembly;
 
@@ -69,6 +76,14 @@ pub enum FaceSelector {
         /// The proven outward normal, to tell the sides apart.
         normal: Option<[f64; 3]>,
     },
+    /// The persistent name a picked edge carries.
+    PickedEdge(EdgeRef),
+    /// The one edge between two faces, each named by its current label.
+    Edge([String; 2]),
+    /// The persistent name a picked vertex carries.
+    PickedVertex(VertexRef),
+    /// The one vertex where faces meet, each named by its current label.
+    Vertex(Vec<String>),
 }
 
 /// A face of one of the root's components.
@@ -95,12 +110,54 @@ pub struct PlaneProof {
     pub label: String,
 }
 
+/// What a face, edge, vertex or reference plane supports, proven on one revision of a part.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SupportProof {
+    /// The part.
+    pub document: DocumentId,
+    /// The revision it was proven on.
+    pub revision: ContentHash,
+    /// That revision's geometry hash.
+    pub geometry: ContentHash,
+    /// The plane, axis or point in the part's frame.
+    pub support: ExactSupport,
+    /// The entity's label at that revision.
+    pub label: String,
+}
+
+impl SupportProof {
+    /// What a mate stores of it for the solver's status: the axis or point, as doubles.
+    pub(crate) fn stored(&self) -> Option<StoredSupport> {
+        use crate::mates::solver::{nearest, rational};
+        let f = |c: &ExactRational| rational(c).map_or(f64::NAN, |r| nearest(&r));
+        let r = |r: &Option<ExactRadius>| r.as_ref().map(|r| (f(&r.squared).sqrt(), r.outward));
+        match &self.support {
+            ExactSupport::Plane(_) => None,
+            ExactSupport::Axis(a) => {
+                let (radius, outward) = r(&a.radius).map_or((None, None), |(v, o)| (Some(v), o));
+                Some(StoredSupport::Axis {
+                    direction: a.direction(),
+                    through: a.through.each_ref().map(f),
+                    radius,
+                    outward,
+                })
+            }
+            ExactSupport::Point(p) => {
+                let (radius, outward) = r(&p.radius).map_or((None, None), |(v, o)| (Some(v), o));
+                Some(StoredSupport::Point { at: p.at.each_ref().map(f), radius, outward })
+            }
+        }
+    }
+}
+
 /// What a proof is of on its part.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Proved {
     Face(FeatureId, Generator, u32),
     Datum(DatumPlane),
     Plane(FeatureId),
+    /// An edge or a vertex, by its reference as JSON.
+    Named(String),
 }
 
 type PlaneKey = (DocumentId, ContentHash, Proved);
@@ -110,7 +167,7 @@ type PlaneKey = (DocumentId, ContentHash, Proved);
 #[derive(Default)]
 pub(crate) struct Proofs {
     parts: HashMap<(DocumentId, ContentHash), Arc<Mutex<PartDocument>>>,
-    planes: HashMap<PlaneKey, PlaneProof>,
+    supports: HashMap<PlaneKey, SupportProof>,
     /// How many parts were rebuilt for proofs.
     pub built: usize,
 }
@@ -179,46 +236,98 @@ impl AssemblyDocument {
         Ok(part)
     }
 
-    /// The proof of the plane `entity` lies on, at the revision `r` pins.
+    /// The proof of the plane `entity` lies on, at the revision `r` pins. An axis or a point
+    /// is refused as `unsupported_plane`.
     pub(crate) fn prove(&mut self, r: &DocRef, entity: &Entity) -> Result<PlaneProof, MateRefusal> {
+        let proof = self.prove_support(r, entity, None)?;
+        match proof.support {
+            ExactSupport::Plane(plane) => Ok(PlaneProof {
+                document: proof.document,
+                revision: proof.revision,
+                geometry: proof.geometry,
+                plane,
+                label: proof.label,
+            }),
+            _ => Err(MateRefusal::new(
+                RefusalCode::UnsupportedPlane,
+                format!("{}: {} is not planar", r.path, entity.describe()),
+            )),
+        }
+    }
+
+    /// The proof of what `entity` supports at the revision `r` pins: a plane, an axis or a
+    /// point. `stored` is what the mate recorded when it was made; a proof whose kind or
+    /// direction differs refuses as `dangling_reference`.
+    pub(crate) fn prove_support(
+        &mut self,
+        r: &DocRef,
+        entity: &Entity,
+        stored: Option<&StoredSupport>,
+    ) -> Result<SupportProof, MateRefusal> {
         let id = r.id.ok_or_else(|| unavailable("the reference has no document id".into()))?;
         let what = match entity {
             Entity::Face(face) => Proved::Face(face.feature, face.generator.clone(), face.ordinal),
             Entity::Plane(PartPlane::Datum { datum }) => Proved::Datum(*datum),
             Entity::Plane(PartPlane::Feature { feature, .. }) => Proved::Plane(*feature),
+            Entity::Edge(edge) => Proved::Named(serde_json::to_string(edge).unwrap_or_default()),
+            Entity::Vertex(vertex) => Proved::Named(serde_json::to_string(vertex).unwrap_or_default()),
         };
         let key = (id, r.pinned.clone(), what);
-        let proof = match self.proofs.planes.get(&key) {
+        let proof = match self.proofs.supports.get(&key) {
             Some(proof) => proof.clone(),
             None => {
                 let part = self.proof_part(r)?;
                 let part = part.lock().expect("the part lock");
                 let proof = match entity {
-                    Entity::Face(face) => {
-                        let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
-                        let found = part.resolve_face(face, body).map_err(|repair| {
-                            let code = match repair.reason {
-                                RepairReason::Ambiguous => RefusalCode::AmbiguousReference,
-                                RepairReason::Missing | RepairReason::Mismatch { .. } => RefusalCode::DanglingReference,
-                            };
-                            MateRefusal::new(code, repair.message)
-                        })?;
-                        plane_of(&part, r, id, found)?
+                    Entity::Plane(plane) => {
+                        let p = reference_plane_proof(&part, r, id, plane)?;
+                        SupportProof {
+                            document: p.document,
+                            revision: p.revision,
+                            geometry: p.geometry,
+                            support: ExactSupport::Plane(p.plane),
+                            label: p.label,
+                        }
                     }
-                    Entity::Plane(plane) => reference_plane_proof(&part, r, id, plane)?,
+                    _ => {
+                        let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+                        let found = match entity {
+                            Entity::Face(face) => part.resolve_face(face, body).map(SupportEntity::Face),
+                            Entity::Edge(edge) => part.resolve_edge(edge, body).map(SupportEntity::Edge),
+                            Entity::Vertex(vertex) => part.resolve_vertex(vertex, body).map(SupportEntity::Vertex),
+                            Entity::Plane(_) => unreachable!("proved above"),
+                        }
+                        .map_err(repair_refusal)?;
+                        support_of(&part, r, id, found)?
+                    }
                 };
                 drop(part);
-                self.proofs.planes.insert(key, proof.clone());
+                self.proofs.supports.insert(key, proof.clone());
                 proof
             }
         };
         if let Entity::Plane(PartPlane::Feature { normal, .. }) = entity
-            && proof.plane.normal() != *normal
+            && !matches!(&proof.support, ExactSupport::Plane(p) if p.normal() == *normal)
         {
             let message = format!("{} now faces another way than when it was mated", proof.label);
             return Err(MateRefusal::new(RefusalCode::DanglingReference, message));
         }
+        let changed = match (stored, &proof.support) {
+            (None, _) => false,
+            (Some(StoredSupport::Axis { direction, .. }), ExactSupport::Axis(a)) => a.direction() != *direction,
+            (Some(StoredSupport::Point { .. }), ExactSupport::Point(_)) => false,
+            (Some(_), _) => true,
+        };
+        if changed {
+            let message = format!("{} now lies another way than when it was mated", entity.describe());
+            return Err(MateRefusal::new(RefusalCode::DanglingReference, message));
+        }
         Ok(proof)
+    }
+
+    /// The axis or point a mate stores for `entity`, proven at the revision `r` pins.
+    pub(crate) fn stored_support(&mut self, r: &DocRef, entity: &Entity) -> Result<Option<StoredSupport>, MateRefusal> {
+        Ok(self.prove_support(r, entity, None)?.stored())
     }
 
     /// The persistent name of the face or plane `selector` finds on the part `r` pins.
@@ -254,6 +363,82 @@ impl AssemblyDocument {
         }
         let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
         let labels = part.face_labels(body);
+        let labelled = |text: &str| -> Result<FaceId, MateRefusal> {
+            let found: Vec<FaceId> = labels
+                .iter()
+                .filter(|(_, l)| l.as_ref().is_some_and(|l| l.text.eq_ignore_ascii_case(text.trim())))
+                .map(|(f, _)| *f)
+                .collect();
+            match found[..] {
+                [face] => Ok(face),
+                [] => Err(MateRefusal::new(RefusalCode::NoSuchFace, format!("{} has no face {text}", r.path))),
+                _ => Err(MateRefusal::new(
+                    RefusalCode::AmbiguousReference,
+                    format!("{} has several faces labelled {text}", r.path),
+                )),
+            }
+        };
+        match selector {
+            FaceSelector::PickedEdge(edge) => {
+                part.resolve_edge(edge, body).map_err(repair_refusal)?;
+                return Ok(Entity::Edge(edge.clone()));
+            }
+            FaceSelector::PickedVertex(vertex) => {
+                part.resolve_vertex(vertex, body).map_err(repair_refusal)?;
+                return Ok(Entity::Vertex(vertex.clone()));
+            }
+            FaceSelector::Edge(between) => {
+                let faces = [labelled(&between[0])?, labelled(&between[1])?];
+                let t = part.kernel().topology(body).map_err(|e| unavailable(e.to_string()))?;
+                let found: Vec<EdgeId> = t
+                    .edges
+                    .iter()
+                    .filter(|e| faces.iter().all(|f| e.faces.contains(f)) && faces[0] != faces[1])
+                    .map(|e| e.id)
+                    .collect();
+                let [edge] = found[..] else {
+                    let (code, what) = if found.is_empty() {
+                        (RefusalCode::NoSuchFace, "no edge")
+                    } else {
+                        (RefusalCode::AmbiguousReference, "several edges")
+                    };
+                    let message = format!("{} has {what} between {} and {}", r.path, between[0], between[1]);
+                    return Err(MateRefusal::new(code, message));
+                };
+                return part
+                    .edge_ref(edge)
+                    .map(Entity::Edge)
+                    .map_err(|e| MateRefusal::new(RefusalCode::AmbiguousReference, e.to_string()));
+            }
+            FaceSelector::Vertex(around) => {
+                let faces = around.iter().map(|l| labelled(l)).collect::<Result<Vec<_>, _>>()?;
+                let t = part.kernel().topology(body).map_err(|e| unavailable(e.to_string()))?;
+                let found: Vec<_> = t
+                    .vertices
+                    .iter()
+                    .filter(|v| {
+                        let touching: Vec<FaceId> =
+                            v.edges.iter().filter_map(|e| t.edge(*e)).flat_map(|e| e.faces.iter().copied()).collect();
+                        faces.iter().all(|f| touching.contains(f))
+                    })
+                    .map(|v| v.id)
+                    .collect();
+                let [vertex] = found[..] else {
+                    let (code, what) = if found.is_empty() {
+                        (RefusalCode::NoSuchFace, "no vertex")
+                    } else {
+                        (RefusalCode::AmbiguousReference, "several vertices")
+                    };
+                    let message = format!("{} has {what} where {} meet", r.path, around.join(", "));
+                    return Err(MateRefusal::new(code, message));
+                };
+                return part
+                    .vertex_ref(vertex)
+                    .map(Entity::Vertex)
+                    .map_err(|e| MateRefusal::new(RefusalCode::AmbiguousReference, e.to_string()));
+            }
+            _ => {}
+        }
         let found: Vec<FaceId> = match selector {
             FaceSelector::Picked(face) => {
                 let repaired = part
@@ -266,7 +451,11 @@ impl AssemblyDocument {
                 .filter(|(_, l)| l.as_ref().is_some_and(|l| l.text.eq_ignore_ascii_case(text.trim())))
                 .map(|(f, _)| *f)
                 .collect(),
-            FaceSelector::Plane(_) => unreachable!("a plane is found above"),
+            FaceSelector::Plane(_)
+            | FaceSelector::PickedEdge(_)
+            | FaceSelector::Edge(_)
+            | FaceSelector::PickedVertex(_)
+            | FaceSelector::Vertex(_) => unreachable!("found above"),
             FaceSelector::Generator { feature, generator, normal } => {
                 let wanted = part.features().iter().find(|f| f.name == *feature).map(|f| f.id);
                 labels
@@ -314,6 +503,51 @@ impl AssemblyDocument {
         }
         Ok(source.document.clone())
     }
+}
+
+/// The refusal for a reference that does not resolve to one entity.
+fn repair_refusal(repair: RepairNeeded) -> MateRefusal {
+    let code = match repair.reason {
+        RepairReason::Ambiguous => RefusalCode::AmbiguousReference,
+        RepairReason::Missing | RepairReason::Mismatch { .. } => RefusalCode::DanglingReference,
+    };
+    MateRefusal::new(code, repair.message)
+}
+
+/// What a face, edge or vertex supports, from the kernel's definition. A refused planar
+/// face is `unsupported_plane`, as before; anything else the kernel refuses is
+/// `unsupported_reference`.
+fn support_of(
+    part: &PartDocument,
+    r: &DocRef,
+    document: DocumentId,
+    entity: SupportEntity,
+) -> Result<SupportProof, MateRefusal> {
+    let body = part.body().ok_or_else(|| unavailable(format!("{} has no body", r.path)))?;
+    let label = match entity {
+        SupportEntity::Face(face) => part.face_label(face).map(|l| l.text).unwrap_or_default(),
+        SupportEntity::Edge(edge) => part.edge_ref(edge).map(|e| e.label).unwrap_or_default(),
+        SupportEntity::Vertex(vertex) => part.vertex_ref(vertex).map(|v| v.label).unwrap_or_default(),
+    };
+    let support = part.kernel().entity_support(body, entity).map_err(|e| {
+        let planar = match entity {
+            SupportEntity::Face(face) => part
+                .kernel()
+                .topology(body)
+                .ok()
+                .and_then(|t| t.face(face).map(|f| f.surface == SurfaceKind::Plane))
+                .unwrap_or(false),
+            _ => false,
+        };
+        let code = match e {
+            KernelError::Unsupported(_) if planar => RefusalCode::UnsupportedPlane,
+            KernelError::Unsupported(_) => RefusalCode::UnsupportedReference,
+            _ => RefusalCode::ProofUnavailable,
+        };
+        let named = if label.is_empty() { String::new() } else { format!(", {label}") };
+        MateRefusal::new(code, format!("{}{named}: {e}", r.path))
+    })?;
+    Ok(SupportProof { document, revision: r.pinned.clone(), geometry: part.geometry_hash(), support, label })
 }
 
 fn plane_of(part: &PartDocument, r: &DocRef, document: DocumentId, face: FaceId) -> Result<PlaneProof, MateRefusal> {

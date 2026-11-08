@@ -6,6 +6,7 @@ use std::sync::Arc;
 use soliddraft_document::DocumentId;
 use soliddraft_kernel_api::{
     BodyId, EdgeId, FaceId, FieldMass, FieldMassAccuracy, Kernel, KernelResult, OpResult, OpTag, Plane, Topology,
+    VertexId,
 };
 use soliddraft_sketch::profile::Region;
 use soliddraft_sketch::{EntityKind, Sketch, SolveStatus};
@@ -17,7 +18,8 @@ use crate::feature::{BlendFeature, DatumPlane, Feature, FeatureId, FeatureKind, 
 use crate::materials::PartMaterials;
 use crate::rebuild::BuildCache;
 use crate::reference::{
-    self, EdgeRef, FaceRef, Generator, NameMap, NamedFace, NamingError, ReferenceSlot, RepairNeeded, View,
+    self, EdgeRef, FaceRef, Generator, NameMap, NamedFace, NamingError, ReferenceSlot, RepairNeeded, RepairReason,
+    VertexRef, View,
 };
 use crate::view::{ViewItem, Visibility};
 
@@ -452,6 +454,52 @@ impl Document {
         reference::resolve_edge(r, &View { topology: &t }, &self.name_map()).map_err(|u| u.into_repair(slot))
     }
 
+    /// A persistent name for a vertex of the part: the faces that meet there. Refused
+    /// when another vertex of the same body touches all of them too.
+    pub fn vertex_ref(&self, vertex: VertexId) -> Result<VertexRef, NamingError> {
+        let t = self.body_with(|t| t.vertex(vertex).is_some()).ok_or(NamingError::NotInModel(vertex.to_string()))?;
+        let around = vertex_faces(&t, vertex);
+        let mut faces = Vec::with_capacity(around.len());
+        for f in &around {
+            faces.push(self.face_ref(*f)?);
+        }
+        let others =
+            t.vertices.iter().filter(|v| v.id != vertex && around.iter().all(|f| vertex_faces(&t, v.id).contains(f)));
+        if others.count() > 0 {
+            return Err(NamingError::NotUnique(vertex.to_string(), "another vertex touches the same faces".into()));
+        }
+        let label = faces.iter().map(|f| f.label.clone()).collect::<Vec<_>>().join(" ∩ ");
+        let position = t.vertex(vertex).expect("found above").position;
+        Ok(VertexRef { faces, position, label })
+    }
+
+    /// Finds a vertex reference in a body: the one vertex every named face touches.
+    pub fn resolve_vertex(&self, r: &VertexRef, body: BodyId) -> Result<VertexId, RepairNeeded> {
+        let slot = ReferenceSlot::SketchPlane;
+        let t = self.view_of(body).map_err(|e| kernel_repair(slot, e))?;
+        let mut faces = Vec::with_capacity(r.faces.len());
+        for f in &r.faces {
+            faces.push(self.resolve_face(f, body)?);
+        }
+        let found: Vec<VertexId> = t
+            .vertices
+            .iter()
+            .filter(|v| {
+                let around = vertex_faces(&t, v.id);
+                faces.iter().all(|f| around.contains(f))
+            })
+            .map(|v| v.id)
+            .collect();
+        let (reason, what) = match found[..] {
+            [one] => return Ok(one),
+            [] => (RepairReason::Missing, "no vertex"),
+            _ => (RepairReason::Ambiguous, "several vertices"),
+        };
+        let label = if r.label.is_empty() { "the vertex" } else { r.label.as_str() };
+        let message = format!("{what} where {label} meet");
+        Err(RepairNeeded { slot, reason, message, candidates: Vec::new() })
+    }
+
     /// Rounds `body` as the fillet or chamfer `b` would, given its edges resolved there,
     /// without adding a feature: what a form previews. The caller releases the result.
     pub fn round(
@@ -585,4 +633,17 @@ pub fn feature_of_tag(tag: &str) -> Option<FeatureId> {
     let rest = tag.strip_prefix('F')?;
     let (id, _) = rest.split_once('.')?;
     id.parse().ok().map(FeatureId)
+}
+
+/// The faces that meet at a vertex, in the order its edges list them, each once.
+fn vertex_faces(t: &Topology, vertex: VertexId) -> Vec<FaceId> {
+    let mut out = Vec::new();
+    for e in t.vertex(vertex).map(|v| v.edges.as_slice()).unwrap_or_default() {
+        for f in t.edge(*e).map(|e| e.faces.as_slice()).unwrap_or_default() {
+            if !out.contains(f) {
+                out.push(*f);
+            }
+        }
+    }
+    out
 }

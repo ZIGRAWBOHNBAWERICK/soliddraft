@@ -1,0 +1,511 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-axes-points",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 12
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "P",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 · End cap",
+            "Boss-Extrude1 · Side of line 2",
+            "Boss-Extrude1 · Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 4",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 3
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 20,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/support/kind",
+          "equals": "point"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "Far",
+        "a": {
+          "component": 2,
+          "vertex": [
+            "Boss-Extrude1 · End cap",
+            "Boss-Extrude1 · Side of line 2",
+            "Boss-Extrude1 · Side of line 3"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 4",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "distance": "5 mm",
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "unsupported_reference"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 13,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        },
+        {
+          "pointer": "/result/mates",
+          "equals": [
+            "Far"
+          ]
+        }
+      ],
+      "refused": "unsupported_reference"
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "P"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_coincident",
+      "arguments": {
+        "name": "E",
+        "a": {
+          "component": 2,
+          "face": "Boss-Extrude1 · Side of line 1"
+        },
+        "b": {
+          "component": 4,
+          "edge": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 4
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": -10,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_distance",
+      "arguments": {
+        "name": "D",
+        "a": {
+          "component": 2,
+          "feature": "Boss-Extrude1",
+          "generator": "end_cap"
+        },
+        "b": {
+          "component": 4,
+          "vertex": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 4",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "distance": "5 mm",
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 3
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 15,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "D",
+        "distance": "2 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 12,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_parallel",
+      "arguments": {
+        "name": "Q",
+        "a": {
+          "component": 2,
+          "edge": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "edge": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 2
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_perpendicular",
+      "arguments": {
+        "name": "R",
+        "a": {
+          "component": 2,
+          "edge": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        },
+        "b": {
+          "component": 4,
+          "edge": [
+            "Boss-Extrude1 · Start cap",
+            "Boss-Extrude1 · Side of line 1"
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "over_constrained"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 19,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        },
+        {
+          "pointer": "/result/mates",
+          "equals": [
+            "Q",
+            "R"
+          ]
+        }
+      ],
+      "refused": "over_constrained"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 2
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 12,
+          "tolerance": 1e-09
+        }
+      ],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/accepted_state/truth",
+          "same_as": {
+            "step": 21,
+            "pointer": "/summary/assembly/accepted_state/truth"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state/revision",
+          "same_as": {
+            "step": 21,
+            "pointer": "/summary/assembly/accepted_state/revision"
+          }
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 2
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 12,
+          "tolerance": 1e-09
+        }
+      ]
+    }
+  ]
+}

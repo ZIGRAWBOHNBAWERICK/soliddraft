@@ -28,7 +28,9 @@ pub mod contract;
 pub mod counting;
 pub mod drawing;
 pub mod measure;
-pub use assembly_measure::{Axis, ExactAxisPlane, ExactRational};
+pub use assembly_measure::{
+    Axis, ExactAxis, ExactAxisPlane, ExactPoint, ExactRadius, ExactRational, ExactSupport, SupportEntity, SupportSource,
+};
 pub use measure::{Certainty, Measurement, PairEndpoint, PairQuantity, PointProof};
 mod assembly_measure;
 mod edit;
@@ -1120,6 +1122,18 @@ pub trait Kernel: Send + Sync {
     /// rational offset, read from the kernel's own definition. Any other face is refused.
     fn face_support_plane(&self, _body: BodyId, _face: FaceId) -> KernelResult<ExactAxisPlane> {
         Err(KernelError::Unsupported("proven support plane".into()))
+    }
+
+    /// What a face, edge or vertex supports, for assembly mates: a plane, an axis or a
+    /// point, read exactly from the kernel's own definition. Directions must lie on world
+    /// axes and coordinates must be rational; anything else is refused. The default reads
+    /// planar faces through [`face_support_plane`](Self::face_support_plane) and refuses
+    /// the rest.
+    fn entity_support(&self, body: BodyId, entity: SupportEntity) -> KernelResult<ExactSupport> {
+        match entity {
+            SupportEntity::Face(face) => self.face_support_plane(body, face).map(ExactSupport::Plane),
+            _ => Err(KernelError::Unsupported("proven axes and points".into())),
+        }
     }
 
     /// The records of every operation that produced `body`, oldest first.

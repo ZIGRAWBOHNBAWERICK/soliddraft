@@ -754,8 +754,36 @@ impl AssemblyDocument {
             self.bvh_moved.extend(moved.iter().copied());
             self.changes.moved.extend(moved);
         }
+        self.follow_seeds(&comps);
         self.record("Move", before, rows_before);
         Ok(())
+    }
+
+    /// Puts the copies of every pattern of `seeds` where the pattern now places them,
+    /// as reading the file would. A copy with a placement of its own keeps it.
+    fn follow_seeds(&mut self, seeds: &[ComponentId]) {
+        let mut placed = Vec::new();
+        for p in &self.assembly.patterns {
+            for &id in p.seeds.iter().filter(|s| seeds.contains(s)) {
+                let Some(seed) = self.assembly.component(id) else { continue };
+                for i in 1..p.rule.len() {
+                    let path = OccurrencePath::root().child(Step::member(id, p.id, i));
+                    if self.assembly.override_at(&path).is_some_and(|o| o.placement.is_some()) {
+                        continue;
+                    }
+                    placed.push((path, p.rule.member(i).compose(&seed.placement)));
+                }
+            }
+        }
+        for (path, local) in placed {
+            if let Some(row) = self.table.find(&path)
+                && self.table.local(row) != local
+            {
+                let moved = self.table.set_local(row, local, &self.store);
+                self.bvh_moved.extend(moved.iter().copied());
+                self.changes.moved.extend(moved);
+            }
+        }
     }
 
     /// Moves occurrences by `delta`, applied in the root's frame after their current
@@ -1173,6 +1201,9 @@ impl AssemblyDocument {
                 self.changes.flags.extend(changed);
             }
         }
+        // A pattern's copies follow a seed the step moved.
+        let seeds: Vec<ComponentId> = image.components.iter().map(|(c, _)| *c).collect();
+        self.follow_seeds(&seeds);
     }
 
     // ----- saving -----

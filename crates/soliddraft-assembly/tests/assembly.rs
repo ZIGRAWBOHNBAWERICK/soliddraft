@@ -407,6 +407,93 @@ fn undoing_a_repeated_insert_keeps_the_shared_source() {
     }
 }
 
+/// Every shown occurrence's world placement, by path.
+fn layout(doc: &AssemblyDocument) -> Vec<(String, Placement)> {
+    let t = doc.table();
+    let mut out: Vec<_> = t
+        .subtree(soliddraft_assembly::OccurrenceIndex::ROOT)
+        .into_iter()
+        .skip(1)
+        .filter(|r| !t.flags(*r).has(soliddraft_assembly::Flags::REMOVED))
+        .map(|r| (t.path(r).to_string(), t.world(r)))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn same_layout(live: &[(String, Placement)], other: &[(String, Placement)], what: &str) {
+    assert_eq!(live.len(), other.len(), "{what}");
+    for ((p, a), (q, b)) in live.iter().zip(other) {
+        assert_eq!(p, q, "{what}");
+        let off = a.translation.distance(b.translation)
+            + (a.rotation * DVec3::X).distance(b.rotation * DVec3::X)
+            + (a.rotation * DVec3::Y).distance(b.rotation * DVec3::Y);
+        assert!(off <= 1e-9, "{what}: {p} is at {a:?} live but {b:?} read back");
+    }
+}
+
+/// Moving a pattern's seed with no mate moves its copies at once, as the saved pattern
+/// says: the shown layout after Move, Undo and Redo is the one the file reopens with.
+/// It holds for linear and circular patterns, a part and a sub-assembly seed, Move and
+/// Move by. A copy with a placement of its own stays put.
+#[test]
+fn moving_a_pattern_seed_moves_its_copies() {
+    let dir = folder("seed-move");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let sub = dir.join("sub.dwasm");
+    let mut s = AssemblyDocument::new_with("Sub", with_kernel());
+    s.save(Some(&sub)).unwrap();
+    s.insert(reference(&sub, &part), Placement::translation(DVec3::new(0.0, 0.0, 5.0))).unwrap();
+    s.finish_loading();
+    s.save(None).unwrap();
+    let linear = PatternRule::Linear { direction: [1.0, 0.0, 0.0], spacing: 20.0, count: 3, second: None };
+    let circular = PatternRule::Circular { origin: [0.0, 0.0, 0.0], axis: [0.0, 0.0, 1.0], angle: 90.0, count: 4 };
+    let turn = Placement::new(glam::DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2), DVec3::new(0.0, 0.0, 3.0));
+    for (case, file, rule, by) in [
+        ("linear part", &part, &linear, false),
+        ("circular part", &part, &circular, true),
+        ("linear sub-assembly", &sub, &linear, false),
+        ("circular sub-assembly", &sub, &circular, true),
+    ] {
+        let root = dir.join(format!("{}.dwasm", case.replace(' ', "-")));
+        let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+        doc.save(Some(&root)).unwrap();
+        let seed = doc.insert(reference(&root, file), Placement::translation(DVec3::new(10.0, 0.0, 0.0))).unwrap();
+        let pattern = doc.add_pattern(vec![seed], rule.clone()).unwrap();
+        doc.finish_loading();
+        // The second copy has a placement of its own, which a seed move must not change.
+        let own: OccurrencePath = format!("{seed}:{pattern}.2").parse().unwrap();
+        let fixed = Placement::translation(DVec3::new(-50.0, -50.0, 0.0));
+        doc.move_to(&[(own.clone(), fixed)]).unwrap();
+        let start = layout(&doc);
+
+        let path: OccurrencePath = format!("{seed}").parse().unwrap();
+        match by {
+            true => doc.move_by(std::slice::from_ref(&path), &turn).unwrap(),
+            false => doc.move_to(&[(path.clone(), Placement::translation(DVec3::new(100.0, 0.0, 0.0)))]).unwrap(),
+        }
+        let moved = layout(&doc);
+        assert_ne!(moved, start, "{case}");
+        let first: OccurrencePath = format!("{seed}:{pattern}.1").parse().unwrap();
+        let seed_at = doc.assembly().component(seed).unwrap().placement;
+        let row = doc.table().find(&first).unwrap();
+        let wanted = rule.member(1).compose(&seed_at);
+        same_layout(&[("copy".into(), doc.table().world(row))], &[("copy".into(), wanted)], case);
+        let row = doc.table().find(&own).unwrap();
+        assert_eq!(doc.table().world(row), fixed, "{case}: the copy placed on its own stays");
+
+        doc.save(None).unwrap();
+        let mut back = AssemblyDocument::open(&root, with_kernel()).unwrap();
+        back.finish_loading();
+        same_layout(&moved, &layout(&back), &format!("{case}, reopened"));
+        assert!(doc.undo());
+        same_layout(&start, &layout(&doc), &format!("{case}, undone"));
+        assert!(doc.redo());
+        same_layout(&moved, &layout(&doc), &format!("{case}, redone"));
+    }
+}
+
 #[test]
 fn references_resolve_from_the_file_that_holds_them() {
     // The sub-assembly and its part live outside the root's folder: the part's path is

@@ -155,6 +155,20 @@ impl Configurations {
 }
 
 impl Document {
+    fn grid_row_layer(&self, defaults: &Values, row: &GridRow, base: &[Feature]) -> Result<Values, GridRefusal> {
+        let mut cells = row.values.clone();
+        // Parameter overrides stay out of the exchange grid but resolve with its globals.
+        if let Some(kept) = self.configurations.rows.iter().find(|r| r.name == row.name) {
+            cells.extend(
+                kept.overrides
+                    .iter()
+                    .filter(|(name, _)| !self.values.has_global(name))
+                    .map(|(name, text)| (name.clone(), text.clone())),
+            );
+        }
+        overlay(defaults, &row.name, &cells, base)
+    }
+
     /// The accepted table.
     pub fn configuration_grid(&self) -> Grid {
         let mut names = BTreeSet::new();
@@ -230,21 +244,9 @@ impl Document {
         check_units(&defaults, default, &expected)?;
         canonical(&defaults, &mut default.values);
         for row in grid.rows.iter_mut().skip(1) {
-            let mut layer = overlay(&defaults, &row.name, &row.values, base)?;
+            let mut layer = self.grid_row_layer(&defaults, row, base)?;
             check_units(&layer, row, &expected)?;
             canonical(&layer, &mut row.values);
-            // The row keeps its parameters' overrides, which the table does not list.
-            if let Some(kept) = self.configurations.rows.iter().find(|r| r.name == row.name) {
-                let hidden: BTreeMap<_, _> = kept
-                    .overrides
-                    .iter()
-                    .filter(|(k, _)| !self.values.has_global(k))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                if !hidden.is_empty() {
-                    layer = layer.overlay(&hidden, base).map_err(|reason| refusal(&row.name, None, reason))?;
-                }
-            }
             layer.validate(base).map_err(|reason| refusal(&row.name, None, reason))?;
         }
         let used: BTreeSet<_> = grid.rows.iter().flat_map(|row| row.properties.keys().cloned()).collect();
@@ -257,12 +259,12 @@ impl Document {
     pub fn resolve_configuration_grid(&self, grid: &Grid) -> Value {
         let Some(default) = grid.rows.first() else { return json!([]) };
         let base = self.configurations.base_or(&self.features);
-        let Ok(defaults) = self.values.overlay(&default.values, base) else { return json!([]) };
+        let Ok(defaults) = overlay(&self.values, DEFAULT_ROW, &default.values, base) else { return json!([]) };
         grid.rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
-                let layer = if i == 0 { Ok(defaults.clone()) } else { defaults.overlay(&row.values, base) };
+                let layer = if i == 0 { Ok(defaults.clone()) } else { self.grid_row_layer(&defaults, row, base) };
                 let mut properties = default.properties.clone();
                 properties.extend(row.properties.clone());
                 let inherited: Vec<_> = properties.keys().filter(|p| !row.properties.contains_key(*p)).collect();

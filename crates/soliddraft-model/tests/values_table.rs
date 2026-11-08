@@ -172,6 +172,60 @@ fn each_configuration_column_overrides_globals_and_parameters() {
     assert_eq!(depth(&doc, "Boss-Extrude2"), 40.0);
 }
 
+fn dependent_grid_value(name: &str, default: &str, expression: &str) -> Document {
+    let mut doc = bracket();
+    doc.execute(Command::SetValue { name: name.into(), expression: default.into() }).unwrap();
+    doc.execute(Command::AddConfiguration { name: "Thin".into() }).unwrap();
+    cell(&mut doc, "Thin", "BossExtrude1.Depth", Some("20 mm")).unwrap();
+    cell(&mut doc, "Thin", name, Some(expression)).unwrap();
+    doc
+}
+
+fn resolved_grid_value(doc: &Document, name: &str) -> serde_json::Value {
+    let resolved = doc.resolve_configuration_grid(&doc.configuration_grid());
+    let thin = resolved.as_array().unwrap().iter().find(|r| r["name"] == "Thin").unwrap();
+    thin["values"]
+        .as_array()
+        .and_then(|values| values.iter().find(|v| v["name"] == name))
+        .map(|v| v["value"].clone())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+#[test]
+fn configuration_grid_checks_globals_with_their_retained_parameter_overrides() {
+    let mut doc = dependent_grid_value("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");
+    assert_eq!(value(&doc, "Ratio", 1), 1.0);
+    let before = doc.configuration_grid();
+    assert!(!before.rows[1].values.contains_key("BossExtrude1.Depth"));
+    let checked = doc.check_configuration_grid(&before).expect("the unchanged accepted row must remain valid");
+    doc.execute(Command::SetConfigurationGrid { grid: Box::new(checked) }).unwrap();
+    assert_eq!(doc.configuration_grid(), before);
+    assert_eq!(value(&doc, "BossExtrude1.Depth", 1), 20.0);
+    assert_eq!(value(&doc, "Ratio", 1), 1.0);
+}
+
+#[test]
+fn configuration_grid_readouts_use_the_complete_row() {
+    let ratio = dependent_grid_value("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");
+    assert_eq!(resolved_grid_value(&ratio, "Ratio"), serde_json::json!(value(&ratio, "Ratio", 1)));
+    let twice = dependent_grid_value("Twice", "20 mm", "BossExtrude1.Depth * 2");
+    assert_eq!(value(&twice, "Twice", 1), 40.0);
+    assert_eq!(resolved_grid_value(&twice, "Twice"), serde_json::json!(40.0));
+}
+
+#[test]
+fn configuration_grid_still_refuses_a_final_division_by_zero_atomically() {
+    let mut doc = dependent_grid_value("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");
+    let truth = doc.part_json();
+    let undo = doc.undo_depth();
+    let mut grid = doc.configuration_grid();
+    grid.rows[1].values.insert("Ratio".into(), "10 mm / (BossExtrude1.Depth - 20 mm)".into());
+    let error = doc.execute(Command::SetConfigurationGrid { grid: Box::new(grid) }).unwrap_err().to_string();
+    assert!(error.contains("division by zero"), "{error}");
+    assert_eq!(doc.part_json(), truth);
+    assert_eq!(doc.undo_depth(), undo);
+}
+
 fn add(doc: &mut Document, kind: FeatureKind) -> FeatureId {
     let command = Command::AddFeature { kind, name: None, position: None, via_assistant: false };
     doc.execute(command).unwrap().created.unwrap()

@@ -44,6 +44,86 @@ fn call(state: &mut AppState, name: &str, arguments: Value) -> Value {
     tool(state, name, arguments).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
+fn parameter_dependent_grid(name: &str, default: &str, expression: &str) -> AppState {
+    let model = soliddraft_model::Document::from_bytes(
+        include_bytes!("../../soliddraft-model/tests/fixtures/bracket-140.dwprt"),
+        soliddraft_app::kernel(),
+    )
+    .unwrap();
+    let mut state = AppState::new(Document::from_model(model));
+    call(&mut state, "set_value", json!({ "name": name, "expression": default }));
+    call(&mut state, "add_configuration", json!({ "name": "Thin" }));
+    call(
+        &mut state,
+        "set_configuration_value",
+        json!({ "configuration": "Thin", "name": "BossExtrude1.Depth", "expression": "20 mm" }),
+    );
+    call(
+        &mut state,
+        "set_configuration_value",
+        json!({ "configuration": "Thin", "name": name, "expression": expression }),
+    );
+    state
+}
+
+fn resolved_thin(report: &Value, name: &str) -> Value {
+    report["resolved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "Thin")
+        .and_then(|row| row["values"].as_array())
+        .and_then(|values| values.iter().find(|v| v["name"] == name))
+        .map(|v| v["value"].clone())
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn grid_retained_parameter_overrides_do_not_block_values_tab_text_property_edits() {
+    use soliddraft_app::values_tab::{self, Field, ValuesAction};
+    let mut state = parameter_dependent_grid("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");
+    let field = Field::Property("note".into(), 0);
+    let undo = state.doc.undo_depth();
+    values_tab::apply(&mut state, ValuesAction::Commit(field.clone(), "Stock item".into()));
+    assert!(state.values.error(&field).is_none(), "{:?}", state.values.error(&field));
+    assert_eq!(state.doc.model().configuration_grid().rows[0].properties["note"], "Stock item");
+    assert_eq!(state.doc.undo_depth(), undo + 1);
+    let read = call(&mut state, "configuration_grid", json!({}));
+    assert_eq!(resolved_thin(&read, "Ratio"), json!(1.0));
+}
+
+#[test]
+fn grid_retained_parameter_overrides_survive_unchanged_csv_and_xlsx_imports() {
+    let mut state = parameter_dependent_grid("Ratio", "1 mm / 1 mm", "10 mm / (BossExtrude1.Depth - 10 mm)");
+    let dir = scratch("retained-parameter-import");
+    for format in ["csv", "xlsx"] {
+        let file = dir.join(format!("unchanged.{format}"));
+        let before = state.doc.model().configuration_grid();
+        call(&mut state, "export_configuration_grid", json!({ "path": file, "format": format }));
+        let preview = call(&mut state, "preview_configuration_grid", json!({ "path": file, "format": format }));
+        assert_eq!(resolved_thin(&preview, "Ratio"), json!(1.0));
+        apply(&mut state, preview["preview_id"].as_str().unwrap()).unwrap();
+        assert_eq!(state.doc.model().configuration_grid(), before);
+        let read = call(&mut state, "configuration_grid", json!({}));
+        assert_eq!(resolved_thin(&read, "Ratio"), json!(1.0));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn grid_retained_parameter_overrides_are_used_by_live_and_preview_readouts() {
+    let mut state = parameter_dependent_grid("Twice", "20 mm", "BossExtrude1.Depth * 2");
+    let live = call(&mut state, "configuration_grid", json!({}));
+    assert_eq!(resolved_thin(&live, "Twice"), json!(40.0));
+    let dir = scratch("retained-parameter-read");
+    let file = dir.join("unchanged.csv");
+    call(&mut state, "export_configuration_grid", json!({ "path": file, "format": "csv" }));
+    let preview = call(&mut state, "preview_configuration_grid", json!({ "path": file, "format": "csv" }));
+    assert_eq!(resolved_thin(&preview, "Twice"), json!(40.0));
+    assert_eq!(live["resolved"], preview["resolved"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn preview_file(state: &mut AppState, name: &str) -> Result<Value, String> {
     let format = name.rsplit('.').next().unwrap();
     tool(state, "preview_configuration_grid", json!({ "path": fixture(name), "format": format }))

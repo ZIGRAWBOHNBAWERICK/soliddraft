@@ -149,10 +149,10 @@ impl Bench {
         let mut f = Frame::default();
         doc.poll(Duration::from_millis(4));
         f.poll = started.elapsed();
-        let (meshes, levels) = {
+        let (meshes, levels, generation) = {
             let mut scene = self.scene.lock().unwrap();
             scene.update(doc);
-            (scene.take_new_meshes(MESHES_PER_FRAME), scene.take_new_levels())
+            (scene.take_new_meshes(MESHES_PER_FRAME), scene.take_new_levels(), scene.generation())
         };
         let meshes: Vec<_> =
             meshes.into_iter().filter_map(|d| doc.store().get(d).mesh.clone().map(|m| (d, m))).collect();
@@ -197,6 +197,7 @@ impl Bench {
             planes: None,
             assembly: Some(AssemblyFrame {
                 scene: self.scene.clone(),
+                generation,
                 meshes,
                 view_proj: view_proj.as_dmat4(),
                 eye,

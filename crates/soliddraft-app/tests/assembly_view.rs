@@ -52,7 +52,9 @@ struct View {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pick: Arc<Mutex<PickSample>>,
-    /// Coarse and fine meshes and deviations for the next frame.
+    /// Standard meshes beyond the scene's, coarse and fine meshes, and deviations for
+    /// the next frame.
+    meshes: Vec<(DefinitionIndex, SharedMesh)>,
     levels: Vec<(DefinitionIndex, Level, SharedMesh)>,
     deviations: Vec<(DefinitionIndex, [f32; 3])>,
 }
@@ -60,7 +62,7 @@ struct View {
 impl View {
     fn new(renderer: ViewportRenderer, device: wgpu::Device, queue: wgpu::Queue) -> View {
         let pick = Arc::new(Mutex::new(PickSample::default()));
-        View { renderer, device, queue, pick, levels: Vec::new(), deviations: Vec::new() }
+        View { renderer, device, queue, pick, meshes: Vec::new(), levels: Vec::new(), deviations: Vec::new() }
     }
 
     /// Renders until a pick window that this frame's scene produced has come back.
@@ -82,12 +84,13 @@ impl View {
         // Reversed depth, like the viewport's camera.
         let proj = glam::camera::rh::proj::directx::perspective_infinite_reverse(0.5, 1.0, 1.0);
         let view_proj: Mat4 = proj * view;
-        let mut meshes = Vec::new();
+        let mut meshes = std::mem::take(&mut self.meshes);
         if new_meshes {
             for d in scene.lock().unwrap().take_new_meshes(usize::MAX) {
                 meshes.push((d, doc.store().get(d).mesh.clone().unwrap()));
             }
         }
+        let generation = scene.lock().unwrap().generation();
         let mut input = FrameInput {
             view,
             proj,
@@ -115,6 +118,7 @@ impl View {
             planes: None,
             assembly: Some(AssemblyFrame {
                 scene: scene.clone(),
+                generation,
                 meshes,
                 view_proj: view_proj.as_dmat4(),
                 eye: eye.as_dvec3(),
@@ -278,4 +282,112 @@ fn each_placement_draws_the_level_its_size_on_screen_needs() {
         }
     }
     assert_eq!(seen, ["-y", "+z"]);
+}
+
+/// Parts A and B, distinct bricks, with A at x = 0 and B under the cursor at x = 50; and
+/// a display copy of a third brick C that nothing places yet, for an insert to find.
+fn two_parts() -> (AssemblyDocument, soliddraft_assembly::ComponentId, DocRef) {
+    let a = (DocumentId::new(), ContentHash::of_bytes(b"a"));
+    let b = (DocumentId::new(), ContentHash::of_bytes(b"b"));
+    let c = (DocumentId::new(), ContentHash::of_bytes(b"c"));
+    let mut root = Assembly::new("Pair");
+    let sa = root.add_source(DocRef::new(a.0, DocKind::Part, "a.dwprt", a.1.clone()));
+    let sb = root.add_source(DocRef::new(b.0, DocKind::Part, "b.dwprt", b.1.clone()));
+    let first = root.add_component(sa, Placement::IDENTITY);
+    root.add_component(sb, Placement::translation(DVec3::new(50.0, 0.0, 0.0)));
+    let mesh = DisplayMesh::cuboid(DVec3::ZERO, DVec3::splat(10.0));
+    let copies = [
+        RefCopy::part(a.0, a.1, &mesh, "test"),
+        RefCopy::part(b.0, b.1, &mesh, "test"),
+        RefCopy::part(c.0, c.1.clone(), &mesh, "test"),
+    ];
+    let bytes = root.to_bytes(DocumentId::new(), None, &copies).unwrap();
+    let mut doc =
+        AssemblyDocument::open_package(AssemblyPackage::from_bytes(bytes).unwrap(), None, OpenOptions::default())
+            .unwrap();
+    doc.finish_loading();
+    (doc, first, DocRef::new(c.0, DocKind::Part, "c.dwprt", c.1))
+}
+
+/// Deleting A and inserting C rereads the structure, which numbers the definitions
+/// again: B takes A's index and C takes B's. The renderer's coarse levels follow their
+/// definitions to the new numbers: B keeps its own, C has none and asks for one, and
+/// neither draws a level of another part.
+#[test]
+fn levels_follow_their_parts_when_definitions_are_renumbered() {
+    let Some((device, queue, tier)) = device() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let renderer = ViewportRenderer::new(&device, &queue, wgpu::TextureFormat::Rgba8UnormSrgb, tier);
+    if !renderer.assembly_culls() {
+        eprintln!("this adapter does not cull on the GPU; levels need it");
+        return;
+    }
+    let mut v = View::new(renderer, device, queue);
+    let (mut doc, first, c_ref) = two_parts();
+    let scene = Arc::new(Mutex::new(Scene::new(&mut doc)));
+    let def_of =
+        |doc: &AssemblyDocument, path: &OccurrencePath| doc.table().definition(doc.table().find(path).unwrap());
+    let a_path: OccurrencePath = format!("{first}").parse().unwrap();
+    let b_path: OccurrencePath = format!("{}", first.0 + 1).parse().unwrap();
+    let (a, b) = (def_of(&doc, &a_path), def_of(&doc, &b_path));
+    let all = Detail { drop_px: 0.0, box_px: 0.0 };
+    let top = |v: &mut View, doc: &AssemblyDocument, new: bool| {
+        let texel = v.frame_from(&scene, doc, new, 400.0, all);
+        let picked = scene.lock().unwrap().decode(texel).expect("a brick under the cursor");
+        doc.selection(&picked).face.expect("a face")
+    };
+    // From 400 mm the coarse level is fine enough (see the test above).
+    v.deviations = vec![(a, [0.4, 0.1, 0.025]), (b, [0.4, 0.1, 0.025])];
+    assert_eq!(top(&mut v, &doc, true), "+z");
+    v.levels = vec![(a, Level::Coarse, marked("-x")), (b, Level::Coarse, marked("-y"))];
+    assert_eq!(top(&mut v, &doc, false), "-y", "B's coarse level");
+
+    doc.delete(&[first]).unwrap();
+    let c = doc.insert(c_ref, Placement::translation(DVec3::new(200.0, 0.0, 0.0))).unwrap();
+    doc.finish_loading();
+    scene.lock().unwrap().update(&mut doc);
+    let c_path: OccurrencePath = format!("{c}").parse().unwrap();
+    let (b2, c2) = (def_of(&doc, &b_path), def_of(&doc, &c_path));
+    assert_eq!((b2, c2), (a, b), "B took A's index and C took B's");
+    v.deviations = vec![(b2, [0.4, 0.1, 0.025]), (c2, [0.4, 0.1, 0.025])];
+    assert_eq!(top(&mut v, &doc, true), "-y", "B draws its own coarse level, not A's");
+
+    // A new standard mesh for B's index numbers faces afresh: the coarse level made
+    // with the old one is dropped, B draws the new mesh and asks for a coarse level.
+    v.meshes = vec![(b2, Arc::new(DisplayMesh::cuboid(DVec3::ZERO, DVec3::splat(10.0))))];
+    v.deviations = vec![(b2, [0.4, 0.1, 0.025])];
+    v.renderer.take_assembly_wanted();
+    let mut wanted = Vec::new();
+    for _ in 0..40 {
+        assert_eq!(top(&mut v, &doc, false), "+z", "B's old coarse level is gone");
+        wanted.extend(v.renderer.take_assembly_wanted());
+        if wanted.contains(&(b2, Level::Coarse)) {
+            break;
+        }
+    }
+    assert!(wanted.contains(&(b2, Level::Coarse)), "B asks for a coarse level again: {wanted:?}");
+    v.levels = vec![(b2, Level::Coarse, marked("-y"))];
+    assert_eq!(top(&mut v, &doc, false), "-y", "B's new coarse level");
+
+    // C under the cursor: it has no coarse level of its own yet, so it draws its
+    // standard mesh and asks for one.
+    doc.move_to(&[
+        (b_path.clone(), Placement::translation(DVec3::new(300.0, 0.0, 0.0))),
+        (c_path.clone(), Placement::translation(DVec3::new(50.0, 0.0, 0.0))),
+    ])
+    .unwrap();
+    scene.lock().unwrap().update(&mut doc);
+    v.renderer.take_assembly_wanted();
+    let mut wanted = Vec::new();
+    for _ in 0..40 {
+        assert_eq!(top(&mut v, &doc, false), "+z", "C draws its standard mesh, not B's coarse level");
+        wanted.extend(v.renderer.take_assembly_wanted());
+        if wanted.contains(&(c2, Level::Coarse)) {
+            break;
+        }
+    }
+    assert!(wanted.contains(&(c2, Level::Coarse)), "C asks for its coarse level: {wanted:?}");
+    assert!(!wanted.contains(&(b2, Level::Coarse)), "B has its own: {wanted:?}");
 }

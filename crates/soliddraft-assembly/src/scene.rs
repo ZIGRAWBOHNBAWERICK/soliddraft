@@ -25,7 +25,7 @@ use crate::document::{AssemblyDocument, Changes};
 use crate::occurrence::{Flags, OccurrenceIndex, OccurrenceTable};
 use crate::path::OccurrencePath;
 use crate::placement::Placement;
-use crate::store::{DefinitionIndex, DefinitionStore};
+use crate::store::{DefinitionIndex, DefinitionKey, DefinitionStore};
 use soliddraft_tessellation::Level;
 
 /// One instance as the renderer uploads it: 64 bytes of little-endian `f32` and `u32`.
@@ -94,6 +94,9 @@ pub struct Scene {
     all_dirty: bool,
     /// Bumped when every instance and draw must be taken again.
     generation: u64,
+    /// What each definition index names in this generation. Rereading the structure
+    /// renumbers definitions; a renderer matches its uploads to the new numbers by key.
+    keys: Vec<DefinitionKey>,
     /// The selection and the hovered occurrence, named by path: rereading the structure
     /// renumbers rows, so the rows beside them are found again from the paths.
     selected: Vec<OccurrenceIndex>,
@@ -161,6 +164,7 @@ impl Scene {
                 [Level::Coarse, Level::Fine].into_iter().filter(|l| d.level_mesh(*l).is_some()).map(move |l| (i, l))
             })
             .collect();
+        self.keys = store.iter().map(|(_, d)| d.key.clone()).collect();
         self.dirty.clear();
         self.all_dirty = true;
         self.generation += 1;
@@ -282,9 +286,17 @@ impl Scene {
         &self.instances
     }
 
-    /// Bumped whenever every instance and draw must be taken again.
+    /// Bumped whenever every instance and draw must be taken again. Definition indices
+    /// in meshes, levels and ranges belong to one generation: rereading the structure
+    /// can give another definition an index, so what was taken under an older one must
+    /// be matched again through [`Scene::keys`].
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// The key of each definition index in this generation.
+    pub fn keys(&self) -> &[DefinitionKey] {
+        &self.keys
     }
 
     /// The draws of the definitions in `loaded` (those whose mesh the renderer holds).

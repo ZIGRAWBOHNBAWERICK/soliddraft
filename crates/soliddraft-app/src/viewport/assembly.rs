@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 use glam::{DMat4, DVec3};
-use soliddraft_assembly::{DefinitionIndex, DisplayMesh, Instance, MeshBounds, Scene, SharedMesh};
+use soliddraft_assembly::{DefinitionIndex, DefinitionKey, DisplayMesh, Instance, MeshBounds, Scene, SharedMesh};
 use soliddraft_tessellation::{DeviceBudget, Level, Usage};
 
 /// How much detail to draw, in pixels of radius on screen: the "light mode" knob.
@@ -53,6 +53,10 @@ impl Default for Detail {
 pub struct AssemblyFrame {
     /// The scene, shared with whoever applies the document's changes to it.
     pub scene: Arc<Mutex<Scene>>,
+    /// The scene generation ([`Scene::generation`]) the definition indices in
+    /// `meshes`, `levels` and `deviations` belong to. A frame from an older one is
+    /// ignored: rebuilding the scene queues every mesh again under the new numbers.
+    pub generation: u64,
     /// Display meshes that arrived since the last frame.
     pub meshes: Vec<(DefinitionIndex, SharedMesh)>,
     /// The camera's view-projection in the root's frame.
@@ -291,6 +295,10 @@ pub struct AssemblyRenderer {
     deviations: Vec<Option<[f32; 3]>>,
     /// Each definition's standard mesh, whose face numbers every level's ids use.
     standard: Vec<Option<SharedMesh>>,
+    /// What each index of `meshes`, `deviations`, `standard`, `wanted` and the
+    /// deferred uploads names, and the scene generation those indices belong to.
+    keys: Vec<DefinitionKey>,
+    keyed: u64,
     /// Triangles uploaded, for the device budget.
     triangles: u64,
     /// Frames prepared, to space the wanted readbacks.
@@ -335,6 +343,8 @@ struct Readback {
     /// The buffer being mapped: a new scene generation may replace the culling
     /// buffers while it is.
     buffer: Option<wgpu::Buffer>,
+    /// The generation whose definition indices the copy holds.
+    generation: u64,
 }
 
 impl AssemblyRenderer {
@@ -537,6 +547,8 @@ impl AssemblyRenderer {
             meshes: Vec::new(),
             deviations: Vec::new(),
             standard: Vec::new(),
+            keys: Vec::new(),
+            keyed: 0,
             triangles: 0,
             frames: 0,
             readback: Arc::default(),
@@ -568,6 +580,8 @@ impl AssemblyRenderer {
         self.meshes.clear();
         self.deviations.clear();
         self.standard.clear();
+        self.keys.clear();
+        self.keyed = 0;
         self.triangles = 0;
         self.wanted.clear();
         // A readback still in flight belongs to the last assembly.
@@ -602,6 +616,21 @@ impl AssemblyRenderer {
             self.scene = Arc::downgrade(&frame.scene);
         }
         self.active = true;
+        // Rereading the structure numbers definitions again: what is held under the old
+        // numbers moves to the new ones, by key, before anything else reads it.
+        let fresh = {
+            let scene = frame.scene.lock().expect("the scene lock");
+            if scene.generation() != self.keyed {
+                self.renumber(scene.keys());
+                self.keyed = scene.generation();
+            }
+            frame.generation == self.keyed
+        };
+        let (frame_meshes, frame_levels, frame_deviations) = if fresh {
+            (&frame.meshes[..], &frame.levels[..], &frame.deviations[..])
+        } else {
+            (&[][..], &[][..], &[][..])
+        };
         let mut uploaded = 0u64;
         let mut draws_changed = false;
         // A frame that makes the instance buffer and the culling tables leaves its meshes
@@ -609,16 +638,26 @@ impl AssemblyRenderer {
         let new_generation =
             self.instances.is_none() || frame.scene.lock().map(|s| s.generation() != self.generation).unwrap_or(true);
         let incoming: Vec<(DefinitionIndex, SharedMesh)> = if new_generation {
-            self.deferred.extend(frame.meshes.iter().cloned());
+            self.deferred.extend(frame_meshes.iter().cloned());
             Vec::new()
         } else {
             let mut all = std::mem::take(&mut self.deferred);
-            all.extend(frame.meshes.iter().cloned());
+            all.extend(frame_meshes.iter().cloned());
             all
         };
+        // A mesh the GPU holds already for its definition, as a rebuilt scene sends
+        // again, is not uploaded twice.
+        let incoming: Vec<(DefinitionIndex, SharedMesh)> = incoming
+            .into_iter()
+            .filter(|(def, mesh)| {
+                let i = def.0 as usize;
+                let held = self.standard.get(i).and_then(Option::as_ref).is_some_and(|s| Arc::ptr_eq(s, mesh));
+                !(held && self.meshes.get(i).is_some_and(|m| m[Level::Standard.index()].is_some()))
+            })
+            .collect();
         // A wanted-levels readback that finished: take it before anything else.
         self.take_readback();
-        for (def, dev) in &frame.deviations {
+        for (def, dev) in frame_deviations {
             let i = def.0 as usize;
             if self.deviations.len() <= i {
                 self.deviations.resize(i + 1, None);
@@ -632,14 +671,21 @@ impl AssemblyRenderer {
             if self.standard.len() <= i {
                 self.standard.resize(i + 1, None);
             }
-            self.standard[i] = Some(mesh.clone());
+            // Coarse and fine levels number their faces like the standard mesh they came
+            // with: a new standard mesh leaves them wrong, and they are asked for again.
+            if self.standard[i].replace(mesh.clone()).is_some()
+                && let Some(m) = self.meshes.get_mut(i)
+            {
+                m[Level::Coarse.index()] = None;
+                m[Level::Fine.index()] = None;
+            }
         }
         let levels: Vec<(DefinitionIndex, Level, SharedMesh)> = if new_generation {
-            self.deferred_levels.extend(frame.levels.iter().cloned());
+            self.deferred_levels.extend(frame_levels.iter().cloned());
             Vec::new()
         } else {
             let mut all = std::mem::take(&mut self.deferred_levels);
-            all.extend(frame.levels.iter().cloned());
+            all.extend(frame_levels.iter().cloned());
             all
         };
         // This frame's meshes go up as one write per pool, however many there are.
@@ -824,6 +870,7 @@ impl AssemblyRenderer {
             if self.frames.is_multiple_of(WANTED_EVERY) && !rb.copied && !rb.pending && !rb.ready {
                 encoder.copy_buffer_to_buffer(&cull.levels, wanted_at, &cull.readback, 0, wanted_len);
                 rb.copied = true;
+                rb.generation = self.keyed;
             }
             drop(rb);
             self.culling = true;
@@ -1085,14 +1132,51 @@ impl AssemblyRenderer {
         }
     }
 
+    /// Moves what is held per definition from the last generation's numbers to the
+    /// numbers of `keys`, the new generation's, matching by key. A definition that is
+    /// gone takes its uploads with it; one that is new starts with none. Nothing is
+    /// kept only because its index is still in use.
+    fn renumber(&mut self, keys: &[DefinitionKey]) {
+        let new: std::collections::HashMap<&DefinitionKey, u32> =
+            keys.iter().enumerate().map(|(j, k)| (k, j as u32)).collect();
+        let map: Vec<Option<u32>> = self.keys.iter().map(|k| new.get(k).copied()).collect();
+        let to = |d: DefinitionIndex| map.get(d.0 as usize).copied().flatten().map(DefinitionIndex);
+        fn moved<T: Clone>(
+            old: &[T],
+            len: usize,
+            empty: T,
+            to: impl Fn(DefinitionIndex) -> Option<DefinitionIndex>,
+        ) -> Vec<T> {
+            let mut out = vec![empty; len];
+            for (i, v) in old.iter().enumerate() {
+                if let Some(j) = to(DefinitionIndex(i as u32)) {
+                    out[j.0 as usize] = v.clone();
+                }
+            }
+            out
+        }
+        self.meshes = moved(&self.meshes, keys.len(), [None; LEVELS], to);
+        self.deviations = moved(&self.deviations, keys.len(), None, to);
+        self.standard = moved(&self.standard, keys.len(), None, to);
+        self.deferred = std::mem::take(&mut self.deferred).into_iter().filter_map(|(d, m)| Some((to(d)?, m))).collect();
+        self.deferred_levels = std::mem::take(&mut self.deferred_levels)
+            .into_iter()
+            .filter_map(|(d, l, m)| Some((to(d)?, l, m)))
+            .collect();
+        self.wanted = std::mem::take(&mut self.wanted).into_iter().filter_map(|(d, l)| Some((to(d)?, l))).collect();
+        self.keys = keys.to_vec();
+    }
+
     /// Reads a finished wanted-levels readback into [`AssemblyRenderer::take_wanted`].
+    /// One copied under an older generation's numbers is dropped; the next one asks
+    /// again.
     fn take_readback(&mut self) {
         let buffer = match self.readback.lock() {
-            Ok(mut r) if r.ready => r.buffer.take(),
+            Ok(mut r) if r.ready => r.buffer.take().map(|b| (b, r.generation == self.keyed)),
             _ => None,
         };
-        let Some(buffer) = buffer else { return };
-        {
+        let Some((buffer, current)) = buffer else { return };
+        if current {
             let view = buffer.slice(..).get_mapped_range().expect("mapped wanted readback");
             let words: &[u32] = bytemuck::cast_slice(&view);
             for (def, w) in words.iter().enumerate().filter(|(_, w)| **w != 0) {

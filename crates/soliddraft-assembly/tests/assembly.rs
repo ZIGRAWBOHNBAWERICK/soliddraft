@@ -494,6 +494,39 @@ fn moving_a_pattern_seed_moves_its_copies() {
     }
 }
 
+/// A seed with twenty thousand copies moves them all in time proportional to the copies,
+/// and so do Undo and Redo of the move: the root's bounds are redone once, not once per
+/// copy.
+#[test]
+fn moving_a_seed_with_many_copies_scales() {
+    const COPIES: u32 = 20_000;
+    let dir = folder("seed-move-many");
+    let part = dir.join("block.dwprt");
+    save_block(&part, 10.0, 10.0);
+    let root = dir.join("rig.dwasm");
+    let mut doc = AssemblyDocument::new_with("Rig", with_kernel());
+    doc.save(Some(&root)).unwrap();
+    let seed = doc.insert(reference(&root, &part), Placement::IDENTITY).unwrap();
+    let rule = PatternRule::Linear { direction: [1.0, 0.0, 0.0], spacing: 20.0, count: COPIES, second: None };
+    doc.add_pattern(vec![seed], rule).unwrap();
+    doc.finish_loading();
+    assert_eq!(doc.table().counts().parts, COPIES as usize);
+    let path: OccurrencePath = format!("{seed}").parse().unwrap();
+    let up = Placement::translation(DVec3::new(0.0, 0.0, 100.0));
+
+    let started = std::time::Instant::now();
+    doc.move_to(&[(path, up)]).unwrap();
+    let moved = layout(&doc);
+    assert!(doc.undo());
+    assert!(doc.redo());
+    let took = started.elapsed();
+    same_layout(&moved, &layout(&doc), "redone");
+    let all = doc.table().bounds(soliddraft_assembly::OccurrenceIndex::ROOT);
+    assert!((all.min.z - 100.0).abs() < 1e-6 && (all.max.z - 110.0).abs() < 1e-6, "every copy rose: {all:?}");
+    // Redoing the root's bounds per copy is 3 x 4e8 sibling visits, which takes far longer.
+    assert!(took < std::time::Duration::from_secs(10), "{took:?}");
+}
+
 #[test]
 fn references_resolve_from_the_file_that_holds_them() {
     // The sub-assembly and its part live outside the root's folder: the part's path is

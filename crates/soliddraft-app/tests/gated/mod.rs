@@ -1,7 +1,7 @@
 use soliddraft_kernel_api::*;
 use soliddraft_kernel_catallax::CatallaxKernel;
 use std::sync::{Condvar, Mutex};
-/// Catallax, with extrusions of one depth held back and others refused on request.
+/// Catallax, with selected operations held back or refused on request.
 #[derive(Default)]
 pub struct Gated {
     inner: CatallaxKernel,
@@ -18,6 +18,8 @@ pub struct Rules {
     pub holding: Option<f64>,
     /// Extrusions this deep fail.
     pub refuse: Vec<f64>,
+    /// Fillets with these radii fail.
+    pub refuse_fillet_radii: Vec<f64>,
     /// No body can be meshed for display.
     pub refuse_display: bool,
     /// Bodies with more volume than this cannot be meshed for display.
@@ -89,6 +91,13 @@ impl Kernel for Gated {
         self.inner.boolean(tag, op, target, tool)
     }
     fn fillet(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], radius: f64) -> KernelResult<OpResult> {
+        if self.rules.lock().unwrap().refuse_fillet_radii.contains(&radius) {
+            return Err(KernelError::Failed {
+                op: OpKind::Fillet,
+                code: 0,
+                message: format!("the scenario refuses a radius of {radius}"),
+            });
+        }
         self.inner.fillet(tag, body, edges, radius)
     }
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {

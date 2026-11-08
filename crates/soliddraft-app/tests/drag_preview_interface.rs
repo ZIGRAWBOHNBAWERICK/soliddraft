@@ -168,7 +168,7 @@ fn dragging_the_depth_field_previews_and_applies_one_undo_step() {
 }
 
 #[test]
-fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
+fn refused_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     if !gpu_available() {
         eprintln!("no GPU adapter; skipping");
         return;
@@ -176,7 +176,11 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     let config = std::env::temp_dir().join(format!("soliddraft-failed-edit-interface-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
     soliddraft_app::file::set_config_dir(Some(config));
-    let mut doc = Document::new("Fillet edit", soliddraft_app::kernel());
+    // Convex box fillets now support large-radius terminal events.
+    // A deterministic refusal keeps this test about failed-edit recovery.
+    let kernel = Arc::new(gated::Gated::default());
+    kernel.rules.lock().unwrap().refuse_fillet_radii.push(50.0);
+    let mut doc = Document::new("Fillet edit", kernel);
     doc.apply(Command::AddExtrude {
         params: ExtrudeParams {
             profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },
@@ -192,6 +196,7 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
         .apply(Command::AddFillet { params: FilletParams { edges: vec![reference], radius: 1.0 } })
         .unwrap()
         .unwrap();
+    assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Ok);
     let proved_body = doc.display_body();
     let proved_revision = doc.revision();
     doc.selection = Some(Selection::Feature(fillet));
@@ -216,7 +221,14 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     harness.run_steps(5);
     settle_document(&mut harness);
     let state = &harness.state().state;
-    assert!(matches!(&state.doc.feature(fillet).unwrap().status, FeatureStatus::Error(_)));
+    assert!(
+        matches!(&state.doc.feature(fillet).unwrap().status, FeatureStatus::Error(message)
+            if message.contains("the scenario refuses a radius of 50")),
+        "after Radius Enter: status={:?}, kind={:?}, undo={}",
+        state.doc.feature(fillet).unwrap().status,
+        state.doc.feature(fillet).unwrap().kind,
+        state.doc.undo_depth(),
+    );
     assert_eq!(state.doc.display_body(), proved_body);
     assert_eq!(state.doc.displayed_revision(), proved_revision);
     assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());

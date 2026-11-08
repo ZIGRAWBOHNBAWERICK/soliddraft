@@ -11,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -52,17 +53,29 @@ class LintHook(unittest.TestCase):
                     self.assertEqual(log.read_text().splitlines(), expected)
 
 
+def pinned_payload(binary):
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode='w:gz') as archive:
+        entry = tarfile.TarInfo('cargo-nextest')
+        entry.size = len(binary)
+        archive.addfile(entry, io.BytesIO(binary))
+    return stream.getvalue()
+
+
+def bootstrap_script():
+    bootstrap = (ROOT / 'ci/bootstrap').read_text()
+    return bootstrap.split("<<'PYTHON'\n", 1)[1].rsplit('\nPYTHON', 1)[0]
+
+
+def http_error(code):
+    return urllib.error.HTTPError('https://example.invalid', code, 'error', {}, None)
+
+
 class PinnedTools(unittest.TestCase):
     def test_installer_checks_hash_and_writes_only_the_given_prefix(self):
-        bootstrap = (ROOT / 'ci/bootstrap').read_text()
-        script = bootstrap.split("<<'PYTHON'\n", 1)[1].rsplit('\nPYTHON', 1)[0]
+        script = bootstrap_script()
         binary = b'#!/bin/sh\necho pinned-nextest\n'
-        stream = io.BytesIO()
-        with tarfile.open(fileobj=stream, mode='w:gz') as archive:
-            entry = tarfile.TarInfo('cargo-nextest')
-            entry.size = len(binary)
-            archive.addfile(entry, io.BytesIO(binary))
-        payload = stream.getvalue()
+        payload = pinned_payload(binary)
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory) / 'repo'
             (root / 'ci').mkdir(parents=True)
@@ -86,3 +99,56 @@ class PinnedTools(unittest.TestCase):
                 self.assertEqual((prefix / 'bin/cargo-nextest').read_bytes(), binary)
             self.assertEqual({str(p.relative_to(prefix)) for p in prefix.rglob('*')},
                              {'bin', 'bin/cargo-nextest'})
+
+    def run_with_downloads(self, downloads):
+        """Runs the installer against `downloads`, one per urlopen call, and returns the
+        number of calls and the backoff delays it slept."""
+        binary = b'#!/bin/sh\necho pinned-nextest\n'
+        payload = pinned_payload(binary)
+        calls = []
+
+        def urlopen(url, timeout):
+            outcome = downloads[len(calls)]
+            calls.append(url)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return io.BytesIO(payload)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / 'repo'
+            (root / 'ci').mkdir(parents=True)
+            prefix = pathlib.Path(directory) / 'tools'
+            asset = {'target': 'x86_64-unknown-linux-gnu',
+                     'sha256': hashlib.sha256(payload).hexdigest()}
+            (root / 'ci/tools').write_text(json.dumps(
+                {'cargo-nextest': {'version': '0.9.148', 'platforms': {'Linux-x86_64': asset}}}))
+            with mock.patch.object(sys, 'argv', ['bootstrap', str(root), str(prefix)]), \
+                 mock.patch('platform.system', return_value='Linux'), \
+                 mock.patch('platform.machine', return_value='x86_64'), \
+                 mock.patch('urllib.request.urlopen', side_effect=urlopen), \
+                 mock.patch('time.sleep') as sleep, \
+                 mock.patch('sys.stderr', io.StringIO()):
+                try:
+                    exec(compile(bootstrap_script(), 'bootstrap', 'exec'), {'__name__': '__main__'})
+                    installed = (prefix / 'bin/cargo-nextest').read_bytes() == binary
+                except BaseException as error:
+                    installed = error
+            return len(calls), [c.args[0] for c in sleep.call_args_list], installed
+
+    def test_installer_retries_a_transient_forge_failure(self):
+        """CI shards failed on a 503 and on a read timeout from the release download."""
+        calls, delays, installed = self.run_with_downloads(
+            [http_error(503), TimeoutError('The read operation timed out'),
+             ConnectionResetError(), http_error(429), 'ok'])
+        self.assertIs(installed, True)
+        self.assertEqual((calls, delays), (5, [5, 10, 20, 40]))
+
+    def test_installer_does_not_retry_a_missing_release(self):
+        calls, delays, installed = self.run_with_downloads([http_error(404), 'ok'])
+        self.assertIsInstance(installed, urllib.error.HTTPError)
+        self.assertEqual((calls, delays, installed.code), (1, [], 404))
+
+    def test_installer_gives_up_after_its_last_attempt(self):
+        calls, delays, installed = self.run_with_downloads([http_error(502)] * 5 + ['ok'])
+        self.assertIsInstance(installed, urllib.error.HTTPError)
+        self.assertEqual((calls, len(delays), installed.code), (5, 4, 502))

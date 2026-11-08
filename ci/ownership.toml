@@ -249,7 +249,7 @@ module = ["sketch_tools"]
 name = "app.sketcher"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/sketcher.rs"]
+paths = ["crates/soliddraft-app/src/sketcher.rs", "crates/soliddraft-app/src/sketcher/"]
 module = ["sketcher"]
 
 [[areas]]

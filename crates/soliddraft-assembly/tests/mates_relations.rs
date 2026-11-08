@@ -161,9 +161,12 @@ impl Drop for Rig {
     }
 }
 
+/// A part's maker and where it is inserted.
+type Inserted<'a> = (&'a dyn Fn(&Path), Placement);
+
 /// Each part made by its maker and inserted where it says; the first is held at the
 /// origin by O.
-fn rig(name: &str, parts: &[(&dyn Fn(&Path), Placement)]) -> Rig {
+fn rig(name: &str, parts: &[Inserted]) -> Rig {
     let dir = folder(name);
     let root = dir.join("rig.dwasm");
     let mut doc = AssemblyDocument::new_with("Rig", options());

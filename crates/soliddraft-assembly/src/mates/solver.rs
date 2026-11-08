@@ -1373,11 +1373,11 @@ fn asks<'a>(
             Constraint::Lock { mate, a, b, relative } => {
                 let m = cube_of(turned(a)).ok_or_else(|| unsupported_lock(mate))?;
                 let t = relative.translation.to_array();
-                for axis in 0..3 {
-                    let j = (0..3).find(|j| m[axis][*j] != 0).expect("a signed permutation");
+                for (row, edges) in m.iter().zip(&mut out.edges) {
+                    let j = (0..3).find(|j| row[*j] != 0).expect("a signed permutation");
                     let offset = finite(t[j], mate, "the lock")?;
-                    let gap = int(i64::from(m[axis][j])) * offset;
-                    out.edges[axis].push(Edge { from: Some(a), to: b, gap, mate, says: "locked".into() });
+                    let gap = int(i64::from(row[j])) * offset;
+                    edges.push(Edge { from: Some(a), to: b, gap, mate, says: "locked".into() });
                 }
             }
             Constraint::Axes { mate, a, b, axis_a, axis_b, coaxial: true, .. } => {

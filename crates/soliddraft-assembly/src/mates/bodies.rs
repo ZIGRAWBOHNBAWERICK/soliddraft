@@ -45,6 +45,7 @@ pub(crate) struct End {
 }
 
 /// What a mate between faces, edges or vertices asks of what they support.
+#[allow(clippy::large_enum_variant, reason = "a solve holds one per mate, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Rule {
     /// Parallel by `sign`, and a distance apart when there is one. A Coincident is a

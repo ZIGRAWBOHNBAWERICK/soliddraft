@@ -128,12 +128,15 @@ fn text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
 
 /// Runs the mate tools. `None` hands the call on.
 pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
+    if name == "assembly_drag" {
+        return Some(drag(state, input).map(|_| json!({"assembly": summary(state)})));
+    }
+
     if matches!(
         name,
         "assembly_mate_gear"
             | "assembly_mate_rack_and_pinion"
             | "assembly_mate_screw"
-            | "assembly_drag"
             | "assembly_mate_path"
             | "assembly_mate_cam"
             | "assembly_mate_universal_joint"
@@ -257,7 +260,15 @@ fn call(state: &mut AppState, name: &str, input: &Value) -> Result<Value, String
             let ([a0, a1], [p0, p1]) = (pair(&input["axes"], "axes")?, pair(&input["planes"], "planes")?);
             let (side, planes) =
                 (optional_alignment(&input["alignment"])?, optional_alignment(&input["plane_alignment"])?);
-            doc.mate_hinge(text(input, "name")?, [&a0, &a1], [&p0, &p1], side, planes, strict)
+            let limits = input
+                .get("angle_limits")
+                .filter(|v| !v.is_null())
+                .map(|v| {
+                    serde_json::from_value::<[f64; 2]>(v.clone())
+                        .map_err(|_| "angle_limits is [min,max] signed degrees".to_owned())
+                })
+                .transpose()?;
+            doc.mate_hinge_limited(text(input, "name")?, [&a0, &a1], [&p0, &p1], [side, planes], limits, strict)
                 .map(|id| json!({ "mate": id }))
         }
         "assembly_mate_symmetric" => {
@@ -499,7 +510,8 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
                         row["locked_turn"] = json!(turn);
                     }
                 }
-                Mate::Hinge { axes, planes, plane_alignment, .. } => {
+                Mate::Hinge { axes, planes, plane_alignment, angle_limits, .. } => {
+                    row["angle_limits"] = json!(angle_limits);
                     row["axes"] = json!(axes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["planes"] = json!(planes.iter().map(|e| endpoint(root, e)).collect::<Vec<_>>());
                     row["plane_alignment"] = json!(plane_alignment);
@@ -538,4 +550,38 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
         })
         .collect();
     (Value::Array(mates), values, json!(s.doc.solver()))
+}
+
+fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
+    let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
+    match input["phase"].as_str().unwrap_or("move") {
+        "begin" => {
+            let path =
+                serde_json::from_value(input["path"].clone()).map_err(|e| format!("the occurrence path: {e}"))?;
+            s.doc.begin_drag(path).map_err(|e| e.to_string())
+        }
+        "update" => {
+            let target =
+                serde_json::from_value(input["placement"].clone()).map_err(|e| format!("the placement: {e}"))?;
+            s.doc.preview_drag(target).map_err(refused)
+        }
+        "commit" => s.doc.commit_drag().map_err(refused),
+        "cancel" => {
+            s.doc.cancel_drag();
+            Ok(())
+        }
+        "move" => {
+            let path =
+                serde_json::from_value(input["path"].clone()).map_err(|e| format!("the occurrence path: {e}"))?;
+            let target =
+                serde_json::from_value(input["placement"].clone()).map_err(|e| format!("the placement: {e}"))?;
+            s.doc.begin_drag(path).map_err(|e| e.to_string())?;
+            if let Err(e) = s.doc.preview_drag(target) {
+                s.doc.cancel_drag();
+                return Err(refused(e));
+            }
+            s.doc.commit_drag().map_err(refused)
+        }
+        _ => Err("phase is begin, update, commit, cancel or move".into()),
+    }
 }

@@ -455,6 +455,11 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(driven["assembly"]["components"][1]["translation"], json!([10.0, 10.0, 22.0]));
     s.call("assembly_edit_mate", json!({ "mate": "O", "align_axes": false }));
     s.call("assembly_delete_mate", json!({ "mate": "Z" }));
+    s.call(
+        "assembly_drag",
+        json!({"path": parts[1].to_string(), "placement":{"translation":[11,10,22], "rotation":[0,0,0,1]}}),
+    );
+    s.call("undo", json!({}));
     let reference = json!({ "component": parts[0], "plane": "Right plane" });
     s.call(
         "assembly_mate_angle",
@@ -467,7 +472,6 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     );
     s.call("assembly_delete_mate", json!({ "mate": "LA" }));
     for command in [
-        "assembly_drag",
         "assembly_mate_gear",
         "assembly_mate_rack_and_pinion",
         "assembly_mate_screw",

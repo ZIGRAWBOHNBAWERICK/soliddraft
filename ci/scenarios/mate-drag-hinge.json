@@ -1,0 +1,559 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-drag-hinge",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              5,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 30,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/shaft.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/shaft.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/shaft.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 12
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_hinge",
+      "arguments": {
+        "name": "H",
+        "axes": [
+          {
+            "component": 2,
+            "feature": "Cut-Extrude1",
+            "generator": "side"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          }
+        ],
+        "planes": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          }
+        ],
+        "alignment": "aligned",
+        "plane_alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "under_constrained"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 14,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        },
+        {
+          "pointer": "/result/remaining_dof",
+          "equals": 1
+        }
+      ],
+      "refused": "under_constrained"
+    },
+    {
+      "tool": "assembly_mate_hinge",
+      "arguments": {
+        "name": "H",
+        "axes": [
+          {
+            "component": 2,
+            "feature": "Cut-Extrude1",
+            "generator": "side"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          }
+        ],
+        "planes": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          }
+        ],
+        "alignment": "aligned",
+        "plane_alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 1
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "hinge"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/plane_alignment",
+          "equals": "aligned"
+        },
+        {
+          "pointer": "/summary/assembly/solver/free/0/motion",
+          "equals": "spin_z"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "H",
+        "angle_limits": [
+          -30,
+          30
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/angle_limits",
+          "equals": [
+            -30.0,
+            30.0
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0.6427876096865393,
+            0.766044443118978
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/2",
+          "approx": 0.25881904510252074,
+          "tolerance": 1e-08
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 0,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.6427876096865393,
+            0.766044443118978
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/2",
+          "approx": -0.25881904510252074,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/2",
+          "approx": 0.25881904510252074,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/2",
+          "approx": -0.25881904510252074,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/mates/1/angle_limits",
+          "equals": [
+            -30.0,
+            30.0
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "assembly_delete_mate",
+      "arguments": {
+        "mate": "H"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_mate_hinge",
+      "arguments": {
+        "name": "H",
+        "axes": [
+          {
+            "component": 2,
+            "feature": "Cut-Extrude1",
+            "generator": "side"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "side"
+          }
+        ],
+        "planes": [
+          {
+            "component": 2,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          },
+          {
+            "component": 4,
+            "feature": "Boss-Extrude1",
+            "generator": "start_cap"
+          }
+        ],
+        "alignment": "aligned",
+        "plane_alignment": "aligned",
+        "angle_limits": [
+          -30,
+          30
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/3",
+          "approx": 1,
+          "tolerance": 1e-08
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/proof/certainty",
+          "equals": "bounded"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "path": "4",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            0
+          ],
+          "rotation": [
+            0,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/rotation/3",
+          "approx": 1,
+          "tolerance": 1e-08
+        }
+      ]
+    }
+  ]
+}

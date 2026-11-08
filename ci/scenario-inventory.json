@@ -1220,6 +1220,36 @@
       "route": "MCP assembly_check_hole_alignment -> pinned native cylinder supports -> exact rational placed axes",
       "supported_limits": "Internal cylindrical axes exactly on world axes; coaxial or parallel offset within a maximum deviation; selected components, negative deviation and single-part refusals; no diameter or fit test.",
       "evidence": "result.json, protocol.json and command evidence; work/a.dwprt and work/rig.dwasm; unchanged accepted state and fresh-process reopen."
+    },
+    {
+      "id": "mate-drag",
+      "file": "ci/scenarios/mate-drag.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
+      "supported_limits": "B6: drag previews and cancel, distance stops, one-step commit, undo/redo and save/reopen; no collision checks.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-drag-hinge",
+      "file": "ci/scenarios/mate-drag-hinge.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "b1452051a101198d7e1d528636301c240bda3d61",
+      "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
+      "supported_limits": "B6: bounded Hinge stops in both directions during rotation, undo/redo and save/reopen; no collision checks.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
     }
   ]
 }

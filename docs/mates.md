@@ -21,7 +21,7 @@ are in `crates/soliddraft-app/src/mates/`.
 | Tangent | Plane-cylinder, plane-sphere, cylinder-cylinder, cylinder-sphere and sphere-sphere contact |
 | Angle | A signed angle between two projected directions about an explicit reference direction |
 | Limit Angle | The same signed angle, free between inclusive angular stops |
-| Hinge | A Concentric between two axes and a Coincident between two planes, under one name: everything but the turn about the axis |
+| Hinge | A Concentric between two axes and a Coincident between two planes, under one name: everything but the turn about the axis, optionally between signed angular stops |
 | Symmetric | One part's plane, line or point the mirror image of another's about a plane: two turns and a translation for planes, two turns and two translations for lines, three translations for points |
 | Linear Coupler | One translation: how far one part slides along its plane's normal or axis is a ratio of how far another slides |
 | Limit Distance | The turns a Distance fixes; its translation stays free between a least and a greatest distance |
@@ -104,6 +104,33 @@ byte unchanged. Failure to find or enclose a solution returns `uncertified`, nam
 mates. It does not claim the system is over-constrained. A Jacobian whose ranks at 1e-6 and
 1e-9 disagree returns `uncertain_rank`. Every refusal leaves truth, placements and undo/redo
 history unchanged.
+
+## Move and rotate under mates
+
+Drag the Placement fields to preview a component's translation or rotation while its mates
+hold. Release commits one undo step. Escape cancels the preview. Typed placements use the
+same solve on acceptance. A fixed component stays at its accepted pose.
+
+`assembly_drag` takes an occurrence `path` and a `placement` in its parent's frame.
+A placement has `translation: [x,y,z]` in millimetres and `rotation: [x,y,z,w]`, a unit
+quaternion. With the default `phase: "move"` it solves and commits once. For a continuous
+drag, send `phase: "begin"` with the path, then `phase: "update"` with each target placement,
+then `phase: "commit"` on release or `phase: "cancel"` to restore the accepted pose.
+Updates change the displayed occurrence table. They leave saved truth and undo/redo history
+unchanged. A refused update retains the previous preview. Saving during a preview saves the
+accepted assembly. An ordinary assembly edit cancels the preview before reading placements or capturing history.
+
+Drag targets are wishes. Mates correct constrained motions, while free translations and
+turns follow the target. Limit Distance, Limit Angle, free Width and straight Slot bounds
+act as inclusive stops. Axis-aligned cases keep the exact solver and its refusals. General
+rotations and Hinge stops use the bounded solver and the same certified residual bounds.
+Collision while dragging and Mate Controller are outside this version.
+
+Set a Hinge's stops with `assembly_edit_mate` and `angle_limits: [min,max]`, in signed degrees
+within [-180,180]. The angle runs about the first selected axis by the right-hand rule.
+Each component's zero direction is its local axis crossed with the local coordinate axis
+least parallel to it, with X first on ties. This definition comes from the selected analytic
+axis, independently of the pick position. Hinges without stops keep their existing bytes.
 
 ## In assembly.json
 
@@ -531,10 +558,10 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Dragging under mates, Gear, Rack and Pinion, Screw and hinge angle limits remain outside B5.
-Named mechanical and dragging commands return `unsupported_motion`. Path, Cam, arc Slot,
-Universal Joint and Physical Dynamics remain unsupported. This work adds static constraints,
-not contact simulation or motion.
+Dragging under mates and Hinge angular stops are supported. Gear, Rack and Pinion and Screw
+remain unsupported until the second B6 stage. Their named commands return `unsupported_motion`.
+Path, Cam, arc Slot, Universal Joint, Physical Dynamics, collision while dragging and Mate
+Controller remain outside this version.
 
 Nonparallel Width Free, angular Dimension and Percent; Distance limits across two points or
 two axes; the misaligned Concentric option; Parallel or Perpendicular between a plane and an

@@ -177,7 +177,17 @@ pub(in crate::mates) fn native_constraint(
             kinds.len() == 2
                 && ((kinds[0] == Kind::Plane && curved(&reads[1])) || (curved(&reads[0]) && curved(&reads[1])))
         }
-        Rule::Hinge { .. } => kinds == [Kind::Axis, Kind::Axis, Kind::Plane, Kind::Plane],
+        Rule::Hinge { limits, .. } => {
+            if let Some([lo, hi]) = limits
+                && (!lo.is_finite() || !hi.is_finite() || *lo < -180.0 || *hi > 180.0 || lo > hi)
+            {
+                return Err(MateRefusal::new(
+                    RefusalCode::InvalidValue,
+                    "hinge stops must be ordered within [-180,180]",
+                ));
+            }
+            kinds == [Kind::Axis, Kind::Axis, Kind::Plane, Kind::Plane]
+        }
         Rule::Symmetric { .. } => {
             kinds.len() == 3 && kinds[2] == Kind::Plane && kinds[0] == kinds[1] && kinds[0] != Kind::Other
         }
@@ -390,8 +400,28 @@ pub(super) fn residual<N: Number>(
                 }
             }
         }
-        Rule::Hinge { sign, plane_sign } => {
+        Rule::Hinge { sign, plane_sign, limits } => {
             coincident(out, a, b, *sign);
+            if let Some([lo, hi]) = limits {
+                let clock = |read: &Read| {
+                    let local =
+                        world::<N>(read, &BTreeMap::from([(read.body.clone(), Placement::IDENTITY)])).direction();
+                    let index =
+                        (0..3).min_by(|i, j| local[*i].middle().abs().total_cmp(&local[*j].middle().abs())).unwrap();
+                    let basis = std::array::from_fn(|k| N::f(if k == index { 1.0 } else { 0.0 }));
+                    rotate(&poses[&read.body], unit(cross(local, basis)))
+                };
+                let (u, v) = (clock(&reads[0]), clock(&reads[1]));
+                let n = a.direction();
+                range(
+                    out,
+                    dot(n, cross(u, v)).atan2(dot(u, v), ((*lo + *hi) * 0.5).to_radians()),
+                    radians(*lo),
+                    radians(*hi),
+                    true,
+                    rank,
+                );
+            }
             from_plane(out, world(&reads[2], poses), world(&reads[3], poses), *plane_sign, N::f(0.0), None, rank);
         }
         Rule::Width { sign, .. } => {
@@ -440,5 +470,58 @@ pub(super) fn residual<N: Number>(
             scalar(out, N::q(&ratio[0]) * slide(1, b) + sign * N::q(&ratio[1]) * slide(0, a) - N::q(offset), false);
         }
         Rule::Profile { .. } | Rule::Slot { .. } => scalar(out, N::f(f64::NAN), false),
+    }
+}
+
+pub(super) fn seed_hinge(reads: &[Read], rule: &Rule, poses: &mut BTreeMap<Body, Placement>, fixed: &BTreeSet<Body>) {
+    let Rule::Hinge { sign, plane_sign, limits } = rule else { return };
+    let (a, b) = (&reads[0].body, &reads[1].body);
+    let moving = if !fixed.contains(b) {
+        b
+    } else if !fixed.contains(a) {
+        a
+    } else {
+        return;
+    };
+    let u = DVec3::from_array(world::<f64>(&reads[0], poses).direction());
+    let v = DVec3::from_array(world::<f64>(&reads[1], poses).direction());
+    let (current, target) = if moving == b { (v, u * (*sign as f64)) } else { (u, v * (*sign as f64)) };
+    if current.try_normalize().is_none() || target.try_normalize().is_none() {
+        return;
+    }
+    let p = poses.get_mut(moving).expect("known hinge body");
+    p.rotation = crate::placement::canonical((shortest_arc(current, target) * p.rotation).normalize());
+    let n = DVec3::from_array(world::<f64>(&reads[0], poses).direction()).normalize();
+    let target = DVec3::from_array(world::<f64>(&reads[2], poses).direction()) * (*plane_sign as f64);
+    let current = DVec3::from_array(world::<f64>(&reads[3], poses).direction());
+    let (target, current) = (target - n * target.dot(n), current - n * current.dot(n));
+    if target.length_squared() > 1e-12 && current.length_squared() > 1e-12 {
+        let (target, current) = (target.normalize(), current.normalize());
+        let angle = libm::atan2(n.dot(current.cross(target)), current.dot(target));
+        let half = angle * if moving == b { 0.5 } else { -0.5 };
+        let sine = libm::sin(half);
+        let q = DQuat::from_xyzw(n.x * sine, n.y * sine, n.z * sine, libm::cos(half));
+        let p = poses.get_mut(moving).expect("known hinge body");
+        p.rotation = crate::placement::canonical((q * p.rotation).normalize());
+    }
+    if let Some([lo, hi]) = limits {
+        let clock = |read: &Read| {
+            let local = world::<f64>(read, &BTreeMap::from([(read.body.clone(), Placement::IDENTITY)])).direction();
+            let index = (0..3).min_by(|i, j| local[*i].abs().total_cmp(&local[*j].abs())).unwrap();
+            let basis = std::array::from_fn(|k| if k == index { 1.0 } else { 0.0 });
+            rotate(&poses[&read.body], unit(cross(local, basis)))
+        };
+        let (u, v) = (clock(&reads[0]), clock(&reads[1]));
+        let n = world::<f64>(&reads[0], poses).direction();
+        let near = ((*lo + *hi) * 0.5).to_radians();
+        let angle = <f64 as Number>::atan2(dot(n, cross(u, v)), dot(u, v), near);
+        let target = angle.clamp(lo.to_radians(), hi.to_radians());
+        let half = (target - angle) * if moving == b { 0.5 } else { -0.5 };
+        let sine = libm::sin(half);
+        let q = DQuat::from_xyzw(n[0] * sine, n[1] * sine, n[2] * sine, libm::cos(half));
+        if q.is_finite() {
+            let p = poses.get_mut(moving).expect("known hinge body");
+            p.rotation = crate::placement::canonical((q * p.rotation).normalize());
+        }
     }
 }

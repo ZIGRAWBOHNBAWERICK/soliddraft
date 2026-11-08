@@ -22,6 +22,7 @@
 
 pub(crate) mod bodies;
 pub(crate) mod command;
+pub(crate) mod drag;
 mod motion;
 mod reference;
 pub(crate) mod solver;
@@ -561,7 +562,7 @@ pub enum Mate {
         alignment: Alignment,
     },
     /// A concentric pair and a coincident pair under one name: a pin turning in a hole,
-    /// with its shoulder on the face round the hole. Limits are not supported.
+    /// with its shoulder on the face round the hole.
     Hinge {
         /// The mate's id.
         id: MateId,
@@ -575,6 +576,9 @@ pub enum Mate {
         alignment: Alignment,
         /// How the planes' outward normals relate.
         plane_alignment: Alignment,
+        /// Inclusive signed stops about the first axis, measured from local transverse frames.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle_limits: Option<[f64; 2]>,
     },
     /// `b` is `a` mirrored about `plane`: two planes, two lines or two points, on two parts,
     /// about a plane of any part.

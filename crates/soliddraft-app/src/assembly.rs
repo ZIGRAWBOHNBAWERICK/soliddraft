@@ -220,6 +220,9 @@ impl AssemblySession {
     /// Takes in what the loader found and what edits changed, once a frame.
     fn update(&mut self) {
         self.doc.poll(POLL_BUDGET);
+        if self.doc.dragging() && self.draft.as_ref().is_some_and(|d| Some(&d.path) != self.selected.as_ref()) {
+            self.doc.cancel_drag();
+        }
         let mut scene = self.scene.lock().expect("the scene lock");
         scene.update(&mut self.doc);
         let selected = self.selected_row();
@@ -236,7 +239,7 @@ impl AssemblySession {
         // The fields follow the selection, and its placement after an undo or a move.
         let local = selected.map(|r| (self.doc.table().path(r), self.doc.table().local(r)));
         self.draft = match (local, self.draft.take()) {
-            (Some((path, p)), Some(d)) if d.path == path && d.source == p => Some(d),
+            (Some((path, p)), Some(d)) if d.path == path && (d.source == p || self.doc.dragging()) => Some(d),
             (Some((path, p)), _) => Some(PlacementDraft::of(path, &p)),
             (None, _) => None,
         };
@@ -560,7 +563,16 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         }
         AssemblyAction::Place(path, placement) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
-            match s.doc.move_to(&[(path, placement)]) {
+            let result = s
+                .doc
+                .begin_drag(path)
+                .map_err(|e| e.to_string())
+                .and_then(|_| s.doc.preview_drag(placement).map_err(|e| e.to_string()))
+                .and_then(|_| s.doc.commit_drag().map_err(|e| e.to_string()));
+            if result.is_err() {
+                s.doc.cancel_drag();
+            }
+            match result {
                 Ok(()) => state.note("Moved", NoteKind::Ok),
                 Err(e) => state.note(e.to_string(), NoteKind::Error),
             }
@@ -943,6 +955,9 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(4.0);
         // A change applies once the field lets go: a drag ends or typing leaves it.
         let mut busy = false;
+        let mut changed = false;
+        let mut started = false;
+        let mut released = false;
         egui::Grid::new("assembly_placement").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             let rows = ["X", "Y", "Z"].into_iter().zip(draft.translation.iter_mut()).map(|(a, v)| (a, v, "mm"));
             let turns = ["Rotate X", "Rotate Y", "Rotate Z"].into_iter().zip(draft.rotation.iter_mut());
@@ -953,9 +968,34 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
                     egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("Placement {label}"))
                 });
                 busy |= resp.dragged() || resp.has_focus();
+                changed |= resp.changed();
+                started |= resp.drag_started();
+                released |= resp.drag_stopped();
                 ui.end_row();
             }
         });
+        let cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if cancel && s.doc.dragging() {
+            s.doc.cancel_drag();
+            s.draft = None;
+            return;
+        }
+        if started && let Err(e) = s.doc.begin_drag(draft.path.clone()) {
+            ui.colored_label(theme::muted(), e.to_string());
+        }
+        if changed
+            && s.doc.dragging()
+            && let Err(e) = s.doc.preview_drag(draft.placement())
+        {
+            ui.colored_label(theme::muted(), e.to_string());
+        }
+        if released && s.doc.dragging() {
+            if let Err(e) = s.doc.commit_drag() {
+                ui.colored_label(theme::muted(), e.to_string());
+            }
+            s.draft = None;
+            return;
+        }
         if !busy && draft.edited() {
             actions.push(AppAction::Assembly(AssemblyAction::Place(draft.path.clone(), draft.placement())));
         }

@@ -140,6 +140,7 @@ pub struct Draft {
     pub alignment: Alignment,
     /// A Hinge's planes' alignment.
     pub plane_alignment: Alignment,
+    pub hinge_limits: bool,
     /// A Concentric holds the turn about its axis.
     pub lock_rotation: bool,
     pub name: String,
@@ -176,6 +177,7 @@ impl Default for Draft {
             family: Family::Distance,
             alignment: Alignment::Opposed,
             plane_alignment: Alignment::Opposed,
+            hinge_limits: false,
             lock_rotation: false,
             name: String::new(),
             distance: "0 mm".into(),
@@ -305,6 +307,7 @@ fn add(state: &mut AppState) {
     };
     let d = &state.assembly.mate;
     let (plane_alignment, lock_rotation, reverse) = (d.plane_alignment, d.lock_rotation, d.reverse);
+    let hinge_limits = d.hinge_limits;
     let (limits, width, slot, ratio) = (
         [d.min.clone(), d.max.clone()],
         (family == Family::Width).then(|| width_input(d)),
@@ -358,7 +361,20 @@ fn add(state: &mut AppState) {
         Family::Lock => s.doc.mate_lock(&name, picked[0].component, picked[1].component, false),
         Family::Concentric => s.doc.mate_concentric(&name, a, b, alignment, lock_rotation, false),
         Family::Tangent => s.doc.mate_tangent(&name, a, b, alignment, false),
-        Family::Hinge => s.doc.mate_hinge(&name, [a, b], [&ends[2], &ends[3]], alignment, plane_alignment, false),
+        Family::Hinge => {
+            let stops = if hinge_limits {
+                match (limits[0].parse::<f64>(), limits[1].parse::<f64>()) {
+                    (Ok(lo), Ok(hi)) => Some([lo, hi]),
+                    _ => {
+                        state.assembly.mate.error = Some("Hinge stops take signed degrees".into());
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+            s.doc.mate_hinge_limited(&name, [a, b], [&ends[2], &ends[3]], [alignment, plane_alignment], stops, false)
+        }
         Family::Symmetric => s.doc.mate_symmetric(&name, [a, b, &ends[2]], alignment, false),
         Family::LinearCoupler => {
             let ratio = ratio.expect("made above");
@@ -483,7 +499,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 if f == Family::Angle {
                     d.distance = "30".into();
                 }
-                if f == Family::LimitAngle {
+                if matches!(f, Family::LimitAngle | Family::Hinge) {
                     d.min = "-30".into();
                     d.max = "30".into();
                 }
@@ -501,6 +517,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         });
     }
     if d.family == Family::Hinge {
+        ui.checkbox(&mut d.hinge_limits, "Angular stops");
         ui.horizontal(|ui| {
             ui.label("Planes");
             ui.selectable_value(&mut d.plane_alignment, Alignment::Opposed, "Planes opposed");
@@ -546,7 +563,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if d.family == Family::Angle {
         labelled(ui, &mut d.distance, "Signed degrees", "Mate degrees");
     }
-    if d.family == Family::LimitAngle {
+    if d.family == Family::LimitAngle || (d.family == Family::Hinge && d.hinge_limits) {
         labelled(ui, &mut d.min, "Least signed degrees", "Mate least degrees");
         labelled(ui, &mut d.max, "Greatest signed degrees", "Mate greatest degrees");
     }

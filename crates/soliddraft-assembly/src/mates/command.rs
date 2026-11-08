@@ -224,6 +224,7 @@ impl AssemblyDocument {
         strict: bool,
         edit: impl FnOnce(&mut AssemblyDocument, &mut Assembly) -> Result<T, MateRefusal>,
     ) -> Result<T, MateRefusal> {
+        self.cancel_drag();
         self.finish_loading();
         let mut candidate = self.assembly.clone();
         let out = edit(self, &mut candidate)?;
@@ -253,7 +254,8 @@ impl AssemblyDocument {
 
     /// Makes `candidate`, which differs in mates, values, placements and the overrides
     /// that place parts inside sub-assemblies only, the truth.
-    fn publish(&mut self, label: &str, candidate: Assembly) {
+    pub(crate) fn publish(&mut self, label: &str, candidate: Assembly) {
+        self.cancel_drag();
         let moved: Vec<(ComponentId, Placement)> = candidate
             .components
             .iter()
@@ -400,6 +402,26 @@ impl AssemblyDocument {
     pub(crate) fn solve_problem(&mut self, problem: Problem) -> Result<Solved, MateRefusal> {
         let p = self.prove_problem(problem)?;
         let placements = solver::solve(&p.bodies, &p.constraints)?;
+        let (dof, free) = solver::freedoms(&placements, &p.constraints)?;
+        let mut status = status_of(dof + 6 * p.parts.saturating_sub(p.bodies.len()), free);
+        status.bounded = motion::certificates(&placements, &p.constraints)?;
+        let moved = placements.into_iter().filter(|(b, pose)| p.bodies[b] != *pose).collect();
+        Ok(Solved { placements: moved, status })
+    }
+
+    pub(crate) fn solve_drag_truth(&mut self, truth: &Assembly, path: &Body) -> Result<Solved, MateRefusal> {
+        let problem = self.gather(&Scope::new(truth, &self.table, &self.store))?;
+        let p = self.prove_problem(problem)?;
+        // Prove feasibility under the authored mates before trying the temporary wish.
+        let mut placements = solver::solve(&p.bodies, &p.constraints)?;
+        if let Some(at) = p.bodies.get(path) {
+            let mut wished = p.constraints.clone();
+            wished.push(Constraint::Origin { mate: "drag target".into(), body: path.clone(), axes: true, at: *at });
+            if let Ok(preferred) = solver::solve(&p.bodies, &wished) {
+                placements = preferred;
+            }
+        }
+        placements = solver::solve(&placements, &p.constraints)?;
         let (dof, free) = solver::freedoms(&placements, &p.constraints)?;
         let mut status = status_of(dof + 6 * p.parts.saturating_sub(p.bodies.len()), free);
         status.bounded = motion::certificates(&placements, &p.constraints)?;
@@ -901,6 +923,23 @@ impl AssemblyDocument {
         plane_alignment: Alignment,
         strict: bool,
     ) -> Result<MateId, MateRefusal> {
+        self.mate_hinge_limited(name, axes, planes, [alignment, plane_alignment], None, strict)
+    }
+
+    /// Creates a Hinge with optional inclusive signed angular stops, in one undo step.
+    pub fn mate_hinge_limited(
+        &mut self,
+        name: &str,
+        axes: [&EndpointSelector; 2],
+        planes: [&EndpointSelector; 2],
+        alignments: [Alignment; 2],
+        limits: Option<[f64; 2]>,
+        strict: bool,
+    ) -> Result<MateId, MateRefusal> {
+        if let Some(limits) = limits {
+            check_angle_limits(limits)?;
+        }
+        let [alignment, plane_alignment] = alignments;
         self.transact("Hinge mate", strict, |doc, truth| {
             check_new_name(truth, name)?;
             if axes[0].component != planes[0].component || axes[1].component != planes[1].component {
@@ -921,6 +960,7 @@ impl AssemblyDocument {
                 planes,
                 alignment,
                 plane_alignment,
+                angle_limits: limits,
             }));
             Ok(id)
         })
@@ -1266,6 +1306,10 @@ impl AssemblyDocument {
                         check_angle_limits(*v)?;
                         *min_degrees = v[0];
                         *max_degrees = v[1];
+                    }
+                    (Mate::Hinge { angle_limits, .. }, MateEdit::AngleLimits(v)) => {
+                        check_angle_limits(*v)?;
+                        *angle_limits = Some(*v);
                     }
                     (m, MateEdit::Distance(text)) if m.expression().is_some() => {
                         let distance = m.expression_mut().expect("checked");
@@ -1734,7 +1778,10 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
             (Local::Plane(p), Local::Plane(q)) => p.normal.iter().zip(q.normal).any(|(x, y)| x.abs() != y.abs()),
             _ => false,
         });
-    if nonparallel_width || reads.iter().any(|r| matches!(r.local, Local::Native(_))) {
+    if matches!(rule, Rule::Hinge { limits: Some(_), .. })
+        || nonparallel_width
+        || reads.iter().any(|r| matches!(r.local, Local::Native(_)))
+    {
         return motion::native_constraint(mate, reads, rule);
     }
     let mut reads = reads.into_iter();
@@ -1961,7 +2008,7 @@ fn constraint(mate: String, reads: Vec<Read>, rule: &Rule) -> Result<Vec<Constra
                 }
             }
         }
-        Rule::Hinge { sign, plane_sign } => {
+        Rule::Hinge { sign, plane_sign, .. } => {
             let (Local::Axis(axis_a), Local::Axis(axis_b)) = (first.local, second.local) else {
                 return Err(unsupported("a Hinge's first two ends are axes"));
             };

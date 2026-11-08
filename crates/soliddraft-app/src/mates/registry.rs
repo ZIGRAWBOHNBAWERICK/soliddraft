@@ -171,6 +171,7 @@ fn hinge_params() -> Vec<(&'static str, Value)> {
             array(face("A cylinder, cone, circular or straight edge"), "Two axes put on one line, as a Concentric"),
         ),
         ("planes", array(face("A planar face or plane"), "Two planes put on one plane, as a Coincident")),
+        ("angle_limits", optional(array(number("Signed degrees"), "Optional inclusive [min,max] angular stops"))),
         ("alignment", optional(one_of(&["aligned", "opposed"], AXES))),
         ("plane_alignment", optional(one_of(&["aligned", "opposed"], ALIGNMENT))),
         ("require_fully_constrained", optional(boolean("true refuses a result with any freedom left"))),
@@ -341,7 +342,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "Reads exact plane equations at the accepted revisions and changes nothing.",
             measure_params,
         ),
-        row("assembly_drag", "Drag under mates", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_drag", "Move and rotate under mates", "Preview a component placement while mates hold")
+            .agents(Agents::Mcp, "Begin, update and commit one drag, or cancel it. Move performs one complete drag. Limits act as stops.", drag_params).undo(Undo::Carried),
         row("assembly_mate_gear", "Gear mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
         row("assembly_mate_rack_and_pinion", "Rack and Pinion mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
         row("assembly_mate_screw", "Screw mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
@@ -469,5 +471,18 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         row("assembly_delete_mate", "Delete mate", "Remove a mate and leave the components where they are")
             .agents(Agents::Mcp, "One undo step.", delete_params)
             .undo(Undo::Step),
+    ]
+}
+
+fn drag_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("phase", optional(one_of(&["move", "begin", "update", "commit", "cancel"], "Drag phase; defaults to move"))),
+        ("path", optional(string("Occurrence path, required for begin or move"))),
+        (
+            "placement",
+            optional(
+                serde_json::json!({"type":"object", "description":"Target in the parent frame, required for update or move", "properties":{"translation":{"type":"array","items":{"type":"number"}},"rotation":{"type":"array","items":{"type":"number"}}},"required":["translation","rotation"],"additionalProperties":false}),
+            ),
+        ),
     ]
 }

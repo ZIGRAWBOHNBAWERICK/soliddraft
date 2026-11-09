@@ -168,7 +168,7 @@ fn dragging_the_depth_field_previews_and_applies_one_undo_step() {
 }
 
 #[test]
-fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
+fn refused_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     if !gpu_available() {
         eprintln!("no GPU adapter; skipping");
         return;
@@ -192,6 +192,7 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
         .apply(Command::AddFillet { params: FilletParams { edges: vec![reference], radius: 1.0 } })
         .unwrap()
         .unwrap();
+    assert_eq!(doc.feature(fillet).unwrap().status, FeatureStatus::Ok);
     let proved_body = doc.display_body();
     let proved_revision = doc.revision();
     doc.selection = Some(Selection::Feature(fillet));
@@ -216,7 +217,14 @@ fn impossible_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     harness.run_steps(5);
     settle_document(&mut harness);
     let state = &harness.state().state;
-    assert!(matches!(&state.doc.feature(fillet).unwrap().status, FeatureStatus::Error(_)));
+    assert!(
+        matches!(&state.doc.feature(fillet).unwrap().status, FeatureStatus::Error(message)
+            if message.contains("fillet.radius-too-large") && message.contains("radius limit")),
+        "after Radius Enter: status={:?}, kind={:?}, undo={}",
+        state.doc.feature(fillet).unwrap().status,
+        state.doc.feature(fillet).unwrap().kind,
+        state.doc.undo_depth(),
+    );
     assert_eq!(state.doc.display_body(), proved_body);
     assert_eq!(state.doc.displayed_revision(), proved_revision);
     assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());

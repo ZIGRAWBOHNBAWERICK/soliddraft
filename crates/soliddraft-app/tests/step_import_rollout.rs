@@ -290,13 +290,18 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
 }
 
 #[test]
-fn unsupported_step_file_gets_a_plain_message_without_editing_the_part() {
+fn malformed_and_unsupported_step_files_get_plain_messages_without_editing_the_part() {
     let doc = soliddraft_app::new_document();
     let source = std::str::from_utf8(include_bytes!("../../../ci/fixtures/import/block-seam-4um.step")).unwrap();
-    // Catallax reads B-spline surfaces since its PR 316; it does not read swept surfaces yet.
-    let swept = source.replace("PLANE(", "SURFACE_OF_LINEAR_EXTRUSION(");
-    let error = soliddraft_app::import::Preview::from_bytes(&doc, "swept.step", swept.into_bytes()).unwrap_err();
-    assert_eq!(error, "Coming soon");
+    for (source, expected) in [
+        (source.replace("PLANE(", "B_SPLINE_SURFACE_WITH_KNOTS("), "This file could not be read as a STEP solid."),
+        (source.replace("MANIFOLD_SOLID_BREP(", "FACETED_BREP("), "Coming soon"),
+        (source.replace("PLANE(", "SURFACE_OF_LINEAR_EXTRUSION("), "Coming soon"),
+    ] {
+        let error =
+            soliddraft_app::import::Preview::from_bytes(&doc, "unsupported.step", source.into_bytes()).unwrap_err();
+        assert_eq!(error, expected);
+    }
     assert!(doc.features.is_empty());
     assert_eq!(doc.revision(), 0);
 }

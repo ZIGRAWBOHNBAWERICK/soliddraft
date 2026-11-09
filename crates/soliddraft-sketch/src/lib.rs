@@ -12,6 +12,7 @@
 //! so another solver can take its place.
 
 mod dimension;
+pub mod ellipse;
 pub mod inference;
 pub mod profile;
 mod references;
@@ -161,6 +162,28 @@ pub enum EntityKind {
         /// Radius.
         radius: f64,
     },
+    /// A full ellipse with a centre and two perpendicular semi-axis handles.
+    Ellipse {
+        /// Centre.
+        center: P2,
+        /// First semi-axis endpoint.
+        major: P2,
+        /// Second semi-axis endpoint.
+        minor: P2,
+    },
+    /// Counterclockwise from `start` to `end` on an ellipse.
+    EllipticArc {
+        /// Centre.
+        center: P2,
+        /// First semi-axis endpoint.
+        major: P2,
+        /// Second semi-axis endpoint.
+        minor: P2,
+        /// Start point on the ellipse.
+        start: P2,
+        /// End point on the ellipse.
+        end: P2,
+    },
 }
 
 /// One piece of sketch geometry.
@@ -181,7 +204,8 @@ impl Entity {
         match self.kind {
             EntityKind::Point { .. } | EntityKind::Circle { .. } => 1,
             EntityKind::Line { .. } => 2,
-            EntityKind::Arc { .. } => 3,
+            EntityKind::Arc { .. } | EntityKind::Ellipse { .. } => 3,
+            EntityKind::EllipticArc { .. } => 5,
         }
     }
 
@@ -189,6 +213,11 @@ impl Entity {
     /// centre, start and end; a circle's centre.
     pub fn point(&self, index: u8) -> Option<P2> {
         match (self.kind, index) {
+            (EntityKind::Ellipse { center, .. } | EntityKind::EllipticArc { center, .. }, 0) => Some(center),
+            (EntityKind::Ellipse { major, .. } | EntityKind::EllipticArc { major, .. }, 1) => Some(major),
+            (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => Some(minor),
+            (EntityKind::EllipticArc { start, .. }, 3) => Some(start),
+            (EntityKind::EllipticArc { end, .. }, 4) => Some(end),
             (EntityKind::Point { p }, 0) => Some(p),
             (EntityKind::Line { a, .. }, 0) => Some(a),
             (EntityKind::Line { b, .. }, 1) => Some(b),
@@ -203,6 +232,11 @@ impl Entity {
     /// Moves point `index` (see [`Entity::point`]) to `p`. Other indices are ignored.
     pub fn set_point(&mut self, index: u8, p: P2) {
         match (&mut self.kind, index) {
+            (EntityKind::Ellipse { center, .. } | EntityKind::EllipticArc { center, .. }, 0) => *center = p,
+            (EntityKind::Ellipse { major, .. } | EntityKind::EllipticArc { major, .. }, 1) => *major = p,
+            (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => *minor = p,
+            (EntityKind::EllipticArc { start, .. }, 3) => *start = p,
+            (EntityKind::EllipticArc { end, .. }, 4) => *end = p,
             (EntityKind::Point { p: q }, 0) => *q = p,
             (EntityKind::Line { a, .. }, 0) => *a = p,
             (EntityKind::Line { b, .. }, 1) => *b = p,
@@ -267,6 +301,8 @@ impl Entity {
             EntityKind::Line { .. } => "Line",
             EntityKind::Arc { .. } => "Arc",
             EntityKind::Circle { .. } => "Circle",
+            EntityKind::Ellipse { .. } => "Ellipse",
+            EntityKind::EllipticArc { .. } => "Partial ellipse",
         }
     }
 
@@ -284,6 +320,11 @@ impl Entity {
     /// The point at the middle of the entity, used to place relation glyphs.
     pub fn midpoint(&self) -> P2 {
         match self.kind {
+            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+                let ellipse = ellipse::Ellipse::of(kind).unwrap();
+                let (start, sweep) = ellipse.span(kind);
+                ellipse.at(start + sweep / 2.0)
+            }
             EntityKind::Point { p } => p,
             EntityKind::Line { a, b } => a.mid(b),
             EntityKind::Arc { center, start, .. } => {
@@ -297,6 +338,9 @@ impl Entity {
     /// Nearest point on the entity's curve to `p` and the distance to it.
     pub fn nearest(&self, p: P2) -> (P2, f64) {
         match self.kind {
+            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+                ellipse::Ellipse::of(kind).unwrap().nearest(kind, p)
+            }
             EntityKind::Point { p: q } => (q, q.dist(p)),
             EntityKind::Line { a, b } => {
                 let ab = b.sub(a);
@@ -334,6 +378,12 @@ impl Entity {
     /// Points along the curve for drawing and hit testing.
     pub fn polyline(&self, segments: usize) -> Vec<P2> {
         match self.kind {
+            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+                let ellipse = ellipse::Ellipse::of(kind).unwrap();
+                let (start, sweep) = ellipse.span(kind);
+                let n = segments.max(4);
+                (0..=n).map(|i| ellipse.at(start + sweep * i as f64 / n as f64)).collect()
+            }
             EntityKind::Point { p } => vec![p],
             EntityKind::Line { a, b } => vec![a, b],
             EntityKind::Circle { center, radius } => (0..=segments)

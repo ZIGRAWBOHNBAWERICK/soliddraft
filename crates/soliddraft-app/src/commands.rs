@@ -1458,7 +1458,7 @@ fn registry() -> Vec<CommandSpec> {
                 tools::sketch_params,
             )
 .undo(Undo::Step),
-        cmd("sketch_geometry", "Sketch geometry", Icon::Sketch, "Create a sketch using polygon and line/arc tools")
+        cmd("sketch_geometry", "Sketch geometry", Icon::Sketch, "Create a sketch using analytic entities and editing tools")
             .agents(
                 Agents::Verb,
                 "Build a sketch from analytic entities and polygon, trim, extend, offset, mirror or pattern operations. \
@@ -1486,6 +1486,18 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::SketchTool(Tool::Circle))
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Circle))
+.app_only(SKETCHER),
+        cmd("sketch_ellipse", "Ellipse", Icon::Circle, "Ellipse: centre, first semi-axis, second semi-axis")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::Ellipse))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Ellipse))
+.app_only(SKETCHER),
+        cmd("sketch_partial_ellipse", "Partial ellipse", Icon::Arc, "Partial ellipse: centre, axes, start, then counterclockwise end")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::PartialEllipse))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::PartialEllipse))
 .app_only(SKETCHER),
         cmd("sketch_rectangle", "Rectangle", Icon::Cad("rect"), "Corner rectangle")
             .on(Sketch, "Draw", Small)

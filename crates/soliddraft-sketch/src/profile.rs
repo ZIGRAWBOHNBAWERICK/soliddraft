@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
 
+use crate::ellipse::Ellipse;
 use crate::{Entity, EntityId, EntityKind, P2, PointRef, Sketch};
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::{Loop, Plane, Point2, Profile, Segment};
@@ -100,6 +101,13 @@ fn segment_area(s: &Segment) -> f64 {
             0.5 * (c.u * (to.v - from.v) - c.v * (to.u - from.u) + r2 * sweep)
         }
         Segment::Circle { radius, .. } => PI * radius * radius,
+        Segment::Ellipse { axis, ratio, .. } => PI * (axis.u * axis.u + axis.v * axis.v) * ratio,
+        Segment::EllipticArc { center, axis, ratio, from, to, clockwise } => {
+            let (ellipse, start, sweep) = ellipse_span(center, axis, ratio, Some((from, to, clockwise)));
+            let _ = (ellipse, start);
+            0.5 * (center.u * (to.v - from.v) - center.v * (to.u - from.u)
+                + (axis.u * axis.u + axis.v * axis.v) * ratio * sweep)
+        }
     }
 }
 
@@ -116,6 +124,16 @@ fn sample(segments: &[Segment]) -> Vec<P2> {
     let mut out = Vec::new();
     for s in segments {
         match *s {
+            Segment::Ellipse { center, axis, ratio } | Segment::EllipticArc { center, axis, ratio, .. } => {
+                let ends = if let Segment::EllipticArc { from, to, clockwise, .. } = *s {
+                    Some((from, to, clockwise))
+                } else {
+                    None
+                };
+                let (ellipse, start, sweep) = ellipse_span(center, axis, ratio, ends);
+                let n = (SAMPLES_PER_TURN * sweep.abs() / TAU).ceil().max(4.0) as usize;
+                out.extend((0..n).map(|i| ellipse.at(start + sweep * i as f64 / n as f64)));
+            }
             Segment::Line { from, .. } => out.push(p2(from)),
             Segment::Arc { center, from, to, clockwise } => {
                 let sweep = arc_sweep(center, from, to, clockwise);
@@ -144,6 +162,17 @@ fn contains(segments: &[Segment], p: P2) -> bool {
     let mut inside = false;
     for segment in segments {
         match *segment {
+            Segment::Ellipse { center, axis, ratio } | Segment::EllipticArc { center, axis, ratio, .. } => {
+                let ends = if let Segment::EllipticArc { from, to, clockwise, .. } = *segment {
+                    Some((from, to, clockwise))
+                } else {
+                    None
+                };
+                let (ellipse, start, sweep) = ellipse_span(center, axis, ratio, ends);
+                if ellipse_crossings(ellipse, start, sweep, p) % 2 == 1 {
+                    inside = !inside;
+                }
+            }
             Segment::Line { from: a, to: b } => {
                 if (a.v > p.v) != (b.v > p.v) && p.u < (b.u - a.u) * (p.v - a.v) / (b.v - a.v) + a.u {
                     inside = !inside;
@@ -198,6 +227,7 @@ fn ends(e: &Entity) -> Option<(PointRef, PointRef)> {
     match e.kind {
         EntityKind::Line { .. } => Some((PointRef::new(e.id, 0), PointRef::new(e.id, 1))),
         EntityKind::Arc { .. } => Some((PointRef::new(e.id, 1), PointRef::new(e.id, 2))),
+        EntityKind::EllipticArc { .. } => Some((PointRef::new(e.id, 3), PointRef::new(e.id, 4))),
         _ => None,
     }
 }
@@ -225,12 +255,17 @@ struct Edge {
     entity: EntityId,
     /// Centre of an arc, `None` for a line.
     center: Option<P2>,
+    ellipse: Option<Ellipse>,
     /// Node of the start and of the end point.
     ends: [usize; 2],
 }
 
 /// A closed loop before it becomes segments.
 enum Chain {
+    Ellipse {
+        entity: EntityId,
+        geometry: Ellipse,
+    },
     Circle {
         entity: EntityId,
         center: P2,
@@ -259,6 +294,14 @@ fn bisector_center(c: P2, from: P2, to: P2) -> P2 {
 
 fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
     match *chain {
+        Chain::Ellipse { entity, geometry } => RegionLoop {
+            segments: vec![Segment::Ellipse {
+                center: pt(geometry.center),
+                axis: pt(geometry.axis()),
+                ratio: geometry.ratio(),
+            }],
+            entities: vec![entity],
+        },
         Chain::Circle { entity, center, radius } => {
             RegionLoop { segments: vec![Segment::Circle { center: pt(center), radius }], entities: vec![entity] }
         }
@@ -268,6 +311,17 @@ fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
                 let edge = &edges[e];
                 let (a, b) = (nodes[edge.ends[0]], nodes[edge.ends[1]]);
                 let (from, to) = if forward { (a, b) } else { (b, a) };
+                if let Some(geometry) = edge.ellipse {
+                    segs.push(Segment::EllipticArc {
+                        center: pt(geometry.center),
+                        axis: pt(geometry.axis()),
+                        ratio: geometry.ratio(),
+                        from: pt(from),
+                        to: pt(to),
+                        clockwise: !forward,
+                    });
+                    continue;
+                }
                 segs.push(match edge.center {
                     None => Segment::Line { from: pt(from), to: pt(to) },
                     // A sketch arc runs counter-clockwise from start to end, so walking it
@@ -307,6 +361,14 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
             continue;
         }
         match e.kind {
+            EntityKind::Ellipse { .. } => {
+                let geometry = Ellipse::of(e.kind).unwrap();
+                if geometry.valid() {
+                    chains.push(Chain::Ellipse { entity: e.id, geometry });
+                } else {
+                    first_error.get_or_insert(ProfileError::Degenerate(name(e)));
+                }
+            }
             EntityKind::Circle { center, radius } => {
                 if radius.is_finite() && radius > JOIN_TOLERANCE {
                     chains.push(Chain::Circle { entity: e.id, center, radius });
@@ -388,7 +450,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
         };
         incident[ends[0]].push(edges.len());
         incident[ends[1]].push(edges.len());
-        edges.push(Edge { entity: e.id, center, ends });
+        edges.push(Edge { entity: e.id, center, ellipse: Ellipse::of(e.kind), ends });
     }
 
     if diagnose {
@@ -485,7 +547,10 @@ fn oriented(lp: &RegionLoop, reversible: bool, ccw: bool) -> RegionLoop {
                 Segment::Arc { center, from, to, clockwise } => {
                     Segment::Arc { center, from: to, to: from, clockwise: !clockwise }
                 }
-                circle @ Segment::Circle { .. } => circle,
+                closed @ (Segment::Circle { .. } | Segment::Ellipse { .. }) => closed,
+                Segment::EllipticArc { center, axis, ratio, from, to, clockwise } => {
+                    Segment::EllipticArc { center, axis, ratio, from: to, to: from, clockwise: !clockwise }
+                }
             };
         }
     }
@@ -510,13 +575,7 @@ pub fn regions(sketch: &Sketch) -> Result<Vec<Region>, ProfileError> {
     if loops.is_empty() {
         return Err(first_error.unwrap_or(ProfileError::NoLoop));
     }
-    let starts: Vec<P2> = loops
-        .iter()
-        .map(|l| match l.segments[0] {
-            Segment::Line { from, .. } | Segment::Arc { from, .. } => p2(from),
-            Segment::Circle { center, radius } => P2::new(center.u + radius, center.v),
-        })
-        .collect();
+    let starts: Vec<P2> = loops.iter().map(|l| p2(l.segments[0].start())).collect();
     let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
     let n = loops.len();
     let inside = |outer: usize, inner: usize| {
@@ -563,6 +622,54 @@ impl Sketch {
     pub fn regions(&self) -> Result<Vec<Region>, ProfileError> {
         regions(self)
     }
+}
+
+fn ellipse_span(center: Point2, axis: Point2, ratio: f64, ends: Option<(Point2, Point2, bool)>) -> (Ellipse, f64, f64) {
+    let center = p2(center);
+    let axis = p2(axis);
+    let ellipse = Ellipse { center, major: center + axis, minor: center + axis.perp().scale(ratio) };
+    let (start, sweep) = ends.map_or((0.0, TAU), |(from, to, clockwise)| {
+        let a = ellipse.parameter(p2(from));
+        let b = ellipse.parameter(p2(to));
+        (a, if clockwise { -(a - b).rem_euclid(TAU) } else { (b - a).rem_euclid(TAU) })
+    });
+    (ellipse, start, sweep)
+}
+
+fn ellipse_crossings(ellipse: Ellipse, start: f64, sweep: f64, p: P2) -> usize {
+    let axis = ellipse.axis();
+    let (c, d) = (axis.v, axis.u * ellipse.ratio());
+    let height = c.hypot(d);
+    let v = (p.v - ellipse.center.v) / height;
+    if v.abs() > 1.0 {
+        return 0;
+    }
+    let phase = d.atan2(c);
+    let offset = |t: f64| if sweep < 0.0 { (start - t).rem_euclid(TAU) } else { (t - start).rem_euclid(TAU) };
+    let mut cuts = vec![0.0, sweep.abs()];
+    for t in [phase, phase + PI] {
+        let u = offset(t);
+        if u > 0.0 && u < sweep.abs() {
+            cuts.push(u);
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    let roots = [phase + v.acos(), phase - v.acos()];
+    let mut crossings = 0;
+    for pair in cuts.windows(2) {
+        let a = ellipse.at(start + sweep.signum() * pair[0]);
+        let b = ellipse.at(start + sweep.signum() * pair[1]);
+        if (a.v > p.v) != (b.v > p.v) {
+            let t = roots.into_iter().find(|t| {
+                let u = offset(*t);
+                u >= pair[0] - 1e-12 && u <= pair[1] + 1e-12
+            });
+            if t.is_some_and(|t| ellipse.at(t).u > p.u) {
+                crossings += 1;
+            }
+        }
+    }
+    crossings
 }
 
 #[cfg(test)]

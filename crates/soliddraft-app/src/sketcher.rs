@@ -24,6 +24,8 @@ use soliddraft_kernel_api::Plane;
 use soliddraft_sketch::inference::{self, InferenceOptions, SnapFilter, apply_snaps};
 use std::ops::{Add, Sub};
 
+mod ellipse;
+
 const POINT_REACH: f32 = 8.0;
 const CURVE_REACH: f32 = 6.0;
 const ALIGN_REACH: f32 = 6.0;
@@ -830,6 +832,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
                 commit(s, actions);
             }
         },
+        Tool::Ellipse | Tool::PartialEllipse => ellipse::click(s, p, snaps, actions),
         Tool::Circle => match s.pending.pop() {
             None => s.pending.push((p, snaps)),
             Some((c, c_snaps)) => {
@@ -966,7 +969,7 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
                 _ => "Pick a second point or line, or click to place a distance to the origin",
             });
         }
-        (None, None) => s.say("Pick a line, arc, circle or point to dimension"),
+        (None, None) => s.say("Pick a line, arc, circle, ellipse or point to dimension"),
         (Some(first), Some(second)) if second != first && s.dim_second.is_none() && !is_curve_sel(&s.sketch, first) => {
             s.dim_second = Some(second);
             s.say("Click to place the dimension");
@@ -991,7 +994,7 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
 }
 
 fn is_curve_sel(sketch: &Sketch, sel: SketchSel) -> bool {
-    matches!(sel, SketchSel::Entity(e) if sketch.entity(e).is_some_and(|e| e.is_curve()))
+    matches!(sel, SketchSel::Entity(e) if sketch.entity(e).is_some_and(|e| e.is_curve() || crate::sketch::ellipse::Ellipse::of(e.kind).is_some()))
 }
 
 /// The dimension two picks and a placement call for, measured from the sketch.
@@ -1034,6 +1037,25 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
         (SketchSel::Entity(e), None) => {
             let ent = sketch.entity(e)?;
             match ent.kind {
+                kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+                    let ellipse = crate::sketch::ellipse::Ellipse::of(kind).unwrap();
+                    let direction = (label - ellipse.center).normalized();
+                    let index = if direction.dot(ellipse.axis().normalized()).abs()
+                        >= direction.dot(ellipse.axis().perp().normalized()).abs()
+                    {
+                        1
+                    } else {
+                        2
+                    };
+                    let b = PointRef::new(e, index);
+                    Some(ConstraintKind::Distance {
+                        a: PointRef::new(e, 0),
+                        b,
+                        kind: DistanceKind::Aligned,
+                        value: ellipse.center.dist(ent.point(index)?),
+                        label,
+                    })
+                }
                 EntityKind::Line { .. } => between(PointRef::new(e, 0), PointRef::new(e, 1)),
                 EntityKind::Circle { radius, .. } => {
                     Some(ConstraintKind::Radius { entity: e, value: radius * 2.0, diameter: true, label })
@@ -1219,7 +1241,13 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
         for i in 0..e.point_count() {
             let r = PointRef::new(e.id, i);
             let Some(sp) = e.point(i).and_then(|p| frame.screen(p)) else { continue };
-            let is_center = matches!(e.kind, EntityKind::Arc { .. } | EntityKind::Circle { .. }) && i == 0;
+            let is_center = matches!(
+                e.kind,
+                EntityKind::Arc { .. }
+                    | EntityKind::Circle { .. }
+                    | EntityKind::Ellipse { .. }
+                    | EntityKind::EllipticArc { .. }
+            ) && i == 0;
             let is_sel = selected(SketchSel::Point(r));
             let is_related = relation_points.contains(&r) || (e.is_point() && relation_entities.contains(&e.id));
             let is_hover = s.hover == Some(SketchSel::Point(r));
@@ -1705,6 +1733,14 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
         }
     };
     match (s.tool, s.pending.as_slice()) {
+        (Tool::Ellipse | Tool::PartialEllipse, _) => {
+            if let Some(kind) = ellipse::preview(s, p) {
+                curve(Entity { id: 0, kind, construction: false }.polyline(96));
+            }
+            if let Some((c, _)) = s.pending.first() {
+                seg(*c, p);
+            }
+        }
         (Tool::Line, [(a, _)]) => seg(*a, p),
         (Tool::Rectangle, [(a, _)]) => {
             let c = [*a, P2::new(p.u, a.v), p, P2::new(a.u, p.v)];
@@ -2022,6 +2058,12 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Line, _) => "Line: click the end point; right-click or Esc ends the chain",
         (Tool::Rectangle, 0) => "Rectangle: click the first corner",
         (Tool::Rectangle, _) => "Rectangle: click the opposite corner",
+        (Tool::Ellipse | Tool::PartialEllipse, 0) => "Ellipse: click the centre",
+        (Tool::Ellipse | Tool::PartialEllipse, 1) => "Ellipse: click the first semi-axis endpoint",
+        (Tool::Ellipse | Tool::PartialEllipse, 2) => "Ellipse: click the second semi-axis endpoint",
+        (Tool::PartialEllipse, 3) => "Partial ellipse: click the start point",
+        (Tool::PartialEllipse, _) => "Partial ellipse: click the counterclockwise end point",
+        (Tool::Ellipse, _) => "Ellipse: click the second semi-axis endpoint",
         (Tool::Circle, 0) => "Circle: click the centre",
         (Tool::Circle, _) => "Circle: click a point on the circle",
         (Tool::Arc, 0) => "Arc: click the centre",
@@ -2131,10 +2173,10 @@ pub fn relations_menu(ui: &mut egui::Ui, s: &mut SketchSession) -> Option<AppAct
         ("Perpendicular", "Select two lines"),
         ("Coincident", "Select two points"),
         ("On line", "Select one point and one line"),
-        ("On curve", "Select one point and one arc or circle"),
+        ("On curve", "Select one point and one arc, circle or ellipse"),
         ("Tangent", "Select a line and an arc or circle, or two arcs or circles"),
-        ("Equal", "Select two lines or two arcs or circles"),
-        ("Concentric", "Select two arcs or circles"),
+        ("Equal", "Select two lines, two circular curves, or two ellipses"),
+        ("Concentric", "Select two arcs, circles or ellipses"),
         ("Collinear", "Select two lines"),
         ("Symmetric", "Select two points or matching entities, then the axis line last"),
         ("Coradial", "Select two arcs or circles"),
@@ -2178,6 +2220,24 @@ pub fn applicable_relations(sketch: &Sketch, selection: &[SketchSel]) -> Vec<(&'
     let lines: Vec<EntityId> = ents.iter().filter(|e| e.is_line()).map(|e| e.id).collect();
     let curves: Vec<EntityId> = ents.iter().filter(|e| e.is_curve()).map(|e| e.id).collect();
     let mut out: Vec<(&'static str, ConstraintKind)> = Vec::new();
+    let ellipses: Vec<_> =
+        ents.iter().filter(|e| crate::sketch::ellipse::Ellipse::of(e.kind).is_some()).map(|e| e.id).collect();
+    if !ellipses.is_empty() {
+        match (ents.len(), ellipses.len(), points.len()) {
+            (2, 2, 0) => out.push(("Equal", ConstraintKind::Equal { a: ellipses[0], b: ellipses[1] })),
+            (1, 1, 1) => out.push(("On curve", ConstraintKind::PointOn { point: points[0], entity: ellipses[0] })),
+            _ => {}
+        }
+        let centers: Vec<_> = ents
+            .iter()
+            .filter(|e| e.is_curve() || crate::sketch::ellipse::Ellipse::of(e.kind).is_some())
+            .map(|e| e.id)
+            .collect();
+        if centers.len() == 2 && ents.len() == 2 && points.is_empty() {
+            out.push(("Concentric", ConstraintKind::Concentric { a: centers[0], b: centers[1] }));
+        }
+        return out;
+    }
     match (lines.len(), curves.len(), points.len()) {
         (1, 0, 0) => {
             out.push(("Horizontal", ConstraintKind::Horizontal { target: Align::Line(lines[0]) }));

@@ -622,7 +622,7 @@ pub fn sketch_params() -> Vec<(&'static str, Value)> {
     ]
 }
 
-/// Parameters for sketches made by polygon and line/arc editing tools.
+/// Parameters for analytic sketch geometry and editing tools.
 pub fn sketch_geometry_params() -> Vec<(&'static str, Value)> {
     vec![
         ("plane", string("top, front, right, or a planar face name")),

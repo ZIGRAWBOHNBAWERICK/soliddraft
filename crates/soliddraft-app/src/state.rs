@@ -401,6 +401,8 @@ pub enum Tool {
     Line,
     Rectangle,
     Circle,
+    Ellipse,
+    PartialEllipse,
     Arc,
     Slot,
     Point,
@@ -434,6 +436,8 @@ impl Tool {
             Tool::Line => "Line",
             Tool::Rectangle => "Rectangle",
             Tool::Circle => "Circle",
+            Tool::Ellipse => "Ellipse",
+            Tool::PartialEllipse => "Partial ellipse",
             Tool::Arc => "Arc",
             Tool::Slot => "Slot",
             Tool::Point => "Point",
@@ -455,7 +459,15 @@ impl Tool {
     pub fn places_points(self) -> bool {
         matches!(
             self,
-            Tool::Line | Tool::Rectangle | Tool::Circle | Tool::Arc | Tool::Slot | Tool::Point | Tool::Polygon
+            Tool::Line
+                | Tool::Rectangle
+                | Tool::Circle
+                | Tool::Ellipse
+                | Tool::PartialEllipse
+                | Tool::Arc
+                | Tool::Slot
+                | Tool::Point
+                | Tool::Polygon
         )
     }
 

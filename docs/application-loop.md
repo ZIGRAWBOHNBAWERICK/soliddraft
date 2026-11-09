@@ -92,7 +92,7 @@ bracket.
 
 `sketch_geometry` accepts `plane` and an ordered `operations` array. Operations
 use the same `soliddraft_sketch::tools::Operation` implementation as the sketch
-properties panel. `add` supplies seed line, arc, circle or point entities;
+properties panel. `add` supplies line, arc, circle, ellipse, partial-ellipse or point entities;
 `polygon`, `trim`, `extend`, `offset`, `mirror`, `linear_pattern` and
 `circular_pattern` operate on those entities. Coordinates are `{ "u": ..., "v": ... }`
 in the sketch plane, not world coordinates. Entity ids start at 1 in insertion

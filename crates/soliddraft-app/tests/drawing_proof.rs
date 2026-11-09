@@ -14,6 +14,8 @@ use soliddraft_drawing::display::layout_sheet;
 use soliddraft_drawing::export::{self, Format};
 use soliddraft_drawing::{Command, Drawing, DrawingError, apply_with};
 
+mod gated;
+
 /// The hang guard every test shares: a wait this long means stuck, not slow.
 const HANG: std::time::Duration = std::time::Duration::from_secs(600);
 
@@ -67,7 +69,6 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     use soliddraft_app::document::{Command as PartCommand, Document, ExtrudeParams, FilletParams, ProfileKind};
     use soliddraft_app::drag::Dimension;
     use soliddraft_app::state::DragStep;
-    use soliddraft_kernel_catallax::CatallaxKernel;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -87,7 +88,9 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
     };
     let dir = std::env::temp_dir().join(format!("soliddraft-drawing-revision-proof-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut doc = Document::new("Proof part", Arc::new(CatallaxKernel::new()));
+    let kernel = Arc::new(gated::Gated::default());
+    kernel.rules.lock().unwrap().refuse_fillet_radii.push(50.0);
+    let mut doc = Document::new("Proof part", kernel);
     let mut params = ExtrudeParams {
         profile: ProfileKind::Rectangle { width: 40.0, height: 30.0 },
         depth: 10.0,
@@ -141,6 +144,7 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
         .unwrap();
     soliddraft_app::drawing::follow_part(&mut state);
     let before_failure = state.drawing.session.as_ref().unwrap().doc.drawing.clone();
+    let retained_body = state.doc.display_body();
     state
         .doc
         .apply_interactive(PartCommand::EditFillet {
@@ -150,6 +154,10 @@ fn drawings_never_pair_requested_definitions_with_a_retained_body() {
         .unwrap();
     settle(&mut state);
     assert!(state.doc.proof_state().failed);
+    assert_eq!(state.doc.display_body(), retained_body);
+    assert!(
+        matches!(&state.doc.feature(fillet).unwrap().status, soliddraft_app::document::FeatureStatus::Error(message) if message.contains("the scenario refuses a radius of 50"))
+    );
     assert!(PartContext::new(&state.doc).is_none());
     rejected_rebuild(&mut state);
     let session = state.drawing.session.as_ref().unwrap();

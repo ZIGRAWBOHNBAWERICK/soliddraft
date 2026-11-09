@@ -577,6 +577,8 @@ impl Document {
                     Some(EntityKind::Line { .. }) => format!("Side of line {entity}{along}"),
                     Some(EntityKind::Arc { .. }) => format!("Side of arc {entity}{along}"),
                     Some(EntityKind::Circle { .. }) => format!("Wall of circle {entity}{along}"),
+                    Some(EntityKind::Ellipse { .. }) => format!("Wall of ellipse {entity}{along}"),
+                    Some(EntityKind::EllipticArc { .. }) => format!("Side of partial ellipse {entity}{along}"),
                     _ => generator.to_string(),
                 }
             }

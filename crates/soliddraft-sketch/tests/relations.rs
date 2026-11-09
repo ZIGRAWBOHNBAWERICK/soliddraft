@@ -176,3 +176,54 @@ fn intersection_can_use_an_endpoint_of_one_selected_line() {
     solved(&mut s);
     assert!((point(&s, a, 1).u - 4.0).abs() < 1e-5);
 }
+
+#[test]
+fn reflected_ellipses_keep_their_axes_and_partial_span_after_edits_and_reopening() {
+    for partial in [false, true] {
+        let ellipse = |center, major, minor, start, end| {
+            if partial {
+                EntityKind::EllipticArc { center, major, minor, start, end }
+            } else {
+                EntityKind::Ellipse { center, major, minor }
+            }
+        };
+        let mut s = Sketch::new();
+        let axis = line(&mut s, p(0.0, -20.0), p(0.0, 20.0));
+        let a = s.add(ellipse(p(-6.0, 0.0), p(-2.0, 0.0), p(-6.0, 2.0), p(-2.0, 0.0), p(-10.0, 0.0)), false);
+        let b = s.add(ellipse(p(6.2, 0.1), p(2.1, 0.1), p(6.2, 2.2), p(10.3, 0.1), p(2.1, 0.1)), false);
+        fix(&mut s, axis);
+        fix(&mut s, a);
+        relate(&mut s, Relation::SymmetricEntities { a, b, axis });
+        solved(&mut s);
+        for (index, expected) in [(0, p(6.0, 0.0)), (1, p(2.0, 0.0)), (2, p(6.0, 2.0))] {
+            near(point(&s, b, index), expected);
+        }
+        if partial {
+            near(point(&s, b, 3), p(10.0, 0.0));
+            near(point(&s, b, 4), p(2.0, 0.0));
+        }
+        let json = serde_json::to_string(&s).unwrap();
+        let mut s: Sketch = serde_json::from_str(&json).unwrap();
+        let edited = ellipse(p(-7.0, 1.0), p(-2.0, 1.0), p(-7.0, 4.0), p(-2.0, 1.0), p(-12.0, 1.0));
+        s.entity_mut(a).unwrap().kind = edited;
+        for constraint in &mut s.constraints {
+            if let ConstraintKind::FixEntity { entity, at } = &mut constraint.kind
+                && *entity == a
+            {
+                *at = edited;
+            }
+        }
+        solved(&mut s);
+        for (index, expected) in [(0, p(7.0, 1.0)), (1, p(2.0, 1.0)), (2, p(7.0, 4.0))] {
+            near(point(&s, b, index), expected);
+        }
+        if partial {
+            near(point(&s, b, 3), p(12.0, 1.0));
+            near(point(&s, b, 4), p(2.0, 1.0));
+            let kind = s.entity(b).unwrap().kind;
+            let geometry = soliddraft_sketch::ellipse::Ellipse::of(kind).unwrap();
+            let (start, sweep) = geometry.span(kind);
+            assert!(geometry.at(start + sweep / 2.0).v > geometry.center.v);
+        }
+    }
+}

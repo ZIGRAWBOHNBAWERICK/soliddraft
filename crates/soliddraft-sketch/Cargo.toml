@@ -1,6 +1,6 @@
 [package]
 name = "soliddraft-sketch"
-description = "SolidDraft sketches: points, lines, arcs and circles with constraints, solved by ezpz behind an app-owned interface."
+description = "SolidDraft sketches: points, lines, arcs, circles and ellipses with constraints, solved by ezpz behind an app-owned interface."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

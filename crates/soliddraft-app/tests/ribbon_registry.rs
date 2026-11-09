@@ -453,7 +453,7 @@ fn before_retained_patterns(id: &str, current: &mut Value) {
          "properties":{"type":{"type":"string","const":"circular"},"center":point,"angle_degrees":{"type":"number"},"count":{"type":"integer"},"total_angle":{"type":"boolean"}},
          "required":["type","center","angle_degrees","count"]}
     ]});
-    let skipped = json!({"type":"array","maxItems":999,"items":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2}});
+    let skipped = json!({"type":"array","items":{"type":"array","minItems":1,"items":{"type":"integer"}}});
     for (tool, input, value) in [
         ("pattern", "entities", json!({"type":"array","minItems":1,"items":{"type":"integer"}})),
         ("edit_pattern", "group", json!({"type":"integer"})),

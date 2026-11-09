@@ -559,7 +559,7 @@ pub fn offset_inspector(ui: &mut egui::Ui, s: &mut SketchSession) {
 /// The same operations used by the sketcher's Modify tools, exposed to command/MCP scenarios.
 pub fn operation_schema() -> Value {
     use soliddraft_assistant::tools::schema::{
-        any_of, boolean, constant, integer, non_empty_array, number, object, one_of, optional,
+        any_of, array, boolean, constant, integer, non_empty_array, number, object, one_of, optional,
     };
     let point = object(&[("u", number("Plane u, mm")), ("v", number("Plane v, mm"))]);
     let offset_options = optional(object(&[
@@ -644,9 +644,13 @@ pub fn operation_schema() -> Value {
             ),
         ]),
     ]);
-    let skipped = optional(
-        serde_json::json!({"type":"array","maxItems":999,"items":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2}}),
-    );
+    let skipped = optional(array(
+        non_empty_array(
+            integer("Zero-based nonnegative position index"),
+            "Exactly two indices [column, row]; circular patterns use row 0",
+        ),
+        "Distinct positions to skip; [0, 0] is the source and cannot be skipped; empty keeps all positions",
+    ));
     let chamfer_size = any_of(vec![
         object(&[
             ("mode", constant("distances")),

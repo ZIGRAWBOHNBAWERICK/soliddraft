@@ -26,6 +26,7 @@ runs:
       env:
         PREFIX: ${{ steps.tool.outputs.prefix }}
         TOOL: ${{ inputs.tool }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         ci/bootstrap --tools "$PREFIX" "$TOOL"
         echo "$PREFIX/bin" >> "$GITHUB_PATH"

@@ -12,6 +12,7 @@ import sys
 import tarfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -48,10 +49,17 @@ def download(url, name):
         try:
             request = urllib.request.Request(url, headers={
                 'Accept': 'application/octet-stream', 'User-Agent': 'soliddraft-ci-tools'})
+            if (urllib.parse.urlsplit(url).hostname == 'api.github.com'
+                    and url.startswith('https://') and os.environ.get('GH_TOKEN')):
+                # The signed asset redirect must not inherit the API credential.
+                request.add_unredirected_header('Authorization', 'Bearer ' + os.environ['GH_TOKEN'])
             with urllib.request.urlopen(request, timeout=120) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
-            if error.code < 500 and error.code != 429:
+            headers = error.headers or {}
+            limited = error.code == 403 and (headers.get('X-RateLimit-Remaining') == '0'
+                                             or headers.get('Retry-After'))
+            if error.code < 500 and error.code != 429 and not limited:
                 sys.exit(f'{name} cache miss: download failed (HTTP {error.code})')
             reason = f'HTTP {error.code}'
         except (OSError, http.client.HTTPException) as error:

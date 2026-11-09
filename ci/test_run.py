@@ -72,6 +72,22 @@ def http_error(code):
 
 
 class PinnedTools(unittest.TestCase):
+    def test_asset_api_authentication_is_not_forwarded_to_download_redirects(self):
+        namespace = {'__name__': 'installer'}
+        exec(compile(bootstrap_script(), 'bootstrap', 'exec'), namespace)
+        with mock.patch.dict(os.environ, GH_TOKEN='test-only-token'), \
+             mock.patch('urllib.request.urlopen', return_value=io.BytesIO(b'asset')) as invoke:
+            namespace['download']('https://api.github.com/repos/example/tools/releases/assets/1', 'tool')
+            request = invoke.call_args.args[0]
+            self.assertEqual(request.get_header('Authorization'), 'Bearer test-only-token')
+            redirect = urllib.request.HTTPRedirectHandler().redirect_request(
+                request, None, 302, 'Found', {}, 'https://release-assets.githubusercontent.com/asset')
+            self.assertIsNone(redirect.get_header('Authorization'))
+        with mock.patch.dict(os.environ, GH_TOKEN='test-only-token'), \
+             mock.patch('urllib.request.urlopen', return_value=io.BytesIO(b'asset')) as invoke:
+            namespace['download']('https://example.invalid/asset', 'tool')
+            self.assertIsNone(invoke.call_args.args[0].get_header('Authorization'))
+
     def test_wasm_bindgen_cli_matches_the_locked_crate(self):
         lock = tomllib.loads((ROOT / 'Cargo.lock').read_text())
         versions = {p['version'] for p in lock['package'] if p['name'] == 'wasm-bindgen'}
@@ -194,6 +210,13 @@ class PinnedTools(unittest.TestCase):
              ConnectionResetError(), http_error(429), 'ok'])
         self.assertIs(installed, True)
         self.assertEqual((calls, delays), (5, [5, 10, 20, 40]))
+
+    def test_installer_retries_an_explicit_api_rate_limit(self):
+        error = urllib.error.HTTPError('https://api.github.com/asset', 403, 'rate limit',
+                                       {'X-RateLimit-Remaining': '0'}, None)
+        calls, delays, installed = self.run_with_downloads([error, 'ok'])
+        self.assertIs(installed, True)
+        self.assertEqual((calls, delays), (2, [5]))
 
     def test_installer_does_not_retry_a_missing_release(self):
         calls, delays, installed = self.run_with_downloads([http_error(404), 'ok'])

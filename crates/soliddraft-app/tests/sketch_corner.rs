@@ -212,7 +212,7 @@ fn corner_joins_an_arc_and_line_in_a_compact_dark_view() {
     app.set_size(vec2(960.0, 600.0));
     soliddraft_app::theme::set_mode(&app.ctx, soliddraft_app::theme::Mode::Dark);
     app.run_steps(12);
-    let before = session(&app).sketch.entity(arc).unwrap().kind;
+    let before = session(&app).sketch.entity(arc).unwrap().kind.clone();
     corner_mode(&mut app);
     let d = 50.0_f64.sqrt();
     pick(&mut app, P2::new(d, d));

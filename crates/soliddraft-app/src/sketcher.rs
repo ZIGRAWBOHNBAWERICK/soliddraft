@@ -25,6 +25,7 @@ use soliddraft_sketch::inference::{self, InferenceOptions, SnapFilter, apply_sna
 use std::ops::{Add, Sub};
 
 mod ellipse;
+mod spline;
 
 const POINT_REACH: f32 = 8.0;
 const CURVE_REACH: f32 = 6.0;
@@ -143,6 +144,10 @@ fn commit(s: &SketchSession, actions: &mut Vec<AppAction>) {
     actions.push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
 }
 
+pub fn finish_spline(s: &mut SketchSession, actions: &mut Vec<AppAction>) {
+    spline::finish(s, actions);
+}
+
 /// Runs the sketcher for one frame: input first, then drawing.
 pub fn run(
     ui: &mut egui::Ui,
@@ -190,8 +195,11 @@ pub fn run(
                         (Some(a), Some(b)) => f64::from((a - b).length()),
                         _ => f64::INFINITY,
                     });
-                snapped = Some(p);
-                s.snaps = snaps;
+                let close = s.tool.spline_mode().is_some()
+                    && s.pending.len() >= 3
+                    && frame.screen(s.pending[0].0).is_some_and(|first| first.distance(pos) <= POINT_REACH);
+                snapped = Some(if close { s.pending[0].0 } else { p });
+                s.snaps = if close { Vec::new() } else { snaps };
             }
         } else if picks {
             s.hover = hit_curve(&frame, &s.sketch, pos, ignore_guide_targets(s)).map(SketchSel::Entity);
@@ -268,7 +276,17 @@ pub fn run(
                 && let Some(p) = snapped
             {
                 let snaps = s.snaps.clone();
-                tool_click(s, p, snaps, double, &mut actions);
+                let finish = if s.tool.spline_mode().is_some() {
+                    (double || resp.triple_clicked_by(egui::PointerButton::Primary))
+                        && s.pending
+                            .last()
+                            .and_then(|(point, _)| frame.screen(*point))
+                            .zip(hover_pos)
+                            .is_some_and(|(last, cursor)| last.distance(cursor) <= POINT_REACH)
+                } else {
+                    double
+                };
+                tool_click(s, p, snaps, finish, &mut actions);
                 s.quick_snap = None;
             }
         }
@@ -367,7 +385,7 @@ fn offset_distance(s: &SketchSession, target: EntityId, p: P2) -> Option<f64> {
     }
     let mut previous: Option<P2> = None;
     for id in sketch_tools::selected_in_order(s) {
-        let kind = s.sketch.entity(id)?.kind;
+        let kind = s.sketch.entity(id)?.kind.clone();
         let (a, b) = match kind {
             EntityKind::Line { a, b } => (a, b),
             EntityKind::Arc { start, end, .. } => (start, end),
@@ -763,7 +781,7 @@ fn select_input(
 fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<ToolPreview> {
     let id = hit_curve(frame, &s.sketch, pos, ignore_guide_targets(s))?;
     let at = frame.plane_at(pos)?;
-    let entity = *s.sketch.entity(id)?;
+    let entity = s.sketch.entity(id)?.clone();
     let preview = match s.tool {
         Tool::TrimCorner | Tool::Fillet | Tool::Chamfer => {
             if let Some((a, keep_a)) = s.corner_first {
@@ -1022,6 +1040,7 @@ fn draw_click(
                 commit(s, actions);
             }
         },
+        Tool::FitSpline | Tool::ControlSpline => spline::click(s, p, snaps, double, actions),
         Tool::Ellipse | Tool::PartialEllipse => ellipse::click(s, p, snaps, actions),
         Tool::Circle => match s.pending.pop() {
             None => s.pending.push((p, snaps)),
@@ -1191,13 +1210,13 @@ fn dimension_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions:
 }
 
 fn is_curve_sel(sketch: &Sketch, sel: SketchSel) -> bool {
-    matches!(sel, SketchSel::Entity(e) if sketch.entity(e).is_some_and(|e| e.is_curve() || crate::sketch::ellipse::Ellipse::of(e.kind).is_some()))
+    matches!(sel, SketchSel::Entity(e) if sketch.entity(e).is_some_and(|e| e.is_curve() || crate::sketch::ellipse::Ellipse::of(&e.kind).is_some()))
 }
 
 /// The dimension two picks and a placement call for, measured from the sketch.
 fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, label: P2) -> Option<ConstraintKind> {
     let ent = |sel: SketchSel| match sel {
-        SketchSel::Entity(e) => sketch.entity(e).copied(),
+        SketchSel::Entity(e) => sketch.entity(e).cloned(),
         _ => None,
     };
     let point_of = |sel: SketchSel| match sel {
@@ -1234,8 +1253,14 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
         (SketchSel::Entity(e), None) => {
             let ent = sketch.entity(e)?;
             match ent.kind {
-                kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
-                    let ellipse = crate::sketch::ellipse::Ellipse::of(kind).unwrap();
+                EntityKind::Spline { ref points, .. }
+                    if points.len() >= 2 && points[0].dist(*points.last().unwrap()) > 1e-7 =>
+                {
+                    between(PointRef::new(e, 0), PointRef::new(e, points.len() - 1))
+                }
+                EntityKind::Spline { .. } => None,
+                ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+                    let ellipse = crate::sketch::ellipse::Ellipse::of(&kind).unwrap();
                     let direction = (label - ellipse.center).normalized();
                     let index = if direction.dot(ellipse.axis().normalized()).abs()
                         >= direction.dot(ellipse.axis().perp().normalized()).abs()
@@ -1378,6 +1403,8 @@ fn dashed(painter: &egui::Painter, pts: &[Pos2], stroke: Stroke) {
 
 fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
     let selected = |sel: SketchSel| s.selection.contains(&sel);
+    let joined_points: std::collections::HashSet<_> =
+        s.sketch.constraints.iter().flat_map(Constraint::points).collect();
     let mut relation_entities = std::collections::HashSet::new();
     let mut relation_points = std::collections::HashSet::new();
     for sel in &s.selection {
@@ -1435,6 +1462,15 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
         if e.is_point() {
             continue;
         }
+        let handle_selected =
+            s.selection.iter().any(|selected| matches!(selected,SketchSel::Point(point) if point.entity==e.id));
+        let handle_hovered = matches!(s.hover,Some(SketchSel::Point(point)) if point.entity==e.id);
+        if (is_sel || is_hover || handle_selected || handle_hovered)
+            && let EntityKind::Spline { mode: crate::sketch::SplineMode::Control, ref points } = e.kind
+        {
+            let polygon: Vec<_> = points.iter().filter_map(|point| frame.screen(*point)).collect();
+            dashed(painter, &polygon, Stroke::new(0.8, theme::muted()));
+        }
         if pts.len() >= 2 {
             if e.construction {
                 dashed(painter, &pts, stroke);
@@ -1462,7 +1498,7 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             let is_sel = selected(SketchSel::Point(r));
             let is_related = relation_points.contains(&r) || (e.is_point() && relation_entities.contains(&e.id));
             let is_hover = s.hover == Some(SketchSel::Point(r));
-            let joined = s.sketch.constraints.iter().any(|c| c.points().contains(&r));
+            let joined = joined_points.contains(&r);
             if is_sel || is_related || is_hover {
                 painter.circle_filled(sp, 7.0, theme::selection_bg());
             }
@@ -1806,9 +1842,10 @@ fn paint_dimension_lines(
         }
         ConstraintKind::Angle { a, b, .. } => {
             let (Some(la), Some(lb)) = (sk.entity(a), sk.entity(b)) else { return };
-            let (EntityKind::Line { a: a0, b: a1 }, EntityKind::Line { a: b0, b: b1 }) = (la.kind, lb.kind) else {
+            let (EntityKind::Line { a: a0, b: a1 }, EntityKind::Line { a: b0, b: b1 }) = (&la.kind, &lb.kind) else {
                 return;
             };
+            let (a0, a1, b0, b1) = (*a0, *a1, *b0, *b1);
             // Intersection of the two lines.
             let (d1, d2) = (a1.sub(a0), b1.sub(b0));
             let den = d1.cross(d2);
@@ -1966,6 +2003,7 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
         }
     };
     match (s.tool, s.pending.as_slice()) {
+        (Tool::FitSpline | Tool::ControlSpline, _) => spline::paint(painter, frame, s, p, st),
         (Tool::Ellipse | Tool::PartialEllipse, _) => {
             if let Some(kind) = ellipse::preview(s, p) {
                 curve(Entity { id: 0, kind, construction: false }.polyline(96));
@@ -2081,7 +2119,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
         let keep = s.tool.trims() && s.trim_options.keep_as_construction;
         let stroke =
             if keep { Stroke::new(1.5, theme::accent()) } else { Stroke::new(4.0, theme::error().gamma_multiply(0.9)) };
-        curve(*kind, stroke, keep);
+        curve(kind.clone(), stroke, keep);
     }
     for (index, kind) in preview.added.iter().enumerate() {
         let guide = preview.construction.get(index).copied().unwrap_or_else(|| match &preview.operation {
@@ -2094,7 +2132,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
             Some(Operation::Split { entity, .. }) => s.sketch.entity(*entity).is_some_and(|e| e.construction),
             _ => false,
         });
-        curve(*kind, Stroke::new(2.0, theme::accent()), guide);
+        curve(kind.clone(), Stroke::new(2.0, theme::accent()), guide);
     }
     if s.tool == Tool::Split {
         let points: Vec<_> = match &preview.operation {
@@ -2114,7 +2152,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
     if let Some(boundary) = preview.boundary
         && let Some(e) = s.sketch.entity(boundary)
     {
-        curve(e.kind, Stroke::new(3.0, theme::selection_bg()), false);
+        curve(e.kind.clone(), Stroke::new(3.0, theme::selection_bg()), false);
     }
 }
 
@@ -2225,7 +2263,7 @@ fn dim_editor(ui: &mut egui::Ui, s: &mut SketchSession, frame: &Frame<'_>, actio
         s.dim_edit = None;
         return;
     }
-    let Some(c) = s.sketch.constraint(edit.constraint).copied() else {
+    let Some(c) = s.sketch.constraint(edit.constraint).cloned() else {
         s.dim_edit = None;
         return;
     };
@@ -2325,6 +2363,9 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Centreline, _) => "Centreline: click the end point; right-click or Esc ends the chain",
         (Tool::Rectangle, 0) => "Rectangle: click the first corner",
         (Tool::Rectangle, _) => "Rectangle: click the opposite corner",
+        (Tool::FitSpline | Tool::ControlSpline, _) => {
+            "Spline: click points; double-click or Enter to finish, Backspace removes the last point"
+        }
         (Tool::Ellipse | Tool::PartialEllipse, 0) => "Ellipse: click the centre",
         (Tool::Ellipse | Tool::PartialEllipse, 1) => "Ellipse: click the first semi-axis endpoint",
         (Tool::Ellipse | Tool::PartialEllipse, 2) => "Ellipse: click the second semi-axis endpoint",
@@ -2422,9 +2463,9 @@ pub fn add_relation(s: &mut SketchSession, kind: ConstraintKind) -> AppAction {
 
 /// Add a composite relation with one solve and one document undo step.
 pub fn add_relations(s: &mut SketchSession, kinds: &[ConstraintKind]) -> AppAction {
-    for &kind in kinds {
-        if !s.sketch.constraints.iter().any(|c| c.kind == kind) {
-            s.sketch.constrain(kind);
+    for kind in kinds {
+        if !s.sketch.constraints.iter().any(|c| c.kind == *kind) {
+            s.sketch.constrain(kind.clone());
         }
     }
     solve::solve(&mut s.sketch, None, true);
@@ -2498,7 +2539,25 @@ pub fn applicable_relations(sketch: &Sketch, selection: &[SketchSel]) -> Vec<(&'
     let curves: Vec<EntityId> = ents.iter().filter(|e| e.is_curve()).map(|e| e.id).collect();
     let mut out: Vec<(&'static str, ConstraintKind)> = Vec::new();
     let ellipses: Vec<_> =
-        ents.iter().filter(|e| crate::sketch::ellipse::Ellipse::of(e.kind).is_some()).map(|e| e.id).collect();
+        ents.iter().filter(|e| crate::sketch::ellipse::Ellipse::of(&e.kind).is_some()).map(|e| e.id).collect();
+    let splines: Vec<_> = ents.iter().filter(|e| matches!(e.kind, EntityKind::Spline { .. })).map(|e| e.id).collect();
+    if !splines.is_empty() {
+        if ents.len() == 1 && points.len() == 1 {
+            out.push(("On curve", ConstraintKind::PointOn { point: points[0], entity: splines[0] }));
+        } else if ents.len() == 2
+            && points.is_empty()
+            && crate::sketch::relations::tangent_supported(sketch, ents[0].id, ents[1].id)
+        {
+            out.push(("Tangent", ConstraintKind::Tangent { a: ents[0].id, b: ents[1].id }));
+        } else if ents.len() == 1
+            && points.is_empty()
+            && let Ok(kinds) =
+                sketch.relation_constraints(&crate::sketch::relations::Relation::FixEntity { entity: splines[0] })
+        {
+            out.push(("Fix", kinds[0].clone()));
+        }
+        return out;
+    }
     if !ellipses.is_empty() {
         match (ents.len(), ellipses.len(), points.len()) {
             (2, 2, 0) => out.push(("Equal", ConstraintKind::Equal { a: ellipses[0], b: ellipses[1] })),
@@ -2507,7 +2566,7 @@ pub fn applicable_relations(sketch: &Sketch, selection: &[SketchSel]) -> Vec<(&'
         }
         let centers: Vec<_> = ents
             .iter()
-            .filter(|e| e.is_curve() || crate::sketch::ellipse::Ellipse::of(e.kind).is_some())
+            .filter(|e| e.is_curve() || crate::sketch::ellipse::Ellipse::of(&e.kind).is_some())
             .map(|e| e.id)
             .collect();
         if centers.len() == 2 && ents.len() == 2 && points.is_empty() {
@@ -2555,7 +2614,7 @@ pub fn applicable_relations(sketch: &Sketch, selection: &[SketchSel]) -> Vec<(&'
         && sketch.entity(*id).is_some_and(|e| !e.is_point())
         && let Ok(kinds) = sketch.relation_constraints(&crate::sketch::relations::Relation::FixEntity { entity: *id })
     {
-        out.push(("Fix", kinds[0]));
+        out.push(("Fix", kinds[0].clone()));
     }
     out
 }

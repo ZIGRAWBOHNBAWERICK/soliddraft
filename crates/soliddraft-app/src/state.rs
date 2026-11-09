@@ -69,6 +69,8 @@ pub enum AppAction {
     StartRepair(FeatureId),
     EditFeature(FeatureId),
     SketchTool(Tool),
+    /// Completes the spline currently being placed.
+    FinishSpline,
     /// Opens or closes the sketch relation list.
     SketchRelations(bool),
     /// Open or close a read-only report of sketch profile warnings.
@@ -405,6 +407,8 @@ pub enum Tool {
     Circle,
     Ellipse,
     PartialEllipse,
+    FitSpline,
+    ControlSpline,
     Arc,
     Slot,
     Point,
@@ -455,6 +459,8 @@ impl Tool {
             Tool::Circle => "Circle",
             Tool::Ellipse => "Ellipse",
             Tool::PartialEllipse => "Partial ellipse",
+            Tool::FitSpline => "Fit-point spline",
+            Tool::ControlSpline => "Control-point spline",
             Tool::Arc => "Arc",
             Tool::Slot => "Slot",
             Tool::Point => "Point",
@@ -484,6 +490,14 @@ impl Tool {
         matches!(self, Tool::Line | Tool::Centreline)
     }
 
+    pub fn spline_mode(self) -> Option<soliddraft_sketch::SplineMode> {
+        match self {
+            Self::FitSpline => Some(soliddraft_sketch::SplineMode::Fit),
+            Self::ControlSpline => Some(soliddraft_sketch::SplineMode::Control),
+            _ => None,
+        }
+    }
+
     /// Tools that place points with the sketcher's inference, one click at a time.
     pub fn places_points(self) -> bool {
         matches!(
@@ -494,6 +508,8 @@ impl Tool {
                 | Tool::Circle
                 | Tool::Ellipse
                 | Tool::PartialEllipse
+                | Tool::FitSpline
+                | Tool::ControlSpline
                 | Tool::Arc
                 | Tool::Slot
                 | Tool::Point

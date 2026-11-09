@@ -1,0 +1,70 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-control-spline",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "spline",
+              "mode": "control",
+              "points": [
+                {
+                  "u": 0,
+                  "v": 0
+                },
+                {
+                  "u": 0,
+                  "v": 4
+                },
+                {
+                  "u": 4,
+                  "v": 4
+                },
+                {
+                  "u": 4,
+                  "v": 0
+                }
+              ]
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 4,
+                "v": 0
+              },
+              "b": {
+                "u": 0,
+                "v": 0
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 2,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 19.2,
+          "tolerance": 1e-05
+        }
+      ]
+    }
+  ]
+}

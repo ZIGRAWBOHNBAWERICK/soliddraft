@@ -170,7 +170,7 @@ fn conflict_filter_locates_solver_relations_and_row_deletion_resolves_them() {
     let (mut app, _) = launch(sketch);
     let before = session(&app).sketch.clone();
     let SolveStatus::OverDefined { conflicting } = &before.status else { panic!("the fixture must conflict") };
-    let chosen = *before.constraints.iter().find(|c| conflicting.contains(&c.id)).unwrap();
+    let chosen = before.constraints.iter().find(|c| conflicting.contains(&c.id)).unwrap().clone();
     let revision = app.state().state.doc.revision();
     let window = ribbon::window(&app);
     ribbon::click_button(&mut app, "Inspect conflicts", window);

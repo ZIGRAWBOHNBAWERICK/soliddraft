@@ -157,14 +157,14 @@ pub fn infer(
             best = Some((priority, d, at, snap));
         }
     };
-    let curves: Vec<_> = sketch.drawn().filter(|e| !e.is_point() && tools::valid(e.kind)).collect();
+    let curves: Vec<_> = sketch.drawn().filter(|e| !e.is_point() && tools::valid(&e.kind)).collect();
     if matches!(options.filter, SnapFilter::All | SnapFilter::Intersection) {
         // Reject distant pairs before calculating analytic intersections.
         let nearby: Vec<_> = curves.iter().filter(|e| distance(raw, e.nearest(raw).0) <= options.point_reach).collect();
         for (i, a) in nearby.iter().enumerate() {
             for b in &nearby[i + 1..] {
-                for p in tools::intersections(a.kind, b.kind) {
-                    if tools::on_curve(a.kind, p) && tools::on_curve(b.kind, p) {
+                for p in tools::intersections(&a.kind, &b.kind) {
+                    if tools::on_curve(&a.kind, p) && tools::on_curve(&b.kind, p) {
                         offer(p, Snap::Intersection(a.id, b.id), SnapFilter::Intersection, 1, options.point_reach);
                     }
                 }
@@ -198,14 +198,14 @@ pub fn infer(
                         3,
                         options.align_reach,
                     );
-                } else if let Some((center, radius)) = tools::circle(e.kind) {
+                } else if let Some((center, radius)) = tools::circle(&e.kind) {
                     let delta = start - center;
                     let len = delta.len();
                     if len < radius - 1e-6 || len <= 1e-6 {
                         continue;
                     }
                     if (len - radius).abs() <= 1e-6 {
-                        if tools::on_curve(e.kind, start) {
+                        if tools::on_curve(&e.kind, start) {
                             let dir = delta.perp().normalized();
                             offer(
                                 start + dir.scale((raw - start).dot(dir)),
@@ -219,7 +219,7 @@ pub fn infer(
                         let foot = center + delta.scale((radius / len).powi(2));
                         let off = delta.perp().scale((radius / len) * (1.0 - (radius / len).powi(2)).sqrt());
                         for contact in [foot - off, foot + off] {
-                            if tools::on_curve(e.kind, contact) {
+                            if tools::on_curve(&e.kind, contact) {
                                 let dir = (contact - start).normalized();
                                 offer(
                                     start + dir.scale((raw - start).dot(dir)),

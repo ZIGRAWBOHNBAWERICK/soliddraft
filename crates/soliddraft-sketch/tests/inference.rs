@@ -63,7 +63,7 @@ fn circle_and_wrapping_arc_crossings_use_the_analytic_bounds() {
     let (at, snaps) = preview(&s, upper + p(0.03, 0.04), None, SnapFilter::Intersection);
     assert!(at.dist(upper) < 1e-9);
     assert_eq!(snaps, vec![Snap::Intersection(circle, other)]);
-    s.entity_mut(other).unwrap().kind = s.entity(circle).unwrap().kind;
+    s.entity_mut(other).unwrap().kind = s.entity(circle).unwrap().kind.clone();
     assert!(preview(&s, p(8.0, 5.0), None, SnapFilter::Intersection).1.is_empty());
 }
 

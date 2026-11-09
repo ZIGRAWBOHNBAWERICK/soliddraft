@@ -23,7 +23,7 @@ fn solved(s: &mut Sketch) {
 fn near(a: P2, b: P2) {
     assert!(a.dist(b) < 1e-5, "{a:?} != {b:?}");
 }
-fn point(s: &Sketch, e: u32, i: u8) -> P2 {
+fn point(s: &Sketch, e: u32, i: usize) -> P2 {
     s.point(PointRef::new(e, i)).unwrap()
 }
 
@@ -35,7 +35,7 @@ fn composite_relations_solve_and_do_not_duplicate_partial_sets() {
     fix(&mut s, a);
     let req = Relation::Collinear { a, b };
     let kinds = s.relation_constraints(&req).unwrap();
-    s.constrain(kinds[0]);
+    s.constrain(kinds[0].clone());
     relate(&mut s, req);
     assert_eq!(s.constraints.len(), 3);
     relate(&mut s, req);
@@ -124,7 +124,7 @@ fn whole_circle_fix_restores_radius_and_releases_when_removed() {
     let mut s = Sketch::new();
     let id = s.add(EntityKind::Circle { center: p(5.0, 8.0), radius: 4.0 }, false);
     fix(&mut s, id);
-    let stored = s.constraints[0];
+    let stored = s.constraints[0].clone();
     s.entity_mut(id).unwrap().kind = EntityKind::Circle { center: p(5.5, 8.5), radius: 4.5 };
     fix(&mut s, id);
     assert_eq!(s.constraints, vec![stored]);
@@ -205,12 +205,12 @@ fn reflected_ellipses_keep_their_axes_and_partial_span_after_edits_and_reopening
         let json = serde_json::to_string(&s).unwrap();
         let mut s: Sketch = serde_json::from_str(&json).unwrap();
         let edited = ellipse(p(-7.0, 1.0), p(-2.0, 1.0), p(-7.0, 4.0), p(-2.0, 1.0), p(-12.0, 1.0));
-        s.entity_mut(a).unwrap().kind = edited;
+        s.entity_mut(a).unwrap().kind = edited.clone();
         for constraint in &mut s.constraints {
             if let ConstraintKind::FixEntity { entity, at } = &mut constraint.kind
                 && *entity == a
             {
-                *at = edited;
+                *at = edited.clone();
             }
         }
         solved(&mut s);
@@ -220,7 +220,7 @@ fn reflected_ellipses_keep_their_axes_and_partial_span_after_edits_and_reopening
         if partial {
             near(point(&s, b, 3), p(12.0, 1.0));
             near(point(&s, b, 4), p(2.0, 1.0));
-            let kind = s.entity(b).unwrap().kind;
+            let kind = &s.entity(b).unwrap().kind;
             let geometry = soliddraft_sketch::ellipse::Ellipse::of(kind).unwrap();
             let (start, sweep) = geometry.span(kind);
             assert!(geometry.at(start + sweep / 2.0).v > geometry.center.v);

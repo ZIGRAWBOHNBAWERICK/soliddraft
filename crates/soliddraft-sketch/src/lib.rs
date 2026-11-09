@@ -19,6 +19,8 @@ mod references;
 pub mod relations;
 mod shapes;
 pub mod solve;
+pub mod spline;
+pub use spline::SplineMode;
 pub mod tools;
 
 #[cfg(test)]
@@ -131,9 +133,16 @@ impl std::ops::Sub for P2 {
 }
 
 /// The geometry of an entity, with the points it owns.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EntityKind {
+    /// A polynomial spline defined by fit points or a control polygon.
+    Spline {
+        /// How the authored points define the curve.
+        mode: SplineMode,
+        /// Authored points in traversal order.
+        points: Vec<P2>,
+    },
     /// A lone point.
     Point {
         /// Its position.
@@ -186,8 +195,21 @@ pub enum EntityKind {
     },
 }
 
+impl EntityKind {
+    /// Number of points owned by this geometry.
+    pub fn point_count(&self) -> usize {
+        match self {
+            Self::Spline { points, .. } => points.len(),
+            Self::Point { .. } | Self::Circle { .. } => 1,
+            Self::Line { .. } => 2,
+            Self::Arc { .. } | Self::Ellipse { .. } => 3,
+            Self::EllipticArc { .. } => 5,
+        }
+    }
+}
+
 /// One piece of sketch geometry.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
     /// Its id, unique within the sketch.
     pub id: EntityId,
@@ -200,38 +222,41 @@ pub struct Entity {
 
 impl Entity {
     /// How many points the entity owns (see [`Entity::point`]).
-    pub fn point_count(&self) -> u8 {
-        match self.kind {
-            EntityKind::Point { .. } | EntityKind::Circle { .. } => 1,
-            EntityKind::Line { .. } => 2,
-            EntityKind::Arc { .. } | EntityKind::Ellipse { .. } => 3,
-            EntityKind::EllipticArc { .. } => 5,
-        }
+    pub fn point_count(&self) -> usize {
+        self.kind.point_count()
     }
 
     /// Point `index`: a point's own point; a line's start and end; an arc's
     /// centre, start and end; a circle's centre.
-    pub fn point(&self, index: u8) -> Option<P2> {
-        match (self.kind, index) {
-            (EntityKind::Ellipse { center, .. } | EntityKind::EllipticArc { center, .. }, 0) => Some(center),
-            (EntityKind::Ellipse { major, .. } | EntityKind::EllipticArc { major, .. }, 1) => Some(major),
-            (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => Some(minor),
-            (EntityKind::EllipticArc { start, .. }, 3) => Some(start),
-            (EntityKind::EllipticArc { end, .. }, 4) => Some(end),
-            (EntityKind::Point { p }, 0) => Some(p),
-            (EntityKind::Line { a, .. }, 0) => Some(a),
-            (EntityKind::Line { b, .. }, 1) => Some(b),
-            (EntityKind::Arc { center, .. }, 0) => Some(center),
-            (EntityKind::Arc { start, .. }, 1) => Some(start),
-            (EntityKind::Arc { end, .. }, 2) => Some(end),
-            (EntityKind::Circle { center, .. }, 0) => Some(center),
+    pub fn point(&self, index: usize) -> Option<P2> {
+        if let EntityKind::Spline { ref points, .. } = self.kind {
+            return points.get(index).copied();
+        }
+        match (&self.kind, index) {
+            (EntityKind::Ellipse { center, .. } | EntityKind::EllipticArc { center, .. }, 0) => Some(*center),
+            (EntityKind::Ellipse { major, .. } | EntityKind::EllipticArc { major, .. }, 1) => Some(*major),
+            (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => Some(*minor),
+            (EntityKind::EllipticArc { start, .. }, 3) => Some(*start),
+            (EntityKind::EllipticArc { end, .. }, 4) => Some(*end),
+            (EntityKind::Point { p }, 0) => Some(*p),
+            (EntityKind::Line { a, .. }, 0) => Some(*a),
+            (EntityKind::Line { b, .. }, 1) => Some(*b),
+            (EntityKind::Arc { center, .. }, 0) => Some(*center),
+            (EntityKind::Arc { start, .. }, 1) => Some(*start),
+            (EntityKind::Arc { end, .. }, 2) => Some(*end),
+            (EntityKind::Circle { center, .. }, 0) => Some(*center),
             _ => None,
         }
     }
 
     /// Moves point `index` (see [`Entity::point`]) to `p`. Other indices are ignored.
-    pub fn set_point(&mut self, index: u8, p: P2) {
+    pub fn set_point(&mut self, index: usize, p: P2) {
         match (&mut self.kind, index) {
+            (EntityKind::Spline { points, .. }, i) => {
+                if let Some(point) = points.get_mut(i) {
+                    *point = p;
+                }
+            }
             (EntityKind::Ellipse { center, .. } | EntityKind::EllipticArc { center, .. }, 0) => *center = p,
             (EntityKind::Ellipse { major, .. } | EntityKind::EllipticArc { major, .. }, 1) => *major = p,
             (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => *minor = p,
@@ -297,6 +322,8 @@ impl Entity {
     /// The kind as a word for the interface.
     pub fn kind_name(&self) -> &'static str {
         match self.kind {
+            EntityKind::Spline { mode: SplineMode::Fit, .. } => "Fit-point spline",
+            EntityKind::Spline { mode: SplineMode::Control, .. } => "Control-point spline",
             EntityKind::Point { .. } => "Point",
             EntityKind::Line { .. } => "Line",
             EntityKind::Arc { .. } => "Arc",
@@ -320,7 +347,8 @@ impl Entity {
     /// The point at the middle of the entity, used to place relation glyphs.
     pub fn midpoint(&self) -> P2 {
         match self.kind {
-            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+            EntityKind::Spline { mode, ref points } => spline::midpoint(mode, points),
+            ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
                 let ellipse = ellipse::Ellipse::of(kind).unwrap();
                 let (start, sweep) = ellipse.span(kind);
                 ellipse.at(start + sweep / 2.0)
@@ -338,7 +366,11 @@ impl Entity {
     /// Nearest point on the entity's curve to `p` and the distance to it.
     pub fn nearest(&self, p: P2) -> (P2, f64) {
         match self.kind {
-            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+            EntityKind::Spline { mode, ref points } => {
+                let nearest = spline::nearest(mode, points, p);
+                (nearest.point, nearest.point.dist(p))
+            }
+            ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
                 ellipse::Ellipse::of(kind).unwrap().nearest(kind, p)
             }
             EntityKind::Point { p: q } => (q, q.dist(p)),
@@ -378,7 +410,8 @@ impl Entity {
     /// Points along the curve for drawing and hit testing.
     pub fn polyline(&self, segments: usize) -> Vec<P2> {
         match self.kind {
-            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+            EntityKind::Spline { mode, ref points } => spline::polyline(mode, points, segments),
+            ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
                 let ellipse = ellipse::Ellipse::of(kind).unwrap();
                 let (start, sweep) = ellipse.span(kind);
                 let n = segments.max(4);
@@ -408,12 +441,12 @@ pub struct PointRef {
     /// The entity that owns the point.
     pub entity: EntityId,
     /// The point index within the entity.
-    pub index: u8,
+    pub index: usize,
 }
 
 impl PointRef {
     /// A reference to point `index` of `entity`.
-    pub const fn new(entity: EntityId, index: u8) -> Self {
+    pub const fn new(entity: EntityId, index: usize) -> Self {
         PointRef { entity, index }
     }
 
@@ -456,7 +489,7 @@ pub struct OffsetJoin {
 
 /// What a constraint says. Relations hold geometry in place; dimensions also carry
 /// a value the user edits and a label position.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConstraintKind {
     /// Two points are the same point.
@@ -650,7 +683,7 @@ pub enum ConstraintKind {
 }
 
 /// A constraint in a sketch.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {
     /// Its id, unique within the sketch.
     pub id: ConstraintId,
@@ -720,7 +753,7 @@ impl Constraint {
     /// The constraint's name for the interface.
     pub fn name(&self) -> &'static str {
         match self.kind {
-            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.name(),
+            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..self.clone() }.name(),
             ConstraintKind::Coincident { .. } => "Coincident",
             ConstraintKind::PointOn { .. } => "On entity",
             ConstraintKind::Horizontal { .. } => "Horizontal",
@@ -749,7 +782,7 @@ impl Constraint {
     /// Every entity the constraint touches.
     pub fn entities(&self) -> Vec<EntityId> {
         let mut v = match self.kind {
-            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.entities(),
+            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..self.clone() }.entities(),
             ConstraintKind::Coincident { a, b } => vec![a.entity, b.entity],
             ConstraintKind::PointOn { point, entity } => vec![point.entity, entity],
             ConstraintKind::Horizontal { target } | ConstraintKind::Vertical { target } => match target {
@@ -786,14 +819,13 @@ impl Constraint {
     /// The points the constraint touches directly.
     pub fn points(&self) -> Vec<PointRef> {
         match self.kind {
-            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..*self }.points(),
+            ConstraintKind::Reference { .. } => Constraint { kind: self.geometry_kind(), ..self.clone() }.points(),
             ConstraintKind::Coincident { a, b }
             | ConstraintKind::Symmetric { a, b, .. }
             | ConstraintKind::Distance { a, b, .. } => vec![a, b],
-            ConstraintKind::FixEntity { entity, at } => (0..Entity { id: entity, kind: at, construction: false }
-                .point_count())
-                .map(|index| PointRef::new(entity, index))
-                .collect(),
+            ConstraintKind::FixEntity { entity, ref at } => {
+                (0..at.point_count()).map(|index| PointRef::new(entity, index)).collect()
+            }
             ConstraintKind::Offset { ends, join, .. } => ends
                 .into_iter()
                 .flatten()

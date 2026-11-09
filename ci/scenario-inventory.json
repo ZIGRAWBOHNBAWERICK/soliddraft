@@ -2,6 +2,20 @@
   "format": "soliddraft-scenario-inventory/1",
   "scenarios": [
     {
+      "id": "all-faces-shell",
+      "file": "ci/scenarios/all-faces-shell.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "A 40 x 30 x 12 mm block with a through bore and a chamfer, every face opened; the part has no body afterwards, and an export of it is refused.",
+      "evidence": "Build, wall edit, upstream edit, undo, redo, save, fresh-process reopen and refused exports; result.json, command.json and the saved part."
+    },
+    {
       "id": "assembly",
       "file": "ci/scenarios/assembly.json",
       "acceptance": true,
@@ -15,6 +29,20 @@
       "route": "MCP document and assembly commands -> Catallax adapter -> pinned kernel -> assembly loader",
       "supported_limits": "One floating component at identity placement, default configuration; in-session freshness, saved-part transactional Update; partial M4 evidence.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "bored-tray-shell",
+      "file": "ci/scenarios/bored-tray-shell.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Convex 40 x 30 x 12 mm tray with a diameter-6 through bore, top open, wall 2 edited to 1.5 mm.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
     },
     {
       "id": "boss-on-face",
@@ -51,6 +79,22 @@
       ]
     },
     {
+      "id": "clearance-verification",
+      "file": "ci/scenarios/clearance-verification.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly_check_clearance -> assembly interference check with a clearance -> parts rebuilt at pinned revisions -> certified tessellation with a proven chord bound -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B7 certified-mesh tier: Clearance Verification over part bodies, default configuration; each pair proven to meet the clearance, proven at or under it, or undecided within the meshes' bounds, with proven distance bounds; exact touching from an opposed Coincident mate is at or under any clearance; a negative clearance refused.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "collar",
       "file": "ci/scenarios/collar.json",
       "acceptance": true,
@@ -63,6 +107,63 @@
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "P2 collar: radii 6 to 12 mm, height 12 mm, revolved 360 degrees about Y, outer-rim chamfers 1 and 0.75 mm; one plain through hole on the top annulus at radius 9 mm, diameter 2 edited to 2.5 mm, strictly inside both bevel rings; volume tolerance 0.005 mm3 at a 20M work allowance; a hole whose wall meets a bevel cone retains intersect.traced-pair-required; partial M7 evidence",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,measurement.json,viewport.png,view.svg}; steps 3-4 drawing.dwdrw, drawing.svg and STEP/STL exports; steps 10 and 13 Hole1 wall name; collar-hole.dwprt; commands/0012/{part.step,step-report.json,check-step.stdout,check-step.stderr,raw-step.stdout,raw-step.stderr}; commands/0014 refusal question and replay; geometry-info.stdout recipe hashes"
+    },
+    {
+      "id": "configuration-grid-csv",
+      "file": "ci/scenarios/configuration-grid-csv.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP configuration grid tools -> CSV codec -> document transaction -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Text properties and named values of one part with rows Default, Narrow and a quoted row; the complete row set must be present; no row rename or deletion; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; app work cap 20M",
+      "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; csv-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+    },
+    {
+      "id": "configuration-grid-xlsx",
+      "file": "ci/scenarios/configuration-grid-xlsx.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP configuration grid tools -> OOXML codec -> document transaction -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One Configurations sheet of string and numeric cells mapped by header name; formula cells are refused; other limits as configuration-grid-csv",
+      "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; xlsx-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+    },
+    {
+      "id": "configuration-title",
+      "file": "ci/scenarios/configuration-title.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-drawing",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP grid and drawing tools -> document transaction -> drawing source snapshot -> SVG writer; Catallax adapter -> pinned kernel",
+      "supported_limits": "One title field bound to a text property of the part the drawing pins; automatic update off; no component configuration selector; app work cap 20M",
+      "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,helper-*.stdout}; out/{family,revised}.svg; title-wide.dwprt; title-wide.dwdrw; commands-1/0003/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+    },
+    {
+      "id": "configurations",
+      "file": "ci/scenarios/configurations.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One part with named-value overrides only; widths 120, 140 and 152.4 mm; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; rows Default, Narrow, Wide, Zero and Void; Zero rejects zero depth, Void rejects the empty cut with flange_d 5 mm and hole_d 200 mm, then repairs with hole_d 12 mm",
+      "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,viewport.png,view.svg}; narrow.dwprt; wide.dwprt; commands/0024 and commands/0028/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
     },
     {
       "id": "countersink",
@@ -131,20 +232,6 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked shoulder, boss, bore and side references through edit, undo, redo, reopen and refusal; draft-boss-through-hole.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
     },
     {
-      "id": "draft-countersink",
-      "file": "ci/scenarios/draft-countersink.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP sketch, extrude, countersunk hole, draft, track and edit_draft -> real document rebuild -> pinned Catallax countersunk-hole draft -> checked STEP on one request allowance",
-      "supported_limits": "A 40 x 30 x 20 mm block with one through hole of diameter 4 at (6, 2) and a 90-degree countersink of diameter 8, made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a cone touching or crossing an outer wall, a blind hole and a selected hole face stay refused in Catallax; partial M7 evidence",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked cap, cone, wall and both side references through edit, undo, redo, reopen and refusal; draft-countersink.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
-    },
-    {
       "id": "draft-concave",
       "file": "ci/scenarios/draft-concave.json",
       "acceptance": true,
@@ -157,6 +244,20 @@
       "route": "MCP sketch_geometry, extrude, draft, track and edit_draft -> real document rebuild -> pinned Catallax concave planar draft -> checked STEP on one request allowance",
       "supported_limits": "A hole-free 40 x 30 x 20 mm L bracket with its right, inner and left walls drafted 3 and 5 degrees about z=0; the notch wall and the other walls stay; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a concave base with a preserved bore or boss stays refused in Catallax; partial M7 evidence",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked notch and inner wall references through edit, undo, redo, reopen and refusal; commands/0004/{part.step,step-oracle.json} for a3; concave-draft.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit; the exact material table in crates/soliddraft-kernel-catallax/tests/material_queries.rs"
+    },
+    {
+      "id": "draft-countersink",
+      "file": "ci/scenarios/draft-countersink.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP sketch, extrude, countersunk hole, draft, track and edit_draft -> real document rebuild -> pinned Catallax countersunk-hole draft -> checked STEP on one request allowance",
+      "supported_limits": "A 40 x 30 x 20 mm block with one through hole of diameter 4 at (6, 2) and a 90-degree countersink of diameter 8, made before Draft1; two planar walls drafted 3 and 5 degrees about z=0; 20M per request, export included; volume and area tolerance 0.005, centroid and box 0.001 mm; a cone touching or crossing an outer wall, a blind hole and a selected hole face stay refused in Catallax; partial M7 evidence",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked cap, cone, wall and both side references through edit, undo, redo, reopen and refusal; draft-countersink.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit"
     },
     {
       "id": "draft-preserved-boss",
@@ -219,6 +320,22 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ]
+    },
+    {
+      "id": "edit-display-reuse",
+      "file": "ci/scenarios/edit-display-reuse.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-cli",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP edits -> document rebuild and immutable display meshes -> retained offscreen viewport -> development rebuild report",
+      "supported_limits": "One part at a time; rounded boss dimension and fillet edits, rename, undo/redo, suppress/restore and fresh reopen; unchanged meshes keep their GPU buffers.",
+      "evidence": "commands/NNNN and commands-1/NNNN/{command.json,display.json,kernel.json,viewport.png,view.svg}; rounded.dwprt; foreground mesh requests and GPU body placements checked separately from background display refinement"
     },
     {
       "id": "end-conditions",
@@ -307,6 +424,32 @@
       ]
     },
     {
+      "id": "hole-alignment",
+      "file": "ci/scenarios/hole-alignment.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly_check_hole_alignment -> pinned native cylinder supports -> exact rational placed axes",
+      "supported_limits": "Internal cylindrical axes exactly on world axes; coaxial or parallel offset within a maximum deviation; selected components, negative deviation and single-part refusals; no diameter or fit test.",
+      "evidence": "result.json, protocol.json and command evidence; work/a.dwprt and work/rig.dwasm; unchanged accepted state and fresh-process reopen."
+    },
+    {
+      "id": "iges-export",
+      "file": "ci/scenarios/iges-export.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-exchange",
+        "soliddraft-kernel-catallax"
+      ],
+      "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
+      "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
+      "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
+    },
+    {
       "id": "import-block",
       "file": "ci/scenarios/import-block.json",
       "acceptance": true,
@@ -352,6 +495,22 @@
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; repaired.dwprt; fresh-process reopen with part.step, step-report.json, check-step.stdout and check-step.stderr; the STL"
     },
     {
+      "id": "interference-detection",
+      "file": "ci/scenarios/interference-detection.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly_check_interference -> assembly interference check -> parts rebuilt at pinned revisions -> certified tessellation with a proven chord bound -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B7 certified-mesh tier: Interference Detection over the whole assembly or named occurrences of part bodies, default configuration; clear, interferes with a witness point inside both parts, or touching or undecided; opposed faces an exact Coincident mate holds on one plane are exactly touching; a single part and an out-of-range chord bound refused; no overlap volumes.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "lattice",
       "file": "ci/scenarios/lattice.json",
       "acceptance": true,
@@ -366,244 +525,18 @@
       "evidence": "result.json and commands/NNNN/{command.json,kernel.json,viewport.png,part.stl,export-stl-oracle.stdout}"
     },
     {
-      "id": "mate-distance",
-      "file": "ci/scenarios/mate-distance.json",
+      "id": "line-arc-sweep",
+      "file": "ci/scenarios/line-arc-sweep.json",
       "acceptance": true,
       "owners": [
         "soliddraft-app",
-        "soliddraft-assembly",
         "soliddraft-model",
-        "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Origin and distance mates between axis-aligned planar faces of the root's own part components, default configuration; identity and exact half-turn placements carry the exact claim; partial M2/M3/M4/M6 evidence.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-coincident",
-      "file": "ci/scenarios/mate-coincident.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Coincident mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "V6 batch 2: Coincident mates between two proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; partial and strict solves, an over-constrained distance refused, distance edits and drivers refused, explicit Update, delete and replacement by a distance; saved as its own kind with no distance; partial M6 evidence.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
-    },
-    {
-      "id": "mate-parallel",
-      "file": "ci/scenarios/mate-parallel.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Parallel mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B1: Parallel mates between proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; a strict refusal naming what stays free, a distance edit refused, an alignment edit that conflicts refused and named, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-perpendicular",
-      "file": "ci/scenarios/mate-perpendicular.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Perpendicular mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B1: Perpendicular mates between proven axis-aligned planar faces; a part that does not already hold the right angle takes the nearest quarter turn; an alignment edit refused, a conflicting Parallel refused naming both mates, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-width",
-      "file": "ci/scenarios/mate-width.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Width mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B1: Width mates between two parallel groove faces and two parallel tab faces, centred, by percent of the play from either face and by a dimension driven by an assembly value; Free between nonparallel faces refused, a percentage out of range refused, a conflicting distance refused naming both mates, undo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-lock",
-      "file": "ci/scenarios/mate-lock.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Lock mate commands -> assembly transaction -> stored relative placement -> exact difference solve",
-      "supported_limits": "B1: Lock mates storing a relative placement between root part components; a conflicting distance refused naming both mates, save and reopen, a same-component Lock refused and a quarter-turn relative rotation accepted. General relative turns are covered by mate-bounded.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-concentric",
-      "file": "ci/scenarios/mate-concentric.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Concentric mate commands -> assembly transaction -> proven axis query -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B2: Concentric mates between axes read from cylinders on root part components: a shaft in a bore placed exactly, a strict refusal naming what stays free, Lock rotation stored as a quarter-turn matrix, a distance edit refused, save and reopen; a strict request on a hole copied by a 60-degree circular pattern refused as under_constrained, the original hole taking a pin exactly, undo and redo.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt, work/tabs.dwprt, work/pin.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-tangent",
-      "file": "ci/scenarios/mate-tangent.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Tangent mate commands -> assembly transaction -> proven plane and axis queries -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B2: Tangent mates from an axis-aligned planar face to a cylinder with a rational radius: the shaft turned flat one radius above the plane, flipped behind it, a planar second end refused as unsupported_reference, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-hinge",
-      "file": "ci/scenarios/mate-hinge.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Hinge mate commands -> assembly transaction -> proven axis and plane queries -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B2: Hinge mates without limits, a Concentric between two cylinders and a Coincident between two planes under one name: the shaft seated flush in the bore with only its spin left, a strict refusal, a plane flip alone refused naming the hinge, both flips turning the shaft over, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-axes-points",
-      "file": "ci/scenarios/mate-axes-points.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Coincident, Distance, Parallel and Perpendicular mate commands on edges and vertices -> assembly transaction -> proven axis and point queries -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B2: Coincident between two vertices, a straight edge in a plane, a vertex at a distance from a plane and its edit, Parallel between two straight edges, a Perpendicular against it refused naming both, negative point-point Distance refused without state changes, save and reopen. Positive Euclidean Distance is covered by mate-point-distance.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-symmetric",
-      "file": "ci/scenarios/mate-symmetric.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Symmetric mate commands -> assembly transaction -> proven plane queries -> exact mirror relation -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B4: Symmetric between two axis-aligned planar faces about a part's Right plane: the image part mirrored exactly, a second Symmetric about the Front plane that asks the image to face the other way refused naming the mates that cannot hold together, the alignment flipped turning the image over, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-linear-coupler",
-      "file": "ci/scenarios/mate-linear-coupler.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Linear Coupler mate commands -> assembly transaction -> proven plane queries -> exact elimination across axes -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B4: Linear Coupler between one part's slide along X and another's along Y at a ratio of one to two: the exact offset stored where the parts are, a distance moving the first part moving the second by twice as much, a ratio of zero refused as invalid_value, reverse taking the parts' places as its zero, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-limit-distance",
-      "file": "ci/scenarios/mate-limit-distance.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly, Limit Distance and Width mate commands -> assembly transaction -> proven plane queries -> exact bounds by Bellman-Ford -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B4: Limit Distance between two axis-aligned planar faces: the gap brought to the nearest end of the range, kept inside a wider one, a distance outside it refused naming both, a least distance past the greatest refused as invalid_value; a free Width keeping the tab between the groove's faces; undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-profile-center",
-      "file": "ci/scenarios/mate-profile-center.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Profile Center mate commands -> assembly transaction -> exact profile centre from native vertices and circles -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B4: Profile Center between two rectangles, the second placed a quarter turn round, centred and fully defined; a rectangle with a circle refused as unsupported_reference by name; Lock rotation on polygons refused as invalid; the offset edited; two shafts' circular caps centred with the spin left, then locked; undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/s1.dwprt, work/s2.dwprt and work/rig.dwasm"
-    },
-    {
-      "id": "mate-slot",
-      "file": "ci/scenarios/mate-slot.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly and Slot mate commands -> assembly transaction -> slot recognition from proven walls and round ends -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B4: Slot between a straight, axis-aligned slot cut through a block and a pin's cylinder: a block's top refused as unsupported_reference by name, the pin free and stopped at the far end, Lock rotation, a distance along the slot edited and flipped, undo, redo, save and reopen.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/pin.dwprt and work/rig.dwasm"
+      "route": "MCP sweep and edit_sweep with segments -> document rebuild -> native path and sweep with exact arc ends -> viewport and checked STEP export",
+      "supported_limits": "Closed polygon profile beside the path; line, quarter arc, line chain with the profile turning along it, edited run length; refused oblique join, zero-length line and reversal without a turn axis leave the part unchanged; face measured by name, undo/redo, save and fresh-process reopen; other path motions and loft remain unavailable",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle over planes and cylinders"
     },
     {
       "id": "mate-angle",
@@ -620,6 +553,22 @@
       "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
       "supported_limits": "B5: a real bracket at a signed 30-degree angle about an explicit reference direction and a 5 mm gap; residual bounds 1e-9 mm and 1e-9 rad; save, fresh reopen and invalid-angle refusal without state changes.",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+    },
+    {
+      "id": "mate-axes-points",
+      "file": "ci/scenarios/mate-axes-points.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Coincident, Distance, Parallel and Perpendicular mate commands on edges and vertices -> assembly transaction -> proven axis and point queries -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Coincident between two vertices, a straight edge in a plane, a vertex at a distance from a plane and its edit, Parallel between two straight edges, a Perpendicular against it refused naming both, negative point-point Distance refused without state changes, save and reopen. Positive Euclidean Distance is covered by mate-point-distance.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
       "id": "mate-bounded",
@@ -654,6 +603,178 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
     },
     {
+      "id": "mate-coincident",
+      "file": "ci/scenarios/mate-coincident.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Coincident mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "V6 batch 2: Coincident mates between two proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; partial and strict solves, an over-constrained distance refused, distance edits and drivers refused, explicit Update, delete and replacement by a distance; saved as its own kind with no distance; partial M6 evidence.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/rig.dwasm and work/rig-lift.dwasm"
+    },
+    {
+      "id": "mate-concentric",
+      "file": "ci/scenarios/mate-concentric.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Concentric mate commands -> assembly transaction -> proven axis query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Concentric mates between axes read from cylinders on root part components: a shaft in a bore placed exactly, a strict refusal naming what stays free, Lock rotation stored as a quarter-turn matrix, a distance edit refused, save and reopen; a strict request on a hole copied by a 60-degree circular pattern refused as under_constrained, the original hole taking a pin exactly, undo and redo.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt, work/tabs.dwprt, work/pin.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-distance",
+      "file": "ci/scenarios/mate-distance.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Origin and distance mates between axis-aligned planar faces of the root's own part components, default configuration; identity and exact half-turn placements carry the exact claim; partial M2/M3/M4/M6 evidence.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-drag",
+      "file": "ci/scenarios/mate-drag.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
+      "supported_limits": "B6: drag previews and cancel, distance stops, one-step commit, undo/redo and save/reopen; no collision checks.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-drag-hinge",
+      "file": "ci/scenarios/mate-drag-hinge.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
+      "supported_limits": "B6: bounded Hinge stops in both directions during rotation, undo/redo and save/reopen; no collision checks.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-gear-motion",
+      "file": "ci/scenarios/mate-gear-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-hinge",
+      "file": "ci/scenarios/mate-hinge.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Hinge mate commands -> assembly transaction -> proven axis and plane queries -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Hinge mates without limits, a Concentric between two cylinders and a Coincident between two planes under one name: the shaft seated flush in the bore with only its spin left, a strict refusal, a plane flip alone refused naming the hinge, both flips turning the shaft over, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-limit-distance",
+      "file": "ci/scenarios/mate-limit-distance.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly, Limit Distance and Width mate commands -> assembly transaction -> proven plane queries -> exact bounds by Bellman-Ford -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Limit Distance between two axis-aligned planar faces: the gap brought to the nearest end of the range, kept inside a wider one, a distance outside it refused naming both, a least distance past the greatest refused as invalid_value; a free Width keeping the tab between the groove's faces; undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-linear-coupler",
+      "file": "ci/scenarios/mate-linear-coupler.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Linear Coupler mate commands -> assembly transaction -> proven plane queries -> exact elimination across axes -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Linear Coupler between one part's slide along X and another's along Y at a ratio of one to two: the exact offset stored where the parts are, a distance moving the first part moving the second by twice as much, a ratio of zero refused as invalid_value, reverse taking the parts' places as its zero, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-linear-motion",
+      "file": "ci/scenarios/mate-linear-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
+      "id": "mate-lock",
+      "file": "ci/scenarios/mate-lock.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Lock mate commands -> assembly transaction -> stored relative placement -> exact difference solve",
+      "supported_limits": "B1: Lock mates storing a relative placement between root part components; a conflicting distance refused naming both mates, save and reopen, a same-component Lock refused and a quarter-turn relative rotation accepted. General relative turns are covered by mate-bounded.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
       "id": "mate-nonparallel-width",
       "file": "ci/scenarios/mate-nonparallel-width.json",
       "acceptance": true,
@@ -668,6 +789,38 @@
       "route": "MCP mate commands -> assembly transaction -> bounded residual certificate -> native support queries -> pinned Catallax kernel",
       "supported_limits": "B5: Centered Width aligns nonparallel face-pair bisectors with residual bounds 1e-9 mm and 1e-9 rad; Free, Dimension and Percent refused without state changes; save and fresh reopen.",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
+    },
+    {
+      "id": "mate-parallel",
+      "file": "ci/scenarios/mate-parallel.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Parallel mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B1: Parallel mates between proven axis-aligned planar faces of the root's own part components, aligned or opposed, default configuration; a strict refusal naming what stays free, a distance edit refused, an alignment edit that conflicts refused and named, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-perpendicular",
+      "file": "ci/scenarios/mate-perpendicular.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Perpendicular mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B1: Perpendicular mates between proven axis-aligned planar faces; a part that does not already hold the right angle takes the nearest quarter turn; an alignment edit refused, a conflicting Parallel refused naming both mates, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
       "id": "mate-point-distance",
@@ -686,6 +839,37 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; bounded mate proofs in command summaries; work/rig.dwasm and its pinned parts"
     },
     {
+      "id": "mate-profile-center",
+      "file": "ci/scenarios/mate-profile-center.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Profile Center mate commands -> assembly transaction -> exact profile centre from native vertices and circles -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Profile Center between two rectangles, the second placed a quarter turn round, centred and fully defined; a rectangle with a circle refused as unsupported_reference by name; Lock rotation on polygons refused as invalid; the offset edited; two shafts' circular caps centred with the spin left, then locked; undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/s1.dwprt, work/s2.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-rack-motion",
+      "file": "ci/scenarios/mate-rack-motion.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
+    },
+    {
       "id": "mate-reference-plane",
       "file": "ci/scenarios/mate-reference-plane.json",
       "acceptance": true,
@@ -702,24 +886,23 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
-      "id": "interference-detection",
-      "file": "ci/scenarios/interference-detection.json",
+      "id": "mate-screw-motion",
+      "file": "ci/scenarios/mate-screw-motion.json",
       "acceptance": true,
       "owners": [
         "soliddraft-app",
         "soliddraft-assembly",
         "soliddraft-model",
-        "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly_check_interference -> assembly interference check -> parts rebuilt at pinned revisions -> certified tessellation with a proven chord bound -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B7 certified-mesh tier: Interference Detection over the whole assembly or named occurrences of part bodies, default configuration; clear, interferes with a witness point inside both parts, or touching or undecided; opposed faces an exact Coincident mate holds on one plane are exactly touching; a single part and an out-of-range chord bound refused; no overlap volumes.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
+      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
+      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
+      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
     },
     {
-      "id": "clearance-verification",
-      "file": "ci/scenarios/clearance-verification.json",
+      "id": "mate-slot",
+      "file": "ci/scenarios/mate-slot.json",
       "acceptance": true,
       "owners": [
         "soliddraft-app",
@@ -729,8 +912,56 @@
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly_check_clearance -> assembly interference check with a clearance -> parts rebuilt at pinned revisions -> certified tessellation with a proven chord bound -> Catallax adapter -> pinned kernel",
-      "supported_limits": "B7 certified-mesh tier: Clearance Verification over part bodies, default configuration; each pair proven to meet the clearance, proven at or under it, or undecided within the meshes' bounds, with proven distance bounds; exact touching from an opposed Coincident mate is at or under any clearance; a negative clearance refused.",
+      "route": "MCP assembly and Slot mate commands -> assembly transaction -> slot recognition from proven walls and round ends -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Slot between a straight, axis-aligned slot cut through a block and a pin's cylinder: a block's top refused as unsupported_reference by name, the pin free and stopped at the far end, Lock rotation, a distance along the slot edited and flipped, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/pin.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-symmetric",
+      "file": "ci/scenarios/mate-symmetric.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Symmetric mate commands -> assembly transaction -> proven plane queries -> exact mirror relation -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B4: Symmetric between two axis-aligned planar faces about a part's Right plane: the image part mirrored exactly, a second Symmetric about the Front plane that asks the image to face the other way refused naming the mates that cannot hold together, the alignment flipped turning the image over, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt, work/c.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-tangent",
+      "file": "ci/scenarios/mate-tangent.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Tangent mate commands -> assembly transaction -> proven plane and axis queries -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B2: Tangent mates from an axis-aligned planar face to a cylinder with a rational radius: the shaft turned flat one radius above the plane, flipped behind it, a planar second end refused as unsupported_reference, undo, redo, save and reopen.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/shaft.dwprt and work/rig.dwasm"
+    },
+    {
+      "id": "mate-width",
+      "file": "ci/scenarios/mate-width.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP assembly and Width mate commands -> assembly transaction -> proven plane query -> Catallax adapter -> pinned kernel",
+      "supported_limits": "B1: Width mates between two parallel groove faces and two parallel tab faces, centred, by percent of the play from either face and by a dimension driven by an assembly value; Free between nonparallel faces refused, a percentage out of range refused, a conflicting distance refused naming both mates, undo, save and reopen.",
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt, work/b.dwprt and work/rig.dwasm"
     },
     {
@@ -772,6 +1003,20 @@
       ]
     },
     {
+      "id": "oblique-cylinder-fillet",
+      "file": "ci/scenarios/oblique-cylinder-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One closed ellipse of a radius-5 cylinder cut by z=8-0.75x, radius 1 edited to 0.5 mm. Volume, mass properties and STEP export supported; mass properties run off the desktop interaction path. Trimmed-band measurement and shared-wall seam conflicts remain refused.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+    },
+    {
       "id": "p3-rounded-boss",
       "file": "ci/scenarios/p3-rounded-boss.json",
       "acceptance": false,
@@ -808,6 +1053,34 @@
       "route": "MCP sketch on an offset datum, revolve about a tilted axis, four-point hole, fillet and edit_fillet -> real document rebuild -> pinned Catallax fitted junction",
       "supported_limits": "The P5 housing under an in-plane rotation and translation, built from ordinary app commands; radii 2 and 2.5 at the mouths; radius 3.5 refuses with shapes.rolling-envelope and keeps the document; a fitted body's box is a display estimate, so only the housing and drilled boxes are checked tight",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png,view.svg}; 28-step edit, undo, redo, fresh-process reopen and refusal scenario; p5-placed-housing.dwprt and commands-1/0001/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout}"
+    },
+    {
+      "id": "parallel-cylinder-fillet",
+      "file": "ci/scenarios/parallel-cylinder-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One straight generator between overlapping through bores, radius 0.5 edited to 0.25 mm.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
+    },
+    {
+      "id": "parallel-plane-fillet",
+      "file": "ci/scenarios/parallel-plane-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "One straight generator of a radius-5 cylinder cut flat at y=3, radius 1 edited to 0.5 mm.",
+      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
     },
     {
       "id": "pattern",
@@ -860,12 +1133,65 @@
       ]
     },
     {
+      "id": "ring-fillet",
+      "file": "ci/scenarios/ring-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "A radius-10 pipe with a radius-4 boss leaving it at a right angle, the closed ring between them rounded at radius 1 edited to 0.75 mm on the 20M allowance; STL exports, and STEP writes one valid solid under the ring's certificate.",
+      "evidence": "Build, radius edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg, the STL and the STEP with its direct validity check."
+    },
+    {
+      "id": "rod-cut-28deg",
+      "file": "ci/scenarios/rod-cut-28deg.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R1 rod, height 10 mm, one-sided Front-plane through cut at 28 degrees through z=5 mm; y<0 is cut and y>0 retains its height-10 cap, matching the supplied native input; volume 7.5*pi, area 16.5*pi + pi/(2*cos(28 deg)) + 10; volume and area tolerance 0.005, box and centroid tolerance 0.001 mm; save, fresh-process reopen and a refused zero-depth edit preserve the body; 20M work per request",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "scene-import",
+      "file": "ci/scenarios/scene-import.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-scene",
+        "soliddraft-assembly",
+        "soliddraft-document"
+      ],
+      "route": "MCP import_scene -> soliddraft-scene readers -> assembly and mesh reference files -> assembly open -> save -> fresh-process open",
+      "supported_limits": "OpenUSD (usd, usda, usdc, usdz) composed under the default prim, glTF 2.0, URDF with OBJ or STL meshes and primitive shapes, OBJ and STL; meshes arrive as mesh reference bodies, never solids; texture maps, skins, animation, collision geometry, USD curves, points and NURBS are left out",
+      "evidence": "result.json, protocol.json and commands/NNNN/command.json with each import record and assembly summary; work/*.dwasm and work/*.parts/ mesh references; work/washer-saved.dwasm"
+    },
+    {
       "id": "sketch-circular-pattern",
       "file": "ci/scenarios/sketch-circular-pattern.json",
       "acceptance": false,
       "owners": [
         "soliddraft-app",
         "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
+      "id": "sketch-control-spline",
+      "file": "ci/scenarios/sketch-control-spline.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-sketch",
         "soliddraft-kernel-catallax"
       ]
     },
@@ -887,6 +1213,17 @@
       "owners": [
         "soliddraft-app",
         "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
+      "id": "sketch-fit-spline",
+      "file": "ci/scenarios/sketch-fit-spline.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-sketch",
         "soliddraft-kernel-catallax"
       ]
     },
@@ -1034,8 +1371,8 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; tracked skew blend and corner references through edit, undo, redo, reopen and refusal; commands/0004/{part.step,step-oracle.json} for radius 1; skew-corner.dwprt and commands-1/NNNN/{part.step,step-report.json,raw-step.stdout,step-oracle.json,step-oracle.stdout} at the refused edit; material_queries.rs and fillet_corner_names.rs for the exact points and the stored corner reference"
     },
     {
-      "id": "configurations",
-      "file": "ci/scenarios/configurations.json",
+      "id": "sphere-revolve",
+      "file": "ci/scenarios/sphere-revolve.json",
       "acceptance": true,
       "owners": [
         "soliddraft-app",
@@ -1043,13 +1380,13 @@
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "One part with named-value overrides only; widths 120, 140 and 152.4 mm; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; rows Default, Narrow, Wide, Zero and Void; Zero rejects zero depth, Void rejects the empty cut with flange_d 5 mm and hole_d 200 mm, then repairs with hole_d 12 mm",
-      "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json,viewport.png,view.svg}; narrow.dwprt; wide.dwprt; commands/0024 and commands/0028/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
+      "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
     },
     {
-      "id": "configuration-grid-csv",
-      "file": "ci/scenarios/configuration-grid-csv.json",
+      "id": "straight-sweep",
+      "file": "ci/scenarios/straight-sweep.json",
       "acceptance": true,
       "owners": [
         "soliddraft-app",
@@ -1057,38 +1394,9 @@
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP configuration grid tools -> CSV codec -> document transaction -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Text properties and named values of one part with rows Default, Narrow and a quoted row; the complete row set must be present; no row rename or deletion; volume and area tolerance 0.005, centroid tolerance 1e-6 mm, mesh bounds tolerance 0.001 mm; app work cap 20M",
-      "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; csv-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
-    },
-    {
-      "id": "configuration-grid-xlsx",
-      "file": "ci/scenarios/configuration-grid-xlsx.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP configuration grid tools -> OOXML codec -> document transaction -> Catallax adapter -> pinned kernel",
-      "supported_limits": "One Configurations sheet of string and numeric cells mapped by header name; formula cells are refused; other limits as configuration-grid-csv",
-      "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,viewport.png,helper-*.stdout}; fixtures/; out/{g0,g1,unicode}.*; xlsx-130.dwprt; commands-2/0001/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
-    },
-    {
-      "id": "configuration-title",
-      "file": "ci/scenarios/configuration-title.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-drawing",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP grid and drawing tools -> document transaction -> drawing source snapshot -> SVG writer; Catallax adapter -> pinned kernel",
-      "supported_limits": "One title field bound to a text property of the part the drawing pins; automatic update off; no component configuration selector; app work cap 20M",
-      "evidence": "result.json, protocol.json, commands/NNNN and commands-N/NNNN/{command.json,kernel.json,helper-*.stdout}; out/{family,revised}.svg; title-wide.dwprt; title-wide.dwdrw; commands-1/0003/{part.step,step-report.json,check-step.stdout,check-step.stderr}"
+      "route": "MCP sweep and edit_sweep -> document rebuild -> native path and sweep -> viewport and checked STEP export",
+      "supported_limits": "Closed polygon profile on an offset plane; one nonzero straight segment with displacement [2,1,3], edited to [2,1,6]; authored profile placement, picking names, undo/redo, invalid edit preservation, save and fresh-process reopen; loft and curved profiles remain unavailable; post-0.2.0 batch",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent planar-solid volume and point oracle"
     },
     {
       "id": "subassembly-form",
@@ -1106,47 +1414,6 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,inspect-*.stdout}; work/parts/base.dwprt, work/parts/pin.dwprt, work/root.dwasm and work/modules/pack.dwasm"
     },
     {
-      "id": "iges-export",
-      "file": "ci/scenarios/iges-export.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-exchange",
-        "soliddraft-kernel-catallax"
-      ],
-      "route": "MCP bracket construction and IGES export -> save/reopen -> CLI IGES -> direct OpenCASCADE reader",
-      "supported_limits": "Catallax exact IGES coverage only; bracket planes and cylinders; unsupported definitions and over-tolerance files refused; millimetres only",
-      "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
-    },
-    {
-      "id": "rod-cut-28deg",
-      "file": "ci/scenarios/rod-cut-28deg.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
-      "supported_limits": "R1 rod, height 10 mm, one-sided Front-plane through cut at 28 degrees through z=5 mm; y<0 is cut and y>0 retains its height-10 cap, matching the supplied native input; volume 7.5*pi, area 16.5*pi + pi/(2*cos(28 deg)) + 10; volume and area tolerance 0.005, box and centroid tolerance 0.001 mm; save, fresh-process reopen and a refused zero-depth edit preserve the body; 20M work per request",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
-    },
-    {
-      "id": "sphere-revolve",
-      "file": "ci/scenarios/sphere-revolve.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
-      "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
-    },
-    {
       "id": "torus-revolve",
       "file": "ci/scenarios/torus-revolve.json",
       "acceptance": true,
@@ -1159,251 +1426,6 @@
       "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
       "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
-    },
-    {
-      "id": "edit-display-reuse",
-      "file": "ci/scenarios/edit-display-reuse.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-cli",
-        "soliddraft-model",
-        "soliddraft-kernel-api",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP edits -> document rebuild and immutable display meshes -> retained offscreen viewport -> development rebuild report",
-      "supported_limits": "One part at a time; rounded boss dimension and fillet edits, rename, undo/redo, suppress/restore and fresh reopen; unchanged meshes keep their GPU buffers.",
-      "evidence": "commands/NNNN and commands-1/NNNN/{command.json,display.json,kernel.json,viewport.png,view.svg}; rounded.dwprt; foreground mesh requests and GPU body placements checked separately from background display refinement"
-    },
-    {
-      "id": "bored-tray-shell",
-      "file": "ci/scenarios/bored-tray-shell.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Convex 40 x 30 x 12 mm tray with a diameter-6 through bore, top open, wall 2 edited to 1.5 mm.",
-      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
-    },
-    {
-      "id": "all-faces-shell",
-      "file": "ci/scenarios/all-faces-shell.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "A 40 x 30 x 12 mm block with a through bore and a chamfer, every face opened; the part has no body afterwards, and an export of it is refused.",
-      "evidence": "Build, wall edit, upstream edit, undo, redo, save, fresh-process reopen and refused exports; result.json, command.json and the saved part."
-    },
-    {
-      "id": "ring-fillet",
-      "file": "ci/scenarios/ring-fillet.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "A radius-10 pipe with a radius-4 boss leaving it at a right angle, the closed ring between them rounded at radius 1 edited to 0.75 mm on the 20M allowance; STL exports, and STEP writes one valid solid under the ring's certificate.",
-      "evidence": "Build, radius edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg, the STL and the STEP with its direct validity check."
-    },
-    {
-      "id": "oblique-cylinder-fillet",
-      "file": "ci/scenarios/oblique-cylinder-fillet.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "One closed ellipse of a radius-5 cylinder cut by z=8-0.75x, radius 1 edited to 0.5 mm. Volume, mass properties and STEP export supported; mass properties run off the desktop interaction path. Trimmed-band measurement and shared-wall seam conflicts remain refused.",
-      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
-    },
-    {
-      "id": "parallel-cylinder-fillet",
-      "file": "ci/scenarios/parallel-cylinder-fillet.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "One straight generator between overlapping through bores, radius 0.5 edited to 0.25 mm.",
-      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
-    },
-    {
-      "id": "parallel-plane-fillet",
-      "file": "ci/scenarios/parallel-plane-fillet.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "One straight generator of a radius-5 cylinder cut flat at y=3, radius 1 edited to 0.5 mm.",
-      "evidence": "Build, edit, undo, redo, save, fresh-process reopen and exports; result.json, command.json, viewport.png, view.svg and exported files."
-    },
-    {
-      "id": "straight-sweep",
-      "file": "ci/scenarios/straight-sweep.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP sweep and edit_sweep -> document rebuild -> native path and sweep -> viewport and checked STEP export",
-      "supported_limits": "Closed polygon profile on an offset plane; one nonzero straight segment with displacement [2,1,3], edited to [2,1,6]; authored profile placement, picking names, undo/redo, invalid edit preservation, save and fresh-process reopen; loft and curved profiles remain unavailable; post-0.2.0 batch",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent planar-solid volume and point oracle"
-    },
-    {
-      "id": "line-arc-sweep",
-      "file": "ci/scenarios/line-arc-sweep.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP sweep and edit_sweep with segments -> document rebuild -> native path and sweep with exact arc ends -> viewport and checked STEP export",
-      "supported_limits": "Closed polygon profile beside the path; line, quarter arc, line chain with the profile turning along it, edited run length; refused oblique join, zero-length line and reversal without a turn axis leave the part unchanged; face measured by name, undo/redo, save and fresh-process reopen; other path motions and loft remain unavailable",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part; checked STEP and independent volume and point oracle over planes and cylinders"
-    },
-    {
-      "id": "scene-import",
-      "file": "ci/scenarios/scene-import.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-scene",
-        "soliddraft-assembly",
-        "soliddraft-document"
-      ],
-      "route": "MCP import_scene -> soliddraft-scene readers -> assembly and mesh reference files -> assembly open -> save -> fresh-process open",
-      "supported_limits": "OpenUSD (usd, usda, usdc, usdz) composed under the default prim, glTF 2.0, URDF with OBJ or STL meshes and primitive shapes, OBJ and STL; meshes arrive as mesh reference bodies, never solids; texture maps, skins, animation, collision geometry, USD curves, points and NURBS are left out",
-      "evidence": "result.json, protocol.json and commands/NNNN/command.json with each import record and assembly summary; work/*.dwasm and work/*.parts/ mesh references; work/washer-saved.dwasm"
-    },
-    {
-      "id": "hole-alignment",
-      "file": "ci/scenarios/hole-alignment.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly_check_hole_alignment -> pinned native cylinder supports -> exact rational placed axes",
-      "supported_limits": "Internal cylindrical axes exactly on world axes; coaxial or parallel offset within a maximum deviation; selected components, negative deviation and single-part refusals; no diameter or fit test.",
-      "evidence": "result.json, protocol.json and command evidence; work/a.dwprt and work/rig.dwasm; unchanged accepted state and fresh-process reopen."
-    },
-    {
-      "id": "mate-drag",
-      "file": "ci/scenarios/mate-drag.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
-      "supported_limits": "B6: drag previews and cancel, distance stops, one-step commit, undo/redo and save/reopen; no collision checks.",
-      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
-    },
-    {
-      "id": "mate-drag-hinge",
-      "file": "ci/scenarios/mate-drag-hinge.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP assembly_drag -> assembly preview -> existing exact or bounded solver -> one-step commit",
-      "supported_limits": "B6: bounded Hinge stops in both directions during rotation, undo/redo and save/reopen; no collision checks.",
-      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
-    },
-    {
-      "id": "mate-gear-motion",
-      "file": "ci/scenarios/mate-gear-motion.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
-      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
-      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
-    },
-    {
-      "id": "mate-rack-motion",
-      "file": "ci/scenarios/mate-rack-motion.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
-      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
-      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
-    },
-    {
-      "id": "mate-screw-motion",
-      "file": "ci/scenarios/mate-screw-motion.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
-      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
-      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
-    },
-    {
-      "id": "mate-linear-motion",
-      "file": "ci/scenarios/mate-linear-motion.json",
-      "acceptance": true,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-assembly",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ],
-      "catallax_revision": "473c9383d8e827a9fce6efd713e463697024224c",
-      "route": "MCP mechanical mate and drag commands -> assembly transaction -> exact or bounded residual checks",
-      "supported_limits": "B6: coupled motion, undo/redo and save/reopen; root joint references and continuous turn tracking; no contact or dynamics.",
-      "evidence": "result.json, protocol.json, command summaries, work/rig.dwasm and pinned parts"
     }
   ]
 }

@@ -57,12 +57,33 @@ pub enum Relation {
     },
 }
 
+/// Whether these entity types have a tangent relation. Spline tangency needs
+/// joined endpoints, so its derivative is evaluated at a specified contact.
+pub fn tangent_supported(sketch: &Sketch, a: EntityId, b: EntityId) -> bool {
+    let (Some(a), Some(b)) = (sketch.entity(a), sketch.entity(b)) else {
+        return false;
+    };
+    if a.id == b.id {
+        return false;
+    }
+    let spline = |entity: &Entity| matches!(entity.kind, EntityKind::Spline { .. });
+    let circular = |entity: &Entity| entity.is_curve();
+    if spline(a) || spline(b) {
+        let endpoint_curve = |entity: &Entity| {
+            matches!(entity.kind, EntityKind::Spline { .. } | EntityKind::Line { .. } | EntityKind::Arc { .. })
+        };
+        endpoint_curve(a) && endpoint_curve(b) && crate::solve::shared_point(sketch, a.id, b.id).is_some()
+    } else {
+        (a.is_line() && circular(b)) || (circular(a) && b.is_line()) || (circular(a) && circular(b))
+    }
+}
+
 impl Sketch {
     /// Validate a selection and produce its relations without changing the sketch.
     pub fn relation_constraints(&self, relation: &Relation) -> Result<Vec<ConstraintKind>, ToolError> {
         let entity = |id| -> Result<&Entity, ToolError> {
             self.entity(id)
-                .filter(|e| tools::valid(e.kind))
+                .filter(|e| tools::valid(&e.kind))
                 .ok_or_else(|| ToolError("Select valid existing geometry".into()))
         };
         let line = |id| -> Result<(P2, P2), ToolError> {
@@ -99,7 +120,7 @@ impl Sketch {
             }
             Relation::Coradial { a, b } => {
                 distinct(a, b)?;
-                if tools::circle(entity(a)?.kind).is_none() || tools::circle(entity(b)?.kind).is_none() {
+                if tools::circle(&entity(a)?.kind).is_none() || tools::circle(&entity(b)?.kind).is_none() {
                     return Err(ToolError("Select two arcs or circles".into()));
                 }
                 vec![ConstraintKind::Concentric { a, b }, ConstraintKind::Equal { a, b }]
@@ -126,7 +147,24 @@ impl Sketch {
                 }
                 let direction = (end - start).normalized();
                 let reflect = |p: P2| start + direction.scale(2.0 * (p - start).dot(direction)) - (p - start);
-                let pairs: Vec<(u8, u8)> = match first.kind {
+                let pairs: Vec<(usize, usize)> = match first.kind {
+                    EntityKind::Spline { mode, ref points } => {
+                        let EntityKind::Spline { mode: other_mode, points: ref other_points } = second.kind else {
+                            unreachable!()
+                        };
+                        if mode != other_mode || points.len() != other_points.len() {
+                            return Err(ToolError("Select splines with the same mode and point count".into()));
+                        }
+                        let direct = points.iter().zip(other_points).map(|(a, b)| reflect(*a).dist(*b)).sum::<f64>();
+                        let reversed = points
+                            .iter()
+                            .zip(other_points.iter().rev())
+                            .map(|(a, b)| reflect(*a).dist(*b))
+                            .sum::<f64>();
+                        (0..points.len())
+                            .map(|i| (i, if direct <= reversed { i } else { points.len() - 1 - i }))
+                            .collect()
+                    }
                     EntityKind::Point { .. } | EntityKind::Circle { .. } => vec![(0, 0)],
                     EntityKind::Arc { .. } => vec![(0, 0), (1, 2), (2, 1)],
                     EntityKind::Ellipse { .. } => vec![(0, 0), (1, 1), (2, 2)],
@@ -159,10 +197,10 @@ impl Sketch {
                     self.constraints
                         .iter()
                         .find_map(|c| match c.kind {
-                            ConstraintKind::FixEntity { entity, .. } if entity == id => Some(c.kind),
+                            ConstraintKind::FixEntity { entity, .. } if entity == id => Some(c.kind.clone()),
                             _ => None,
                         })
-                        .unwrap_or(ConstraintKind::FixEntity { entity: id, at: e.kind }),
+                        .unwrap_or(ConstraintKind::FixEntity { entity: id, at: e.kind.clone() }),
                 ]
             }
         })

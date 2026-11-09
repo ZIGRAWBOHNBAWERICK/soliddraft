@@ -21,12 +21,12 @@ fn fixed(vars: &mut Vars, reqs: &mut Vec<Constraint>, at: P2) -> DatumPoint {
 pub(super) fn requirements(
     vars: &mut Vars,
     axes: &mut Axes,
-    source: Entity,
-    target: Entity,
-    transform: ConstraintKind,
+    source: &Entity,
+    target: &Entity,
+    transform: &ConstraintKind,
 ) -> Vec<Constraint> {
     let mut reqs = Vec::new();
-    let ConstraintKind::PatternTransform { group, translation, center, angle_degrees: angle, .. } = transform else {
+    let &ConstraintKind::PatternTransform { group, translation, center, angle_degrees: angle, .. } = transform else {
         return reqs;
     };
     if source.point_count() != target.point_count() {

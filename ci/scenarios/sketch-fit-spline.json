@@ -1,0 +1,66 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-fit-spline",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "spline",
+              "mode": "fit",
+              "points": [
+                {
+                  "u": 0,
+                  "v": 0
+                },
+                {
+                  "u": 2,
+                  "v": 3
+                },
+                {
+                  "u": 4,
+                  "v": 0
+                }
+              ]
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 4,
+                "v": 0
+              },
+              "b": {
+                "u": 0,
+                "v": 0
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 2,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 15,
+          "tolerance": 1e-05
+        }
+      ]
+    }
+  ]
+}

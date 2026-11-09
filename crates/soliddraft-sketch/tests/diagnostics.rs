@@ -173,7 +173,7 @@ fn relation_reference_checks_follow_the_solver_target_families() {
     ];
     for kind in invalid {
         let mut s = base.clone();
-        let id = s.constrain(kind);
+        let id = s.constrain(kind.clone());
         assert!(inspect(&s).iter().any(|i| i.relation == Some(id)), "{kind:?}");
     }
     let valid = [
@@ -194,7 +194,7 @@ fn relation_reference_checks_follow_the_solver_target_families() {
     ];
     for kind in valid {
         let mut s = base.clone();
-        s.constrain(kind);
+        s.constrain(kind.clone());
         assert!(!inspect(&s).iter().any(|i| i.kind == DiagnosticKind::InvalidRelation), "{kind:?}");
     }
 }

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::{Loop, Plane, Point2, Profile, Segment};
 
 pub mod diagnostics;
+mod spline;
 use diagnostics::{Diagnostic, DiagnosticKind};
 
 /// Two ends closer than this join even when no coincident constraint joins them.
@@ -94,6 +95,7 @@ impl Region {
 /// `u dv - v du`. Summed over a closed loop it gives the signed enclosed area.
 fn segment_area(s: &Segment) -> f64 {
     match *s {
+        Segment::Bezier { from, controls, to } => spline::span(from, controls, to).signed_area(),
         Segment::Line { from, to } => 0.5 * (from.u * to.v - to.u * from.v),
         Segment::Arc { center: c, from, to, clockwise } => {
             let r2 = (from.u - c.u).powi(2) + (from.v - c.v).powi(2);
@@ -124,6 +126,10 @@ fn sample(segments: &[Segment]) -> Vec<P2> {
     let mut out = Vec::new();
     for s in segments {
         match *s {
+            Segment::Bezier { from, controls, to } => {
+                let span = spline::span(from, controls, to);
+                out.extend((0..32).map(|i| span.at(i as f64 / 32.0)));
+            }
             Segment::Ellipse { center, axis, ratio } | Segment::EllipticArc { center, axis, ratio, .. } => {
                 let ends = if let Segment::EllipticArc { from, to, clockwise, .. } = *s {
                     Some((from, to, clockwise))
@@ -162,6 +168,11 @@ fn contains(segments: &[Segment], p: P2) -> bool {
     let mut inside = false;
     for segment in segments {
         match *segment {
+            Segment::Bezier { from, controls, to } => {
+                if spline::span(from, controls, to).crossings(p) % 2 == 1 {
+                    inside = !inside;
+                }
+            }
             Segment::Ellipse { center, axis, ratio } | Segment::EllipticArc { center, axis, ratio, .. } => {
                 let ends = if let Segment::EllipticArc { from, to, clockwise, .. } = *segment {
                     Some((from, to, clockwise))
@@ -225,6 +236,9 @@ fn p2(p: Point2) -> P2 {
 /// The two ends of a line or arc as point refs.
 fn ends(e: &Entity) -> Option<(PointRef, PointRef)> {
     match e.kind {
+        EntityKind::Spline { ref points, .. } if points.len() >= 2 => {
+            Some((PointRef::new(e.id, 0), PointRef::new(e.id, points.len() - 1)))
+        }
         EntityKind::Line { .. } => Some((PointRef::new(e.id, 0), PointRef::new(e.id, 1))),
         EntityKind::Arc { .. } => Some((PointRef::new(e.id, 1), PointRef::new(e.id, 2))),
         EntityKind::EllipticArc { .. } => Some((PointRef::new(e.id, 3), PointRef::new(e.id, 4))),
@@ -256,12 +270,17 @@ struct Edge {
     /// Centre of an arc, `None` for a line.
     center: Option<P2>,
     ellipse: Option<Ellipse>,
+    spline: Option<Vec<Segment>>,
     /// Node of the start and of the end point.
     ends: [usize; 2],
 }
 
 /// A closed loop before it becomes segments.
 enum Chain {
+    Spline {
+        entity: EntityId,
+        segments: Vec<Segment>,
+    },
     Ellipse {
         entity: EntityId,
         geometry: Ellipse,
@@ -294,6 +313,9 @@ fn bisector_center(c: P2, from: P2, to: P2) -> P2 {
 
 fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
     match *chain {
+        Chain::Spline { entity, ref segments } => {
+            RegionLoop { segments: segments.clone(), entities: vec![entity; segments.len()] }
+        }
         Chain::Ellipse { entity, geometry } => RegionLoop {
             segments: vec![Segment::Ellipse {
                 center: pt(geometry.center),
@@ -306,35 +328,38 @@ fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
             RegionLoop { segments: vec![Segment::Circle { center: pt(center), radius }], entities: vec![entity] }
         }
         Chain::Edges(ref walk) => {
-            let mut segs = Vec::with_capacity(walk.len());
+            let mut result = RegionLoop { segments: Vec::new(), entities: Vec::new() };
             for &(e, forward) in walk {
                 let edge = &edges[e];
                 let (a, b) = (nodes[edge.ends[0]], nodes[edge.ends[1]]);
                 let (from, to) = if forward { (a, b) } else { (b, a) };
-                if let Some(geometry) = edge.ellipse {
-                    segs.push(Segment::EllipticArc {
+                if edge.spline.is_some() {
+                    spline::append(&mut result, edge, forward, from, to);
+                    continue;
+                }
+                let segment = if let Some(geometry) = edge.ellipse {
+                    Segment::EllipticArc {
                         center: pt(geometry.center),
                         axis: pt(geometry.axis()),
                         ratio: geometry.ratio(),
                         from: pt(from),
                         to: pt(to),
                         clockwise: !forward,
-                    });
-                    continue;
-                }
-                segs.push(match edge.center {
-                    None => Segment::Line { from: pt(from), to: pt(to) },
-                    // A sketch arc runs counter-clockwise from start to end, so walking it
-                    // backwards runs clockwise.
-                    Some(c) => Segment::Arc {
-                        center: pt(bisector_center(c, from, to)),
+                    }
+                } else if let Some(center) = edge.center {
+                    Segment::Arc {
+                        center: pt(bisector_center(center, from, to)),
                         from: pt(from),
                         to: pt(to),
                         clockwise: !forward,
-                    },
-                });
+                    }
+                } else {
+                    Segment::Line { from: pt(from), to: pt(to) }
+                };
+                result.segments.push(segment);
+                result.entities.push(edge.entity);
             }
-            RegionLoop { segments: segs, entities: walk.iter().map(|&(e, _)| edges[e].entity).collect() }
+            result
         }
     }
 }
@@ -356,13 +381,29 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
     // Ends of usable lines and arcs; degenerate ones are reported and left out.
     let mut curves: Vec<(&Entity, PointRef, PointRef)> = Vec::new();
     for e in &drawn {
-        if diagnose && !e.is_point() && !crate::tools::valid(e.kind) {
+        if diagnose && !e.is_point() && !crate::tools::valid(&e.kind) {
             issues.push(Diagnostic::new(DiagnosticKind::Degenerate, vec![e.id], e.points()));
             continue;
         }
         match e.kind {
+            EntityKind::Spline { ref points, .. } => {
+                let Some(mut segments) = spline::segments(e) else {
+                    first_error.get_or_insert(ProfileError::Degenerate(name(e)));
+                    continue;
+                };
+                if points.first().unwrap().dist(*points.last().unwrap()) <= JOIN_TOLERANCE {
+                    let first = segments[0].start();
+                    match segments.last_mut().unwrap() {
+                        Segment::Bezier { to, .. } | Segment::Line { to, .. } => *to = first,
+                        _ => unreachable!("spline segments"),
+                    }
+                    chains.push(Chain::Spline { entity: e.id, segments });
+                } else if let Some((a, b)) = ends(e) {
+                    curves.push((e, a, b));
+                }
+            }
             EntityKind::Ellipse { .. } => {
-                let geometry = Ellipse::of(e.kind).unwrap();
+                let geometry = Ellipse::of(&e.kind).unwrap();
                 if geometry.valid() {
                     chains.push(Chain::Ellipse { entity: e.id, geometry });
                 } else {
@@ -402,7 +443,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
             refs.extend([a, b]);
         }
     }
-    let mut index: BTreeMap<(EntityId, u8), usize> = BTreeMap::new();
+    let mut index: BTreeMap<(EntityId, usize), usize> = BTreeMap::new();
     for (i, r) in refs.iter().enumerate() {
         index.entry((r.entity, r.index)).or_insert(i);
     }
@@ -450,7 +491,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
         };
         incident[ends[0]].push(edges.len());
         incident[ends[1]].push(edges.len());
-        edges.push(Edge { entity: e.id, center, ellipse: Ellipse::of(e.kind), ends });
+        edges.push(Edge { entity: e.id, center, ellipse: Ellipse::of(&e.kind), spline: spline::segments(e), ends });
     }
 
     if diagnose {
@@ -528,7 +569,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
             out.first_error.get_or_insert(ProfileError::Degenerate(first));
             continue;
         }
-        out.reversible.push(matches!(chain, Chain::Edges(_)));
+        out.reversible.push(matches!(chain, Chain::Edges(_) | Chain::Spline { .. }));
         out.loops.push(lp);
     }
     out
@@ -543,6 +584,7 @@ fn oriented(lp: &RegionLoop, reversible: bool, ccw: bool) -> RegionLoop {
         lp.entities.reverse();
         for s in &mut lp.segments {
             *s = match *s {
+                Segment::Bezier { from, controls, to } => spline::reverse(from, controls, to),
                 Segment::Line { from, to } => Segment::Line { from: to, to: from },
                 Segment::Arc { center, from, to, clockwise } => {
                     Segment::Arc { center, from: to, to: from, clockwise: !clockwise }

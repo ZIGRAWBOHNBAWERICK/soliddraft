@@ -4,10 +4,38 @@ use serde::{Deserialize, Serialize};
 
 use crate::geometry::{Plane, Point2};
 
+/// Interior control points of a polynomial profile span.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BezierControls {
+    /// One interior control defines a quadratic span.
+    Quadratic([Point2; 1]),
+    /// Two ordered interior controls define a cubic span.
+    Cubic([Point2; 2]),
+}
+impl BezierControls {
+    /// Controls in traversal order.
+    pub fn as_slice(&self) -> &[Point2] {
+        match self {
+            Self::Quadratic(points) => points,
+            Self::Cubic(points) => points,
+        }
+    }
+}
+
 /// One piece of a profile loop, in the coordinates of the profile's plane.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Segment {
+    /// A quadratic or cubic polynomial span, retaining its authored controls.
+    Bezier {
+        /// Start point.
+        from: Point2,
+        /// Interior controls in traversal order.
+        controls: BezierControls,
+        /// End point.
+        to: Point2,
+    },
     /// A straight segment.
     Line {
         /// Start point.
@@ -68,7 +96,10 @@ impl Segment {
     /// Start point of the segment (for a circle, the point at angle zero).
     pub fn start(&self) -> Point2 {
         match *self {
-            Segment::Line { from, .. } | Segment::Arc { from, .. } | Segment::EllipticArc { from, .. } => from,
+            Segment::Bezier { from, .. }
+            | Segment::Line { from, .. }
+            | Segment::Arc { from, .. }
+            | Segment::EllipticArc { from, .. } => from,
             Segment::Circle { center, radius } => Point2::new(center.u + radius, center.v),
             Segment::Ellipse { center, axis, .. } => Point2::new(center.u + axis.u, center.v + axis.v),
         }
@@ -77,7 +108,10 @@ impl Segment {
     /// End point of the segment (for a circle, the same as the start).
     pub fn end(&self) -> Point2 {
         match *self {
-            Segment::Line { to, .. } | Segment::Arc { to, .. } | Segment::EllipticArc { to, .. } => to,
+            Segment::Bezier { to, .. }
+            | Segment::Line { to, .. }
+            | Segment::Arc { to, .. }
+            | Segment::EllipticArc { to, .. } => to,
             Segment::Circle { .. } | Segment::Ellipse { .. } => self.start(),
         }
     }
@@ -200,6 +234,12 @@ fn finite(p: Point2) -> bool {
 
 fn segment_is_degenerate(s: &Segment) -> bool {
     match *s {
+        Segment::Bezier { from, controls, to } => {
+            !finite(from)
+                || !finite(to)
+                || controls.as_slice().iter().any(|p| !finite(*p))
+                || dist(from, to) <= PROFILE_JOIN_TOLERANCE
+        }
         Segment::Line { from, to } => !finite(from) || !finite(to) || dist(from, to) <= PROFILE_JOIN_TOLERANCE,
         Segment::Arc { center, from, to, .. } => {
             let (r0, r1) = (dist(center, from), dist(center, to));

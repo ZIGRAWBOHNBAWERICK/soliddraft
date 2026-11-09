@@ -60,7 +60,7 @@ pub(super) fn click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, actions: &mu
     let mut picks = s.pending.clone();
     picks.push((p, snaps));
     for (index, (_, snaps)) in picks.iter().enumerate() {
-        let point = PointRef::new(id, index as u8);
+        let point = PointRef::new(id, index);
         apply_snaps(&mut s.sketch, point, snaps, None);
         if index == 1 {
             let target = Align::Points(PointRef::new(id, 0), point);
@@ -78,8 +78,8 @@ pub(super) fn click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, actions: &mu
         }
     }
     solve::solve(&mut s.sketch, None, true);
-    let kind = s.sketch.entity(id).unwrap().kind;
-    let valid = Ellipse::of(kind).is_some_and(Ellipse::valid)
+    let kind = s.sketch.entity(id).unwrap().kind.clone();
+    let valid = Ellipse::of(&kind).is_some_and(Ellipse::valid)
         && !matches!(kind, EntityKind::EllipticArc { start, end, .. } if start.dist(end) <= 1e-6);
     if !valid || matches!(s.sketch.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }) {
         s.sketch = before;

@@ -384,12 +384,13 @@ fn entity(kind: EntityKind) -> Entity {
     Entity { id: 0, kind, construction: false }
 }
 
-pub(crate) fn valid(kind: EntityKind) -> bool {
-    match kind {
-        kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+pub(crate) fn valid(kind: &EntityKind) -> bool {
+    match *kind {
+        EntityKind::Spline { mode, ref points } => crate::spline::spans(mode, points).is_some(),
+        ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
             let ellipse = crate::ellipse::Ellipse::of(kind).unwrap();
             ellipse.valid()
-                && if let EntityKind::EllipticArc { start, end, .. } = kind {
+                && if let EntityKind::EllipticArc { start, end, .. } = *kind {
                     finite(start)
                         && finite(end)
                         && start.dist(end) > EPS
@@ -427,8 +428,8 @@ fn rotation_sin_cos(degrees: f64) -> (f64, f64) {
     }
 }
 
-pub(crate) fn ends(kind: EntityKind) -> Option<[P2; 2]> {
-    match kind {
+pub(crate) fn ends(kind: &EntityKind) -> Option<[P2; 2]> {
+    match *kind {
         EntityKind::Line { a, b } => Some([a, b]),
         EntityKind::Arc { start, end, .. } => Some([start, end]),
         _ => None,
@@ -437,6 +438,7 @@ pub(crate) fn ends(kind: EntityKind) -> Option<[P2; 2]> {
 
 fn copy_endpoints(entity: &Entity) -> Option<[(PointRef, P2); 2]> {
     let indices = match entity.kind {
+        EntityKind::Spline { ref points, .. } if points.len() >= 2 => [0, points.len() - 1],
         EntityKind::Line { .. } => [0, 1],
         EntityKind::Arc { .. } => [1, 2],
         EntityKind::EllipticArc { .. } => [3, 4],
@@ -465,14 +467,14 @@ fn set_end(kind: &mut EntityKind, end: End, p: P2) {
     }
 }
 
-fn parameter(kind: EntityKind, p: P2) -> Option<f64> {
-    match kind {
+fn parameter(kind: &EntityKind, p: P2) -> Option<f64> {
+    match *kind {
         EntityKind::Line { a, b } => {
             let d = b - a;
             Some((p - a).dot(d) / d.dot(d))
         }
         EntityKind::Arc { center, start, .. } => {
-            let (_, sweep) = entity(kind).arc_angles()?;
+            let (_, sweep) = entity(kind.clone()).arc_angles()?;
             let a = ((p - center).angle() - (start - center).angle()).rem_euclid(TAU);
             Some(if a > TAU - EPS / center.dist(start) { 0.0 } else { a / sweep })
         }
@@ -480,12 +482,12 @@ fn parameter(kind: EntityKind, p: P2) -> Option<f64> {
     }
 }
 
-pub(crate) fn on_curve(kind: EntityKind, p: P2) -> bool {
-    entity(kind).nearest(p).1 <= EPS
+pub(crate) fn on_curve(kind: &EntityKind, p: P2) -> bool {
+    entity(kind.clone()).nearest(p).1 <= EPS
 }
 
-pub(crate) fn circle(kind: EntityKind) -> Option<(P2, f64)> {
-    match kind {
+pub(crate) fn circle(kind: &EntityKind) -> Option<(P2, f64)> {
+    match *kind {
         EntityKind::Arc { center, start, .. } => Some((center, center.dist(start))),
         EntityKind::Circle { center, radius } => Some((center, radius)),
         _ => None,
@@ -493,8 +495,9 @@ pub(crate) fn circle(kind: EntityKind) -> Option<(P2, f64)> {
 }
 
 /// Intersections of the infinite supporting lines/circles, never tessellated curves.
-pub(crate) fn intersections(a: EntityKind, b: EntityKind) -> Vec<P2> {
+pub(crate) fn intersections(a: &EntityKind, b: &EntityKind) -> Vec<P2> {
     if let (EntityKind::Line { a: p, b: q }, EntityKind::Line { a: r, b: s }) = (a, b) {
+        let (p, q, r, s) = (*p, *q, *r, *s);
         let (d, e) = (q - p, s - r);
         let den = d.cross(e);
         if den.abs() <= 1e-12 * d.len() * e.len() {
@@ -502,7 +505,7 @@ pub(crate) fn intersections(a: EntityKind, b: EntityKind) -> Vec<P2> {
         }
         return vec![p + d.scale((r - p).cross(e) / den)];
     }
-    if let EntityKind::Line { a: p, b: q } = a {
+    if let EntityKind::Line { a: p, b: q } = *a {
         let Some((c, r)) = circle(b) else { return Vec::new() };
         let d = (q - p).normalized();
         let t = (c - p).dot(d);
@@ -534,7 +537,7 @@ pub(crate) fn intersections(a: EntityKind, b: EntityKind) -> Vec<P2> {
     }
 }
 
-fn point_at(kind: EntityKind, t: f64) -> P2 {
+fn point_at(kind: &EntityKind, t: f64) -> P2 {
     let [a, b] = ends(kind).expect("line or arc");
     if t == 0.0 {
         return a;
@@ -542,10 +545,10 @@ fn point_at(kind: EntityKind, t: f64) -> P2 {
     if t == 1.0 {
         return b;
     }
-    match kind {
+    match *kind {
         EntityKind::Line { .. } => a.lerp(b, t),
         EntityKind::Arc { center, start, .. } => {
-            let (angle, sweep) = entity(kind).arc_angles().expect("arc");
+            let (angle, sweep) = entity(kind.clone()).arc_angles().expect("arc");
             center + P2::from_angle(angle + sweep * t).scale(center.dist(start))
         }
         _ => unreachable!(),
@@ -555,16 +558,16 @@ fn point_at(kind: EntityKind, t: f64) -> P2 {
 /// The nearest point where `target`, lengthened beyond `end`, meets the bounded `limit`,
 /// with how far the end travels to reach it. A line or arc target only.
 fn extension(target: &Entity, end: End, limit: &Entity) -> Option<(f64, P2)> {
-    let [a, b] = ends(target.kind)?;
-    let mut candidates: Vec<_> = intersections(target.kind, limit.kind)
+    let [a, b] = ends(&target.kind)?;
+    let mut candidates: Vec<_> = intersections(&target.kind, &limit.kind)
         .into_iter()
         .filter_map(|p| {
-            if !on_curve(limit.kind, p) {
+            if !on_curve(&limit.kind, p) {
                 return None;
             }
             let distance = match target.kind {
                 EntityKind::Line { .. } => {
-                    let t = parameter(target.kind, p)?;
+                    let t = parameter(&target.kind, p)?;
                     match end {
                         End::Start if t < 0.0 => a.dist(p),
                         End::End if t > 1.0 => b.dist(p),
@@ -592,15 +595,15 @@ fn extension(target: &Entity, end: End, limit: &Entity) -> Option<(f64, P2)> {
 }
 
 fn corner_piece(kind: EntityKind, keep: P2, corner: P2) -> Result<(EntityKind, End)> {
-    let [start, end] = ends(kind).ok_or_else(|| ToolError("corner trim needs two lines or arcs".into()))?;
-    let keep = entity(kind).nearest(keep).0;
-    let pick = parameter(kind, keep).expect("line or arc");
-    let hit = parameter(kind, corner).expect("line or arc");
+    let [start, end] = ends(&kind).ok_or_else(|| ToolError("corner trim needs two lines or arcs".into()))?;
+    let keep = entity(kind.clone()).nearest(keep).0;
+    let pick = parameter(&kind, keep).expect("line or arc");
+    let hit = parameter(&kind, corner).expect("line or arc");
     let side = if corner.dist(start) <= EPS {
         End::Start
     } else if corner.dist(end) <= EPS {
         End::End
-    } else if matches!(kind, EntityKind::Line { .. }) || on_curve(kind, corner) {
+    } else if matches!(kind, EntityKind::Line { .. }) || on_curve(&kind, corner) {
         if keep.dist(corner) <= EPS {
             return refuse("pick a portion to keep, away from the corner");
         }
@@ -622,7 +625,7 @@ fn corner_piece(kind: EntityKind, keep: P2, corner: P2) -> Result<(EntityKind, E
     };
     let mut changed = kind;
     set_end(&mut changed, side, corner);
-    if !valid(changed) {
+    if !valid(&changed) {
         return refuse("the corner would collapse a curve or create an invalid arc");
     }
     Ok((changed, side))
@@ -630,20 +633,20 @@ fn corner_piece(kind: EntityKind, keep: P2, corner: P2) -> Result<(EntityKind, E
 
 fn corner_removed(kind: EntityKind, changed: EntityKind, side: End) -> Option<EntityKind> {
     let index = usize::from(side == End::End);
-    let at = ends(changed)?[index];
-    if ends(kind)?[index].dist(at) <= EPS || !on_curve(kind, at) {
+    let at = ends(&changed)?[index];
+    if ends(&kind)?[index].dist(at) <= EPS || !on_curve(&kind, at) {
         return None;
     }
     let mut removed = kind;
     set_end(&mut removed, if side == End::Start { End::End } else { End::Start }, at);
-    valid(removed).then_some(removed)
+    valid(&removed).then_some(removed)
 }
 
 impl Sketch {
     fn tool_entity(&self, id: EntityId) -> Result<Entity> {
         self.entity(id)
-            .copied()
-            .filter(|e| e.id != ORIGIN && valid(e.kind))
+            .cloned()
+            .filter(|e| e.id != ORIGIN && valid(&e.kind))
             .ok_or_else(|| ToolError(format!("entity {id} is missing, degenerate or the origin")))
     }
 
@@ -662,17 +665,17 @@ impl Sketch {
     }
 
     fn add_tool_entities(&mut self, geometry: Vec<(EntityKind, bool)>) -> Result<Vec<EntityId>> {
-        if geometry.iter().any(|(kind, _)| !valid(*kind)) {
+        if geometry.iter().any(|(kind, _)| !valid(kind)) {
             return refuse("the tool would produce non-finite or degenerate geometry");
         }
         let ids: Vec<_> = geometry.into_iter().map(|(kind, construction)| self.add(kind, construction)).collect();
         // Copied curves own their points. Join matching endpoints within this new geometry only.
         for (i, &a) in ids.iter().enumerate() {
-            let Some(ea) = self.entity(a).copied() else { continue };
+            let Some(ea) = self.entity(a).cloned() else { continue };
             let Some(pa) = copy_endpoints(&ea) else { continue };
             for &b in &ids[i + 1..] {
-                let eb = *self.entity(b).expect("new entity");
-                let Some(pb) = copy_endpoints(&eb) else { continue };
+                let eb = self.entity(b).expect("new entity");
+                let Some(pb) = copy_endpoints(eb) else { continue };
                 for &(a, p) in &pa {
                     for &(b, q) in &pb {
                         if p.dist(q) <= EPS {
@@ -690,7 +693,7 @@ impl Sketch {
     /// because dimensions or endpoint relations could otherwise restore deleted geometry.
     pub fn apply_operation(&mut self, operation: &Operation) -> Result<Vec<EntityId>> {
         match operation {
-            Operation::Add { kind, construction } => self.add_tool_entities(vec![(*kind, *construction)]),
+            Operation::Add { kind, construction } => self.add_tool_entities(vec![(kind.clone(), *construction)]),
             Operation::SnappedLine { start, end, reach, start_filter, end_filter, construction } => {
                 use crate::inference::{InferenceOptions, apply_snaps, infer};
                 if !finite(*start) || !finite(*end) || !reach.is_finite() || *reach <= 0.0 {
@@ -878,6 +881,9 @@ impl Sketch {
             let map = transform(i);
             for e in &selected {
                 let kind = match e.kind {
+                    EntityKind::Spline { mode, ref points } => {
+                        EntityKind::Spline { mode, points: points.iter().copied().map(&map).collect() }
+                    }
                     EntityKind::Ellipse { center, major, minor } => {
                         EntityKind::Ellipse { center: map(center), major: map(major), minor: map(minor) }
                     }
@@ -906,7 +912,7 @@ impl Sketch {
     }
 
     fn replace_tool_entity(&mut self, id: EntityId, pieces: Vec<EntityKind>) -> Result<Vec<EntityId>> {
-        if pieces.iter().any(|k| !valid(*k)) {
+        if pieces.iter().any(|k| !valid(k)) {
             return refuse("the edit would produce degenerate geometry");
         }
         let old = self.tool_entity(id)?;
@@ -928,7 +934,10 @@ impl Sketch {
 
     fn trim_target(&self, id: EntityId, options: TrimOptions) -> Result<Entity> {
         let target = self.tool_entity(id)?;
-        if crate::ellipse::Ellipse::of(target.kind).is_some() {
+        if matches!(target.kind, EntityKind::Spline { .. }) {
+            return refuse("trim does not yet support spline targets");
+        }
+        if crate::ellipse::Ellipse::of(&target.kind).is_some() {
             return refuse("trim does not yet support ellipse targets");
         }
         if target.construction && (options.ignore_construction || options.keep_as_construction) {
@@ -940,19 +949,23 @@ impl Sketch {
     /// What trimming `id` at `at` removes and keeps, without changing the sketch.
     pub fn trim_preview(&self, id: EntityId, at: P2, options: TrimOptions) -> Result<TrimPreview> {
         let target = self.trim_target(id, options)?;
-        if self.drawn().any(|e| crate::ellipse::Ellipse::of(e.kind).is_some()) {
+        if self.drawn().any(|e| matches!(e.kind, EntityKind::Spline { .. })) {
+            return refuse("trim does not yet support spline boundaries");
+        }
+        if self.drawn().any(|e| crate::ellipse::Ellipse::of(&e.kind).is_some()) {
             return refuse("trim does not yet support ellipse boundaries");
         }
         if !finite(at) || target.is_point() {
             return refuse("trim needs a line, arc or circle and a finite pick point");
         }
+        let target_kind = &target.kind;
         let crossings: Vec<P2> = self
             .drawn()
             .filter(|e| e.id != id)
             .flat_map(|other| {
-                intersections(target.kind, other.kind)
+                intersections(&target.kind, &other.kind)
                     .into_iter()
-                    .filter(move |p| on_curve(target.kind, *p) && on_curve(other.kind, *p))
+                    .filter(move |p| on_curve(target_kind, *p) && on_curve(&other.kind, *p))
             })
             .collect();
         if let EntityKind::Circle { center, .. } = target.kind {
@@ -978,26 +991,26 @@ impl Sketch {
             });
         }
         let mut cuts = vec![0.0, 1.0];
-        cuts.extend(crossings.into_iter().map(|p| parameter(target.kind, p).expect("line or arc").clamp(0.0, 1.0)));
+        cuts.extend(crossings.into_iter().map(|p| parameter(&target.kind, p).expect("line or arc").clamp(0.0, 1.0)));
         cuts.sort_by(f64::total_cmp);
-        cuts.dedup_by(|a, b| point_at(target.kind, *a).dist(point_at(target.kind, *b)) <= EPS);
+        cuts.dedup_by(|a, b| point_at(&target.kind, *a).dist(point_at(&target.kind, *b)) <= EPS);
         let p = target.nearest(at).0;
-        let t = parameter(target.kind, p).expect("line or arc");
-        if cuts.iter().any(|c| point_at(target.kind, *c).dist(p) <= EPS) {
+        let t = parameter(&target.kind, p).expect("line or arc");
+        if cuts.iter().any(|c| point_at(&target.kind, *c).dist(p) <= EPS) {
             return refuse("pick inside a trim interval, not at an endpoint or intersection");
         }
         let Some(pair) = cuts.windows(2).find(|w| w[0] < t && t < w[1]) else {
             return refuse("no trim interval at this point");
         };
         let piece = |a: f64, b: f64| {
-            let mut kind = target.kind;
-            set_end(&mut kind, End::Start, point_at(target.kind, a));
-            set_end(&mut kind, End::End, point_at(target.kind, b));
+            let mut kind = target.kind.clone();
+            set_end(&mut kind, End::Start, point_at(&target.kind, a));
+            set_end(&mut kind, End::End, point_at(&target.kind, b));
             kind
         };
         let kept = [(0.0, pair[0]), (pair[1], 1.0)]
             .into_iter()
-            .filter(|(a, b)| point_at(target.kind, *a).dist(point_at(target.kind, *b)) > EPS)
+            .filter(|(a, b)| point_at(&target.kind, *a).dist(point_at(&target.kind, *b)) > EPS)
             .map(|(a, b)| piece(a, b))
             .collect();
         Ok(TrimPreview { removed: vec![piece(pair[0], pair[1])], kept })
@@ -1010,13 +1023,16 @@ impl Sketch {
             return refuse("construction targets are protected from trim extension");
         }
         let target = self.tool_entity(id)?;
+        if matches!(target.kind, EntityKind::Spline { .. }) {
+            return refuse("extend does not yet support spline targets");
+        }
         if !finite(at) {
             return refuse("extension needs a finite pointer position");
         }
-        let mut kind = target.kind;
+        let mut kind = target.kind.clone();
         match kind {
             EntityKind::Line { a, b } => {
-                let t = parameter(kind, at).expect("line");
+                let t = parameter(&kind, at).expect("line");
                 if (0.0..=1.0).contains(&t) {
                     return Ok(false);
                 }
@@ -1027,7 +1043,7 @@ impl Sketch {
                     return refuse("move away from the arc centre to choose an extension direction");
                 }
                 let p = center + (at - center).normalized().scale(center.dist(start));
-                if on_curve(kind, p) {
+                if on_curve(&kind, p) {
                     return Ok(false);
                 }
                 let before = ((start - center).angle() - (p - center).angle()).rem_euclid(TAU);
@@ -1045,20 +1061,20 @@ impl Sketch {
     /// Returns a checkpoint before each cut. A refusal leaves the sketch unchanged.
     pub fn trim_stroke(&mut self, from: P2, to: P2, options: TrimOptions) -> Result<Vec<TrimCheckpoint>> {
         let stroke = EntityKind::Line { a: from, b: to };
-        if !valid(stroke) {
+        if !valid(&stroke) {
             return refuse("a trim stroke needs a finite nonzero length");
         }
         let direction = to - from;
         let mut hits = Vec::new();
         for target in self.drawn().filter(|e| {
             !e.is_point()
-                && valid(e.kind)
+                && valid(&e.kind)
                 && !(e.construction && (options.ignore_construction || options.keep_as_construction))
         }) {
-            for at in intersections(stroke, target.kind) {
-                let tangent = circle(target.kind)
+            for at in intersections(&stroke, &target.kind) {
+                let tangent = circle(&target.kind)
                     .is_some_and(|(center, _)| direction.dot(at - center).abs() <= EPS * direction.len());
-                if !tangent && from.dist(at) > EPS && on_curve(stroke, at) && on_curve(target.kind, at) {
+                if !tangent && from.dist(at) > EPS && on_curve(&stroke, at) && on_curve(&target.kind, at) {
                     hits.push((from.dist(at), target.id, at));
                 }
             }
@@ -1074,14 +1090,14 @@ impl Sketch {
             let family = families.entry(original).or_insert_with(|| vec![original]);
             // Earlier cuts can remove boundaries, so check eligibility against the evolving sketch.
             let target = family.iter().copied().find(|id| {
-                trial.entity(*id).is_some_and(|e| on_curve(e.kind, at)) && trial.trim_preview(*id, at, options).is_ok()
+                trial.entity(*id).is_some_and(|e| on_curve(&e.kind, at)) && trial.trim_preview(*id, at, options).is_ok()
             });
             let Some(target) = target else { continue };
             let entity_index = trial.entities.iter().position(|e| e.id == target).expect("trim target exists");
             let mut checkpoint = TrimCheckpoint {
                 at,
                 direction,
-                entity: trial.entities[entity_index],
+                entity: trial.entities[entity_index].clone(),
                 entity_index,
                 next_entity: trial.next_entity,
                 next_constraint: trial.next_constraint,
@@ -1131,12 +1147,15 @@ impl Sketch {
         }
         let first = self.tool_entity(a)?;
         let second = self.tool_entity(b)?;
-        if ends(first.kind).is_none() || ends(second.kind).is_none() {
+        if matches!(first.kind, EntityKind::Spline { .. }) || matches!(second.kind, EntityKind::Spline { .. }) {
+            return refuse("corner trim does not yet support spline geometry");
+        }
+        if ends(&first.kind).is_none() || ends(&second.kind).is_none() {
             return refuse("corner trim needs two lines or arcs; a closed circle has no endpoint");
         }
         let keep_a = first.nearest(keep_a).0;
         let keep_b = second.nearest(keep_b).0;
-        let mut hits = intersections(first.kind, second.kind);
+        let mut hits = intersections(&first.kind, &second.kind);
         hits.dedup_by(|a, b| a.dist(*b) <= EPS);
         let mut choices: Vec<_> = hits
             .into_iter()
@@ -1151,27 +1170,27 @@ impl Sketch {
             return refuse("two corners match these picks; pick closer to the intended corner");
         }
         // Keep existing endpoints exact rather than moving them by intersection round-off.
-        let at = ends(first.kind)
+        let at = ends(&first.kind)
             .expect("line or arc")
             .into_iter()
-            .chain(ends(second.kind).expect("line or arc"))
+            .chain(ends(&second.kind).expect("line or arc"))
             .find(|p| p.dist(at) <= EPS)
             .unwrap_or(at);
-        let (ka, end_a) = corner_piece(first.kind, keep_a, at)?;
-        let (kb, end_b) = corner_piece(second.kind, keep_b, at)?;
+        let (ka, end_a) = corner_piece(first.kind.clone(), keep_a, at)?;
+        let (kb, end_b) = corner_piece(second.kind.clone(), keep_b, at)?;
         if options.ignore_construction
             && ((first.construction && ka != first.kind) || (second.construction && kb != second.kind))
         {
             return refuse("a corner cannot change a protected construction target");
         }
-        let pa = PointRef::new(a, u8::from(first.is_curve()) + u8::from(end_a == End::End));
-        let pb = PointRef::new(b, u8::from(second.is_curve()) + u8::from(end_b == End::End));
+        let pa = PointRef::new(a, usize::from(first.is_curve()) + usize::from(end_a == End::End));
+        let pb = PointRef::new(b, usize::from(second.is_curve()) + usize::from(end_b == End::End));
         let joined = |c: &Constraint| matches!(c.kind, ConstraintKind::Coincident { a, b } if (a == pa && b == pb) || (a == pb && b == pa));
         if ka == first.kind && kb == second.kind && self.constraints.iter().any(joined) {
             return refuse("these curves already share this corner");
         }
         Ok(CornerPreview {
-            kept: [ka, kb],
+            kept: [ka.clone(), kb.clone()],
             removed: [corner_removed(first.kind, ka, end_a), corner_removed(second.kind, kb, end_b)]
                 .into_iter()
                 .flatten()
@@ -1190,7 +1209,7 @@ impl Sketch {
     ) -> Result<Vec<EntityId>> {
         let preview = self.corner_preview(a, b, keep_a, keep_b, options)?;
         let mut trial = self.clone();
-        for (id, kind) in [(a, preview.kept[0]), (b, preview.kept[1])] {
+        for (id, kind) in [a, b].into_iter().zip(preview.kept) {
             if trial.entity(id).expect("corner target validated").kind != kind {
                 trial.replace_tool_entity(id, vec![kind])?;
             }
@@ -1221,13 +1240,19 @@ impl Sketch {
             return refuse("pick two distinct bounds and a different target");
         }
         let target = self.trim_target(id, options)?;
-        let Some([start, end]) = ends(target.kind) else {
+        let Some([start, end]) = ends(&target.kind) else {
             return refuse("inside/outside trim needs an open line or arc");
         };
-        let tangent = |kind: EntityKind, at: P2| match kind {
+        let tangent = |kind: &EntityKind, at: P2| match *kind {
+            EntityKind::Spline { mode, ref points } => {
+                let nearest = crate::spline::nearest(mode, points, at);
+                crate::spline::spans(mode, points)
+                    .map(|spans| spans[nearest.span].derivative(nearest.parameter).normalized())
+                    .unwrap_or(P2::ZERO)
+            }
             EntityKind::Line { a, b } => (b - a).normalized(),
             EntityKind::Arc { center, .. } | EntityKind::Circle { center, .. } => (at - center).perp().normalized(),
-            kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
+            ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
                 let ellipse = crate::ellipse::Ellipse::of(kind).unwrap();
                 let t = ellipse.parameter(at);
                 (ellipse.axis().scale(-t.sin()) + ellipse.axis().perp().scale(ellipse.ratio() * t.cos())).normalized()
@@ -1237,25 +1262,28 @@ impl Sketch {
         let mut cuts = Vec::with_capacity(2);
         for bound in [a, b] {
             let boundary = self.tool_entity(bound)?;
-            if crate::ellipse::Ellipse::of(boundary.kind).is_some() {
+            if matches!(boundary.kind, EntityKind::Spline { .. }) {
+                return refuse("bounded trim does not yet support spline boundaries");
+            }
+            if crate::ellipse::Ellipse::of(&boundary.kind).is_some() {
                 return refuse("bounded trim does not yet support ellipse boundaries");
             }
-            let mut hits: Vec<_> = intersections(target.kind, boundary.kind)
+            let mut hits: Vec<_> = intersections(&target.kind, &boundary.kind)
                 .into_iter()
-                .filter(|p| on_curve(target.kind, *p) && on_curve(boundary.kind, *p))
+                .filter(|p| on_curve(&target.kind, *p) && on_curve(&boundary.kind, *p))
                 .collect();
             hits.dedup_by(|p, q| p.dist(*q) <= EPS);
             if hits.len() != 1 {
                 return refuse("each bound must cross the open target exactly once");
             }
             let mut at = hits[0];
-            if tangent(target.kind, at).cross(tangent(boundary.kind, at)).abs() <= 1e-9 {
+            if tangent(&target.kind, at).cross(tangent(&boundary.kind, at)).abs() <= 1e-9 {
                 return refuse("a tangent contact does not bound a trim interval");
             }
             if let Some(p) = [start, end].into_iter().find(|p| p.dist(at) <= EPS) {
                 at = p;
             }
-            cuts.push((parameter(target.kind, at).expect("open target").clamp(0.0, 1.0), at));
+            cuts.push((parameter(&target.kind, at).expect("open target").clamp(0.0, 1.0), at));
         }
         cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
         let [(lo, p), (hi, q)] = [cuts[0], cuts[1]];
@@ -1263,7 +1291,7 @@ impl Sketch {
             return refuse("the bounds must make two distinct crossings");
         }
         let piece = |from: P2, to: P2| {
-            let mut kind = target.kind;
+            let mut kind = target.kind.clone();
             set_end(&mut kind, End::Start, from);
             set_end(&mut kind, End::End, to);
             kind
@@ -1280,7 +1308,7 @@ impl Sketch {
         if removed.is_empty() {
             return refuse("no target geometry lies outside these bounds");
         }
-        if removed.iter().chain(&kept).any(|kind| !valid(*kind)) {
+        if removed.iter().chain(&kept).any(|kind| !valid(kind)) {
             return refuse("the bounds would produce degenerate geometry");
         }
         Ok(TrimPreview { removed, kept })
@@ -1292,7 +1320,7 @@ impl Sketch {
         preview: TrimPreview,
         options: TrimOptions,
     ) -> Result<Vec<EntityId>> {
-        if options.keep_as_construction && preview.removed.iter().any(|kind| !valid(*kind)) {
+        if options.keep_as_construction && preview.removed.iter().any(|kind| !valid(kind)) {
             return refuse("the trim would create degenerate construction geometry");
         }
         if options.keep_as_construction && preview.kept.is_empty() {
@@ -1318,9 +1346,9 @@ impl Sketch {
     /// beyond that end, or when `id` is not a line or arc.
     pub fn extend_boundary(&self, id: EntityId, end: End) -> Option<EntityId> {
         let target = self.tool_entity(id).ok()?;
-        ends(target.kind)?;
+        ends(&target.kind)?;
         self.drawn()
-            .filter(|e| e.id != id && valid(e.kind) && !e.is_point())
+            .filter(|e| e.id != id && valid(&e.kind) && !e.is_point())
             .filter_map(|limit| extension(&target, end, limit).map(|(distance, _)| (distance, limit.id)))
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, id)| id)
@@ -1332,16 +1360,19 @@ impl Sketch {
         }
         let target = self.tool_entity(id)?;
         let limit = self.tool_entity(boundary)?;
-        if crate::ellipse::Ellipse::of(limit.kind).is_some() {
+        if matches!(target.kind, EntityKind::Spline { .. }) || matches!(limit.kind, EntityKind::Spline { .. }) {
+            return refuse("extend does not yet support spline targets or boundaries");
+        }
+        if crate::ellipse::Ellipse::of(&limit.kind).is_some() {
             return refuse("extend does not yet support ellipse boundaries");
         }
-        if ends(target.kind).is_none() {
+        if ends(&target.kind).is_none() {
             return refuse("extend needs a line or arc");
         }
         let Some((_, p)) = extension(&target, end, &limit) else {
             return refuse("the boundary has no intersection beyond that endpoint");
         };
-        let mut kind = target.kind;
+        let mut kind = target.kind.clone();
         set_end(&mut kind, end, p);
         self.replace_tool_entity(id, vec![kind])
     }

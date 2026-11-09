@@ -75,7 +75,9 @@ impl Sketch {
     pub(super) fn mirror_linked(&mut self, ids: &[EntityId], axis: MirrorAxis) -> Result<Vec<EntityId>> {
         let selected = self.tool_selection(ids)?;
         if selected.iter().any(|e| matches!(e.kind, EntityKind::Text { .. })) {
-            return refuse("Linked mirror does not support sketch text; turn off Keep symmetry for an independent copy");
+            return refuse(
+                "Linked mirror does not support sketch text; turn off Keep symmetry for an independent copy",
+            );
         }
         let (start, end, existing) = match axis {
             MirrorAxis::Entity { entity } => match self.tool_entity(entity)?.kind {

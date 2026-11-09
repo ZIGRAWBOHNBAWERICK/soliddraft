@@ -149,7 +149,9 @@ impl Sketch {
                 let reflect = |p: P2| start + direction.scale(2.0 * (p - start).dot(direction)) - (p - start);
                 let pairs: Vec<(usize, usize)> = match first.kind {
                     EntityKind::Text { .. } => {
-                        return Err(ToolError("Whole-text symmetry is not supported; mirror an independent text copy".into()));
+                        return Err(ToolError(
+                            "Whole-text symmetry is not supported; mirror an independent text copy".into(),
+                        ));
                     }
                     EntityKind::Spline { mode, ref points } => {
                         let EntityKind::Spline { mode: other_mode, points: ref other_points } = second.kind else {

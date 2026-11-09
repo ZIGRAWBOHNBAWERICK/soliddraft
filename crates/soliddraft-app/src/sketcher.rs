@@ -1437,7 +1437,8 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
                     painter.add(egui::Shape::line(pts.clone(), halo));
                 }
             }
-            let stroke = Stroke::new(if e.construction { 1.0 } else { 1.8 }, if is_sel { theme::accent() } else { color });
+            let stroke =
+                Stroke::new(if e.construction { 1.0 } else { 1.8 }, if is_sel { theme::accent() } else { color });
             if e.is_point() {
                 continue;
             }

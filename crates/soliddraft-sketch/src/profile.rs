@@ -406,7 +406,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
                                     valid = false;
                                     break;
                                 }
-                            }
+                            },
                         }
                     }
                     if valid && !segments.is_empty() {

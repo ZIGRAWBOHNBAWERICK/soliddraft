@@ -667,14 +667,17 @@ pub fn operation_schema() -> Value {
     let geometry = any_of(vec![
         object(&[
             ("type", constant("text")),
-            ("text", object(&[
-                ("content", string("Single line, 1 to 256 characters supported by the bundled font")),
-                ("font", one_of(&["inter_regular", "inter_medium"], "Bundled Inter font, SIL OFL 1.1")),
-                ("position", point.clone()),
-                ("height", number("Capital height, 0.01 to 10000 mm")),
-                ("angle", optional(number("Baseline angle in radians, default 0"))),
-                ("reflected", optional(boolean("Reflect across the baseline, default false"))),
-            ])),
+            (
+                "text",
+                object(&[
+                    ("content", string("Single line, 1 to 256 characters supported by the bundled font")),
+                    ("font", one_of(&["inter_regular", "inter_medium"], "Bundled Inter font, SIL OFL 1.1")),
+                    ("position", point.clone()),
+                    ("height", number("Capital height, 0.01 to 10000 mm")),
+                    ("angle", optional(number("Baseline angle in radians, default 0"))),
+                    ("reflected", optional(boolean("Reflect across the baseline, default false"))),
+                ]),
+            ),
         ]),
         object(&[
             ("type", constant("spline")),

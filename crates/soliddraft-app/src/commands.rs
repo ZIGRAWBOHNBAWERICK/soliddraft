@@ -93,7 +93,9 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
     use DrawingTab as D;
     match tab {
         Tab::Part(RibbonTab::Solid) => &["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"],
-        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"],
+        Tab::Part(RibbonTab::Sketch) => {
+            &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"]
+        }
         Tab::Part(RibbonTab::Inspect) => &["Measure", "Check", "Surface quality"],
         Tab::Part(RibbonTab::View) => &["Orientation", "Display", "Projection", "Panels"],
         Tab::Part(RibbonTab::Assembly | RibbonTab::Surface | RibbonTab::PointCloud) => &[],

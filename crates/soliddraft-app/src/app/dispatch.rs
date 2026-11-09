@@ -875,8 +875,10 @@ impl SolidDraftApp {
                 if let Some(s) = self.state.sketch.as_mut() {
                     s.show_dimensions = show;
                     if !show {
-                        s.selection.retain(|sel| !matches!(sel, crate::state::SketchSel::Constraint(id)
-                            if s.sketch.constraint(*id).is_some_and(|c| c.is_dimension())));
+                        s.selection.retain(|sel| {
+                            !matches!(sel, crate::state::SketchSel::Constraint(id)
+                            if s.sketch.constraint(*id).is_some_and(|c| c.is_dimension()))
+                        });
                         if matches!(s.drag, Some(crate::state::SketchDrag::Label { .. })) {
                             s.drag = None;
                         }

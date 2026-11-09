@@ -142,10 +142,8 @@ impl Spacing {
 
     /// Nearest grid crossing in sketch-plane coordinates, measured from its origin.
     pub fn snap(&self, p: crate::sketch::P2) -> crate::sketch::P2 {
-        let snapped = crate::sketch::P2::new(
-            (p.u / self.minor).round() * self.minor,
-            (p.v / self.minor).round() * self.minor,
-        );
+        let snapped =
+            crate::sketch::P2::new((p.u / self.minor).round() * self.minor, (p.v / self.minor).round() * self.minor);
         if snapped.u.is_finite() && snapped.v.is_finite() { snapped } else { p }
     }
 

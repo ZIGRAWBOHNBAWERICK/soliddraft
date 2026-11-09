@@ -1541,6 +1541,24 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| s.sketch.as_ref().is_some_and(|k| k.tool.trims()))
 .app_only(SKETCHER),
+        cmd("sketch_fillet", "Sketch fillet", Icon::Fillet, "Insert a tangent radius between two picked lines or arcs")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Fillet))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Fillet))
+.app_only(SKETCHER),
+        cmd("sketch_chamfer", "Sketch chamfer", Icon::Chamfer, "Replace a picked line corner with a setback or distance/angle chamfer")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Chamfer))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Chamfer))
+.app_only(SKETCHER),
+        cmd("sketch_split", "Split entities", Icon::Trim, "Split a line or arc at one point, or a circle at two points")
+            .on(Sketch, "Modify", Small)
+            .run(|_| AppAction::SketchTool(Tool::Split))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Split))
+.app_only(SKETCHER),
         cmd("sketch_extend", "Extend", Icon::Extend, "Extend: click the end of a line or arc to lengthen it to the next curve")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Extend))

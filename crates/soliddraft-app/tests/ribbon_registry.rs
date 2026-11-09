@@ -292,6 +292,41 @@ fn before_composite_relations(id: &str, current: &mut Value) {
     );
 }
 
+fn before_corner_finishing(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let point = json!({"type":"object", "additionalProperties":false, "properties":{"u":{"type":"number"},"v":{"type":"number"}}, "required":["u","v"]});
+    let size = json!({"anyOf":[
+        {"type":"object", "additionalProperties":false, "properties":{"mode":{"type":"string","const":"distances"},"first":{"type":"number"},"second":{"type":"number"}}, "required":["mode","first","second"]},
+        {"type":"object", "additionalProperties":false, "properties":{"mode":{"type":"string","const":"distance_angle"},"distance":{"type":"number"},"angle_degrees":{"type":"number"}}, "required":["mode","distance","angle_degrees"]}
+    ]});
+    for (tool, last, value) in [("fillet", "radius", json!({"type":"number"})), ("chamfer", "size", size)] {
+        let index =
+            variants.iter().position(|v| v["properties"]["tool"]["const"] == tool).expect("corner treatment operation");
+        let mut properties = json!({"tool":{"type":"string","const":tool},"a":{"type":"integer"},"b":{"type":"integer"},"keep_a":point,"keep_b":point});
+        properties[last] = value;
+        assert_eq!(
+            variants.remove(index),
+            json!({"type":"object", "additionalProperties":false, "properties":properties, "required":["tool","a","b","keep_a","keep_b",last]})
+        );
+    }
+    let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == "split").expect("split operation");
+    assert_eq!(
+        variants.remove(index),
+        json!({"type":"object", "additionalProperties":false,
+        "properties":{"tool":{"type":"string","const":"split"},"entity":{"type":"integer"},"at":point,"second":point}, "required":["tool","entity","at"]})
+    );
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -358,6 +393,9 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                 &[
                     "sketch_polygon",
                     "sketch_trim",
+                    "sketch_fillet",
+                    "sketch_chamfer",
+                    "sketch_split",
                     "sketch_extend",
                     "sketch_offset",
                     "sketch_mirror",
@@ -419,6 +457,8 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_trim_modes(id, &mut current);
         before_inference_snaps(id, &mut current);
         before_composite_relations(id, &mut current);
+
+        before_corner_finishing(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

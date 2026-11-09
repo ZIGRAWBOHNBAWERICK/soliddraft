@@ -31,6 +31,8 @@ pub type App = Harness<'static, SolidDraftApp>;
 pub const TOLERANCE: f32 = 1.0;
 
 pub const WINDOW: Vec2 = vec2(1440.0, 900.0);
+/// Full-ribbon inspection without responsive group folding.
+pub const EXPANDED_WINDOW: Vec2 = vec2(1920.0, 900.0);
 
 /// The rendered harnesses share one adapter and the process-wide config; one at a time.
 static GPU: Mutex<()> = Mutex::new(());
@@ -271,10 +273,38 @@ pub fn ribbon_button(app: &App, label: &str) -> Control {
     control(app, label, ribbon_region(app))
 }
 
-/// Clicks a ribbon button where it is drawn.
+/// Clicks a ribbon command, opening its collapsed group when needed.
 pub fn click_ribbon(app: &mut App, label: &str) {
-    let rect = ribbon_button(app, label).rect;
-    click_at(app, rect.center());
+    let band = ribbon_region(app);
+    if !app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| band.intersects(n.rect())) {
+        let group = {
+            let state = &app.state().state;
+            let tab = if state.drawing.is_active() {
+                soliddraft_app::commands::Tab::Drawing(state.drawing.session.as_ref().expect("active drawing").tab)
+            } else if state.assembly.is_active() {
+                soliddraft_app::commands::Tab::Assembly
+            } else {
+                state.ribbon_tab.into()
+            };
+            soliddraft_app::commands::ribbon(tab)
+                .into_iter()
+                .find_map(|(group, items)| {
+                    items.iter().any(|(c, _)| (c.shown)(state) && c.label_in(state) == label).then_some(group)
+                })
+                .unwrap_or_else(|| panic!("ribbon command {label}"))
+        };
+        let bounds = window(app);
+        click_button(app, &format!("{group} group"), bounds);
+        app.run_steps(4);
+        let window = window(app);
+        let bottom =
+            painted(app).into_iter().find(|p| p.text == "Properties").map_or(window.bottom(), |p| p.rect.top());
+        let row = Rect::from_min_max(window.min, pos2(window.right(), bottom));
+        click_button(app, label, row);
+    } else {
+        let rect = ribbon_button(app, label).rect;
+        click_at(app, rect.center());
+    }
     app.run_steps(4);
 }
 

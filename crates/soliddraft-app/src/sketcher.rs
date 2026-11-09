@@ -232,9 +232,14 @@ pub fn run(
                 dimension_click(s, &frame, pos, &mut actions);
             }
         }
-        Tool::TrimCorner => {
+        Tool::TrimCorner | Tool::Fillet | Tool::Chamfer => {
             if clicked && let Some(pos) = hover_pos {
                 corner_click(s, &frame, pos, &mut actions);
+            }
+        }
+        Tool::Split => {
+            if clicked && let Some(pos) = hover_pos {
+                split_click(s, &frame, pos, &mut actions);
             }
         }
         Tool::TrimInside | Tool::TrimOutside => {
@@ -421,6 +426,31 @@ fn copy_input(
             s.pending = vec![(p, Vec::new())];
         }
         _ => {}
+    }
+}
+
+fn split_click(s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2, actions: &mut Vec<AppAction>) {
+    if s.corner_first.is_none()
+        && let Some(id) = hit_curve(frame, &s.sketch, pos, false)
+        && s.sketch.entity(id).is_some_and(|e| matches!(e.kind, EntityKind::Circle { .. }))
+        && let Some(at) = frame.plane_at(pos)
+    {
+        s.corner_first = Some((id, s.sketch.entity(id).expect("picked circle").nearest(at).0));
+        s.selection = vec![SketchSel::Entity(id)];
+        return;
+    }
+    if let Some(operation) = s.preview.as_ref().and_then(|p| p.operation.clone()) {
+        if sketch_tools::apply(s, &operation, actions) {
+            s.corner_first = None;
+            s.selection.clear();
+        }
+    } else {
+        s.say(
+            s.preview
+                .as_ref()
+                .and_then(|p| p.refused.clone())
+                .unwrap_or_else(|| "Point at a line, arc or circle".into()),
+        );
     }
 }
 
@@ -676,12 +706,14 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
     let at = frame.plane_at(pos)?;
     let entity = *s.sketch.entity(id)?;
     let preview = match s.tool {
-        Tool::TrimCorner => {
+        Tool::TrimCorner | Tool::Fillet | Tool::Chamfer => {
             if let Some((a, keep_a)) = s.corner_first {
-                let mut preview = sketch_tools::try_operation(
-                    s,
-                    Operation::TrimCorner { a, b: id, keep_a, keep_b: at, options: s.trim_options },
-                );
+                let operation = match s.tool {
+                    Tool::Fillet => Operation::Fillet { a, b: id, keep_a, keep_b: at, radius: s.modify.fillet_radius },
+                    Tool::Chamfer => Operation::Chamfer { a, b: id, keep_a, keep_b: at, size: s.modify.chamfer },
+                    _ => Operation::TrimCorner { a, b: id, keep_a, keep_b: at, options: s.trim_options },
+                };
+                let mut preview = sketch_tools::try_operation(s, operation);
                 preview.target = Some(id);
                 preview
             } else {
@@ -695,6 +727,25 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
                     ..Default::default()
                 }
             }
+        }
+        Tool::Split => {
+            let operation = if let Some((circle, first)) = s.corner_first {
+                if circle != id {
+                    return Some(ToolPreview {
+                        target: Some(id),
+                        refused: Some("Pick the second point on the same circle".into()),
+                        ..Default::default()
+                    });
+                }
+                Operation::Split { entity: circle, at: first, second: Some(at) }
+            } else if matches!(entity.kind, EntityKind::Circle { .. }) {
+                return Some(ToolPreview { target: Some(id), ..Default::default() });
+            } else {
+                Operation::Split { entity: id, at, second: None }
+            };
+            let mut preview = sketch_tools::try_operation(s, operation);
+            preview.target = Some(id);
+            preview
         }
         Tool::TrimInside | Tool::TrimOutside => {
             if let [a, b] = s.trim_bounds.as_slice() {
@@ -947,6 +998,9 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
         | Tool::Dimension
         | Tool::Trim
         | Tool::TrimCorner
+        | Tool::Fillet
+        | Tool::Chamfer
+        | Tool::Split
         | Tool::TrimInside
         | Tool::TrimOutside
         | Tool::Extend
@@ -1203,6 +1257,8 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             Some([*entity, *entity])
         }
         Operation::TrimCorner { a, b, options, .. } if options.keep_as_construction => Some([*a, *b]),
+        Operation::Fillet { a, b, .. } | Operation::Chamfer { a, b, .. } => Some([*a, *b]),
+        Operation::Split { entity, .. } => Some([*entity, *entity]),
         _ => None,
     });
     for e in s.sketch.drawn() {
@@ -1841,12 +1897,32 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
         curve(*kind, stroke, keep);
     }
     for (index, kind) in preview.added.iter().enumerate() {
-        let guide = if let Some(Operation::TrimCorner { a, b, .. }) = &preview.operation {
-            [a, b].get(index).and_then(|id| s.sketch.entity(**id)).is_some_and(|e| e.construction)
-        } else {
-            false
+        let guide = match &preview.operation {
+            Some(
+                Operation::TrimCorner { a, b, .. } | Operation::Fillet { a, b, .. } | Operation::Chamfer { a, b, .. },
+            ) => {
+                let id = if index == 1 { *b } else { *a };
+                s.sketch.entity(id).is_some_and(|e| e.construction)
+            }
+            Some(Operation::Split { entity, .. }) => s.sketch.entity(*entity).is_some_and(|e| e.construction),
+            _ => false,
         };
         curve(*kind, Stroke::new(2.0, theme::accent()), guide);
+    }
+    if s.tool == Tool::Split {
+        let points: Vec<_> = match &preview.operation {
+            Some(Operation::Split { entity, at, second }) => s
+                .sketch
+                .entity(*entity)
+                .map(|e| std::iter::once(*at).chain(*second).map(|p| e.nearest(p).0).collect())
+                .unwrap_or_default(),
+            _ => s.corner_first.map(|(_, at)| vec![at]).unwrap_or_default(),
+        };
+        for point in points {
+            if let Some(at) = frame.screen(point) {
+                painter.circle_stroke(at, 4.5, Stroke::new(2.0, theme::accent()));
+            }
+        }
     }
     if let Some(boundary) = preview.boundary
         && let Some(e) = s.sketch.entity(boundary)
@@ -2082,8 +2158,12 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         }
         (Tool::Polygon, 0) => "Polygon: click the centre",
         (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
-        (Tool::TrimCorner, _) if s.corner_first.is_none() => "Corner: first pick",
-        (Tool::TrimCorner, _) => "Corner: second pick",
+        (Tool::TrimCorner | Tool::Fillet | Tool::Chamfer, _) if s.corner_first.is_none() => {
+            "Corner: pick the first retained portion"
+        }
+        (Tool::TrimCorner | Tool::Fillet | Tool::Chamfer, _) => "Corner: pick the second retained portion",
+        (Tool::Split, _) if s.corner_first.is_some() => "Split: pick the second point on the circle",
+        (Tool::Split, _) => "Split: click inside a line or arc; a circle needs two points",
         (Tool::TrimInside | Tool::TrimOutside, _) if s.trim_bounds.is_empty() => "Trim: first bound",
         (Tool::TrimInside | Tool::TrimOutside, _) if s.trim_bounds.len() == 1 => "Trim: second bound",
         (Tool::TrimInside, _) => "Trim inside: pick targets",

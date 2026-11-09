@@ -314,7 +314,7 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
     let case = ribbon::case("l1");
 
     // Each part category, then the assembly's ribbon.
-    let mut plate = ribbon::app_unrendered(ribbon::plate(), ribbon::WINDOW, 1.0);
+    let mut plate = ribbon::app_unrendered(ribbon::plate(), ribbon::EXPANDED_WINDOW, 1.0);
     case.run(&mut plate, |app| {
         settle(app);
         let start = ribbon::fingerprint(app);
@@ -334,7 +334,7 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
     drop(plate);
 
     // Each drawing category.
-    let mut drawing = ribbon::app_unrendered(ribbon::plate(), ribbon::WINDOW, 1.0);
+    let mut drawing = ribbon::app_unrendered(ribbon::plate(), ribbon::EXPANDED_WINDOW, 1.0);
     case.run(&mut drawing, |app| {
         settle(app);
         open_drawing(app);
@@ -354,7 +354,7 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
     for mode in MODES {
         for ppp in SCALES {
             let what = format!("{mode:?} {ppp}");
-            let mut plate = ribbon::app_unrendered(ribbon::plate(), ribbon::WINDOW, ppp);
+            let mut plate = ribbon::app_unrendered(ribbon::plate(), ribbon::EXPANDED_WINDOW, ppp);
             case.run(&mut plate, |app| {
                 theme::set_mode(&app.ctx.clone(), mode);
                 settle(app);
@@ -369,7 +369,7 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
                 }
             });
             drop(plate);
-            let mut sketch = ribbon::app_unrendered(ribbon::sketch(), ribbon::WINDOW, ppp);
+            let mut sketch = ribbon::app_unrendered(ribbon::sketch(), ribbon::EXPANDED_WINDOW, ppp);
             case.run(&mut sketch, |app| {
                 theme::set_mode(&app.ctx.clone(), mode);
                 settle(app);

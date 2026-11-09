@@ -393,7 +393,7 @@ fn one_pass(case: &ribbon::Case, mode: Mode, ppp: f32, log: &mut Log) {
     let seen = format!("{mode:?} {ppp}");
 
     // Disabled art on a blank part.
-    let mut blank = ribbon::app_at(ribbon::blank(), ribbon::WINDOW, ppp);
+    let mut blank = ribbon::app_at(ribbon::blank(), ribbon::EXPANDED_WINDOW, ppp);
     case.run(&mut blank, |app| {
         theme::set_mode(&app.ctx.clone(), mode);
         app.run_steps(6);
@@ -405,7 +405,7 @@ fn one_pass(case: &ribbon::Case, mode: Mode, ppp: f32, log: &mut Log) {
     });
 
     // The plate on every tab, with each first paint held to the references.
-    let mut plate = ribbon::app_at(ribbon::plate(), ribbon::WINDOW, ppp);
+    let mut plate = ribbon::app_at(ribbon::plate(), ribbon::EXPANDED_WINDOW, ppp);
     case.run(&mut plate, |app| {
         app.run_steps(6);
         if dark {
@@ -452,7 +452,7 @@ fn one_pass(case: &ribbon::Case, mode: Mode, ppp: f32, log: &mut Log) {
     });
 
     // The sketch tab with its tools enabled, in a real sketch.
-    let mut sketch = ribbon::app_at(ribbon::sketch(), ribbon::WINDOW, ppp);
+    let mut sketch = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, ppp);
     case.run(&mut sketch, |app| {
         theme::set_mode(&app.ctx.clone(), mode);
         app.run_steps(6);

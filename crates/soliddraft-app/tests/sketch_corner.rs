@@ -66,7 +66,8 @@ fn corner_mode(app: &mut App) {
     if !app.query_all(By::new().role(egui::accesskit::Role::Button).label("Trim")).any(|n| band.intersects(n.rect())) {
         ribbon::click_button(app, "Modify group", window);
     }
-    let controls = egui::Rect::from_min_max(pos2(app.state().state.viewport.rect.left(), 0.0), window.max);
+    let properties = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect.top();
+    let controls = egui::Rect::from_min_max(window.min, pos2(window.right(), properties));
     ribbon::click_button(app, "Trim", controls);
     for _ in 0..4 {
         if let Some(label) = ribbon::painted(app).into_iter().find(|p| {

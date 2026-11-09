@@ -223,7 +223,7 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
 #[test]
 fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
     let case = ribbon::case("r2");
-    let mut app = ribbon::app(ribbon::sketch());
+    let mut app = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, 1.0);
     case.run(&mut app, |app| {
         settle(app);
         let (sketch, name) = {

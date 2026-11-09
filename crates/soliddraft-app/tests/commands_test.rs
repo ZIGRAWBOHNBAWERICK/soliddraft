@@ -82,6 +82,8 @@ fn every_ribbon_button_is_a_registry_command() {
         return;
     }
     let mut harness = harness();
+    harness.set_size(vec2(1920.0, 900.0));
+    harness.run_steps(4);
     for tab in RibbonTab::ALL.into_iter().filter(|t| t.planned().is_none()) {
         harness.state_mut().state.ribbon_tab = tab;
         harness.run_steps(2);

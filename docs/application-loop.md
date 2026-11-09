@@ -116,6 +116,17 @@ The same selection validation serves the native menu and property panel.
 `sketch-relations.json` uses these choices on two symmetric square profiles and
 construction guides, then checks a 96 mm³ extrusion before and after reopening.
 
+`fillet` and `chamfer` take `a`, `b`, `keep_a` and `keep_b` to identify two curves
+and their retained portions. Fillet adds a positive `radius` and accepts lines
+or circular arcs. Chamfer accepts two lines and a `size` object, either
+`{ "mode": "distances", "first": 3, "second": 4 }` or
+`{ "mode": "distance_angle", "distance": 2, "angle_degrees": 45 }`.
+`split` takes `entity` and `at`; circles also require a distinct `second` point.
+These operations use the viewport's analytic preview and preserve construction
+state. A corner treatment requires two profile curves or two construction curves.
+`sketch-fillet-chamfer-split.json` combines these operations, extrudes through
+Catallax to about 1179.4248 mm³, and checks that volume after reopening.
+
 Both sketch tools accept an optional signed `offset` in millimetres along a
 reference plane's or planar face's normal. Omitted offsets are zero. A face
 offset follows the persistently named face on rebuild, including coplanar

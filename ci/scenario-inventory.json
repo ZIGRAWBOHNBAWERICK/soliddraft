@@ -911,6 +911,12 @@
       ]
     },
     {
+      "id": "sketch-fillet-chamfer-split",
+      "file": "ci/scenarios/sketch-fillet-chamfer-split.json",
+      "acceptance": false,
+      "owners": ["soliddraft-app", "soliddraft-model", "soliddraft-kernel-catallax"]
+    },
+    {
       "id": "sketch-offset",
       "file": "ci/scenarios/sketch-offset.json",
       "acceptance": false,

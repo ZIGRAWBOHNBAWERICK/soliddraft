@@ -289,3 +289,41 @@ fn retained_lines_use_the_stored_endpoint_correspondence_at_the_axis() {
         }
     }
 }
+
+fn retained_circle_pair() -> (Sketch, Operation, u32, u32) {
+    let mut s = Sketch::new();
+    let axis = fixed(&mut s, EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) }, true);
+    let a = s.add(EntityKind::Circle { center: p(4.0, 0.0), radius: 1.0 }, false);
+    let b = s.add(EntityKind::Circle { center: p(-4.0, 0.0), radius: 1.0 }, false);
+    let op = Operation::MirrorLinked { entities: vec![a, b], axis: MirrorAxis::Entity { entity: axis } };
+    s.apply_operation(&op).unwrap();
+    solved(&mut s);
+    (s, op, a, b)
+}
+#[test]
+fn retained_mirror_pair_reapplication_keeps_one_relation_and_stable_ids() {
+    let (mut s, op, _, _) = retained_circle_pair();
+    let before = s.clone();
+    for _ in 0..3 {
+        assert!(s.apply_operation(&op).unwrap().is_empty());
+        assert_eq!(s, before, "reapplying a retained pair is a complete no-op");
+    }
+}
+#[test]
+fn retained_mirror_pair_single_removal_releases_the_centre_pairing() {
+    let (mut s, op, a, b) = retained_circle_pair();
+    s.apply_operation(&op).unwrap();
+    let id = s.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Symmetric { .. })).unwrap().id;
+    s.constraints.retain(|c| c.id != id);
+    assert!(
+        !s.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Symmetric { .. })),
+        "one removal releases symmetry"
+    );
+    for (entity, at) in [(a, p(6.0, 0.0)), (b, p(-4.0, 0.0))] {
+        s.constrain(ConstraintKind::Fix { point: soliddraft_sketch::PointRef::new(entity, 0), at });
+    }
+    solved(&mut s);
+    for (entity, at) in [(a, p(6.0, 0.0)), (b, p(-4.0, 0.0))] {
+        assert!(s.entity(entity).unwrap().point(0).unwrap().dist(at) < 1e-6);
+    }
+}

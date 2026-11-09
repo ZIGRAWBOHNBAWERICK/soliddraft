@@ -141,7 +141,9 @@ impl Sketch {
     fn mirror_pair(&mut self, source: Entity, partner: EntityId, axis: EntityId, start: P2, end: P2) -> Result<()> {
         let kinds = self.relation_constraints(&Relation::SymmetricEntities { a: source.id, b: partner, axis })?;
         for kind in &kinds {
-            self.constrain(*kind);
+            if !self.constraints.iter().any(|c| c.kind == *kind) {
+                self.constrain(*kind);
+            }
         }
         for kind in kinds {
             let ConstraintKind::Symmetric { a, b, .. } = kind else { continue };

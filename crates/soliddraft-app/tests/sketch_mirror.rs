@@ -373,3 +373,38 @@ fn retained_complementary_arcs_stay_closed_after_center_edits_and_reopen() {
     drop(app);
     soliddraft_app::file::set_config_dir(None);
 }
+
+#[test]
+fn repeated_retained_mirror_is_refused_as_a_noop_without_another_relation() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!("mirror-repeat-config-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.clone()));
+    let mut sketch = Sketch::new();
+    axis(&mut sketch);
+    for center in [p(4.0, 0.0), p(-4.0, 0.0)] {
+        sketch.add(EntityKind::Circle { center, radius: 1.0 }, false);
+    }
+    let (mut app, _id) = launch(sketch);
+    pick(&mut app, p(5.0, 0.0), false);
+    pick(&mut app, p(-5.0, 0.0), true);
+    ribbon::click_ribbon(&mut app, "Mirror entities");
+    control(&mut app, "Two points");
+    control(&mut app, "Line 1");
+    control(&mut app, "Apply");
+    let after = session(&app).sketch.clone();
+    assert_eq!(after.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Symmetric { .. })).count(), 1);
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    pick(&mut app, p(5.0, 0.0), false);
+    pick(&mut app, p(-5.0, 0.0), true);
+    ribbon::click_ribbon(&mut app, "Mirror entities");
+    proof(&mut app, "repeated-mirror-noop");
+    let preview = session(&app).preview.as_ref().unwrap();
+    assert!(preview.operation.is_none(), "a retained pair cannot add the same symmetry again");
+    assert_eq!(preview.refused.as_deref(), Some("The selection is already symmetric about this axis"));
+    assert_eq!(session(&app).sketch, after);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+    std::fs::remove_dir_all(dir).unwrap();
+}

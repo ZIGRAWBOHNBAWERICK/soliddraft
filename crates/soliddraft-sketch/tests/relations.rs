@@ -227,3 +227,80 @@ fn reflected_ellipses_keep_their_axes_and_partial_span_after_edits_and_reopening
         }
     }
 }
+
+#[test]
+fn spline_symmetry_keeps_every_point_pair_after_fixed_source_edits_and_reopening() {
+    use soliddraft_sketch::SplineMode;
+    for mode in [SplineMode::Fit, SplineMode::Control] {
+        for reversed in [false, true] {
+            let mut s = Sketch::new();
+            let axis = line(&mut s, p(0.0, -10.0), p(0.0, 10.0));
+            fix(&mut s, axis);
+            let points = vec![p(1.0, 0.0), p(2.0, 3.0), p(4.0, 2.0), p(5.0, 0.0)];
+            let a = s.add(EntityKind::Spline { mode, points: points.clone() }, false);
+            let mut reflected: Vec<_> = points.iter().map(|q| p(-q.u, q.v)).collect();
+            if reversed {
+                reflected.reverse();
+            }
+            let b = s.add(EntityKind::Spline { mode, points: reflected }, false);
+            fix(&mut s, a);
+            relate(&mut s, Relation::SymmetricEntities { a, b, axis });
+            solved(&mut s);
+            let mut edited = points;
+            edited[1] = p(3.0, 5.0);
+            let snapshot = EntityKind::Spline { mode, points: edited.clone() };
+            for c in &mut s.constraints {
+                if let ConstraintKind::FixEntity { entity, at } = &mut c.kind
+                    && *entity == a
+                {
+                    *at = snapshot.clone();
+                }
+            }
+            solved(&mut s);
+            let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            solved(&mut reopened);
+            for (index, q) in edited.iter().enumerate() {
+                let other = if reversed { edited.len() - 1 - index } else { index };
+                near(point(&reopened, b, other), p(-q.u, q.v));
+            }
+        }
+    }
+}
+
+#[test]
+fn spline_copies_transform_the_whole_polynomial_in_both_modes() {
+    use soliddraft_sketch::{SplineMode, spline};
+    for mode in [SplineMode::Fit, SplineMode::Control] {
+        let points = vec![p(1.0, 0.0), p(2.0, 4.0), p(3.0, 5.0), p(5.0, 2.0), p(6.0, 0.0)];
+        for transform in 0..3 {
+            let mut s = Sketch::new();
+            let seed = s.add(EntityKind::Spline { mode, points: points.clone() }, false);
+            let operation = match transform {
+                0 => Operation::Mirror { entities: vec![seed], axis_start: p(0.0, -1.0), axis_end: p(0.0, 1.0) },
+                1 => Operation::LinearPattern { entities: vec![seed], step: p(10.0, 20.0), count: 2 },
+                _ => {
+                    Operation::CircularPattern { entities: vec![seed], center: P2::ZERO, angle_degrees: 90.0, count: 2 }
+                }
+            };
+            let copied = s.apply_operation(&operation).unwrap();
+            assert_eq!(copied.len(), 1);
+            let EntityKind::Spline { mode: actual_mode, points: actual } = &s.entity(copied[0]).unwrap().kind else {
+                panic!()
+            };
+            assert_eq!(*actual_mode, mode);
+            let map = |q: P2| match transform {
+                0 => p(-q.u, q.v),
+                1 => q + p(10.0, 20.0),
+                _ => p(-q.v, q.u),
+            };
+            let before = spline::spans(mode, &points).unwrap();
+            let after = spline::spans(mode, actual).unwrap();
+            assert_eq!(before.len(), after.len());
+            for (a, b) in before.iter().zip(&after) {
+                for t in [0.0, 0.17, 0.5, 0.83, 1.0] {
+                    near(b.at(t), map(a.at(t)));
+                }
+            }
+        }
+    }
+}

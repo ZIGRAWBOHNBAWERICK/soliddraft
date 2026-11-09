@@ -127,7 +127,7 @@ impl BezierSpan {
             .count()
     }
 
-    /// Exact affine subdivision of the control polygon at one half.
+    /// Subdivide the control polygon at one half.
     pub fn split(&self) -> [Self; 2] {
         let mut row = self.controls.clone();
         let mut left = vec![row[0]];

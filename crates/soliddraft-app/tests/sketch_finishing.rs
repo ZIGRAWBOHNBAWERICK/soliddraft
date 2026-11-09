@@ -238,7 +238,7 @@ fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
                     "{name}: {:?}",
                     after.status
                 );
-                for (id, kind) in [(first, preview[0]), (second, preview[1])] {
+                for (id, kind) in [(first, preview[0].clone()), (second, preview[1].clone())] {
                     let expected = Entity { id, kind, construction: false };
                     for index in 0..2 {
                         assert!(

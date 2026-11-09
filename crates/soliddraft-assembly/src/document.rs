@@ -163,6 +163,8 @@ pub struct AssemblyDocument {
     levels: Option<LevelWorker>,
     exact: HashMap<DefinitionIndex, Arc<Mutex<PartDocument>>>,
     pub(crate) drag: Option<crate::mates::drag::Drag>,
+    pub(crate) motion: Option<crate::interference::motion::Motion>,
+    pub(crate) motion_report: Option<crate::interference::motion::MotionReport>,
     undo: Vec<Record>,
     redo: Vec<Record>,
     pub(crate) changes: Changes,
@@ -255,6 +257,8 @@ impl AssemblyDocument {
             levels: None,
             exact: HashMap::new(),
             drag: None,
+            motion: None,
+            motion_report: None,
             undo: Vec::new(),
             redo: Vec::new(),
             changes: Changes::default(),
@@ -1590,6 +1594,24 @@ impl AssemblyDocument {
             i = *p;
         }
         depth
+    }
+
+    pub(crate) fn drag_snapshot(&self) -> AssemblyDocument {
+        let mut doc = Self::from_parts(
+            self.path.clone(),
+            self.id,
+            self.assembly.clone(),
+            self.packages.clone(),
+            self.options.clone(),
+        );
+        doc.store = self.store.clone();
+        doc.table = self.table.clone();
+        doc.root = self.root;
+        doc.refs = self.refs.clone();
+        doc.parents = self.parents.clone();
+        doc.certified = self.certified.clone();
+        doc.drag = self.drag.clone();
+        doc
     }
 
     /// A candidate of this document with `truth` in its place, at `path` under `id`, its

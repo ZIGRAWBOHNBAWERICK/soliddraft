@@ -477,7 +477,12 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
 
 fn drag_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("phase", optional(one_of(&["move", "begin", "update", "commit", "cancel"], "Drag phase; defaults to move"))),
+        ("collision", optional(boolean("Stop before contact using certified meshes; set at begin or move"))),
+        ("clearance", optional(string("Dynamic clearance, such as 2 mm; set at begin or move"))),
+        (
+            "phase",
+            optional(one_of(&["move", "begin", "update", "poll", "commit", "cancel"], "Drag phase; defaults to move")),
+        ),
         ("path", optional(string("Occurrence path, required for begin or move"))),
         (
             "placement",

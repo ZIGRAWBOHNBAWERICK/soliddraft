@@ -77,3 +77,5 @@ pub use schema::{Assembly, Component, Direction, OccurrenceAppearance, Override,
 pub use source::{DisplaySource, FileSource, KernelSource};
 pub use store::{Definition, DefinitionIndex, DefinitionKey, DefinitionStore, Freshness, LoadState};
 pub use subassembly::{FormCode, FormPlan, FormRefusal, FormRequest, FormStatus, Formed, Migration};
+
+pub use interference::motion::{MotionFace, MotionReport};

@@ -129,7 +129,7 @@ fn text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
 /// Runs the mate tools. `None` hands the call on.
 pub(crate) fn run(state: &mut AppState, name: &str, input: &Value) -> Option<Result<Value, String>> {
     if name == "assembly_drag" {
-        return Some(drag(state, input).map(|_| json!({"assembly": summary(state)})));
+        return Some(drag(state, input).map(|_| json!({"assembly": summary(state), "pending": state.assembly.session.as_ref().is_some_and(|s| s.doc.drag_pending()), "motion": state.assembly.session.as_ref().and_then(|s| s.doc.drag_report())})));
     }
 
     if matches!(
@@ -601,17 +601,22 @@ pub(crate) fn rows(s: &mut AssemblySession) -> (Value, Value, Value) {
 
 fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
     let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
+    s.doc.poll_drag();
+    let guarded = input["collision"].as_bool().unwrap_or(false) || !input["clearance"].is_null();
+    let clearance = input["clearance"].as_str().map(crate::interference::tools::length).transpose()?;
     match input["phase"].as_str().unwrap_or("move") {
         "begin" => {
             let path =
                 serde_json::from_value(input["path"].clone()).map_err(|e| format!("the occurrence path: {e}"))?;
-            s.doc.begin_drag(path).map_err(|e| e.to_string())
+            if guarded { s.doc.begin_guarded_drag(path, clearance) } else { s.doc.begin_drag(path) }
+                .map_err(|e| e.to_string())
         }
         "update" => {
             let target =
                 serde_json::from_value(input["placement"].clone()).map_err(|e| format!("the placement: {e}"))?;
             s.doc.preview_drag(target).map_err(refused)
         }
+        "poll" => Ok(()),
         "commit" => s.doc.commit_drag().map_err(refused),
         "cancel" => {
             s.doc.cancel_drag();
@@ -622,13 +627,14 @@ fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
                 serde_json::from_value(input["path"].clone()).map_err(|e| format!("the occurrence path: {e}"))?;
             let target =
                 serde_json::from_value(input["placement"].clone()).map_err(|e| format!("the placement: {e}"))?;
-            s.doc.begin_drag(path).map_err(|e| e.to_string())?;
+            if guarded { s.doc.begin_guarded_drag(path, clearance) } else { s.doc.begin_drag(path) }
+                .map_err(|e| e.to_string())?;
             if let Err(e) = s.doc.preview_drag(target) {
                 s.doc.cancel_drag();
                 return Err(refused(e));
             }
             s.doc.commit_drag().map_err(refused)
         }
-        _ => Err("phase is begin, update, commit, cancel or move".into()),
+        _ => Err("phase is begin, update, poll, commit, cancel or move".into()),
     }
 }

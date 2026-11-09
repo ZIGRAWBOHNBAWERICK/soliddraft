@@ -127,7 +127,7 @@ Drag targets are wishes. Mates correct constrained motions, while free translati
 turns follow the target. Limit Distance, Limit Angle, free Width and straight Slot bounds
 act as inclusive stops. Axis-aligned cases keep the exact solver and its refusals. General
 rotations and Hinge stops use the bounded solver and the same certified residual bounds.
-Collision while dragging and Mate Controller are outside this version.
+Collision detection and Dynamic Clearance are available on the desktop through the mesh-certified tier described below. Mate Controller remains deferred.
 
 Set a Hinge's stops with `assembly_edit_mate` and `angle_limits: [min,max]`, in signed degrees
 within [-180,180]. The angle runs about the first selected axis by the right-hand rule.
@@ -610,7 +610,7 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 ## Limits for later batches
 
 Path, Cam, arc Slot, Universal Joint and Physical Dynamics remain unsupported. Collision
-while dragging and Mate Controller are deferred. Mechanical relations add kinematics without
+uses the mesh-certified tier while dragging. Mate Controller is deferred. Mechanical relations add kinematics without
 contact simulation.
 
 Nonparallel Width Free, angular Dimension and Percent; Distance limits across two points or
@@ -649,4 +649,42 @@ parts are optional. One check takes at most 128 parts and 512 distinct bore axes
 
 This compares infinite bore axes, so separated holes on one line are aligned regardless of
 their depth. It does not certify hole fit, diameter, fastener passage, angular deviation or
-contact. Collision while dragging belongs to a later batch.
+contact. Drag collision checks use the same certified meshes.
+
+
+## Collision detection and dynamic clearance while dragging
+
+In the desktop Placement panel, enable **Collision detection (mesh-certified)** to stop
+before penetration, or **Dynamic clearance (mesh-certified)** to keep a minimum distance
+in millimetres. Both use B7's certified meshes at pinned revisions. They include hidden
+parts and parts moved indirectly by mates. Suppressed parts do not participate. Unknown
+or unsupported geometry refuses the update and leaves the previous preview in place.
+
+Checks and mate solves run on a worker snapshot. The interface keeps showing the last
+accepted preview while work is pending. New wishes replace queued wishes. Release waits
+for the latest wish before committing one undo step. Escape, undo and ordinary edits
+cancel pending work; late results cannot change a cancelled drag. Saving always writes
+the accepted assembly, including while a released drag is still being checked.
+
+The guard splits the wish into smaller mate-solved steps near an obstacle. It accepts a
+step only when certified separation exceeds the requested clearance plus a bound on
+both parts' swept motion. This checks the path even when the target lies clear on the
+other side of an obstacle. Each step uses straight world translations and shortest
+quaternion rotations between solved poses. Intermediate accepted poses satisfy mates.
+The guard stops conservatively when the mesh bounds cannot prove another step safe,
+or its work limit is reached. An existing contact whose relative placement changes may
+prevent movement in either direction until the parts are separated outside guarded mode.
+
+The panel shows the nearest moving pair's distance interval. At a stop it names the
+nearest faces and highlights one nearest face per part in orange. These are nearest
+mesh faces, not a claim of exact B-rep contact. The default chord bound is 0.01 mm per
+part, so a stop normally leaves a small gap above the requested distance. Exact contact
+and exact clearance at the threshold need the kernel's exact two-body tier as follow-up.
+Physical Dynamics, force transfer and sliding contact are outside this batch.
+
+For MCP, set `collision: true` or `clearance: "2 mm"` on `assembly_drag` with
+`phase: "begin"` or `phase: "move"`. Updates return `pending: true` while the worker
+runs. Call `phase: "poll"` until `pending` is false to inspect the completed preview.
+`motion` reports `tier: "certified_mesh"`, `stopped`, `clearance_mm`, the minimum
+`distance` bounds, nearest `faces` and any `error`. A `commit` during pending work
+requests release; poll until completion before relying on the committed assembly.

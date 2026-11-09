@@ -14,6 +14,7 @@
 
 mod certified;
 mod holes;
+pub(crate) mod motion;
 
 pub use holes::{HoleAlignmentReport, HoleAlignmentRequest, HoleAxis, HoleOutcome, HolePair};
 pub(crate) mod geometry;
@@ -329,7 +330,7 @@ pub(crate) struct LocalMesh {
 
 /// Certified meshes by part, revision and chord bound. Derived: dropping it changes
 /// nothing but how soon the next check comes.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Certified {
     meshes: HashMap<(DocumentId, ContentHash, u64), Arc<LocalMesh>>,
 }

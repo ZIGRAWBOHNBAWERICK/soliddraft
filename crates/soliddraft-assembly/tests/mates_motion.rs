@@ -978,3 +978,84 @@ fn nested_screw_winding_belongs_to_the_parent_occurrence() {
     assert_eq!(std::fs::read(&r.file).unwrap(), child_bytes);
     std::fs::remove_dir_all(r.dir).unwrap();
 }
+
+fn wait_motion(doc: &mut AssemblyDocument) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while doc.drag_pending() {
+        doc.poll_drag();
+        assert!(std::time::Instant::now() < deadline, "collision worker timed out");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    if let Some(report) = doc.drag_report() {
+        assert!(report.error.is_none(), "{report:?}");
+    }
+}
+
+#[test]
+fn guarded_drag_stops_before_contact_and_cannot_tunnel_to_a_clear_endpoint() {
+    for (name, target_z, clearance) in
+        [("collision", 5.0, None), ("tunnel", -30.0, None), ("dynamic", -30.0, Some(2.0))]
+    {
+        let mut r = rig(&format!("guard-{name}"), Profile::Block);
+        let path = occurrence(r.b);
+        let before = r.doc.assembly().clone();
+        let depth = r.doc.undo_depth();
+        r.doc.begin_guarded_drag(path.clone(), clearance).unwrap();
+        r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, target_z))).unwrap();
+        assert!(r.doc.drag_pending());
+        wait_motion(&mut r.doc);
+        assert_eq!(&before, r.doc.assembly());
+        assert_eq!(depth, r.doc.undo_depth());
+        let row = r.doc.table().find(&path).unwrap();
+        let z = r.doc.table().world(row).translation.z;
+        let stop = 10.0 + clearance.unwrap_or(0.0);
+        assert!(z > stop && z < stop + 0.03, "{name}: stopped at {z}");
+        let report = r.doc.drag_report().unwrap();
+        assert_eq!(report.tier, "certified_mesh");
+        assert!(report.stopped && report.faces.len() == 2, "{report:?}");
+        assert!(report.distance.unwrap().lo >= clearance.unwrap_or(0.0));
+        r.doc.save(None).unwrap();
+        let reopened = AssemblyDocument::open(&r.file, options()).unwrap();
+        assert_eq!(&before, reopened.assembly(), "saving must not publish the preview");
+        r.doc.commit_drag().unwrap();
+        wait_motion(&mut r.doc);
+        assert!(!r.doc.dragging());
+        assert_eq!(r.doc.undo_depth(), depth + 1);
+        assert!(r.doc.undo());
+        assert_eq!(&before, r.doc.assembly());
+        assert!(r.doc.redo());
+        assert_eq!(r.doc.assembly().component(r.b).unwrap().placement.translation.z, z);
+        std::fs::remove_dir_all(r.dir).unwrap();
+    }
+}
+
+#[test]
+fn guarded_release_waits_for_latest_wish_and_cancel_discards_inflight_work() {
+    let mut r = rig("guard-lifecycle", Profile::Block);
+    let path = occurrence(r.b);
+    let before = r.doc.assembly().clone();
+    let depth = r.doc.undo_depth();
+    r.doc.begin_guarded_drag(path.clone(), None).unwrap();
+    for z in [25.0, 30.0, 40.0] {
+        r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, z))).unwrap();
+    }
+    r.doc.commit_drag().unwrap();
+    wait_motion(&mut r.doc);
+    assert!(!r.doc.dragging());
+    assert_eq!(r.doc.assembly().component(r.b).unwrap().placement.translation.z, 40.0);
+    assert_eq!(r.doc.undo_depth(), depth + 1);
+    r.doc.undo();
+    r.doc.begin_guarded_drag(path.clone(), None).unwrap();
+    r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, -30.0))).unwrap();
+    r.doc.cancel_drag();
+    r.doc.poll_drag();
+    assert!(!r.doc.drag_pending());
+    assert_eq!(&before, r.doc.assembly());
+    r.doc.begin_guarded_drag(path, None).unwrap();
+    r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, 30.0))).unwrap();
+    r.doc.rename(r.b, Some("Renamed during check".into())).unwrap();
+    r.doc.poll_drag();
+    assert!(!r.doc.drag_pending());
+    assert_eq!(r.doc.assembly().component(r.b).unwrap().placement, before.component(r.b).unwrap().placement);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}

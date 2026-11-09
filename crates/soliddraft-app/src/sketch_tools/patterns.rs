@@ -27,23 +27,33 @@ pub(crate) fn operation(s: &SketchSession, entities: Vec<EntityId>) -> Option<Op
 }
 
 pub(crate) fn preview(s: &SketchSession, operation: Operation) -> ToolPreview {
-    let Operation::EditPattern { group, .. } = operation else { return ToolPreview::default() };
-    let replaced = s
-        .sketch
-        .patterns
-        .iter()
-        .find(|p| p.id == group)
-        .map(|p| p.instances.iter().flat_map(|i| i.entities.iter().copied()).collect())
-        .unwrap_or_default();
     let mut copy = s.sketch.clone();
     match copy.apply_operation(&operation) {
-        Ok(ids) => ToolPreview {
-            added: ids.iter().filter_map(|id| copy.entity(*id).map(|e| e.kind)).collect(),
-            construction: ids.iter().filter_map(|id| copy.entity(*id).map(|e| e.construction)).collect(),
-            replaced,
-            operation: Some(operation),
-            ..Default::default()
-        },
+        Ok(_) => {
+            let replaced = s
+                .sketch
+                .drawn()
+                .filter(|old| {
+                    copy.entity(old.id).is_none_or(|new| old.kind != new.kind || old.construction != new.construction)
+                })
+                .map(|e| e.id)
+                .collect();
+            let changed: Vec<_> = copy
+                .drawn()
+                .filter(|new| {
+                    s.sketch
+                        .entity(new.id)
+                        .is_none_or(|old| old.kind != new.kind || old.construction != new.construction)
+                })
+                .collect();
+            ToolPreview {
+                added: changed.iter().map(|e| e.kind).collect(),
+                construction: changed.iter().map(|e| e.construction).collect(),
+                replaced,
+                operation: Some(operation),
+                ..Default::default()
+            }
+        }
         Err(error) => ToolPreview { refused: Some(error.to_string()), ..Default::default() },
     }
 }

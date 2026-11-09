@@ -210,3 +210,33 @@ fn direct_link_deletion_dissolves_the_definition_without_deleting_other_geometry
     assert!(empty.get("patterns").is_none());
     assert!(empty.get("next_pattern").is_none());
 }
+
+fn restore_pattern_after_power_trim(index: u32) {
+    let mut sketch = Sketch::new();
+    let seed = sketch.add(EntityKind::Line { a: P2::ZERO, b: p(2.0, 0.0) }, false);
+    sketch
+        .apply_operation(&Operation::Pattern {
+            entities: vec![seed],
+            spec: PatternSpec::Linear { step: p(0.0, 10.0), count: 4, second: None },
+            skipped: vec![],
+        })
+        .unwrap();
+    solved(&mut sketch);
+    let before = sketch.clone();
+    let y = f64::from(index) * 10.0;
+    let cuts = sketch.trim_stroke(p(1.0, y - 1.0), p(1.0, y + 1.0), Default::default()).unwrap();
+    assert_eq!(cuts.len(), 1);
+    assert!(sketch.patterns.is_empty(), "cutting a copy dissolves its definition");
+    for cut in cuts.into_iter().rev() {
+        cut.restore(&mut sketch);
+    }
+    assert_eq!(sketch, before, "retrace restores the entire pattern, relations and counters");
+}
+#[test]
+fn last_pattern_copy_power_trim_retrace_restores_the_complete_sketch() {
+    restore_pattern_after_power_trim(3);
+}
+#[test]
+fn first_pattern_copy_power_trim_retrace_restores_the_complete_sketch() {
+    restore_pattern_after_power_trim(1);
+}

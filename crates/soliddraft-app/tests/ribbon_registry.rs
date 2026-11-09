@@ -468,7 +468,6 @@ fn before_retained_patterns(id: &str, current: &mut Value) {
     }
 }
 
-
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }

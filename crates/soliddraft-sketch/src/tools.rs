@@ -8,7 +8,9 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, OffsetJoin, P2, PointRef, Sketch};
+use crate::{
+    Constraint, ConstraintId, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, OffsetJoin, P2, PointRef, Sketch,
+};
 
 mod patterns;
 pub(crate) use patterns::pattern_axes;
@@ -324,7 +326,10 @@ pub struct TrimCheckpoint {
     entity: Entity,
     entity_index: usize,
     next_entity: EntityId,
+    next_constraint: ConstraintId,
+    next_pattern: u32,
     constraints: Vec<(usize, Constraint)>,
+    patterns: Vec<(usize, PatternDefinition)>,
 }
 
 impl TrimCheckpoint {
@@ -332,11 +337,19 @@ impl TrimCheckpoint {
     pub fn restore(self, sketch: &mut Sketch) {
         sketch.entities.retain(|e| e.id < self.next_entity && e.id != self.entity.id);
         sketch.entities.insert(self.entity_index, self.entity);
-        sketch.constraints.retain(|c| !self.constraints.iter().any(|(_, original)| original.id == c.id));
+        let changed: std::collections::HashSet<_> = self.constraints.iter().map(|(_, c)| c.id).collect();
+        sketch.constraints.retain(|c| c.id < self.next_constraint && !changed.contains(&c.id));
         for (index, constraint) in self.constraints {
             sketch.constraints.insert(index, constraint);
         }
+        let changed: std::collections::HashSet<_> = self.patterns.iter().map(|(_, p)| p.id).collect();
+        sketch.patterns.retain(|p| p.id < self.next_pattern && !changed.contains(&p.id));
+        for (index, pattern) in self.patterns {
+            sketch.patterns.insert(index, pattern);
+        }
         sketch.next_entity = self.next_entity;
+        sketch.next_constraint = self.next_constraint;
+        sketch.next_pattern = self.next_pattern;
     }
 }
 
@@ -1065,21 +1078,34 @@ impl Sketch {
             });
             let Some(target) = target else { continue };
             let entity_index = trial.entities.iter().position(|e| e.id == target).expect("trim target exists");
-            let checkpoint = TrimCheckpoint {
+            let mut checkpoint = TrimCheckpoint {
                 at,
                 direction,
                 entity: trial.entities[entity_index],
                 entity_index,
                 next_entity: trial.next_entity,
-                constraints: trial
-                    .constraints
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| c.entities().contains(&target))
-                    .map(|(index, c)| (index, *c))
-                    .collect(),
+                next_constraint: trial.next_constraint,
+                next_pattern: trial.next_pattern,
+                constraints: Vec::new(),
+                patterns: Vec::new(),
             };
+            let before_constraints = trial.constraints.clone();
+            let before_patterns = trial.patterns.clone();
             let kept = trial.trim_interval(target, at, options)?;
+            // Include every change from pattern dissolution, not only relations on the target.
+            let after_constraints: std::collections::HashMap<_, _> =
+                trial.constraints.iter().map(|c| (c.id, c)).collect();
+            checkpoint.constraints = before_constraints
+                .into_iter()
+                .enumerate()
+                .filter(|(_, old)| after_constraints.get(&old.id).copied() != Some(old))
+                .collect();
+            let after_patterns: std::collections::HashMap<_, _> = trial.patterns.iter().map(|p| (p.id, p)).collect();
+            checkpoint.patterns = before_patterns
+                .into_iter()
+                .enumerate()
+                .filter(|(_, old)| after_patterns.get(&old.id).copied() != Some(old))
+                .collect();
             family.retain(|id| *id != target);
             family.extend(kept);
             checkpoints.push(checkpoint);

@@ -8,6 +8,7 @@ use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, PlaneKind, SketchPlane},
+    sketch::tools::{Operation, PatternSpec},
     sketch::{ConstraintKind, EntityKind, P2, PointRef, Sketch, solve},
     sketcher::Frame,
     state::{AppAction, SketchSession, Tool},
@@ -126,14 +127,17 @@ fn scroll_top(app: &mut App) {
     app.run_steps(36);
 }
 fn setup(name: &str) -> (App, std::path::PathBuf, soliddraft_app::document::FeatureId) {
-    let dir = std::env::temp_dir().join(format!("soliddraft-patterns-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(dir.join("config")).unwrap();
-    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let mut sketch = Sketch::new();
     let id = sketch.add(EntityKind::Circle { center: p(10.0, 10.0), radius: 2.0 }, false);
     sketch.constrain(ConstraintKind::Fix { point: PointRef::new(id, 0), at: p(10.0, 10.0) });
     sketch.constrain(ConstraintKind::Radius { entity: id, value: 2.0, diameter: false, label: p(14.0, 14.0) });
     solve::solve(&mut sketch, None, true);
+    setup_custom(sketch, name)
+}
+fn setup_custom(sketch: Sketch, name: &str) -> (App, std::path::PathBuf, soliddraft_app::document::FeatureId) {
+    let dir = std::env::temp_dir().join(format!("soliddraft-patterns-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("config")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let mut doc = ribbon::blank();
     let id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
@@ -222,7 +226,7 @@ fn grid_skips_retained_edits_cancel_history_and_reopen() {
     scroll_top(&mut app);
     number(&mut app, "First step u", 15.0);
     let preview = session(&app).preview.as_ref().unwrap();
-    assert_eq!(preview.replaced.len(), 4);
+    assert_eq!(preview.replaced.len(), 3, "unchanged copies remain in the original drawing");
     proof(&mut app, "grid-edit-preview");
     app.key_press(Key::Escape);
     app.run_steps(6);
@@ -299,7 +303,11 @@ fn circular_total_spans_skips_and_reopen() {
     number(&mut app, "Pattern count", 4.0);
     text(&mut app, "Skip instances");
     text(&mut app, "Instance 3");
-    assert_eq!(session(&app).preview.as_ref().unwrap().added.len(), 2);
+    assert_eq!(
+        session(&app).preview.as_ref().unwrap().added.len(),
+        1,
+        "unchanged copies remain in the original drawing"
+    );
     assert_eq!(pixel(&mut app, p(-9.3, 10.7)), omitted_background, "skipped instance has no stale region fill");
     assert_eq!(
         pixel(&mut app, p(-10.0, 10.0)),
@@ -316,6 +324,184 @@ fn circular_total_spans_skips_and_reopen() {
     redo(&mut app);
     assert_eq!(session(&app).sketch, full);
     reopen(&mut app, &dir, id);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn hover(app: &mut App, at: P2) {
+    let st = &app.state().state;
+    let pos =
+        Frame { plane: session(app).plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(at).unwrap();
+    app.hover_at(pos);
+    app.run_steps(6);
+}
+#[test]
+fn retained_circular_pivot_ignores_hover_and_moves_only_on_click() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let kind = EntityKind::Circle { center: p(10.0, 0.0), radius: 2.0 };
+    let seed = sketch.add(kind, false);
+    sketch.constrain(ConstraintKind::FixEntity { entity: seed, at: kind });
+    sketch
+        .apply_operation(&Operation::Pattern {
+            entities: vec![seed],
+            spec: PatternSpec::Circular { center: P2::ZERO, angle_degrees: 180.0, count: 2, total_angle: false },
+            skipped: vec![],
+        })
+        .unwrap();
+    solve::solve(&mut sketch, None, true);
+    let (mut app, dir, id) = setup_custom(sketch, "pivot");
+    let before = session(&app).sketch.clone();
+    button(&mut app, "Edit pattern 1");
+    hover(&mut app, p(0.0, 10.0));
+    proof(&mut app, "saved-pivot-hover");
+    assert_eq!(session(&app).modify.center, P2::ZERO, "hover keeps the saved pivot");
+    assert_eq!(session(&app).sketch, before);
+    assert!(session(&app).preview.as_ref().unwrap().operation.is_none());
+    pick(&mut app, p(0.0, 10.0));
+    assert!((session(&app).modify.center - p(0.0, 10.0)).len() < 1e-3, "explicit click relocates pivot");
+    hover(&mut app, p(0.0, -10.0));
+    assert!((session(&app).modify.center - p(0.0, 10.0)).len() < 1e-3);
+    proof(&mut app, "relocated-pivot-preview");
+    button(&mut app, "Apply");
+    hover(&mut app, p(0.0, -10.0));
+    assert!((session(&app).modify.center - p(0.0, 10.0)).len() < 1e-3, "Apply keeps the pivot placed");
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    let after = session(&app).sketch.clone();
+    let EntityKind::Circle { center, .. } = after.entity(2).unwrap().kind else { panic!("circle") };
+    assert!((center - p(-10.0, 20.0)).len() < 2e-3);
+    undo(&mut app);
+    assert_eq!(session(&app).sketch, before);
+    redo(&mut app);
+    assert_eq!(session(&app).sketch, after);
+    reopen(&mut app, &dir, id);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+#[test]
+fn constrained_copy_edit_previews_moved_seed_and_dependent_geometry() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let seed = sketch.add(EntityKind::Circle { center: P2::ZERO, radius: 2.0 }, false);
+    for step in [p(10.0, 0.0), p(0.0, 5.0)] {
+        sketch
+            .apply_operation(&Operation::Pattern {
+                entities: vec![seed],
+                spec: PatternSpec::Linear { step, count: 2, second: None },
+                skipped: vec![],
+            })
+            .unwrap();
+    }
+    let fixed = sketch.entity(2).unwrap().kind;
+    sketch.constrain(ConstraintKind::FixEntity { entity: 2, at: fixed });
+    sketch.entity_mut(3).unwrap().construction = true;
+    solve::solve(&mut sketch, None, true);
+    let (mut app, dir, id) = setup_custom(sketch, "solved-preview");
+    let before = session(&app).sketch.clone();
+    button(&mut app, "Edit pattern 1");
+    scroll_top(&mut app);
+    number(&mut app, "First step u", 20.0);
+    let preview = session(&app).preview.as_ref().unwrap().clone();
+    proof(&mut app, "solved-source-dependent-preview");
+    assert!(preview.replaced.contains(&seed), "preview replaces the moved source");
+    assert!(preview.replaced.contains(&3), "preview replaces moved dependent geometry");
+    let mut expected = before.clone();
+    expected.apply_operation(preview.operation.as_ref().unwrap()).unwrap();
+    let changed: Vec<_> = expected
+        .drawn()
+        .filter(|e| before.entity(e.id).is_none_or(|old| old.kind != e.kind || old.construction != e.construction))
+        .collect();
+    assert_eq!(preview.added, changed.iter().map(|e| e.kind).collect::<Vec<_>>());
+    assert_eq!(preview.construction, changed.iter().map(|e| e.construction).collect::<Vec<_>>());
+    assert_eq!(session(&app).sketch, before);
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    assert_eq!(session(&app).sketch, before, "Escape preserves source,copy and dependencies");
+    button(&mut app, "Edit pattern 1");
+    scroll_top(&mut app);
+    number(&mut app, "First step u", 20.0);
+    apply(&mut app);
+    let after = session(&app).sketch.clone();
+    assert_eq!(after.entities.len(), expected.entities.len());
+    for (actual, shown) in after.entities.iter().zip(&expected.entities) {
+        assert_eq!(actual.id, shown.id);
+        assert_eq!(std::mem::discriminant(&actual.kind), std::mem::discriminant(&shown.kind));
+        assert_eq!(actual.construction, shown.construction);
+        for (a, b) in actual.points().into_iter().zip(shown.points()) {
+            assert!(a.dist(b) < 1e-6, "Apply matches the complete solved preview");
+        }
+        if let (Some(a), Some(b)) = (actual.radius(), shown.radius()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+    for (entity, at) in [(seed, p(-10.0, 0.0)), (3, p(-10.0, 5.0))] {
+        let EntityKind::Circle { center, .. } = after.entity(entity).unwrap().kind else { panic!("circle") };
+        assert!((center - at).len() < 1e-6);
+    }
+    undo(&mut app);
+    assert_eq!(session(&app).sketch, before);
+    redo(&mut app);
+    assert_eq!(session(&app).sketch, after);
+    reopen(&mut app, &dir, id);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn power_trim_retrace_restores_pattern_without_a_document_edit() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    let seed = sketch.add(EntityKind::Line { a: P2::ZERO, b: p(2.0, 0.0) }, false);
+    sketch
+        .apply_operation(&Operation::Pattern {
+            entities: vec![seed],
+            spec: PatternSpec::Linear { step: p(0.0, 10.0), count: 4, second: None },
+            skipped: vec![],
+        })
+        .unwrap();
+    solve::solve(&mut sketch, None, true);
+    let (mut app, dir, _id) = setup_custom(sketch, "trim-retrace");
+    let st = &mut app.state_mut().state;
+    st.viewport.camera.zoom(10.0, None, st.viewport.rect.aspect_ratio());
+    app.run_steps(6);
+    ribbon::click_ribbon(&mut app, "Trim");
+    let before = session(&app).sketch.clone();
+    let revision = app.state().state.doc.revision();
+    hover(&mut app, p(1.0, 29.0));
+    let at = {
+        let st = &app.state().state;
+        Frame { plane: session(&app).plane, camera: &st.viewport.camera, rect: st.viewport.rect }
+            .screen(p(1.0, 29.0))
+            .unwrap()
+    };
+    app.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    app.step();
+    hover(&mut app, p(1.0, 31.0));
+    assert_eq!(session(&app).sketch.drawn().count(), 3);
+    assert!(session(&app).sketch.patterns.is_empty());
+    assert_eq!(session(&app).trim_drag.as_ref().unwrap().checkpoints.len(), 1);
+    proof(&mut app, "pattern-last-copy-trimmed");
+    hover(&mut app, p(1.0, 29.0));
+    assert_eq!(session(&app).sketch, before, "pointer retrace restores every pattern link");
+    app.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    app.run_steps(6);
+    assert_eq!(app.state().state.doc.revision(), revision, "fully retraced gesture records no edit");
+    assert!(session(&app).trim_drag.is_none());
+    proof(&mut app, "pattern-retrace-restored");
     drop(app);
     soliddraft_app::file::set_config_dir(None);
     std::fs::remove_dir_all(dir).unwrap();

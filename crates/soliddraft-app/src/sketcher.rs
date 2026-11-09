@@ -344,7 +344,8 @@ fn copy_value(s: &mut SketchSession, p: P2) {
         Tool::LinearPattern | Tool::Move | Tool::Copy if s.pending.len() == 1 => {
             s.modify.step = p.sub(s.pending[0].0);
         }
-        Tool::CircularPattern | Tool::Rotate if s.pending.is_empty() => s.modify.center = p,
+        Tool::CircularPattern if s.pending.is_empty() && s.modify.pattern_group.is_none() => s.modify.center = p,
+        Tool::Rotate if s.pending.is_empty() => s.modify.center = p,
         Tool::Scale if s.pending.is_empty() => s.modify.base = p,
         _ => {}
     }

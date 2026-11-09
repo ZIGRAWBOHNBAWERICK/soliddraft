@@ -20,6 +20,6 @@ runs:
         echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
         echo 'SCCACHE_GHA_ENABLED=on' >> "$GITHUB_ENV"
         echo "SCCACHE_GHA_VERSION=soliddraft-v1-$CACHE_VERSION" >> "$GITHUB_ENV"
-        echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+        # Keep absolute checkout paths in keys because Rust embeds fixture paths.
         echo 'SCCACHE_IDLE_TIMEOUT=0' >> "$GITHUB_ENV"
         echo "SCCACHE_SERVER_UDS=$RUNNER_TEMP/sccache-$GITHUB_JOB.sock" >> "$GITHUB_ENV"

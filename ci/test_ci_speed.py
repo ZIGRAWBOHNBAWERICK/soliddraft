@@ -18,6 +18,7 @@ spec.loader.exec_module(selection)
 class CompilerCache(unittest.TestCase):
     def test_cache_protocol_is_exported_with_its_credentials(self):
         action = (ROOT / '.github/actions/compile-cache/action.yml').read_text()
+        self.assertNotIn('SCCACHE_BASEDIRS', action)
         script = action.split('        script: |\n', 1)[1].split('    - shell:', 1)[0]
         exports = dict(re.findall(r"core.exportVariable\('([^']+)', process.env.([A-Z_0-9]+) ", script))
         required = ('ACTIONS_RESULTS_URL', 'ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_SERVICE_V2')

@@ -238,6 +238,44 @@ class BoatRunners(unittest.TestCase):
         self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
 
 
+class ArchiveWorkspace(unittest.TestCase):
+    def test_archive_preparation_keeps_the_commit_without_copying_credentials(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        block = text.split('      - name: Prepare the portable archive workspace\n', 1)[1].split('      - uses:', 1)[0]
+        script = textwrap.dedent(block.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / 'producer'
+            destination = root / 'hosted/project'
+            subprocess.run(['git', 'init', '-q', source], check=True)
+            (source / 'fixture').write_text('source')
+            subprocess.run(['git', '-C', source, 'add', 'fixture'], check=True)
+            subprocess.run(['git', '-C', source, '-c', 'user.name=Fixture', '-c',
+                            'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            subprocess.run(['git', '-C', source, 'config', 'http.extraheader', 'auth-marker'], check=True)
+            (source / 'untracked').write_text('runtime data')
+            binaries = root / 'bin'
+            binaries.mkdir()
+            sudo = binaries / 'sudo'
+            sudo.write_text('#!/bin/sh\necho called >> "$SUDO_LOG"\nexec "$@"\n')
+            sudo.chmod(0o755)
+            env = dict(os.environ, GITHUB_WORKSPACE=str(source),
+                       LINUX_ARCHIVE_WORKSPACE=str(destination), SUDO_LOG=str(root / 'sudo.log'),
+                       PATH=f'{binaries}:{os.environ["PATH"]}')
+            subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            self.assertEqual((destination / 'fixture').read_text(), 'source')
+            self.assertNotIn('auth-marker', (destination / '.git/config').read_text())
+            self.assertFalse((destination / 'untracked').exists())
+            self.assertEqual(subprocess.check_output(['git', '-C', source, 'rev-parse', 'HEAD']),
+                             subprocess.check_output(['git', '-C', destination, 'rev-parse', 'HEAD']))
+            env['GITHUB_WORKSPACE'] = str(destination)
+            subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            self.assertEqual((root / 'sudo.log').read_text().splitlines(), ['called'])
+        linux = text.split('\n  build-linux:', 1)[1].split('\n  test-linux:', 1)[0]
+        self.assertEqual(linux.count('working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}'), 2)
+        self.assertIn('run: test "$GITHUB_WORKSPACE" = "$LINUX_ARCHIVE_WORKSPACE"', text)
+
+
 class RustCache(unittest.TestCase):
     def test_compatible_jobs_share_caches_and_only_main_saves(self):
         keys = set()

@@ -3039,7 +3039,7 @@ mod tests {
         assert_eq!(panels(RibbonTab::Solid), ["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"]);
         assert_eq!(
             panels(RibbonTab::Sketch),
-            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Use sketch", "View"]
+            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"]
         );
         assert_eq!(panels(RibbonTab::Assembly), ["Edit", "Component", "File", "View"]);
         assert_eq!(panels(RibbonTab::Inspect), ["Measure", "Check", "Surface quality"]);

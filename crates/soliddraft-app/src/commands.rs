@@ -1480,6 +1480,12 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Line))
 .app_only(SKETCHER),
+        cmd("sketch_centreline", "Centreline", Icon::Cad("construction"), "Construction line: click points; right-click ends the chain")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::Centreline))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Centreline))
+.app_only(SKETCHER),
         cmd("sketch_circle", "Circle", Icon::Cad("circle"), "Circle: centre, then a point on it")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::C)

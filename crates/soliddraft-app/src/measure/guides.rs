@@ -20,7 +20,16 @@ pub fn offered(auto_relations: bool, raw: P2, inferred: (P2, Vec<Snap>)) -> (P2,
 pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     let at = Rect::from_min_size(pos2(rect.left() + 12.0, rect.top() + 58.0), vec2(150.0, 22.0));
     ui.put(at, egui::Checkbox::new(&mut s.auto_relations, "Auto relations"));
-    ui.put(at.translate(vec2(0.0, 24.0)), egui::Checkbox::new(&mut s.construction, "Draw construction"));
+    let centreline = s.tool == Tool::Centreline;
+    let mut construction = s.draws_construction();
+    ui.add_enabled_ui(!centreline, |ui| {
+        ui.put(at.translate(vec2(0.0, 24.0)), egui::Checkbox::new(&mut construction, "Draw construction"))
+    })
+    .inner
+    .on_disabled_hover_text("Centrelines always use construction geometry. Other tools keep their drawing setting.");
+    if !centreline {
+        s.construction = construction;
+    }
     if s.tool.places_points() {
         ui.scope_builder(egui::UiBuilder::new().max_rect(at.translate(vec2(0.0, 48.0))), |ui| {
             egui::ComboBox::from_id_salt("quick-snap")
@@ -31,7 +40,7 @@ pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
                         let enabled = match filter {
                             SnapFilter::Axes => !s.pending.is_empty(),
                             SnapFilter::Parallel | SnapFilter::Perpendicular | SnapFilter::Tangent => {
-                                s.tool == Tool::Line && !s.pending.is_empty()
+                                s.tool.draws_line() && !s.pending.is_empty()
                             }
                             _ => true,
                         };

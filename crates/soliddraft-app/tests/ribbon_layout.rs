@@ -78,8 +78,15 @@ const VIEW_RUNS: [&str; 9] = [
     "display_wireframe",
     "orthographic",
 ];
-const SKETCH_RUNS: [&str; 6] =
-    ["sketch_line", "sketch_circle", "sketch_rectangle", "sketch_arc", "sketch_slot", "sketch_point"];
+const SKETCH_RUNS: [&str; 7] = [
+    "sketch_line",
+    "sketch_centreline",
+    "sketch_circle",
+    "sketch_rectangle",
+    "sketch_arc",
+    "sketch_slot",
+    "sketch_point",
+];
 
 fn settle(app: &mut App) {
     app.run_steps(30);

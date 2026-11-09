@@ -1339,6 +1339,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             let tools = [
                 (Tool::Select, Icon::Views, "Select"),
                 (Tool::Line, Icon::Line, "Line (L)"),
+                (Tool::Centreline, Icon::Cad("construction"), "Centreline"),
                 (Tool::Rectangle, Icon::Rectangle, "Rectangle (R)"),
                 (Tool::Circle, Icon::Circle, "Circle (C)"),
                 (Tool::Ellipse, Icon::Circle, "Ellipse"),

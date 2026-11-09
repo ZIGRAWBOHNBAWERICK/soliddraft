@@ -238,6 +238,42 @@ class BoatRunners(unittest.TestCase):
         self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
 
 
+class BrowserStartup(unittest.TestCase):
+    def test_only_a_lost_bridge_retries_open_once(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        start = text.index('          open_browser() {')
+        end = text.index('          python3 -m http.server', start)
+        script = textwrap.dedent(text[start:end]) + '\nopen_browser http://127.0.0.1:8766/\n'
+        for mode, expected, calls in [
+            ('bridge_once', 0, ['open', 'stop', 'open']),
+            ('bridge_always', 7, ['open', 'stop', 'open']),
+            ('other', 7, ['open']),
+            ('stop_failed', 0, ['open', 'stop', 'open']),
+        ]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                tool = root / 'chrome-devtools-axi'
+                tool.write_text('#!/usr/bin/env python3\n'
+                                'import os, pathlib, sys\n'
+                                'log = pathlib.Path(os.environ["CALLS"])\n'
+                                'previous = log.read_text().splitlines() if log.exists() else []\n'
+                                'command = sys.argv[1]\n'
+                                'log.write_text("\\n".join(previous + [command]) + "\\n")\n'
+                                'mode = os.environ["MODE"]\n'
+                                'if command == "stop": sys.exit(7 if mode == "stop_failed" else 0)\n'
+                                'if mode != "other" and mode != "bridge_always" and "open" in previous: sys.exit(0)\n'
+                                'print("code: " + ("OTHER_ERROR" if mode == "other" else "BRIDGE_NOT_READY"))\n'
+                                'sys.exit(7)\n')
+                tool.chmod(0o755)
+                env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', MODE=mode,
+                           CALLS=str(root / 'calls'), RUNNER_TEMP=str(root))
+                result = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual((root / 'calls').read_text().splitlines(), calls)
+        for name in ('browser-journal.js', 'browser-recovery-storage.js'):
+            self.assertEqual(text.count(f'chrome-devtools-axi run < ci/{name}'), 1)
+
+
 class ArchiveWorkspace(unittest.TestCase):
     def test_archive_preparation_keeps_the_commit_without_copying_credentials(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()

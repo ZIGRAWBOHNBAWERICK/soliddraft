@@ -44,6 +44,7 @@ The scenario recorder accepts the timestamped log from the original sequential a
 The packaging job retains its SPDX inventory by running the same `syft scan dir:. -o spdx-json` command with cached syft 1.42.3. This removes the SBOM wrapper's per-run release installer; its inventory and the required release artifact stay in place. Clippy keeps the existing target cache. A measured lint run had zero compiler-cache hits, five fixture misses and 243 non-cacheable calls, so lint no longer installs sccache.
 
 The browser job also packages a runnable `web-application` artifact with trunk.
+An initial browser open that returns `BRIDGE_NOT_READY` restarts the named journal session and retries once. Other errors retain their failure status, and each browser test script runs once.
 `ci/browser-journal.js` runs against that complete application through
 `chrome-devtools-axi` and headless Chromium, using real localStorage quota and Web
 Locks. It covers a full store, reload, failed retry, redacted report export without

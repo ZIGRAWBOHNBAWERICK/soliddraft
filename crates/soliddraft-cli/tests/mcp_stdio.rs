@@ -170,3 +170,27 @@ fn mcp_bundle_keeps_the_part_and_question_after_a_refused_extrusion() {
     }));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn snap_scenario_builds_and_reopens_through_the_application_protocol() {
+    let mut c = Client::start(&["mcp"]);
+    c.request(
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},
+        "clientInfo":{"name":"snap-test","version":"1"}}),
+    );
+    let source =
+        include_str!("../../../ci/scenarios/sketch-snaps.json").replace("{bundle}", c.config.to_str().unwrap());
+    let scenario: Value = serde_json::from_str(&source).unwrap();
+    for step in scenario["steps"].as_array().unwrap() {
+        let name = step["tool"].as_str().unwrap();
+        let reply = c.call(name, step["arguments"].clone());
+        assert_eq!(reply["isError"], false, "{name}: {reply}");
+        if step.get("checks").is_some() {
+            let measured = c.call("mass_properties", json!({"name":"Boss-Extrude1"}));
+            assert_eq!(measured["isError"], false, "{measured}");
+            let volume = measured["structuredContent"]["volume_mm3"].as_f64().unwrap();
+            assert!((volume - 240.0).abs() < 0.005, "{volume}");
+        }
+    }
+}

@@ -79,7 +79,7 @@ and exports its actual Catallax recipe and allowance. The runner calls
 `catallax-verify replay` and requires the same refusal code and a complete
 response. A crash, timeout, invalid input or missing response fails the scenario.
 
-The eight `sketch-*.json` scenarios create profiles using `sketch_geometry`, then
+The `sketch-*.json` scenarios create profiles using `sketch_geometry`, then
 extrude them through Catallax and check volume and extrusion height. They cover a
 regular polygon, line and arc trim, line and arc extend, a mixed line/arc offset,
 mirror, linear pattern and circular pattern. `sketch-polygon-trim-extend.json` is
@@ -99,6 +99,13 @@ in the sketch plane, not world coordinates. Entity ids start at 1 in insertion
 order and are never reused. Trim keeps the target id for the first surviving
 piece and allocates another id only when it splits a curve. Copies receive new
 ids. See the scenarios for complete requests, including construction boundaries.
+
+`sketch-snaps.json` places lines at bounded guide intersections and adds parallel,
+perpendicular and tangent construction lines. The shared `snapped_line` operation
+accepts raw `start` and `end` points, a positive `reach` in mm, optional
+`start_filter` and `end_filter` snap classes, and a `construction` flag. Omitted
+filters offer all classes. The resulting profile extrudes to 240 mm³ and retains
+that volume after save/reopen. The MCP stdio test replays the same scenario.
 
 Both sketch tools accept an optional signed `offset` in millimetres along a
 reference plane's or planar face's normal. Omitted offsets are zero. A face

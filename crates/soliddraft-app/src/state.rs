@@ -575,20 +575,7 @@ impl DimEdit {
     }
 }
 
-/// An inference the sketcher offers at the cursor.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Snap {
-    /// Snapped onto an existing point.
-    Point(PointRef),
-    /// Snapped onto the middle of a line.
-    Midpoint(EntityId),
-    /// Snapped onto an entity's curve.
-    On(EntityId),
-    /// Level with the previous point.
-    Horizontal,
-    /// Plumb with the previous point.
-    Vertical,
-}
+pub use soliddraft_sketch::inference::{Snap, SnapFilter};
 
 /// The property list's relation scope, independent of geometry selection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -646,6 +633,8 @@ pub struct SketchSession {
     pub message: Option<(String, Instant)>,
     /// Whether the pointer infers relations; see [`crate::measure::guides`].
     pub auto_relations: bool,
+    /// A snap class for the next placement only.
+    pub quick_snap: Option<SnapFilter>,
     /// Whether the ribbon's relation list is open.
     pub relations_open: bool,
     /// Pending shared-value form; saved truth stays in the part's values.
@@ -724,6 +713,7 @@ impl SketchSession {
             was_orthographic,
             message: None,
             auto_relations: true,
+            quick_snap: None,
             relations_open: false,
             link_values: None,
             show_relations: true,
@@ -740,6 +730,8 @@ impl SketchSession {
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
         self.link_values = None;
+        self.quick_snap = None;
+        self.snaps.clear();
         self.cancel_trim();
         let bounds = if self.tool.bounded_trim() && tool.bounded_trim() {
             std::mem::take(&mut self.trim_bounds)

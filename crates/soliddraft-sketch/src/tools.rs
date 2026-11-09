@@ -48,6 +48,24 @@ pub enum Operation {
         #[serde(default)]
         construction: bool,
     },
+    /// Place a line with the same snap preview and retained relations as the viewport.
+    SnappedLine {
+        /// Raw first placement, in mm.
+        start: P2,
+        /// Raw second placement, in mm.
+        end: P2,
+        /// Positive snap reach in mm.
+        reach: f64,
+        /// Snap class for the first placement.
+        #[serde(default)]
+        start_filter: crate::inference::SnapFilter,
+        /// Snap class for the second placement.
+        #[serde(default)]
+        end_filter: crate::inference::SnapFilter,
+        /// Exclude the line from profiles.
+        #[serde(default)]
+        construction: bool,
+    },
     /// A regular polygon, counter-clockwise from its first vertex.
     Polygon {
         /// Circumcentre.
@@ -511,6 +529,18 @@ impl Sketch {
     pub fn apply_operation(&mut self, operation: &Operation) -> Result<Vec<EntityId>> {
         match operation {
             Operation::Add { kind, construction } => self.add_tool_entities(vec![(*kind, *construction)]),
+            Operation::SnappedLine { start, end, reach, start_filter, end_filter, construction } => {
+                use crate::inference::{InferenceOptions, apply_snaps, infer};
+                if !finite(*start) || !finite(*end) || !reach.is_finite() || *reach <= 0.0 {
+                    return refuse("snapped line needs finite points and a positive finite reach");
+                }
+                let (a, first) = infer(self, *start, None, InferenceOptions::uniform(*reach, *start_filter), P2::dist);
+                let (b, last) = infer(self, *end, Some(a), InferenceOptions::uniform(*reach, *end_filter), P2::dist);
+                let ids = self.add_tool_entities(vec![(EntityKind::Line { a, b }, *construction)])?;
+                apply_snaps(self, PointRef::new(ids[0], 0), &first, Some(ids[0]));
+                apply_snaps(self, PointRef::new(ids[0], 1), &last, Some(ids[0]));
+                Ok(ids)
+            }
             Operation::Polygon { center, vertex, sides } => {
                 let corners = polygon_corners(*center, *vertex, *sides)?;
                 self.add_tool_entities(

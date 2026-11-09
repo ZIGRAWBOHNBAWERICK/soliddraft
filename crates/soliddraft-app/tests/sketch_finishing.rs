@@ -197,11 +197,11 @@ fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
                 let (a, b) = ends(P2::ZERO, p(0.0, 10.0), reverse_b);
                 let second = sketch.add(EntityKind::Line { a, b }, false);
                 sketch.constrain(ConstraintKind::Coincident {
-                    a: PointRef::new(first, u8::from(!reverse_a)),
-                    b: PointRef::new(second, u8::from(reverse_b)),
+                    a: PointRef::new(first, usize::from(!reverse_a)),
+                    b: PointRef::new(second, usize::from(reverse_b)),
                 });
                 for (entity, index, at) in
-                    [(first, u8::from(reverse_a), p(-10.0, 0.0)), (second, u8::from(!reverse_b), p(0.0, 10.0))]
+                    [(first, usize::from(reverse_a), p(-10.0, 0.0)), (second, usize::from(!reverse_b), p(0.0, 10.0))]
                 {
                     sketch.constrain(ConstraintKind::Fix { point: PointRef::new(entity, index), at });
                 }
@@ -336,7 +336,7 @@ fn split_retargets_symmetry_and_keeps_it_through_undo_redo_and_reopen() {
             };
             let source = sketch.add(kind, false);
             let axis_kind = EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) };
-            let axis = sketch.add(axis_kind, true);
+            let axis = sketch.add(axis_kind.clone(), true);
             sketch.constrain(ConstraintKind::FixEntity { entity: axis, at: axis_kind });
             let partner = sketch.add(EntityKind::Point { p: p(-far.u, far.v) }, true);
             let partner_ref = PointRef::new(partner, 0);
@@ -365,7 +365,11 @@ fn split_retargets_symmetry_and_keeps_it_through_undo_redo_and_reopen() {
             } else {
                 ConstraintKind::Symmetric { a: replacement, b: partner_ref, axis }
             };
-            assert_eq!(after.constraint(symmetry).map(|c| c.kind), Some(expected), "arc={arc} swapped={swapped}");
+            assert_eq!(
+                after.constraint(symmetry).map(|c| c.kind.clone()),
+                Some(expected),
+                "arc={arc} swapped={swapped}"
+            );
             proof(&mut app, &format!("split-symmetry-{arc}-{swapped}"));
             undo(&mut app);
             assert_eq!(session(&app).sketch, before);

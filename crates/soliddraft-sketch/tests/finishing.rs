@@ -192,10 +192,11 @@ fn fixed_midpoint_corner(reverse_a: bool, reverse_b: bool) -> (Sketch, u32, u32,
     let a = line(&mut s, pa, qa);
     let b = line(&mut s, pb, qb);
     s.constrain(ConstraintKind::Coincident {
-        a: PointRef::new(a, u8::from(!reverse_a)),
-        b: PointRef::new(b, u8::from(reverse_b)),
+        a: PointRef::new(a, usize::from(!reverse_a)),
+        b: PointRef::new(b, usize::from(reverse_b)),
     });
-    for (entity, index, at) in [(a, u8::from(reverse_a), p(-10.0, 0.0)), (b, u8::from(!reverse_b), p(0.0, 10.0))] {
+    for (entity, index, at) in [(a, usize::from(reverse_a), p(-10.0, 0.0)), (b, usize::from(!reverse_b), p(0.0, 10.0))]
+    {
         s.constrain(ConstraintKind::Fix { point: PointRef::new(entity, index), at });
     }
     for (line, at) in [(a, p(-5.0, 0.0)), (b, p(0.0, 5.0))] {
@@ -280,7 +281,7 @@ fn split_preserves_symmetry_in_both_point_slots_and_tracks_the_original_far_end(
             };
             let source = s.add(kind, false);
             let axis_kind = EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) };
-            let axis = s.add(axis_kind, true);
+            let axis = s.add(axis_kind.clone(), true);
             s.constrain(ConstraintKind::FixEntity { entity: axis, at: axis_kind });
             let partner = s.add(EntityKind::Point { p: p(-far.u, far.v) }, true);
             let partner_ref = PointRef::new(partner, 0);
@@ -300,7 +301,7 @@ fn split_preserves_symmetry_in_both_point_slots_and_tracks_the_original_far_end(
             let marker = s.add(EntityKind::Point { p: far }, true);
             let coincidence = s.constrain(ConstraintKind::Coincident { a: far_ref, b: PointRef::new(marker, 0) });
             solved(&mut s);
-            let control = *s.constraint(unaffected).unwrap();
+            let control = s.constraint(unaffected).unwrap().clone();
             let ids = s.apply_operation(&Operation::Split { entity: source, at, second: None }).unwrap();
             let replacement = PointRef::new(ids[1], index);
             let expected = if swapped {
@@ -308,7 +309,11 @@ fn split_preserves_symmetry_in_both_point_slots_and_tracks_the_original_far_end(
             } else {
                 ConstraintKind::Symmetric { a: replacement, b: partner_ref, axis }
             };
-            assert_eq!(s.constraint(symmetry).map(|c| c.kind), Some(expected), "arc={arc} swapped={swapped}");
+            assert_eq!(
+                s.constraint(symmetry).map(|c| c.kind.clone()),
+                Some(expected.clone()),
+                "arc={arc} swapped={swapped}"
+            );
             assert_eq!(s.constraint(unaffected), Some(&control));
             assert_eq!(
                 s.constraint(coincidence).unwrap().kind,
@@ -323,7 +328,7 @@ fn split_preserves_symmetry_in_both_point_slots_and_tracks_the_original_far_end(
             let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
             solved(&mut reopened);
             near(reopened.point(replacement).unwrap(), changed);
-            assert_eq!(reopened.constraint(symmetry).map(|c| c.kind), Some(expected));
+            assert_eq!(reopened.constraint(symmetry).map(|c| c.kind.clone()), Some(expected));
         }
     }
 }

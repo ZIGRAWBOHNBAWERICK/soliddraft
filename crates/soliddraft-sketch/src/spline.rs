@@ -485,7 +485,7 @@ mod tests {
     fn unsupported_spline_edits_refuse_by_name_without_changing_the_sketch() {
         use crate::{
             EntityKind, Sketch,
-            tools::{End, Operation, TrimOptions},
+            tools::{ChamferSize, End, Operation, TrimOptions},
         };
         let mut sketch = Sketch::new();
         let curve = sketch.add(
@@ -508,6 +508,15 @@ mod tests {
             },
             Operation::Extend { entity: line, end: End::End, boundary: curve },
             Operation::Offset { entities: vec![curve], distance: 1.0 },
+            Operation::Fillet { a: curve, b: line, keep_a: P2::ZERO, keep_b: P2::new(4.0, 1.0), radius: 1.0 },
+            Operation::Chamfer {
+                a: curve,
+                b: line,
+                keep_a: P2::ZERO,
+                keep_b: P2::new(4.0, 1.0),
+                size: ChamferSize::Distances { first: 1.0, second: 1.0 },
+            },
+            Operation::Split { entity: curve, at: P2::new(2.0, 3.0), second: None },
         ] {
             let before = sketch.clone();
             let error = sketch.apply_operation(&operation).unwrap_err();

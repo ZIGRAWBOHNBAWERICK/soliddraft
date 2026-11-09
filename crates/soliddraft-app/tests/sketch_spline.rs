@@ -89,6 +89,22 @@ fn spline_tools_place_finish_close_undo_and_reopen_through_the_pointer() {
             pick(app,handle);
             assert!(session(app).selection.contains(&SketchSel::Point(PointRef::new(curve,1))));
             case.frame(app,"selected-handle");
+            let from = screen(app, handle);
+            let moved = handle + P2::new(5.0, 5.0);
+            let to = screen(app, moved);
+            app.run_steps(30);
+            app.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+            app.step();
+            app.hover_at(to);
+            app.run_steps(5);
+            app.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+            app.run_steps(5);
+            let actual = session(app).sketch.entity(curve).unwrap().point(1).unwrap();
+            assert!(actual.dist(moved) < 1e-3, "{mode:?} handle drag: {actual:?} != {moved:?}");
+            app.state_mut().state.push(AppAction::Undo);
+            app.run_steps(6);
+            assert_eq!(session(app).sketch, saved);
+
             ribbon::click_ribbon(app,"Line");
             let end=session(app).sketch.entity(curve).unwrap().point(points.len()-1).unwrap();
             pick(app,end); pick(app,P2::ZERO);

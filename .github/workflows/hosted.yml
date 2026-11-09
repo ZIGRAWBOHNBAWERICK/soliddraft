@@ -100,9 +100,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'lint')
     name: Lint (fmt, clippy)
-    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]') }}
-    env:
-      CARGO_BUILD_JOBS: ${{ needs.select.outputs.plain_jobs }}
+    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -127,9 +125,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'kernel')
     name: Catallax adapter and recipes
-    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]') }}
-    env:
-      CARGO_BUILD_JOBS: ${{ needs.select.outputs.plain_jobs }}
+    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -474,12 +470,15 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'msrv')
     name: Minimum Rust version (Rust-only crates)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]') }}
+    env:
+      CARGO_BUILD_JOBS: ${{ needs.select.outputs.plain_jobs }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-bin: false
           shared-key: native-dev
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check -p soliddraft-kernel-api -p soliddraft-recipe -p soliddraft-drawing -p soliddraft-sketch -p soliddraft-assistant -p soliddraft-materials -p soliddraft-assembly --all-features

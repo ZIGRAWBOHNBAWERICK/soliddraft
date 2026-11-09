@@ -193,7 +193,7 @@ class BoatRunners(unittest.TestCase):
     def test_outside_runs_cannot_override_runner_selection(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
-        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop'):
+        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop', 'msrv'):
             expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
             for actor, author, source, starter in (
                     ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
@@ -213,6 +213,9 @@ class BoatRunners(unittest.TestCase):
         for job in ('select', 'gate', 'test-linux'):
             self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
         self.assertIn('ci/select-runner.py', jobs['select'])
+        self.assertIn('needs.select.outputs.plain_runner', jobs['msrv'])
+        for job in ('lint', 'kernel'):
+            self.assertNotIn('needs.select.outputs.plain_runner', jobs[job])
         self.assertIn('lane: [proof, 1, 2, 3]', jobs['application-loop'])
         self.assertIn("if: matrix.lane == 'proof'", jobs['application-loop'])
         self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])

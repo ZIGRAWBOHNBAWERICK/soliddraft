@@ -413,11 +413,14 @@ pub enum Tool {
     /// Three consecutive corners, retaining opposite parallel sides.
     Parallelogram,
     Circle,
+    PerimeterCircle,
     Ellipse,
     PartialEllipse,
     FitSpline,
     ControlSpline,
     Arc,
+    ThreePointArc,
+    TangentArc,
     Slot,
     CentrepointSlot,
     ThreePointArcSlot,
@@ -472,11 +475,14 @@ impl Tool {
             Tool::ThreePointCentreRectangle => "3-point centre rectangle",
             Tool::Parallelogram => "Parallelogram",
             Tool::Circle => "Circle",
+            Tool::PerimeterCircle => "Perimeter circle",
             Tool::Ellipse => "Ellipse",
             Tool::PartialEllipse => "Partial ellipse",
             Tool::FitSpline => "Fit-point spline",
             Tool::ControlSpline => "Control-point spline",
             Tool::Arc => "Arc",
+            Tool::ThreePointArc => "Three-point arc",
+            Tool::TangentArc => "Tangent arc",
             Tool::Slot => "Slot",
             Tool::CentrepointSlot => "Centrepoint slot",
             Tool::ThreePointArcSlot => "Three-point arc slot",
@@ -528,11 +534,14 @@ impl Tool {
                 | Tool::ThreePointCentreRectangle
                 | Tool::Parallelogram
                 | Tool::Circle
+                | Tool::PerimeterCircle
                 | Tool::Ellipse
                 | Tool::PartialEllipse
                 | Tool::FitSpline
                 | Tool::ControlSpline
                 | Tool::Arc
+                | Tool::ThreePointArc
+                | Tool::TangentArc
                 | Tool::Slot
                 | Tool::CentrepointSlot
                 | Tool::ThreePointArcSlot
@@ -810,6 +819,8 @@ pub struct SketchSession {
     pub diagnostics: Option<crate::sketch_diagnostics::Inspection>,
     /// Whether new entities are drawn as construction geometry.
     pub construction: bool,
+    /// Direction for centrepoint arc placement.
+    pub arc_clockwise: bool,
     /// Smart dimension creates reference annotations instead of equations.
     pub reference_dimensions: bool,
     /// The Modify tools' numeric and pointer-placed values.
@@ -887,6 +898,7 @@ impl SketchSession {
             relations_filter: RelationFilter::default(),
             diagnostics: None,
             construction: false,
+            arc_clockwise: false,
             reference_dimensions: false,
             modify: ModifyInputs::default(),
             dynamic_mirror: None,

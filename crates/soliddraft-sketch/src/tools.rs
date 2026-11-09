@@ -1,6 +1,7 @@
 //! Tolerance-based sketch tools. These retain analytic lines and circular arcs;
 //! Catallax's existing converter supplies the exact kernel representation.
 
+pub mod circular;
 mod mirror;
 pub use mirror::{MirrorAxis, reflected};
 
@@ -61,6 +62,55 @@ pub enum Operation {
         /// Analytic geometry to add.
         kind: EntityKind,
         /// Exclude this entity from profiles.
+        #[serde(default)]
+        construction: bool,
+    },
+    /// Fit a circle through three perimeter points.
+    PerimeterCircle {
+        /// First perimeter point.
+        a: P2,
+        /// Second perimeter point.
+        b: P2,
+        /// Third perimeter point.
+        c: P2,
+        /// Exclude from profiles.
+        #[serde(default)]
+        construction: bool,
+    },
+    /// Place a centre-first arc with an explicit sweep direction.
+    CentrepointArc {
+        /// Circle centre.
+        center: P2,
+        /// Start point, setting the radius.
+        start: P2,
+        /// End direction, projected onto the radius.
+        end: P2,
+        /// Clockwise instead of counterclockwise.
+        #[serde(default)]
+        clockwise: bool,
+        /// Exclude from profiles.
+        #[serde(default)]
+        construction: bool,
+    },
+    /// Fit an arc through start, end and an intermediate point.
+    ThreePointArc {
+        /// First endpoint.
+        start: P2,
+        /// Last endpoint.
+        end: P2,
+        /// Point on the requested sweep.
+        through: P2,
+        /// Exclude from profiles.
+        #[serde(default)]
+        construction: bool,
+    },
+    /// Continue from an existing endpoint with persistent tangency and coincidence.
+    TangentArc {
+        /// Line endpoint 0/1 or circular arc endpoint 1/2.
+        from: PointRef,
+        /// New endpoint.
+        end: P2,
+        /// Exclude from profiles.
         #[serde(default)]
         construction: bool,
     },
@@ -409,7 +459,8 @@ fn entity(kind: EntityKind) -> Entity {
     Entity { id: 0, kind, construction: false }
 }
 
-pub(crate) fn valid(kind: &EntityKind) -> bool {
+/// Whether analytic geometry is finite and nondegenerate.
+pub fn valid(kind: &EntityKind) -> bool {
     match *kind {
         EntityKind::Spline { mode, ref points } => crate::spline::spans(mode, points).is_some(),
         ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
@@ -719,6 +770,25 @@ impl Sketch {
     pub fn apply_operation(&mut self, operation: &Operation) -> Result<Vec<EntityId>> {
         match operation {
             Operation::Add { kind, construction } => self.add_tool_entities(vec![(kind.clone(), *construction)]),
+            Operation::PerimeterCircle { a, b, c, construction } => {
+                self.add_tool_entities(vec![(circular::perimeter_circle(*a, *b, *c)?, *construction)])
+            }
+            Operation::CentrepointArc { center, start, end, clockwise, construction } => {
+                self.add_tool_entities(vec![(
+                    circular::centrepoint_arc(*center, *start, *end, *clockwise)?,
+                    *construction,
+                )])
+            }
+            Operation::ThreePointArc { start, end, through, construction } => {
+                self.add_tool_entities(vec![(circular::three_point_arc(*start, *end, *through)?, *construction)])
+            }
+            Operation::TangentArc { from, end, construction } => {
+                let (kind, join) = circular::tangent_arc(self, *from, *end)?;
+                let ids = self.add_tool_entities(vec![(kind, *construction)])?;
+                self.constrain(ConstraintKind::Coincident { a: *from, b: PointRef::new(ids[0], join) });
+                self.constrain(ConstraintKind::Tangent { a: from.entity, b: ids[0] });
+                Ok(ids)
+            }
             Operation::SnappedLine { start, end, reach, start_filter, end_filter, construction } => {
                 use crate::inference::{InferenceOptions, apply_snaps, infer};
                 if !finite(*start) || !finite(*end) || !reach.is_finite() || *reach <= 0.0 {

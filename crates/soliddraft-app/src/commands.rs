@@ -1493,6 +1493,12 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Circle))
 .app_only(SKETCHER),
+        cmd("sketch_perimeter_circle", "Perimeter circle", Icon::Cad("circle"), "Circle through three perimeter points")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::PerimeterCircle))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::PerimeterCircle))
+.app_only(SKETCHER),
         cmd("sketch_ellipse", "Ellipse", Icon::Circle, "Ellipse: centre, first semi-axis, second semi-axis")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Ellipse))
@@ -1548,12 +1554,24 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Parallelogram))
 .app_only(SKETCHER),
-        cmd("sketch_arc", "Arc", Icon::Cad("arc"), "Centre-point arc: centre, start, end")
+        cmd("sketch_arc", "Arc", Icon::Cad("arc"), "Centrepoint arc: centre, start, end; choose direction in properties")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::A)
             .run(|_| AppAction::SketchTool(Tool::Arc))
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Arc))
+.app_only(SKETCHER),
+        cmd("sketch_three_point_arc", "Three-point arc", Icon::Cad("arc"), "Arc: start, end, then a point on the sweep")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::ThreePointArc))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::ThreePointArc))
+.app_only(SKETCHER),
+        cmd("sketch_tangent_arc", "Tangent arc", Icon::Cad("arc"), "Continue a line or circular arc: endpoint, then new endpoint")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::TangentArc))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::TangentArc))
 .app_only(SKETCHER),
         cmd("sketch_slot", "Slot", Icon::Cad("slot_sketch"), "Straight slot: two centres, then the width")
             .on(Sketch, "Draw", Small)

@@ -655,7 +655,7 @@ pub fn operation_schema() -> Value {
         object(&[
             ("type", constant("symmetric_points")),
             ("a", point_ref.clone()),
-            ("b", point_ref),
+            ("b", point_ref.clone()),
             ("axis", id.clone()),
         ]),
         object(&[("type", constant("symmetric_entities")), ("a", id.clone()), ("b", id.clone()), ("axis", id.clone())]),
@@ -735,6 +735,34 @@ pub fn operation_schema() -> Value {
         ]),
     ]);
     any_of(vec![
+        object(&[
+            ("tool", constant("perimeter_circle")),
+            ("a", point.clone()),
+            ("b", point.clone()),
+            ("c", point.clone()),
+            ("construction", optional(boolean("Exclude from profiles, default false"))),
+        ]),
+        object(&[
+            ("tool", constant("centrepoint_arc")),
+            ("center", point.clone()),
+            ("start", point.clone()),
+            ("end", point.clone()),
+            ("clockwise", optional(boolean("Clockwise sweep, default counterclockwise"))),
+            ("construction", optional(boolean("Exclude from profiles, default false"))),
+        ]),
+        object(&[
+            ("tool", constant("three_point_arc")),
+            ("start", point.clone()),
+            ("end", point.clone()),
+            ("through", point.clone()),
+            ("construction", optional(boolean("Exclude from profiles, default false"))),
+        ]),
+        object(&[
+            ("tool", constant("tangent_arc")),
+            ("from", point_ref),
+            ("end", point.clone()),
+            ("construction", optional(boolean("Exclude from profiles, default false"))),
+        ]),
         object(&[("tool", constant("relate")), ("relation", relation)]),
         object(&[
             ("tool", constant("fillet")),

@@ -2,6 +2,8 @@
 import importlib.util
 import json
 import pathlib
+import subprocess
+import textwrap
 import tempfile
 import unittest
 from unittest import mock
@@ -12,6 +14,20 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('select_runner', ROOT / 'ci/select-runner.py')
 selection = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(selection)
+
+
+class CompilerCache(unittest.TestCase):
+    def test_javascript_action_exports_the_cache_protocol_to_shell_steps(self):
+        action = (ROOT / '.github/actions/compile-cache/action.yml').read_text()
+        script = textwrap.dedent(action.split('        script: |\n', 1)[1]
+                                 .split('    - shell:', 1)[0])
+        values = {'ACTIONS_RESULTS_URL': 'https://cache.invalid/',
+                  'ACTIONS_RUNTIME_TOKEN': 'test-token', 'ACTIONS_CACHE_SERVICE_V2': 'true'}
+        program = ('const exported = {}; const core = {exportVariable: (k, v) => exported[k] = v};'
+                   + 'process.env = ' + json.dumps(values) + ';' + script
+                   + 'process.stdout.write(JSON.stringify(exported));')
+        result = subprocess.check_output(['node', '-e', program], text=True)
+        self.assertEqual(json.loads(result), values)
 
 
 class RunnerHealth(unittest.TestCase):

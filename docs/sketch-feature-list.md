@@ -45,6 +45,8 @@ The tables below retain their original source-audit baseline. Later work has add
 
 - Orders 69–70: retained construction geometry and added a dedicated Centreline command in Draw, the property tools and the command palette. It shares line chaining and inference, always places construction geometry and preserves the ordinary Draw construction preference. Dashed previews, cancellation, per-segment history, `X`, profile exclusion, retained solver relations/dimensions and reopen have [native acceptance coverage](../crates/soliddraft-app/tests/sketch_construction.rs). The existing construction model, selected-entity toggle and profile conversion remain unchanged.
 
+- Order 71: retained the existing Line chain with [native pointer coverage](../crates/soliddraft-app/tests/sketch_line_chains.rs) for uncommitted starts, coincident continuation with Auto relations off, right-click/double-click termination while staying in Line, closure onto an existing point, independent restarts, cancellation, per-segment undo/redo and serialized joins. The viewport hint distinguishes ending a chain from Esc returning to Select; see [the sketch workflow](DESIGN.md#phase-2-the-sketcher).
+
 ## How to read the list
 
 - **SolidDraft** means an end-user command exists, not merely that the solver could express it. `yes` means the listed operation is implemented; `partial` names its limit; `no` names the inspected code boundary where support is absent. These are source-audit findings, not fresh interactive acceptance results.

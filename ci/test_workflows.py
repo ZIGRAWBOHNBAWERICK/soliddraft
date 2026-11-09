@@ -79,6 +79,23 @@ class Concurrency(unittest.TestCase):
             two = render(group, ref="refs/pull/8/merge", head_ref="feature-two")
             self.assertNotEqual(one, two, path.name)
 
+    def test_boat_benchmark_does_not_cancel_the_normal_qualification(self):
+        path = next(p for p in WORKFLOWS if p.name == 'hosted.yml')
+        group, _, text = settings(path)
+        values = dict(ref='refs/heads/feature', event_name='workflow_dispatch')
+        self.assertNotEqual(render(group, **values),
+                            render(group, **values, inputs={'benchmark_boat': True}))
+        boat = re.search(r"^          USE_BOAT: (.*)$", text, re.M)[1]
+        for event, requested, enabled, expected in [
+            ('pull_request', True, 'false', False),
+            ('workflow_dispatch', False, 'false', False),
+            ('workflow_dispatch', True, 'false', True),
+            ('pull_request', False, 'true', True),
+        ]:
+            self.assertEqual(evaluate(boat.removeprefix('${{ ').removesuffix(' }}'),
+                                      event_name=event, inputs={'benchmark_boat': requested},
+                                      variables={'USE_BOAT': enabled}), expected)
+
     def test_a_manual_run_on_a_branch_is_grouped_by_the_branch(self):
         for path in WORKFLOWS:
             group, cancel, _ = settings(path)
@@ -222,43 +239,6 @@ class BoatRunners(unittest.TestCase):
 
 
 class RustCache(unittest.TestCase):
-    def test_laptop_target_survives_retries_and_clears_only_its_own_stale_cache(self):
-        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
-        block = text.split("      - name: Reuse the laptop's bounded compilation target\n", 1)[1].split('      - uses:', 1)[0]
-        script = textwrap.dedent(block.split('        run: |\n', 1)[1])
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            binaries = root / 'bin'
-            binaries.mkdir()
-            for name, source in {'rustc': 'echo "$FAKE_COMPILER"', 'du': 'echo "$FAKE_SIZE ignored"'}.items():
-                path = binaries / name
-                path.write_text('#!/bin/sh\n' + source + '\n')
-                path.chmod(0o755)
-            other = root / 'other-lane'
-            other.write_text('keep')
-            cache = root / 'soliddraft-msrv'
-            env = dict(os.environ, PATH=f'{binaries}:{os.environ["PATH"]}', RUNNER_TOOL_CACHE=str(root),
-                       GITHUB_ENV=str(root / 'environment'), LOCK_HASH='lock-a', FAKE_COMPILER='rust-a', FAKE_SIZE='1')
-            def invoke():
-                subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
-            invoke()
-            witness = cache / 'target/compiled'
-            witness.write_text('compiled')
-            invoke()
-            self.assertTrue(witness.exists())
-            env['LOCK_HASH'] = 'lock-b'
-            invoke()
-            self.assertFalse(witness.exists())
-            witness.write_text('compiled')
-            env['FAKE_COMPILER'] = 'rust-b'
-            invoke()
-            self.assertFalse(witness.exists())
-            witness.write_text('compiled')
-            env['FAKE_SIZE'] = '8193'
-            invoke()
-            self.assertFalse(witness.exists())
-            self.assertEqual(other.read_text(), 'keep')
-
     def test_compatible_jobs_share_caches_and_only_main_saves(self):
         keys = set()
         count = 0

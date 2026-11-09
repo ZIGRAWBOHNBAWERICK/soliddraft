@@ -8,6 +8,10 @@ on:
     - cron: '17 23 * * *'
   workflow_dispatch:
     inputs:
+      benchmark_boat:
+        description: Use healthy boat runners for this manual qualification only
+        type: boolean
+        default: false
       refresh_catallax_views:
         description: Generate Catallax view and drawing baselines as artifacts for review
         type: boolean
@@ -30,7 +34,7 @@ permissions:
 # Superseded feature runs cancel. Main and release branch runs retain their exact-commit
 # evidence even while development continues on main.
 concurrency:
-  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
 
 # Health records expire after 15 minutes. Archive consumers stay on GitHub.
@@ -52,7 +56,7 @@ jobs:
           fetch-depth: 0
       - id: runner
         env:
-          USE_BOAT: ${{ vars.USE_BOAT }}
+          USE_BOAT: ${{ vars.USE_BOAT == 'true' || (github.event_name == 'workflow_dispatch' && inputs.benchmark_boat) }}
           RUNNER_BOAT_OK_AT: ${{ vars.RUNNER_BOAT_OK_AT }}
           RUNNER_BOHN03_OK_AT: ${{ vars.RUNNER_BOHN03_OK_AT }}
         run: python3 ci/select-runner.py
@@ -474,22 +478,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
-      - name: Reuse the laptop's bounded compilation target
-        if: needs.select.outputs.plain_jobs == '1'
-        env:
-          LOCK_HASH: ${{ hashFiles('Cargo.lock') }}
-        run: |
-          : "${RUNNER_TOOL_CACHE:?}"
-          cache="$RUNNER_TOOL_CACHE/soliddraft-msrv"
-          compiler=$(rustc -vV)
-          identity="$LOCK_HASH:$compiler"
-          previous=$(cat "$cache/identity" 2>/dev/null || true)
-          size=0
-          if [[ -d "$cache" ]]; then read -r size _ <<< "$(du -sm "$cache")"; fi
-          if [[ "$previous" != "$identity" || "$size" -gt 8192 ]]; then rm -rf "$cache"; fi
-          mkdir -p "$cache/target"
-          printf '%s' "$identity" > "$cache/identity"
-          echo "CARGO_TARGET_DIR=$cache/target" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         if: needs.select.outputs.plain_jobs != '1'
         with:

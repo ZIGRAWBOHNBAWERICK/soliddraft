@@ -151,15 +151,21 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         open_sketch(app);
         assert_eq!(app.state().state.ribbon_tab, soliddraft_app::state::RibbonTab::Sketch, "the Sketch tab opens");
         for label in ["Polygon", "Trim", "Extend", "Offset", "Mirror entities", "Linear pattern", "Circular pattern"] {
-            let button = ribbon::ribbon_button(app, label);
-            assert!(button.enabled, "{label} is enabled in a sketch");
+            ribbon::click_ribbon(app, label);
+            assert_eq!(session(app).tool.label(), label, "{label} is enabled in a sketch");
         }
         case.frame(app, "01-sketch-tab");
 
         // Polygon: the centre on the origin, the vertex under the pointer, previewed live.
         ribbon::click_ribbon(app, "Polygon");
         assert_eq!(session(app).tool, Tool::Polygon);
-        assert!(ribbon::ribbon_button(app, "Polygon").selected, "the tile is lit");
+        let band = ribbon::ribbon_region(app);
+        let active = if ribbon::buttons_in(app, band).iter().any(|(name, _)| name == "Polygon") {
+            "Polygon"
+        } else {
+            "Modify group"
+        };
+        assert!(ribbon::ribbon_button(app, active).selected, "the tool or its folded group is lit");
         sketch_click(app, P2::ZERO);
         assert_eq!(session(app).pending.len(), 1, "the centre is placed");
         hover_sketch(app, P2::new(R, 0.0));

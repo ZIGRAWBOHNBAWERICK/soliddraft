@@ -1366,6 +1366,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::Scale, Icon::Rectangle, "Scale entities"),
             ];
             ui.horizontal_wrapped(|ui| {
+                // Keep Modify controls above the command bar as the palette gains tools.
+                ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
                 for (tool, icon, tip) in tools {
                     let (r, resp) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
                     resp.widget_info(|| {

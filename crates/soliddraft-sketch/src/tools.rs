@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, P2, PointRef, Sketch};
 
+mod finishing;
+pub use finishing::{ChamferSize, JunctionPreview, SplitPreview};
+
 const EPS: f64 = 1e-6;
 
 /// Session or per-operation choices for trimming construction geometry.
@@ -79,6 +82,42 @@ pub enum Operation {
         vertex: P2,
         /// Number of sides, at least three.
         sides: u32,
+    },
+    /// Insert a tangent radius between two picked lines or arcs.
+    Fillet {
+        /// First curve.
+        a: EntityId,
+        /// Second curve.
+        b: EntityId,
+        /// Portion of the first curve to retain.
+        keep_a: P2,
+        /// Portion of the second curve to retain.
+        keep_b: P2,
+        /// Positive radius, mm.
+        radius: f64,
+    },
+    /// Replace a line corner by a segment sized from the corner.
+    Chamfer {
+        /// First line.
+        a: EntityId,
+        /// Second line.
+        b: EntityId,
+        /// Portion of the first line to retain.
+        keep_a: P2,
+        /// Portion of the second line to retain.
+        keep_b: P2,
+        /// Setbacks or setback and angle.
+        size: ChamferSize,
+    },
+    /// Divide a curve without removing any portion.
+    Split {
+        /// Line, arc or circle.
+        entity: EntityId,
+        /// Point projected onto the curve.
+        at: P2,
+        /// A second point, required only for a circle.
+        #[serde(default)]
+        second: Option<P2>,
     },
     /// Remove the picked interval between intersections with other sketch curves.
     Trim {
@@ -585,6 +624,9 @@ impl Sketch {
                         .collect(),
                 )
             }
+            Operation::Fillet { a, b, keep_a, keep_b, radius } => self.fillet(*a, *b, *keep_a, *keep_b, *radius),
+            Operation::Chamfer { a, b, keep_a, keep_b, size } => self.chamfer(*a, *b, *keep_a, *keep_b, *size),
+            Operation::Split { entity, at, second } => self.split(*entity, *at, *second),
             Operation::Trim { entity: id, at, options } => self.trim_interval(*id, *at, *options),
             Operation::TrimCorner { a, b, keep_a, keep_b, options } => {
                 self.trim_corner(*a, *b, *keep_a, *keep_b, *options)

@@ -7,7 +7,7 @@
 use crate::document::Command;
 use crate::sketch::{
     EntityId, P2, solve,
-    tools::{Operation, ToolError},
+    tools::{ChamferSize, Operation, ToolError},
 };
 use crate::state::{AppAction, SketchSel, SketchSession, Tool, ToolPreview};
 use crate::theme;
@@ -63,6 +63,32 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
 /// What `operation` would add to the sketch, tried on a copy. The refusal is the tool's
 /// own words.
 pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
+    let junction = match &operation {
+        Operation::Fillet { a, b, keep_a, keep_b, radius } => {
+            Some(s.sketch.fillet_preview(*a, *b, *keep_a, *keep_b, *radius))
+        }
+        Operation::Chamfer { a, b, keep_a, keep_b, size } => {
+            Some(s.sketch.chamfer_preview(*a, *b, *keep_a, *keep_b, *size))
+        }
+        _ => None,
+    };
+    if let Some(result) = junction {
+        return match result {
+            Ok(p) => ToolPreview {
+                added: p.kept.into_iter().chain([p.bridge]).collect(),
+                removed: p.removed,
+                operation: Some(operation),
+                ..Default::default()
+            },
+            Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
+        };
+    }
+    if let Operation::Split { entity, at, second } = &operation {
+        return match s.sketch.split_preview(*entity, *at, *second) {
+            Ok(p) => ToolPreview { added: p.pieces.to_vec(), operation: Some(operation), ..Default::default() },
+            Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
+        };
+    }
     if let Operation::TrimCorner { a, b, keep_a, keep_b, options } = &operation {
         return match s.sketch.corner_preview(*a, *b, *keep_a, *keep_b, *options) {
             Ok(p) => ToolPreview {
@@ -108,6 +134,7 @@ pub fn selection_preview(s: &SketchSession) -> Option<ToolPreview> {
 /// selection, so a copy can be copied again; a refusal leaves the sketch alone and says why.
 pub fn apply(s: &mut SketchSession, operation: &Operation, actions: &mut Vec<AppAction>) -> bool {
     let name = s.tool.label();
+    let old_relations: Vec<_> = s.sketch.constraints.iter().map(|c| c.id).collect();
     match s.sketch.apply_operation(operation) {
         Ok(ids) => {
             if s.construction && matches!(operation, Operation::Polygon { .. }) {
@@ -125,7 +152,15 @@ pub fn apply(s: &mut SketchSession, operation: &Operation, actions: &mut Vec<App
             s.preview = None;
             s.pending.clear();
             s.drag = None;
-            s.say(format!("{name} applied"));
+            let released = old_relations.iter().filter(|id| s.sketch.constraint(**id).is_none()).count();
+            if matches!(operation, Operation::Fillet { .. } | Operation::Chamfer { .. } | Operation::Split { .. })
+                && released > 0
+            {
+                let noun = if released == 1 { "relation" } else { "relations" };
+                s.say(format!("{name} applied; released {released} {noun} from changed geometry"));
+            } else {
+                s.say(format!("{name} applied"));
+            }
             true
         }
         Err(error) => {
@@ -209,6 +244,40 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             if let Some(why) = s.preview.as_ref().and_then(|p| p.refused.as_deref()) {
                 ui.label(egui::RichText::new(why).size(11.0).color(theme::error()));
             }
+        }
+        Tool::Fillet => {
+            hint(ui, "Pick each line or arc on the portion to keep. The preview inserts a tangent radius.");
+            ui.add(egui::DragValue::new(&mut s.modify.fillet_radius).speed(0.25).prefix("Radius ").suffix(" mm"));
+        }
+        Tool::Chamfer => {
+            hint(ui, "Pick each line on the portion to keep. Setbacks are measured from their corner.");
+            let mut angle = matches!(s.modify.chamfer, ChamferSize::DistanceAngle { .. });
+            if ui.checkbox(&mut angle, "Distance and angle").changed() {
+                s.modify.chamfer = match s.modify.chamfer {
+                    ChamferSize::Distances { first, .. } => {
+                        ChamferSize::DistanceAngle { distance: first, angle_degrees: 45.0 }
+                    }
+                    ChamferSize::DistanceAngle { distance, .. } => {
+                        ChamferSize::Distances { first: distance, second: distance }
+                    }
+                };
+            }
+            match &mut s.modify.chamfer {
+                ChamferSize::Distances { first, second } => {
+                    ui.add(egui::DragValue::new(first).speed(0.25).prefix("First setback ").suffix(" mm"));
+                    ui.add(egui::DragValue::new(second).speed(0.25).prefix("Second setback ").suffix(" mm"));
+                }
+                ChamferSize::DistanceAngle { distance, angle_degrees } => {
+                    ui.add(egui::DragValue::new(distance).speed(0.25).prefix("First setback ").suffix(" mm"));
+                    ui.add(egui::DragValue::new(angle_degrees).speed(1.0).prefix("Angle ").suffix(" degrees"));
+                }
+            }
+        }
+        Tool::Split => {
+            hint(
+                ui,
+                "Click inside a line or arc to split it. For a circle, pick two distinct points. No interval is removed.",
+            );
         }
         Tool::Extend => {
             hint(ui, "Point at the end of a line or arc and click. It lengthens to the nearest curve in its way.");
@@ -337,8 +406,43 @@ pub fn operation_schema() -> Value {
         ]),
         object(&[("type", constant("circle")), ("center", point.clone()), ("radius", number("Positive radius, mm"))]),
     ]);
+    let chamfer_size = any_of(vec![
+        object(&[
+            ("mode", constant("distances")),
+            ("first", number("First positive setback, mm")),
+            ("second", number("Second positive setback, mm")),
+        ]),
+        object(&[
+            ("mode", constant("distance_angle")),
+            ("distance", number("First positive setback, mm")),
+            ("angle_degrees", number("Acute angle to the first line, degrees")),
+        ]),
+    ]);
     any_of(vec![
         object(&[("tool", constant("relate")), ("relation", relation)]),
+
+        object(&[
+            ("tool", constant("fillet")),
+            ("a", id.clone()),
+            ("b", id.clone()),
+            ("keep_a", point.clone()),
+            ("keep_b", point.clone()),
+            ("radius", number("Positive radius, mm")),
+        ]),
+        object(&[
+            ("tool", constant("chamfer")),
+            ("a", id.clone()),
+            ("b", id.clone()),
+            ("keep_a", point.clone()),
+            ("keep_b", point.clone()),
+            ("size", chamfer_size),
+        ]),
+        object(&[
+            ("tool", constant("split")),
+            ("entity", id.clone()),
+            ("at", point.clone()),
+            ("second", optional(point.clone())),
+        ]),
         object(&[("tool", constant("add")), ("kind", geometry), ("construction", boolean("Exclude from profiles"))]),
         object(&[
             ("tool", constant("snapped_line")),

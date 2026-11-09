@@ -1,0 +1,180 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-fillet-chamfer-split",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "polygon",
+            "center": {
+              "u": 0,
+              "v": 0
+            },
+            "vertex": {
+              "u": 10,
+              "v": -10
+            },
+            "sides": 4
+          },
+          {
+            "tool": "fillet",
+            "a": 4,
+            "b": 1,
+            "keep_a": {
+              "u": 0,
+              "v": -10
+            },
+            "keep_b": {
+              "u": 10,
+              "v": 0
+            },
+            "radius": 2
+          },
+          {
+            "tool": "chamfer",
+            "a": 2,
+            "b": 3,
+            "keep_a": {
+              "u": 0,
+              "v": 10
+            },
+            "keep_b": {
+              "u": -10,
+              "v": 0
+            },
+            "size": {
+              "mode": "distances",
+              "first": 3,
+              "second": 4
+            }
+          },
+          {
+            "tool": "split",
+            "entity": 4,
+            "at": {
+              "u": 0,
+              "v": -10
+            }
+          },
+          {
+            "tool": "split",
+            "entity": 5,
+            "at": {
+              "u": 9.414213562373096,
+              "v": -9.414213562373096
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 0,
+                "v": 0
+              },
+              "radius": 3
+            },
+            "construction": true
+          },
+          {
+            "tool": "split",
+            "entity": 9,
+            "at": {
+              "u": 3,
+              "v": 0
+            },
+            "second": {
+              "u": -3,
+              "v": 0
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 20,
+                "v": 0
+              },
+              "b": {
+                "u": 30,
+                "v": 0
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 30,
+                "v": 0
+              },
+              "b": {
+                "u": 30,
+                "v": 10
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "chamfer",
+            "a": 11,
+            "b": 12,
+            "keep_a": {
+              "u": 22,
+              "v": 0
+            },
+            "keep_b": {
+              "u": 30,
+              "v": 8
+            },
+            "size": {
+              "mode": "distance_angle",
+              "distance": 2,
+              "angle_degrees": 45
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 3,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 1179.4247779607695,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/finishing.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/finishing.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 1179.4247779607695,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

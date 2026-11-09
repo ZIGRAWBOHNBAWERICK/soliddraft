@@ -11,7 +11,7 @@ use crate::document::{EdgeRef, EntityRef};
 use crate::drag::{Dimension, DragPreview, Finish};
 use crate::sketch::{
     ConstraintId, EntityId, EntityKind, P2, PointRef, Sketch,
-    tools::{Operation, TrimOptions},
+    tools::{ChamferSize, Operation, TrimOptions},
 };
 use crate::viewport::ViewportState;
 use crate::viewport::camera::StandardView;
@@ -413,6 +413,12 @@ pub enum Tool {
     Trim,
     /// Trims or extends two picked lines/arcs to a shared corner.
     TrimCorner,
+    /// Inserts a tangent radius between two lines or arcs.
+    Fillet,
+    /// Replaces a line corner by a setback or distance/angle chamfer.
+    Chamfer,
+    /// Divides a line or arc at one point, or a circle at two points.
+    Split,
     /// Removes the portion between two chosen boundary crossings.
     TrimInside,
     /// Removes the portions outside two chosen boundary crossings.
@@ -445,6 +451,9 @@ impl Tool {
             Tool::Polygon => "Polygon",
             Tool::Trim => "Trim",
             Tool::TrimCorner => "Trim corner",
+            Tool::Fillet => "Sketch fillet",
+            Tool::Chamfer => "Sketch chamfer",
+            Tool::Split => "Split entities",
             Tool::TrimInside => "Trim inside",
             Tool::TrimOutside => "Trim outside",
             Tool::Extend => "Extend",
@@ -481,9 +490,14 @@ impl Tool {
         matches!(self, Tool::TrimInside | Tool::TrimOutside)
     }
 
+    /// Tools that pick two retained portions around a corner.
+    pub fn picks_corner(self) -> bool {
+        matches!(self, Tool::TrimCorner | Tool::Fillet | Tool::Chamfer)
+    }
+
     /// Tools that change the line or arc under the pointer, and preview the change first.
     pub fn picks_curve(self) -> bool {
-        self.trims() || self == Tool::Extend
+        self.trims() || matches!(self, Tool::Extend | Tool::Fillet | Tool::Chamfer | Tool::Split)
     }
 
     /// Tools that keep the selection as their input.
@@ -498,6 +512,9 @@ impl Tool {
             || matches!(
                 self,
                 Tool::Polygon
+                    | Tool::Fillet
+                    | Tool::Chamfer
+                    | Tool::Split
                     | Tool::Extend
                     | Tool::Offset
                     | Tool::Mirror
@@ -515,6 +532,10 @@ pub struct ModifyInputs {
     pub sides: u32,
     /// Offset distance; positive is left of the chain's walking direction.
     pub distance: f64,
+    /// Sketch fillet radius, mm.
+    pub fillet_radius: f64,
+    /// Sketch chamfer sizing mode and values.
+    pub chamfer: ChamferSize,
     /// The mirror axis.
     pub axis_start: P2,
     pub axis_end: P2,
@@ -532,6 +553,8 @@ impl Default for ModifyInputs {
         Self {
             sides: 6,
             distance: 2.0,
+            fillet_radius: 2.0,
+            chamfer: ChamferSize::Distances { first: 2.0, second: 2.0 },
             axis_start: P2::ZERO,
             axis_end: P2::new(0.0, 10.0),
             step: P2::new(20.0, 0.0),
@@ -750,7 +773,7 @@ impl SketchSession {
         } else {
             Vec::new()
         };
-        if self.tool == Tool::TrimCorner || self.tool.bounded_trim() {
+        if self.tool.picks_corner() || self.tool == Tool::Split || self.tool.bounded_trim() {
             self.selection.clear();
         }
         self.corner_first = None;

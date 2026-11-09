@@ -30,7 +30,10 @@ fn gpu_available() -> bool {
 }
 
 fn out_dir() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/drawing");
+    // Nextest runs cases in separate processes, beyond the scope of the GPU mutex.
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/exit-test/drawing")
+        .join(std::process::id().to_string());
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

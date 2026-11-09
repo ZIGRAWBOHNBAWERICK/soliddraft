@@ -174,6 +174,9 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         // Polygon: the centre on the origin, the vertex under the pointer, previewed live.
         ribbon::click_ribbon(app, "Polygon");
         assert_eq!(session(app).tool, Tool::Polygon);
+        assert!(ribbon::reveal_ribbon_command(app, "sketch_polygon").selected, "the tile is lit");
+        ribbon::dismiss_ribbon_popup(app);
+        assert_eq!(session(app).tool, Tool::Polygon, "inspecting the tile keeps the tool active");
         let band = ribbon::ribbon_region(app);
         let active = if ribbon::buttons_in(app, band).iter().any(|(name, _)| name == "Polygon") {
             "Polygon"

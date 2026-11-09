@@ -297,13 +297,17 @@ impl Log {
 /// One tab as the app drew it, against the references. Commands the state switches off are
 /// held to the disabled treatment.
 fn compare_tab(app: &mut App, rows: &[(&str, &str, &[Family])], dark: bool, ppp: f32, log: &mut Log, seen: &str) {
-    let frame = app.render().expect("the frame renders");
+    let first_frame = app.render().expect("the frame renders");
     let panel = theme::panel().to_array();
     let background = Rgba(panel);
     for (label, key, families) in rows {
-        let button = ribbon::ribbon_button(app, label);
+        let id = ribbon::ribbon_command_id(app, label);
+        let button = ribbon::reveal_ribbon_command(app, id);
+        let row_frame = (!ribbon::ribbon_region(app).contains_rect(button.rect))
+            .then(|| app.render().expect("the group row renders"));
+        let frame = row_frame.as_ref().unwrap_or(&first_frame);
         let square = icon_square(app, label, button.rect);
-        let actual = crop(&frame, square, ppp);
+        let actual = crop(frame, square, ppp);
         let what = format!("{seen} {label}");
         let wanted = reference(key, dark);
         let expected = if button.enabled {
@@ -315,7 +319,7 @@ fn compare_tab(app: &mut App, rows: &[(&str, &str, &[Family])], dark: bool, ppp:
         let state = if button.enabled { "enabled" } else { "disabled" };
         log.row(&what, key, state, square.width(), actual.width(), off);
         assert!(off <= MAX_DIFFERENCE, "{what} is {off} from the {key} reference");
-        inside_its_square(&frame, square, ppp, background, &what);
+        inside_its_square(frame, square, ppp, background, &what);
         if button.enabled {
             for accent in *families {
                 let covered = share(&actual, *accent);
@@ -329,22 +333,28 @@ fn compare_tab(app: &mut App, rows: &[(&str, &str, &[Family])], dark: bool, ppp:
             let off = difference(&middle(&actual), &middle(&expected));
             assert!(off <= MAX_DIFFERENCE * 1.5, "{what} fills its opening: {off}");
         }
+        ribbon::dismiss_ribbon_popup(app);
     }
 }
 
 fn compare_glyphs(app: &mut App, rows: &[(&str, &str)], ppp: f32, log: &mut Log, seen: &str) {
-    let frame = app.render().expect("the frame renders");
+    let first_frame = app.render().expect("the frame renders");
     let background = Rgba(theme::panel().to_array());
     for (label, key) in rows {
-        let button = ribbon::ribbon_button(app, label);
+        let id = ribbon::ribbon_command_id(app, label);
+        let button = ribbon::reveal_ribbon_command(app, id);
+        let row_frame = (!ribbon::ribbon_region(app).contains_rect(button.rect))
+            .then(|| app.render().expect("the group row renders"));
+        let frame = row_frame.as_ref().unwrap_or(&first_frame);
         let square = icon_square(app, label, button.rect);
-        let actual = crop(&frame, square, ppp);
+        let actual = crop(frame, square, ppp);
         let color = if button.enabled { theme::ink() } else { theme::muted().gamma_multiply(0.55) };
         let wanted = fixture(&format!("line/{key}.png"));
         let off = difference(&actual, &over(&wanted, actual.dimensions(), background, tinted(color)));
         let what = format!("{seen} {label}");
         log.row(&what, key, "glyph", square.width(), actual.width(), off);
         assert!(off <= MAX_DIFFERENCE, "{what} is {off} from the {key} glyph");
+        ribbon::dismiss_ribbon_popup(app);
     }
 }
 

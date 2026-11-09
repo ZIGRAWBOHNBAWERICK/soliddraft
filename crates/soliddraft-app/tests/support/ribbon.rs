@@ -329,17 +329,29 @@ pub fn dismiss_ribbon_popup(app: &mut App) {
     }
 }
 
-/// Clicks a ribbon command, opening its collapsed group when needed.
-pub fn click_ribbon(app: &mut App, label: &str) {
+/// Resolves a command's shown label on the active ribbon tab.
+pub fn ribbon_command_id(app: &App, label: &str) -> &'static str {
     let state = &app.state().state;
-    let id = soliddraft_app::commands::ribbon(active_ribbon_tab(app))
+    soliddraft_app::commands::ribbon(active_ribbon_tab(app))
         .into_iter()
         .flat_map(|(_, items)| items)
         .find_map(|(c, _)| ((c.shown)(state) && c.label_in(state) == label).then_some(c.id))
-        .unwrap_or_else(|| panic!("ribbon command {label}"));
+        .unwrap_or_else(|| panic!("ribbon command {label}"))
+}
+
+/// Clicks a ribbon command, opening its collapsed group when needed.
+pub fn click_ribbon(app: &mut App, label: &str) {
+    let id = ribbon_command_id(app, label);
     let rect = reveal_ribbon_command(app, id).rect;
     click_at(app, rect.center());
     app.run_steps(4);
+}
+
+/// Clicks a quick-access command above the ribbon tabs.
+pub fn click_quick_access(app: &mut App, label: &str) {
+    let bounds = window(app);
+    let bar = Rect::from_min_max(bounds.min, pos2(bounds.right(), bounds.top() + soliddraft_app::theme::MENU_HEIGHT));
+    click_button(app, label, bar);
 }
 
 /// Rests the pointer on a control and reads only that control's tooltip node.
@@ -589,19 +601,38 @@ pub fn caption_names(app: &App) -> Vec<String> {
     captions(app).into_iter().map(|p| p.text).collect()
 }
 
-/// The open tab has exactly these groups in this order, each with its commands visible
-/// over its caption. The groups run left to right and do not overlap.
-pub fn groups_in_order(app: &App, groups: &[(&str, &[&str])]) {
+/// The open tab has exactly these groups in order, with visible command labels or
+/// a collapsed group that reveals them. Group footprints do not overlap.
+pub fn groups_in_order(app: &mut App, groups: &[(&str, &[&str])]) {
     let names: Vec<&str> = groups.iter().map(|(name, _)| *name).collect();
     assert_eq!(caption_names(app), names, "the group captions");
     let mut right = 0.0_f32;
     for ((name, labels), caption) in groups.iter().zip(captions(app)) {
-        let mut bounds = Rect::NOTHING;
+        let collapsed = buttons_in(app, ribbon_region(app))
+            .into_iter()
+            .find_map(|(label, button)| (label == format!("{name} group")).then_some(button));
+        let mut bounds = collapsed.unwrap_or(Rect::NOTHING);
         for label in *labels {
-            let rect = ribbon_button(app, label).rect;
+            let id = soliddraft_app::commands::ribbon(active_ribbon_tab(app))
+                .into_iter()
+                .find_map(|(group, items)| {
+                    if group != *name {
+                        return None;
+                    }
+                    let state = &app.state().state;
+                    items
+                        .into_iter()
+                        .find_map(|(c, _)| ((c.shown)(state) && c.label_in(state) == *label).then_some(c.id))
+                })
+                .unwrap_or_else(|| panic!("{name}: registered command {label}"));
+            let rect = reveal_ribbon_command(app, id).rect;
+            assert!(window(app).contains_rect(rect), "{name}: {id} is reachable");
             let seen = painted_in(app, rect).iter().any(|p| p.text == *label);
             assert!(seen, "{name}: the label {label} is painted on its button {rect:?}");
-            bounds = bounds.union(rect);
+            if collapsed.is_none() {
+                bounds = bounds.union(rect);
+            }
+            dismiss_ribbon_popup(app);
         }
         let x = caption.rect.center().x;
         assert!(

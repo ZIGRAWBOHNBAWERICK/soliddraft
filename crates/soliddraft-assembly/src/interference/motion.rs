@@ -13,6 +13,8 @@ pub struct MotionFace {
     pub path: OccurrencePath,
     /// Face label at the pinned revision.
     pub face: String,
+    /// Persistent face reference matching the display mesh, or empty when unavailable.
+    pub reference: String,
 }
 
 /// Feedback for the last collision or dynamic clearance update.
@@ -268,10 +270,12 @@ fn measure(
                     faces.push(MotionFace {
                         path: parts[i].path.clone(),
                         face: parts[i].mesh.faces[solids[i].face(*ta) as usize].1.clone(),
+                        reference: parts[i].mesh.face_names[solids[i].face(*ta) as usize].clone(),
                     });
                     faces.push(MotionFace {
                         path: parts[j].path.clone(),
                         face: parts[j].mesh.faces[solids[j].face(*tb) as usize].1.clone(),
+                        reference: parts[j].mesh.face_names[solids[j].face(*tb) as usize].clone(),
                     });
                 }
             } else if let Some(d) = minimum.as_mut() {

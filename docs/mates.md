@@ -690,5 +690,6 @@ For MCP, set `collision: true` or `clearance: "2 mm"` on `assembly_drag` with
 `phase: "begin"` or `phase: "move"`. Updates return `pending: true` while the worker
 runs. Call `phase: "poll"` until `pending` is false to inspect the completed preview.
 `motion` reports `tier: "certified_mesh"`, `stopped`, `clearance_mm`, the minimum
-`distance` bounds, nearest `faces` and any `error`. A `commit` during pending work
+`distance` bounds, nearest `faces` and any `error`. Each face has a readable `face` label
+and a persistent `reference` for display lookup. A `commit` during pending work
 requests release; poll until completion before relying on the committed assembly.

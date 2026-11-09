@@ -325,6 +325,8 @@ pub(crate) struct LocalMesh {
     triangle_faces: Vec<u32>,
     /// Each face's kernel id at this revision and its label.
     faces: Vec<(FaceId, String)>,
+    /// Persistent display references in the same order as `faces`.
+    face_names: Vec<String>,
     chord: f64,
 }
 
@@ -631,6 +633,7 @@ impl AssemblyDocument {
             return Err((CheckCode::UnsupportedBody, format!("{name}: the chord bound is not certified ({c})")));
         }
         let mut faces: Vec<(FaceId, String)> = Vec::new();
+        let mut face_names = Vec::new();
         let mut index: BTreeMap<FaceId, u32> = BTreeMap::new();
         let triangle_faces = mesh
             .triangle_faces
@@ -638,13 +641,20 @@ impl AssemblyDocument {
             .map(|f| {
                 *index.entry(*f).or_insert_with(|| {
                     let label = part.face_label(*f).map(|l| l.text).unwrap_or_else(|| format!("Face {}", f.raw()));
+                    face_names.push(part.face_name(*f));
                     faces.push((*f, label));
                     faces.len() as u32 - 1
                 })
             })
             .collect();
-        let local =
-            Arc::new(LocalMesh { positions: mesh.positions, indices: mesh.indices, triangle_faces, faces, chord });
+        let local = Arc::new(LocalMesh {
+            positions: mesh.positions,
+            indices: mesh.indices,
+            triangle_faces,
+            faces,
+            face_names,
+            chord,
+        });
         drop(part);
         if self.certified.meshes.len() >= MESHES_KEPT {
             self.certified.meshes.clear();

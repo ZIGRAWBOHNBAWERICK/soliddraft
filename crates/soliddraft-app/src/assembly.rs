@@ -237,7 +237,7 @@ impl AssemblySession {
                 let row = self.doc.table().find(&f.path)?;
                 let def = self.doc.store().get(self.doc.table().definition(row));
                 let mesh = def.mesh.as_ref()?;
-                let face = mesh.faces.iter().position(|face| face.name == f.face)?;
+                let face = mesh.faces.iter().position(|face| !f.reference.is_empty() && face.name == f.reference)?;
                 Some((row, face as u32))
             })
             .collect();

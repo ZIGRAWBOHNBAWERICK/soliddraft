@@ -1019,6 +1019,16 @@ fn guarded_drag_stops_before_contact_and_cannot_tunnel_to_a_clear_endpoint() {
         let report = r.doc.drag_report().unwrap();
         assert_eq!(report.tier, "certified_mesh");
         assert!(report.stopped && report.faces.len() == 2, "{report:?}");
+        for face in &report.faces {
+            let row = r.doc.table().find(&face.path).unwrap();
+            let mesh = r.doc.store().get(r.doc.table().definition(row)).mesh.as_ref().unwrap();
+            assert!(
+                mesh.faces.iter().any(|named| named.name == face.reference),
+                "nearest face {:?} has no display face: {:?}",
+                face.face,
+                mesh.faces.iter().map(|f| &f.name).collect::<Vec<_>>()
+            );
+        }
         assert!(report.distance.unwrap().lo >= clearance.unwrap_or(0.0));
         r.doc.save(None).unwrap();
         let reopened = AssemblyDocument::open(&r.file, options()).unwrap();

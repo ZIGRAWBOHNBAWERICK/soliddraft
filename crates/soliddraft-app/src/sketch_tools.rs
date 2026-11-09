@@ -420,7 +420,6 @@ pub fn operation_schema() -> Value {
     ]);
     any_of(vec![
         object(&[("tool", constant("relate")), ("relation", relation)]),
-
         object(&[
             ("tool", constant("fillet")),
             ("a", id.clone()),

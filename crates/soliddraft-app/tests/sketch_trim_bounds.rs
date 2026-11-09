@@ -226,8 +226,13 @@ fn bounded_trim_refusals_right_click_and_document_changes_are_safe() {
         assert_eq!(app.state().state.doc.revision(), revision);
     }
     frame(&mut app, "bounded-refused");
+    assert!(
+        ribbon::painted(&app).iter().any(|p| p.text == "Choose bounds again" && p.rect.contains_rect(p.full)),
+        "the reset control must be visible before clicking it"
+    );
     let window = ribbon::window(&app);
     ribbon::click_button(&mut app, "Choose bounds again", window);
+    assert!(session(&app).tool.bounded_trim(), "reset keeps the current trim mode");
     assert!(session(&app).trim_bounds.is_empty() && session(&app).selection.is_empty());
     assert_eq!(session(&app).sketch, before);
     pick(&mut app, P2::new(-3.0, 4.0));

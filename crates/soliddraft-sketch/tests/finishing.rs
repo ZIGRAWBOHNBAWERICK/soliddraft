@@ -183,3 +183,81 @@ fn finishing_refusals_are_atomic_and_operations_roundtrip() {
         assert_eq!(serde_json::from_str::<Operation>(&serde_json::to_string(&operation).unwrap()).unwrap(), operation);
     }
 }
+
+fn fixed_midpoint_corner(reverse_a: bool, reverse_b: bool) -> (Sketch, u32, u32, u32) {
+    let mut s = Sketch::new();
+    let ends = |a, b, reverse| if reverse { (b, a) } else { (a, b) };
+    let (pa, qa) = ends(p(-10.0, 0.0), P2::ZERO, reverse_a);
+    let (pb, qb) = ends(P2::ZERO, p(0.0, 10.0), reverse_b);
+    let a = line(&mut s, pa, qa);
+    let b = line(&mut s, pb, qb);
+    s.constrain(ConstraintKind::Coincident {
+        a: PointRef::new(a, u8::from(!reverse_a)),
+        b: PointRef::new(b, u8::from(reverse_b)),
+    });
+    for (entity, index, at) in [(a, u8::from(reverse_a), p(-10.0, 0.0)), (b, u8::from(!reverse_b), p(0.0, 10.0))] {
+        s.constrain(ConstraintKind::Fix { point: PointRef::new(entity, index), at });
+    }
+    for (line, at) in [(a, p(-5.0, 0.0)), (b, p(0.0, 5.0))] {
+        let id = s.add(EntityKind::Point { p: at }, true);
+        s.constrain(ConstraintKind::Midpoint { point: PointRef::new(id, 0), line });
+        s.constrain(ConstraintKind::Fix { point: PointRef::new(id, 0), at });
+    }
+    let unrelated = line(&mut s, p(8.0, -4.0), p(16.0, -4.0));
+    let marker = s.add(EntityKind::Point { p: p(12.0, -4.0) }, true);
+    s.constrain(ConstraintKind::Midpoint { point: PointRef::new(marker, 0), line: unrelated });
+    s.constrain(ConstraintKind::Fix { point: PointRef::new(marker, 0), at: p(12.0, -4.0) });
+    solved(&mut s);
+    (s, a, b, unrelated)
+}
+
+fn check_fixed_midpoint_treatment(fillet: bool) {
+    for reverse_a in [false, true] {
+        for reverse_b in [false, true] {
+            let (mut s, a, b, unrelated) = fixed_midpoint_corner(reverse_a, reverse_b);
+            let old = s.clone();
+            let (operation, preview) = if fillet {
+                (
+                    Operation::Fillet { a, b, keep_a: p(-8.0, 0.0), keep_b: p(0.0, 8.0), radius: 2.0 },
+                    s.fillet_preview(a, b, p(-8.0, 0.0), p(0.0, 8.0), 2.0).unwrap(),
+                )
+            } else {
+                let size = ChamferSize::Distances { first: 2.0, second: 2.0 };
+                (
+                    Operation::Chamfer { a, b, keep_a: p(-8.0, 0.0), keep_b: p(0.0, 8.0), size },
+                    s.chamfer_preview(a, b, p(-8.0, 0.0), p(0.0, 8.0), size).unwrap(),
+                )
+            };
+            assert_eq!(s, old, "preview must not change constraints");
+            s.apply_operation(&operation).unwrap();
+            solved(&mut s);
+            near(s.point(preview.joint[0]).unwrap(), p(-2.0, 0.0));
+            near(s.point(preview.joint[1]).unwrap(), p(0.0, 2.0));
+            assert!(
+                !s.constraints
+                    .iter()
+                    .any(|c| matches!(c.kind, ConstraintKind::Midpoint { line, .. } if line == a || line == b))
+            );
+            assert!(
+                s.constraints
+                    .iter()
+                    .any(|c| matches!(c.kind, ConstraintKind::Midpoint { line, .. } if line == unrelated))
+            );
+            for c in old.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Fix { .. })) {
+                assert_eq!(s.constraint(c.id), Some(c), "unrelated and far-end anchors survive");
+                let ConstraintKind::Fix { point, at } = c.kind else { unreachable!() };
+                near(s.point(point).unwrap(), at);
+            }
+        }
+    }
+}
+
+#[test]
+fn fillet_releases_fixed_external_midpoints_in_all_endpoint_orders() {
+    check_fixed_midpoint_treatment(true);
+}
+
+#[test]
+fn chamfer_releases_fixed_external_midpoints_in_all_endpoint_orders() {
+    check_fixed_midpoint_treatment(false);
+}

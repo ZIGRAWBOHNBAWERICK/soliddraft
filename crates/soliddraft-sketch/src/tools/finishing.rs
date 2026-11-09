@@ -275,7 +275,8 @@ impl Sketch {
             [a, b].into_iter().filter(|id| self.entity(*id).is_some_and(|e| e.is_line())).collect::<Vec<_>>();
         // A removed corner point cannot keep its old anchor or coincidence. Far endpoints retain theirs.
         self.constraints.retain(|c| c.is_reference() || (!c.points().iter().any(|p| preview.joint.contains(p))
-            && !matches!(c.kind, ConstraintKind::Equal { a, b } if line_changes.contains(&a) || line_changes.contains(&b))));
+            && !matches!(c.kind, ConstraintKind::Equal { a, b } if line_changes.contains(&a) || line_changes.contains(&b))
+            && !matches!(c.kind, ConstraintKind::Midpoint { line, .. } if line_changes.contains(&line))));
         self.entity_mut(a).expect("validated target").kind = preview.kept[0];
         self.entity_mut(b).expect("validated target").kind = preview.kept[1];
         let bridge = self.add(preview.bridge, construction);

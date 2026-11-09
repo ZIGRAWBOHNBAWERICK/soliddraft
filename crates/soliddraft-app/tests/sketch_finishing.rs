@@ -7,10 +7,14 @@ use egui::{Key, Modifiers, Pos2};
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, PlaneKind, SketchPlane},
-    sketch::{ConstraintKind, EntityKind, P2, Sketch, tools::ChamferSize},
+    sketch::{ConstraintKind, Entity, EntityKind, P2, PointRef, Sketch, SolveStatus, tools::ChamferSize},
     sketcher::{self, Frame},
     state::{AppAction, SketchSession, Tool},
 };
+
+use std::sync::Mutex;
+
+static SERIAL: Mutex<()> = Mutex::new(());
 
 fn p(u: f64, v: f64) -> P2 {
     P2::new(u, v)
@@ -77,6 +81,7 @@ fn undo(app: &mut App) {
 
 #[test]
 fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir().join(format!("soliddraft-finishing-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
@@ -173,4 +178,139 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     drop(app);
     soliddraft_app::file::set_config_dir(None);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (label, fillet) in [("Sketch fillet", true), ("Sketch chamfer", false)] {
+        for reverse_a in [false, true] {
+            for reverse_b in [false, true] {
+                let name = format!("midpoint-{}-{reverse_a}-{reverse_b}", if fillet { "fillet" } else { "chamfer" });
+                let dir = std::env::temp_dir().join(format!("soliddraft-{name}-{}", std::process::id()));
+                std::fs::create_dir_all(dir.join("config")).unwrap();
+                soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+                let mut sketch = Sketch::new();
+                let ends = |a, b, reverse| if reverse { (b, a) } else { (a, b) };
+                let (a, b) = ends(p(-10.0, 0.0), P2::ZERO, reverse_a);
+                let first = sketch.add(EntityKind::Line { a, b }, false);
+                let (a, b) = ends(P2::ZERO, p(0.0, 10.0), reverse_b);
+                let second = sketch.add(EntityKind::Line { a, b }, false);
+                sketch.constrain(ConstraintKind::Coincident {
+                    a: PointRef::new(first, u8::from(!reverse_a)),
+                    b: PointRef::new(second, u8::from(reverse_b)),
+                });
+                for (entity, index, at) in
+                    [(first, u8::from(reverse_a), p(-10.0, 0.0)), (second, u8::from(!reverse_b), p(0.0, 10.0))]
+                {
+                    sketch.constrain(ConstraintKind::Fix { point: PointRef::new(entity, index), at });
+                }
+                for (line, at) in [(first, p(-5.0, 0.0)), (second, p(0.0, 5.0))] {
+                    let id = sketch.add(EntityKind::Point { p: at }, true);
+                    sketch.constrain(ConstraintKind::Midpoint { point: PointRef::new(id, 0), line });
+                    sketch.constrain(ConstraintKind::Fix { point: PointRef::new(id, 0), at });
+                }
+                let unrelated = sketch.add(EntityKind::Line { a: p(8.0, -4.0), b: p(16.0, -4.0) }, true);
+                let marker = sketch.add(EntityKind::Point { p: p(12.0, -4.0) }, true);
+                sketch.constrain(ConstraintKind::Midpoint { point: PointRef::new(marker, 0), line: unrelated });
+                sketch.constrain(ConstraintKind::Fix { point: PointRef::new(marker, 0), at: p(12.0, -4.0) });
+                let mut doc = ribbon::blank();
+                let id = doc
+                    .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+                    .unwrap()
+                    .unwrap();
+                doc.apply(Command::EditSketch { id, sketch }).unwrap();
+                let mut app = ribbon::app(doc);
+                app.state_mut().state.push(AppAction::EditSketch(id));
+                app.run_steps(30);
+                let before = session(&app).sketch.clone();
+                tool(&mut app, label);
+                pick(&mut app, p(-8.0, 0.0));
+                hover(&mut app, p(0.0, 8.0));
+                let preview = session(&app).preview.as_ref().expect("preview").added.clone();
+                assert_eq!(preview.len(), 3, "{name}");
+                assert_eq!(session(&app).sketch, before);
+                pick(&mut app, p(0.0, 8.0));
+                let after = session(&app).sketch.clone();
+                proof(&mut app, &name);
+                assert!(
+                    matches!(after.status, SolveStatus::UnderDefined | SolveStatus::FullyDefined),
+                    "{name}: {:?}",
+                    after.status
+                );
+                for (id, kind) in [(first, preview[0]), (second, preview[1])] {
+                    let expected = Entity { id, kind, construction: false };
+                    for index in 0..2 {
+                        assert!(
+                            after.point(PointRef::new(id, index)).unwrap().dist(expected.point(index).unwrap()) < 1e-5,
+                            "{name}: applied geometry must match preview"
+                        );
+                    }
+                }
+                assert!(!after.constraints.iter().any(
+                    |c| matches!(c.kind, ConstraintKind::Midpoint { line, .. } if line == first || line == second)
+                ));
+                assert!(
+                    after
+                        .constraints
+                        .iter()
+                        .any(|c| matches!(c.kind, ConstraintKind::Midpoint { line, .. } if line == unrelated))
+                );
+                assert!(
+                    session(&app).message.as_ref().unwrap().0.contains("released 3 relations"),
+                    "{name}: {:?}",
+                    session(&app).message
+                );
+                for c in before.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Fix { .. })) {
+                    assert_eq!(after.constraint(c.id), Some(c));
+                    let ConstraintKind::Fix { point, at } = c.kind else { unreachable!() };
+                    assert!(after.point(point).unwrap().dist(at) < 1e-5, "{name}: fixed geometry must stay put");
+                }
+                undo(&mut app);
+                assert_eq!(session(&app).sketch.constraints, before.constraints, "{name}: one undo");
+                for entity in before.drawn() {
+                    for index in 0..entity.point_count() {
+                        assert!(
+                            session(&app)
+                                .sketch
+                                .point(PointRef::new(entity.id, index))
+                                .unwrap()
+                                .dist(entity.point(index).unwrap())
+                                < 1e-5,
+                            "{name}: undo restores geometry"
+                        );
+                    }
+                }
+                app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+                app.run_steps(8);
+                assert_eq!(session(&app).sketch.constraints, after.constraints, "{name}: one redo");
+                let path = dir.join("midpoints.dwprt");
+                app.state_mut().state.push(AppAction::ExitSketch(None));
+                app.run_steps(6);
+                app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+                app.run_steps(6);
+                app.state_mut().state.push(AppAction::Open(Some(path)));
+                app.run_steps(10);
+                app.state_mut().state.push(AppAction::EditSketch(id));
+                app.run_steps(30);
+                assert_eq!(session(&app).sketch.constraints, after.constraints, "{name}: saved relations");
+                for entity in after.drawn() {
+                    for index in 0..entity.point_count() {
+                        assert!(
+                            session(&app)
+                                .sketch
+                                .point(PointRef::new(entity.id, index))
+                                .unwrap()
+                                .dist(entity.point(index).unwrap())
+                                < 1e-5,
+                            "{name}: reopen restores geometry"
+                        );
+                    }
+                }
+                drop(app);
+                soliddraft_app::file::set_config_dir(None);
+                std::fs::remove_dir_all(dir).unwrap();
+            }
+        }
+    }
 }

@@ -1523,6 +1523,12 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s,Tool::ControlSpline))
 .app_only(SKETCHER),
+        cmd("sketch_text", "Sketch text", Icon::Text, "Place editable font outlines on the sketch baseline")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::Text))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Text))
+.app_only(SKETCHER),
         cmd("sketch_rectangle", "Rectangle", Icon::Cad("rect"), "Corner rectangle")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::R)

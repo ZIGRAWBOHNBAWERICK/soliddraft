@@ -224,6 +224,29 @@ fn before_trim_modes(id: &str, current: &mut Value) {
         }),
         "the spline schema declares both modes without a fixed point limit"
     );
+    let index = kinds.iter().position(|variant| variant["properties"]["type"]["const"] == "text").unwrap();
+    assert_eq!(
+        kinds.remove(index),
+        json!({
+            "type":"object", "additionalProperties":false,
+            "properties":{
+                "type":{"type":"string","const":"text"},
+                "text":{"type":"object","additionalProperties":false,
+                    "properties":{
+                        "content":{"type":"string"},
+                        "font":{"type":"string","enum":["inter_regular","inter_medium"]},
+                        "position":point,
+                        "height":{"type":"number"},
+                        "angle":{"type":"number"},
+                        "reflected":{"type":"boolean"}
+                    },
+                    "required":["content","font","position","height"]
+                }
+            },
+            "required":["type","text"]
+        }),
+        "text declares its bundled fonts and editable baseline frame"
+    );
 }
 
 fn before_inference_snaps(id: &str, current: &mut Value) {
@@ -601,6 +624,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                     "sketch_partial_ellipse",
                     "sketch_fit_spline",
                     "sketch_control_spline",
+                    "sketch_text",
                     "sketch_rectangle",
                     "sketch_centre_rectangle",
                     "sketch_three_point_corner_rectangle",

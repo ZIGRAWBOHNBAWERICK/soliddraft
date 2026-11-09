@@ -13,6 +13,7 @@ soliddraft-kernel-api.workspace = true
 ezpz.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+ttf-parser = "0.25.1"
 
 [dev-dependencies]
 # Exact float parsing, so solved sketches round-trip bit for bit in the tests.

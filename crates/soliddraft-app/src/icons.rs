@@ -56,6 +56,8 @@ pub enum Icon {
     Plane,
     Axis,
     Point,
+    /// Sketch text outlines.
+    Text,
     Spark,
     Check,
     Chat,
@@ -385,6 +387,11 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.line(p, &[(8.0, 1.5), (8.0, 14.5)]);
             g.arrow_head(p, (8.0, 1.5), vec2(0.0, -1.0), 2.4);
             g.arrow_head(p, (8.0, 14.5), vec2(0.0, 1.0), 2.4);
+        }
+        Icon::Text => {
+            g.line(p, &[(3.0, 3.0), (13.0, 3.0)]);
+            g.line(p, &[(8.0, 3.0), (8.0, 13.0)]);
+            g.line(p, &[(5.5, 13.0), (10.5, 13.0)]);
         }
         Icon::Point => {
             g.dot(p, 8.0, 8.0, 1.8);

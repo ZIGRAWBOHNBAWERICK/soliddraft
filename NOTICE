@@ -6,3 +6,7 @@ Authors (https://github.com/rsms/inter), under the SIL Open Font License,
 Version 1.1 (crates/soliddraft-app/assets/fonts/LICENSE-Inter.txt). The drawing
 crate carries a copy of Inter Regular and the licence in crates/soliddraft-drawing/fonts/
 and embeds a subset of it in the PDFs it writes.
+
+Sketch text also bundles unmodified Inter Regular and Medium from the existing
+application fonts, under SIL Open Font License 1.1. Copies and the full licence
+are in crates/soliddraft-sketch/fonts/. No font download is performed.

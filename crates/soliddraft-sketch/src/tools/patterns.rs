@@ -161,6 +161,7 @@ fn transformed(kind: EntityKind, p: Placement) -> EntityKind {
         p.center + P2::new(cos * d.u - sin * d.v, sin * d.u + cos * d.v) + p.translation
     };
     match kind {
+        EntityKind::Text { text } => EntityKind::Text { text: text.mapped(map) },
         EntityKind::Spline { mode, points } => {
             EntityKind::Spline { mode, points: points.into_iter().map(map).collect() }
         }
@@ -230,6 +231,9 @@ impl Sketch {
         skipped: &[[u32; 2]],
     ) -> Result<Vec<EntityId>> {
         let sources = self.tool_selection(&old.seeds)?;
+        if sources.iter().any(|e| matches!(e.kind, EntityKind::Text { .. })) {
+            return refuse("Retained patterns do not yet support sketch text");
+        }
         let placements = spec.placements()?;
         let positions: Vec<_> = placements.iter().map(|p| p.position).collect();
         let mut skipped = skipped.to_vec();

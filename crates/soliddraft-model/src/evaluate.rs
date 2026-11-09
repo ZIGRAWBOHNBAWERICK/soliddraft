@@ -521,6 +521,13 @@ impl Document {
             Ok(_) => return Built::failed(current, "the built-in profile has no closed region"),
             Err(err) => return Built::failed(current, format!("the built-in profile has no closed region: {err}")),
         };
+        if let ProfileSource::Sketch { feature } = &e.profile
+            && let Some(source) = self.feature(*feature)
+            && let FeatureKind::Sketch(source) = &source.kind
+            && let Some(message) = source.sketch.text_extrusion_notice(regions.len())
+        {
+            return Built::failed(current, message);
+        }
         let dir = if e.reverse { -sk.plane.normal } else { sk.plane.normal };
         // The tool starts exactly on its sketch plane, also on a face of the part; the
         // kernel's coplanar Boolean rules decide the shared face.

@@ -29,6 +29,7 @@ pub fn reflected(kind: EntityKind, start: P2, end: P2) -> Result<EntityKind> {
     let dir = (end - start).normalized();
     let map = |p: P2| start + dir.scale(2.0 * (p - start).dot(dir)) - (p - start);
     let kind = match kind {
+        EntityKind::Text { text } => EntityKind::Text { text: text.mapped(map) },
         EntityKind::Spline { mode, points } => {
             EntityKind::Spline { mode, points: points.into_iter().map(map).collect() }
         }
@@ -73,6 +74,11 @@ fn same(a: &EntityKind, b: &EntityKind) -> bool {
 impl Sketch {
     pub(super) fn mirror_linked(&mut self, ids: &[EntityId], axis: MirrorAxis) -> Result<Vec<EntityId>> {
         let selected = self.tool_selection(ids)?;
+        if selected.iter().any(|e| matches!(e.kind, EntityKind::Text { .. })) {
+            return refuse(
+                "Linked mirror does not support sketch text; turn off Keep symmetry for an independent copy",
+            );
+        }
         let (start, end, existing) = match axis {
             MirrorAxis::Entity { entity } => match self.tool_entity(entity)?.kind {
                 EntityKind::Line { a, b } => (a, b, Some(entity)),

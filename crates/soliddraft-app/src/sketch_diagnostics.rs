@@ -115,6 +115,9 @@ pub fn panel(
                 Ok(_) if report.usage == Usage::Cut && !has_body => {
                     ui.label(egui::RichText::new("Cut extrude needs a part body.").color(theme::error()));
                 }
+                Ok(profiles) if s.sketch.text_extrusion_notice(profiles.len()).is_some() => {
+                    ui.colored_label(theme::error(), s.sketch.text_extrusion_notice(profiles.len()).unwrap());
+                }
                 Ok(profiles) => {
                     let count = profiles.len();
                     let color = if report.issues.is_empty() { theme::ok() } else { theme::muted() };

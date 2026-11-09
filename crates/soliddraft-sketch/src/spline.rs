@@ -507,7 +507,7 @@ mod tests {
                 options: TrimOptions::default(),
             },
             Operation::Extend { entity: line, end: End::End, boundary: curve },
-            Operation::Offset { entities: vec![curve], distance: 1.0 },
+            Operation::Offset { entities: vec![curve], distance: 1.0, options: Default::default() },
             Operation::Fillet { a: curve, b: line, keep_a: P2::ZERO, keep_b: P2::new(4.0, 1.0), radius: 1.0 },
             Operation::Chamfer {
                 a: curve,
@@ -523,5 +523,21 @@ mod tests {
             assert!(error.0.contains("spline"), "{error:?}");
             assert_eq!(sketch, before);
         }
+        sketch
+            .apply_operation(&Operation::Offset { entities: vec![line], distance: 1.0, options: Default::default() })
+            .unwrap();
+        let group = sketch
+            .constraints
+            .iter()
+            .find_map(|c| match c.kind {
+                crate::ConstraintKind::Offset { group, .. } => Some(group),
+                _ => None,
+            })
+            .unwrap();
+        sketch.entity_mut(line).unwrap().kind = sketch.entity(curve).unwrap().kind.clone();
+        let before = sketch.clone();
+        let error = sketch.apply_operation(&Operation::EditOffset { group, distance: 2.0 }).unwrap_err();
+        assert!(error.0.contains("spline"), "{error:?}");
+        assert_eq!(sketch, before);
     }
 }

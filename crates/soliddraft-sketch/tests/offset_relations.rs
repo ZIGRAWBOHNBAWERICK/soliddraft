@@ -93,7 +93,7 @@ fn capped_offsets_solve_in_both_directions_and_edit_without_changing_ids() {
                             assert!((s.entity(*id).unwrap().radius().unwrap() - expected).abs() < 1e-5);
                         }
                     }
-                    let right = PointRef::new(source, u8::from(!reverse));
+                    let right = PointRef::new(source, usize::from(!reverse));
                     let fixed = s
                         .constraints
                         .iter_mut()
@@ -197,7 +197,7 @@ fn an_arc_line_chain_keeps_its_circle_and_round_caps_after_editing() {
     let arc = s.add(EntityKind::Arc { center: p(0.0, 5.0), start: P2::ZERO, end: p(5.0, 5.0) }, false);
     s.constrain(ConstraintKind::Coincident { a: PointRef::new(line, 1), b: PointRef::new(arc, 1) });
     for entity in [line, arc] {
-        let e = *s.entity(entity).unwrap();
+        let e = s.entity(entity).unwrap().clone();
         for index in 0..e.point_count() {
             s.constrain(ConstraintKind::Fix { point: PointRef::new(entity, index), at: e.point(index).unwrap() });
         }
@@ -345,7 +345,7 @@ fn join_anchors_follow_constraint_driven_straight_corner_transitions() {
                         .unwrap();
                     solved(&mut s);
                     for straight in [!initially_straight, initially_straight] {
-                        let point = PointRef::new(2, u8::from(!reverse_b));
+                        let point = PointRef::new(2, usize::from(!reverse_b));
                         let at = if straight { p(20.0, 0.0) } else { p(10.0, 10.0) };
                         s.constraints
                             .iter_mut()

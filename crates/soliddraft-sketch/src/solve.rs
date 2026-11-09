@@ -411,8 +411,8 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
             ConstraintKind::OffsetCap { cap, a, b, .. } => {
                 if let (Some(p), Some(q), Some(entity)) = (pt(&vars, a), pt(&vars, b), sketch.entity(cap)) {
                     let arc = entity.is_curve();
-                    let start = pt(&vars, PointRef::new(cap, u8::from(arc)));
-                    let end = pt(&vars, PointRef::new(cap, 1 + u8::from(arc)));
+                    let start = pt(&vars, PointRef::new(cap, usize::from(arc)));
+                    let end = pt(&vars, PointRef::new(cap, 1 + usize::from(arc)));
                     if let (Some(start), Some(end)) = (start, end) {
                         reqs.push(Constraint::PointsCoincident(start, p));
                         reqs.push(Constraint::PointsCoincident(end, q));

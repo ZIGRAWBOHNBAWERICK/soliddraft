@@ -1260,7 +1260,7 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
                 }
                 EntityKind::Spline { .. } => None,
                 ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
-                    let ellipse = crate::sketch::ellipse::Ellipse::of(&kind).unwrap();
+                    let ellipse = crate::sketch::ellipse::Ellipse::of(kind).unwrap();
                     let direction = (label - ellipse.center).normalized();
                     let index = if direction.dot(ellipse.axis().normalized()).abs()
                         >= direction.dot(ellipse.axis().perp().normalized()).abs()

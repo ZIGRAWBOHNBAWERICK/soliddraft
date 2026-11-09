@@ -290,7 +290,7 @@ pub fn run(
 
     // Drawing.
     paint_plane(&painter, &frame, doc, &s.sketch);
-    paint_regions(&painter, &frame, &s.sketch);
+    paint_regions(&painter, &frame, s);
     paint_entities(&painter, &frame, s);
     paint_glyphs(&painter, s, &glyphs);
     paint_dimensions(&painter, &frame, s);
@@ -427,6 +427,10 @@ fn copy_input(
         }
     }
     if !clicked {
+        return;
+    }
+    if s.modify.pattern_group.is_some() && (modifiers.ctrl || modifiers.shift) {
+        s.say("This pattern keeps its source selection; edit the sources or start a new pattern");
         return;
     }
     if modifiers.ctrl
@@ -1334,8 +1338,15 @@ fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketc
     axis(P2::new(0.0, -half), P2::new(0.0, half), theme::line().gamma_multiply(1.3));
 }
 
-fn paint_regions(painter: &egui::Painter, frame: &Frame<'_>, sketch: &Sketch) {
-    for outline in crate::sketch::profile::region_outlines(sketch) {
+fn paint_regions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
+    let sketch = if let Some(preview) = s.preview.as_ref().filter(|p| !p.replaced.is_empty()) {
+        let mut visible = s.sketch.clone();
+        visible.entities.retain(|e| !preview.replaced.contains(&e.id));
+        std::borrow::Cow::Owned(visible)
+    } else {
+        std::borrow::Cow::Borrowed(&s.sketch)
+    };
+    for outline in crate::sketch::profile::region_outlines(&sketch) {
         let pts: Vec<Pos2> = outline.iter().filter_map(|p| frame.screen(*p)).collect();
         if pts.len() >= 3 {
             let mesh = polygon_fill(&pts, theme::accent_alpha(18));
@@ -1433,6 +1444,9 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
     }
     // Points: filled when joined to something, hollow when free.
     for e in &s.sketch.entities {
+        if s.preview.as_ref().is_some_and(|p| p.replaced.contains(&e.id)) {
+            continue;
+        }
         let color = entity_color(s, e);
         for i in 0..e.point_count() {
             let r = PointRef::new(e.id, i);
@@ -1510,6 +1524,7 @@ fn glyph_anchors(sketch: &Sketch, c: &Constraint) -> Vec<(P2, egui::Vec2)> {
         ConstraintKind::Coincident { a, .. } => at_point(a).into_iter().collect(),
         ConstraintKind::Symmetric { a, b, .. } => at_point(a).into_iter().chain(at_point(b)).collect(),
         ConstraintKind::FixEntity { entity, .. } => beside(entity).into_iter().collect(),
+        ConstraintKind::PatternTransform { b, .. } => beside(b).into_iter().collect(),
         ConstraintKind::PointOn { point, .. }
         | ConstraintKind::Midpoint { point, .. }
         | ConstraintKind::Fix { point, .. } => at_point(point).into_iter().collect(),
@@ -1535,6 +1550,10 @@ fn paint_glyphs(painter: &egui::Painter, s: &SketchSession, glyphs: &[(Constrain
     };
     for (id, r) in glyphs {
         let Some(c) = s.sketch.constraint(*id) else { continue };
+        if s.preview.as_ref().is_some_and(|p| c.entities().iter().any(|id| p.replaced.contains(id))) {
+            continue;
+        }
+
         let sel = s.selection.contains(&SketchSel::Constraint(*id));
         let hover = s.hover == Some(SketchSel::Constraint(*id));
         let bad = conflicting.contains(id);
@@ -1610,6 +1629,13 @@ fn paint_glyphs(painter: &egui::Painter, s: &SketchSession, glyphs: &[(Constrain
                 painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
                 painter.circle_filled(pos2(l, cy), 1.5, fg);
                 painter.circle_filled(pos2(rr, cy), 1.5, fg);
+            }
+            ConstraintKind::PatternTransform { .. } => {
+                for x in [l + 1.0, rr - 1.0] {
+                    for y in [t + 1.0, b - 1.0] {
+                        painter.circle_filled(pos2(x, y), 1.3, fg);
+                    }
+                }
             }
             ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => {
                 painter.rect_stroke(

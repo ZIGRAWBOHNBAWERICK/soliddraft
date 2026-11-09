@@ -1,0 +1,160 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-linked-patterns",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 10,
+                "v": 10
+              },
+              "radius": 2
+            },
+            "construction": false
+          },
+          {
+            "tool": "pattern",
+            "entities": [
+              1
+            ],
+            "spec": {
+              "type": "linear",
+              "step": {
+                "u": 12,
+                "v": 0
+              },
+              "count": 3,
+              "second": {
+                "step": {
+                  "u": 0,
+                  "v": 12
+                },
+                "count": 2
+              }
+            },
+            "skipped": [
+              [
+                2,
+                1
+              ]
+            ]
+          },
+          {
+            "tool": "edit_pattern",
+            "group": 1,
+            "spec": {
+              "type": "linear",
+              "step": {
+                "u": 10,
+                "v": 0
+              },
+              "count": 4,
+              "second": {
+                "step": {
+                  "u": 0,
+                  "v": 12
+                },
+                "count": 2
+              }
+            },
+            "skipped": [
+              [
+                2,
+                1
+              ]
+            ]
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": -40,
+                "v": 0
+              },
+              "radius": 2
+            },
+            "construction": false
+          },
+          {
+            "tool": "pattern",
+            "entities": [
+              8
+            ],
+            "spec": {
+              "type": "circular",
+              "center": {
+                "u": -60,
+                "v": 0
+              },
+              "angle_degrees": 180,
+              "count": 3,
+              "total_angle": true
+            }
+          },
+          {
+            "tool": "edit_pattern",
+            "group": 2,
+            "spec": {
+              "type": "circular",
+              "center": {
+                "u": -60,
+                "v": 0
+              },
+              "angle_degrees": 360,
+              "count": 4,
+              "total_angle": true
+            },
+            "skipped": [
+              [
+                2,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 3,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 376.99111843077515,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/linked-patterns.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/linked-patterns.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 376.99111843077515,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

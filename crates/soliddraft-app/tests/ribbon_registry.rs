@@ -431,6 +431,44 @@ fn before_linked_mirror(id: &str, current: &mut Value) {
     );
 }
 
+fn before_retained_patterns(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let point = json!({"type":"object", "additionalProperties":false, "properties":{"u":{"type":"number"},"v":{"type":"number"}}, "required":["u","v"]});
+    let spec = json!({"anyOf":[
+        {"type":"object", "additionalProperties":false,
+         "properties":{"type":{"type":"string","const":"linear"},"step":point,"count":{"type":"integer"},
+           "second":{"type":"object","additionalProperties":false,"properties":{"step":point,"count":{"type":"integer"}},"required":["step","count"]}},
+         "required":["type","step","count"]},
+        {"type":"object", "additionalProperties":false,
+         "properties":{"type":{"type":"string","const":"circular"},"center":point,"angle_degrees":{"type":"number"},"count":{"type":"integer"},"total_angle":{"type":"boolean"}},
+         "required":["type","center","angle_degrees","count"]}
+    ]});
+    let skipped = json!({"type":"array","maxItems":999,"items":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2}});
+    for (tool, input, value) in [
+        ("pattern", "entities", json!({"type":"array","minItems":1,"items":{"type":"integer"}})),
+        ("edit_pattern", "group", json!({"type":"integer"})),
+    ] {
+        let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == tool).unwrap();
+        let mut properties = json!({"tool":{"type":"string","const":tool},"spec":spec,"skipped":skipped});
+        properties[input] = value;
+        assert_eq!(
+            variants.remove(index),
+            json!({"type":"object","additionalProperties":false,"properties":properties,"required":["tool",input,"spec"]})
+        );
+    }
+}
+
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -568,6 +606,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_selection_transforms(id, &mut current);
         before_linked_offsets(id, &mut current);
         before_linked_mirror(id, &mut current);
+        before_retained_patterns(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

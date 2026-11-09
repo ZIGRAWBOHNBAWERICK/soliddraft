@@ -4,6 +4,8 @@
 //! tool previews what it will do before it does it, and a refused operation changes
 //! nothing. The MCP `sketch_geometry` verb runs the same operations headlessly.
 
+pub(crate) mod patterns;
+
 use crate::document::Command;
 use crate::sketch::{
     ConstraintKind, EntityId, P2, solve,
@@ -50,6 +52,9 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
         return Some(Operation::EditOffset { group, distance: s.modify.distance });
     }
     let mut entities = selected_in_order(s);
+    if matches!(s.tool, Tool::LinearPattern | Tool::CircularPattern) {
+        return patterns::operation(s, entities);
+    }
     if s.tool == Tool::Mirror {
         entities.retain(|id| Some(*id) != s.modify.mirror_axis);
     }
@@ -81,6 +86,9 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
 /// What `operation` would add to the sketch, tried on a copy. The refusal is the tool's
 /// own words.
 pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
+    if matches!(operation, Operation::EditPattern { .. }) {
+        return patterns::preview(s, operation);
+    }
     let junction = match &operation {
         Operation::Fillet { a, b, keep_a, keep_b, radius } => {
             Some(s.sketch.fillet_preview(*a, *b, *keep_a, *keep_b, *radius))
@@ -179,6 +187,13 @@ pub fn selection_preview(s: &SketchSession) -> Option<ToolPreview> {
         && s.modify.offset_group.is_some_and(|group| s.sketch.offset_group_distance(group) == Some(s.modify.distance))
     {
         return Some(ToolPreview::default());
+    }
+    if let Some(group) = s.modify.pattern_group {
+        let mut skipped = s.modify.skipped.clone();
+        skipped.sort_unstable();
+        if s.sketch.patterns.iter().any(|p| p.id == group && p.spec == patterns::spec(s) && p.skipped == skipped) {
+            return Some(ToolPreview::default());
+        }
     }
     Some(match operation_for(s) {
         Some(operation) => try_operation(s, operation),
@@ -425,17 +440,7 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             }
             hint(ui, "Dynamic mirror draws reflected pairs about an existing line. Esc stops it.");
         }
-        Tool::LinearPattern => {
-            hint(ui, "Select the entities, then click the start and end of one step. Apply adds the copies.");
-            point(ui, "Step", &mut s.modify.step);
-            ui.add(egui::DragValue::new(&mut s.modify.count).range(2..=1000).prefix("Instances "));
-        }
-        Tool::CircularPattern => {
-            hint(ui, "Select the entities, then click the centre. Set the angle and count here, then Apply.");
-            point(ui, "Centre", &mut s.modify.center);
-            ui.add(egui::DragValue::new(&mut s.modify.angle).speed(1.0).suffix(" degrees"));
-            ui.add(egui::DragValue::new(&mut s.modify.count).range(2..=1000).prefix("Instances "));
-        }
+        Tool::LinearPattern | Tool::CircularPattern => patterns::panel(ui, s),
         Tool::Move | Tool::Copy => {
             hint(
                 ui,
@@ -473,6 +478,8 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                 "Offsets retain their source links. Select a resulting curve or relation to edit the distance."
             } else if tool == Tool::Mirror && s.modify.keep_symmetry {
                 "Mirrored entities keep symmetry about the chosen axis. Coordinates are u, v in mm."
+            } else if matches!(tool, Tool::LinearPattern | Tool::CircularPattern) {
+                "Instances follow their source geometry. Counts include the source."
             } else {
                 "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed."
             },
@@ -486,7 +493,11 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
         let selected = selected_in_order(s).len();
         hint(
             ui,
-            &format!("{selected} selected. Ctrl-click adds or removes entities. Esc or Cancel returns to Select."),
+            &if s.modify.pattern_group.is_some() {
+                format!("{selected} source entities. Esc or Cancel returns to Select.")
+            } else {
+                format!("{selected} selected. Ctrl-click adds or removes entities. Esc or Cancel returns to Select.")
+            },
         );
         let preview = selection_preview(s);
         if let Some(why) = preview.as_ref().and_then(|p| p.refused.as_deref()) {
@@ -612,6 +623,30 @@ pub fn operation_schema() -> Value {
         ]),
         object(&[("type", constant("circle")), ("center", point.clone()), ("radius", number("Positive radius, mm"))]),
     ]);
+    let pattern_spec = any_of(vec![
+        object(&[
+            ("type", constant("linear")),
+            ("step", point.clone()),
+            ("count", integer("Positions in the first direction, including the source")),
+            (
+                "second",
+                optional(object(&[("step", point.clone()), ("count", integer("Positions in the second direction"))])),
+            ),
+        ]),
+        object(&[
+            ("type", constant("circular")),
+            ("center", point.clone()),
+            ("angle_degrees", number("Angle per step or total span, degrees")),
+            ("count", count.clone()),
+            (
+                "total_angle",
+                optional(boolean("Distribute across the entire span; a full turn has no repeated endpoint")),
+            ),
+        ]),
+    ]);
+    let skipped = optional(
+        serde_json::json!({"type":"array","maxItems":999,"items":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2}}),
+    );
     let chamfer_size = any_of(vec![
         object(&[
             ("mode", constant("distances")),
@@ -753,6 +788,18 @@ pub fn operation_schema() -> Value {
             ("entities", ids.clone()),
             ("axis_start", point.clone()),
             ("axis_end", point.clone()),
+        ]),
+        object(&[
+            ("tool", constant("pattern")),
+            ("entities", ids.clone()),
+            ("spec", pattern_spec.clone()),
+            ("skipped", skipped.clone()),
+        ]),
+        object(&[
+            ("tool", constant("edit_pattern")),
+            ("group", integer("Retained sketch pattern id")),
+            ("spec", pattern_spec),
+            ("skipped", skipped),
         ]),
         object(&[
             ("tool", constant("linear_pattern")),

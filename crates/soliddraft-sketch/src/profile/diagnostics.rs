@@ -144,6 +144,19 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
         {
             Some("An offset cap must be a line or semicircular arc")
         }
+        ConstraintKind::PatternTransform { a, b, translation, center, angle_degrees, .. }
+            if !translation.u.is_finite()
+                || !translation.v.is_finite()
+                || !center.u.is_finite()
+                || !center.v.is_finite()
+                || !angle_degrees.is_finite()
+                || sketch
+                    .entity(a)
+                    .zip(sketch.entity(b))
+                    .is_some_and(|(a, b)| std::mem::discriminant(&a.kind) != std::mem::discriminant(&b.kind)) =>
+        {
+            Some("Pattern instances require matching geometry and a finite transformation")
+        }
         ConstraintKind::Radius { entity, .. } if !circular(entity) => Some("Radius requires a circle or arc target"),
         ConstraintKind::Concentric { a, b } if !centered(a) || !centered(b) => {
             Some("Concentric requires two circle, arc or ellipse targets")

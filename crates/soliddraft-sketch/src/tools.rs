@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, OffsetJoin, P2, PointRef, Sketch};
 
+mod patterns;
+pub(crate) use patterns::pattern_axes;
+pub use patterns::{PatternDefinition, PatternDirection, PatternInstance, PatternSpec};
+
 mod finishing;
 pub use finishing::{ChamferSize, JunctionPreview, SplitPreview};
 mod offset;
@@ -241,6 +245,26 @@ pub enum Operation {
         entities: Vec<EntityId>,
         /// Existing axis line or two points for a fixed construction axis.
         axis: MirrorAxis,
+    },
+    /// Create a retained pattern definition and linked instances.
+    Pattern {
+        /// Source geometry.
+        entities: Vec<EntityId>,
+        /// Distribution and dimensions.
+        spec: PatternSpec,
+        /// Omitted zero-based positions, excluding the seed.
+        #[serde(default)]
+        skipped: Vec<[u32; 2]>,
+    },
+    /// Edit a retained pattern without changing surviving instance ids.
+    EditPattern {
+        /// Pattern definition id.
+        group: u32,
+        /// New distribution and dimensions.
+        spec: PatternSpec,
+        /// Omitted zero-based positions, excluding the seed.
+        #[serde(default)]
+        skipped: Vec<[u32; 2]>,
     },
     /// Copy geometry at repeated translations.
     LinearPattern {
@@ -738,6 +762,8 @@ impl Sketch {
                     }
                 })
             }
+            Operation::Pattern { entities, spec, skipped } => self.create_pattern(entities, *spec, skipped),
+            Operation::EditPattern { group, spec, skipped } => self.edit_pattern(*group, *spec, skipped),
             Operation::LinearPattern { entities, step, count } => {
                 if !finite(*step) || step.len() <= EPS {
                     return refuse("pattern step must be finite and nonzero");

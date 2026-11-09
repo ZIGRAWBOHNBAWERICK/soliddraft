@@ -572,6 +572,21 @@ pub enum ConstraintKind {
         /// Offset group this cap belongs to.
         group: ConstraintId,
     },
+    /// A generated entity follows its source through a fixed rigid transformation.
+    PatternTransform {
+        /// Source entity.
+        a: EntityId,
+        /// Generated entity.
+        b: EntityId,
+        /// Owning pattern definition.
+        group: u32,
+        /// Translation after rotation, mm.
+        translation: P2,
+        /// Rotation centre.
+        center: P2,
+        /// Counterclockwise rotation, degrees.
+        angle_degrees: f64,
+    },
     /// The point stays where it is.
     Fix {
         /// The point.
@@ -717,6 +732,7 @@ impl Constraint {
             ConstraintKind::Midpoint { .. } => "Midpoint",
             ConstraintKind::Concentric { .. } => "Concentric",
             ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => "Fixed",
+            ConstraintKind::PatternTransform { .. } => "Pattern instance",
             ConstraintKind::Symmetric { .. } => "Symmetric",
             ConstraintKind::Offset { .. } => "Offset",
             ConstraintKind::OffsetCap { .. } => "Offset cap",
@@ -758,6 +774,7 @@ impl Constraint {
                 ids
             }
             ConstraintKind::OffsetCap { cap, a, b, .. } => vec![cap, a.entity, b.entity],
+            ConstraintKind::PatternTransform { a, b, .. } => vec![a, b],
             ConstraintKind::Distance { a, b, .. } => vec![a.entity, b.entity],
             ConstraintKind::PointLineDistance { point, line, .. } => vec![point.entity, line],
             ConstraintKind::Radius { entity, .. } => vec![entity],
@@ -834,6 +851,11 @@ pub struct Sketch {
     pub entities: Vec<Entity>,
     /// Every constraint, in the order they were added.
     pub constraints: Vec<Constraint>,
+    /// Editable pattern definitions, including skipped positions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<tools::PatternDefinition>,
+    #[serde(default = "first_pattern", skip_serializing_if = "is_first_pattern")]
+    next_pattern: u32,
     next_entity: EntityId,
     next_constraint: ConstraintId,
     /// Entities that still have a free degree of freedom after the last solve.
@@ -844,12 +866,21 @@ pub struct Sketch {
     pub status: SolveStatus,
 }
 
+fn first_pattern() -> u32 {
+    1
+}
+fn is_first_pattern(id: &u32) -> bool {
+    *id == 1
+}
+
 impl Sketch {
     /// An empty sketch holding only the origin.
     pub fn new() -> Self {
         Sketch {
             entities: vec![Entity { id: ORIGIN, kind: EntityKind::Point { p: P2::ZERO }, construction: true }],
             constraints: Vec::new(),
+            patterns: Vec::new(),
+            next_pattern: 1,
             next_entity: 1,
             next_constraint: 1,
             free: Vec::new(),
@@ -864,6 +895,9 @@ impl Sketch {
         }
         self.next_entity = self.entities.iter().map(|e| e.id + 1).max().unwrap_or(1).max(1);
         self.next_constraint = self.constraints.iter().map(|c| c.id + 1).max().unwrap_or(1).max(1);
+        self.next_pattern =
+            self.patterns.iter().map(|p| p.id.saturating_add(1)).max().unwrap_or(1).max(self.next_pattern).max(1);
+        self.reconcile_patterns();
     }
 
     /// The entity with this id.
@@ -922,6 +956,7 @@ impl Sketch {
         }
         self.entities.retain(|e| e.id != id);
         self.constraints.retain(|c| !c.entities().contains(&id));
+        self.reconcile_patterns();
     }
 
     /// Entities other than the origin.

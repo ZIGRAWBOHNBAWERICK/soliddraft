@@ -938,6 +938,17 @@
       ]
     },
     {
+      "id": "sketch-linked-patterns",
+      "file": "ci/scenarios/sketch-linked-patterns.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-sketch",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-offset",
       "file": "ci/scenarios/sketch-offset.json",
       "acceptance": false,

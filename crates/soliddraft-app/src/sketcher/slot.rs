@@ -188,7 +188,7 @@ pub(super) fn click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, actions: &mu
     for (a, ai, b, bi) in joins {
         s.sketch.constrain(ConstraintKind::Coincident { a: PointRef::new(a, ai), b: PointRef::new(b, bi) });
     }
-    let axis_start = u8::from(curved(s.tool));
+    let axis_start = usize::from(curved(s.tool));
     for (index, cap) in [(axis_start, start), (axis_start + 1, end)] {
         s.sketch.constrain(ConstraintKind::Coincident { a: PointRef::new(axis, index), b: PointRef::new(cap, 0) });
     }
@@ -408,7 +408,7 @@ mod tests {
                 assert_eq!(place(&mut s, &[*last]).len(), 1);
                 for ((expected, construction), actual) in expected.iter().zip(s.sketch.drawn()) {
                     assert_eq!(*construction, actual.construction);
-                    for (a, b) in (Entity { id: 0, kind: *expected, construction: false })
+                    for (a, b) in (Entity { id: 0, kind: expected.clone(), construction: false })
                         .polyline(16)
                         .iter()
                         .zip(actual.polyline(16))

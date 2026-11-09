@@ -177,6 +177,13 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
                 }
                 Datum::Ellipse(datum)
             }
+            EntityKind::Text { ref text } => {
+                if let Err(error) = text.outlines() {
+                    sketch.status = SolveStatus::Failed(error);
+                    return;
+                }
+                Datum::Point(vars.point(PointRef::new(e.id, 0), text.position))
+            }
             EntityKind::Point { p } => Datum::Point(vars.point(PointRef::new(e.id, 0), p)),
             EntityKind::Line { a, b } => Datum::Line(DatumLineSegment::new(
                 vars.point(PointRef::new(e.id, 0), a),
@@ -242,6 +249,12 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
                 }
             }
             ConstraintKind::PointOn { point, entity } => {
+                if sketch.entity(entity).is_some_and(|e| matches!(e.kind, EntityKind::Text { .. })) {
+                    sketch.status = SolveStatus::Failed(
+                        "Point-on-text outlines is not supported; constrain the baseline point instead".into(),
+                    );
+                    return;
+                }
                 if let (Some(p), Some(d)) = (pt(&vars, point), datums.get(&entity)) {
                     match d {
                         Datum::Line(l) => reqs.push(Constraint::PointLineDistance(p, *l, 0.0)),

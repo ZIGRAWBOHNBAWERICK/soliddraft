@@ -28,6 +28,7 @@ mod ellipse;
 mod rectangle;
 mod slot;
 mod spline;
+pub(crate) mod text;
 
 const POINT_REACH: f32 = 8.0;
 const CURVE_REACH: f32 = 6.0;
@@ -89,11 +90,16 @@ fn dist_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 
 /// Distance in pixels from `pos` to an entity's curve.
 fn entity_distance(frame: &Frame<'_>, e: &Entity, pos: Pos2) -> f32 {
-    let poly: Vec<Pos2> = e.polyline(64).into_iter().filter_map(|p| frame.screen(p)).collect();
-    if poly.len() == 1 {
-        return (poly[0] - pos).length();
-    }
-    poly.windows(2).map(|w| dist_to_segment(pos, w[0], w[1])).fold(f32::INFINITY, f32::min)
+    e.polylines(64)
+        .into_iter()
+        .map(|path| {
+            let poly: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
+            if poly.len() == 1 {
+                return (poly[0] - pos).length();
+            }
+            poly.windows(2).map(|w| dist_to_segment(pos, w[0], w[1])).fold(f32::INFINITY, f32::min)
+        })
+        .fold(f32::INFINITY, f32::min)
 }
 
 /// What the pointer is over, in the sketch.
@@ -323,13 +329,15 @@ pub fn run(
     paint_rubber_band(&painter, &frame, s, snapped);
     for (kind, construction) in &s.dynamic_preview {
         let entity = Entity { id: 0, kind: kind.clone(), construction: *construction };
-        let points: Vec<_> = entity.polyline(64).into_iter().filter_map(|p| frame.screen(p)).collect();
-        if points.len() == 1 {
-            painter.circle_stroke(points[0], 4.0, Stroke::new(1.5, theme::accent()));
-        } else if *construction {
-            painter.extend(egui::Shape::dashed_line(&points, Stroke::new(1.5, theme::accent()), 6.0, 4.0));
-        } else if points.len() > 1 {
-            painter.add(egui::Shape::line(points, Stroke::new(1.5, theme::accent())));
+        for path in entity.polylines(64) {
+            let points: Vec<_> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
+            if points.len() == 1 {
+                painter.circle_stroke(points[0], 4.0, Stroke::new(1.5, theme::accent()));
+            } else if *construction {
+                painter.extend(egui::Shape::dashed_line(&points, Stroke::new(1.5, theme::accent()), 6.0, 4.0));
+            } else if points.len() > 1 {
+                painter.add(egui::Shape::line(points, Stroke::new(1.5, theme::accent())));
+            }
         }
     }
     if let Some(axis) = s.dynamic_mirror {
@@ -1042,6 +1050,7 @@ fn draw_click(
         | Tool::ThreePointCornerRectangle
         | Tool::ThreePointCentreRectangle
         | Tool::Parallelogram => rectangle::click(s, p, snaps, actions, analyse),
+        Tool::Text => text::place(s, p, snaps, actions),
         Tool::FitSpline | Tool::ControlSpline => spline::click(s, p, snaps, double, actions, analyse),
         Tool::Ellipse | Tool::PartialEllipse => ellipse::click(s, p, snaps, actions),
         Tool::Circle => match s.pending.pop() {
@@ -1254,7 +1263,7 @@ fn dimension_kind(sketch: &Sketch, first: SketchSel, second: Option<SketchSel>, 
                 EntityKind::Arc { .. } => {
                     Some(ConstraintKind::Radius { entity: e, value: ent.radius()?, diameter: false, label })
                 }
-                EntityKind::Point { .. } => between(PointRef::new(e, 0), PointRef::ORIGIN),
+                EntityKind::Text { .. } | EntityKind::Point { .. } => between(PointRef::new(e, 0), PointRef::ORIGIN),
             }
         }
         (SketchSel::Point(p), None) => between(p, PointRef::ORIGIN),
@@ -1417,34 +1426,36 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
         let is_sel = selected(SketchSel::Entity(e.id));
         let is_related = relation_entities.contains(&e.id);
         let is_hover = s.hover == Some(SketchSel::Entity(e.id));
-        let pts: Vec<Pos2> = e.polyline(96).into_iter().filter_map(|p| frame.screen(p)).collect();
-        if is_sel || is_related || is_hover {
-            let halo = Stroke::new(
-                if is_sel || is_related { 6.0 } else { 5.0 },
-                theme::selection_bg().gamma_multiply(if is_sel || is_related { 1.0 } else { 0.7 }),
-            );
-            if pts.len() >= 2 {
-                painter.add(egui::Shape::line(pts.clone(), halo));
+        for path in e.polylines(96) {
+            let pts: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
+            if is_sel || is_related || is_hover {
+                let halo = Stroke::new(
+                    if is_sel || is_related { 6.0 } else { 5.0 },
+                    theme::selection_bg().gamma_multiply(if is_sel || is_related { 1.0 } else { 0.7 }),
+                );
+                if pts.len() >= 2 {
+                    painter.add(egui::Shape::line(pts.clone(), halo));
+                }
             }
-        }
-        let stroke = Stroke::new(if e.construction { 1.0 } else { 1.8 }, if is_sel { theme::accent() } else { color });
-        if e.is_point() {
-            continue;
-        }
-        let handle_selected =
-            s.selection.iter().any(|selected| matches!(selected,SketchSel::Point(point) if point.entity==e.id));
-        let handle_hovered = matches!(s.hover,Some(SketchSel::Point(point)) if point.entity==e.id);
-        if (is_sel || is_hover || handle_selected || handle_hovered)
-            && let EntityKind::Spline { mode: crate::sketch::SplineMode::Control, ref points } = e.kind
-        {
-            let polygon: Vec<_> = points.iter().filter_map(|point| frame.screen(*point)).collect();
-            dashed(painter, &polygon, Stroke::new(0.8, theme::muted()));
-        }
-        if pts.len() >= 2 {
-            if e.construction {
-                dashed(painter, &pts, stroke);
-            } else {
-                painter.add(egui::Shape::line(pts, stroke));
+            let stroke = Stroke::new(if e.construction { 1.0 } else { 1.8 }, if is_sel { theme::accent() } else { color });
+            if e.is_point() {
+                continue;
+            }
+            let handle_selected =
+                s.selection.iter().any(|selected| matches!(selected,SketchSel::Point(point) if point.entity==e.id));
+            let handle_hovered = matches!(s.hover,Some(SketchSel::Point(point)) if point.entity==e.id);
+            if (is_sel || is_hover || handle_selected || handle_hovered)
+                && let EntityKind::Spline { mode: crate::sketch::SplineMode::Control, ref points } = e.kind
+            {
+                let polygon: Vec<_> = points.iter().filter_map(|point| frame.screen(*point)).collect();
+                dashed(painter, &polygon, Stroke::new(0.8, theme::muted()));
+            }
+            if pts.len() >= 2 {
+                if e.construction {
+                    dashed(painter, &pts, stroke);
+                } else {
+                    painter.add(egui::Shape::line(pts, stroke));
+                }
             }
         }
     }
@@ -1972,6 +1983,13 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
         }
     };
     match (s.tool, s.pending.as_slice()) {
+        (Tool::Text, _) => {
+            let mut text = s.text.clone();
+            text.position = p;
+            for path in text.polylines(24) {
+                curve(path);
+            }
+        }
         (Tool::FitSpline | Tool::ControlSpline, _) => spline::paint(painter, frame, s, p, st),
         (Tool::Ellipse | Tool::PartialEllipse, _) => {
             if let Some(kind) = ellipse::preview(s, p) {
@@ -2084,16 +2102,18 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
     }
     let curve = |kind: EntityKind, stroke: Stroke, construction: bool| {
         let e = Entity { id: 0, kind, construction: false };
-        let pts: Vec<Pos2> = e.polyline(96).into_iter().filter_map(|q| frame.screen(q)).collect();
-        if e.is_point() {
-            if let Some(p) = pts.first() {
-                painter.rect_filled(Rect::from_center_size(*p, vec2(5.0, 5.0)), CornerRadius::ZERO, stroke.color);
-            }
-        } else if pts.len() >= 2 {
-            if construction {
-                dashed(painter, &pts, stroke);
-            } else {
-                painter.add(egui::Shape::line(pts, stroke));
+        for path in e.polylines(96) {
+            let pts: Vec<Pos2> = path.into_iter().filter_map(|q| frame.screen(q)).collect();
+            if e.is_point() {
+                if let Some(p) = pts.first() {
+                    painter.rect_filled(Rect::from_center_size(*p, vec2(5.0, 5.0)), CornerRadius::ZERO, stroke.color);
+                }
+            } else if pts.len() >= 2 {
+                if construction {
+                    dashed(painter, &pts, stroke);
+                } else {
+                    painter.add(egui::Shape::line(pts, stroke));
+                }
             }
         }
     };
@@ -2338,6 +2358,7 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         SolveStatus::Failed(_) => (theme::error(), "Solver failed".to_owned()),
     };
     let hint = match (s.tool, s.pending.len()) {
+        (Tool::Text, _) => "Sketch text: edit the content and font, then click the baseline origin",
         (Tool::Select, _) => "Click to select, drag to move, double-click a dimension to edit",
         (Tool::Line, 0) => "Line: click the start point",
         (Tool::Line, _) => "Line: click end; right-click or double-click ends chain; Esc: Select",
@@ -2446,17 +2467,19 @@ pub fn paint_passive(
 ) {
     let frame = Frame { plane, camera, rect };
     for e in sketch.drawn() {
-        let pts: Vec<Pos2> = e.polyline(64).into_iter().filter_map(|p| frame.screen(p)).collect();
-        let stroke = Stroke::new(if e.construction { 1.0 } else { 1.6 }, color);
-        if e.is_point() {
-            if let Some(p) = pts.first() {
-                painter.rect_filled(Rect::from_center_size(*p, vec2(4.0, 4.0)), CornerRadius::ZERO, color);
-            }
-        } else if pts.len() >= 2 {
-            if e.construction {
-                dashed(painter, &pts, stroke);
-            } else {
-                painter.add(egui::Shape::line(pts, stroke));
+        for path in e.polylines(64) {
+            let pts: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
+            let stroke = Stroke::new(if e.construction { 1.0 } else { 1.6 }, color);
+            if e.is_point() {
+                if let Some(p) = pts.first() {
+                    painter.rect_filled(Rect::from_center_size(*p, vec2(4.0, 4.0)), CornerRadius::ZERO, color);
+                }
+            } else if pts.len() >= 2 {
+                if e.construction {
+                    dashed(painter, &pts, stroke);
+                } else {
+                    painter.add(egui::Shape::line(pts, stroke));
+                }
             }
         }
     }

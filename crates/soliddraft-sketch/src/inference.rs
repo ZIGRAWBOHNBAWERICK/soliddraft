@@ -157,7 +157,10 @@ pub fn infer(
             best = Some((priority, d, at, snap));
         }
     };
-    let curves: Vec<_> = sketch.drawn().filter(|e| !e.is_point() && tools::valid(&e.kind)).collect();
+    let curves: Vec<_> = sketch
+        .drawn()
+        .filter(|e| !e.is_point() && !matches!(e.kind, EntityKind::Text { .. }) && tools::valid(&e.kind))
+        .collect();
     if matches!(options.filter, SnapFilter::All | SnapFilter::Intersection) {
         // Reject distant pairs before calculating analytic intersections.
         let nearby: Vec<_> = curves.iter().filter(|e| distance(raw, e.nearest(raw).0) <= options.point_reach).collect();

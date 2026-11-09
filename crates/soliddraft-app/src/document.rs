@@ -2774,6 +2774,16 @@ impl Document {
         Ok((profiles, plane))
     }
 
+    /// Applies the shared text limit before creating any extrusion preview solids.
+    fn check_text_extrusion(&self, sketch_id: FeatureId, region_count: usize) -> Result<(), String> {
+        if let Some(sketch) = self.feature(sketch_id).and_then(|feature| feature.sketch())
+            && let Some(message) = sketch.sketch.text_extrusion_notice(region_count)
+        {
+            return Err(message.into());
+        }
+        Ok(())
+    }
+
     /// Extrudes every profile and unions the results into one solid, for previews.
     fn extrude_profiles(
         &self,
@@ -2936,6 +2946,9 @@ impl Document {
                 (vec![params.profile.to_kernel(plane)], plane)
             }
         };
+        if let Some(sketch) = params.sketch {
+            self.check_text_extrusion(sketch, profiles.len())?;
+        }
         let dir = if params.flip { -plane.normal } else { plane.normal };
         let (tool, made) = self.extrude_profiles(&profiles, dir, params.depth).map_err(|e| e.to_string())?;
         let mesh = self.mesh_of(tool);
@@ -2951,6 +2964,7 @@ impl Document {
             return Ok(Preview::default());
         }
         let (profiles, plane) = self.sketch_profiles(params.sketch)?;
+        self.check_text_extrusion(params.sketch, profiles.len())?;
         let dir = if params.flip { plane.normal } else { -plane.normal };
         let depth = if params.through_all { self.through_all_depth(base) } else { params.depth };
         let (tool, mut made) = self.extrude_profiles(&profiles, dir, depth).map_err(|e| e.to_string())?;

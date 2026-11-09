@@ -1275,6 +1275,7 @@ impl SolidDraftApp {
             Some(sk) => {
                 if sk.sketch != s.sketch {
                     s.link_values = None;
+                    s.text_edit = None;
                     if !s.trim_bounds.is_empty() {
                         s.trim_bounds.clear();
                         s.selection.clear();

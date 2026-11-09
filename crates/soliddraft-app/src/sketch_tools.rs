@@ -624,7 +624,7 @@ pub fn offset_inspector(ui: &mut egui::Ui, s: &mut SketchSession) {
 /// The same operations used by the sketcher's Modify tools, exposed to command/MCP scenarios.
 pub fn operation_schema() -> Value {
     use soliddraft_assistant::tools::schema::{
-        any_of, array, boolean, constant, integer, non_empty_array, number, object, one_of, optional,
+        any_of, array, boolean, constant, integer, non_empty_array, number, object, one_of, optional, string,
     };
     let point = object(&[("u", number("Plane u, mm")), ("v", number("Plane v, mm"))]);
     let offset_options = optional(object(&[
@@ -665,6 +665,17 @@ pub fn operation_schema() -> Value {
     let count = integer("Instances including the seed, from 2 to 1000");
     let spline_points = non_empty_array(point.clone(), "At least two fit or control points in traversal order");
     let geometry = any_of(vec![
+        object(&[
+            ("type", constant("text")),
+            ("text", object(&[
+                ("content", string("Single line, 1 to 256 characters supported by the bundled font")),
+                ("font", one_of(&["inter_regular", "inter_medium"], "Bundled Inter font, SIL OFL 1.1")),
+                ("position", point.clone()),
+                ("height", number("Capital height, 0.01 to 10000 mm")),
+                ("angle", optional(number("Baseline angle in radians, default 0"))),
+                ("reflected", optional(boolean("Reflect across the baseline, default false"))),
+            ])),
+        ]),
         object(&[
             ("type", constant("spline")),
             ("mode", one_of(&["fit", "control"], "Fit through points or use their control polygon")),

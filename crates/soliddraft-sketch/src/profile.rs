@@ -386,6 +386,46 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
             continue;
         }
         match e.kind {
+            EntityKind::Text { ref text } => {
+                let contours = match text.outlines() {
+                    Ok(contours) => contours,
+                    Err(error) => {
+                        first_error.get_or_insert(ProfileError::Degenerate(error));
+                        continue;
+                    }
+                };
+                for contour in contours {
+                    let mut segments = Vec::new();
+                    let mut valid = true;
+                    for kind in contour {
+                        match kind {
+                            EntityKind::Line { a, b } => segments.push(Segment::Line { from: pt(a), to: pt(b) }),
+                            kind => match spline::segments(&Entity { id: e.id, kind, construction: false }) {
+                                Some(curve) => segments.extend(curve),
+                                None => {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if valid && !segments.is_empty() {
+                        // B-spline conversion may round an endpoint by a few ulps.
+                        // Font contours are closed by definition: share exact joins.
+                        let mut previous = segments.last().unwrap().end();
+                        for segment in &mut segments {
+                            match segment {
+                                Segment::Line { from, .. } | Segment::Bezier { from, .. } => *from = previous,
+                                _ => unreachable!("font outline segment"),
+                            }
+                            previous = segment.end();
+                        }
+                        chains.push(Chain::Spline { entity: e.id, segments });
+                    } else {
+                        first_error.get_or_insert(ProfileError::Degenerate(name(e)));
+                    }
+                }
+            }
             EntityKind::Spline { ref points, .. } => {
                 let Some(mut segments) = spline::segments(e) else {
                     first_error.get_or_insert(ProfileError::Degenerate(name(e)));

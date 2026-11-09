@@ -417,6 +417,7 @@ pub enum Tool {
     PartialEllipse,
     FitSpline,
     ControlSpline,
+    Text,
     Arc,
     Slot,
     CentrepointSlot,
@@ -476,6 +477,7 @@ impl Tool {
             Tool::PartialEllipse => "Partial ellipse",
             Tool::FitSpline => "Fit-point spline",
             Tool::ControlSpline => "Control-point spline",
+            Tool::Text => "Sketch text",
             Tool::Arc => "Arc",
             Tool::Slot => "Slot",
             Tool::CentrepointSlot => "Centrepoint slot",
@@ -532,6 +534,7 @@ impl Tool {
                 | Tool::PartialEllipse
                 | Tool::FitSpline
                 | Tool::ControlSpline
+                | Tool::Text
                 | Tool::Arc
                 | Tool::Slot
                 | Tool::CentrepointSlot
@@ -765,8 +768,22 @@ impl RelationFilter {
     }
 }
 
+/// Buffered edits and their saved source, so geometry changes refresh the form.
+pub struct TextEdit {
+    /// Entity whose form is open.
+    pub entity: EntityId,
+    /// Saved geometry when the form was opened or refreshed.
+    pub original: crate::sketch::SketchText,
+    /// Edits awaiting Apply.
+    pub draft: crate::sketch::SketchText,
+}
+
 /// The sketcher while a sketch is open.
 pub struct SketchSession {
+    /// Draft for the next text placement.
+    pub text: crate::sketch::SketchText,
+    /// Buffered settings for the selected text entity.
+    pub text_edit: Option<TextEdit>,
     pub feature: FeatureId,
     pub plane: Plane,
     pub sketch: Sketch,
@@ -863,6 +880,8 @@ impl SketchSession {
             plane,
             sketch,
             tool: Tool::Select,
+            text: Default::default(),
+            text_edit: None,
             pending: Vec::new(),
             chain_from: None,
             selection: Vec::new(),

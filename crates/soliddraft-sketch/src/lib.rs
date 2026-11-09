@@ -20,7 +20,9 @@ pub mod relations;
 mod shapes;
 pub mod solve;
 pub mod spline;
+pub mod text;
 pub use spline::SplineMode;
+pub use text::{SketchText, TextFont};
 pub mod tools;
 
 #[cfg(test)]
@@ -136,6 +138,11 @@ impl std::ops::Sub for P2 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EntityKind {
+    /// Editable font outlines, regenerated from their retained settings.
+    Text {
+        /// Text settings and baseline frame.
+        text: SketchText,
+    },
     /// A polynomial spline defined by fit points or a control polygon.
     Spline {
         /// How the authored points define the curve.
@@ -199,6 +206,7 @@ impl EntityKind {
     /// Number of points owned by this geometry.
     pub fn point_count(&self) -> usize {
         match self {
+            Self::Text { .. } => 1,
             Self::Spline { points, .. } => points.len(),
             Self::Point { .. } | Self::Circle { .. } => 1,
             Self::Line { .. } => 2,
@@ -238,6 +246,7 @@ impl Entity {
             (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => Some(*minor),
             (EntityKind::EllipticArc { start, .. }, 3) => Some(*start),
             (EntityKind::EllipticArc { end, .. }, 4) => Some(*end),
+            (EntityKind::Text { text }, 0) => Some(text.position),
             (EntityKind::Point { p }, 0) => Some(*p),
             (EntityKind::Line { a, .. }, 0) => Some(*a),
             (EntityKind::Line { b, .. }, 1) => Some(*b),
@@ -262,6 +271,7 @@ impl Entity {
             (EntityKind::Ellipse { minor, .. } | EntityKind::EllipticArc { minor, .. }, 2) => *minor = p,
             (EntityKind::EllipticArc { start, .. }, 3) => *start = p,
             (EntityKind::EllipticArc { end, .. }, 4) => *end = p,
+            (EntityKind::Text { text }, 0) => text.position = p,
             (EntityKind::Point { p: q }, 0) => *q = p,
             (EntityKind::Line { a, .. }, 0) => *a = p,
             (EntityKind::Line { b, .. }, 1) => *b = p,
@@ -324,6 +334,7 @@ impl Entity {
         match self.kind {
             EntityKind::Spline { mode: SplineMode::Fit, .. } => "Fit-point spline",
             EntityKind::Spline { mode: SplineMode::Control, .. } => "Control-point spline",
+            EntityKind::Text { .. } => "Sketch text",
             EntityKind::Point { .. } => "Point",
             EntityKind::Line { .. } => "Line",
             EntityKind::Arc { .. } => "Arc",
@@ -353,6 +364,7 @@ impl Entity {
                 let (start, sweep) = ellipse.span(kind);
                 ellipse.at(start + sweep / 2.0)
             }
+            EntityKind::Text { ref text } => text.position,
             EntityKind::Point { p } => p,
             EntityKind::Line { a, b } => a.mid(b),
             EntityKind::Arc { center, start, .. } => {
@@ -373,6 +385,7 @@ impl Entity {
             ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
                 ellipse::Ellipse::of(kind).unwrap().nearest(kind, p)
             }
+            EntityKind::Text { ref text } => text.nearest(p),
             EntityKind::Point { p: q } => (q, q.dist(p)),
             EntityKind::Line { a, b } => {
                 let ab = b.sub(a);
@@ -407,6 +420,15 @@ impl Entity {
         }
     }
 
+    /// Separate paths for entities with multiple closed contours.
+    pub fn polylines(&self, segments: usize) -> Vec<Vec<P2>> {
+        if let EntityKind::Text { ref text } = self.kind {
+            text.polylines(segments)
+        } else {
+            vec![self.polyline(segments)]
+        }
+    }
+
     /// Points along the curve for drawing and hit testing.
     pub fn polyline(&self, segments: usize) -> Vec<P2> {
         match self.kind {
@@ -417,6 +439,7 @@ impl Entity {
                 let n = segments.max(4);
                 (0..=n).map(|i| ellipse.at(start + sweep * i as f64 / n as f64)).collect()
             }
+            EntityKind::Text { ref text } => text.polylines(segments).into_iter().flatten().collect(),
             EntityKind::Point { p } => vec![p],
             EntityKind::Line { a, b } => vec![a, b],
             EntityKind::Circle { center, radius } => (0..=segments)

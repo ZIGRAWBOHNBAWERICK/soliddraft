@@ -411,6 +411,7 @@ fn entity(kind: EntityKind) -> Entity {
 
 pub(crate) fn valid(kind: &EntityKind) -> bool {
     match *kind {
+        EntityKind::Text { ref text } => text.outlines().is_ok(),
         EntityKind::Spline { mode, ref points } => crate::spline::spans(mode, points).is_some(),
         ref kind @ (EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. }) => {
             let ellipse = crate::ellipse::Ellipse::of(kind).unwrap();
@@ -857,6 +858,13 @@ impl Sketch {
     ) -> Result<Vec<EntityId>> {
         let mut selected = self.tool_selection(ids)?;
         for e in &mut selected {
+            if let EntityKind::Text { ref text } = e.kind {
+                e.kind = EntityKind::Text { text: text.mapped(&map) };
+                if !valid(&e.kind) {
+                    return refuse("the transform would produce invalid sketch text");
+                }
+                continue;
+            }
             for index in 0..e.point_count() {
                 e.set_point(index, map(e.point(index).expect("entity point")));
             }
@@ -913,6 +921,7 @@ impl Sketch {
             let map = transform(i);
             for e in &selected {
                 let kind = match e.kind {
+                    EntityKind::Text { ref text } => EntityKind::Text { text: text.mapped(&map) },
                     EntityKind::Spline { mode, ref points } => {
                         EntityKind::Spline { mode, points: points.iter().copied().map(&map).collect() }
                     }
@@ -966,6 +975,9 @@ impl Sketch {
 
     fn trim_target(&self, id: EntityId, options: TrimOptions) -> Result<Entity> {
         let target = self.tool_entity(id)?;
+        if matches!(target.kind, EntityKind::Text { .. }) {
+            return refuse("trim does not yet support text targets");
+        }
         if matches!(target.kind, EntityKind::Spline { .. }) {
             return refuse("trim does not yet support spline targets");
         }
@@ -981,6 +993,9 @@ impl Sketch {
     /// What trimming `id` at `at` removes and keeps, without changing the sketch.
     pub fn trim_preview(&self, id: EntityId, at: P2, options: TrimOptions) -> Result<TrimPreview> {
         let target = self.trim_target(id, options)?;
+        if self.drawn().any(|e| matches!(e.kind, EntityKind::Text { .. })) {
+            return refuse("trim does not yet support text boundaries");
+        }
         if self.drawn().any(|e| matches!(e.kind, EntityKind::Spline { .. })) {
             return refuse("trim does not yet support spline boundaries");
         }
@@ -1289,11 +1304,14 @@ impl Sketch {
                 let t = ellipse.parameter(at);
                 (ellipse.axis().scale(-t.sin()) + ellipse.axis().perp().scale(ellipse.ratio() * t.cos())).normalized()
             }
-            EntityKind::Point { .. } => P2::ZERO,
+            EntityKind::Text { .. } | EntityKind::Point { .. } => P2::ZERO,
         };
         let mut cuts = Vec::with_capacity(2);
         for bound in [a, b] {
             let boundary = self.tool_entity(bound)?;
+            if matches!(boundary.kind, EntityKind::Text { .. }) {
+                return refuse("bounded trim does not yet support text boundaries");
+            }
             if matches!(boundary.kind, EntityKind::Spline { .. }) {
                 return refuse("bounded trim does not yet support spline boundaries");
             }

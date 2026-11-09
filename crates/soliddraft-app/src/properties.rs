@@ -1269,7 +1269,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         state.sketch.as_ref().map(|s| crate::sketch_values::links(state.doc.model(), s.feature)).unwrap_or_default();
     let Some(s) = state.sketch.as_mut() else { return };
     let profiles = crate::sketch::profile::profiles(&s.sketch, s.plane);
-    let has_profile = profiles.is_ok();
+    let text_limit = profiles.as_ref().ok().and_then(|profiles| s.sketch.text_extrusion_notice(profiles.len()));
+    let has_profile = profiles.is_ok() && text_limit.is_none();
     let reset_scroll = ui.data_mut(|data| {
         let id = ui.id().with("sketch_active_tool");
         let previous = data.get_temp::<Tool>(id);
@@ -1343,7 +1344,9 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     actions.push(AppAction::ExitSketch(Some(ExitInto::Cut)));
                 }
             });
-            if !has_profile {
+            if let Some(message) = text_limit {
+                error_row(ui, message);
+            } else if !has_profile {
                 hint(ui, "Close a loop to extrude or cut.");
             }
             section_gap(ui);
@@ -1364,6 +1367,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::PartialEllipse, Icon::Arc, "Partial ellipse"),
                 (Tool::FitSpline,Icon::Arc,"Fit-point spline"),
                 (Tool::ControlSpline,Icon::Arc,"Control-point spline"),
+                (Tool::Text,Icon::Text,"Sketch text"),
                 (Tool::Arc, Icon::Arc, "Arc (A)"),
                 (Tool::Slot, Icon::Slot, "Slot (S)"),
                 (Tool::CentrepointSlot, Icon::Slot, "Centrepoint slot"),
@@ -1442,6 +1446,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             section_gap(ui);
 
             crate::sketch_tools::patterns::editors(ui,s);
+            crate::sketcher::text::panel(ui, s, &mut actions);
 
             // Selection.
             let selection = s.selection.clone();
@@ -1460,6 +1465,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         SketchSel::Entity(id) => {
                             if let Some(e) = s.sketch.entity(*id) {
                                 let detail = match e.kind {
+                                    EntityKind::Text {ref text} => format!("{} · {}",text.content,text.font.label()),
                                     EntityKind::Spline {ref points,..} => format!("{} points",points.len()),
                                     EntityKind::Line { a, b } => format!("{} mm long", fmt_value(a.dist(b))),
                                     EntityKind::Circle { radius, .. } => format!("Ø{} mm", fmt_value(radius * 2.0)),

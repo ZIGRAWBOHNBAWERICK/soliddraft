@@ -27,10 +27,7 @@ case "${1:-}" in
     ;;
   test-shard)
     [[ $# -eq 3 ]]
-    # A small selected archive can leave one partition empty.
-    cargo nextest run --config-file "$root/ci/nextest.toml" --profile ci \
-      --archive-file "$2" --workspace-remap "$root" --extract-to "$root" --extract-overwrite \
-      --partition "slice:$3" --no-tests pass --no-fail-fast
+    python3 ci/balance.py run "$2" "$3"
     ;;
   *)
     echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N" >&2

@@ -1,0 +1,22 @@
+name: Shared Rust compilation cache
+description: Cache individual compiler outputs on GitHub across ephemeral runners
+runs:
+  using: composite
+  steps:
+    - uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+      with:
+        version: v0.19.0
+    - uses: actions/github-script@v7
+      with:
+        script: |
+          core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+    - shell: bash
+      env:
+        CACHE_VERSION: ${{ hashFiles('Cargo.lock', 'ci/tools', 'crates/soliddraft-kernel-catallax/Cargo.toml') }}
+      run: |
+        echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
+        echo 'SCCACHE_GHA_ENABLED=on' >> "$GITHUB_ENV"
+        echo "SCCACHE_GHA_VERSION=soliddraft-v1-$CACHE_VERSION" >> "$GITHUB_ENV"
+        echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+        echo 'SCCACHE_IDLE_TIMEOUT=0' >> "$GITHUB_ENV"

@@ -222,6 +222,23 @@ class Runner(unittest.TestCase):
         expected = sorted(e['file'] for e in json.loads((ROOT / 'ci/scenario-inventory.json').read_text())['scenarios'])
         self.assertEqual(runner.scenario_paths(selector.FULL_WORK, ROOT), expected)
 
+    def test_scenario_shards_cover_the_selected_inventory_once(self):
+        expected = runner.scenario_paths(selector.FULL_WORK, ROOT)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        seen = []
+        for index in range(1, 4):
+            args = argparse.Namespace(command='scenarios', selection=None,
+                                      out=pathlib.Path(temporary.name) / str(index),
+                                      shard=f'{index}/3')
+            with mock.patch.object(runner.subprocess, 'run',
+                    return_value=subprocess.CompletedProcess([], 0)) as invoke, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(runner.run(args), 0)
+                seen.extend(call.args[0][2] for call in invoke.call_args_list)
+        self.assertEqual(sorted(seen), expected)
+        self.assertEqual(len(set(seen)), len(seen))
+
     def test_build_and_doc_failures_propagate(self):
         for command in ('test-build', 'test-doc'):
             with mock.patch.object(runner.subprocess, 'run', return_value=subprocess.CompletedProcess([], 7)) as invoke, \

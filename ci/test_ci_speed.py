@@ -1,0 +1,106 @@
+"""Runner trust, duration balancing and complete partition coverage."""
+import importlib.util
+import json
+import pathlib
+import tempfile
+import unittest
+from unittest import mock
+
+from balance import filterset, inventory, matcher, partition, run_shard
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+spec = importlib.util.spec_from_file_location('select_runner', ROOT / 'ci/select-runner.py')
+selection = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(selection)
+
+
+class RunnerHealth(unittest.TestCase):
+    def select(self, **overrides):
+        values = dict(event={}, actor='BohnBawerick', starter='BohnBawerick',
+                      repository='ZIGRAWBOHNBAWERICK/soliddraft', boat_enabled='true',
+                      boat_at='1000', bohn_at='1000', now=1001)
+        values.update(overrides)
+        return selection.runners(**values)
+
+    def test_priority_and_nixos_capability(self):
+        self.assertEqual(self.select()['plain'], ['boat-large'])
+        fallback = self.select(boat_at='0')
+        self.assertEqual(fallback['plain'], ['self-hosted', 'bohn-03'])
+        self.assertEqual(fallback['plain_jobs'], '1')
+        self.assertEqual(fallback['archive'], ['ubuntu-latest'])
+        self.assertEqual(fallback['application'], ['ubuntu-latest'])
+        self.assertEqual(self.select(boat_at='0', bohn_at='0')['plain'], ['ubuntu-latest'])
+        self.assertEqual(self.select(boat_enabled='false')['plain'], ['self-hosted', 'bohn-03'])
+
+    def test_health_expires_and_future_or_malformed_values_fail_closed(self):
+        for stamp in (None, '', 'no', '1001', '0', '100.0'):
+            self.assertFalse(selection.fresh(stamp, 1000), stamp)
+        self.assertTrue(selection.fresh('100', 999))
+        self.assertFalse(selection.fresh('100', 1000))
+
+    def test_forks_and_outside_contributors_always_use_github(self):
+        repo = 'ZIGRAWBOHNBAWERICK/soliddraft'
+        trusted_pr = {'pull_request': {'user': {'login': 'BohnBawerick'},
+                                      'head': {'repo': {'full_name': repo}}}}
+        self.assertEqual(self.select(event=trusted_pr)['plain'], ['boat-large'])
+        untrusted = [dict(actor='dependabot[bot]'), dict(starter='outsider'),
+                     dict(repository='fork/soliddraft'),
+                     dict(event={'pull_request': {'user': {'login': 'outsider'},
+                                                 'head': {'repo': {'full_name': repo}}}}),
+                     dict(event={'pull_request': {'user': {'login': 'BohnBawerick'},
+                                                 'head': {'repo': {'full_name': 'fork/soliddraft'}}}}),
+                     dict(event={'pull_request': {'head': {'repo': None}}})]
+        for values in untrusted:
+            with self.subTest(values=values):
+                runners = self.select(**values)
+                for key in ('plain', 'archive', 'application'):
+                    self.assertEqual(runners[key], ['ubuntu-latest'])
+
+
+class Balancing(unittest.TestCase):
+    def test_balances_long_tests_and_includes_unknown_tests_once(self):
+        items = ['slow', 'medium', 'fast', 'new', 'renamed']
+        shards, loads = partition(items, {'slow': 10, 'medium': 6, 'fast': 4}, 2)
+        self.assertEqual(sorted(sum(shards, [])), sorted(items))
+        self.assertLessEqual(max(loads) - min(loads), 2)
+        self.assertEqual(partition(list(reversed(items)), {'slow': 10, 'medium': 6, 'fast': 4}, 2),
+                         (shards, loads))
+        self.assertEqual(partition(['a'], {}, 4)[0], [['a'], [], [], []])
+        with self.assertRaises(ValueError):
+            partition(['a', 'a'], {}, 2)
+
+    def test_live_inventory_preserves_filters_and_ignored_tests(self):
+        listing = {'rust-suites': {'crate::test': {'testcases': {
+            'run': {'ignored': False, 'filter-match': {'status': 'matches'}},
+            'ignored': {'ignored': True, 'filter-match': {'status': 'matches'}},
+            'filtered': {'ignored': False, 'filter-match': {'status': 'mismatch'}}}}}}
+        self.assertEqual(inventory(listing), ['crate::test\trun'])
+
+    def test_filtersets_escape_exact_names_and_group_by_binary(self):
+        self.assertEqual(matcher('a,b)\\\n'), '=a\\,b\\)\\\\\\n')
+        self.assertEqual(filterset([]), 'none()')
+        text = filterset(['a\tx', 'a\ty', 'b\tx'])
+        self.assertEqual(text.count('binary_id(=a)'), 1)
+        self.assertIn('test(=x) | test(=y)', text)
+
+    def test_invalid_shard_cannot_invoke_nextest(self):
+        with mock.patch('balance.subprocess.run') as invoke:
+            for shard in ('0/4', '5/4', '1/0'):
+                with self.assertRaises(ValueError):
+                    run_shard('archive', shard)
+            invoke.assert_not_called()
+
+    def test_pinned_duration_data_has_valid_positive_weights(self):
+        for name in ('test-durations.json', 'scenario-durations.json'):
+            data = json.loads((ROOT / 'ci' / name).read_text())
+            self.assertTrue(data['seconds'])
+            self.assertIn('https://github.com/', data['source'])
+            self.assertTrue(all(isinstance(v, (int, float)) and v >= 0 for v in data['seconds'].values()))
+            items = list(data['seconds'])
+            shards, loads = partition(items, data['seconds'], 4)
+            self.assertEqual(sorted(sum(shards, [])), sorted(items))
+            self.assertLess(max(loads) - min(loads), max(data['seconds'].values()) + 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

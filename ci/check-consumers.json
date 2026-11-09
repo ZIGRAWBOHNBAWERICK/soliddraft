@@ -1,6 +1,11 @@
 {
   "format": "soliddraft-check-consumers/1",
   "files": {
+    "ci/balance.py": ["lint", "test-linux", "test-macos", "application-loop"],
+    "ci/test-durations.json": ["test-linux", "test-macos"],
+    "ci/scenario-durations.json": ["application-loop"],
+    "ci/select-runner.py": "all",
+    "ci/test_ci_speed.py": ["lint"],
     "ci/browser-documents.mjs": ["web"],
     "ci/browser-journal.js": ["web"],
     "ci/browser-preferences.mjs": ["web"],

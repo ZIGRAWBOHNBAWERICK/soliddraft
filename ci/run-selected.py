@@ -6,6 +6,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 KEYS = {'packages', 'test_targets', 'scenarios'}
@@ -95,15 +96,31 @@ def run(args):
         print(json.dumps(command), flush=True)
         return subprocess.run(command, cwd=ROOT).returncode
     paths = scenario_paths(plan, ROOT)
+    if getattr(args, 'shard', None):
+        from balance import partition
+        index, count = map(int, args.shard.split('/'))
+        if not 1 <= index <= count:
+            raise ValueError('shard must be K/N with 1 <= K <= N')
+        timings = json.loads((ROOT / 'ci/scenario-durations.json').read_text())['seconds']
+        shards, loads = partition(paths, timings, count)
+        paths = shards[index - 1]
+        print(f'Scenario shard {args.shard}: estimated seconds {loads}', flush=True)
     print(f'Running {len(paths)} application scenarios: {json.dumps(paths)}', flush=True)
     failed = False
+    durations = {}
+    args.out.mkdir(parents=True, exist_ok=True)
     for path in paths:
         command = [sys.executable, str(ROOT / 'ci/run-scenarios.py'), path,
                    '--soliddraft', 'target/release/soliddraft',
                    '--catallax-verify', 'target/release/catallax-verify',
                    '--out', str(args.out / pathlib.PurePosixPath(path).stem)]
+        started = time.monotonic()
         if subprocess.run(command, cwd=ROOT).returncode:
             failed = True
+        durations[path] = round(time.monotonic() - started, 3)
+        (args.out / 'scenario-times.json').write_text(json.dumps({'seconds': durations}, indent=2) + '\n')
+    if not paths:
+        (args.out / 'scenario-times.json').write_text('{"seconds": {}}\n')
     return int(failed)
 
 
@@ -117,6 +134,7 @@ def main():
             command.add_argument('archive')
         if name == 'scenarios':
             command.add_argument('--out', type=pathlib.Path, required=True)
+            command.add_argument('--shard', help='duration-balanced K/N partition of selected scenarios')
     return run(parser.parse_args())
 
 

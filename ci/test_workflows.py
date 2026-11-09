@@ -23,9 +23,11 @@ def evaluate(expr, **github):
     """Evaluates the expression subset used by the workflow settings under test."""
     inputs = github.pop("inputs", {})
     variables = github.pop("variables", {})
+    needs = github.pop("needs", {})
     python = re.sub(r"github((?:\.\w+)+)",
                     lambda m: "g" + "".join(f"[{key!r}]" for key in m[1][1:].split('.')),
                     expr).replace("&&", " and ").replace("||", " or ")
+    python = re.sub(r"needs\.select\.outputs\.(\w+)", r"n.get('\1', '')", python)
     python = re.sub(r"vars\.(\w+)", r"v.get('\1', '')", python)
     python = re.sub(r"inputs\.(\w+)", r"i.get('\1', False)", python)
     python = re.sub(r"!(?!=)", " not ", python)
@@ -34,6 +36,8 @@ def evaluate(expr, **github):
         "g": context,
         "i": inputs,
         "v": variables,
+        "n": needs,
+        "fromJSON": json.loads,
         "startsWith": lambda value, prefix: value.lower().startswith(prefix.lower()),
     })
 
@@ -186,42 +190,32 @@ class NightlyQualification(unittest.TestCase):
 
 
 class BoatRunners(unittest.TestCase):
-    def test_only_owner_runs_from_this_repository_use_boat(self):
+    def test_outside_runs_cannot_override_runner_selection(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
-        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)",
-                               text, re.M | re.S))
-        moved = {'step-opencascade', 'application-loop'}
-        self.assertEqual({job for job, block in jobs.items() if 'vars.USE_BOAT' in block}, moved)
-        self.assertEqual(len(moved), 2)
-        self.assertIn('shard: [1, 2, 3, 4]', jobs['test-linux'])
-        for job in ('lint', 'kernel', 'build-linux', 'test-linux', 'web', 'msrv', 'interactive-linux'):
-            self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
-        owner = 'BohnBawerick'
-        repo = 'ZIGRAWBOHNBAWERICK/soliddraft'
-        for job in moved:
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
+        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop'):
             expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
-            size = re.search(r"&& '(boat(?:-large)?)' \|\| 'ubuntu-latest'$", expression)[1]
-            self.assertNotIn('USE_LOCAL_RUNNERS', expression)
-            for event in ('push', 'workflow_dispatch', 'pull_request'):
-                for enabled in ('true', 'false', ''):
-                    for repository in (repo, 'elsewhere/soliddraft'):
-                        for actor in (owner, 'dependabot[bot]'):
-                            for starter in (owner, 'another-user'):
-                                for author in (owner, 'another-user'):
-                                    for source in (repo, 'fork/soliddraft'):
-                                        values = dict(variables={'USE_BOAT': enabled},
-                                                      repository=repository, actor=actor,
-                                                      triggering_actor=starter, event_name=event,
-                                                      event={'pull_request': {
-                                                          'user': {'login': author},
-                                                          'head': {'repo': {'full_name': source}}}})
-                                        allowed = (enabled == 'true' and repository == repo
-                                                   and actor == owner and starter == owner
-                                                   and (event != 'pull_request'
-                                                        or (author == owner and source == repo)))
-                                        with self.subTest(job=job, **values):
-                                            self.assertEqual(evaluate(expression, **values),
-                                                             size if allowed else 'ubuntu-latest')
+            for actor, author, source, starter in (
+                    ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
+                    ('outsider', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
+                    ('BohnBawerick', 'outsider', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
+                    ('BohnBawerick', 'BohnBawerick', 'fork/soliddraft', 'BohnBawerick'),
+                    ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'outsider')):
+                values = dict(repository='ZIGRAWBOHNBAWERICK/soliddraft', actor=actor,
+                              triggering_actor=starter, event_name='pull_request',
+                              event={'pull_request': {'user': {'login': author},
+                                     'head': {'repo': {'full_name': source}}}},
+                              needs={k: '["boat-large"]' for k in
+                                     ('plain_runner', 'archive_runner', 'application_runner')})
+                trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
+                self.assertEqual(evaluate(expression, **values),
+                                 ['boat-large'] if trusted else ['ubuntu-latest'])
+        for job in ('select', 'gate', 'test-linux'):
+            self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
+        self.assertIn('ci/select-runner.py', jobs['select'])
+        self.assertIn('lane: [proof, 1, 2, 3]', jobs['application-loop'])
+        self.assertIn("if: matrix.lane == 'proof'", jobs['application-loop'])
+        self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
 
 
 class RustCache(unittest.TestCase):

@@ -1318,6 +1318,12 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
 
             crate::sketch_diagnostics::panel(ui, s, &mut actions, &profiles, has_body);
 
+            if s.tool == Tool::Arc {
+                ui.checkbox(&mut s.arc_clockwise, "Clockwise arc")
+                    .on_hover_text("Off draws counterclockwise; either direction supports major arcs");
+                section_gap(ui);
+            }
+
             // Keep the active tool's controls ahead of the growing tool palette.
             if s.tool.modifies() {
                 crate::sketch_tools::panel(ui, s, &mut actions);
@@ -1360,11 +1366,14 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::ThreePointCentreRectangle, Icon::Rectangle, "3-point centre rectangle"),
                 (Tool::Parallelogram, Icon::Rectangle, "Parallelogram"),
                 (Tool::Circle, Icon::Circle, "Circle (C)"),
+                (Tool::PerimeterCircle, Icon::Circle, "Perimeter circle"),
                 (Tool::Ellipse, Icon::Circle, "Ellipse"),
                 (Tool::PartialEllipse, Icon::Arc, "Partial ellipse"),
                 (Tool::FitSpline,Icon::Arc,"Fit-point spline"),
                 (Tool::ControlSpline,Icon::Arc,"Control-point spline"),
                 (Tool::Arc, Icon::Arc, "Arc (A)"),
+                (Tool::ThreePointArc, Icon::Arc, "Three-point arc"),
+                (Tool::TangentArc, Icon::Arc, "Tangent arc"),
                 (Tool::Slot, Icon::Slot, "Slot (S)"),
                 (Tool::CentrepointSlot, Icon::Slot, "Centrepoint slot"),
                 (Tool::ThreePointArcSlot, Icon::Slot, "Three-point arc slot"),

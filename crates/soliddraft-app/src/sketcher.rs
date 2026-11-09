@@ -24,6 +24,7 @@ use soliddraft_kernel_api::Plane;
 use soliddraft_sketch::inference::{self, InferenceOptions, SnapFilter, apply_snaps};
 use std::ops::{Add, Sub};
 
+mod circular;
 mod ellipse;
 mod rectangle;
 mod slot;
@@ -203,6 +204,27 @@ pub fn run(
                     snaps.clear();
                 }
                 let p = projected;
+                let (p, snaps) = if s.tool == Tool::TangentArc && s.pending.is_empty() {
+                    circular::endpoint(s, &frame, pos).unwrap_or((raw, Vec::new()))
+                } else {
+                    (p, snaps)
+                };
+                // Repeated screen picks stay identical despite projection roundoff.
+                let p = if matches!(
+                    s.tool,
+                    Tool::Circle | Tool::PerimeterCircle | Tool::Arc | Tool::ThreePointArc | Tool::TangentArc
+                ) {
+                    s.pending
+                        .iter()
+                        .find_map(|(previous, _)| {
+                            let a = frame.screen(*previous)?;
+                            let b = frame.screen(p)?;
+                            (a.distance(b) <= 0.5).then_some(*previous)
+                        })
+                        .unwrap_or(p)
+                } else {
+                    p
+                };
                 let close = s.tool.spline_mode().is_some()
                     && s.pending.len() >= 3
                     && frame.screen(s.pending[0].0).is_some_and(|first| first.distance(pos) <= POINT_REACH);
@@ -986,6 +1008,7 @@ fn dynamic_preview(s: &SketchSession, p: Option<P2>) -> Vec<(EntityKind, bool)> 
     copy.pending = s.pending.clone();
     copy.chain_from = s.chain_from;
     copy.construction = s.construction;
+    copy.arc_clockwise = s.arc_clockwise;
     copy.modify = s.modify.clone();
     copy.dynamic_mirror = s.dynamic_mirror;
     let ids = mirrored_placement(&mut copy, p, s.snaps.clone(), false, &mut Vec::new(), false);
@@ -1043,6 +1066,9 @@ fn draw_click(
         | Tool::ThreePointCentreRectangle
         | Tool::Parallelogram => rectangle::click(s, p, snaps, actions, analyse),
         Tool::FitSpline | Tool::ControlSpline => spline::click(s, p, snaps, double, actions, analyse),
+        Tool::PerimeterCircle | Tool::Arc | Tool::ThreePointArc | Tool::TangentArc => {
+            circular::click(s, p, snaps, actions, analyse)
+        }
         Tool::Ellipse | Tool::PartialEllipse => ellipse::click(s, p, snaps, actions),
         Tool::Circle => match s.pending.pop() {
             None => s.pending.push((p, snaps)),
@@ -1061,35 +1087,6 @@ fn draw_click(
                 commit(s, actions);
             }
         },
-        Tool::Arc => {
-            if s.pending.len() < 2 {
-                s.pending.push((p, snaps));
-                return;
-            }
-            let (start, start_snaps) = s.pending.remove(1);
-            let (c, c_snaps) = s.pending.remove(0);
-            let r = c.dist(start);
-            if r < 1e-6 || c.dist(p) < 1e-6 {
-                return;
-            }
-            let end = c.add(p.sub(c).normalized().scale(r));
-            let mut sweep = end.sub(c).angle() - start.sub(c).angle();
-            while sweep < 0.0 {
-                sweep += std::f64::consts::TAU;
-            }
-            // Arcs are stored counter-clockwise; a clockwise pick swaps the ends.
-            let (a, b, a_snaps, b_snaps) = if sweep <= std::f64::consts::PI {
-                (start, end, start_snaps, snaps)
-            } else {
-                (end, start, snaps, start_snaps)
-            };
-            let id = s.sketch.add(EntityKind::Arc { center: c, start: a, end: b }, s.construction);
-            apply_snaps(&mut s.sketch, PointRef::new(id, 0), &c_snaps, None);
-            apply_snaps(&mut s.sketch, PointRef::new(id, 1), &a_snaps, None);
-            apply_snaps(&mut s.sketch, PointRef::new(id, 2), &b_snaps, None);
-            solve::solve(&mut s.sketch, None, analyse);
-            commit(s, actions);
-        }
         Tool::Slot | Tool::CentrepointSlot | Tool::ThreePointArcSlot | Tool::CentrepointArcSlot => {
             slot::click(s, p, snaps, actions, analyse);
         }
@@ -2011,23 +2008,22 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
                 seg(*a, p);
             }
         }
+        (Tool::PerimeterCircle | Tool::Arc | Tool::ThreePointArc | Tool::TangentArc, _) => {
+            if let Some(kind) = circular::preview(s, p) {
+                let points = Entity { id: 0, kind, construction: s.construction }.polyline(96);
+                if s.construction {
+                    let points: Vec<_> = points.into_iter().filter_map(|p| frame.screen(p)).collect();
+                    dashed(painter, &points, st);
+                } else {
+                    curve(points);
+                }
+            } else if let Some((first, _)) = s.pending.first() {
+                seg(*first, p);
+            }
+        }
         (Tool::Circle, [(c, _)]) => {
             let e = Entity { id: 0, kind: EntityKind::Circle { center: *c, radius: c.dist(p) }, construction: false };
             curve(e.polyline(64));
-        }
-        (Tool::Arc, [(c, _)]) => seg(*c, p),
-        (Tool::Arc, [(c, _), (start, _)]) => {
-            let r = c.dist(*start);
-            if r > 1e-6 && c.dist(p) > 1e-6 {
-                let end = c.add(p.sub(*c).normalized().scale(r));
-                let mut sweep = end.sub(*c).angle() - start.sub(*c).angle();
-                while sweep < 0.0 {
-                    sweep += std::f64::consts::TAU;
-                }
-                let (a, b) = if sweep <= std::f64::consts::PI { (*start, end) } else { (end, *start) };
-                let e = Entity { id: 0, kind: EntityKind::Arc { center: *c, start: a, end: b }, construction: false };
-                curve(e.polyline(64));
-            }
         }
         (Tool::Polygon, [(c, _)]) => {
             if let Ok(corners) = regular_polygon_corners(*c, p, s.modify.sides, s.modify.polygon_mode) {
@@ -2366,9 +2362,18 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Ellipse, _) => "Ellipse: click the second semi-axis endpoint",
         (Tool::Circle, 0) => "Circle: click the centre",
         (Tool::Circle, _) => "Circle: click a point on the circle",
+        (Tool::PerimeterCircle, 0) => "Perimeter circle: click the first point",
+        (Tool::PerimeterCircle, 1) => "Perimeter circle: click the second point",
+        (Tool::PerimeterCircle, _) => "Perimeter circle: click the third point",
+        (Tool::ThreePointArc, 0) => "Three-point arc: click the start",
+        (Tool::ThreePointArc, 1) => "Three-point arc: click the end",
+        (Tool::ThreePointArc, _) => "Three-point arc: click a point on the sweep",
+        (Tool::TangentArc, 0) => "Tangent arc: pick a line or arc endpoint",
+        (Tool::TangentArc, _) => "Tangent arc: click the new endpoint",
         (Tool::Arc, 0) => "Arc: click the centre",
         (Tool::Arc, 1) => "Arc: click the start point",
-        (Tool::Arc, _) => "Arc: click the end point",
+        (Tool::Arc, _) if s.arc_clockwise => "Arc: click the clockwise end point",
+        (Tool::Arc, _) => "Arc: click the counterclockwise end point",
         (Tool::Slot, 0) => "Slot: click the first centre",
         (Tool::Slot, 1) => "Slot: click the second centre",
         (Tool::Slot, _) => "Slot: click to set the width",

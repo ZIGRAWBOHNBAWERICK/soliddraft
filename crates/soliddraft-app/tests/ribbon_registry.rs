@@ -417,6 +417,26 @@ fn before_selection_transforms(id: &str, current: &mut Value) {
     }
 }
 
+fn before_circular_placement(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    for tool in ["perimeter_circle", "centrepoint_arc", "three_point_arc", "tangent_arc"] {
+        let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == tool).expect(tool);
+        let added = variants.remove(index);
+        assert_eq!(added["additionalProperties"], false);
+        assert!(!added["required"].as_array().unwrap().contains(&json!("construction")));
+    }
+}
+
 fn before_linked_mirror(id: &str, current: &mut Value) {
     let variants = match id {
         "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
@@ -576,6 +596,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                     "sketch_line",
                     "sketch_centreline",
                     "sketch_circle",
+                    "sketch_perimeter_circle",
                     "sketch_ellipse",
                     "sketch_partial_ellipse",
                     "sketch_fit_spline",
@@ -586,6 +607,8 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                     "sketch_three_point_centre_rectangle",
                     "sketch_parallelogram",
                     "sketch_arc",
+                    "sketch_three_point_arc",
+                    "sketch_tangent_arc",
                     "sketch_slot",
                     "sketch_centrepoint_slot",
                     "sketch_three_point_arc_slot",
@@ -670,6 +693,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_linked_mirror(id, &mut current);
         before_retained_patterns(id, &mut current);
         before_retained_polygons(id, &mut current);
+        before_circular_placement(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

@@ -1,6 +1,6 @@
 //! Retained pattern parameters and solver links survive source edits and omitted copies.
 use soliddraft_sketch::{
-    ConstraintKind, Entity, EntityKind, P2, Sketch, SolveStatus, solve,
+    ConstraintKind, Entity, EntityKind, P2, Sketch, SolveStatus, SplineMode, solve,
     tools::{Operation, PatternDirection, PatternSpec},
 };
 fn p(u: f64, v: f64) -> P2 {
@@ -11,7 +11,7 @@ fn solved(s: &mut Sketch) {
     assert!(matches!(s.status, SolveStatus::FullyDefined | SolveStatus::UnderDefined), "{:?}", s.status);
 }
 fn fixed(s: &mut Sketch, kind: EntityKind, construction: bool) -> u32 {
-    let id = s.add(kind, construction);
+    let id = s.add(kind.clone(), construction);
     s.constrain(ConstraintKind::FixEntity { entity: id, at: kind });
     id
 }
@@ -37,13 +37,18 @@ fn every_curve_family_follows_source_edits_through_translation_and_rotation() {
             start: p(8.0, 2.0),
             end: p(5.0, 3.0),
         },
+        EntityKind::Spline { mode: SplineMode::Fit, points: vec![p(3.0, 0.0), p(6.0, 2.0), p(4.0, 5.0), p(1.0, 3.0)] },
+        EntityKind::Spline {
+            mode: SplineMode::Control,
+            points: vec![p(3.0, 0.0), p(6.0, 2.0), p(4.0, 5.0), p(1.0, 3.0)],
+        },
     ]
     .into_iter()
     .enumerate()
     {
         for circular in [false, true] {
             let mut s = Sketch::new();
-            let seed = fixed(&mut s, kind, n % 2 == 0);
+            let seed = fixed(&mut s, kind.clone(), n % 2 == 0);
             let spec = if circular {
                 PatternSpec::Circular { center: P2::ZERO, angle_degrees: 360.0, count: 4, total_angle: true }
             } else {
@@ -51,9 +56,9 @@ fn every_curve_family_follows_source_edits_through_translation_and_rotation() {
             };
             s.apply_operation(&Operation::Pattern { entities: vec![seed], spec, skipped: vec![] }).unwrap();
             solved(&mut s);
-            let mut shifted = Entity { id: seed, kind, construction: n % 2 == 0 };
-            for (i, at) in (Entity { id: seed, kind, construction: false }).points().into_iter().enumerate() {
-                shifted.set_point(i as u8, at + p(2.0, 3.0));
+            let mut shifted = Entity { id: seed, kind: kind.clone(), construction: n % 2 == 0 };
+            for (i, at) in shifted.points().into_iter().enumerate() {
+                shifted.set_point(i, at + p(2.0, 3.0));
             }
             if let EntityKind::Circle { radius, .. } = &mut shifted.kind {
                 *radius = 3.0;
@@ -62,7 +67,7 @@ fn every_curve_family_follows_source_edits_through_translation_and_rotation() {
                 .iter_mut()
                 .find(|c| matches!(c.kind,ConstraintKind::FixEntity{entity,..} if entity==seed))
                 .unwrap()
-                .kind = ConstraintKind::FixEntity { entity: seed, at: shifted.kind };
+                .kind = ConstraintKind::FixEntity { entity: seed, at: shifted.kind.clone() };
             solved(&mut s);
             for instance in &s.patterns[0].instances {
                 let index = f64::from(instance.position[0]);
@@ -91,6 +96,40 @@ fn every_curve_family_follows_source_edits_through_translation_and_rotation() {
         }
     }
 }
+#[test]
+fn spline_grid_edits_keep_point_transforms_and_surviving_ids_after_reopen() {
+    for mode in [SplineMode::Fit, SplineMode::Control] {
+        let mut s = Sketch::new();
+        let points = vec![p(1.0, 0.0), p(3.0, 2.0), p(4.0, 5.0), p(2.0, 6.0)];
+        let seed = fixed(&mut s, EntityKind::Spline { mode, points: points.clone() }, false);
+        s.apply_operation(&Operation::Pattern { entities: vec![seed], spec: linear(), skipped: vec![[1, 1]] }).unwrap();
+        solved(&mut s);
+        let before = s.patterns[0].clone();
+        let spec = PatternSpec::Linear {
+            step: p(12.0, 0.0),
+            count: 4,
+            second: Some(PatternDirection { step: p(0.0, 15.0), count: 2 }),
+        };
+        s.apply_operation(&Operation::EditPattern { group: before.id, spec, skipped: vec![[1, 1], [2, 0]] }).unwrap();
+        solved(&mut s);
+        for instance in &s.patterns[0].instances {
+            if let Some(prior) = before.instances.iter().find(|old| old.position == instance.position) {
+                assert_eq!(instance.entities, prior.entities);
+            }
+            let offset = p(12.0 * f64::from(instance.position[0]), 15.0 * f64::from(instance.position[1]));
+            for (source, actual) in points.iter().zip(s.entity(instance.entities[0]).unwrap().points()) {
+                assert!((*source + offset).dist(actual) < 1e-6);
+            }
+        }
+        let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        reopened.normalise();
+        solved(&mut reopened);
+        assert_eq!(s.entities, reopened.entities);
+        assert_eq!(s.constraints, reopened.constraints);
+        assert_eq!(s.patterns, reopened.patterns);
+    }
+}
+
 #[test]
 fn grid_edits_preserve_surviving_ids_and_skipped_definitions_reopen() {
     let mut s = Sketch::new();
@@ -155,7 +194,7 @@ fn conflicting_edits_and_invalid_skips_refuse_without_mutation() {
     s.apply_operation(&Operation::Pattern { entities: vec![seed], spec: linear(), skipped: vec![] }).unwrap();
     solved(&mut s);
     let instance = s.patterns[0].instances[0].entities[0];
-    let at = s.entity(instance).unwrap().kind;
+    let at = s.entity(instance).unwrap().kind.clone();
     s.constrain(ConstraintKind::FixEntity { entity: instance, at });
     solved(&mut s);
     for operation in [

@@ -341,7 +341,7 @@ fn retained_circular_pivot_ignores_hover_and_moves_only_on_click() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut sketch = Sketch::new();
     let kind = EntityKind::Circle { center: p(10.0, 0.0), radius: 2.0 };
-    let seed = sketch.add(kind, false);
+    let seed = sketch.add(kind.clone(), false);
     sketch.constrain(ConstraintKind::FixEntity { entity: seed, at: kind });
     sketch
         .apply_operation(&Operation::Pattern {
@@ -395,7 +395,7 @@ fn constrained_copy_edit_previews_moved_seed_and_dependent_geometry() {
             })
             .unwrap();
     }
-    let fixed = sketch.entity(2).unwrap().kind;
+    let fixed = sketch.entity(2).unwrap().kind.clone();
     sketch.constrain(ConstraintKind::FixEntity { entity: 2, at: fixed });
     sketch.entity_mut(3).unwrap().construction = true;
     solve::solve(&mut sketch, None, true);
@@ -414,7 +414,7 @@ fn constrained_copy_edit_previews_moved_seed_and_dependent_geometry() {
         .drawn()
         .filter(|e| before.entity(e.id).is_none_or(|old| old.kind != e.kind || old.construction != e.construction))
         .collect();
-    assert_eq!(preview.added, changed.iter().map(|e| e.kind).collect::<Vec<_>>());
+    assert_eq!(preview.added, changed.iter().map(|e| e.kind.clone()).collect::<Vec<_>>());
     assert_eq!(preview.construction, changed.iter().map(|e| e.construction).collect::<Vec<_>>());
     assert_eq!(session(&app).sketch, before);
     app.key_press(Key::Escape);

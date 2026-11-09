@@ -314,3 +314,73 @@ fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
         }
     }
 }
+
+#[test]
+fn split_retargets_symmetry_and_keeps_it_through_undo_redo_and_reopen() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!("soliddraft-symmetric-split-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("config")).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    for arc in [false, true] {
+        for swapped in [false, true] {
+            let mut sketch = Sketch::new();
+            let (kind, at, index, far) = if arc {
+                (
+                    EntityKind::Arc { center: p(4.0, 0.0), start: p(8.0, 0.0), end: p(4.0, 4.0) },
+                    p(4.0 + 8.0_f64.sqrt(), 8.0_f64.sqrt()),
+                    2,
+                    p(4.0, 4.0),
+                )
+            } else {
+                (EntityKind::Line { a: p(2.0, 0.0), b: p(10.0, 0.0) }, p(6.0, 0.0), 1, p(10.0, 0.0))
+            };
+            let source = sketch.add(kind, false);
+            let axis_kind = EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) };
+            let axis = sketch.add(axis_kind, true);
+            sketch.constrain(ConstraintKind::FixEntity { entity: axis, at: axis_kind });
+            let partner = sketch.add(EntityKind::Point { p: p(-far.u, far.v) }, true);
+            let partner_ref = PointRef::new(partner, 0);
+            let far_ref = PointRef::new(source, index);
+            let (a, b) = if swapped { (partner_ref, far_ref) } else { (far_ref, partner_ref) };
+            let symmetry = sketch.constrain(ConstraintKind::Symmetric { a, b, axis });
+            let mut doc = ribbon::blank();
+            let id = doc
+                .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+                .unwrap()
+                .unwrap();
+            doc.apply(Command::EditSketch { id, sketch }).unwrap();
+            let mut app = ribbon::app(doc);
+            app.state_mut().state.push(AppAction::EditSketch(id));
+            app.run_steps(30);
+            let before = session(&app).sketch.clone();
+            tool(&mut app, "Split entities");
+            hover(&mut app, at);
+            assert!(session(&app).preview.as_ref().unwrap().operation.is_some());
+            pick(&mut app, at);
+            let after = session(&app).sketch.clone();
+            let new = after.drawn().last().unwrap().id;
+            let replacement = PointRef::new(new, index);
+            let expected = if swapped {
+                ConstraintKind::Symmetric { a: partner_ref, b: replacement, axis }
+            } else {
+                ConstraintKind::Symmetric { a: replacement, b: partner_ref, axis }
+            };
+            assert_eq!(after.constraint(symmetry).map(|c| c.kind), Some(expected), "arc={arc} swapped={swapped}");
+            proof(&mut app, &format!("split-symmetry-{arc}-{swapped}"));
+            undo(&mut app);
+            assert_eq!(session(&app).sketch, before);
+            app.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+            app.run_steps(8);
+            assert_eq!(session(&app).sketch, after);
+            let path = dir.join(format!("split-{arc}-{swapped}.dwprt"));
+            app.state_mut().state.push(AppAction::ExitSketch(None));
+            app.run_steps(6);
+            app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
+            app.run_steps(6);
+            app.state_mut().state.push(AppAction::Open(Some(path)));
+            app.run_steps(10);
+            assert_eq!(app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, after);
+        }
+    }
+    soliddraft_app::file::set_config_dir(None);
+}

@@ -411,6 +411,7 @@ fn remap_split(mut c: Constraint, endpoint: PointRef, replacement: PointRef) -> 
     let reference = c.is_reference();
     let kind = match c.geometry_kind() {
         ConstraintKind::Coincident { a, b } => ConstraintKind::Coincident { a: map(a), b: map(b) },
+        ConstraintKind::Symmetric { a, b, axis } => ConstraintKind::Symmetric { a: map(a), b: map(b), axis },
         ConstraintKind::PointOn { point, entity } => ConstraintKind::PointOn { point: map(point), entity },
         ConstraintKind::Horizontal { target } => ConstraintKind::Horizontal { target: align(target) },
         ConstraintKind::Vertical { target } => ConstraintKind::Vertical { target: align(target) },

@@ -261,3 +261,69 @@ fn fillet_releases_fixed_external_midpoints_in_all_endpoint_orders() {
 fn chamfer_releases_fixed_external_midpoints_in_all_endpoint_orders() {
     check_fixed_midpoint_treatment(false);
 }
+
+#[test]
+fn split_preserves_symmetry_in_both_point_slots_and_tracks_the_original_far_end() {
+    for arc in [false, true] {
+        for swapped in [false, true] {
+            let mut s = Sketch::new();
+            let (kind, at, index, far, changed) = if arc {
+                (
+                    EntityKind::Arc { center: p(4.0, 0.0), start: p(8.0, 0.0), end: p(4.0, 4.0) },
+                    p(4.0 + 8.0_f64.sqrt(), 8.0_f64.sqrt()),
+                    2,
+                    p(4.0, 4.0),
+                    p(6.0, 12.0_f64.sqrt()),
+                )
+            } else {
+                (EntityKind::Line { a: p(2.0, 0.0), b: p(10.0, 0.0) }, p(6.0, 0.0), 1, p(10.0, 0.0), p(12.0, 0.0))
+            };
+            let source = s.add(kind, false);
+            let axis_kind = EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) };
+            let axis = s.add(axis_kind, true);
+            s.constrain(ConstraintKind::FixEntity { entity: axis, at: axis_kind });
+            let partner = s.add(EntityKind::Point { p: p(-far.u, far.v) }, true);
+            let partner_ref = PointRef::new(partner, 0);
+            let partner_fix = s.constrain(ConstraintKind::Fix { point: partner_ref, at: p(-far.u, far.v) });
+            let far_ref = PointRef::new(source, index);
+            let (a, b) = if swapped { (partner_ref, far_ref) } else { (far_ref, partner_ref) };
+            let symmetry = s.constrain(ConstraintKind::Symmetric { a, b, axis });
+            let first = PointRef::new(source, if arc { 1 } else { 0 });
+            let first_at = s.point(first).unwrap();
+            let control = s.add(EntityKind::Point { p: p(-first_at.u, first_at.v) }, true);
+            let unaffected = s.constrain(ConstraintKind::Symmetric { a: first, b: PointRef::new(control, 0), axis });
+            s.constrain(ConstraintKind::Fix { point: first, at: first_at });
+            if arc {
+                s.constrain(ConstraintKind::Fix { point: PointRef::new(source, 0), at: p(4.0, 0.0) });
+                s.constrain(ConstraintKind::Radius { entity: source, value: 4.0, diameter: false, label: P2::ZERO });
+            }
+            let marker = s.add(EntityKind::Point { p: far }, true);
+            let coincidence = s.constrain(ConstraintKind::Coincident { a: far_ref, b: PointRef::new(marker, 0) });
+            solved(&mut s);
+            let control = *s.constraint(unaffected).unwrap();
+            let ids = s.apply_operation(&Operation::Split { entity: source, at, second: None }).unwrap();
+            let replacement = PointRef::new(ids[1], index);
+            let expected = if swapped {
+                ConstraintKind::Symmetric { a: partner_ref, b: replacement, axis }
+            } else {
+                ConstraintKind::Symmetric { a: replacement, b: partner_ref, axis }
+            };
+            assert_eq!(s.constraint(symmetry).map(|c| c.kind), Some(expected), "arc={arc} swapped={swapped}");
+            assert_eq!(s.constraint(unaffected), Some(&control));
+            assert_eq!(
+                s.constraint(coincidence).unwrap().kind,
+                ConstraintKind::Coincident { a: replacement, b: PointRef::new(marker, 0) }
+            );
+            solved(&mut s);
+            s.constraint_mut(partner_fix).unwrap().kind =
+                ConstraintKind::Fix { point: partner_ref, at: p(-changed.u, changed.v) };
+            solved(&mut s);
+            near(s.point(replacement).unwrap(), changed);
+            near(s.point(PointRef::new(marker, 0)).unwrap(), changed);
+            let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            solved(&mut reopened);
+            near(reopened.point(replacement).unwrap(), changed);
+            assert_eq!(reopened.constraint(symmetry).map(|c| c.kind), Some(expected));
+        }
+    }
+}

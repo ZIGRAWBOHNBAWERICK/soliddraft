@@ -9,7 +9,7 @@ use crate::icons;
 use crate::state::{AppState, RibbonTab};
 use crate::theme;
 use egui::text::LayoutJob;
-use egui::{Align, Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align, Align2, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
 /// From the edge of the ribbon to its first group.
 const BODY_MARGIN: f32 = 8.0;
@@ -195,7 +195,7 @@ pub fn body(ui: &mut egui::Ui, state: &mut AppState, tab: commands::Tab) {
             width
         } else {
             let width = group_width(ui, group);
-            let tiles = row(ui, group, gi, x + (width - row_width(ui, group)) / 2.0, top, tile_h);
+            let tiles = row(ui, group, gi, pos2(x + (width - row_width(ui, group)) / 2.0, top), tile_h, f32::INFINITY);
             if let Some((_, resp)) = tiles.iter().find(|(c, _)| c.id == "relations") {
                 relations_anchor = resp.rect;
             }
@@ -287,24 +287,36 @@ fn compact_width(ui: &egui::Ui, group: &Group) -> f32 {
     (caption_width(ui, group) + CHEVRON_SIZE + TILE_PADDING).max(COMPACT_MIN_WIDTH)
 }
 
-/// A group's tiles, left to right from a point.
+/// Where a group's tiles sit from the first one's corner: left to right, starting another
+/// row below before a tile would run past `room`.
+fn tile_rects(ui: &egui::Ui, group: &Group, height: f32, room: f32) -> Vec<Rect> {
+    let mut at = Pos2::ZERO;
+    let mut rects = Vec::new();
+    for item in &group.items {
+        let width = tile_width(ui, item);
+        if at.x > 0.0 && at.x + width > room {
+            at = pos2(0.0, at.y + height + TILE_GAP);
+        }
+        rects.push(Rect::from_min_size(at, vec2(width, height)));
+        at.x += width + TILE_GAP;
+    }
+    rects
+}
+
+/// A group's tiles from a point, in as many rows as `room` needs.
 fn row(
     ui: &mut egui::Ui,
     group: &Group,
     gi: usize,
-    left: f32,
-    top: f32,
+    origin: Pos2,
     height: f32,
+    room: f32,
 ) -> Vec<(&'static CommandSpec, egui::Response)> {
-    let mut x = left;
-    let mut drawn = Vec::new();
-    for (i, item) in group.items.iter().enumerate() {
-        let width = tile_width(ui, item);
-        let rect = Rect::from_min_size(pos2(x, top), vec2(width, height));
-        drawn.push((item.command, draw_item(ui, item, rect, (gi, i))));
-        x += width + TILE_GAP;
-    }
-    drawn
+    let rects = tile_rects(ui, group, height, room);
+    let items = group.items.iter().zip(rects).enumerate();
+    items
+        .map(|(i, (item, rect))| (item.command, draw_item(ui, item, rect.translate(origin.to_vec2()), (gi, i))))
+        .collect()
 }
 
 fn caption(ui: &egui::Ui, label: &str, centre: egui::Pos2) {
@@ -312,8 +324,8 @@ fn caption(ui: &egui::Ui, label: &str, centre: egui::Pos2) {
 }
 
 /// A group as one button: its first command's art over its name and a chevron. Clicking it
-/// opens the group's tiles in a row, which goes when a command is chosen, with a click
-/// elsewhere or with Escape.
+/// opens the group's tiles in rows no wider than the window, which go when a command is
+/// chosen, with a click elsewhere or with Escape.
 fn collapsed_group(
     ui: &mut egui::Ui,
     group: &Group,
@@ -349,10 +361,12 @@ fn collapsed_group(
         .gap(ROW_GAP)
         .show(|ui| {
             let height = theme::RIBBON_BODY_HEIGHT - 26.0;
-            let width = group_width(ui, group);
-            let (area, _) = ui.allocate_exact_size(vec2(width, height + 20.0), Sense::hover());
-            let left = area.left() + (width - row_width(ui, group)) / 2.0;
-            let tiles = row(ui, group, gi, left, area.top(), height);
+            let room = ui.ctx().content_rect().width() - 2.0 * BODY_MARGIN - ui.spacing().menu_margin.sum().x;
+            let bounds = tile_rects(ui, group, height, room).into_iter().fold(Rect::NOTHING, Rect::union);
+            let width = bounds.width().max(caption_width(ui, group) + TILE_PADDING);
+            let (area, _) = ui.allocate_exact_size(vec2(width, bounds.height() + 20.0), Sense::hover());
+            let origin = pos2(area.left() + (width - bounds.width()) / 2.0, area.top());
+            let tiles = row(ui, group, gi, origin, height, room);
             caption(ui, group.label, pos2(area.center().x, area.bottom() - 8.0));
             let chosen = tiles.iter().find(|(_, resp)| resp.clicked()).map(|(c, _)| *c);
             if chosen.is_some() || tiles.iter().any(|(_, resp)| resp.drag_stopped()) {

@@ -4,6 +4,10 @@ inputs:
   tool:
     required: true
     description: Tool name in ci/tools
+outputs:
+  prefix:
+    description: Verified installation prefix
+    value: ${{ steps.tool.outputs.prefix }}
 runs:
   using: composite
   steps:

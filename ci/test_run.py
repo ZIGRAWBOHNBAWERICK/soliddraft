@@ -71,6 +71,26 @@ def http_error(code):
 
 
 class PinnedTools(unittest.TestCase):
+    def test_raw_packaging_helper_is_verified_and_installed_without_extraction(self):
+        payload = b'#!/bin/sh\necho helper\n'
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / 'repo'
+            (root / 'ci').mkdir(parents=True)
+            prefix = pathlib.Path(directory) / 'tools'
+            asset = {'target': 'x86_64', 'format': 'raw',
+                     'url': 'https://api.github.com/repos/example/tools/releases/assets/1',
+                     'sha256': hashlib.sha256(payload).hexdigest()}
+            (root / 'ci/tools').write_text(json.dumps({'helper': {'version': 'asset-1',
+                'binary': 'helper.AppImage', 'platforms': {'Linux-x86_64': asset}}}))
+            with mock.patch.object(sys, 'argv', ['bootstrap', str(root), str(prefix), 'helper']), \
+                 mock.patch('platform.system', return_value='Linux'), \
+                 mock.patch('platform.machine', return_value='x86_64'), \
+                 mock.patch('urllib.request.urlopen', return_value=io.BytesIO(payload)) as download:
+                exec(compile(bootstrap_script(), 'bootstrap', 'exec'), {'__name__': '__main__'})
+                self.assertEqual(download.call_args.args[0].full_url, asset['url'])
+                self.assertEqual((prefix / 'bin/helper.AppImage').read_bytes(), payload)
+                self.assertTrue(os.access(prefix / 'bin/helper.AppImage', os.X_OK))
+
     def test_verified_binary_survives_outage_and_corruption_triggers_repair(self):
         binary = b'#!/bin/sh\necho pinned-nextest\n'
         payload = pinned_payload(binary)

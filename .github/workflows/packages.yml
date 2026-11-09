@@ -74,6 +74,35 @@ jobs:
       - uses: ./.github/actions/pinned-tool
         with:
           tool: cargo-packager
+      - id: apprun
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: apprun
+      - id: linuxdeploy
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: linuxdeploy
+      - id: appimage-plugin
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: appimage-plugin
+      - name: Seed the packager's AppImage helper cache
+        if: runner.os == 'Linux'
+        env:
+          APPRUN: ${{ steps.apprun.outputs.prefix }}
+          LINUXDEPLOY: ${{ steps.linuxdeploy.outputs.prefix }}
+          APPIMAGE_PLUGIN: ${{ steps.appimage-plugin.outputs.prefix }}
+        run: |
+          cache="$RUNNER_TOOL_CACHE/soliddraft-packaging-cache"
+          helpers="$cache/.cargo-packager/AppImage"
+          mkdir -p "$helpers"
+          install -m755 "$APPRUN/bin/AppRun-x86_64" "$helpers/AppRun-x86_64"
+          install -m755 "$LINUXDEPLOY/bin/linuxdeploy-x86_64.AppImage" "$helpers/linuxdeploy-x86_64.AppImage"
+          install -m755 "$APPIMAGE_PLUGIN/bin/linuxdeploy-plugin-appimage.AppImage" "$helpers/linuxdeploy-plugin-appimage.AppImage"
+          echo "XDG_CACHE_HOME=$cache" >> "$GITHUB_ENV"
       - name: Install Linux packaging and software rendering dependencies
         if: runner.os == 'Linux'
         run: |

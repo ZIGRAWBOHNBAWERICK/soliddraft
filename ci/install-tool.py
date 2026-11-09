@@ -86,12 +86,15 @@ def install(root, prefix, name):
         payload = download(url, f'{name} {tool["version"]}')
         if hashlib.sha256(payload).hexdigest() != asset['sha256']:
             sys.exit(f'{name} checksum mismatch')
-        with tarfile.open(fileobj=io.BytesIO(payload), mode='r:gz') as archive:
-            members = [m for m in archive.getmembers()
-                       if m.isfile() and pathlib.PurePosixPath(m.name).name == executable]
-            if len(members) != 1:
-                sys.exit(f'{name} archive must contain exactly one executable')
-            binary = archive.extractfile(members[0]).read()
+        if asset.get('format') == 'raw':
+            binary = payload
+        else:
+            with tarfile.open(fileobj=io.BytesIO(payload), mode='r:gz') as archive:
+                members = [m for m in archive.getmembers()
+                           if m.isfile() and pathlib.PurePosixPath(m.name).name == executable]
+                if len(members) != 1:
+                    sys.exit(f'{name} archive must contain exactly one executable')
+                binary = archive.extractfile(members[0]).read()
         bindir = prefix / 'bin'
         bindir.mkdir(parents=True, exist_ok=True)
         temporary = bindir / f'.{executable}.tmp'

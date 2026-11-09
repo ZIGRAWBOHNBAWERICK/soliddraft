@@ -58,5 +58,41 @@
         "url": "https://api.github.com/repos/anchore/syft/releases/assets/377338300"
       }
     }
+  },
+  "linuxdeploy": {
+    "version": "asset-182515537",
+    "binary": "linuxdeploy-x86_64.AppImage",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef",
+        "url": "https://api.github.com/repos/tauri-apps/binary-releases/releases/assets/182515537"
+      }
+    }
+  },
+  "apprun": {
+    "version": "asset-274691722",
+    "binary": "AppRun-x86_64",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f",
+        "url": "https://api.github.com/repos/tauri-apps/binary-releases/releases/assets/274691722"
+      }
+    }
+  },
+  "appimage-plugin": {
+    "version": "asset-602435573",
+    "binary": "linuxdeploy-plugin-appimage.AppImage",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e",
+        "url": "https://api.github.com/repos/linuxdeploy/linuxdeploy-plugin-appimage/releases/assets/602435573"
+      }
+    }
   }
 }

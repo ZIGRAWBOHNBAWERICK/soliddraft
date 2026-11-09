@@ -12,7 +12,7 @@ use crate::document::{Command, Document};
 use crate::sketch::{
     Align, Constraint, ConstraintId, ConstraintKind, DistanceKind, Entity, EntityId, EntityKind, P2, PointRef, Sketch,
     SolveStatus, fmt_value, solve,
-    tools::{End, Operation, polygon_corners},
+    tools::{End, Operation, PolygonMode, regular_polygon_corners},
 };
 use crate::sketch_tools;
 use crate::state::{AppAction, DimEdit, SketchDrag, SketchSel, SketchSession, Snap, Tool, ToolPreview, TrimDrag};
@@ -1114,13 +1114,21 @@ fn draw_click(
         Tool::Polygon => match s.pending.pop() {
             None => s.pending.push((p, snaps)),
             Some((c, c_snaps)) => {
-                let operation = Operation::Polygon { center: c, vertex: p, sides: s.modify.sides };
+                let operation = Operation::RegularPolygon {
+                    center: c,
+                    point: p,
+                    sides: s.modify.sides,
+                    mode: s.modify.polygon_mode,
+                };
                 let before = s.sketch.entities.len();
                 if sketch_tools::apply_with_analysis(s, &operation, actions, analyse) {
-                    // The first vertex keeps the relation its snap showed; the centre is
-                    // not a point of the sketch.
+                    // The circle retains centre snaps in either placement mode.
                     if let Some(first) = s.sketch.entities.get(before).map(|e| e.id) {
-                        apply_snaps(&mut s.sketch, PointRef::new(first, 0), &snaps, None);
+                        let circle = s.sketch.polygon_of(first).expect("new polygon").circle;
+                        apply_snaps(&mut s.sketch, PointRef::new(circle, 0), &c_snaps, None);
+                        if s.modify.polygon_mode == PolygonMode::Inscribed {
+                            apply_snaps(&mut s.sketch, PointRef::new(first, 0), &snaps, None);
+                        }
                         solve::solve(&mut s.sketch, None, analyse);
                         if let Some(AppAction::Command(Command::EditSketch { sketch, .. })) = actions.last_mut() {
                             *sketch = s.sketch.clone();
@@ -2025,10 +2033,19 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
             }
         }
         (Tool::Polygon, [(c, _)]) => {
-            if let Ok(corners) = polygon_corners(*c, p, s.modify.sides) {
+            if let Ok(corners) = regular_polygon_corners(*c, p, s.modify.sides, s.modify.polygon_mode) {
                 let mut closed = corners.clone();
                 closed.push(corners[0]);
-                curve(closed);
+                let points: Vec<_> = closed.iter().filter_map(|q| frame.screen(*q)).collect();
+                if s.construction {
+                    dashed(painter, &points, st);
+                } else {
+                    curve(closed);
+                }
+                let guide =
+                    Entity { id: 0, kind: EntityKind::Circle { center: *c, radius: c.dist(p) }, construction: true };
+                let points: Vec<_> = guide.polyline(96).into_iter().filter_map(|q| frame.screen(q)).collect();
+                dashed(painter, &points, st);
                 seg(*c, p);
             }
         }
@@ -2368,6 +2385,9 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
             }
         }
         (Tool::Polygon, 0) => "Polygon: click the centre",
+        (Tool::Polygon, _) if s.modify.polygon_mode == PolygonMode::Circumscribed => {
+            "Polygon: click a side midpoint; Esc or right-click cancels"
+        }
         (Tool::Polygon, _) => "Polygon: click a vertex; Esc or right-click cancels",
         (Tool::TrimCorner | Tool::Fillet | Tool::Chamfer, _) if s.corner_first.is_none() => {
             "Corner: pick the first retained portion"

@@ -482,6 +482,46 @@ fn before_retained_patterns(id: &str, current: &mut Value) {
     }
 }
 
+/// Retained polygons intentionally add two documented operations to direct sketch
+/// tools and proposal lines. Pin both additions before comparing the older contract.
+fn before_retained_polygons(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let point = json!({"type":"object", "additionalProperties":false,
+        "properties":{"u":{"type":"number"},"v":{"type":"number"}}, "required":["u","v"]});
+    let mode = json!({"type":"string", "enum":["inscribed","circumscribed"]});
+    for (tool, properties, required) in [
+        (
+            "regular_polygon",
+            json!({"center":point,"point":point,"sides":{"type":"integer"},"mode":mode}),
+            json!(["tool", "center", "point", "sides"]),
+        ),
+        (
+            "edit_polygon",
+            json!({"circle":{"type":"integer"},"sides":{"type":"integer"},"radius":{"type":"number"},"mode":mode}),
+            json!(["tool", "circle", "sides", "radius", "mode"]),
+        ),
+    ] {
+        let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == tool).expect(tool);
+        let mut properties = properties.as_object().unwrap().clone();
+        properties.insert("tool".into(), json!({"type":"string","const":tool}));
+        assert_eq!(
+            variants.remove(index),
+            json!({"type":"object","additionalProperties":false,"properties":properties,"required":required}),
+            "only the documented retained polygon operation extends the frozen schema"
+        );
+    }
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -625,6 +665,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_linked_offsets(id, &mut current);
         before_linked_mirror(id, &mut current);
         before_retained_patterns(id, &mut current);
+        before_retained_polygons(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

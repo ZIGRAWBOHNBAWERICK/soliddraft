@@ -247,7 +247,9 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
 
         // Extrude from Use sketch ends the sketch and opens the editor in Solid.
         let before = viewport(app);
-        ribbon::click_ribbon(app, "Extrude");
+        let extrude = ribbon::reveal_ribbon_command(app, "extrude");
+        assert!(extrude.enabled, "Extrude is available for the sketch profile");
+        ribbon::click_at(app, extrude.rect.center());
         settle(app);
         let state = &app.state().state;
         assert!(state.sketch.is_none(), "the sketch session ended");

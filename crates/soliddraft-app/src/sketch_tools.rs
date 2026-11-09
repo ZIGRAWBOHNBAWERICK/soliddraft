@@ -7,7 +7,7 @@
 use crate::document::Command;
 use crate::sketch::{
     ConstraintKind, EntityId, P2, solve,
-    tools::{ChamferSize, OffsetCap, Operation, ToolError},
+    tools::{ChamferSize, MirrorAxis, OffsetCap, Operation, ToolError},
 };
 use crate::state::{AppAction, SketchSel, SketchSession, Tool, ToolPreview};
 use crate::theme;
@@ -49,13 +49,22 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
     {
         return Some(Operation::EditOffset { group, distance: s.modify.distance });
     }
-    let entities = selected_in_order(s);
+    let mut entities = selected_in_order(s);
+    if s.tool == Tool::Mirror {
+        entities.retain(|id| Some(*id) != s.modify.mirror_axis);
+    }
     if entities.is_empty() {
         return None;
     }
     let m = &s.modify;
     Some(match s.tool {
         Tool::Offset => Operation::Offset { entities, distance: m.distance, options: m.offset },
+        Tool::Mirror if m.keep_symmetry => Operation::MirrorLinked {
+            entities,
+            axis: m.mirror_axis.map_or(MirrorAxis::Points { start: m.axis_start, end: m.axis_end }, |entity| {
+                MirrorAxis::Entity { entity }
+            }),
+        },
         Tool::Mirror => Operation::Mirror { entities, axis_start: m.axis_start, axis_end: m.axis_end },
         Tool::LinearPattern => Operation::LinearPattern { entities, step: m.step, count: m.count },
         Tool::CircularPattern => {
@@ -119,6 +128,12 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
     }
     let mut copy = s.sketch.clone();
     match copy.apply_operation(&operation) {
+        Ok(ids) if ids.is_empty() && copy == s.sketch && matches!(operation, Operation::MirrorLinked { .. }) => {
+            ToolPreview {
+                refused: Some("The selection is already symmetric about this axis".into()),
+                ..Default::default()
+            }
+        }
         Ok(mut ids) => {
             let replaced: Vec<_> = s
                 .sketch
@@ -174,6 +189,15 @@ pub fn selection_preview(s: &SketchSession) -> Option<ToolPreview> {
 /// Runs a tool on the sketch and records it as one undo step. New entities become the
 /// selection, so a copy can be copied again; a refusal leaves the sketch alone and says why.
 pub fn apply(s: &mut SketchSession, operation: &Operation, actions: &mut Vec<AppAction>) -> bool {
+    apply_with_analysis(s, operation, actions, true)
+}
+
+pub(crate) fn apply_with_analysis(
+    s: &mut SketchSession,
+    operation: &Operation,
+    actions: &mut Vec<AppAction>,
+    analyse: bool,
+) -> bool {
     let name = s.tool.label();
     let old_relations: Vec<_> = s.sketch.constraints.iter().map(|c| c.id).collect();
     match s.sketch.apply_operation(operation) {
@@ -185,7 +209,7 @@ pub fn apply(s: &mut SketchSession, operation: &Operation, actions: &mut Vec<App
                     }
                 }
             }
-            solve::solve(&mut s.sketch, None, true);
+            solve::solve(&mut s.sketch, None, analyse);
             actions.push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
             if s.tool.selects() {
                 s.selection = ids.into_iter().map(SketchSel::Entity).collect();
@@ -364,9 +388,42 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             }
         }
         Tool::Mirror => {
-            hint(ui, "Select the entities, then click two points on the mirror axis. Apply adds the copies.");
-            point(ui, "Axis start", &mut s.modify.axis_start);
-            point(ui, "Axis end", &mut s.modify.axis_end);
+            hint(
+                ui,
+                "Select entities to reflect. Choose an axis line, or place two axis points. Apply adds the copies.",
+            );
+            let old_axis = s.modify.mirror_axis;
+            egui::ComboBox::from_label("Mirror axis")
+                .selected_text(s.modify.mirror_axis.map_or_else(|| "Two points".into(), |id| format!("Line {id}")))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.modify.mirror_axis, None, "Two points");
+                    for e in s.sketch.drawn().filter(|e| e.is_line()) {
+                        ui.selectable_value(&mut s.modify.mirror_axis, Some(e.id), format!("Line {}", e.id));
+                    }
+                });
+            if s.modify.mirror_axis != old_axis {
+                s.pending.clear();
+                s.say(if s.modify.mirror_axis.is_some() {
+                    "Mirror: select entities, then Apply"
+                } else {
+                    "Mirror: click the axis start"
+                });
+            }
+            if let Some(entity) = s.modify.mirror_axis {
+                if let Some(crate::sketch::EntityKind::Line { a, b }) = s.sketch.entity(entity).map(|e| e.kind) {
+                    s.modify.axis_start = a;
+                    s.modify.axis_end = b;
+                }
+            } else {
+                point(ui, "Axis start", &mut s.modify.axis_start);
+                point(ui, "Axis end", &mut s.modify.axis_end);
+            }
+            ui.checkbox(&mut s.modify.keep_symmetry, "Keep symmetry");
+            if ui.add_enabled(s.modify.mirror_axis.is_some(), egui::Button::new("Start dynamic mirror")).clicked() {
+                s.dynamic_mirror = s.modify.mirror_axis;
+                s.set_tool(Tool::Line);
+            }
+            hint(ui, "Dynamic mirror draws reflected pairs about an existing line. Esc stops it.");
         }
         Tool::LinearPattern => {
             hint(ui, "Select the entities, then click the start and end of one step. Apply adds the copies.");
@@ -677,6 +734,17 @@ pub fn operation_schema() -> Value {
             ("tool", constant("edit_offset")),
             ("group", integer("An existing offset group constraint id")),
             ("distance", number("New signed offset distance, mm")),
+        ]),
+        object(&[
+            ("tool", constant("mirror_linked")),
+            ("entities", ids.clone()),
+            (
+                "axis",
+                any_of(vec![
+                    object(&[("type", constant("entity")), ("entity", integer("Existing axis line id"))]),
+                    object(&[("type", constant("points")), ("start", point.clone()), ("end", point.clone())]),
+                ]),
+            ),
         ]),
         object(&[
             ("tool", constant("mirror")),

@@ -403,6 +403,35 @@ fn before_selection_transforms(id: &str, current: &mut Value) {
     }
 }
 
+fn before_linked_mirror(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .unwrap();
+    let at = variants.iter().position(|v| v["properties"]["tool"]["const"] == "mirror_linked").unwrap();
+    let point = json!({"type":"object", "additionalProperties":false, "properties":{"u":{"type":"number"},"v":{"type":"number"}}, "required":["u","v"]});
+    assert_eq!(
+        variants.remove(at),
+        json!({"type":"object", "additionalProperties":false,
+        "properties": {
+            "tool":{"type":"string", "const":"mirror_linked"},
+            "entities":{"type":"array", "items":{"type":"integer"}, "minItems":1},
+            "axis":{"anyOf":[
+                {"type":"object", "additionalProperties":false, "properties":{"type":{"type":"string","const":"entity"},"entity":{"type":"integer"}}, "required":["type","entity"]},
+                {"type":"object", "additionalProperties":false, "properties":{"type":{"type":"string","const":"points"},"start":point,"end":point}, "required":["type","start","end"]}
+            ]}
+        },"required":["tool","entities","axis"]})
+    );
+}
+
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -538,6 +567,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_corner_finishing(id, &mut current);
         before_selection_transforms(id, &mut current);
         before_linked_offsets(id, &mut current);
+        before_linked_mirror(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

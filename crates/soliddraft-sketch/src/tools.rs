@@ -1,6 +1,9 @@
 //! Tolerance-based sketch tools. These retain analytic lines and circular arcs;
 //! Catallax's existing converter supplies the exact kernel representation.
 
+mod mirror;
+pub use mirror::{MirrorAxis, reflected};
+
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
@@ -231,6 +234,13 @@ pub enum Operation {
         axis_start: P2,
         /// Second point on the mirror axis.
         axis_end: P2,
+    },
+    /// Reflect geometry while retaining symmetry about a stored axis.
+    MirrorLinked {
+        /// Entities to reflect, excluding the axis itself.
+        entities: Vec<EntityId>,
+        /// Existing axis line or two points for a fixed construction axis.
+        axis: MirrorAxis,
     },
     /// Copy geometry at repeated translations.
     LinearPattern {
@@ -715,6 +725,7 @@ impl Sketch {
                 }
                 self.transform_selection(entities, false, *factor, |p| *base + (p - *base).scale(*factor))
             }
+            Operation::MirrorLinked { entities, axis } => self.mirror_linked(entities, *axis),
             Operation::Mirror { entities, axis_start, axis_end } => {
                 if !finite(*axis_start) || !finite(*axis_end) || axis_start.dist(*axis_end) <= EPS {
                     return refuse("the mirror axis needs two distinct finite points");

@@ -901,6 +901,17 @@
       ]
     },
     {
+      "id": "sketch-linked-mirror",
+      "file": "ci/scenarios/sketch-linked-mirror.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-sketch",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-mirror",
       "file": "ci/scenarios/sketch-mirror.json",
       "acceptance": false,

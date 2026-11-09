@@ -1,0 +1,213 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-linked-mirror",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0,
+                "v": -20
+              },
+              "b": {
+                "u": 0,
+                "v": 20
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 1
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0,
+                "v": -6
+              },
+              "b": {
+                "u": 8,
+                "v": -6
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 2
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 8,
+                "v": -6
+              },
+              "b": {
+                "u": 8,
+                "v": 6
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 3
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 8,
+                "v": 6
+              },
+              "b": {
+                "u": 0,
+                "v": 6
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 4
+            }
+          },
+          {
+            "tool": "mirror_linked",
+            "entities": [
+              2,
+              3,
+              4
+            ],
+            "axis": {
+              "type": "entity",
+              "entity": 1
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 25,
+                "v": 0
+              },
+              "radius": 3
+            },
+            "construction": false
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 8
+            }
+          },
+          {
+            "tool": "mirror_linked",
+            "entities": [
+              8
+            ],
+            "axis": {
+              "type": "entity",
+              "entity": 1
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "arc",
+              "center": {
+                "u": 25,
+                "v": 12
+              },
+              "start": {
+                "u": 28,
+                "v": 12
+              },
+              "end": {
+                "u": 25,
+                "v": 15
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 10
+            }
+          },
+          {
+            "tool": "mirror_linked",
+            "entities": [
+              10
+            ],
+            "axis": {
+              "type": "entity",
+              "entity": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 3,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 745.6460032938488,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/linked-mirror.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/linked-mirror.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 745.6460032938488,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

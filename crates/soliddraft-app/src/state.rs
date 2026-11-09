@@ -559,6 +559,10 @@ pub struct ModifyInputs {
     pub offset: OffsetOptions,
     /// An existing offset group being edited instead of copied.
     pub offset_group: Option<ConstraintId>,
+    /// Follow an existing mirror axis instead of placing two points.
+    pub mirror_axis: Option<EntityId>,
+    /// Retain symmetry about the chosen axis.
+    pub keep_symmetry: bool,
     /// The mirror axis.
     pub axis_start: P2,
     pub axis_end: P2,
@@ -586,6 +590,8 @@ impl Default for ModifyInputs {
             chamfer: ChamferSize::Distances { first: 2.0, second: 2.0 },
             offset: OffsetOptions { chain: true, ..Default::default() },
             offset_group: None,
+            mirror_axis: None,
+            keep_symmetry: true,
             axis_start: P2::ZERO,
             axis_end: P2::new(0.0, 10.0),
             step: P2::new(20.0, 0.0),
@@ -724,6 +730,10 @@ pub struct SketchSession {
     pub reference_dimensions: bool,
     /// The Modify tools' numeric and pointer-placed values.
     pub modify: ModifyInputs,
+    /// Axis used to mirror newly drawn geometry in this session.
+    pub dynamic_mirror: Option<EntityId>,
+    /// Reflected geometry from the current drawing placement, without a document edit.
+    pub dynamic_preview: Vec<(EntityKind, bool)>,
     /// What the active Modify tool would do now, redrawn every frame.
     pub preview: Option<ToolPreview>,
 }
@@ -795,6 +805,8 @@ impl SketchSession {
             construction: false,
             reference_dimensions: false,
             modify: ModifyInputs::default(),
+            dynamic_mirror: None,
+            dynamic_preview: Vec::new(),
             preview: None,
         }
     }
@@ -803,6 +815,10 @@ impl SketchSession {
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
         self.modify.offset_group = None;
+        if tool == Tool::Select {
+            self.dynamic_mirror = None;
+        }
+        self.dynamic_preview.clear();
         self.link_values = None;
         self.quick_snap = None;
         self.snaps.clear();

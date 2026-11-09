@@ -241,7 +241,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     hover(&mut app, P2::new(10.0, 20.0));
     assert_eq!(session(&app).preview.as_ref().unwrap().added, preview, "placed axis stays put");
     button(&mut app, "Apply");
-    assert_eq!(count(&app), 5);
+    assert_eq!(count(&app), 6, "the linked mirror also retains its construction axis");
     assert_eq!(session(&app).sketch.drawn().last().unwrap().kind, preview[0]);
     undo(&mut app, 4);
 

@@ -93,8 +93,12 @@ def main():
 
 
 def execution_partitions(report):
-    copies = report['before_bytes'] // max(1, report['after_bytes'])
-    return 4 * min(3, max(1, copies))
+    before, after = report['before_bytes'], max(1, report['after_bytes'])
+    if 3 * after <= before:
+        return 12
+    if 3 * after <= 2 * before:
+        return 8
+    return 4
 
 
 if __name__ == '__main__':

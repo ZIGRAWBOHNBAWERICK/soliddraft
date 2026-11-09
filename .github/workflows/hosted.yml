@@ -837,7 +837,7 @@ jobs:
       windows: ${{ contains(fromJSON(needs.select.outputs.selected), 'package-windows') }}
 
   gate:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_catallax_views && 'Baseline refresh gate' || 'Merge gate' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_catallax_views && 'Baseline refresh gate' || github.event_name == 'workflow_dispatch' && inputs.benchmark_linux_only && 'Linux benchmark gate' || 'Merge gate' }}
     if: always()
     needs: [select, lint, kernel, step-opencascade, build-linux, partition-linux, test-linux, build-macos, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
     runs-on: ubuntu-latest

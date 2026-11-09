@@ -190,7 +190,7 @@ class Concurrency(unittest.TestCase):
 
 
 class BaselineRefresh(unittest.TestCase):
-    def test_only_an_explicit_refresh_dispatch_changes_the_gate(self):
+    def test_refresh_dispatch_has_its_own_gate(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         refresh = re.search(r"REFRESH_CATALLAX_VIEWS: (.*)", text)[1]
         kernel = text.split("\n  kernel:\n", 1)[1].split("\n  step-opencascade:", 1)[0]
@@ -207,6 +207,18 @@ class BaselineRefresh(unittest.TestCase):
                 self.assertEqual(evaluate(condition, **values), not refreshing)
                 self.assertEqual(render(name, **values),
                                  'Baseline refresh gate' if refreshing else 'Merge gate')
+
+    def test_linux_benchmark_has_its_own_gate(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        gate = text.split('\n  gate:\n', 1)[1]
+        name = re.search(r'^    name: (.*)$', gate, re.M)[1]
+        for event in ('pull_request', 'push', 'schedule', 'workflow_dispatch'):
+            for requested in (False, True):
+                with self.subTest(event=event, requested=requested):
+                    values = dict(event_name=event, inputs={'benchmark_linux_only': requested})
+                    expected = ('Linux benchmark gate' if event == 'workflow_dispatch' and requested
+                                else 'Merge gate')
+                    self.assertEqual(render(name, **values), expected)
 
     def test_selection_step_runs_only_generators_for_refresh(self):
         root = pathlib.Path(__file__).resolve().parent.parent

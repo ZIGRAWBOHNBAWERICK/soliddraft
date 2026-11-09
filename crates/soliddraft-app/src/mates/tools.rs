@@ -603,7 +603,14 @@ fn drag(state: &mut AppState, input: &Value) -> Result<(), String> {
     let s = state.assembly.session.as_mut().ok_or("no assembly is open")?;
     s.doc.poll_drag();
     let guarded = input["collision"].as_bool().unwrap_or(false) || !input["clearance"].is_null();
-    let clearance = input["clearance"].as_str().map(crate::interference::tools::length).transpose()?;
+    let clearance = input["clearance"]
+        .as_str()
+        .map(|text| {
+            let values = soliddraft_model::ValueTable::default();
+            let expression = values.parse(text).map_err(|e| format!("the clearance: {e}"))?;
+            values.length(&expression).map_err(|e| format!("the clearance: {e}"))
+        })
+        .transpose()?;
     match input["phase"].as_str().unwrap_or("move") {
         "begin" => {
             let path =

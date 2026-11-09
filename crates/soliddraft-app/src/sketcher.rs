@@ -158,6 +158,7 @@ pub fn finish_spline(s: &mut SketchSession, actions: &mut Vec<AppAction>) {
 }
 
 /// Runs the sketcher for one frame: input first, then drawing.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     ui: &mut egui::Ui,
     s: &mut SketchSession,
@@ -165,6 +166,7 @@ pub fn run(
     camera: &Camera,
     rect: Rect,
     resp: &egui::Response,
+    grid: Option<crate::viewport::grid::Spacing>,
 ) -> Vec<AppAction> {
     let mut actions = Vec::new();
     let frame = Frame { plane: s.plane, camera, rect };
@@ -234,7 +236,13 @@ pub fn run(
                 let close = s.tool.spline_mode().is_some()
                     && s.pending.len() >= 3
                     && frame.screen(s.pending[0].0).is_some_and(|first| first.distance(pos) <= POINT_REACH);
-                snapped = Some(if close { s.pending[0].0 } else { p });
+                snapped = Some(if close {
+                    s.pending[0].0
+                } else if s.grid_snap && snaps.is_empty() && s.quick_snap.is_none() {
+                    grid.map_or(p, |grid| grid.snap(p))
+                } else {
+                    p
+                });
                 s.snaps = if close { Vec::new() } else { snaps };
             }
         } else if picks {
@@ -243,6 +251,7 @@ pub fn run(
         } else {
             s.hover = hit_test(&frame, &s.sketch, pos, &glyphs);
             if s.hover.is_none()
+                && s.show_dimensions
                 && let Some((id, _)) = label_rects(&frame, &s.sketch, ui).into_iter().find(|(_, r)| r.contains(pos))
             {
                 s.hover = Some(SketchSel::Constraint(id));
@@ -724,7 +733,7 @@ fn select_input(
     if resp.drag_started_by(egui::PointerButton::Primary)
         && let Some(pos) = ui.input(|i| i.pointer.press_origin())
     {
-        let labels = label_rects(frame, &s.sketch, ui);
+        let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
         let hit = hit_test(frame, &s.sketch, pos, &[]);
         let label = labels.into_iter().find(|(_, r)| r.contains(pos)).map(|(id, _)| id);
         s.drag = match (hit, label) {
@@ -1340,6 +1349,9 @@ fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketc
 }
 
 fn paint_regions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
+    if !s.show_regions {
+        return;
+    }
     let sketch = if let Some(preview) = s.preview.as_ref().filter(|p| !p.replaced.is_empty()) {
         let mut visible = s.sketch.clone();
         visible.entities.retain(|e| !preview.replaced.contains(&e.id));
@@ -1703,6 +1715,9 @@ pub(crate) fn dim_text(c: &Constraint, sketch: &Sketch) -> String {
 }
 
 fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
+    if !s.show_dimensions {
+        return;
+    }
     let conflicting = match &s.sketch.status {
         SolveStatus::OverDefined { conflicting } => conflicting.clone(),
         _ => Vec::new(),

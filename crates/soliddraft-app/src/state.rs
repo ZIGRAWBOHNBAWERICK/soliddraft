@@ -73,6 +73,12 @@ pub enum AppAction {
     FinishSpline,
     /// Opens or closes the sketch relation list.
     SketchRelations(bool),
+    /// Show closed-region fills in the active sketch.
+    SketchShading(bool),
+    /// Show and pick dimension annotations in the active sketch.
+    SketchDimensions(bool),
+    /// Round new placements to the viewport grid when no geometry snap applies.
+    SketchGridSnap(bool),
     /// Open or close a read-only report of sketch profile warnings.
     SketchDiagnostics(bool),
     /// Open the same inspector with intended extrusion checks enabled.
@@ -830,6 +836,12 @@ pub struct SketchSession {
     pub link_values: Option<crate::sketch_values::LinkValues>,
     /// Shows relation glyphs without changing the constraints or dimensions.
     pub show_relations: bool,
+    /// Session-local closed-contour fill visibility.
+    pub show_regions: bool,
+    /// Session-local dimension painting and picking visibility.
+    pub show_dimensions: bool,
+    /// Snap placements to the current grid, independently of grid visibility.
+    pub grid_snap: bool,
     /// Scope of the Existing relations property list for this session.
     pub relations_filter: RelationFilter,
     /// A read-only profile report, cached until refresh or closed.
@@ -914,6 +926,9 @@ impl SketchSession {
             relations_open: false,
             link_values: None,
             show_relations: true,
+            show_regions: true,
+            show_dimensions: true,
+            grid_snap: false,
             relations_filter: RelationFilter::default(),
             diagnostics: None,
             construction: false,

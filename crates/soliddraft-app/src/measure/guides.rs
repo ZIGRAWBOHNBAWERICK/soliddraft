@@ -30,8 +30,10 @@ pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     if !centreline {
         s.construction = construction;
     }
+    ui.put(at.translate(vec2(0.0, 48.0)), egui::Checkbox::new(&mut s.grid_snap, "Snap to grid"))
+        .on_hover_text("Use the current minor grid spacing. Geometry snaps and explicit Quick snap choices take priority.");
     if s.tool.places_points() {
-        ui.scope_builder(egui::UiBuilder::new().max_rect(at.translate(vec2(0.0, 48.0))), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(at.translate(vec2(0.0, 72.0))), |ui| {
             egui::ComboBox::from_id_salt("quick-snap")
                 .height(280.0)
                 .selected_text(s.quick_snap.map_or("Quick snap", SnapFilter::label))

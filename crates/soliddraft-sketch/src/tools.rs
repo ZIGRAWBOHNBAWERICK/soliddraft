@@ -186,6 +186,43 @@ pub enum Operation {
         /// New nonzero signed distance, mm.
         distance: f64,
     },
+    /// Translate selected entities, preserving compatible constraints or refusing atomically.
+    Move {
+        /// Entities to move.
+        entities: Vec<EntityId>,
+        /// Translation in the sketch plane, mm.
+        displacement: P2,
+    },
+    /// Make an independent translated copy, without copying driving relations.
+    Copy {
+        /// Entities to copy.
+        entities: Vec<EntityId>,
+        /// Placement base point.
+        base: P2,
+        /// Displacement from the base point, mm.
+        displacement: P2,
+    },
+    /// Rotate about a point, optionally making an independent copy.
+    Rotate {
+        /// Entities to transform.
+        entities: Vec<EntityId>,
+        /// Rotation centre.
+        center: P2,
+        /// Signed rotation in degrees.
+        angle_degrees: f64,
+        /// Keep the source geometry and add independent copies.
+        #[serde(default)]
+        copy: bool,
+    },
+    /// Uniformly scale about a point, preserving compatible constraints or refusing.
+    Scale {
+        /// Entities to resize.
+        entities: Vec<EntityId>,
+        /// Fixed base point of the scaling.
+        base: P2,
+        /// Positive finite scale factor.
+        factor: f64,
+    },
     /// Copy geometry across an infinite line, reversing reflected arc endpoints.
     Mirror {
         /// Entities to copy.
@@ -650,6 +687,34 @@ impl Sketch {
             Operation::Extend { entity: id, end, boundary } => self.extend_to(*id, *end, *boundary),
             Operation::Offset { entities, distance, options } => self.offset_chain(entities, *distance, *options),
             Operation::EditOffset { group, distance } => self.edit_offset(*group, *distance),
+            Operation::Move { entities, displacement } => {
+                if !finite(*displacement) || displacement.len() <= EPS {
+                    return refuse("move needs a finite nonzero displacement");
+                }
+                self.transform_selection(entities, false, 1.0, |p| p + *displacement)
+            }
+            Operation::Copy { entities, base, displacement } => {
+                if !finite(*base) || !finite(*displacement) || displacement.len() <= EPS {
+                    return refuse("copy needs a finite base and a finite nonzero displacement");
+                }
+                self.transform_selection(entities, true, 1.0, |p| p + *displacement)
+            }
+            Operation::Rotate { entities, center, angle_degrees, copy } => {
+                if !finite(*center) || !angle_degrees.is_finite() || angle_degrees.rem_euclid(360.0) < 1e-10 {
+                    return refuse("rotate needs a finite centre and a nonzero finite rotation");
+                }
+                let (sin, cos) = rotation_sin_cos(*angle_degrees);
+                self.transform_selection(entities, *copy, 1.0, |p| {
+                    let d = p - *center;
+                    *center + P2::new(cos * d.u - sin * d.v, sin * d.u + cos * d.v)
+                })
+            }
+            Operation::Scale { entities, base, factor } => {
+                if !finite(*base) || !factor.is_finite() || *factor <= 0.0 || (*factor - 1.0).abs() < 1e-10 {
+                    return refuse("scale needs a finite base and a positive finite factor other than one");
+                }
+                self.transform_selection(entities, false, *factor, |p| *base + (p - *base).scale(*factor))
+            }
             Operation::Mirror { entities, axis_start, axis_end } => {
                 if !finite(*axis_start) || !finite(*axis_end) || axis_start.dist(*axis_end) <= EPS {
                     return refuse("the mirror axis needs two distinct finite points");
@@ -697,6 +762,54 @@ impl Sketch {
                 })
             }
         }
+    }
+
+    fn transform_selection(
+        &mut self,
+        ids: &[EntityId],
+        copy: bool,
+        scale: f64,
+        map: impl Fn(P2) -> P2,
+    ) -> Result<Vec<EntityId>> {
+        let mut selected = self.tool_selection(ids)?;
+        for e in &mut selected {
+            for index in 0..e.point_count() {
+                e.set_point(index, map(e.point(index).expect("entity point")));
+            }
+            if let EntityKind::Circle { radius, .. } = &mut e.kind {
+                *radius *= scale;
+            }
+            if !valid(e.kind) {
+                return refuse("the transform would produce non-finite or degenerate geometry");
+            }
+        }
+        if copy {
+            return self.add_tool_entities(selected.into_iter().map(|e| (e.kind, e.construction)).collect());
+        }
+        // Solve on a trial sketch. Existing dimensions, fixed geometry and relations
+        // must all hold at the requested result without moving unselected geometry.
+        let mut trial = self.clone();
+        for e in selected {
+            *trial.entity_mut(e.id).expect("validated selection") = e;
+        }
+        let expected = trial.entities.clone();
+        crate::solve::solve(&mut trial, None, true);
+        let compatible = trial.entities.iter().zip(&expected).all(|(actual, expected)| {
+            valid(actual.kind)
+                && actual.points().iter().zip(expected.points()).all(|(a, b)| a.dist(b) <= EPS)
+                && match (actual.radius(), expected.radius()) {
+                    (Some(a), Some(b)) => (a - b).abs() <= EPS,
+                    _ => true,
+                }
+        });
+        if !compatible || matches!(trial.status, crate::SolveStatus::OverDefined { .. } | crate::SolveStatus::Failed(_))
+        {
+            return refuse(
+                "constraints prevent this transform; include connected geometry or remove the blocking relations",
+            );
+        }
+        *self = trial;
+        Ok(ids.to_vec())
     }
 
     fn transform_copies<F: Fn(P2) -> P2>(

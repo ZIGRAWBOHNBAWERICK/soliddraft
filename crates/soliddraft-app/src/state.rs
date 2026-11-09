@@ -433,6 +433,14 @@ pub enum Tool {
     LinearPattern,
     /// Copies the selection around a centre.
     CircularPattern,
+    /// Translates the selection while retaining compatible constraints.
+    Move,
+    /// Copies the selection from a base point to a destination.
+    Copy,
+    /// Rotates the selection about a centre, optionally copying it.
+    Rotate,
+    /// Uniformly resizes the selection about a base point.
+    Scale,
 }
 
 impl Tool {
@@ -461,6 +469,10 @@ impl Tool {
             Tool::Mirror => "Mirror entities",
             Tool::LinearPattern => "Linear pattern",
             Tool::CircularPattern => "Circular pattern",
+            Tool::Move => "Move entities",
+            Tool::Copy => "Copy entities",
+            Tool::Rotate => "Rotate entities",
+            Tool::Scale => "Scale entities",
         }
     }
 
@@ -503,12 +515,19 @@ impl Tool {
     /// Tools that keep the selection as their input.
     pub fn selects(self) -> bool {
         matches!(self, Tool::Select | Tool::Offset | Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
+            || self.transforms()
+    }
+
+    /// Selection transforms with a numeric panel and pointer placement.
+    pub fn transforms(self) -> bool {
+        matches!(self, Tool::Move | Tool::Copy | Tool::Rotate | Tool::Scale)
     }
 
     /// The tools of the ribbon's Modify group, which make or change geometry through
     /// [`crate::sketch::tools::Operation`].
     pub fn modifies(self) -> bool {
         self.trims()
+            || self.transforms()
             || matches!(
                 self,
                 Tool::Polygon
@@ -550,6 +569,12 @@ pub struct ModifyInputs {
     /// The circular pattern's centre and the angle between instances, in degrees.
     pub center: P2,
     pub angle: f64,
+    /// Base point for Move/Copy placement and uniform scaling.
+    pub base: P2,
+    /// Uniform scale factor.
+    pub factor: f64,
+    /// Rotate adds independent copies when enabled.
+    pub copy: bool,
 }
 
 impl Default for ModifyInputs {
@@ -567,6 +592,9 @@ impl Default for ModifyInputs {
             count: 3,
             center: P2::ZERO,
             angle: 90.0,
+            base: P2::ZERO,
+            factor: 2.0,
+            copy: false,
         }
     }
 }

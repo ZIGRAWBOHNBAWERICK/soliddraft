@@ -166,7 +166,8 @@ pub fn run(
     s.preview = None;
     let places = s.tool.places_points();
     let picks = s.tool.picks_curve();
-    let copy_places = matches!(s.tool, Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
+    let copy_places = (matches!(s.tool, Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
+        || s.tool.transforms())
         && !sketch_tools::selected_in_order(s).is_empty()
         && !ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
     let mut snapped: Option<P2> = None;
@@ -317,8 +318,11 @@ pub fn run(
 fn copy_value(s: &mut SketchSession, p: P2) {
     match s.tool {
         Tool::Mirror if s.pending.len() == 1 => s.modify.axis_end = p,
-        Tool::LinearPattern if s.pending.len() == 1 => s.modify.step = p.sub(s.pending[0].0),
-        Tool::CircularPattern if s.pending.is_empty() => s.modify.center = p,
+        Tool::LinearPattern | Tool::Move | Tool::Copy if s.pending.len() == 1 => {
+            s.modify.step = p.sub(s.pending[0].0);
+        }
+        Tool::CircularPattern | Tool::Rotate if s.pending.is_empty() => s.modify.center = p,
+        Tool::Scale if s.pending.is_empty() => s.modify.base = p,
         _ => {}
     }
 }
@@ -424,12 +428,14 @@ fn copy_input(
     }
     let Some(p) = snapped else { return };
     match s.tool {
-        Tool::Mirror | Tool::LinearPattern => {
+        Tool::Mirror | Tool::LinearPattern | Tool::Move | Tool::Copy => {
             if s.pending.len() != 1 {
                 s.pending.clear();
                 s.pending.push((p, Vec::new()));
                 if s.tool == Tool::Mirror {
                     s.modify.axis_start = p;
+                } else if matches!(s.tool, Tool::Move | Tool::Copy) {
+                    s.modify.base = p;
                 }
                 copy_value(s, p);
             } else {
@@ -437,8 +443,12 @@ fn copy_input(
                 s.pending.push((p, Vec::new()));
             }
         }
-        Tool::CircularPattern => {
+        Tool::CircularPattern | Tool::Rotate => {
             s.modify.center = p;
+            s.pending = vec![(p, Vec::new())];
+        }
+        Tool::Scale => {
+            s.modify.base = p;
             s.pending = vec![(p, Vec::new())];
         }
         _ => {}
@@ -1023,7 +1033,11 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
         | Tool::Offset
         | Tool::Mirror
         | Tool::LinearPattern
-        | Tool::CircularPattern => {}
+        | Tool::CircularPattern
+        | Tool::Move
+        | Tool::Copy
+        | Tool::Rotate
+        | Tool::Scale => {}
     }
 }
 
@@ -1891,7 +1905,9 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
     let guide = match s.tool {
         Tool::Mirror => Some((s.modify.axis_start, s.modify.axis_end)),
         Tool::LinearPattern => s.pending.first().map(|(a, _)| (*a, a.add(s.modify.step))),
-        Tool::CircularPattern => Some((s.modify.center, s.modify.center)),
+        Tool::CircularPattern | Tool::Rotate => Some((s.modify.center, s.modify.center)),
+        Tool::Move | Tool::Copy => Some((s.modify.base, s.modify.base + s.modify.step)),
+        Tool::Scale => Some((s.modify.base, s.modify.base)),
         _ => None,
     };
     if let Some((a, b)) = guide
@@ -2206,6 +2222,11 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::LinearPattern, 1) => "Linear pattern: click the step end, then Apply",
         (Tool::LinearPattern, _) => "Linear pattern: step placed; Apply adds the copies",
         (Tool::CircularPattern, _) => "Circular pattern: click the centre, then Apply; Ctrl-click selects entities",
+        (Tool::Move | Tool::Copy, 0) => "Click a base point; Ctrl-click selects entities",
+        (Tool::Move | Tool::Copy, 1) => "Click the destination, then Apply",
+        (Tool::Move | Tool::Copy, _) => "Displacement placed; Apply commits the preview",
+        (Tool::Rotate, _) => "Rotate: click the centre, set the angle, then Apply",
+        (Tool::Scale, _) => "Scale: click the base point, set the factor, then Apply",
     };
     let message = s.message.as_ref().filter(|(_, at)| at.elapsed().as_secs_f32() < 4.0).map(|(m, _)| m.clone());
     let line2 = message.unwrap_or_else(|| hint.to_owned());

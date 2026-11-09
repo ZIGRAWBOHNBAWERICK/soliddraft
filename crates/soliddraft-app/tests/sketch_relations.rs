@@ -60,12 +60,17 @@ fn pick(app: &mut App, p: P2, modifiers: Modifiers) {
     app.run_steps(4);
 }
 
-fn open_menu(app: &mut App) {
+fn relations_control(app: &mut App) -> ribbon::Control {
     let window = ribbon::window(app);
     if app.query_all(By::new().role(egui::accesskit::Role::Button).label("Relations")).next().is_none() {
         ribbon::click_button(app, "Constrain group", window);
     }
-    ribbon::click_button(app, "Relations", window);
+    ribbon::control(app, "Relations", window)
+}
+
+fn open_menu(app: &mut App) {
+    let control = relations_control(app);
+    ribbon::click_at(app, control.rect.center());
     app.run_steps(4);
     assert!(session(app).relations_open);
 }
@@ -139,13 +144,10 @@ fn sketch_relations_are_accessible_from_the_ribbon() {
     let (doc, id, [a, b, c, d, p]) = fixture();
     let mut app = ribbon::app(doc);
     ribbon::click_tab(&mut app, "Sketch");
-    assert!(!ribbon::control(&app, "Relations", ribbon::window(&app)).enabled, "unavailable outside a sketch");
+    assert!(!relations_control(&mut app).enabled, "unavailable outside a sketch");
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
-    assert!(
-        ribbon::control(&app, "Relations", ribbon::window(&app)).enabled,
-        "Relations must be an actionable sketch command"
-    );
+    assert!(relations_control(&mut app).enabled, "Relations must be an actionable sketch command");
     frame(&mut app, "before-menu");
     let before = session(&app).sketch.clone();
     let revision = app.state().state.doc.revision();

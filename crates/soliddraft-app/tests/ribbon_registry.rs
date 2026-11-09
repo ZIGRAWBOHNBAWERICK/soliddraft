@@ -365,6 +365,44 @@ fn before_linked_offsets(id: &str, current: &mut Value) {
     );
 }
 
+fn before_selection_transforms(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let point = json!({"type":"object", "additionalProperties":false,
+        "properties":{"u":{"type":"number"},"v":{"type":"number"}}, "required":["u","v"]});
+    let ids = json!({"type":"array", "items":{"type":"integer"}, "minItems":1});
+    for (tool, fields, required) in [
+        ("move", json!({"displacement":point}), vec!["tool", "entities", "displacement"]),
+        ("copy", json!({"base":point,"displacement":point}), vec!["tool", "entities", "base", "displacement"]),
+        (
+            "rotate",
+            json!({"center":point,"angle_degrees":{"type":"number"},"copy":{"type":"boolean"}}),
+            vec!["tool", "entities", "center", "angle_degrees"],
+        ),
+        ("scale", json!({"base":point,"factor":{"type":"number"}}), vec!["tool", "entities", "base", "factor"]),
+    ] {
+        let mut properties = fields.as_object().unwrap().clone();
+        properties.insert("tool".into(), json!({"type":"string","const":tool}));
+        properties.insert("entities".into(), ids.clone());
+        let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == tool).expect(tool);
+        assert_eq!(
+            variants.remove(index),
+            json!({"type":"object", "additionalProperties":false,
+            "properties":properties,"required":required}),
+            "only the declared transform extends the frozen schema"
+        );
+    }
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -441,6 +479,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                     "sketch_circular_pattern",
                 ],
             ),
+            ("Transform", &["sketch_move", "sketch_copy", "sketch_rotate", "sketch_scale"]),
             ("Constrain", &["smart_dimension", "relations", "construction"]),
             ("Use sketch", &["extrude", "revolve", "cut"]),
             ("View", &["normal_to"]),
@@ -497,6 +536,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_composite_relations(id, &mut current);
 
         before_corner_finishing(id, &mut current);
+        before_selection_transforms(id, &mut current);
         before_linked_offsets(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");

@@ -132,6 +132,18 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
         {
             Some("Fixed geometry no longer matches its recorded type")
         }
+        ConstraintKind::Offset { a, b, distance, .. }
+            if !distance.is_finite()
+                || distance.abs() <= 1e-6
+                || !((line(a) && line(b)) || (circular(a) && circular(b))) =>
+        {
+            Some("Offset requires two matching curves and a nonzero finite distance")
+        }
+        ConstraintKind::OffsetCap { cap, .. }
+            if !line(cap) && !sketch.entity(cap).is_some_and(|e| matches!(e.kind, EntityKind::Arc { .. })) =>
+        {
+            Some("An offset cap must be a line or semicircular arc")
+        }
         ConstraintKind::Radius { entity, .. } if !circular(entity) => Some("Radius requires a circle or arc target"),
         ConstraintKind::Concentric { a, b } if !centered(a) || !centered(b) => {
             Some("Concentric requires two circle, arc or ellipse targets")

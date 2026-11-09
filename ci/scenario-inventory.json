@@ -917,6 +917,16 @@
       "owners": ["soliddraft-app", "soliddraft-model", "soliddraft-kernel-catallax"]
     },
     {
+      "id": "sketch-linked-offsets",
+      "file": "ci/scenarios/sketch-linked-offsets.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-offset",
       "file": "ci/scenarios/sketch-offset.json",
       "acceptance": false,

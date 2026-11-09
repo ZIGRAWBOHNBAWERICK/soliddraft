@@ -327,6 +327,44 @@ fn before_corner_finishing(id: &str, current: &mut Value) {
     );
 }
 
+fn before_linked_offsets(id: &str, current: &mut Value) {
+    let variants = match id {
+        "sketch_geometry" => current.pointer_mut("/tool/input/properties/operations/items/anyOf"),
+        "propose" => current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .and_then(|lines| lines.iter_mut().find(|line| line["properties"]["op"]["const"] == "sketch_geometry"))
+            .and_then(|line| line.pointer_mut("/properties/operations/items/anyOf")),
+        _ => return,
+    }
+    .and_then(Value::as_array_mut)
+    .expect("sketch operation variants");
+    let offset = variants.iter_mut().find(|v| v["properties"]["tool"]["const"] == "offset").unwrap();
+    assert_eq!(offset["required"], json!(["tool", "entities", "distance"]));
+    assert_eq!(
+        offset["properties"].as_object_mut().unwrap().remove("options").unwrap(),
+        json!({
+            "type":"object", "additionalProperties":false, "required":[],
+            "properties": {
+                "chain":{"type":"boolean"}, "both_sides":{"type":"boolean"},
+                "cap":{"type":"string", "enum":["none", "lines", "round"]},
+                "make_base_construction":{"type":"boolean"},
+            }
+        })
+    );
+    let index = variants.iter().position(|v| v["properties"]["tool"]["const"] == "edit_offset").unwrap();
+    assert_eq!(
+        variants.remove(index),
+        json!({
+            "type":"object", "additionalProperties":false,
+            "properties": {
+                "tool":{"type":"string", "const":"edit_offset"}, "group":{"type":"integer"},
+                "distance":{"type":"number"},
+            }, "required":["tool", "group", "distance"]
+        })
+    );
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -459,6 +497,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_composite_relations(id, &mut current);
 
         before_corner_finishing(id, &mut current);
+        before_linked_offsets(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

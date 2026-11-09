@@ -172,6 +172,11 @@ fn mcp_bundle_keeps_the_part_and_question_after_a_refused_extrusion() {
 }
 
 #[test]
+fn offset_scenario_builds_and_reopens_through_the_application_protocol() {
+    replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-linked-offsets.json"));
+}
+
+#[test]
 fn snap_scenario_builds_and_reopens_through_the_application_protocol() {
     replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-snaps.json"));
 }

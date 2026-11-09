@@ -1,0 +1,100 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-linked-offsets",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 0,
+                "v": 0
+              },
+              "radius": 10
+            },
+            "construction": false
+          },
+          {
+            "tool": "offset",
+            "entities": [
+              1
+            ],
+            "distance": 2
+          },
+          {
+            "tool": "edit_offset",
+            "group": 1,
+            "distance": 3
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 30,
+                "v": 0
+              },
+              "b": {
+                "u": 50,
+                "v": 0
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "offset",
+            "entities": [
+              3
+            ],
+            "distance": 2,
+            "options": {
+              "chain": true,
+              "both_sides": true,
+              "cap": "round",
+              "make_base_construction": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 3,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 758.3627878423159,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/linked-offsets.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/linked-offsets.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 758.3627878423159,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

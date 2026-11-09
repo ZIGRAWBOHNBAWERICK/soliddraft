@@ -530,6 +530,34 @@ pub enum ConstraintKind {
         /// Geometry at the time Fix was applied.
         at: EntityKind,
     },
+    /// A curve follows its source at the group's signed offset distance.
+    Offset {
+        /// Source curve.
+        a: EntityId,
+        /// Offset curve.
+        b: EntityId,
+        /// First relation id in this offset group.
+        group: ConstraintId,
+        /// Signed distance relative to the group's walking direction, mm.
+        distance: f64,
+        /// Source is traversed against its stored direction.
+        reverse: bool,
+        /// This is the opposite side of a both-sides offset.
+        opposite: bool,
+        /// Source/target endpoint pairs at the free ends of an open chain.
+        ends: [Option<(PointRef, PointRef)>; 2],
+    },
+    /// An offset end cap joins two referenced endpoints.
+    OffsetCap {
+        /// Cap line or semicircular arc.
+        cap: EntityId,
+        /// Point at the cap's start.
+        a: PointRef,
+        /// Point at the cap's end.
+        b: PointRef,
+        /// Offset group this cap belongs to.
+        group: ConstraintId,
+    },
     /// The point stays where it is.
     Fix {
         /// The point.
@@ -676,6 +704,8 @@ impl Constraint {
             ConstraintKind::Concentric { .. } => "Concentric",
             ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => "Fixed",
             ConstraintKind::Symmetric { .. } => "Symmetric",
+            ConstraintKind::Offset { .. } => "Offset",
+            ConstraintKind::OffsetCap { .. } => "Offset cap",
             ConstraintKind::Distance { kind: DistanceKind::Aligned, .. } => "Distance",
             ConstraintKind::Distance { kind: DistanceKind::Horizontal, .. } => "Horizontal distance",
             ConstraintKind::Distance { kind: DistanceKind::Vertical, .. } => "Vertical distance",
@@ -706,6 +736,8 @@ impl Constraint {
             ConstraintKind::Fix { point, .. } => vec![point.entity],
             ConstraintKind::FixEntity { entity, .. } => vec![entity],
             ConstraintKind::Symmetric { a, b, axis } => vec![a.entity, b.entity, axis],
+            ConstraintKind::Offset { a, b, .. } => vec![a, b],
+            ConstraintKind::OffsetCap { cap, a, b, .. } => vec![cap, a.entity, b.entity],
             ConstraintKind::Distance { a, b, .. } => vec![a.entity, b.entity],
             ConstraintKind::PointLineDistance { point, line, .. } => vec![point.entity, line],
             ConstraintKind::Radius { entity, .. } => vec![entity],
@@ -725,6 +757,8 @@ impl Constraint {
                 .point_count())
                 .map(|index| PointRef::new(entity, index))
                 .collect(),
+            ConstraintKind::Offset { ends, .. } => ends.into_iter().flatten().flat_map(|(a, b)| [a, b]).collect(),
+            ConstraintKind::OffsetCap { cap, a, b, .. } => vec![a, b, PointRef::new(cap, 0)],
             ConstraintKind::PointOn { point, .. }
             | ConstraintKind::Midpoint { point, .. }
             | ConstraintKind::Fix { point, .. }

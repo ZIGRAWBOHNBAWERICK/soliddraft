@@ -11,7 +11,7 @@ use crate::document::{EdgeRef, EntityRef};
 use crate::drag::{Dimension, DragPreview, Finish};
 use crate::sketch::{
     ConstraintId, EntityId, EntityKind, P2, PointRef, Sketch,
-    tools::{ChamferSize, Operation, TrimOptions},
+    tools::{ChamferSize, OffsetOptions, Operation, TrimOptions},
 };
 use crate::viewport::ViewportState;
 use crate::viewport::camera::StandardView;
@@ -536,6 +536,10 @@ pub struct ModifyInputs {
     pub fillet_radius: f64,
     /// Sketch chamfer sizing mode and values.
     pub chamfer: ChamferSize,
+    /// Chain, side, cap and original-geometry choices for new offsets.
+    pub offset: OffsetOptions,
+    /// An existing offset group being edited instead of copied.
+    pub offset_group: Option<ConstraintId>,
     /// The mirror axis.
     pub axis_start: P2,
     pub axis_end: P2,
@@ -555,6 +559,8 @@ impl Default for ModifyInputs {
             distance: 2.0,
             fillet_radius: 2.0,
             chamfer: ChamferSize::Distances { first: 2.0, second: 2.0 },
+            offset: OffsetOptions { chain: true, ..Default::default() },
+            offset_group: None,
             axis_start: P2::ZERO,
             axis_end: P2::new(0.0, 10.0),
             step: P2::new(20.0, 0.0),
@@ -572,6 +578,10 @@ impl Default for ModifyInputs {
 pub struct ToolPreview {
     /// Geometry the tool would add, or the new shape of what it changes.
     pub added: Vec<EntityKind>,
+    /// Construction state of the added geometry, when supplied by the operation.
+    pub construction: Vec<bool>,
+    /// Existing geometry replaced by the preview.
+    pub replaced: Vec<EntityId>,
     /// Geometry the tool would remove.
     pub removed: Vec<EntityKind>,
     /// The entity Trim or Extend works on.
@@ -764,6 +774,7 @@ impl SketchSession {
     /// Picks a tool. Whatever the old tool had started is dropped. A tool that works on
     /// the selection keeps it, so entities picked first are its input.
     pub fn set_tool(&mut self, tool: Tool) {
+        self.modify.offset_group = None;
         self.link_values = None;
         self.quick_snap = None;
         self.snaps.clear();

@@ -288,6 +288,67 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
                     reqs.push(Constraint::Fixed(circle.radius.id, radius));
                 }
             }
+            ConstraintKind::Offset { a, b, distance, reverse, opposite, ends, .. } => {
+                let distance = distance * if reverse { -1.0 } else { 1.0 } * if opposite { -1.0 } else { 1.0 };
+                if let (Some(first), Some(second)) = (datums.get(&a).copied(), datums.get(&b).copied()) {
+                    if let (Some(source), Some(_)) = (first.line(), second.line()) {
+                        for index in 0..2 {
+                            if let Some(point) = pt(&vars, PointRef::new(b, index)) {
+                                reqs.push(Constraint::PointLineDistance(point, source, distance));
+                            }
+                        }
+                        for (from, to) in ends.into_iter().flatten() {
+                            if let (Some(p), Some(q)) = (pt(&vars, from), pt(&vars, to)) {
+                                reqs.push(Constraint::LinesAtAngle(
+                                    source,
+                                    DatumLineSegment::new(p, q),
+                                    AngleKind::Perpendicular,
+                                ));
+                            }
+                        }
+                    } else if let (Some(source), Some(target), Some(origin)) =
+                        (first.circle(), second.circle(), pt(&vars, PointRef::ORIGIN))
+                    {
+                        reqs.push(Constraint::PointsCoincident(source.center, target.center));
+                        let mut scalars = Vec::new();
+                        for (id, circle) in [(a, source), (b, target)] {
+                            let point = DatumPoint::new(&mut vars.ids);
+                            vars.guesses
+                                .push((point.id_x(), sketch.entity(id).and_then(Entity::radius).unwrap_or(1.0)));
+                            vars.guesses.push((point.id_y(), 0.0));
+                            reqs.push(Constraint::Fixed(point.id_y(), 0.0));
+                            reqs.push(Constraint::ScalarEqual(point.id_x(), circle.radius.id));
+                            // Radius differences must not produce negative radii hidden by writeback's abs().
+                            reqs.push(Constraint::DistanceVar(origin, point, circle.radius));
+                            scalars.push(point);
+                        }
+                        reqs.push(Constraint::HorizontalDistance(scalars[1], scalars[0], -distance));
+                        for (from, to) in ends.into_iter().flatten() {
+                            if let (Some(p), Some(q)) = (pt(&vars, from), pt(&vars, to)) {
+                                reqs.push(Constraint::PointLineDistance(
+                                    q,
+                                    DatumLineSegment::new(source.center, p),
+                                    0.0,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            ConstraintKind::OffsetCap { cap, a, b, .. } => {
+                if let (Some(p), Some(q), Some(entity)) = (pt(&vars, a), pt(&vars, b), sketch.entity(cap)) {
+                    let arc = entity.is_curve();
+                    let start = pt(&vars, PointRef::new(cap, u8::from(arc)));
+                    let end = pt(&vars, PointRef::new(cap, 1 + u8::from(arc)));
+                    if let (Some(start), Some(end)) = (start, end) {
+                        reqs.push(Constraint::PointsCoincident(start, p));
+                        reqs.push(Constraint::PointsCoincident(end, q));
+                    }
+                    if arc && let Some(center) = pt(&vars, PointRef::new(cap, 0)) {
+                        reqs.push(Constraint::Midpoint(DatumLineSegment::new(p, q), center));
+                    }
+                }
+            }
             ConstraintKind::Fix { point, at } => {
                 if let Some(p) = pt(&vars, point) {
                     reqs.push(Constraint::Fixed(p.id_x(), at.u));

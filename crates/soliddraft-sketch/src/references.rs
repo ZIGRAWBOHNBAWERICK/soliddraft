@@ -59,6 +59,15 @@ pub(super) fn resolve(sketch: &mut Sketch) {
                     link(&mut parent, a, b, axis);
                 }
             }
+            ConstraintKind::OffsetCap { cap, a, b, .. } => {
+                let arc = sketch.entity(cap).is_some_and(|e| matches!(e.kind, crate::EntityKind::Arc { .. }));
+                for (endpoint, point) in [a, b].into_iter().enumerate() {
+                    let end = PointRef::new(cap, u8::from(arc) + endpoint as u8);
+                    for axis in 0..2 {
+                        link(&mut parent, end, point, axis);
+                    }
+                }
+            }
             ConstraintKind::Horizontal { target } | ConstraintKind::Vertical { target } => {
                 if let Some((a, b)) = ends(target, sketch) {
                     let axis = usize::from(matches!(c.kind, ConstraintKind::Horizontal { .. }));

@@ -657,6 +657,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             ),
             ("Transform", &["sketch_move", "sketch_copy", "sketch_rotate", "sketch_scale"]),
             ("Constrain", &["smart_dimension", "relations", "construction"]),
+            ("Display", &["sketch_shading", "sketch_dimensions", "sketch_grid_snap"]),
             ("Use sketch", &["extrude", "revolve", "cut"]),
             ("View", &["normal_to"]),
         ],

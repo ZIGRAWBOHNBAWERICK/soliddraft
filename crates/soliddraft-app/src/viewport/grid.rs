@@ -140,6 +140,13 @@ impl Spacing {
         self.minor
     }
 
+    /// Nearest grid crossing in sketch-plane coordinates, measured from its origin.
+    pub fn snap(&self, p: crate::sketch::P2) -> crate::sketch::P2 {
+        let snapped =
+            crate::sketch::P2::new((p.u / self.minor).round() * self.minor, (p.v / self.minor).round() * self.minor);
+        if snapped.u.is_finite() && snapped.v.is_finite() { snapped } else { p }
+    }
+
     pub fn major(&self) -> f64 {
         self.minor * f64::from(self.every)
     }
@@ -240,6 +247,28 @@ mod tests {
     /// A step of `digit` times ten to the `exponent`, major every five.
     fn step(digit: u32, exponent: i32) -> Spacing {
         Spacing { minor: f64::from(digit) * 10f64.powi(exponent), every: 5, decimals: (-exponent).max(0) as usize }
+    }
+
+    #[test]
+    fn placements_round_to_minor_crossings_in_every_quadrant() {
+        use crate::sketch::P2;
+        for minor in [0.01, 0.25, 2.5, 1000.0] {
+            let style = GridStyle { follow_zoom: false, fixed_mm: minor, ..Default::default() };
+            let spacing = Spacing::for_scale(0.1, &style).unwrap();
+            for ((u, v), (want_u, want_v)) in [
+                ((1.1, 2.8), (1.0, 3.0)),
+                ((-1.1, 2.8), (-1.0, 3.0)),
+                ((-1.1, -2.8), (-1.0, -3.0)),
+                ((1.1, -2.8), (1.0, -3.0)),
+                ((1.5, -2.5), (2.0, -3.0)),
+            ] {
+                let at = spacing.snap(P2::new(u * minor, v * minor));
+                assert!((at.u - want_u * minor).abs() < 1e-10);
+                assert!((at.v - want_v * minor).abs() < 1e-10);
+                assert_eq!(spacing.snap(at), at);
+            }
+            assert_eq!(spacing.snap(P2::ZERO), P2::ZERO);
+        }
     }
 
     fn frame(plane: &GridPlane, spacing: Spacing, camera: &Camera) -> Option<GridFrame> {

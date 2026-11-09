@@ -866,6 +866,31 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::SketchShading(show) => {
+                if let Some(s) = self.state.sketch.as_mut() {
+                    s.show_regions = show;
+                }
+            }
+            AppAction::SketchDimensions(show) => {
+                if let Some(s) = self.state.sketch.as_mut() {
+                    s.show_dimensions = show;
+                    if !show {
+                        s.selection.retain(|sel| {
+                            !matches!(sel, crate::state::SketchSel::Constraint(id)
+                            if s.sketch.constraint(*id).is_some_and(|c| c.is_dimension()))
+                        });
+                        if matches!(s.drag, Some(crate::state::SketchDrag::Label { .. })) {
+                            s.drag = None;
+                        }
+                        s.dim_edit = None;
+                    }
+                }
+            }
+            AppAction::SketchGridSnap(on) => {
+                if let Some(s) = self.state.sketch.as_mut() {
+                    s.grid_snap = on;
+                }
+            }
             AppAction::SketchDiagnostics(open) => {
                 if let Some(s) = self.state.sketch.as_mut() {
                     if open {

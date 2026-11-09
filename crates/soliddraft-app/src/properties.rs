@@ -1457,6 +1457,20 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             crate::sketch_tools::patterns::editors(ui,s);
             crate::sketcher::text::panel(ui, s, &mut actions);
 
+            ui.collapsing("Sketch display", |ui| {
+                let mut shading = s.show_regions;
+                if ui.checkbox(&mut shading, "Contour shading").changed() {
+                    actions.push(AppAction::SketchShading(shading));
+                }
+                let mut dimensions = s.show_dimensions;
+                if ui.checkbox(&mut dimensions, "Sketch dimensions").changed() {
+                    actions.push(AppAction::SketchDimensions(dimensions));
+                }
+                ui.checkbox(&mut s.grid_snap, "Snap to grid")
+                    .on_hover_text("Use the current minor grid spacing, even when the grid is hidden. Geometry snaps take priority. Quick snap overrides this for one placement.");
+                hint(ui, "Grid spacing and display: Preferences > Viewport > Grid and planes.");
+            });
+
             // Selection.
             let selection = s.selection.clone();
             let mut remove_constraint = None;

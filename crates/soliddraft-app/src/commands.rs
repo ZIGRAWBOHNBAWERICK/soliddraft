@@ -93,7 +93,9 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
     use DrawingTab as D;
     match tab {
         Tab::Part(RibbonTab::Solid) => &["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"],
-        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Use sketch", "View"],
+        Tab::Part(RibbonTab::Sketch) => {
+            &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"]
+        }
         Tab::Part(RibbonTab::Inspect) => &["Measure", "Check", "Surface quality"],
         Tab::Part(RibbonTab::View) => &["Orientation", "Display", "Projection", "Panels"],
         Tab::Part(RibbonTab::Assembly | RibbonTab::Surface | RibbonTab::PointCloud) => &[],
@@ -1740,6 +1742,24 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| s.sketch.as_ref().is_some_and(|s| s.relations_open))
 .app_only(SKETCHER),
+        cmd("sketch_shading", "Contour shading", Icon::Display, "Show or hide closed-contour shading in this sketch")
+            .on(Sketch, "Display", Small)
+            .run(|s| AppAction::SketchShading(!s.sketch.as_ref().is_some_and(|s| s.show_regions)))
+            .when(AppState::in_sketch)
+            .lit(|s| s.sketch.as_ref().is_some_and(|s| s.show_regions))
+            .app_only(SKETCHER),
+        cmd("sketch_dimensions", "Sketch dimensions", Icon::SmartDim, "Show or hide dimension annotations in this sketch")
+            .on(Sketch, "Display", Small)
+            .run(|s| AppAction::SketchDimensions(!s.sketch.as_ref().is_some_and(|s| s.show_dimensions)))
+            .when(AppState::in_sketch)
+            .lit(|s| s.sketch.as_ref().is_some_and(|s| s.show_dimensions))
+            .app_only(SKETCHER),
+        cmd("sketch_grid_snap", "Snap to grid", Icon::Point, "Snap placements to the current minor grid spacing; geometry snaps take priority")
+            .on(Sketch, "Display", Small)
+            .run(|s| AppAction::SketchGridSnap(!s.sketch.as_ref().is_some_and(|s| s.grid_snap)))
+            .when(AppState::in_sketch)
+            .lit(|s| s.sketch.as_ref().is_some_and(|s| s.grid_snap))
+            .app_only(SKETCHER),
         // Boss.
         cmd("extrude", "Extrude", Icon::Cad("extrude"), "Add material: extrude a sketch and join it to the part")
             .on(Solid, "Create", Large)
@@ -3021,7 +3041,7 @@ mod tests {
         assert_eq!(panels(RibbonTab::Solid), ["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"]);
         assert_eq!(
             panels(RibbonTab::Sketch),
-            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Use sketch", "View"]
+            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"]
         );
         assert_eq!(panels(RibbonTab::Assembly), ["Edit", "Component", "File", "View"]);
         assert_eq!(panels(RibbonTab::Inspect), ["Measure", "Check", "Surface quality"]);

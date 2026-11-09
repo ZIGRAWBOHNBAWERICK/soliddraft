@@ -226,8 +226,8 @@ jobs:
       CARGO_PROFILE_TEST_OPT_LEVEL: 2
     runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
     outputs:
-      partitions: ${{ steps.compact.outputs.partitions }}
-      partition_count: ${{ steps.compact.outputs.count }}
+      partitions: ${{ steps.archives.outputs.partitions }}
+      partition_count: ${{ steps.archives.outputs.count }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the portable archive workspace
@@ -253,22 +253,17 @@ jobs:
         with:
           name: check-selection
           path: ${{ runner.temp }}/check-selection
-      - name: Build the selected test archive once
+      - name: Build the selected test archives once
+        id: archives
         working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}
-        run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/check-selection/selection.json"
+        run: ci/run test-build-shards "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/check-selection/selection.json"
       - name: Run workspace documentation tests
         working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}
         run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
-      - name: Reduce the test archive transfer size
-        id: compact
-        run: python3 ci/compact-archive.py "$RUNNER_TEMP/workspace-tests.tar.zst" --partition-output "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/test-archives
         with:
-          name: workspace-tests-linux
-          path: ${{ runner.temp }}/workspace-tests.tar.zst
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+          directory: ${{ runner.temp }}/test-archives
+          count: ${{ steps.archives.outputs.count }}
       - name: Compiler cache statistics
         if: always()
         run: |
@@ -301,7 +296,7 @@ jobs:
           tool: cargo-nextest
       - uses: actions/download-artifact@v4
         with:
-          name: workspace-tests-linux
+          name: workspace-tests-linux-${{ matrix.shard }}
           path: ${{ runner.temp }}
       - name: Install the software Vulkan adapter for rendered workspace tests
         run: |
@@ -311,7 +306,7 @@ jobs:
           chmod 700 "$RUNNER_TEMP/soliddraft-runtime"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/soliddraft-runtime" >> "$GITHUB_ENV"
       - name: Run the workspace archive partition
-        run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/${{ needs.build-linux.outputs.partition_count }}" "target/nextest/ci/inventory.json"
+        run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/${{ needs.build-linux.outputs.partition_count }}" "target/nextest/ci/inventory.json" "$RUNNER_TEMP/listing.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -363,6 +358,7 @@ jobs:
         with:
           shared-key: native-test-opt2
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/compile-cache
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
         with:
@@ -384,6 +380,14 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
+            sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
+            sccache --stop-server || echo "::warning::Compiler cache server unavailable."
+          fi
 
   test-macos:
     needs: [select, build-macos]

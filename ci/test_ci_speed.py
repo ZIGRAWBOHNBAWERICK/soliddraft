@@ -172,6 +172,32 @@ class Balancing(unittest.TestCase):
             self.assertEqual(sorted(sum(shards, [])), sorted(items))
             self.assertLess(max(loads) - min(loads), max(data['seconds'].values()) + 1)
 
+class BinaryArchives(unittest.TestCase):
+    def test_binaries_stay_together_with_new_cases_and_empty_workers(self):
+        from balance import binary_partition
+        items = ['a\tslow', 'a\tnew', 'b\tother', 'c\trenamed']
+        shards, loads = binary_partition(items, {'a\tslow': 10, 'b\tother': 6}, 4)
+        self.assertEqual(sorted(sum(shards, [])), sorted(items))
+        self.assertEqual(next(s for s in shards if 'a\tslow' in s), ['a\tnew', 'a\tslow'])
+        self.assertIn([], shards)
+        self.assertEqual(binary_partition(items[::-1], {'a\tslow': 10, 'b\tother': 6}, 4), (shards, loads))
+        for weight in (-1, float('inf'), float('nan')):
+            with self.assertRaises(ValueError):
+                binary_partition(items, {'a\tslow': weight}, 4)
+
+    def test_filtered_archive_must_contain_the_globally_selected_cases(self):
+        def listing(names):
+            return {'rust-suites': {'a': {'testcases': {
+                name: {'ignored': False, 'filter-match': {'status': 'matches'}}
+                for name in names}}}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'listing.json'
+            path.write_text(json.dumps(listing(['present', 'missing'])))
+            with mock.patch('balance.subprocess.run', return_value=mock.Mock(stdout=json.dumps(listing(['present'])))) as invoke:
+                with self.assertRaisesRegex(ValueError, 'missing selected tests'):
+                    run_shard('archive', '1/1', full_inventory=path)
+                self.assertEqual(invoke.call_count, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

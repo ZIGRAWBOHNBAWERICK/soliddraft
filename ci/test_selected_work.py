@@ -27,6 +27,54 @@ selector = load('select-checks')
 runner = load('run-selected')
 
 
+class PartitionBuild(unittest.TestCase):
+    def test_native_archives_cover_live_binaries_once_and_publish_complete_matrix(self):
+        names = ['a', 'b', 'new']
+        listing = {'rust-suites': {name: {'testcases': {
+            'case': {'ignored': False, 'filter-match': {'status': 'matches'}}}}
+            for name in names}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / 'ci').mkdir()
+            output = root / 'matrix'
+            for duration, count in ((1, 4), (2000, 8)):
+                with self.subTest(count=count):
+                    (root / 'ci/test-durations.json').write_text(json.dumps({
+                        'seconds': {'a\tcase': duration, 'b\tcase': duration, 'new\tcase': duration}}))
+                    output.write_text('')
+                    def archive(command, **kwargs):
+                        pathlib.Path(command[command.index('--archive-file') + 1]).write_bytes(b'native')
+                        return mock.Mock(returncode=0)
+                    with mock.patch.object(runner, 'ROOT', root), \
+                            mock.patch.object(runner.subprocess, 'run', side_effect=archive) as invoke, \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(runner.build_shards(runner.read_plan(None), listing, root / 'archives', output), 0)
+                    values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                    self.assertEqual(int(values['count']), count)
+                    self.assertEqual(json.loads(values['partitions']), list(range(1, count + 1)))
+                    self.assertEqual(invoke.call_count, count)
+                    for call in invoke.call_args_list:
+                        command = call.args[0]
+                        self.assertIn('--locked', command)
+                        self.assertIn('-E', command)
+                    for i in range(1, count + 1):
+                        self.assertEqual(json.loads((root / 'archives' / str(i) / 'listing.json').read_text()), listing)
+
+    def test_an_archive_failure_cannot_publish_a_successful_matrix(self):
+        listing = {'rust-suites': {'a': {'testcases': {
+            'case': {'ignored': False, 'filter-match': {'status': 'matches'}}}}}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / 'ci').mkdir()
+            (root / 'ci/test-durations.json').write_text('{"seconds": {}}')
+            output = root / 'matrix'
+            with mock.patch.object(runner, 'ROOT', root), \
+                    mock.patch.object(runner.subprocess, 'run', return_value=mock.Mock(returncode=7)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(runner.build_shards(runner.read_plan(None), listing, root / 'archives', output), 7)
+            self.assertFalse(output.exists())
+
+
 class WorkPlan(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

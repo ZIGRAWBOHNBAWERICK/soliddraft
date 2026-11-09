@@ -39,6 +39,10 @@ class TestCommandWrapper(unittest.TestCase):
                  ['ci/run-selected.py', 'test-build', 'test archive.tar.zst']),
                 (['test-build', 'test archive.tar.zst', 'selected work.json'],
                  ['ci/run-selected.py', 'test-build', 'test archive.tar.zst', '--selection', 'selected work.json']),
+                (['test-shard', 'test archive.tar.zst', '1/2', 'case report.json', 'full inventory.json'],
+                 ['ci/balance.py', 'run', 'test archive.tar.zst', '1/2', '--metadata', 'case report.json', '--inventory', 'full inventory.json']),
+                (['test-build-shards', 'archives dir', 'selected work.json'],
+                 ['ci/run-selected.py', 'test-build-shards', 'archives dir', '--selection', 'selected work.json', '--partition-output', 'matrix output']),
                 (['test-doc'], ['ci/run-selected.py', 'test-doc']),
                 (['test-doc', 'selected work.json'],
                  ['ci/run-selected.py', 'test-doc', '--selection', 'selected work.json']),
@@ -52,7 +56,7 @@ class TestCommandWrapper(unittest.TestCase):
                     with self.subTest(arguments=arguments, code=code):
                         log.unlink(missing_ok=True)
                         env = dict(os.environ, PATH=f'{binaries}:{os.environ["PATH"]}',
-                                   WRAPPER_LOG=str(log), WRAPPER_EXIT=str(code))
+                                   WRAPPER_LOG=str(log), WRAPPER_EXIT=str(code), GITHUB_OUTPUT='matrix output')
                         result = subprocess.run([root / 'ci/run', *arguments], cwd=root / 'ci',
                                                 env=env, capture_output=True, text=True)
                         self.assertEqual(result.returncode, code, result.stderr)

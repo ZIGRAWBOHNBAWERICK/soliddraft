@@ -1,0 +1,72 @@
+name: Upload native test partitions
+description: Publish each binary partition without copying the complete workspace archive.
+inputs:
+  directory:
+    description: Directory containing numbered archive folders
+    required: true
+  count:
+    description: Number of partitions
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/upload-artifact@v4
+      with:
+        name: workspace-tests-linux-1
+        path: ${{ inputs.directory }}/1/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      with:
+        name: workspace-tests-linux-2
+        path: ${{ inputs.directory }}/2/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      with:
+        name: workspace-tests-linux-3
+        path: ${{ inputs.directory }}/3/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      with:
+        name: workspace-tests-linux-4
+        path: ${{ inputs.directory }}/4/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      if: ${{ fromJSON(inputs.count) >= 5 }}
+      with:
+        name: workspace-tests-linux-5
+        path: ${{ inputs.directory }}/5/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      if: ${{ fromJSON(inputs.count) >= 6 }}
+      with:
+        name: workspace-tests-linux-6
+        path: ${{ inputs.directory }}/6/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      if: ${{ fromJSON(inputs.count) >= 7 }}
+      with:
+        name: workspace-tests-linux-7
+        path: ${{ inputs.directory }}/7/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - uses: actions/upload-artifact@v4
+      if: ${{ fromJSON(inputs.count) >= 8 }}
+      with:
+        name: workspace-tests-linux-8
+        path: ${{ inputs.directory }}/8/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1

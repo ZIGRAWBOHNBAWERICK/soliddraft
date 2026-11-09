@@ -26,7 +26,16 @@ runs:
         export SCCACHE_IDLE_TIMEOUT=0
         export SCCACHE_SERVER_UDS="$RUNNER_TEMP/sccache-$GITHUB_JOB.sock"
         export SCCACHE_IGNORE_SERVER_IO_ERROR=1
-        if timeout 30s sccache --start-server; then
+        if python3 - <<'PYTHON'
+        import subprocess
+        import sys
+        try:
+            result = subprocess.run(['sccache', '--start-server'], timeout=30)
+        except subprocess.TimeoutExpired:
+            sys.exit(1)
+        sys.exit(result.returncode)
+        PYTHON
+        then
           echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
           for variable in SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION SCCACHE_IDLE_TIMEOUT SCCACHE_SERVER_UDS SCCACHE_IGNORE_SERVER_IO_ERROR; do
             printf '%s=%s\n' "$variable" "${!variable}" >> "$GITHUB_ENV"

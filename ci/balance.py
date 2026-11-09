@@ -28,6 +28,22 @@ def partition(items, timings, count):
     return shards, loads
 
 
+def binary_partition(items, timings, count):
+    if len(items) != len(set(items)):
+        raise ValueError('duplicate inventory')
+    groups, weights = {}, {}
+    for item in items:
+        binary = item.split('\t', 1)[0]
+        duration = timings.get(item, 1.0)
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError('invalid duration')
+        groups.setdefault(binary, []).append(item)
+        weights[binary] = weights.get(binary, 0) + duration
+    binaries, loads = partition(list(groups), weights, count)
+    return [[item for binary in shard for item in sorted(groups[binary])]
+            for shard in binaries], loads
+
+
 def matcher(value):
     escapes = {'\\': '\\\\', ')': '\\)', ',': '\\,', '\n': '\\n', '\r': '\\r', '\t': '\\t'}
     return '=' + ''.join(escapes.get(c, c) for c in value)
@@ -58,7 +74,7 @@ def inventory_digest(items):
     return hashlib.sha256(json.dumps(sorted(items)).encode()).hexdigest()
 
 
-def run_shard(archive, shard, metadata=None):
+def run_shard(archive, shard, metadata=None, full_inventory=None):
     index, count = map(int, shard.split('/'))
     if not 1 <= index <= count:
         raise ValueError('shard must be K/N with 1 <= K <= N')
@@ -67,10 +83,14 @@ def run_shard(archive, shard, metadata=None):
     result = subprocess.run(['cargo', 'nextest', 'list', *reuse, '--message-format', 'json'],
                             cwd=ROOT, capture_output=True, text=True, check=True)
     listing = json.loads(result.stdout)
-    items = inventory(listing)
+    local_items = inventory(listing)
+    items = inventory(json.loads(full_inventory.read_text())) if full_inventory else local_items
     timings = json.loads((ROOT / 'ci/test-durations.json').read_text())['seconds']
-    shards, loads = partition(items, timings, count)
+    assign = binary_partition if full_inventory else partition
+    shards, loads = assign(items, timings, count)
     chosen = shards[index - 1]
+    if not set(chosen) <= set(local_items):
+        raise ValueError('archive is missing selected tests')
     print(f'Shard {shard}: {len(chosen)}/{len(items)} tests; estimated seconds {loads}', flush=True)
     # Only selected tests enter the filter. New and renamed tests have a one-second weight.
     filters = filterset(chosen)
@@ -119,9 +139,10 @@ def main():
     run.add_argument('archive')
     run.add_argument('shard')
     run.add_argument('--metadata', type=pathlib.Path)
+    run.add_argument('--inventory', type=pathlib.Path)
     args = parser.parse_args()
     if args.command == 'run':
-        return run_shard(args.archive, args.shard, args.metadata)
+        return run_shard(args.archive, args.shard, args.metadata, args.inventory)
     timings = {}
     if args.command == 'record-scenarios':
         for path in args.inputs:

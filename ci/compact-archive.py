@@ -82,23 +82,9 @@ def compact(archive, *, threads=0, timeout=120, minimum=64 * 1024 * 1024):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('archive', type=pathlib.Path)
-    parser.add_argument('--partition-output', type=pathlib.Path)
     args = parser.parse_args()
     result = compact(args.archive)
-    if args.partition_output is not None:
-        count = execution_partitions(result)
-        with args.partition_output.open('a') as output:
-            output.write(f'count={count}\npartitions={json.dumps(list(range(1, count + 1)))}\n')
     print(json.dumps(result), flush=True)
-
-
-def execution_partitions(report):
-    before, after = report['before_bytes'], max(1, report['after_bytes'])
-    if 3 * after <= before:
-        return 12
-    if 3 * after <= 2 * before:
-        return 8
-    return 4
 
 
 if __name__ == '__main__':

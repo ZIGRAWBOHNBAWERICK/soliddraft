@@ -49,6 +49,9 @@ impl AssemblyDocument {
     /// Starts collision detection, or dynamic clearance when a minimum distance is given.
     /// Includes hidden parts and refuses unchecked geometry. Suppressed parts are omitted.
     pub fn begin_guarded_drag(&mut self, path: OccurrencePath, clearance: Option<f64>) -> Result<(), crate::EditError> {
+        if cfg!(target_arch = "wasm32") {
+            return Err(crate::EditError::Invalid("guarded dragging needs the desktop collision worker".into()));
+        }
         let clearance = clearance.unwrap_or(0.0);
         if !clearance.is_finite() || clearance < 0.0 {
             return Err(crate::EditError::Invalid("a dynamic clearance is a finite length of zero or more".into()));
@@ -170,7 +173,7 @@ impl Part {
     }
 }
 
-fn parts(doc: &mut AssemblyDocument) -> Result<Vec<Part>, String> {
+fn parts(doc: &mut AssemblyDocument, cancelled: &AtomicBool) -> Result<Vec<Part>, String> {
     let request = CheckRequest { include_hidden: true, ..CheckRequest::default() };
     let (entries, unread) = doc.scope_parts(&request).map_err(|e| e.to_string())?;
     if !unread.is_empty() {
@@ -182,6 +185,9 @@ fn parts(doc: &mut AssemblyDocument) -> Result<Vec<Part>, String> {
     entries
         .into_iter()
         .map(|entry| {
+            if cancelled.load(Ordering::Relaxed) {
+                return Err("drag cancelled".into());
+            }
             let (_, mesh, _) = doc.placed(&entry, request.chord).map_err(|(_, e)| e)?;
             let radius =
                 mesh.positions.iter().map(|p| DVec3::from_array(p.map(f64::from)).length()).fold(0.0, f64::max);
@@ -215,7 +221,18 @@ fn changing(a: &[Placement], b: &[Placement], i: usize, j: usize) -> bool {
     // A common translation leaves an existing contact unchanged.
     !(a[i].rotation == b[i].rotation
         && a[j].rotation == b[j].rotation
-        && b[i].translation - a[i].translation == b[j].translation - a[j].translation)
+        && (0..3).all(|k| {
+            let exact = |x| num_rational::BigRational::from_float(x);
+            match (
+                exact(b[i].translation[k]),
+                exact(a[i].translation[k]),
+                exact(b[j].translation[k]),
+                exact(a[j].translation[k]),
+            ) {
+                (Some(bi), Some(ai), Some(bj), Some(aj)) => bi - ai == bj - aj,
+                _ => false,
+            }
+        }))
 }
 
 fn measure(
@@ -267,13 +284,36 @@ fn measure(
     (safe, minimum, faces)
 }
 
+fn joint_phases(doc: &AssemblyDocument) -> Result<Vec<[f64; 2]>, String> {
+    use crate::mates::bodies::{Gathered, Rule};
+    let truth = &doc.drag.as_ref().ok_or("no drag is active")?.candidate;
+    let problem = doc.gather(&Scope::new(truth, &doc.table, &doc.store)).map_err(|e| e.to_string())?;
+    Ok(problem
+        .mates
+        .into_iter()
+        .filter_map(|m| match m {
+            Gathered::Between { rule: Rule::Mechanical { angles, .. }, .. } => Some(angles),
+            _ => None,
+        })
+        .collect())
+}
+
+fn short_joint_steps(before: &[[f64; 2]], after: &[[f64; 2]]) -> bool {
+    before.len() == after.len()
+        && before
+            .iter()
+            .flatten()
+            .zip(after.iter().flatten())
+            .all(|(a, b)| (a - b).abs() <= std::f64::consts::FRAC_PI_4)
+}
+
 fn advance(
     doc: &mut AssemblyDocument,
     target: Placement,
     clearance: f64,
     cancelled: &AtomicBool,
 ) -> Result<MotionReport, String> {
-    let parts = parts(doc)?;
+    let parts = parts(doc, cancelled)?;
     let path = doc.drag.as_ref().ok_or("no drag is active")?.path.clone();
     let mut work = vec![(target, 0_u32)];
     let mut report = MotionReport {
@@ -290,6 +330,7 @@ fn advance(
         }
         let Some((wish, depth)) = work.pop() else { return Ok(report) };
         let before = poses(doc, &parts);
+        let phases = joint_phases(doc)?;
         let old_table = doc.table.clone();
         let old_drag = doc.drag.clone();
         let start = doc.table.local(doc.table.find(&path).ok_or("the dragged occurrence disappeared")?);
@@ -300,7 +341,7 @@ fn advance(
         }
         let after = poses(doc, &parts);
         let (safe, distance, faces) = measure(&parts, &before, &after, clearance, true);
-        if safe {
+        if safe && short_joint_steps(&phases, &joint_phases(doc)?) {
             // Use the same set of moving pairs when reporting their accepted separation.
             let (_, distance, faces) = measure(&parts, &after, &before, clearance, false);
             report.distance = distance;
@@ -329,4 +370,42 @@ fn advance(
     }
     report.stopped = true;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::DQuat;
+
+    #[test]
+    fn travel_bounds_every_point_of_a_rotating_translating_part() {
+        for angle in [0.001, 0.5, 1.5, std::f64::consts::PI] {
+            let a = Placement::IDENTITY;
+            let b = Placement::new(DQuat::from_rotation_z(angle), DVec3::new(10.0, -7.0, 3.0));
+            let bound = travel(a, b, 20.0);
+            for step in 0..=100 {
+                let pose = mixed(a, b, step as f64 / 100.0);
+                for p in [DVec3::X, DVec3::Y, DVec3::Z] {
+                    assert!(pose.apply(p * 20.0).distance(a.apply(p * 20.0)) <= bound);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_full_coupled_turn_requires_subdivision_even_when_its_quaternion_repeats() {
+        assert!(!short_joint_steps(&[[0.0, 0.0]], &[[0.0, std::f64::consts::TAU]]));
+        assert!(short_joint_steps(&[[0.0, 0.0]], &[[0.2, 0.3]]));
+    }
+
+    #[test]
+    fn common_translation_requires_equal_exact_displacements() {
+        let before = [Placement::translation(DVec3::X), Placement::IDENTITY];
+        let after = [Placement::translation(DVec3::X * 1e16); 2];
+        assert_eq!(after[0].translation - before[0].translation, after[1].translation - before[1].translation);
+        assert!(changing(&before, &after, 0, 1));
+        let before = [Placement::IDENTITY, Placement::translation(DVec3::X * 1e16)];
+        let shifted = [Placement::translation(DVec3::X * 4.0), Placement::translation(DVec3::X * (1e16 + 4.0))];
+        assert!(!changing(&before, &shifted, 0, 1));
+    }
 }

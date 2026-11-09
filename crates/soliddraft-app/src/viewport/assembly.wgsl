@@ -147,7 +147,7 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     } else if ((flags & HOVERED) != 0u) {
         base = mix(base, accent, 0.22);
     }
-    if ((in.info.w >> 16u) == in.face + 1u) {
+    if ((in.info.y >> 4u) == in.face + 1u) {
         base = srgb_to_linear(vec3<f32>(1.0, 0.28, 0.06));
     }
     let shade = 0.36 + diffuse * (1.0 - 0.5 * metallic);

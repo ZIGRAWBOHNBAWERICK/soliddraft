@@ -657,8 +657,10 @@ contact. Drag collision checks use the same certified meshes.
 In the desktop Placement panel, enable **Collision detection (mesh-certified)** to stop
 before penetration, or **Dynamic clearance (mesh-certified)** to keep a minimum distance
 in millimetres. Both use B7's certified meshes at pinned revisions. They include hidden
-parts and parts moved indirectly by mates. Suppressed parts do not participate. Unknown
-or unsupported geometry refuses the update and leaves the previous preview in place.
+parts and parts moved indirectly by mates. Suppressed parts do not participate. The check
+omits stationary pairs and pairs that share one translation without rotating. It reports
+the minimum across the remaining pairs. Unknown or unsupported geometry refuses the
+update and leaves the previous preview in place.
 
 Checks and mate solves run on a worker snapshot. The interface keeps showing the last
 accepted preview while work is pending. New wishes replace queued wishes. Release waits
@@ -671,7 +673,9 @@ step only when certified separation exceeds the requested clearance plus a bound
 both parts' swept motion. This checks the path even when the target lies clear on the
 other side of an obstacle. Each step uses straight world translations and shortest
 quaternion rotations between solved poses. Intermediate accepted poses satisfy mates.
-The guard stops conservatively when the mesh bounds cannot prove another step safe,
+Continuous joint angles also limit step size, so a coupled full turn cannot hide behind
+identical quaternion endpoints. The guard stops conservatively when the mesh bounds cannot
+prove another step safe,
 or its work limit is reached. An existing contact whose relative placement changes may
 prevent movement in either direction until the parts are separated outside guarded mode.
 

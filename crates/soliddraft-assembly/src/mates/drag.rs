@@ -132,7 +132,9 @@ impl AssemblyDocument {
         }
         self.verify_problem(self.gather(&Scope::new(&drag.candidate, &self.table, &self.store))?)?;
         if drag.candidate != self.assembly {
+            let report = self.motion_report.take();
             self.publish("Drag component", drag.candidate);
+            self.motion_report = report;
         }
         Ok(())
     }

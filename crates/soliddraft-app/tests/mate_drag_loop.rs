@@ -93,6 +93,10 @@ fn poll_collision(state: &mut AppState) -> Value {
 
 #[test]
 fn collision_and_dynamic_clearance_application_loops() {
+    let shader = naga::front::wgsl::parse_str(include_str!("../src/viewport/assembly.wgsl")).unwrap();
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+        .validate(&shader)
+        .unwrap();
     let spec: Value = serde_json::from_str(include_str!("../../../ci/scenarios/clearance-verification.json")).unwrap();
     for (name, guard, stop) in
         [("collision", json!({"collision":true}), 10.02), ("dynamic-clearance", json!({"clearance":"2 mm"}), 12.02)]
@@ -123,7 +127,14 @@ fn collision_and_dynamic_clearance_application_loops() {
         assert_eq!(result["motion"]["tier"], "certified_mesh");
         assert_eq!(result["motion"]["stopped"], true);
         assert!(result["motion"]["error"].is_null(), "{result}");
+        let mut dock = egui_dock::DockState::new(vec![soliddraft_app::app::Tab::Assembly]);
+        soliddraft_app::assembly::frame(&mut state, &mut dock, &egui::Context::default());
         let session = state.assembly.session.as_ref().unwrap();
+        assert_eq!(
+            session.scene.lock().unwrap().instances().iter().filter(|i| i.flags >> 4 != 0).count(),
+            2,
+            "both nearest faces must be highlighted"
+        );
         assert_eq!(session.doc.assembly(), &before);
         assert_eq!(session.doc.undo_depth(), depth);
         let row = session.doc.table().find(&"4".parse().unwrap()).unwrap();
@@ -139,7 +150,7 @@ fn collision_and_dynamic_clearance_application_loops() {
         assert_eq!(doc.assembly(), &before);
         assert!(doc.redo());
         assert!(!call(&mut state, "assembly_save", json!({"path":dir.join("work/committed.dwasm")})).0);
-        let (error, result) = call(&mut state, "open_assembly", json!({"path":dir.join("work/committed.dwasm")}));
+        let (error, result) = call(&mut state, "open", json!({"path":dir.join("work/committed.dwasm")}));
         assert!(!error, "{result}");
         let doc = &state.assembly.session.as_ref().unwrap().doc;
         assert_eq!(doc.assembly().component(soliddraft_assembly::ComponentId(4)).unwrap().placement.translation.z, z);

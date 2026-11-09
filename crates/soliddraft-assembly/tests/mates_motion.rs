@@ -1000,6 +1000,12 @@ fn guarded_drag_stops_before_contact_and_cannot_tunnel_to_a_clear_endpoint() {
         let path = occurrence(r.b);
         let before = r.doc.assembly().clone();
         let depth = r.doc.undo_depth();
+        if name == "collision" {
+            r.doc.begin_drag(path.clone()).unwrap();
+            r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, target_z))).unwrap();
+            assert_eq!(r.doc.check_interference(&soliddraft_assembly::CheckRequest::default()).unwrap().interferes, 1);
+            r.doc.cancel_drag();
+        }
         r.doc.begin_guarded_drag(path.clone(), clearance).unwrap();
         r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, target_z))).unwrap();
         assert!(r.doc.drag_pending());
@@ -1057,5 +1063,34 @@ fn guarded_release_waits_for_latest_wish_and_cancel_discards_inflight_work() {
     r.doc.poll_drag();
     assert!(!r.doc.drag_pending());
     assert_eq!(r.doc.assembly().component(r.b).unwrap().placement, before.component(r.b).unwrap().placement);
+    std::fs::remove_dir_all(r.dir).unwrap();
+}
+
+#[test]
+fn guarded_rotation_and_a_mate_driven_follower_cannot_cross_an_obstacle() {
+    let mut r = rig("guard-rotation", Profile::Block);
+    let path = occurrence(r.b);
+    r.doc.begin_guarded_drag(path, None).unwrap();
+    r.doc
+        .preview_drag(Placement::new(DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2), DVec3::new(3.0, 4.0, 20.0)))
+        .unwrap();
+    wait_motion(&mut r.doc);
+    assert!(r.doc.drag_report().unwrap().stopped);
+    let checked = r.doc.check_interference(&soliddraft_assembly::CheckRequest::default()).unwrap();
+    assert_eq!(checked.clear, 1, "{checked:?}");
+    r.doc.cancel_drag();
+    let reference = r.doc.assembly().sources[0].document.clone();
+    let c = r.doc.insert(reference, Placement::translation(DVec3::new(3.0, 4.0, 40.0))).unwrap();
+    r.doc.finish_loading();
+    r.doc.mate_lock("Link", r.b, c, false).unwrap();
+    r.doc.begin_guarded_drag(occurrence(c), None).unwrap();
+    r.doc.preview_drag(Placement::translation(DVec3::new(3.0, 4.0, 0.0))).unwrap();
+    wait_motion(&mut r.doc);
+    assert!(r.doc.drag_report().unwrap().stopped);
+    let b = r.doc.table().world(r.doc.table().find(&occurrence(r.b)).unwrap()).translation.z;
+    let c = r.doc.table().world(r.doc.table().find(&occurrence(c)).unwrap()).translation.z;
+    assert!(b > 10.0 && b < 10.03, "follower at {b}");
+    assert!((c - b - 20.0).abs() < 1e-8, "{b} {c}");
+    r.doc.cancel_drag();
     std::fs::remove_dir_all(r.dir).unwrap();
 }

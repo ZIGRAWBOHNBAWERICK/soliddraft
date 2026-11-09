@@ -38,7 +38,7 @@ pub struct Instance {
     /// The occurrence's row in the table.
     pub row: u32,
     /// [`Instance::HIDDEN`], [`Instance::SELECTED`], [`Instance::HOVERED`],
-    /// [`Instance::COLOURED`].
+    /// [`Instance::COLOURED`]. Bits 4 through 31 hold the contact face index plus one, or zero.
     pub flags: u32,
     /// The assembly-level colour, sRGB, red in the low byte; used when
     /// [`Instance::COLOURED`] is set.
@@ -196,10 +196,10 @@ impl Scene {
             .contact_faces
             .iter()
             .find(|(row, _)| *row == r)
-            .map(|(_, face)| face + 1)
-            .filter(|f| *f <= u16::MAX as u32)
+            .and_then(|(_, face)| face.checked_add(1))
+            .filter(|f| *f <= u32::MAX >> 4)
             .unwrap_or(0);
-        i.finish |= face << 16;
+        flags |= face << 4;
         i.flags = flags;
         i
     }
@@ -284,15 +284,15 @@ impl Scene {
         let selected = self.selected.iter().any(|s| *s == r || is_under(table, r, *s));
         let hovered = self.hovered.is_some_and(|h| h == r || is_under(table, r, h));
         let i = &mut self.instances[slot as usize];
-        let before = (i.flags, i.finish);
+        let before = i.flags;
         let face = self
             .contact_faces
             .iter()
             .find(|(row, _)| *row == r)
-            .map(|(_, face)| face + 1)
-            .filter(|f| *f <= u16::MAX as u32)
+            .and_then(|(_, face)| face.checked_add(1))
+            .filter(|f| *f <= u32::MAX >> 4)
             .unwrap_or(0);
-        i.finish = (i.finish & 0xffff) | (face << 16);
+        i.flags = (i.flags & 0xf) | (face << 4);
         i.flags &= !(Instance::SELECTED | Instance::HOVERED);
         if selected {
             i.flags |= Instance::SELECTED;
@@ -300,7 +300,7 @@ impl Scene {
         if hovered {
             i.flags |= Instance::HOVERED;
         }
-        if (i.flags, i.finish) != before {
+        if i.flags != before {
             self.dirty.push(slot);
         }
     }

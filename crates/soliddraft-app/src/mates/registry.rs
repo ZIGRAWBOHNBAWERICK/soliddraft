@@ -344,7 +344,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             measure_params,
         ),
         row("assembly_drag", "Move and rotate under mates", "Preview a component placement while mates hold")
-            .agents(Agents::Mcp, "Begin, update and commit one drag, or cancel it. Move performs one complete drag. Limits act as stops.", drag_params).undo(Undo::Carried),
+            .agents(Agents::Mcp, "Begin, update and commit one drag, or cancel it. Move performs one complete drag. Limits act as stops. Set collision or clearance at begin or move for mesh-certified worker checks; poll until pending is false. A pending commit releases after the latest wish.", drag_params).undo(Undo::Carried),
         row("assembly_mate_gear", "Gear mate", "Couple rotations of two Hinge or Concentric joints").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", gear_params).undo(Undo::Step),
         row("assembly_mate_rack_and_pinion", "Rack and Pinion mate", "Couple a joint rotation to a signed rack slide").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", rack_params).undo(Undo::Step),
         row("assembly_mate_screw", "Screw mate", "Couple axial travel and rotation of a Concentric joint").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", screw_params).undo(Undo::Step),

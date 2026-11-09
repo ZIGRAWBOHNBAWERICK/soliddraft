@@ -986,7 +986,7 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.colored_label(theme::error(), error);
             }
             if report.stopped {
-                ui.colored_label(theme::warn(), "Stopped at the certified mesh bound");
+                ui.colored_label(theme::warn(), "Stopped before the requested pose");
             }
             if let Some(distance) = report.distance {
                 ui.label(match distance.hi {

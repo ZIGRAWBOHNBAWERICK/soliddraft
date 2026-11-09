@@ -38,7 +38,7 @@ pub struct Instance {
     /// The occurrence's row in the table.
     pub row: u32,
     /// [`Instance::HIDDEN`], [`Instance::SELECTED`], [`Instance::HOVERED`],
-    /// [`Instance::COLOURED`].
+    /// [`Instance::COLOURED`]. Bits 4 through 31 hold the contact face index plus one, or zero.
     pub flags: u32,
     /// The assembly-level colour, sRGB, red in the low byte; used when
     /// [`Instance::COLOURED`] is set.
@@ -103,6 +103,7 @@ pub struct Scene {
     selected_paths: Vec<OccurrencePath>,
     hovered: Option<OccurrenceIndex>,
     hovered_path: Option<OccurrencePath>,
+    contact_faces: Vec<(OccurrenceIndex, u32)>,
 }
 
 const NO_SLOT: u32 = u32::MAX;
@@ -191,6 +192,14 @@ impl Scene {
             let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
             i.finish = q(a.metallic) | q(a.roughness) << 8;
         }
+        let face = self
+            .contact_faces
+            .iter()
+            .find(|(row, _)| *row == r)
+            .and_then(|(_, face)| face.checked_add(1))
+            .filter(|f| *f <= u32::MAX >> 4)
+            .unwrap_or(0);
+        flags |= face << 4;
         i.flags = flags;
         i
     }
@@ -206,6 +215,7 @@ impl Scene {
             self.selected = self.selected_paths.iter().filter_map(|p| table.find(p)).collect();
             self.hovered_path = self.hovered_path.take().filter(|p| table.find(p).is_some());
             self.hovered = self.hovered_path.as_ref().and_then(|p| table.find(p));
+            self.contact_faces.clear();
             self.rebuild(table, doc.store());
             return;
         }
@@ -255,6 +265,17 @@ impl Scene {
         }
     }
 
+    /// Highlights one nearest contact face per occurrence without editing appearances.
+    pub fn set_contact_faces(&mut self, table: &OccurrenceTable, faces: &[(OccurrenceIndex, u32)]) {
+        if self.contact_faces == faces {
+            return;
+        }
+        let old = std::mem::replace(&mut self.contact_faces, faces.to_vec());
+        for (row, _) in old.iter().chain(faces) {
+            self.refresh_flags(table, *row);
+        }
+    }
+
     fn refresh_flags(&mut self, table: &OccurrenceTable, r: OccurrenceIndex) {
         let slot = self.slot_of_row.get(r.0 as usize).copied().unwrap_or(NO_SLOT);
         if slot == NO_SLOT {
@@ -264,6 +285,14 @@ impl Scene {
         let hovered = self.hovered.is_some_and(|h| h == r || is_under(table, r, h));
         let i = &mut self.instances[slot as usize];
         let before = i.flags;
+        let face = self
+            .contact_faces
+            .iter()
+            .find(|(row, _)| *row == r)
+            .and_then(|(_, face)| face.checked_add(1))
+            .filter(|f| *f <= u32::MAX >> 4)
+            .unwrap_or(0);
+        i.flags = (i.flags & 0xf) | (face << 4);
         i.flags &= !(Instance::SELECTED | Instance::HOVERED);
         if selected {
             i.flags |= Instance::SELECTED;

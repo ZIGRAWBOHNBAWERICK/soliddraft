@@ -414,3 +414,19 @@ fn deleting_a_coloured_component_takes_its_colours_along() {
     assert_eq!(assigned(&doc), ["24"]);
     assert_eq!(saves(&doc), Ok(()));
 }
+
+#[test]
+fn contact_face_highlights_survive_moves_and_clear_without_editing_appearance() {
+    let mut doc = sample();
+    let mut scene = Scene::new(&mut doc);
+    let path: OccurrencePath = "3".parse().unwrap();
+    let row = doc.table().find(&path).unwrap();
+    scene.set_contact_faces(doc.table(), &[(row, 2)]);
+    let contact = |scene: &Scene| scene.instances().iter().find(|i| i.row == row.0).unwrap().flags >> 4;
+    assert_eq!(contact(&scene), 3);
+    doc.move_by(&[path], &Placement::translation(DVec3::Z)).unwrap();
+    scene.update(&mut doc);
+    assert_eq!(contact(&scene), 3);
+    scene.set_contact_faces(doc.table(), &[]);
+    assert_eq!(contact(&scene), 0);
+}

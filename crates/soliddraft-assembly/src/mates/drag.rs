@@ -4,10 +4,11 @@ use crate::mates::{MateRefusal, RefusalCode};
 use crate::schema::Assembly;
 use crate::{AssemblyDocument, EditError, OccurrencePath, Placement};
 
+#[derive(Clone)]
 pub(crate) struct Drag {
-    path: OccurrencePath,
-    base: Assembly,
-    candidate: Assembly,
+    pub(crate) path: OccurrencePath,
+    pub(crate) base: Assembly,
+    pub(crate) candidate: Assembly,
     shown: Vec<(OccurrencePath, Placement)>,
 }
 impl AssemblyDocument {
@@ -28,6 +29,7 @@ impl AssemblyDocument {
         if self.table.find(&path).is_none_or(|r| self.table.flags(r).has(crate::occurrence::Flags::REMOVED)) {
             return Err(EditError::NoOccurrence(path));
         }
+        self.motion_report = None;
         self.drag =
             Some(Drag { path, base: self.assembly.clone(), candidate: self.assembly.clone(), shown: Vec::new() });
         Ok(())
@@ -36,6 +38,9 @@ impl AssemblyDocument {
     /// Solves a placement wish under mates and shows the accepted preview without an undo step.
     /// A refused update retains the previous preview.
     pub fn preview_drag(&mut self, target: Placement) -> Result<(), MateRefusal> {
+        if self.motion.is_some() {
+            return self.queue_motion(target);
+        }
         if !target.translation.is_finite()
             || !target.rotation.is_finite()
             || (target.rotation.length_squared() - 1.0).abs() > 1e-8
@@ -66,6 +71,11 @@ impl AssemblyDocument {
         bodies::keep(&mut candidate, kept);
         self.refresh_mechanical(&mut candidate, None)?;
         self.verify_problem(self.gather(&Scope::new(&candidate, &self.table, &self.store))?)?;
+        self.show_drag_candidate(candidate);
+        Ok(())
+    }
+
+    pub(crate) fn show_drag_candidate(&mut self, candidate: Assembly) {
         let scope = Scope::new(&candidate, &self.table, &self.store);
         let placed: Vec<_> = (1..self.table.len() as u32)
             .filter_map(|i| {
@@ -87,11 +97,12 @@ impl AssemblyDocument {
             self.changes.moved.extend(moved);
         }
         drag.candidate = candidate;
-        Ok(())
     }
 
     /// Restores the accepted pose and discards the preview, preserving undo and redo.
     pub fn cancel_drag(&mut self) {
+        self.motion = None;
+        self.motion_report = None;
         let Some(drag) = self.drag.take() else { return };
         self.restore_drag_rows(&drag.shown);
     }
@@ -109,6 +120,11 @@ impl AssemblyDocument {
 
     /// Commits the last accepted preview as one undo step. A stationary release is a no-op.
     pub fn commit_drag(&mut self) -> Result<(), MateRefusal> {
+        if let Some(motion) = self.motion.as_mut() {
+            motion.release = true;
+            self.poll_drag();
+            return Ok(());
+        }
         let drag = self.drag.take().ok_or_else(|| MateRefusal::invalid("no component drag is active"))?;
         self.restore_drag_rows(&drag.shown);
         if drag.base != self.assembly {
@@ -116,7 +132,9 @@ impl AssemblyDocument {
         }
         self.verify_problem(self.gather(&Scope::new(&drag.candidate, &self.table, &self.store))?)?;
         if drag.candidate != self.assembly {
+            let report = self.motion_report.take();
             self.publish("Drag component", drag.candidate);
+            self.motion_report = report;
         }
         Ok(())
     }

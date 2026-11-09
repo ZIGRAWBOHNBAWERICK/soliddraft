@@ -85,6 +85,9 @@ pub struct AssemblyState {
     pub form: crate::subassembly::Draft,
     /// The Interference panel's fields and last report.
     pub interference: crate::interference::Draft,
+    pub collision_drag: bool,
+    pub dynamic_clearance: bool,
+    pub clearance_mm: f64,
 }
 
 impl AssemblyState {
@@ -220,11 +223,27 @@ impl AssemblySession {
     /// Takes in what the loader found and what edits changed, once a frame.
     fn update(&mut self) {
         self.doc.poll(POLL_BUDGET);
+        self.doc.poll_drag();
         if self.doc.dragging() && self.draft.as_ref().is_some_and(|d| Some(&d.path) != self.selected.as_ref()) {
             self.doc.cancel_drag();
         }
+        let contact_faces: Vec<_> = self
+            .doc
+            .drag_report()
+            .filter(|r| r.stopped)
+            .into_iter()
+            .flat_map(|r| &r.faces)
+            .filter_map(|f| {
+                let row = self.doc.table().find(&f.path)?;
+                let def = self.doc.store().get(self.doc.table().definition(row));
+                let mesh = def.mesh.as_ref()?;
+                let face = mesh.faces.iter().position(|face| !f.reference.is_empty() && face.name == f.reference)?;
+                Some((row, face as u32))
+            })
+            .collect();
         let mut scene = self.scene.lock().expect("the scene lock");
         scene.update(&mut self.doc);
+        scene.set_contact_faces(self.doc.table(), &contact_faces);
         let selected = self.selected_row();
         let path = selected.map(|r| self.doc.table().path(r));
         if self.shown.0 != path {
@@ -396,7 +415,7 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
     if let Some(s) = state.assembly.session.as_mut() {
         loaded = s.doc.is_loading();
         s.update();
-        if s.doc.is_loading() {
+        if s.doc.is_loading() || s.doc.drag_pending() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
     }
@@ -563,9 +582,12 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         }
         AssemblyAction::Place(path, placement) => {
             let Some(s) = state.assembly.session.as_mut() else { return };
-            let result = s
-                .doc
-                .begin_drag(path)
+            let begin = if state.assembly.collision_drag || state.assembly.dynamic_clearance {
+                s.doc.begin_guarded_drag(path, state.assembly.dynamic_clearance.then_some(state.assembly.clearance_mm))
+            } else {
+                s.doc.begin_drag(path)
+            };
+            let result = begin
                 .map_err(|e| e.to_string())
                 .and_then(|_| s.doc.preview_drag(placement).map_err(|e| e.to_string()))
                 .and_then(|_| s.doc.commit_drag().map_err(|e| e.to_string()));
@@ -887,6 +909,9 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
     let mating = state.assembly.mate.open;
     let forming = state.assembly.form.open;
     let checking = state.assembly.interference.open;
+    let collision_drag = &mut state.assembly.collision_drag;
+    let dynamic_clearance = &mut state.assembly.dynamic_clearance;
+    let clearance_mm = &mut state.assembly.clearance_mm;
     let Some(s) = state.assembly.session.as_mut() else { return };
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     let title = match s.selected_row() {
@@ -946,6 +971,33 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             ui.label(egui::RichText::new("Select a component to place it.").color(theme::muted()));
             return;
         };
+        ui.add_enabled_ui(!s.doc.dragging(), |ui| {
+            ui.checkbox(collision_drag, "Collision detection (mesh-certified)");
+            ui.checkbox(dynamic_clearance, "Dynamic clearance (mesh-certified)");
+            if *dynamic_clearance {
+                ui.add(egui::DragValue::new(clearance_mm).range(0.0..=1e9).suffix(" mm"));
+            }
+        });
+        if s.doc.drag_pending() {
+            ui.label("Checking motion...");
+        }
+        if let Some(report) = s.doc.drag_report() {
+            if let Some(error) = &report.error {
+                ui.colored_label(theme::error(), error);
+            }
+            if report.stopped {
+                ui.colored_label(theme::warn(), "Stopped before the requested pose");
+            }
+            if let Some(distance) = report.distance {
+                ui.label(match distance.hi {
+                    Some(hi) => format!("Clearance: {:.4} to {:.4} mm", distance.lo, hi),
+                    None => format!("Clearance: at least {:.4} mm", distance.lo),
+                });
+            }
+            for face in &report.faces {
+                ui.label(format!("{}: {}", face.path, face.face));
+            }
+        }
         theme::section_label(ui, "Placement");
         ui.label(
             egui::RichText::new("Relative to the assembly that holds it. Each change is one undo step.")
@@ -980,7 +1032,13 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             s.draft = None;
             return;
         }
-        if started && let Err(e) = s.doc.begin_drag(draft.path.clone()) {
+        if started
+            && let Err(e) = if *collision_drag || *dynamic_clearance {
+                s.doc.begin_guarded_drag(draft.path.clone(), dynamic_clearance.then_some(*clearance_mm))
+            } else {
+                s.doc.begin_drag(draft.path.clone())
+            }
+        {
             ui.colored_label(theme::muted(), e.to_string());
         }
         if changed

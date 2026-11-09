@@ -325,6 +325,18 @@ fn copy_value(s: &mut SketchSession, p: P2) {
 
 /// Signed distance from a selected curve, respecting the chain's walking direction.
 fn offset_distance(s: &SketchSession, target: EntityId, p: P2) -> Option<f64> {
+    if s.modify.offset.chain {
+        let seed = *sketch_tools::selected_in_order(s).first()?;
+        let chain = s.sketch.offset_chain_from(seed).ok()?;
+        let (_, reverse) = chain.iter().find(|(id, _)| *id == target)?;
+        let distance = match s.sketch.entity(target)?.kind {
+            EntityKind::Line { a, b } => (p - a).dot((b - a).normalized().perp()),
+            EntityKind::Arc { center, start, .. } => center.dist(start) - center.dist(p),
+            EntityKind::Circle { center, radius } => radius - center.dist(p),
+            _ => return None,
+        };
+        return Some(if *reverse { -distance } else { distance });
+    }
     let mut previous: Option<P2> = None;
     for id in sketch_tools::selected_in_order(s) {
         let kind = s.sketch.entity(id)?.kind;
@@ -358,6 +370,10 @@ fn copy_input(
     clicked: bool,
     snapped: Option<P2>,
 ) {
+    if s.tool == Tool::Offset && s.modify.offset_group.is_some() {
+        return;
+    }
+
     let modifiers = ui.input(|i| i.modifiers);
     if s.tool == Tool::Offset {
         if resp.drag_started_by(egui::PointerButton::Primary)
@@ -1262,7 +1278,9 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
         _ => None,
     });
     for e in s.sketch.drawn() {
-        if replacing.is_some_and(|ids| ids.contains(&e.id)) {
+        if replacing.is_some_and(|ids| ids.contains(&e.id))
+            || s.preview.as_ref().is_some_and(|p| p.replaced.contains(&e.id))
+        {
             continue;
         }
         let color = entity_color(s, e);
@@ -1381,7 +1399,9 @@ fn glyph_anchors(sketch: &Sketch, c: &Constraint) -> Vec<(P2, egui::Vec2)> {
         | ConstraintKind::Perpendicular { a, b }
         | ConstraintKind::Tangent { a, b }
         | ConstraintKind::Equal { a, b }
-        | ConstraintKind::Concentric { a, b } => beside(a).into_iter().chain(beside(b)).collect(),
+        | ConstraintKind::Concentric { a, b }
+        | ConstraintKind::Offset { a, b, .. } => beside(a).into_iter().chain(beside(b)).collect(),
+        ConstraintKind::OffsetCap { cap, .. } => beside(cap).into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -1454,6 +1474,14 @@ fn paint_glyphs(painter: &egui::Painter, s: &SketchSession, glyphs: &[(Constrain
             ConstraintKind::PointOn { .. } => {
                 painter.line_segment([pos2(l, b - 1.0), pos2(rr, t + 1.0)], st);
                 painter.circle_filled(g.center(), 1.8, fg);
+            }
+            ConstraintKind::Offset { .. } => {
+                painter.line_segment([pos2(l, cy - 3.0), pos2(rr, cy - 3.0)], st);
+                painter.line_segment([pos2(l, cy + 3.0), pos2(rr, cy + 3.0)], st);
+                painter.line_segment([pos2(cx, cy - 3.0), pos2(cx, cy + 3.0)], st);
+            }
+            ConstraintKind::OffsetCap { .. } => {
+                painter.text(g.center(), Align2::CENTER_CENTER, "C", theme::font_semibold(9.5), fg);
             }
             ConstraintKind::Symmetric { .. } => {
                 painter.line_segment([pos2(cx, t), pos2(cx, b)], st);
@@ -1897,7 +1925,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
         curve(*kind, stroke, keep);
     }
     for (index, kind) in preview.added.iter().enumerate() {
-        let guide = match &preview.operation {
+        let guide = preview.construction.get(index).copied().unwrap_or_else(|| match &preview.operation {
             Some(
                 Operation::TrimCorner { a, b, .. } | Operation::Fillet { a, b, .. } | Operation::Chamfer { a, b, .. },
             ) => {
@@ -1906,7 +1934,7 @@ fn paint_tool_preview(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSess
             }
             Some(Operation::Split { entity, .. }) => s.sketch.entity(*entity).is_some_and(|e| e.construction),
             _ => false,
-        };
+        });
         curve(*kind, Stroke::new(2.0, theme::accent()), guide);
     }
     if s.tool == Tool::Split {

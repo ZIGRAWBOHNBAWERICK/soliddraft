@@ -5,10 +5,12 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, P2, PointRef, Sketch};
+use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, OffsetJoin, P2, PointRef, Sketch};
 
 mod finishing;
 pub use finishing::{ChamferSize, JunctionPreview, SplitPreview};
+mod offset;
+pub use offset::{OffsetCap, OffsetOptions};
 
 const EPS: f64 = 1e-6;
 
@@ -39,7 +41,7 @@ pub enum End {
 }
 
 /// One sketch tool invocation. All coordinates are in the sketch's plane, in mm.
-/// Copies are independent geometry, not associative patterns. Counts include the seed.
+/// Mirror and pattern copies are independent geometry. Pattern counts include the seed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "tool", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
@@ -172,6 +174,16 @@ pub enum Operation {
         /// Chain entities in walking order; the first entity sets the direction.
         entities: Vec<EntityId>,
         /// Signed distance, mm. Adjacent curves meet at miter intersections.
+        distance: f64,
+        /// Chain selection, opposite side, caps and source construction choices.
+        #[serde(default, skip_serializing_if = "OffsetOptions::is_default")]
+        options: OffsetOptions,
+    },
+    /// Change a linked offset group's distance while retaining its entity ids.
+    EditOffset {
+        /// Existing offset group id.
+        group: crate::ConstraintId,
+        /// New nonzero signed distance, mm.
         distance: f64,
     },
     /// Copy geometry across an infinite line, reversing reflected arc endpoints.
@@ -636,7 +648,8 @@ impl Sketch {
                 self.replace_trim_entity(*entity, preview, *options)
             }
             Operation::Extend { entity: id, end, boundary } => self.extend_to(*id, *end, *boundary),
-            Operation::Offset { entities, distance } => self.offset_chain(entities, *distance),
+            Operation::Offset { entities, distance, options } => self.offset_chain(entities, *distance, *options),
+            Operation::EditOffset { group, distance } => self.edit_offset(*group, *distance),
             Operation::Mirror { entities, axis_start, axis_end } => {
                 if !finite(*axis_start) || !finite(*axis_end) || axis_start.dist(*axis_end) <= EPS {
                     return refuse("the mirror axis needs two distinct finite points");
@@ -1155,106 +1168,5 @@ impl Sketch {
         let mut kind = target.kind;
         set_end(&mut kind, end, p);
         self.replace_tool_entity(id, vec![kind])
-    }
-
-    fn offset_chain(&mut self, ids: &[EntityId], distance: f64) -> Result<Vec<EntityId>> {
-        if !distance.is_finite() || distance.abs() <= EPS {
-            return refuse("offset distance must be finite and nonzero");
-        }
-        let selected = self.tool_selection(ids)?;
-        if selected.len() == 1
-            && let EntityKind::Circle { center, radius } = selected[0].kind
-        {
-            return self.add_tool_entities(vec![(
-                EntityKind::Circle { center, radius: radius - distance },
-                selected[0].construction,
-            )]);
-        }
-        // Walk the supplied chain. Reverse individual lines and track reversed arcs
-        // separately because the entity model stores only counter-clockwise arcs.
-        let mut source = Vec::with_capacity(selected.len());
-        let mut previous = None;
-        for e in &selected {
-            let Some([a, b]) = ends(e.kind) else {
-                return refuse("offset needs a connected chain of lines and arcs");
-            };
-            let reverse = if let Some(p) = previous {
-                if a.dist(p) <= EPS {
-                    false
-                } else if b.dist(p) <= EPS {
-                    true
-                } else {
-                    return refuse("offset entities must be in connected walking order");
-                }
-            } else {
-                false
-            };
-            previous = Some(if reverse { a } else { b });
-            source.push((e.kind, reverse));
-        }
-        let mut out = Vec::with_capacity(source.len());
-        for &(kind, reverse) in &source {
-            let d = if reverse { -distance } else { distance };
-            let shifted = match kind {
-                EntityKind::Line { a, b } => {
-                    let n = (b - a).normalized().perp().scale(d);
-                    let k = EntityKind::Line { a: a + n, b: b + n };
-                    if reverse { reversed(k) } else { k }
-                }
-                EntityKind::Arc { center, start, end } => {
-                    let r = center.dist(start);
-                    if r - d <= EPS {
-                        return refuse("offset collapses an arc radius");
-                    }
-                    EntityKind::Arc {
-                        center,
-                        start: center + (start - center).scale((r - d) / r),
-                        end: center + (end - center).scale((r - d) / r),
-                    }
-                }
-                _ => unreachable!(),
-            };
-            out.push(shifted);
-        }
-        let start = ends(source[0].0).expect("chain")[0];
-        let closed = previous.is_some_and(|p| p.dist(start) <= EPS);
-        let joins = if closed { out.len() } else { out.len() - 1 };
-        for i in 0..joins {
-            let j = (i + 1) % out.len();
-            let ei = if source[i].1 && matches!(out[i], EntityKind::Arc { .. }) { End::Start } else { End::End };
-            let ej = if source[j].1 && matches!(out[j], EntityKind::Arc { .. }) { End::End } else { End::Start };
-            let pi = ends(out[i]).expect("chain")[usize::from(ei == End::End)];
-            let pj = ends(out[j]).expect("chain")[usize::from(ej == End::End)];
-            let joint = if pi.dist(pj) <= EPS {
-                pi
-            } else {
-                intersections(out[i], out[j])
-                    .into_iter()
-                    .min_by(|a, b| (a.dist(pi) + a.dist(pj)).total_cmp(&(b.dist(pi) + b.dist(pj))))
-                    .ok_or_else(|| ToolError("offset neighbours do not intersect".into()))?
-            };
-            set_end(&mut out[i], ei, joint);
-            set_end(&mut out[j], ej, joint);
-        }
-        // A miter may consume an edge completely. Do not turn it inside out.
-        for ((original, reverse), shifted) in source.iter().zip(&out) {
-            if let (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) = (*original, *shifted) {
-                let sign = if *reverse { -1.0 } else { 1.0 };
-                if (b - a).dot(d - c) * sign <= EPS * EPS {
-                    return refuse("offset consumes a chain edge");
-                }
-            }
-        }
-        for i in 0..out.len() {
-            for j in i + 1..out.len() {
-                if j == i + 1 || (closed && i == 0 && j == out.len() - 1) {
-                    continue;
-                }
-                if intersections(out[i], out[j]).into_iter().any(|p| on_curve(out[i], p) && on_curve(out[j], p)) {
-                    return refuse("offset would make the chain intersect itself");
-                }
-            }
-        }
-        self.add_tool_entities(out.into_iter().zip(selected).map(|(kind, e)| (kind, e.construction)).collect())
     }
 }

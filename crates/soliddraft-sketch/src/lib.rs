@@ -443,6 +443,17 @@ pub enum Align {
     Points(PointRef, PointRef),
 }
 
+/// An internal offset join whose source-normal anchor applies only while its source lines are parallel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OffsetJoin {
+    /// The next source line in the chain.
+    pub neighbor: EntityId,
+    /// The outgoing endpoint of this source line.
+    pub source: PointRef,
+    /// The corresponding endpoint of the offset line.
+    pub target: PointRef,
+}
+
 /// What a constraint says. Relations hold geometry in place; dimensions also carry
 /// a value the user edits and a label position.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -529,6 +540,37 @@ pub enum ConstraintKind {
         entity: EntityId,
         /// Geometry at the time Fix was applied.
         at: EntityKind,
+    },
+    /// A curve follows its source at the group's signed offset distance.
+    Offset {
+        /// Source curve.
+        a: EntityId,
+        /// Offset curve.
+        b: EntityId,
+        /// First relation id in this offset group.
+        group: ConstraintId,
+        /// Signed distance relative to the group's walking direction, mm.
+        distance: f64,
+        /// Source is traversed against its stored direction.
+        reverse: bool,
+        /// This is the opposite side of a both-sides offset.
+        opposite: bool,
+        /// Source/target endpoint pairs at genuine free ends.
+        ends: [Option<(PointRef, PointRef)>; 2],
+        /// Internal line join, anchored only while the current source lines are parallel.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        join: Option<OffsetJoin>,
+    },
+    /// An offset end cap joins two referenced endpoints.
+    OffsetCap {
+        /// Cap line or semicircular arc.
+        cap: EntityId,
+        /// Point at the cap's start.
+        a: PointRef,
+        /// Point at the cap's end.
+        b: PointRef,
+        /// Offset group this cap belongs to.
+        group: ConstraintId,
     },
     /// The point stays where it is.
     Fix {
@@ -676,6 +718,8 @@ impl Constraint {
             ConstraintKind::Concentric { .. } => "Concentric",
             ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => "Fixed",
             ConstraintKind::Symmetric { .. } => "Symmetric",
+            ConstraintKind::Offset { .. } => "Offset",
+            ConstraintKind::OffsetCap { .. } => "Offset cap",
             ConstraintKind::Distance { kind: DistanceKind::Aligned, .. } => "Distance",
             ConstraintKind::Distance { kind: DistanceKind::Horizontal, .. } => "Horizontal distance",
             ConstraintKind::Distance { kind: DistanceKind::Vertical, .. } => "Vertical distance",
@@ -706,6 +750,14 @@ impl Constraint {
             ConstraintKind::Fix { point, .. } => vec![point.entity],
             ConstraintKind::FixEntity { entity, .. } => vec![entity],
             ConstraintKind::Symmetric { a, b, axis } => vec![a.entity, b.entity, axis],
+            ConstraintKind::Offset { a, b, join, .. } => {
+                let mut ids = vec![a, b];
+                if let Some(join) = join {
+                    ids.push(join.neighbor);
+                }
+                ids
+            }
+            ConstraintKind::OffsetCap { cap, a, b, .. } => vec![cap, a.entity, b.entity],
             ConstraintKind::Distance { a, b, .. } => vec![a.entity, b.entity],
             ConstraintKind::PointLineDistance { point, line, .. } => vec![point.entity, line],
             ConstraintKind::Radius { entity, .. } => vec![entity],
@@ -725,6 +777,13 @@ impl Constraint {
                 .point_count())
                 .map(|index| PointRef::new(entity, index))
                 .collect(),
+            ConstraintKind::Offset { ends, join, .. } => ends
+                .into_iter()
+                .flatten()
+                .flat_map(|(a, b)| [a, b])
+                .chain(join.into_iter().flat_map(|j| [j.source, j.target]))
+                .collect(),
+            ConstraintKind::OffsetCap { cap, a, b, .. } => vec![a, b, PointRef::new(cap, 0)],
             ConstraintKind::PointOn { point, .. }
             | ConstraintKind::Midpoint { point, .. }
             | ConstraintKind::Fix { point, .. }

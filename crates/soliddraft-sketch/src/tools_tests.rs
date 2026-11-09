@@ -810,7 +810,8 @@ fn offset_rounded_chain_joins_lines_and_arcs_without_faceting() {
     let shape = s.rounded_rectangle(P2::ZERO, 20.0, 12.0, 2.0).unwrap();
     let ids = shape.entities;
     let order = vec![ids[0], ids[4], ids[1], ids[5], ids[2], ids[6], ids[3], ids[7]];
-    let out = s.apply_operation(&Operation::Offset { entities: order, distance: -1.0 }).unwrap();
+    let out =
+        s.apply_operation(&Operation::Offset { entities: order, distance: -1.0, options: Default::default() }).unwrap();
     for &id in &out {
         let e = s.entity(id).unwrap();
         if e.is_curve() {
@@ -827,10 +828,13 @@ fn offset_miters_a_square_and_rejects_consumed_edges_atomically() {
     let mut s = Sketch::new();
     let shape = s.rectangle(P2::ZERO, 10.0, 10.0).unwrap();
     let ids = shape.entities[..4].to_vec();
-    s.apply_operation(&Operation::Offset { entities: ids.clone(), distance: -2.0 }).unwrap();
+    s.apply_operation(&Operation::Offset { entities: ids.clone(), distance: -2.0, options: Default::default() })
+        .unwrap();
     close(area(&s), 196.0 - 100.0);
     let before = s.clone();
-    assert!(s.apply_operation(&Operation::Offset { entities: ids, distance: 6.0 }).is_err());
+    assert!(
+        s.apply_operation(&Operation::Offset { entities: ids, distance: 6.0, options: Default::default() }).is_err()
+    );
     assert_eq!(s, before);
 }
 
@@ -864,7 +868,7 @@ fn invalid_tools_do_not_consume_ids_or_touch_constraints() {
         Operation::LinearPattern { entities: ids.clone(), step: p(10.0, 0.0), count: 0 },
         Operation::CircularPattern { entities: ids.clone(), center: P2::ZERO, angle_degrees: 1.0, count: u32::MAX },
         Operation::CircularPattern { entities: ids, center: P2::ZERO, angle_degrees: 180.0, count: 3 },
-        Operation::Offset { entities: vec![999], distance: 1.0 },
+        Operation::Offset { entities: vec![999], distance: 1.0, options: Default::default() },
         Operation::Trim { options: Default::default(), entity: shape.entities[0], at: p(-5.0, -4.0) },
     ] {
         let before = s.clone();

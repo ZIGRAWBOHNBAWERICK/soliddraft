@@ -6,8 +6,8 @@
 
 use crate::document::Command;
 use crate::sketch::{
-    EntityId, P2, solve,
-    tools::{ChamferSize, Operation, ToolError},
+    ConstraintKind, EntityId, P2, solve,
+    tools::{ChamferSize, OffsetCap, Operation, ToolError},
 };
 use crate::state::{AppAction, SketchSel, SketchSession, Tool, ToolPreview};
 use crate::theme;
@@ -44,13 +44,18 @@ pub fn selected_in_order(s: &SketchSession) -> Vec<EntityId> {
 
 /// The operation a copy tool would run on the selection with the current values.
 pub fn operation_for(s: &SketchSession) -> Option<Operation> {
+    if s.tool == Tool::Offset
+        && let Some(group) = s.modify.offset_group
+    {
+        return Some(Operation::EditOffset { group, distance: s.modify.distance });
+    }
     let entities = selected_in_order(s);
     if entities.is_empty() {
         return None;
     }
     let m = &s.modify;
     Some(match s.tool {
-        Tool::Offset => Operation::Offset { entities, distance: m.distance },
+        Tool::Offset => Operation::Offset { entities, distance: m.distance, options: m.offset },
         Tool::Mirror => Operation::Mirror { entities, axis_start: m.axis_start, axis_end: m.axis_end },
         Tool::LinearPattern => Operation::LinearPattern { entities, step: m.step, count: m.count },
         Tool::CircularPattern => {
@@ -110,11 +115,29 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
     }
     let mut copy = s.sketch.clone();
     match copy.apply_operation(&operation) {
-        Ok(ids) => ToolPreview {
-            added: ids.iter().filter_map(|id| copy.entity(*id).map(|e| e.kind)).collect(),
-            operation: Some(operation),
-            ..Default::default()
-        },
+        Ok(mut ids) => {
+            let replaced: Vec<_> = s
+                .sketch
+                .drawn()
+                .filter(|old| {
+                    copy.entity(old.id).is_some_and(|new| old.kind != new.kind || old.construction != new.construction)
+                })
+                .map(|e| e.id)
+                .collect();
+            for id in &replaced {
+                if !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+            let entities: Vec<_> = ids.iter().filter_map(|id| copy.entity(*id)).collect();
+            ToolPreview {
+                added: entities.iter().map(|e| e.kind).collect(),
+                construction: entities.iter().map(|e| e.construction).collect(),
+                replaced,
+                operation: Some(operation),
+                ..Default::default()
+            }
+        }
         Err(ToolError(why)) => ToolPreview { refused: Some(why), ..Default::default() },
     }
 }
@@ -123,6 +146,11 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
 pub fn selection_preview(s: &SketchSession) -> Option<ToolPreview> {
     if !s.tool.selects() || s.tool == Tool::Select {
         return None;
+    }
+    if s.tool == Tool::Offset
+        && s.modify.offset_group.is_some_and(|group| s.sketch.offset_group_distance(group) == Some(s.modify.distance))
+    {
+        return Some(ToolPreview::default());
     }
     Some(match operation_for(s) {
         Some(operation) => try_operation(s, operation),
@@ -283,11 +311,44 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             hint(ui, "Point at the end of a line or arc and click. It lengthens to the nearest curve in its way.");
         }
         Tool::Offset => {
+            let editing = s.modify.offset_group.is_some();
             hint(
                 ui,
-                "Select a connected chain in walking order, then drag a selected curve to the side and distance you want. Apply adds the copy.",
+                if editing {
+                    "Change the linked distance, then Apply. The preview respects existing constraints. Esc cancels."
+                } else {
+                    "Pick a seed curve. Chain selection follows connected curves without branches. Drag to set the side and distance, or enter a distance."
+                },
             );
-            ui.add(egui::DragValue::new(&mut s.modify.distance).speed(0.25).prefix("Distance ").suffix(" mm"));
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut s.modify.distance).speed(0.25).prefix("Distance ").suffix(" mm"));
+                if ui.button("Reverse").clicked() {
+                    s.modify.distance = -s.modify.distance;
+                }
+            });
+            if !editing {
+                ui.checkbox(&mut s.modify.offset.chain, "Chain selection");
+                let both = ui.checkbox(&mut s.modify.offset.both_sides, "Both sides").changed();
+                let old_cap = s.modify.offset.cap;
+                egui::ComboBox::from_label("End caps")
+                    .selected_text(match old_cap {
+                        OffsetCap::None => "None",
+                        OffsetCap::Lines => "Lines",
+                        OffsetCap::Round => "Round",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.modify.offset.cap, OffsetCap::None, "None");
+                        ui.selectable_value(&mut s.modify.offset.cap, OffsetCap::Lines, "Lines");
+                        ui.selectable_value(&mut s.modify.offset.cap, OffsetCap::Round, "Round");
+                    });
+                if (both || old_cap != s.modify.offset.cap) && s.modify.offset.cap != OffsetCap::None {
+                    s.modify.offset.make_base_construction = s.modify.offset.both_sides;
+                }
+                if s.modify.offset.cap == OffsetCap::None || s.modify.offset.both_sides {
+                    ui.checkbox(&mut s.modify.offset.make_base_construction, "Make originals construction");
+                }
+                hint(ui, "Caps apply to open chains. One-sided caps use the originals as their other boundary.");
+            }
         }
         Tool::Mirror => {
             hint(ui, "Select the entities, then click two points on the mirror axis. Apply adds the copies.");
@@ -317,7 +378,14 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
         }
     }
     if tool.selects() {
-        hint(ui, "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed.");
+        hint(
+            ui,
+            if tool == Tool::Offset {
+                "Offsets retain their source links. Select a resulting curve or relation to edit the distance."
+            } else {
+                "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed."
+            },
+        );
         let selected = selected_in_order(s).len();
         hint(
             ui,
@@ -331,7 +399,7 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
         ui.horizontal(|ui| {
             let apply_now = ui
                 .add_enabled(operation.is_some(), egui::Button::new("Apply"))
-                .on_hover_text("Add the previewed copies as one undo step")
+                .on_hover_text("Apply the preview as one undo step")
                 .clicked();
             if apply_now && let Some(operation) = operation {
                 apply(s, &operation, actions);
@@ -345,12 +413,53 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
     }
 }
 
+/// Inspect a selected offset without turning every new Offset command into an edit.
+pub fn offset_inspector(ui: &mut egui::Ui, s: &mut SketchSession) {
+    if s.tool != Tool::Select {
+        return;
+    }
+    let mut groups = Vec::new();
+    for selection in &s.selection {
+        for c in &s.sketch.constraints {
+            let selected = match selection {
+                SketchSel::Constraint(id) => c.id == *id,
+                SketchSel::Entity(id) => c.entities().contains(id),
+                SketchSel::Point(p) => c.entities().contains(&p.entity),
+            };
+            if selected
+                && let ConstraintKind::Offset { group, .. } | ConstraintKind::OffsetCap { group, .. } = c.kind
+                && !groups.contains(&group)
+            {
+                groups.push(group);
+            }
+        }
+    }
+    if let [group] = groups.as_slice()
+        && let Some(distance) = s.sketch.offset_group_distance(*group)
+    {
+        theme::section_label(ui, "Linked offset");
+        ui.label(format!("Distance {} mm", crate::sketch::fmt_value(distance)));
+        if ui.button("Edit offset distance").clicked() {
+            let group = *group;
+            s.set_tool(Tool::Offset);
+            s.modify.offset_group = Some(group);
+            s.modify.distance = distance;
+        }
+    }
+}
+
 /// The same operations used by the sketcher's Modify tools, exposed to command/MCP scenarios.
 pub fn operation_schema() -> Value {
     use soliddraft_assistant::tools::schema::{
         any_of, boolean, constant, integer, non_empty_array, number, object, one_of, optional,
     };
     let point = object(&[("u", number("Plane u, mm")), ("v", number("Plane v, mm"))]);
+    let offset_options = optional(object(&[
+        ("chain", optional(boolean("Follow the connected chain from the first seed, default false"))),
+        ("both_sides", optional(boolean("Offset both sides, default false"))),
+        ("cap", optional(one_of(&["none", "lines", "round"], "End caps on open chains, default none"))),
+        ("make_base_construction", optional(boolean("Keep the originals as guides, default false"))),
+    ]));
     let trim_options = optional(object(&[
         ("keep_as_construction", optional(boolean("Keep removed pieces as guides, default false"))),
         (
@@ -524,6 +633,12 @@ pub fn operation_schema() -> Value {
             ("tool", constant("offset")),
             ("entities", ids.clone()),
             ("distance", number("Signed distance to the left of the chain, mm")),
+            ("options", offset_options),
+        ]),
+        object(&[
+            ("tool", constant("edit_offset")),
+            ("group", integer("An existing offset group constraint id")),
+            ("distance", number("New signed offset distance, mm")),
         ]),
         object(&[
             ("tool", constant("mirror")),

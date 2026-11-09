@@ -127,6 +127,8 @@ state. A corner treatment requires two profile curves or two construction curves
 `sketch-fillet-chamfer-split.json` combines these operations, extrudes through
 Catallax to about 1179.4248 mm³, and checks that volume after reopening.
 
+`sketch-linked-offsets.json` builds an annulus and a round-capped strip, edits the annulus distance and checks 758.36278784 mm³ after extrusion and reopen. `offset` accepts optional `options`: `chain` follows an unbranched connected component from the first seed, `both_sides` creates both signed sides, `cap` chooses `none`, `lines` or `round`, and `make_base_construction` retains originals as guides. All omitted options are false or `none`. Caps apply only to open chains. One-sided caps require the original profile boundary. Offset relations store a group id, exposed in the sketch constraints; `edit_offset` accepts that `group` and a new signed `distance`, retains entity ids and refuses incompatible constraints atomically. The native Offset panel defaults chain selection on and offers the same analytic preview.
+
 Both sketch tools accept an optional signed `offset` in millimetres along a
 reference plane's or planar face's normal. Omitted offsets are zero. A face
 offset follows the persistently named face on rebuild, including coplanar

@@ -269,7 +269,7 @@ fn partial_ellipse_trim_extend_and_offset_refuse_atomically() {
     for operation in [
         Operation::Trim { entity: curve, at: P2::new(0.0, 2.0), options: TrimOptions::default() },
         Operation::Extend { entity: curve, end: End::Start, boundary },
-        Operation::Offset { entities: vec![curve], distance: 1.0 },
+        Operation::Offset { entities: vec![curve], distance: 1.0, options: Default::default() },
     ] {
         let before = sketch.clone();
         assert!(sketch.apply_operation(&operation).is_err(), "{operation:?}");

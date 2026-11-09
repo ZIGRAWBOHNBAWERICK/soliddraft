@@ -78,13 +78,16 @@ const VIEW_RUNS: [&str; 9] = [
     "display_wireframe",
     "orthographic",
 ];
-const SKETCH_RUNS: [&str; 7] = [
+const SKETCH_RUNS: [&str; 10] = [
     "sketch_line",
     "sketch_centreline",
     "sketch_circle",
     "sketch_rectangle",
     "sketch_arc",
     "sketch_slot",
+    "sketch_centrepoint_slot",
+    "sketch_three_point_arc_slot",
+    "sketch_centrepoint_arc_slot",
     "sketch_point",
 ];
 

@@ -50,6 +50,8 @@ The tables below retain their original source-audit baseline. Later work has add
 
 - Order 71: retained the existing Line chain with [native pointer coverage](../crates/soliddraft-app/tests/sketch_line_chains.rs) for uncommitted starts, coincident continuation with Auto relations off, right-click/double-click termination while staying in Line, closure onto an existing point, independent restarts, cancellation, per-segment undo/redo and serialized joins. The viewport hint distinguishes ending a chain from Esc returning to Select; see [the sketch workflow](DESIGN.md#phase-2-the-sketcher).
 
+- Orders 81–83: retained the original Straight slot command and added Centrepoint slot, Three-point arc slot and Centrepoint arc slot to Draw, the property tools and the palette. Preview and placement share ordinary line/arc geometry, construction guides and retained coincidence, tangent and equal-radius relations; circular sides stay concentric. See [slot workflows and limits](sketch-slots.md), [placement](../crates/soliddraft-app/src/sketcher/slot.rs) and [native acceptance tests](../crates/soliddraft-app/tests/sketch_slots.rs).
+
 ## How to read the list
 
 - **SolidDraft** means an end-user command exists, not merely that the solver could express it. `yes` means the listed operation is implemented; `partial` names its limit; `no` names the inspected code boundary where support is absent. These are source-audit findings, not fresh interactive acceptance results.
@@ -143,8 +145,8 @@ The tables below retain their original source-audit baseline. Later work has add
 | 79 | Three-point arc [SW-arcs] | Creates an arc through start, end and an intermediate point. | no; [entity-input] has only a centre-first arc path. | yes | M |
 | 80 | Tangent arc [SW-arcs] | Continues a line or arc with a tangent arc. | no; [entity-input] has no tangent-arc creation mode; a manual tangent relation can be added later. | yes | M |
 | 81 | Straight slot [SW-slots] | Creates two parallel sides and equal-radius tangent ends. | yes; `Tool::Slot` in [entity-input] creates lines, arcs, a construction axis and their relations. | yes | 0 |
-| 82 | Centrepoint straight slot [SW-slots] | Defines a straight slot symmetrically from its midpoint. | no; [entity-input] takes the two end centres and width instead. | yes | M |
-| 83 | Three-point / centrepoint arc slots [SW-slots] | Makes a constant-width slot along a circular path. | no; [entity-input] has no curved-slot path. | yes | L |
+| 82 | Centrepoint straight slot [SW-slots] | Defines a straight slot symmetrically from its midpoint. | yes; midpoint, end centre and width create the existing straight-slot geometry with a retained midpoint relation. See [slot workflows](sketch-slots.md). | yes | M |
+| 83 | Three-point / centrepoint arc slots [SW-slots] | Makes a constant-width slot along a circular path. | yes; three-point and counterclockwise centrepoint paths create concentric side arcs, tangent equal-radius caps and a construction path. See [slot workflows and limits](sketch-slots.md). | yes | L |
 | 84 | Regular polygon [SW-polygon] | Creates a chosen number of sides about a centre. | partial; [tool-model] and [modify-ui] create a regular polygon from a vertex, but do not retain a parametric polygon object or inscribed/circumscribed mode. | yes | M |
 | 85 | Sketch point [SW-entities-overview] | Adds a reference or construction point for relations and dimensions. | yes; `Tool::Point` in [entity-input], with point relations in [relation-ui]. | yes | 0 |
 | 86 | Closed-contour shading [SW-shading] | Fills closed regions so missing closure is easier to notice. | partial; `paint_regions` in [sketch-paint] fills valid regions, but [session] has no shading toggle. | yes | S |

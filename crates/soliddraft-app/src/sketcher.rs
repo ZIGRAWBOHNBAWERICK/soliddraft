@@ -25,6 +25,7 @@ use soliddraft_sketch::inference::{self, InferenceOptions, SnapFilter, apply_sna
 use std::ops::{Add, Sub};
 
 mod ellipse;
+mod slot;
 mod spline;
 
 const POINT_REACH: f32 = 8.0;
@@ -1107,49 +1108,8 @@ fn draw_click(
             solve::solve(&mut s.sketch, None, analyse);
             commit(s, actions);
         }
-        Tool::Slot => {
-            if s.pending.len() < 2 {
-                s.pending.push((p, snaps));
-                return;
-            }
-            let (c1, c1_snaps) = s.pending.remove(1);
-            let (c0, c0_snaps) = s.pending.remove(0);
-            let d = c1.sub(c0);
-            if d.len() < 1e-6 {
-                return;
-            }
-            let n = d.normalized().perp();
-            let r = p.sub(c0).dot(n).abs().max(d.len() * 0.05);
-            let top = s.sketch.add(EntityKind::Line { a: c0.add(n.scale(r)), b: c1.add(n.scale(r)) }, s.construction);
-            let right = s.sketch.add(
-                EntityKind::Arc { center: c1, start: c1.sub(n.scale(r)), end: c1.add(n.scale(r)) },
-                s.construction,
-            );
-            let bottom =
-                s.sketch.add(EntityKind::Line { a: c1.sub(n.scale(r)), b: c0.sub(n.scale(r)) }, s.construction);
-            let left = s.sketch.add(
-                EntityKind::Arc { center: c0, start: c0.add(n.scale(r)), end: c0.sub(n.scale(r)) },
-                s.construction,
-            );
-            let axis = s.sketch.add(EntityKind::Line { a: c0, b: c1 }, true);
-            for (a, b) in [
-                (PointRef::new(top, 1), PointRef::new(right, 2)),
-                (PointRef::new(right, 1), PointRef::new(bottom, 0)),
-                (PointRef::new(bottom, 1), PointRef::new(left, 2)),
-                (PointRef::new(left, 1), PointRef::new(top, 0)),
-                (PointRef::new(axis, 0), PointRef::new(left, 0)),
-                (PointRef::new(axis, 1), PointRef::new(right, 0)),
-            ] {
-                s.sketch.constrain(ConstraintKind::Coincident { a, b });
-            }
-            for (a, b) in [(top, right), (bottom, right), (top, left), (bottom, left)] {
-                s.sketch.constrain(ConstraintKind::Tangent { a, b });
-            }
-            s.sketch.constrain(ConstraintKind::Equal { a: left, b: right });
-            apply_snaps(&mut s.sketch, PointRef::new(axis, 0), &c0_snaps, Some(axis));
-            apply_snaps(&mut s.sketch, PointRef::new(axis, 1), &c1_snaps, Some(axis));
-            solve::solve(&mut s.sketch, None, analyse);
-            commit(s, actions);
+        Tool::Slot | Tool::CentrepointSlot | Tool::ThreePointArcSlot | Tool::CentrepointArcSlot => {
+            slot::click(s, p, snaps, actions, analyse);
         }
         Tool::Polygon => match s.pending.pop() {
             None => s.pending.push((p, snaps)),
@@ -2072,26 +2032,15 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
                 seg(*c, p);
             }
         }
-        (Tool::Slot, [(c0, _)]) => seg(*c0, p),
-        (Tool::Slot, [(c0, _), (c1, _)]) => {
-            let d = c1.sub(*c0);
-            if d.len() > 1e-6 {
-                let n = d.normalized().perp();
-                let r = p.sub(*c0).dot(n).abs().max(d.len() * 0.05);
-                seg(c0.add(n.scale(r)), c1.add(n.scale(r)));
-                seg(c0.sub(n.scale(r)), c1.sub(n.scale(r)));
-                let right = Entity {
-                    id: 0,
-                    kind: EntityKind::Arc { center: *c1, start: c1.sub(n.scale(r)), end: c1.add(n.scale(r)) },
-                    construction: false,
-                };
-                let left = Entity {
-                    id: 0,
-                    kind: EntityKind::Arc { center: *c0, start: c0.add(n.scale(r)), end: c0.sub(n.scale(r)) },
-                    construction: false,
-                };
-                curve(right.polyline(32));
-                curve(left.polyline(32));
+        (Tool::Slot | Tool::CentrepointSlot | Tool::ThreePointArcSlot | Tool::CentrepointArcSlot, _) => {
+            for (kind, construction) in slot::preview(s, p) {
+                let points = Entity { id: 0, kind, construction }.polyline(64);
+                if construction {
+                    let points: Vec<_> = points.into_iter().filter_map(|p| frame.screen(p)).collect();
+                    dashed(painter, &points, st);
+                } else {
+                    curve(points);
+                }
             }
         }
         _ => {}
@@ -2399,6 +2348,17 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Slot, 0) => "Slot: click the first centre",
         (Tool::Slot, 1) => "Slot: click the second centre",
         (Tool::Slot, _) => "Slot: click to set the width",
+        (Tool::CentrepointSlot, 0) => "Centrepoint slot: click the midpoint",
+        (Tool::CentrepointSlot, 1) => "Centrepoint slot: click an end centre",
+        (Tool::CentrepointSlot, _) => "Centrepoint slot: click to set the width",
+        (Tool::ThreePointArcSlot, 0) => "Three-point arc slot: click the start centre",
+        (Tool::ThreePointArcSlot, 1) => "Three-point arc slot: click the end centre",
+        (Tool::ThreePointArcSlot, 2) => "Three-point arc slot: click a point along the arc",
+        (Tool::ThreePointArcSlot, _) => "Three-point arc slot: click to set the width",
+        (Tool::CentrepointArcSlot, 0) => "Centrepoint arc slot: click the arc centre",
+        (Tool::CentrepointArcSlot, 1) => "Centrepoint arc slot: click the start centre",
+        (Tool::CentrepointArcSlot, 2) => "Centrepoint arc slot: click the counterclockwise end centre",
+        (Tool::CentrepointArcSlot, _) => "Centrepoint arc slot: click to set the width",
         (Tool::Point, _) => "Point: click to place",
         (Tool::Dimension, _) => {
             if s.dim_first.is_some() {

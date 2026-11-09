@@ -1538,6 +1538,24 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Slot))
 .app_only(SKETCHER),
+        cmd("sketch_centrepoint_slot", "Centrepoint slot", Icon::Cad("slot_sketch"), "Straight slot: midpoint, end centre, then width")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::CentrepointSlot))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::CentrepointSlot))
+.app_only(SKETCHER),
+        cmd("sketch_three_point_arc_slot", "Three-point arc slot", Icon::Cad("slot_sketch"), "Arc slot: start, end, point along the arc, then width")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::ThreePointArcSlot))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::ThreePointArcSlot))
+.app_only(SKETCHER),
+        cmd("sketch_centrepoint_arc_slot", "Centrepoint arc slot", Icon::Cad("slot_sketch"), "Arc slot: arc centre, start, counterclockwise end, then width")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::CentrepointArcSlot))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::CentrepointArcSlot))
+.app_only(SKETCHER),
         cmd("sketch_point", "Point", Icon::Cad("sk_point"), "Point")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::P)

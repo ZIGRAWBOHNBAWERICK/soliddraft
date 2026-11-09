@@ -93,6 +93,16 @@ class Balancing(unittest.TestCase):
         self.assertEqual(text.count('binary_id(=a)'), 1)
         self.assertIn('test(=x) | test(=y)', text)
 
+    def test_all_ignored_archive_keeps_no_tests_pass_behavior(self):
+        listing = {'rust-suites': {'crate::test': {'testcases': {
+            'ignored': {'ignored': True, 'filter-match': {'status': 'matches'}}}}}}
+        with mock.patch('balance.subprocess.run', side_effect=[
+                mock.Mock(stdout=json.dumps(listing)), mock.Mock(returncode=0)]) as invoke:
+            self.assertEqual(run_shard('ignored.tar.zst', '1/1'), 0)
+        command = invoke.call_args.args[0]
+        self.assertEqual(command[command.index('--filter-expr') + 1], 'none()')
+        self.assertEqual(command[command.index('--no-tests') + 1], 'pass')
+
     def test_invalid_shard_cannot_invoke_nextest(self):
         with mock.patch('balance.subprocess.run') as invoke:
             for shard in ('0/4', '5/4', '1/0'):

@@ -832,7 +832,7 @@ impl Sketch {
             if let EntityKind::Circle { radius, .. } = &mut e.kind {
                 *radius *= scale;
             }
-            if !valid(e.kind) {
+            if !valid(&e.kind) {
                 return refuse("the transform would produce non-finite or degenerate geometry");
             }
         }
@@ -843,12 +843,13 @@ impl Sketch {
         // must all hold at the requested result without moving unselected geometry.
         let mut trial = self.clone();
         for e in selected {
-            *trial.entity_mut(e.id).expect("validated selection") = e;
+            let id = e.id;
+            *trial.entity_mut(id).expect("validated selection") = e;
         }
         let expected = trial.entities.clone();
         crate::solve::solve(&mut trial, None, true);
         let compatible = trial.entities.iter().zip(&expected).all(|(actual, expected)| {
-            valid(actual.kind)
+            valid(&actual.kind)
                 && actual.points().iter().zip(expected.points()).all(|(a, b)| a.dist(b) <= EPS)
                 && match (actual.radius(), expected.radius()) {
                     (Some(a), Some(b)) => (a - b).abs() <= EPS,

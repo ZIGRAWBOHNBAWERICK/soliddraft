@@ -218,7 +218,7 @@ fn before_trim_modes(id: &str, current: &mut Value) {
             "properties": {
                 "type":{"type":"string","const":"spline"},
                 "mode":{"type":"string","enum":["fit","control"]},
-                "points":{"type":"array","items":point,"minItems":2}
+                "points":{"type":"array","items":point,"minItems":1}
             },
             "required":["type","mode","points"]
         }),

@@ -160,7 +160,7 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
                 Operation::Move { entities, .. }
                 | Operation::Rotate { entities, copy: false, .. }
                 | Operation::Scale { entities, .. } => {
-                    entities.iter().filter_map(|id| s.sketch.entity(*id).map(|e| e.kind)).collect()
+                    entities.iter().filter_map(|id| s.sketch.entity(*id).map(|e| e.kind.clone())).collect()
                 }
                 _ => Vec::new(),
             };
@@ -598,8 +598,7 @@ pub fn operation_schema() -> Value {
     ]);
     let ids = non_empty_array(id.clone(), "Distinct entity ids, in selection order");
     let count = integer("Instances including the seed, from 2 to 1000");
-    let mut spline_points = non_empty_array(point.clone(), "At least two fit or control points in traversal order");
-    spline_points["minItems"] = 2.into();
+    let spline_points = non_empty_array(point.clone(), "At least two fit or control points in traversal order");
     let geometry = any_of(vec![
         object(&[
             ("type", constant("spline")),

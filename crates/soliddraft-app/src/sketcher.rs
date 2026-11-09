@@ -325,6 +325,18 @@ fn copy_value(s: &mut SketchSession, p: P2) {
 
 /// Signed distance from a selected curve, respecting the chain's walking direction.
 fn offset_distance(s: &SketchSession, target: EntityId, p: P2) -> Option<f64> {
+    if s.modify.offset.chain {
+        let seed = *sketch_tools::selected_in_order(s).first()?;
+        let chain = s.sketch.offset_chain_from(seed).ok()?;
+        let (_, reverse) = chain.iter().find(|(id, _)| *id == target)?;
+        let distance = match s.sketch.entity(target)?.kind {
+            EntityKind::Line { a, b } => (p - a).dot((b - a).normalized().perp()),
+            EntityKind::Arc { center, start, .. } => center.dist(start) - center.dist(p),
+            EntityKind::Circle { center, radius } => radius - center.dist(p),
+            _ => return None,
+        };
+        return Some(if *reverse { -distance } else { distance });
+    }
     let mut previous: Option<P2> = None;
     for id in sketch_tools::selected_in_order(s) {
         let kind = s.sketch.entity(id)?.kind;

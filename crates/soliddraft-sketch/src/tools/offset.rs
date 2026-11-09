@@ -270,14 +270,23 @@ impl Sketch {
                 let kind = geometry[target].0;
                 let target_reverse = *reverse && matches!(kind, EntityKind::Arc { .. });
                 let mut locks = [None; 2];
-                if !closed {
-                    for (end, active) in [(false, i == 0), (true, i + 1 == count)] {
-                        if active {
-                            locks[usize::from(end)] = Some((
-                                PointRef::new(e.id, endpoint(e.kind, *reverse, end)),
-                                PointRef::new(id(target), endpoint(kind, target_reverse, end)),
-                            ));
+                let collinear_join = if i + 1 < count || closed {
+                    match (e.kind, source[(i + 1) % count].0.kind) {
+                        (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => {
+                            (b - a).normalized().cross((d - c).normalized()).abs() <= 1e-12
                         }
+                        _ => false,
+                    }
+                } else {
+                    false
+                };
+                for (end, active) in [(false, !closed && i == 0), (true, (!closed && i + 1 == count) || collinear_join)]
+                {
+                    if active {
+                        locks[usize::from(end)] = Some((
+                            PointRef::new(e.id, endpoint(e.kind, *reverse, end)),
+                            PointRef::new(id(target), endpoint(kind, target_reverse, end)),
+                        ));
                     }
                 }
                 relations.push(ConstraintKind::Offset {

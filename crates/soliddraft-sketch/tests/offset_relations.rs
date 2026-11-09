@@ -224,3 +224,98 @@ fn an_arc_line_chain_keeps_its_circle_and_round_caps_after_editing() {
     assert!(radii.iter().any(|r| (*r - 3.0).abs() < 1e-5));
     assert!(radii.iter().any(|r| (*r - 7.0).abs() < 1e-5));
 }
+
+#[test]
+fn collinear_joins_follow_source_partitions_and_refuse_a_reversing_drag() {
+    for reverse_a in [false, true] {
+        for reverse_b in [false, true] {
+            for both_sides in [false, true] {
+                let mut s = Sketch::new();
+                for (a, b, reverse) in [(p(0.0, 0.0), p(10.0, 0.0), reverse_a), (p(10.0, 0.0), p(20.0, 0.0), reverse_b)]
+                {
+                    let (a, b) = if reverse { (b, a) } else { (a, b) };
+                    let id = s.add(EntityKind::Line { a, b }, false);
+                    for (index, at) in [(0, a), (1, b)] {
+                        s.constrain(ConstraintKind::Fix { point: PointRef::new(id, index), at });
+                    }
+                }
+                let ids = s
+                    .apply_operation(&Operation::Offset {
+                        entities: vec![1],
+                        distance: 2.0,
+                        options: OffsetOptions { chain: true, both_sides, ..Default::default() },
+                    })
+                    .unwrap();
+                solved(&mut s);
+                let mut joins = Vec::new();
+                for id in ids {
+                    for index in 0..2 {
+                        let at = s.point(PointRef::new(id, index)).unwrap();
+                        if (at.u - 10.0).abs() < 1e-6 {
+                            joins.push(PointRef::new(id, index));
+                        }
+                    }
+                }
+                assert_eq!(joins.len(), if both_sides { 4 } else { 2 });
+                for c in &mut s.constraints {
+                    if let ConstraintKind::Fix { point, at } = c.kind
+                        && (at.u - 10.0).abs() < 1e-6
+                    {
+                        c.kind = ConstraintKind::Fix { point, at: p(15.0, at.v) };
+                    }
+                }
+                solved(&mut s);
+                for point in &joins {
+                    assert!(
+                        (s.point(*point).unwrap().u - 15.0).abs() < 1e-6,
+                        "source partition must locate the target join: {:?}",
+                        s.point(*point)
+                    );
+                }
+                let point = joins[0];
+                let at = s.point(point).unwrap();
+                solve::solve(&mut s, Some(solve::Drag { point, to: p(25.0, at.v) }), true);
+                assert!(
+                    !matches!(s.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }),
+                    "{:?}",
+                    s.status
+                );
+                for point in joins {
+                    assert!(
+                        (s.point(point).unwrap().u - 15.0).abs() < 1e-6,
+                        "the offset join must not reverse either neighboring segment"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ordinary_miter_joins_are_not_locked_to_source_normals() {
+    let mut s = Sketch::new();
+    for (a, b) in [(p(0.0, 0.0), p(10.0, 0.0)), (p(10.0, 0.0), p(10.0, 10.0))] {
+        let id = s.add(EntityKind::Line { a, b }, false);
+        for (index, at) in [(0, a), (1, b)] {
+            s.constrain(ConstraintKind::Fix { point: PointRef::new(id, index), at });
+        }
+    }
+    let ids = s
+        .apply_operation(&Operation::Offset {
+            entities: vec![1],
+            distance: 2.0,
+            options: OffsetOptions { chain: true, ..Default::default() },
+        })
+        .unwrap();
+    solved(&mut s);
+    for (id, index) in [(ids[0], 1), (ids[1], 0)] {
+        assert!(s.point(PointRef::new(id, index)).unwrap().dist(p(8.0, 2.0)) < 1e-6);
+    }
+    for c in &s.constraints {
+        match c.kind {
+            ConstraintKind::Offset { a: 1, ends, .. } => assert!(ends[1].is_none()),
+            ConstraintKind::Offset { a: 2, ends, .. } => assert!(ends[0].is_none()),
+            _ => {}
+        }
+    }
+}

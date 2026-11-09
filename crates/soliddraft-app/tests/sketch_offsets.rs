@@ -13,6 +13,8 @@ use soliddraft_app::{
     state::{AppAction, SketchSession, Tool},
 };
 
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn session(app: &App) -> &SketchSession {
     app.state().state.sketch.as_ref().unwrap()
 }
@@ -97,6 +99,7 @@ fn redo(app: &mut App) {
 
 #[test]
 fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir().join(format!("soliddraft-offsets-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
@@ -219,6 +222,132 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
     assert!(session(&app).sketch.drawn().all(|e| !e.construction));
     assert_eq!(session(&app).sketch.regions().unwrap().len(), 1);
     proof(&mut app, "one-sided-line-caps");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+fn fixed_segment(sketch: &mut Sketch, a: P2, b: P2) {
+    let id = sketch.add(EntityKind::Line { a, b }, false);
+    for (index, at) in [(0, a), (1, b)] {
+        sketch.constrain(ConstraintKind::Fix { point: PointRef::new(id, index), at });
+    }
+}
+fn review_app(sketch: Sketch, name: &str) -> App {
+    let dir = std::env::temp_dir().join(format!("offset-review-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir));
+    let mut doc = ribbon::blank();
+    let id = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    doc.apply(Command::EditSketch { id, sketch }).unwrap();
+    let mut app = ribbon::app(doc);
+    app.state_mut().state.push(AppAction::EditSketch(id));
+    app.run_steps(30);
+    app
+}
+fn review_screen(app: &App, at: P2) -> Pos2 {
+    let st = &app.state().state;
+    let pos =
+        Frame { plane: session(app).plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(at).unwrap();
+    assert!(st.viewport.rect.contains(pos));
+    pos
+}
+fn ctrl_pick(app: &mut App, at: P2) {
+    let pos = review_screen(app, at);
+    app.hover_at(pos);
+    app.run_steps(3);
+    for pressed in [true, false] {
+        app.event_modifiers(
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::CTRL,
+            },
+            Modifiers::CTRL,
+        );
+        app.step();
+    }
+    app.run_steps(6);
+}
+fn review_drag(app: &mut App, a: P2, b: P2) {
+    let (a, b) = (review_screen(app, a), review_screen(app, b));
+    app.hover_at(a);
+    app.run_steps(4);
+    app.event(egui::Event::PointerButton {
+        pos: a,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    app.step();
+    for i in 1..=8 {
+        app.hover_at(a + (b - a) * (i as f32 / 8.0));
+        app.step();
+    }
+    app.event(egui::Event::PointerButton {
+        pos: b,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    app.step();
+    app.run_steps(6);
+}
+#[test]
+fn auto_chain_drag_uses_the_reversed_nonadjacent_selected_member() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    fixed_segment(&mut sketch, p(-10.0, -6.0), p(0.0, -6.0));
+    fixed_segment(&mut sketch, p(0.0, -6.0), p(0.0, 6.0));
+    fixed_segment(&mut sketch, p(10.0, 6.0), p(0.0, 6.0));
+    let mut app = review_app(sketch, "direction");
+    let before = session(&app).sketch.clone();
+    pick(&mut app, p(-5.0, -6.0));
+    ribbon::click_ribbon(&mut app, "Offset");
+    ctrl_pick(&mut app, p(5.0, 6.0));
+    assert_eq!(soliddraft_app::sketch_tools::selected_in_order(session(&app)), vec![1, 3]);
+    assert!(session(&app).modify.offset.chain);
+    review_drag(&mut app, p(5.0, 6.0), p(5.0, 4.0));
+    proof(&mut app, "auto-chain-reversed-drag");
+    assert!(
+        (session(&app).modify.distance + 2.0).abs() < 1e-4,
+        "drag must use the expanded chain direction: {}",
+        session(&app).modify.distance
+    );
+    let preview = session(&app).preview.as_ref().unwrap();
+    assert_eq!(preview.added.len(), 3);
+    let EntityKind::Line { a, b } = preview.added[2] else { panic!("offset member") };
+    assert!((a.v - 4.0).abs() < 1e-4 && (b.v - 4.0).abs() < 1e-4);
+    button(&mut app, "Apply");
+    assert_eq!(session(&app).sketch.drawn().count(), 6);
+    undo(&mut app);
+    assert_eq!(session(&app).sketch, before);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+#[test]
+fn collinear_offset_join_cannot_be_dragged_beyond_its_neighbor() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    fixed_segment(&mut sketch, p(0.0, 0.0), p(10.0, 0.0));
+    fixed_segment(&mut sketch, p(10.0, 0.0), p(20.0, 0.0));
+    let mut app = review_app(sketch, "join");
+    pick(&mut app, p(5.0, 0.0));
+    ribbon::click_ribbon(&mut app, "Offset");
+    distance(&mut app, 2.0);
+    button(&mut app, "Apply");
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    let point = PointRef::new(3, 1);
+    assert!((session(&app).sketch.point(point).unwrap().u - 10.0).abs() < 1e-6);
+    review_drag(&mut app, p(10.0, 2.0), p(25.0, 2.0));
+    proof(&mut app, "collinear-join-drag");
+    let join = session(&app).sketch.point(point).unwrap();
+    assert!((join.u - 10.0).abs() < 1e-6, "the internal offset join must stay on its source normal: {join:?}");
+    assert!((session(&app).sketch.point(PointRef::new(4, 0)).unwrap().u - 10.0).abs() < 1e-6);
     drop(app);
     soliddraft_app::file::set_config_dir(None);
 }

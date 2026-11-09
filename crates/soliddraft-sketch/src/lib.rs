@@ -544,7 +544,7 @@ pub enum ConstraintKind {
         reverse: bool,
         /// This is the opposite side of a both-sides offset.
         opposite: bool,
-        /// Source/target endpoint pairs at the free ends of an open chain.
+        /// Source/target endpoint pairs at free ends or collinear joins.
         ends: [Option<(PointRef, PointRef)>; 2],
     },
     /// An offset end cap joins two referenced endpoints.

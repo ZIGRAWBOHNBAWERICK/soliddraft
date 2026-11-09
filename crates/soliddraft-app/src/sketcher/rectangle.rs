@@ -102,7 +102,7 @@ pub(super) fn click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, actions: &mu
         let axis = s.sketch.add(EntityKind::Line { a, b }, true);
         let center = s.sketch.add(EntityKind::Point { p: s.pending[0].0 }, true);
         for i in 0..2 {
-            let point = PointRef::new(axis, i as u8);
+            let point = PointRef::new(axis, i);
             let kind = if s.tool == Tool::CentreRectangle {
                 ConstraintKind::Coincident { a: point, b: corner(i * 2) }
             } else {
@@ -133,8 +133,8 @@ pub(super) fn click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, actions: &mu
         })
     });
     let height = match (s.sketch.entity(ids[0]), s.sketch.entity(ids[1])) {
-        (Some(a), Some(b)) => match (a.kind, b.kind) {
-            (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => (b - a).normalized().cross(d - c).abs(),
+        (Some(a), Some(b)) => match (&a.kind, &b.kind) {
+            (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => (*b - *a).normalized().cross(*d - *c).abs(),
             _ => 0.0,
         },
         _ => 0.0,
@@ -274,7 +274,7 @@ mod tests {
         for tool in TOOLS {
             let mut s = session(tool);
             let kind = EntityKind::Line { a: P2::new(-80.0, -50.0), b: P2::new(-80.0, 50.0) };
-            let axis = s.sketch.add(kind, true);
+            let axis = s.sketch.add(kind.clone(), true);
             s.sketch.constrain(ConstraintKind::FixEntity { entity: axis, at: kind });
             s.dynamic_mirror = Some(axis);
             let picks = if matches!(tool, Tool::Rectangle | Tool::CentreRectangle) {

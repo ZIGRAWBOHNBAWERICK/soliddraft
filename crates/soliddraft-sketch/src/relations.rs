@@ -129,6 +129,8 @@ impl Sketch {
                 let pairs: Vec<(u8, u8)> = match first.kind {
                     EntityKind::Point { .. } | EntityKind::Circle { .. } => vec![(0, 0)],
                     EntityKind::Arc { .. } => vec![(0, 0), (1, 2), (2, 1)],
+                    EntityKind::Ellipse { .. } => vec![(0, 0), (1, 1), (2, 2)],
+                    EntityKind::EllipticArc { .. } => vec![(0, 0), (1, 1), (2, 2), (3, 4), (4, 3)],
                     EntityKind::Line { a, b } => {
                         let (c, d) = line(second.id)?;
                         // Store the nearest endpoint correspondence once, so later drags cannot swap it.

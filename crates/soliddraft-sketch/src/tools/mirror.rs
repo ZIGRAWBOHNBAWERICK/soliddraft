@@ -78,7 +78,9 @@ impl Sketch {
                 return refuse("the mirror axis cannot also be copied");
             }
             let kind = reflected(e.kind, start, end)?;
-            if let Some(partner) = selected.iter().find(|source| same(source.kind, kind)) {
+            if let Some(partner) =
+                selected.iter().find(|source| source.construction == e.construction && same(source.kind, kind))
+            {
                 if e.id <= partner.id {
                     retained.push((*e, partner.id));
                 }
@@ -97,9 +99,11 @@ impl Sketch {
             }
         };
         for (source, partner) in retained {
-            let kinds = if source.id != partner {
-                trial.relation_constraints(&Relation::SymmetricEntities { a: source.id, b: partner, axis })?
-            } else {
+            if source.id != partner {
+                trial.mirror_pair(source, partner, axis, start, end)?;
+                continue;
+            }
+            let kinds = {
                 let point = |index| PointRef::new(source.id, index);
                 match source.kind {
                     EntityKind::Point { .. } | EntityKind::Circle { .. } => {
@@ -128,29 +132,32 @@ impl Sketch {
         let copies =
             trial.add_tool_entities(pairs.iter().map(|(source, kind)| (*kind, source.construction)).collect())?;
         for ((source, _), &copy) in pairs.iter().zip(&copies) {
-            for kind in trial.relation_constraints(&Relation::SymmetricEntities { a: source.id, b: copy, axis })? {
-                trial.constrain(kind);
-            }
-            // A shared boundary on the axis keeps a mirrored profile closed during later edits.
-            if !source.is_point() && !matches!(source.kind, EntityKind::Circle { .. }) {
-                for index in if source.is_line() { 0..2 } else { 1..3 } {
-                    let p = source.point(index).expect("curve endpoint");
-                    if (p - start).cross(end - start).abs() / start.dist(end) <= EPS {
-                        let original = PointRef::new(source.id, index);
-                        let target_index = if source.is_line() { index } else { 3 - index };
-                        let kind = ConstraintKind::PointOn { point: original, entity: axis };
-                        if !trial.constraints.iter().any(|c| c.kind == kind) {
-                            trial.constrain(kind);
-                        }
-                        trial.constrain(ConstraintKind::Coincident {
-                            a: original,
-                            b: PointRef::new(copy, target_index),
-                        });
-                    }
-                }
-            }
+            trial.mirror_pair(*source, copy, axis, start, end)?;
         }
         *self = trial;
         Ok(copies)
+    }
+
+    fn mirror_pair(&mut self, source: Entity, partner: EntityId, axis: EntityId, start: P2, end: P2) -> Result<()> {
+        let kinds = self.relation_constraints(&Relation::SymmetricEntities { a: source.id, b: partner, axis })?;
+        for kind in &kinds {
+            self.constrain(*kind);
+        }
+        for kind in kinds {
+            let ConstraintKind::Symmetric { a, b, .. } = kind else { continue };
+            let endpoint = match source.kind {
+                EntityKind::Line { .. } => a.index < 2,
+                EntityKind::Arc { .. } => a.index == 1 || a.index == 2,
+                _ => false,
+            };
+            if endpoint
+                && let Some(p) = source.point(a.index)
+                && (p - start).cross(end - start).abs() / start.dist(end) <= EPS
+            {
+                self.constrain(ConstraintKind::PointOn { point: a, entity: axis });
+                self.constrain(ConstraintKind::Coincident { a, b });
+            }
+        }
+        Ok(())
     }
 }

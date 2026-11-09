@@ -204,3 +204,88 @@ fn existing_symmetric_geometry_keeps_intent_without_duplicate_curves() {
     assert!(s.constraints.iter().any(|c| matches!(c.kind,ConstraintKind::Equal{a: x,b:y} if x==a && y==b)));
     solved(&mut s);
 }
+
+#[test]
+fn construction_partners_do_not_suppress_profile_copies() {
+    let mut s = Sketch::new();
+    let axis = fixed(&mut s, EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) }, true);
+    let a = fixed(&mut s, EntityKind::Circle { center: p(4.0, 0.0), radius: 1.0 }, false);
+    let b = fixed(&mut s, EntityKind::Circle { center: p(-4.0, 0.0), radius: 1.0 }, true);
+    let copies = s
+        .apply_operation(&Operation::MirrorLinked { entities: vec![a, b], axis: MirrorAxis::Entity { entity: axis } })
+        .unwrap();
+    solved(&mut s);
+    let area: f64 = s.regions().unwrap().iter().map(|r| r.area()).sum();
+    assert!((area - 2.0 * std::f64::consts::PI).abs() < 1e-6, "ordinary copies must produce two profiles, area={area}");
+    assert_eq!(copies.len(), 2);
+    assert!(!s.entity(copies[0]).unwrap().construction);
+    assert!(s.entity(copies[1]).unwrap().construction);
+    let reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert_eq!(s.entities, reopened.entities);
+}
+
+#[test]
+fn retained_complementary_arcs_keep_shared_axis_ends_after_source_edits_and_reopen() {
+    let mut s = Sketch::new();
+    let axis = fixed(&mut s, EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) }, true);
+    let a = s.add(EntityKind::Arc { center: P2::ZERO, start: p(0.0, -2.0), end: p(0.0, 2.0) }, false);
+    let b = s.add(EntityKind::Arc { center: P2::ZERO, start: p(0.0, 2.0), end: p(0.0, -2.0) }, false);
+    let center = s.constrain(ConstraintKind::Fix { point: soliddraft_sketch::PointRef::new(a, 0), at: P2::ZERO });
+    s.constrain(ConstraintKind::Radius { entity: a, value: 2.0, diameter: false, label: p(5.0, 5.0) });
+    assert!(
+        s.apply_operation(&Operation::MirrorLinked { entities: vec![a, b], axis: MirrorAxis::Entity { entity: axis } })
+            .unwrap()
+            .is_empty()
+    );
+    solved(&mut s);
+    assert_eq!(s.regions().unwrap().len(), 1);
+    for x in [1.0, 0.5] {
+        s.constraint_mut(center).unwrap().kind =
+            ConstraintKind::Fix { point: soliddraft_sketch::PointRef::new(a, 0), at: p(x, 0.0) };
+        solved(&mut s);
+        assert!(s.entity(a).unwrap().point(0).unwrap().dist(p(x, 0.0)) < 1e-6);
+        for (i, j) in [(1, 2), (2, 1)] {
+            let p = s.entity(a).unwrap().point(i).unwrap();
+            let q = s.entity(b).unwrap().point(j).unwrap();
+            assert!(p.dist(q) < 1e-6, "retained junction must remain shared: {p:?} {q:?}");
+            assert!(p.u.abs() < 1e-6);
+        }
+        assert_eq!(s.regions().unwrap().len(), 1);
+        let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        solved(&mut reopened);
+        assert_eq!(reopened.constraints, s.constraints);
+        s = reopened;
+    }
+}
+
+#[test]
+fn retained_lines_use_the_stored_endpoint_correspondence_at_the_axis() {
+    use soliddraft_sketch::PointRef;
+    for reverse_source in [false, true] {
+        for reverse_partner in [false, true] {
+            let mut s = Sketch::new();
+            let axis = fixed(&mut s, EntityKind::Line { a: p(0.0, -10.0), b: p(0.0, 10.0) }, true);
+            let (a, b) = if reverse_source { (p(4.0, 0.0), P2::ZERO) } else { (P2::ZERO, p(4.0, 0.0)) };
+            let source = s.add(EntityKind::Line { a, b }, false);
+            let (a, b) = if reverse_partner { (P2::ZERO, p(-4.0, 0.0)) } else { (p(-4.0, 0.0), P2::ZERO) };
+            let partner = s.add(EntityKind::Line { a, b }, false);
+            let joint = PointRef::new(source, u8::from(reverse_source));
+            let other = PointRef::new(partner, u8::from(!reverse_partner));
+            let outer = PointRef::new(source, 1 - joint.index);
+            let anchor = s.constrain(ConstraintKind::Fix { point: outer, at: p(4.0, 0.0) });
+            assert!(
+                s.apply_operation(&Operation::MirrorLinked {
+                    entities: vec![source, partner],
+                    axis: MirrorAxis::Entity { entity: axis }
+                })
+                .unwrap()
+                .is_empty()
+            );
+            assert!(s.constraints.iter().any(|c| c.kind == ConstraintKind::Coincident { a: joint, b: other }));
+            s.constraint_mut(anchor).unwrap().kind = ConstraintKind::Fix { point: outer, at: p(5.0, 1.0) };
+            solved(&mut s);
+            assert!(s.point(joint).unwrap().dist(s.point(other).unwrap()) < 1e-6);
+            assert!(s.point(joint).unwrap().u.abs() < 1e-6);
+        }
+    }
+}

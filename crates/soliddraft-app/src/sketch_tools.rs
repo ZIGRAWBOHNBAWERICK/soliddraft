@@ -471,6 +471,8 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             ui,
             if tool == Tool::Offset {
                 "Offsets retain their source links. Select a resulting curve or relation to edit the distance."
+            } else if tool == Tool::Mirror && s.modify.keep_symmetry {
+                "Mirrored entities keep symmetry about the chosen axis. Coordinates are u, v in mm."
             } else {
                 "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed."
             },

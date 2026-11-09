@@ -9,6 +9,8 @@ use soliddraft_app::{
     sketcher::Frame,
     state::{AppAction, SketchSession, Tool},
 };
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn p(u: f64, v: f64) -> P2 {
     P2::new(u, v)
 }
@@ -116,6 +118,7 @@ fn reopen(app: &mut App, id: u64, name: &str) -> Sketch {
 }
 #[test]
 fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir().join(format!("mirror-config-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir));
@@ -282,6 +285,91 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     assert!(session(&app).dynamic_preview.is_empty());
     let expected = reopen(&mut app, id, "dynamic");
     assert!(expected.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Symmetric { axis: 1, .. })));
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+
+fn review_launch(sketch: Sketch, name: &str) -> (App, u64) {
+    let dir = std::env::temp_dir().join(format!("mirror-review-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir));
+    launch(sketch)
+}
+fn choose_axis(app: &mut App) {
+    ribbon::click_ribbon(app, "Mirror entities");
+    control(app, "Two points");
+    control(app, "Line 1");
+}
+#[test]
+fn mixed_construction_circle_selection_keeps_both_profile_copies() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    axis(&mut sketch);
+    sketch.add(EntityKind::Circle { center: p(4.0, 0.0), radius: 1.0 }, false);
+    sketch.add(EntityKind::Circle { center: p(-4.0, 0.0), radius: 1.0 }, true);
+    let (mut app, id) = review_launch(sketch, "mixed");
+    pick(&mut app, p(5.0, 0.0), false);
+    pick(&mut app, p(-5.0, 0.0), true);
+    choose_axis(&mut app);
+    let before = session(&app).sketch.clone();
+    control(&mut app, "Apply");
+    proof(&mut app, "mixed-construction-mirror");
+    let area: f64 = session(&app).sketch.regions().unwrap().iter().map(|r| r.area()).sum();
+    assert!((area - 2.0 * std::f64::consts::PI).abs() < 1e-6, "two ordinary circle profiles must survive, area={area}");
+    assert_eq!(session(&app).sketch.drawn().filter(|e| !e.construction).count(), 2);
+    let after = session(&app).sketch.clone();
+    undo(&mut app);
+    assert_eq!(session(&app).sketch, before);
+    redo(&mut app);
+    assert_eq!(session(&app).sketch, after);
+    reopen(&mut app, id, "mixed");
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}
+#[test]
+fn retained_complementary_arcs_stay_closed_after_center_edits_and_reopen() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    axis(&mut sketch);
+    sketch.add(EntityKind::Arc { center: P2::ZERO, start: p(0.0, -2.0), end: p(0.0, 2.0) }, false);
+    sketch.add(EntityKind::Arc { center: P2::ZERO, start: p(0.0, 2.0), end: p(0.0, -2.0) }, false);
+    sketch.constrain(ConstraintKind::Fix { point: soliddraft_app::sketch::PointRef::new(2, 0), at: P2::ZERO });
+    sketch.constrain(ConstraintKind::Radius { entity: 2, value: 2.0, diameter: false, label: p(5.0, 5.0) });
+    let (mut app, id) = review_launch(sketch, "arcs");
+    pick(&mut app, p(2.0, 0.0), false);
+    pick(&mut app, p(-2.0, 0.0), true);
+    choose_axis(&mut app);
+    control(&mut app, "Apply");
+    assert_eq!(session(&app).sketch.drawn().count(), 3);
+    let before = session(&app).sketch.clone();
+    let mut edited = before.clone();
+    for c in &mut edited.constraints {
+        if let ConstraintKind::Fix { point, .. } = c.kind
+            && point == soliddraft_app::sketch::PointRef::new(2, 0)
+        {
+            c.kind = ConstraintKind::Fix { point, at: p(1.0, 0.0) };
+        }
+    }
+    solve::solve(&mut edited, None, true);
+    app.state_mut().state.sketch.as_mut().unwrap().sketch = edited.clone();
+    app.state_mut().state.push(AppAction::Command(Command::EditSketch { id, sketch: edited }));
+    app.run_steps(6);
+    proof(&mut app, "retained-arcs-source-edit");
+    let s = &session(&app).sketch;
+    assert!(s.entity(2).unwrap().point(0).unwrap().dist(p(1.0, 0.0)) < 1e-6);
+    for (i, j) in [(1, 2), (2, 1)] {
+        let a = s.entity(2).unwrap().point(i).unwrap();
+        let b = s.entity(3).unwrap().point(j).unwrap();
+        assert!(a.dist(b) < 1e-6, "retained arc ends must remain shared: {a:?}, {b:?}");
+    }
+    assert_eq!(s.regions().unwrap().len(), 1);
+    let after = s.clone();
+    undo(&mut app);
+    assert_eq!(session(&app).sketch, before);
+    redo(&mut app);
+    assert_eq!(session(&app).sketch, after);
+    let reopened = reopen(&mut app, id, "arcs");
+    assert_eq!(reopened.regions().unwrap().len(), 1);
     drop(app);
     soliddraft_app::file::set_config_dir(None);
 }

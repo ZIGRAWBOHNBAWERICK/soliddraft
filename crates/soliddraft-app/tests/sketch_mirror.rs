@@ -268,11 +268,11 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     control(&mut app, "Draw construction");
     pick(&mut app, p(20.0, -12.0), false);
     hover(&mut app, p(23.0, -12.0));
-    assert_eq!(session(&app).dynamic_preview.len(), 6);
+    assert_eq!(session(&app).dynamic_preview.len(), 7);
     assert!(session(&app).dynamic_preview.iter().all(|(_, construction)| *construction));
     pick(&mut app, p(23.0, -12.0), false);
-    assert_eq!(session(&app).sketch.drawn().count(), 39);
-    assert!(session(&app).sketch.entities.iter().rev().take(12).all(|e| e.construction));
+    assert_eq!(session(&app).sketch.drawn().count(), 41);
+    assert!(session(&app).sketch.entities.iter().rev().take(14).all(|e| e.construction));
     let polygon = session(&app).sketch.clone();
     undo(&mut app);
     assert_eq!(session(&app).sketch, slot);

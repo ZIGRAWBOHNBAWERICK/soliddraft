@@ -200,7 +200,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         ribbon::click_ribbon(app, "Polygon");
         sketch_click(app, P2::ZERO);
         sketch_click(app, P2::new(R, 0.0));
-        assert_eq!(drawn(app), 6, "six sides");
+        assert_eq!(drawn(app), 7, "six sides and their construction circle");
         assert_eq!(session(app).tool, Tool::Polygon, "the tool stays for the next polygon");
         let (a, _) = line_ends(entity(app, 1).expect("the first side").kind);
         assert!(near(a, P2::new(R, 0.0), 0.05), "the first vertex is under the pointer: {a:?}");
@@ -216,30 +216,30 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         sketch_click(app, P2::new(-10.0, CHORD_V));
         sketch_click(app, P2::new(10.0, CHORD_V));
         right_click(app, P2::new(10.0, CHORD_V));
-        assert_eq!(drawn(app), 7);
+        assert_eq!(drawn(app), 8);
         assert_eq!(session(app).tool, Tool::Line, "the right-click ends the chain and keeps the tool");
-        let (a, b) = line_ends(entity(app, 7).expect("the chord").kind);
+        let (a, b) = line_ends(entity(app, 8).expect("the chord").kind);
         assert!(near(a, P2::new(-10.0, CHORD_V), 0.05) && near(b, P2::new(10.0, CHORD_V), 0.05), "{a:?} {b:?}");
 
         // Extend: the end nearer the pointer reaches the slanted edge, previewed first.
         ribbon::click_ribbon(app, "Extend");
         hover_sketch(app, P2::new(-9.0, CHORD_V));
         let preview = session(app).preview.clone().expect("a preview at the chord");
-        assert_eq!(preview.operation, Some(Operation::Extend { entity: 7, end: End::Start, boundary: 3 }));
+        assert_eq!(preview.operation, Some(Operation::Extend { entity: 8, end: End::Start, boundary: 3 }));
         assert_eq!(preview.boundary, Some(3));
         let (pa, _) = line_ends(preview.added[0].clone());
         assert!(near(pa, P2::new(-chord_reach(), CHORD_V), 0.05), "the preview reaches the edge: {pa:?}");
         case.frame(app, "04-extend-preview");
         sketch_click(app, P2::new(-9.0, CHORD_V));
-        let (a, _) = line_ends(entity(app, 7).unwrap().kind);
+        let (a, _) = line_ends(entity(app, 8).unwrap().kind);
         assert!(near(a, P2::new(-chord_reach(), CHORD_V), 0.05), "the start moved: {a:?}");
         hover_sketch(app, P2::new(9.0, CHORD_V));
         let preview = session(app).preview.clone().expect("a preview at the other end");
-        assert_eq!(preview.operation, Some(Operation::Extend { entity: 7, end: End::End, boundary: 1 }));
+        assert_eq!(preview.operation, Some(Operation::Extend { entity: 8, end: End::End, boundary: 1 }));
         sketch_click(app, P2::new(9.0, CHORD_V));
-        let (_, b) = line_ends(entity(app, 7).unwrap().kind);
+        let (_, b) = line_ends(entity(app, 8).unwrap().kind);
         assert!(near(b, P2::new(chord_reach(), CHORD_V), 0.05), "the end moved: {b:?}");
-        assert_eq!(drawn(app), 7, "extend keeps the entity");
+        assert_eq!(drawn(app), 8, "extend keeps the entity");
         case.frame(app, "05-extended");
 
         // A copy tool previews from the selection and the panel's values; Escape drops it.
@@ -247,9 +247,9 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         app.run_steps(3);
         assert_eq!(session(app).tool, Tool::Select, "V picks Select");
         sketch_click(app, P2::new(3.0, CHORD_V));
-        assert_eq!(session(app).selected_entities(), vec![7], "the chord is selected");
+        assert_eq!(session(app).selected_entities(), vec![8], "the chord is selected");
         ribbon::click_ribbon(app, "Linear pattern");
-        assert_eq!(session(app).selected_entities(), vec![7], "a copy tool keeps the selection");
+        assert_eq!(session(app).selected_entities(), vec![8], "a copy tool keeps the selection");
         app.run_steps(2);
         let preview = session(app).preview.clone().expect("a pattern preview");
         assert_eq!(preview.added.len(), 2, "two copies of the chord at the default count");
@@ -259,7 +259,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         escape(app);
         assert_eq!(session(app).tool, Tool::Select);
         assert!(session(app).preview.is_none());
-        assert_eq!(drawn(app), 7, "a cancelled pattern adds nothing");
+        assert_eq!(drawn(app), 8, "a cancelled pattern adds nothing");
 
         // Trim: the piece under the pointer is shown before it goes.
         ribbon::click_ribbon(app, "Trim");
@@ -274,7 +274,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         case.frame(app, "07-trim-preview");
         sketch_click(app, P2::new(0.0, apothem));
         assert!(entity(app, 2).is_none(), "the top side is gone");
-        assert_eq!(drawn(app), 6);
+        assert_eq!(drawn(app), 7);
         for (u, side) in [(12.5, 1), (-12.5, 3)] {
             hover_sketch(app, P2::new(u, 13.0));
             let preview = session(app).preview.clone().expect("a trim preview on a slanted side");
@@ -286,7 +286,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
             sketch_click(app, P2::new(u, 13.0));
             assert!(entity(app, side).is_some(), "the lower piece keeps the side's id");
         }
-        assert_eq!(drawn(app), 6, "six sides again, one of them the chord");
+        assert_eq!(drawn(app), 7, "six profile sides and a construction circle");
         let regions = profile::regions(&session(app).sketch).expect("the profile closes");
         assert_eq!(regions.len(), 1);
         let area: f64 = regions.iter().map(|r| r.area()).sum();

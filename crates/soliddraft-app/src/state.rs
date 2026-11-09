@@ -416,7 +416,7 @@ pub enum Tool {
     CentrepointArcSlot,
     Point,
     Dimension,
-    /// A regular polygon from a centre and a first vertex.
+    /// A retained regular polygon from a centre and construction-circle point.
     Polygon,
     /// Removes a picked interval or power-trims a pointer trail.
     Trim,
@@ -583,6 +583,10 @@ impl Tool {
 pub struct ModifyInputs {
     /// Polygon sides, 3 to 1000.
     pub sides: u32,
+    /// Polygon circle/placement interpretation.
+    pub polygon_mode: crate::sketch::tools::PolygonMode,
+    /// Draft parameters for the selected retained polygon.
+    pub polygon_edit: Option<crate::sketch_tools::PolygonEdit>,
     /// Offset distance; positive is left of the chain's walking direction.
     pub distance: f64,
     /// Sketch fillet radius, mm.
@@ -629,6 +633,8 @@ impl Default for ModifyInputs {
     fn default() -> Self {
         Self {
             sides: 6,
+            polygon_mode: crate::sketch::tools::PolygonMode::Inscribed,
+            polygon_edit: None,
             distance: 2.0,
             fillet_radius: 2.0,
             chamfer: ChamferSize::Distances { first: 2.0, second: 2.0 },

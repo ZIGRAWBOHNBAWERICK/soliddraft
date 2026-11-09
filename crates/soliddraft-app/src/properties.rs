@@ -1579,6 +1579,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.scroll_to_cursor(Some(egui::Align::TOP));
             }
             crate::sketch_tools::offset_inspector(ui, s);
+            crate::sketch_tools::polygon_inspector(ui, s, &mut actions);
             let relation_top = ui.next_widget_position();
             theme::section_label(ui, "Existing relations");
             let previous_filter = s.relations_filter;

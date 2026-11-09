@@ -20,6 +20,8 @@ mod finishing;
 pub use finishing::{ChamferSize, JunctionPreview, SplitPreview};
 mod offset;
 pub use offset::{OffsetCap, OffsetOptions};
+mod polygon;
+pub use polygon::{Polygon, PolygonMode, regular_polygon_corners};
 
 const EPS: f64 = 1e-6;
 
@@ -93,6 +95,29 @@ pub enum Operation {
         vertex: P2,
         /// Number of sides, at least three.
         sides: u32,
+    },
+    /// Retained polygon about a centre and a point on its construction circle.
+    RegularPolygon {
+        /// Centre of the construction circle.
+        center: P2,
+        /// First vertex in inscribed mode; first side midpoint in circumscribed mode.
+        point: P2,
+        /// Number of sides, 3 through 1000.
+        sides: u32,
+        /// Relationship of the polygon to its construction circle.
+        #[serde(default)]
+        mode: PolygonMode,
+    },
+    /// Resize or change the side count of a retained polygon.
+    EditPolygon {
+        /// Construction circle id returned when creating the polygon.
+        circle: EntityId,
+        /// Number of sides, 3 through 1000.
+        sides: u32,
+        /// Positive construction-circle radius, mm.
+        radius: f64,
+        /// Preserve this circle radius while changing mode.
+        mode: PolygonMode,
     },
     /// Insert a tangent radius between two picked lines or arcs.
     Fillet {
@@ -722,6 +747,12 @@ impl Sketch {
                         .map(|i| (EntityKind::Line { a: corners[i], b: corners[(i + 1) % corners.len()] }, false))
                         .collect(),
                 )
+            }
+            Operation::RegularPolygon { center, point, sides, mode } => {
+                self.regular_polygon(*center, *point, *sides, *mode)
+            }
+            Operation::EditPolygon { circle, sides, radius, mode } => {
+                self.edit_polygon(*circle, *sides, *radius, *mode)
             }
             Operation::Fillet { a, b, keep_a, keep_b, radius } => self.fillet(*a, *b, *keep_a, *keep_b, *radius),
             Operation::Chamfer { a, b, keep_a, keep_b, size } => self.chamfer(*a, *b, *keep_a, *keep_b, *size),

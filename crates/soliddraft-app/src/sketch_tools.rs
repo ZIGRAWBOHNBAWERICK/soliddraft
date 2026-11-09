@@ -9,7 +9,7 @@ pub(crate) mod patterns;
 use crate::document::Command;
 use crate::sketch::{
     ConstraintKind, EntityId, P2, solve,
-    tools::{ChamferSize, MirrorAxis, OffsetCap, Operation, ToolError},
+    tools::{ChamferSize, MirrorAxis, OffsetCap, Operation, PolygonMode, ToolError},
 };
 use crate::state::{AppAction, SketchSel, SketchSession, Tool, ToolPreview};
 use crate::theme;
@@ -25,6 +25,59 @@ fn point(ui: &mut egui::Ui, label: &str, value: &mut P2) {
 
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(theme::muted()));
+}
+
+fn polygon_mode(ui: &mut egui::Ui, mode: &mut PolygonMode) {
+    ui.horizontal(|ui| {
+        ui.selectable_value(mode, PolygonMode::Inscribed, "Inscribed");
+        ui.selectable_value(mode, PolygonMode::Circumscribed, "Circumscribed");
+    });
+}
+
+/// Session-local draft; Apply records a complete parameter edit as one undo step.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PolygonEdit {
+    circle: EntityId,
+    original: (u32, f64, PolygonMode),
+    sides: u32,
+    radius: f64,
+    mode: PolygonMode,
+}
+
+/// Edit one selected retained polygon through any side or its construction circle.
+pub fn polygon_inspector(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppAction>) {
+    if s.tool != Tool::Select {
+        s.modify.polygon_edit = None;
+        return;
+    }
+    let selected = selected_in_order(s);
+    let groups: Vec<_> = selected.iter().filter_map(|id| s.sketch.polygon_of(*id)).collect();
+    let Some(group) = groups
+        .first()
+        .filter(|first| groups.len() == selected.len() && groups.iter().all(|p| p.circle == first.circle))
+    else {
+        s.modify.polygon_edit = None;
+        return;
+    };
+    let circle = group.circle;
+    let original = (group.edges.len() as u32, s.sketch.entity(circle).unwrap().radius().unwrap(), group.mode);
+    if s.modify.polygon_edit.as_ref().is_none_or(|e| e.circle != circle || e.original != original) {
+        s.modify.polygon_edit =
+            Some(PolygonEdit { circle, original, sides: original.0, radius: original.1, mode: original.2 });
+    }
+    let edit = s.modify.polygon_edit.as_mut().unwrap();
+    theme::section_label(ui, "Regular polygon");
+    ui.add(egui::DragValue::new(&mut edit.sides).range(3..=1000).prefix("Sides "));
+    ui.add(egui::DragValue::new(&mut edit.radius).speed(0.5).prefix("Radius ").suffix(" mm"));
+    polygon_mode(ui, &mut edit.mode);
+    hint(ui, "Radius sizes the construction circle. External edge relations must be released before a parameter edit.");
+    let changed = (edit.sides, edit.radius, edit.mode) != edit.original;
+    if ui.add_enabled(changed, egui::Button::new("Apply polygon")).clicked() {
+        let operation = Operation::EditPolygon { circle, sides: edit.sides, radius: edit.radius, mode: edit.mode };
+        if apply(s, &operation, actions) {
+            s.modify.polygon_edit = None;
+        }
+    }
 }
 
 /// The entities the selection names, in the order they were picked. A picked point
@@ -213,11 +266,11 @@ pub(crate) fn apply_with_analysis(
     actions: &mut Vec<AppAction>,
     analyse: bool,
 ) -> bool {
-    let name = s.tool.label();
+    let name = if matches!(operation, Operation::EditPolygon { .. }) { "Polygon" } else { s.tool.label() };
     let old_relations: Vec<_> = s.sketch.constraints.iter().map(|c| c.id).collect();
     match s.sketch.apply_operation(operation) {
         Ok(ids) => {
-            if s.construction && matches!(operation, Operation::Polygon { .. }) {
+            if s.construction && matches!(operation, Operation::Polygon { .. } | Operation::RegularPolygon { .. }) {
                 for id in &ids {
                     if let Some(e) = s.sketch.entity_mut(*id) {
                         e.construction = true;
@@ -226,7 +279,18 @@ pub(crate) fn apply_with_analysis(
             }
             solve::solve(&mut s.sketch, None, analyse);
             actions.push(AppAction::Command(Command::EditSketch { id: s.feature, sketch: s.sketch.clone() }));
-            if s.tool.selects() {
+            if let Operation::EditPolygon { circle, .. } = operation {
+                // Keep the inspected side selected: selecting every output side would
+                // push the editor down the panel after each parameter change.
+                s.selection.retain(|selection| match selection {
+                    SketchSel::Entity(id) => s.sketch.entity(*id).is_some(),
+                    SketchSel::Point(point) => s.sketch.point(*point).is_some(),
+                    SketchSel::Constraint(id) => s.sketch.constraint(*id).is_some(),
+                });
+                if s.selection.is_empty() {
+                    s.selection.push(SketchSel::Entity(*circle));
+                }
+            } else if s.tool.selects() {
                 s.selection = ids.into_iter().map(SketchSel::Entity).collect();
             }
             s.preview = None;
@@ -277,8 +341,9 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
     theme::section_label(ui, tool.label());
     match tool {
         Tool::Polygon => {
-            hint(ui, "Click the centre, then a vertex. The vertex sets the size and the turn.");
+            hint(ui, "Click the centre, then a vertex (inscribed) or side midpoint (circumscribed).");
             ui.add(egui::DragValue::new(&mut s.modify.sides).range(3..=1000).prefix("Sides "));
+            polygon_mode(ui, &mut s.modify.polygon_mode);
         }
         Tool::Trim => {
             hint(
@@ -742,6 +807,26 @@ pub fn operation_schema() -> Value {
             ("center", point.clone()),
             ("vertex", point.clone()),
             ("sides", integer("Sides from 3 to 1000")),
+        ]),
+        object(&[
+            ("tool", constant("regular_polygon")),
+            ("center", point.clone()),
+            ("point", point.clone()),
+            ("sides", integer("Sides from 3 to 1000")),
+            (
+                "mode",
+                optional(one_of(
+                    &["inscribed", "circumscribed"],
+                    "Construction circle relationship; defaults to inscribed",
+                )),
+            ),
+        ]),
+        object(&[
+            ("tool", constant("edit_polygon")),
+            ("circle", id.clone()),
+            ("sides", integer("Sides from 3 to 1000")),
+            ("radius", number("Positive construction-circle radius, mm")),
+            ("mode", one_of(&["inscribed", "circumscribed"], "Construction circle relationship")),
         ]),
         object(&[
             ("tool", constant("trim")),

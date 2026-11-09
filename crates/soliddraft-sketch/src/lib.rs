@@ -888,6 +888,9 @@ pub struct Sketch {
     pub patterns: Vec<tools::PatternDefinition>,
     #[serde(default = "first_pattern", skip_serializing_if = "is_first_pattern")]
     next_pattern: u32,
+    /// Retained polygon membership; absent in older sketches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub polygons: Vec<tools::Polygon>,
     next_entity: EntityId,
     next_constraint: ConstraintId,
     /// Entities that still have a free degree of freedom after the last solve.
@@ -913,6 +916,7 @@ impl Sketch {
             constraints: Vec::new(),
             patterns: Vec::new(),
             next_pattern: 1,
+            polygons: Vec::new(),
             next_entity: 1,
             next_constraint: 1,
             free: Vec::new(),

@@ -145,7 +145,7 @@ fn commit(s: &SketchSession, actions: &mut Vec<AppAction>) {
 }
 
 pub fn finish_spline(s: &mut SketchSession, actions: &mut Vec<AppAction>) {
-    spline::finish(s, actions);
+    mirrored_edit(s, actions, true, spline::finish);
 }
 
 /// Runs the sketcher for one frame: input first, then drawing.
@@ -314,7 +314,7 @@ pub fn run(
     paint_dimensions(&painter, &frame, s);
     paint_rubber_band(&painter, &frame, s, snapped);
     for (kind, construction) in &s.dynamic_preview {
-        let entity = Entity { id: 0, kind: *kind, construction: *construction };
+        let entity = Entity { id: 0, kind: kind.clone(), construction: *construction };
         let points: Vec<_> = entity.polyline(64).into_iter().filter_map(|p| frame.screen(p)).collect();
         if points.len() == 1 {
             painter.circle_stroke(points[0], 4.0, Stroke::new(1.5, theme::accent()));
@@ -904,17 +904,26 @@ fn mirrored_placement(
     actions: &mut Vec<AppAction>,
     analyse: bool,
 ) -> Vec<EntityId> {
-    let Some(axis) = s.dynamic_mirror.filter(|_| s.tool.places_points()) else {
-        draw_click(s, p, snaps, double, actions, analyse);
-        return Vec::new();
-    };
-    if matches!(s.tool, Tool::Ellipse | Tool::PartialEllipse) {
+    if s.dynamic_mirror.is_some() && matches!(s.tool, Tool::Ellipse | Tool::PartialEllipse) {
         s.say("Stop dynamic mirror with Esc before drawing an ellipse");
         return Vec::new();
     }
+    mirrored_edit(s, actions, analyse, |s, actions, analyse| draw_click(s, p, snaps, double, actions, analyse))
+}
+
+fn mirrored_edit(
+    s: &mut SketchSession,
+    actions: &mut Vec<AppAction>,
+    analyse: bool,
+    edit: impl FnOnce(&mut SketchSession, &mut Vec<AppAction>, bool),
+) -> Vec<EntityId> {
+    let Some(axis) = s.dynamic_mirror.filter(|_| s.tool.places_points()) else {
+        edit(s, actions, analyse);
+        return Vec::new();
+    };
     if !s.sketch.entity(axis).is_some_and(|e| e.is_line()) {
         s.dynamic_mirror = None;
-        draw_click(s, p, snaps, double, actions, analyse);
+        edit(s, actions, analyse);
         s.say("Dynamic mirror stopped: its axis no longer exists");
         return Vec::new();
     }
@@ -922,7 +931,7 @@ fn mirrored_placement(
     let pending = s.pending.clone();
     let chain = s.chain_from;
     let first_action = actions.len();
-    draw_click(s, p, snaps, double, actions, false);
+    edit(s, actions, false);
     let entities: Vec<_> = s.sketch.drawn().filter(|e| checkpoint.entity(e.id).is_none()).map(|e| e.id).collect();
     if entities.is_empty() {
         return Vec::new();
@@ -954,6 +963,16 @@ fn dynamic_preview(s: &SketchSession, p: Option<P2>) -> Vec<(EntityKind, bool)> 
     let Some(p) = p.filter(|_| s.dynamic_mirror.is_some() && s.tool.places_points()) else {
         return Vec::new();
     };
+    if s.tool.spline_mode().is_some() {
+        let axis = s.dynamic_mirror.and_then(|id| s.sketch.entity(id));
+        let Some(EntityKind::Line { a, b }) = axis.map(|e| &e.kind) else {
+            return Vec::new();
+        };
+        return spline::preview(s, p)
+            .and_then(|kind| crate::sketch::tools::reflected(kind, *a, *b).ok())
+            .map(|kind| vec![(kind, s.construction)])
+            .unwrap_or_default();
+    }
     let mut copy = SketchSession::new(s.feature, s.plane, s.sketch.clone(), s.was_orthographic);
     copy.tool = s.tool;
     copy.pending = s.pending.clone();
@@ -962,7 +981,7 @@ fn dynamic_preview(s: &SketchSession, p: Option<P2>) -> Vec<(EntityKind, bool)> 
     copy.modify = s.modify.clone();
     copy.dynamic_mirror = s.dynamic_mirror;
     let ids = mirrored_placement(&mut copy, p, s.snaps.clone(), false, &mut Vec::new(), false);
-    ids.into_iter().filter_map(|id| copy.sketch.entity(id).map(|e| (e.kind, e.construction))).collect()
+    ids.into_iter().filter_map(|id| copy.sketch.entity(id).map(|e| (e.kind.clone(), e.construction))).collect()
 }
 
 fn draw_click(
@@ -1040,7 +1059,7 @@ fn draw_click(
                 commit(s, actions);
             }
         },
-        Tool::FitSpline | Tool::ControlSpline => spline::click(s, p, snaps, double, actions),
+        Tool::FitSpline | Tool::ControlSpline => spline::click(s, p, snaps, double, actions, analyse),
         Tool::Ellipse | Tool::PartialEllipse => ellipse::click(s, p, snaps, actions),
         Tool::Circle => match s.pending.pop() {
             None => s.pending.push((p, snaps)),

@@ -425,9 +425,9 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                 });
             }
             if let Some(entity) = s.modify.mirror_axis {
-                if let Some(crate::sketch::EntityKind::Line { a, b }) = s.sketch.entity(entity).map(|e| e.kind) {
-                    s.modify.axis_start = a;
-                    s.modify.axis_end = b;
+                if let Some(crate::sketch::EntityKind::Line { a, b }) = s.sketch.entity(entity).map(|e| &e.kind) {
+                    s.modify.axis_start = *a;
+                    s.modify.axis_end = *b;
                 }
             } else {
                 point(ui, "Axis start", &mut s.modify.axis_start);

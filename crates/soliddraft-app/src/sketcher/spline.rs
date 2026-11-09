@@ -29,19 +29,26 @@ pub(super) fn paint(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
     }
 }
 
-pub(super) fn click(s: &mut SketchSession, point: P2, snaps: Vec<Snap>, double: bool, actions: &mut Vec<AppAction>) {
+pub(super) fn click(
+    s: &mut SketchSession,
+    point: P2,
+    snaps: Vec<Snap>,
+    double: bool,
+    actions: &mut Vec<AppAction>,
+    analyse: bool,
+) {
     if double {
-        finish(s, actions);
+        finish(s, actions, analyse);
         return;
     }
     let closes = s.pending.len() >= 3 && s.pending[0].0.dist(point) <= 1e-6;
     s.pending.push((point, snaps));
     if closes {
-        finish(s, actions);
+        finish(s, actions, analyse);
     }
 }
 
-pub(super) fn finish(s: &mut SketchSession, actions: &mut Vec<AppAction>) {
+pub(super) fn finish(s: &mut SketchSession, actions: &mut Vec<AppAction>, analyse: bool) {
     let Some(mode) = s.tool.spline_mode() else {
         return;
     };
@@ -60,7 +67,7 @@ pub(super) fn finish(s: &mut SketchSession, actions: &mut Vec<AppAction>) {
     if closed {
         s.sketch.constrain(ConstraintKind::Coincident { a: PointRef::new(id, 0), b: PointRef::new(id, last) });
     }
-    solve::solve(&mut s.sketch, None, true);
+    solve::solve(&mut s.sketch, None, analyse);
     if matches!(s.sketch.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }) {
         s.sketch = before;
         s.say("The spline points conflict with existing sketch relations");

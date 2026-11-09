@@ -7,6 +7,9 @@
 //! turns on the GPU: short harnesses made and dropped at the same moment crashed the
 //! driver.
 
+#[path = "support/ribbon.rs"]
+mod ribbon;
+
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -36,7 +39,7 @@ fn harness() -> App<'static> {
 }
 
 fn harness_with(doc: fn() -> soliddraft_app::document::Document) -> App<'static> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/commands");
+    let dir = ribbon::target_dir().join("exit-test/commands");
     harness_in(doc, dir)
 }
 
@@ -89,14 +92,34 @@ fn every_ribbon_button_is_a_registry_command() {
         harness.run_steps(2);
         let panels = commands::ribbon(tab);
         assert!(!panels.is_empty(), "{} has no panels", tab.label());
+        let registered: Vec<_> = panels
+            .iter()
+            .flat_map(|(_, items)| items)
+            .filter(|(c, _)| (c.shown)(&harness.state().state))
+            .map(|(c, _)| c.label_in(&harness.state().state))
+            .collect();
+        let mut body = ribbon::ribbon_region(&harness);
+        body.min.y = soliddraft_app::theme::MENU_HEIGHT + soliddraft_app::theme::RIBBON_TABS_HEIGHT;
+        for (label, _) in ribbon::buttons_in(&harness, body) {
+            assert!(
+                registered.contains(&label) || panels.iter().any(|(group, _)| label == format!("{group} group")),
+                "{}: unregistered ribbon button {label}",
+                tab.label()
+            );
+        }
         for (panel, items) in panels {
             for (command, _) in items {
+                if !(command.shown)(&harness.state().state) {
+                    continue;
+                }
+                let button = ribbon::reveal_ribbon_command(&mut harness, command.id);
                 assert!(
-                    harness.query_all_by_label(command.label).next().is_some(),
-                    "{} › {panel}: no button labelled {}",
+                    ribbon::window(&harness).contains_rect(button.rect),
+                    "{} › {panel}: command {} must remain reachable",
                     tab.label(),
-                    command.label
+                    command.id
                 );
+                ribbon::dismiss_ribbon_popup(&mut harness);
             }
         }
     }
@@ -147,7 +170,7 @@ fn the_shortcuts_window_lists_the_registry() {
     }
     assert!(harness.query_by_label("Ctrl+Y / Ctrl+Shift+Z").is_some());
     let image = harness.render().expect("render");
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/commands");
+    let dir = ribbon::target_dir().join("exit-test/commands");
     image.save(dir.join("shortcuts-window.png")).expect("save png");
 }
 

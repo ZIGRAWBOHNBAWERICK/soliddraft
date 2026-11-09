@@ -291,10 +291,10 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         });
         settle(app);
         plate_is_whole(&app.state().state.doc);
-        ribbon::click_ribbon(app, "Undo");
+        ribbon::click_quick_access(app, "Undo");
         settle(app);
         assert_eq!(app.state().state.doc.features.len(), 1, "quick-access Undo reaches the same stack");
-        ribbon::click_ribbon(app, "Redo");
+        ribbon::click_quick_access(app, "Redo");
         ribbon::until(app, "the redo", |a| {
             let doc = &a.state().state.doc;
             doc.features.len() == 2 && doc.display_body().is_some() && !doc.proof_pending()

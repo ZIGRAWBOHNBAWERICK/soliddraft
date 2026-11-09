@@ -43,6 +43,13 @@ pub struct Case {
     _gpu: MutexGuard<'static, ()>,
 }
 
+/// The caller's Cargo output directory, including external build targets.
+pub fn target_dir() -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"))
+}
+
 /// Starts a case. A missing renderer fails it: an acceptance run that skips is not one.
 pub fn case(name: &str) -> Case {
     let gpu = GPU.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -50,7 +57,7 @@ pub fn case(name: &str) -> Case {
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     assert!(!adapters.is_empty(), "this acceptance test requires a renderer");
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ribbon-acceptance").join(name);
+    let dir = target_dir().join("ribbon-acceptance").join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("config")).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
@@ -273,39 +280,78 @@ pub fn ribbon_button(app: &App, label: &str) -> Control {
     control(app, label, ribbon_region(app))
 }
 
+fn ribbon_command_region(app: &App) -> Rect {
+    let window = window(app);
+    let bottom = painted(app).into_iter().find(|p| p.text == "Properties").map_or(window.bottom(), |p| p.rect.top());
+    let top = window.top() + soliddraft_app::theme::MENU_HEIGHT + soliddraft_app::theme::RIBBON_TABS_HEIGHT;
+    Rect::from_min_max(pos2(window.left(), top), pos2(window.right(), bottom))
+}
+
+fn active_ribbon_tab(app: &App) -> soliddraft_app::commands::Tab {
+    let state = &app.state().state;
+    if state.drawing.is_active() {
+        soliddraft_app::commands::Tab::Drawing(state.drawing.session.as_ref().expect("active drawing").tab)
+    } else if state.assembly.is_active() {
+        soliddraft_app::commands::Tab::Assembly
+    } else {
+        state.ribbon_tab.into()
+    }
+}
+
+/// Reveals a registered command on the current tab, including collapsed groups.
+/// Inspecting it runs no command; dismiss its ribbon popup after inspection.
+pub fn reveal_ribbon_command(app: &mut App, id: &str) -> Control {
+    let (label, group) = {
+        let state = &app.state().state;
+        let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
+        let group = soliddraft_app::commands::ribbon(active_ribbon_tab(app))
+            .into_iter()
+            .find_map(|(group, items)| items.iter().any(|(c, _)| c.id == id && (c.shown)(state)).then_some(group))
+            .unwrap_or_else(|| panic!("{id} is not shown on the current tab"));
+        (command.label_in(state), group)
+    };
+    let region = ribbon_command_region(app);
+    if !app.query_all(By::new().role(egui::accesskit::Role::Button).label(&label)).any(|n| region.intersects(n.rect()))
+    {
+        let band = ribbon_region(app);
+        click_button(app, &format!("{group} group"), band);
+        app.run_steps(4);
+    }
+    control(app, &label, ribbon_command_region(app))
+}
+
+/// Closes an inspected ribbon row without cancelling the current sketch tool.
+pub fn dismiss_ribbon_popup(app: &mut App) {
+    if egui::Popup::is_any_open(&app.ctx) {
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+        assert!(!egui::Popup::is_any_open(&app.ctx), "Escape closes the ribbon row");
+    }
+}
+
+/// Resolves a command's shown label on the active ribbon tab.
+pub fn ribbon_command_id(app: &App, label: &str) -> &'static str {
+    let state = &app.state().state;
+    soliddraft_app::commands::ribbon(active_ribbon_tab(app))
+        .into_iter()
+        .flat_map(|(_, items)| items)
+        .find_map(|(c, _)| ((c.shown)(state) && c.label_in(state) == label).then_some(c.id))
+        .unwrap_or_else(|| panic!("ribbon command {label}"))
+}
+
 /// Clicks a ribbon command, opening its collapsed group when needed.
 pub fn click_ribbon(app: &mut App, label: &str) {
-    let band = ribbon_region(app);
-    if !app.query_all(By::new().role(egui::accesskit::Role::Button).label(label)).any(|n| band.intersects(n.rect())) {
-        let group = {
-            let state = &app.state().state;
-            let tab = if state.drawing.is_active() {
-                soliddraft_app::commands::Tab::Drawing(state.drawing.session.as_ref().expect("active drawing").tab)
-            } else if state.assembly.is_active() {
-                soliddraft_app::commands::Tab::Assembly
-            } else {
-                state.ribbon_tab.into()
-            };
-            soliddraft_app::commands::ribbon(tab)
-                .into_iter()
-                .find_map(|(group, items)| {
-                    items.iter().any(|(c, _)| (c.shown)(state) && c.label_in(state) == label).then_some(group)
-                })
-                .unwrap_or_else(|| panic!("ribbon command {label}"))
-        };
-        let bounds = window(app);
-        click_button(app, &format!("{group} group"), bounds);
-        app.run_steps(4);
-        let window = window(app);
-        let bottom =
-            painted(app).into_iter().find(|p| p.text == "Properties").map_or(window.bottom(), |p| p.rect.top());
-        let row = Rect::from_min_max(window.min, pos2(window.right(), bottom));
-        click_button(app, label, row);
-    } else {
-        let rect = ribbon_button(app, label).rect;
-        click_at(app, rect.center());
-    }
+    let id = ribbon_command_id(app, label);
+    let rect = reveal_ribbon_command(app, id).rect;
+    click_at(app, rect.center());
     app.run_steps(4);
+}
+
+/// Clicks a quick-access command above the ribbon tabs.
+pub fn click_quick_access(app: &mut App, label: &str) {
+    let bounds = window(app);
+    let bar = Rect::from_min_max(bounds.min, pos2(bounds.right(), bounds.top() + soliddraft_app::theme::MENU_HEIGHT));
+    click_button(app, label, bar);
 }
 
 /// Rests the pointer on a control and reads only that control's tooltip node.
@@ -555,19 +601,38 @@ pub fn caption_names(app: &App) -> Vec<String> {
     captions(app).into_iter().map(|p| p.text).collect()
 }
 
-/// The open tab has exactly these groups in this order, each with its commands visible
-/// over its caption. The groups run left to right and do not overlap.
-pub fn groups_in_order(app: &App, groups: &[(&str, &[&str])]) {
+/// The open tab has exactly these groups in order, with visible command labels or
+/// a collapsed group that reveals them. Group footprints do not overlap.
+pub fn groups_in_order(app: &mut App, groups: &[(&str, &[&str])]) {
     let names: Vec<&str> = groups.iter().map(|(name, _)| *name).collect();
     assert_eq!(caption_names(app), names, "the group captions");
     let mut right = 0.0_f32;
     for ((name, labels), caption) in groups.iter().zip(captions(app)) {
-        let mut bounds = Rect::NOTHING;
+        let collapsed = buttons_in(app, ribbon_region(app))
+            .into_iter()
+            .find_map(|(label, button)| (label == format!("{name} group")).then_some(button));
+        let mut bounds = collapsed.unwrap_or(Rect::NOTHING);
         for label in *labels {
-            let rect = ribbon_button(app, label).rect;
+            let id = soliddraft_app::commands::ribbon(active_ribbon_tab(app))
+                .into_iter()
+                .find_map(|(group, items)| {
+                    if group != *name {
+                        return None;
+                    }
+                    let state = &app.state().state;
+                    items
+                        .into_iter()
+                        .find_map(|(c, _)| ((c.shown)(state) && c.label_in(state) == *label).then_some(c.id))
+                })
+                .unwrap_or_else(|| panic!("{name}: registered command {label}"));
+            let rect = reveal_ribbon_command(app, id).rect;
+            assert!(window(app).contains_rect(rect), "{name}: {id} is reachable");
             let seen = painted_in(app, rect).iter().any(|p| p.text == *label);
             assert!(seen, "{name}: the label {label} is painted on its button {rect:?}");
-            bounds = bounds.union(rect);
+            if collapsed.is_none() {
+                bounds = bounds.union(rect);
+            }
+            dismiss_ribbon_popup(app);
         }
         let x = caption.rect.center().x;
         assert!(

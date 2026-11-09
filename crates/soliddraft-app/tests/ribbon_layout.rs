@@ -78,13 +78,16 @@ const VIEW_RUNS: [&str; 9] = [
     "display_wireframe",
     "orthographic",
 ];
-const SKETCH_RUNS: [&str; 7] = [
+const SKETCH_RUNS: [&str; 10] = [
     "sketch_line",
     "sketch_centreline",
     "sketch_circle",
     "sketch_rectangle",
     "sketch_arc",
     "sketch_slot",
+    "sketch_centrepoint_slot",
+    "sketch_three_point_arc_slot",
+    "sketch_centrepoint_arc_slot",
     "sketch_point",
 ];
 
@@ -219,20 +222,30 @@ fn no_overlaps(buttons: &[(String, Rect)], what: &str) {
     }
 }
 
-/// Everything the open tab offers is on the ribbon, under the label rule.
-fn every_tile(app: &App, tab: Tab, what: &str) {
+/// Every command is reachable on the ribbon or its group row, under the label rule.
+fn every_tile(app: &mut App, tab: Tab, what: &str) {
     let body = body(app);
     let entries = entries(app, tab);
     assert!(!entries.is_empty(), "{what} has commands");
-    let mut expected: Vec<&str> = entries.iter().map(|e| e.label.as_str()).collect();
+    let folded = collapsed(app, tab);
+    let mut expected: Vec<String> =
+        entries.iter().filter(|e| !folded.contains(&e.group)).map(|e| e.label.clone()).collect();
+    expected.extend(folded.iter().map(|group| group_button(group)));
     let buttons = ribbon::buttons_in(app, body);
-    let mut seen: Vec<&str> = buttons.iter().map(|(name, _)| name.as_str()).collect();
+    let mut seen: Vec<String> = buttons.iter().map(|(name, _)| name.clone()).collect();
     expected.sort();
     seen.sort();
     assert_eq!(seen, expected, "{what}: the buttons on the ribbon");
     no_overlaps(&buttons, what);
     for entry in &entries {
-        label_below(&tile(app, &entry.label, body), body, what);
+        let shown = reveal(app, entry, what);
+        let region = if folded.contains(&entry.group) { row_band(app) } else { body };
+        assert!(
+            region.expand(TOLERANCE).contains_rect(shown.control.rect),
+            "{what}: {} is inside its command surface",
+            entry.command.id
+        );
+        dismiss(app);
     }
 }
 

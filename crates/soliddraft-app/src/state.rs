@@ -411,6 +411,9 @@ pub enum Tool {
     ControlSpline,
     Arc,
     Slot,
+    CentrepointSlot,
+    ThreePointArcSlot,
+    CentrepointArcSlot,
     Point,
     Dimension,
     /// A regular polygon from a centre and a first vertex.
@@ -463,6 +466,9 @@ impl Tool {
             Tool::ControlSpline => "Control-point spline",
             Tool::Arc => "Arc",
             Tool::Slot => "Slot",
+            Tool::CentrepointSlot => "Centrepoint slot",
+            Tool::ThreePointArcSlot => "Three-point arc slot",
+            Tool::CentrepointArcSlot => "Centrepoint arc slot",
             Tool::Point => "Point",
             Tool::Dimension => "Smart dimension",
             Tool::Polygon => "Polygon",
@@ -512,6 +518,9 @@ impl Tool {
                 | Tool::ControlSpline
                 | Tool::Arc
                 | Tool::Slot
+                | Tool::CentrepointSlot
+                | Tool::ThreePointArcSlot
+                | Tool::CentrepointArcSlot
                 | Tool::Point
                 | Tool::Polygon
         )

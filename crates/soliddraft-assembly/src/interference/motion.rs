@@ -109,12 +109,13 @@ impl AssemblyDocument {
                 motion.job = None;
                 match result {
                     Ok((worker, report)) => {
-                        if let (Some(live), Some(done)) = (&self.drag, &worker.drag) {
-                            if live.base == self.assembly && worker.assembly == self.assembly {
-                                self.show_drag_candidate(done.candidate.clone());
-                                self.certified = worker.certified;
-                                self.motion_report = Some(report);
-                            }
+                        if let (Some(live), Some(done)) = (&self.drag, &worker.drag)
+                            && live.base == self.assembly
+                            && worker.assembly == self.assembly
+                        {
+                            self.show_drag_candidate(done.candidate.clone());
+                            self.certified = worker.certified;
+                            self.motion_report = Some(report);
                         }
                     }
                     Err(error) => {

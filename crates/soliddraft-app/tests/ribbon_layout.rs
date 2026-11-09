@@ -38,8 +38,8 @@ const SOLID_CAPTIONS: [&str; 6] = ["Sketch", "Create", "Remove", "Modify", "Patt
 const MIN_CONTRAST: f32 = 4.5;
 const MIN_DISABLED_CONTRAST: f32 = 3.0;
 
-/// The room under the ribbon a row of tiles takes while it is open.
-const ROW_HEIGHT: f32 = 120.0;
+/// The room under the ribbon an open group takes: up to two rows of tiles and its name.
+const ROW_HEIGHT: f32 = 180.0;
 
 type IsEditor = fn(&EditorParams) -> bool;
 
@@ -78,11 +78,15 @@ const VIEW_RUNS: [&str; 9] = [
     "display_wireframe",
     "orthographic",
 ];
-const SKETCH_RUNS: [&str; 10] = [
+const SKETCH_RUNS: [&str; 14] = [
     "sketch_line",
     "sketch_centreline",
     "sketch_circle",
     "sketch_rectangle",
+    "sketch_centre_rectangle",
+    "sketch_three_point_corner_rectangle",
+    "sketch_three_point_centre_rectangle",
+    "sketch_parallelogram",
     "sketch_arc",
     "sketch_slot",
     "sketch_centrepoint_slot",
@@ -420,9 +424,10 @@ fn reveal(app: &mut App, entry: &Entry, what: &str) -> Tile {
     label_below(&tile, window, &name);
     assert_eq!(tile.control.enabled, entry.command.is_enabled(&app.state().state), "{name}: enabled");
 
-    // Its group is named under it, and nothing crowds it.
-    let row = Rect::from_min_size(tile.control.rect.left_bottom(), vec2(window.width(), 24.0));
-    let row = Rect::from_x_y_ranges(window.x_range(), row.y_range());
+    // Its group is named under it, past any further row the group wrapped onto, and
+    // nothing crowds it.
+    let under = if direct { tile.control.rect.bottom() + 24.0 } else { region.bottom() };
+    let row = Rect::from_x_y_ranges(window.x_range(), tile.control.rect.bottom()..=under);
     assert!(
         ribbon::painted_in(app, row).iter().any(|p| p.text == entry.group),
         "{name}: the group name is under its commands"

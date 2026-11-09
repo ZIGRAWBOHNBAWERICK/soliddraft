@@ -32,7 +32,7 @@ pub const TOLERANCE: f32 = 1.0;
 
 pub const WINDOW: Vec2 = vec2(1440.0, 900.0);
 /// Full-ribbon inspection without responsive group folding.
-pub const EXPANDED_WINDOW: Vec2 = vec2(1920.0, 900.0);
+pub const EXPANDED_WINDOW: Vec2 = vec2(2240.0, 900.0);
 
 /// The rendered harnesses share one adapter and the process-wide config; one at a time.
 static GPU: Mutex<()> = Mutex::new(());

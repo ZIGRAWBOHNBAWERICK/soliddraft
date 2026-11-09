@@ -1524,6 +1524,30 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::Rectangle))
 .app_only(SKETCHER),
+        cmd("sketch_centre_rectangle", "Centre rectangle", Icon::Cad("rect"), "Centre and corner")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::CentreRectangle))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::CentreRectangle))
+.app_only(SKETCHER),
+        cmd("sketch_three_point_corner_rectangle", "3-point corner rectangle", Icon::Cad("rect"), "First edge, then perpendicular height")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::ThreePointCornerRectangle))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::ThreePointCornerRectangle))
+.app_only(SKETCHER),
+        cmd("sketch_three_point_centre_rectangle", "3-point centre rectangle", Icon::Cad("rect"), "Centre, side midpoint, then half-width")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::ThreePointCentreRectangle))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::ThreePointCentreRectangle))
+.app_only(SKETCHER),
+        cmd("sketch_parallelogram", "Parallelogram", Icon::Cad("rect"), "Three consecutive corners")
+            .on(Sketch, "Draw", Small)
+            .run(|_| AppAction::SketchTool(Tool::Parallelogram))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Parallelogram))
+.app_only(SKETCHER),
         cmd("sketch_arc", "Arc", Icon::Cad("arc"), "Centre-point arc: centre, start, end")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::A)

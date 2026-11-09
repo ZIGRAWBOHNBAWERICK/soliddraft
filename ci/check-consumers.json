@@ -3,6 +3,8 @@
   "files": {
     "ci/install-tool.py": "all",
     "ci/balance.py": ["lint", "test-linux", "test-macos", "application-loop"],
+    "ci/compact-archive.py": ["lint", "test-linux", "test-macos"],
+    "ci/test_compact_archive.py": ["lint"],
     "ci/test-durations.json": ["test-linux", "test-macos"],
     "ci/scenario-durations.json": ["application-loop"],
     "ci/select-runner.py": "all",

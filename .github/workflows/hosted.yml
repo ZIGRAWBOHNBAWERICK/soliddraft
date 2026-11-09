@@ -256,6 +256,8 @@ jobs:
       - name: Run workspace documentation tests
         working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}
         run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
+      - name: Reduce the test archive transfer size
+        run: python3 ci/compact-archive.py "$RUNNER_TEMP/workspace-tests.tar.zst"
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-tests-linux
@@ -340,6 +342,8 @@ jobs:
         run: ci/run test-build "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/check-selection/selection.json"
       - name: Run workspace documentation tests
         run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
+      - name: Reduce the test archive transfer size
+        run: python3 ci/compact-archive.py "$RUNNER_TEMP/workspace-tests.tar.zst"
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-tests-macos

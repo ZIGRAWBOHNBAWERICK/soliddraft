@@ -61,6 +61,10 @@ pub fn operation_for(s: &SketchSession) -> Option<Operation> {
         Tool::CircularPattern => {
             Operation::CircularPattern { entities, center: m.center, angle_degrees: m.angle, count: m.count }
         }
+        Tool::Move => Operation::Move { entities, displacement: m.step },
+        Tool::Copy => Operation::Copy { entities, base: m.base, displacement: m.step },
+        Tool::Rotate => Operation::Rotate { entities, center: m.center, angle_degrees: m.angle, copy: m.copy },
+        Tool::Scale => Operation::Scale { entities, base: m.base, factor: m.factor },
         _ => return None,
     })
 }
@@ -129,11 +133,20 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
                     ids.push(*id);
                 }
             }
+            let removed = match &operation {
+                Operation::Move { entities, .. }
+                | Operation::Rotate { entities, copy: false, .. }
+                | Operation::Scale { entities, .. } => {
+                    entities.iter().filter_map(|id| s.sketch.entity(*id).map(|e| e.kind)).collect()
+                }
+                _ => Vec::new(),
+            };
             let entities: Vec<_> = ids.iter().filter_map(|id| copy.entity(*id)).collect();
             ToolPreview {
                 added: entities.iter().map(|e| e.kind).collect(),
                 construction: entities.iter().map(|e| e.construction).collect(),
                 replaced,
+                removed,
                 operation: Some(operation),
                 ..Default::default()
             }
@@ -366,6 +379,25 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
             ui.add(egui::DragValue::new(&mut s.modify.angle).speed(1.0).suffix(" degrees"));
             ui.add(egui::DragValue::new(&mut s.modify.count).range(2..=1000).prefix("Instances "));
         }
+        Tool::Move | Tool::Copy => {
+            hint(
+                ui,
+                "Select entities, then click a base point and destination, or enter a displacement. Apply commits the preview.",
+            );
+            point(ui, "Base", &mut s.modify.base);
+            point(ui, "Displacement", &mut s.modify.step);
+        }
+        Tool::Rotate => {
+            hint(ui, "Select entities, click the centre, then enter the rotation angle and Apply.");
+            point(ui, "Centre", &mut s.modify.center);
+            ui.add(egui::DragValue::new(&mut s.modify.angle).speed(1.0).suffix(" degrees"));
+            ui.checkbox(&mut s.modify.copy, "Copy entities");
+        }
+        Tool::Scale => {
+            hint(ui, "Select entities, click the base point, then enter a positive scale factor and Apply.");
+            point(ui, "Base", &mut s.modify.base);
+            ui.add(egui::DragValue::new(&mut s.modify.factor).speed(0.05).prefix("Factor "));
+        }
         _ => {}
     }
     if tool.trims() {
@@ -386,6 +418,12 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                 "Coordinates are u, v in the sketch plane, in mm. Copies are independent; counts include the seed."
             },
         );
+        if tool.transforms() {
+            hint(
+                ui,
+                "In-place edits retain relations and driving dimensions. Incompatible transforms are refused. Copies retain construction state and join matching copied endpoints, without copying driving relations.",
+            );
+        }
         let selected = selected_in_order(s).len();
         hint(
             ui,
@@ -654,10 +692,30 @@ pub fn operation_schema() -> Value {
         ]),
         object(&[
             ("tool", constant("circular_pattern")),
-            ("entities", ids),
-            ("center", point),
+            ("entities", ids.clone()),
+            ("center", point.clone()),
             ("angle_degrees", number("Signed angle per instance, degrees")),
             ("count", count),
+        ]),
+        object(&[("tool", constant("move")), ("entities", ids.clone()), ("displacement", point.clone())]),
+        object(&[
+            ("tool", constant("copy")),
+            ("entities", ids.clone()),
+            ("base", point.clone()),
+            ("displacement", point.clone()),
+        ]),
+        object(&[
+            ("tool", constant("rotate")),
+            ("entities", ids.clone()),
+            ("center", point.clone()),
+            ("angle_degrees", number("Signed rotation, degrees")),
+            ("copy", optional(boolean("Add independent copies, default false"))),
+        ]),
+        object(&[
+            ("tool", constant("scale")),
+            ("entities", ids),
+            ("base", point),
+            ("factor", number("Positive uniform scale factor, other than one")),
         ]),
     ])
 }

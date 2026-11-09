@@ -1357,6 +1357,10 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::Mirror, Icon::Mirror, "Mirror entities"),
                 (Tool::LinearPattern, Icon::LinearPattern, "Linear pattern"),
                 (Tool::CircularPattern, Icon::CircularPattern, "Circular pattern"),
+                (Tool::Move, Icon::Views, "Move entities"),
+                (Tool::Copy, Icon::LinearPattern, "Copy entities"),
+                (Tool::Rotate, Icon::CircularPattern, "Rotate entities"),
+                (Tool::Scale, Icon::Rectangle, "Scale entities"),
             ];
             ui.horizontal_wrapped(|ui| {
                 for (tool, icon, tip) in tools {

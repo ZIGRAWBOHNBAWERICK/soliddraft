@@ -93,7 +93,7 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
     use DrawingTab as D;
     match tab {
         Tab::Part(RibbonTab::Solid) => &["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"],
-        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Modify", "Constrain", "Use sketch", "View"],
+        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Use sketch", "View"],
         Tab::Part(RibbonTab::Inspect) => &["Measure", "Check", "Surface quality"],
         Tab::Part(RibbonTab::View) => &["Orientation", "Display", "Projection", "Panels"],
         Tab::Part(RibbonTab::Assembly | RibbonTab::Surface | RibbonTab::PointCloud) => &[],
@@ -1594,6 +1594,30 @@ fn registry() -> Vec<CommandSpec> {
         .when(AppState::in_sketch)
         .lit(|s| tool_is(s, Tool::CircularPattern))
 .app_only(SKETCHER),
+        cmd("sketch_move", "Move entities", Icon::Views, "Translate selected geometry with compatible constraints")
+            .on(Sketch, "Transform", Small)
+            .run(|_| AppAction::SketchTool(Tool::Move))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Move))
+.app_only(SKETCHER),
+        cmd("sketch_copy", "Copy entities", Icon::LinearPattern, "Copy selected geometry from a base point and displacement")
+            .on(Sketch, "Transform", Small)
+            .run(|_| AppAction::SketchTool(Tool::Copy))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Copy))
+.app_only(SKETCHER),
+        cmd("sketch_rotate", "Rotate entities", Icon::CircularPattern, "Rotate or copy selected geometry about a centre")
+            .on(Sketch, "Transform", Small)
+            .run(|_| AppAction::SketchTool(Tool::Rotate))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Rotate))
+.app_only(SKETCHER),
+        cmd("sketch_scale", "Scale entities", Icon::Rectangle, "Uniformly scale selected geometry about a base point")
+            .on(Sketch, "Transform", Small)
+            .run(|_| AppAction::SketchTool(Tool::Scale))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s, Tool::Scale))
+.app_only(SKETCHER),
         cmd("sketch_select", "Select", Icon::Sketch, "Select and drag sketch geometry")
             .key(Scope::Sketch, none, Key::V)
             .run(|_| AppAction::SketchTool(Tool::Select))
@@ -2909,7 +2933,10 @@ mod tests {
     fn the_ribbon_keeps_its_layout() {
         let panels = |tab: RibbonTab| ribbon(tab).iter().map(|(p, _)| *p).collect::<Vec<_>>();
         assert_eq!(panels(RibbonTab::Solid), ["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"]);
-        assert_eq!(panels(RibbonTab::Sketch), ["Sketch", "Draw", "Modify", "Constrain", "Use sketch", "View"]);
+        assert_eq!(
+            panels(RibbonTab::Sketch),
+            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Use sketch", "View"]
+        );
         assert_eq!(panels(RibbonTab::Assembly), ["Edit", "Component", "File", "View"]);
         assert_eq!(panels(RibbonTab::Inspect), ["Measure", "Check", "Surface quality"]);
         assert_eq!(panels(RibbonTab::View), ["Orientation", "Display", "Projection", "Panels"]);
@@ -2918,6 +2945,10 @@ mod tests {
             ribbon(tab).into_iter().find(|(p, _)| *p == panel).unwrap().1.iter().map(|(c, _)| c.id).collect::<Vec<_>>()
         };
         assert_eq!(ids(RibbonTab::Solid, "Sketch"), ["sketch"]);
+        assert_eq!(
+            ids(RibbonTab::Sketch, "Transform"),
+            ["sketch_move", "sketch_copy", "sketch_rotate", "sketch_scale"]
+        );
         assert_eq!(
             ids(RibbonTab::View, "Orientation"),
             ["view_isometric", "zoom_fit", "view_front", "view_top", "view_right", "normal_to"]

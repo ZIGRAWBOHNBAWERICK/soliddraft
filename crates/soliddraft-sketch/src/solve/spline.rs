@@ -175,14 +175,29 @@ impl Attachment {
     pub fn offset_requests(&mut self, offset: usize) {
         self.request_start += offset;
     }
-    fn nearest(&self, values: &[f64]) -> crate::spline::Nearest {
+    fn retry_seed(&self, values: &[f64], tried: &mut Vec<(usize, usize)>) -> Option<(usize, f64)> {
         let at = |point: DatumPoint| P2::new(values[point.id_x() as usize], values[point.id_y() as usize]);
-        let spans: Vec<_> = self
+        let target = at(self.graph.last().unwrap()[2]);
+        let mut candidates: Vec<_> = self
             .spans
             .iter()
-            .map(|points| crate::spline::BezierSpan { controls: points.iter().map(|p| at(*p)).collect() })
+            .enumerate()
+            .map(|(index, points)| {
+                let span = crate::spline::BezierSpan { controls: points.iter().map(|p| at(*p)).collect() };
+                let nearest = crate::spline::nearest_spans(&[span], target);
+                (index, nearest.parameter, nearest.point.dist(target))
+            })
             .collect();
-        crate::spline::nearest_spans(&spans, at(self.graph.last().unwrap()[2]))
+        candidates.sort_by(|a, b| a.2.total_cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
+        for (span, nearest, _) in candidates {
+            for (seed, parameter) in [nearest, 0.5, 0.25, 0.75].into_iter().enumerate() {
+                if !tried.contains(&(span, seed)) {
+                    tried.push((span, seed));
+                    return Some((span, parameter));
+                }
+            }
+        }
+        None
     }
     fn select(&mut self, index: usize, requests: &mut [ConstraintRequest]) {
         let mut row = self.spans[index].clone();
@@ -218,9 +233,13 @@ pub(super) fn finite_solve(
     requests: &mut Vec<ConstraintRequest>,
     mut guesses: Vec<(ezpz::Id, f64)>,
     attachments: &mut [Attachment],
+    geometric_request_count: usize,
 ) -> Result<(ezpz::SolveOutcome, Vec<usize>), String> {
     let mut clamped = Vec::new();
-    for attempt in 0..=4 {
+    let mut tried: Vec<_> = attachments.iter().map(|a| vec![(a.selected, 0)]).collect();
+    // Conflicting sketches must finish even when a spline has many spans.
+    let retries = attachments.iter().map(|a| a.spans.len().saturating_mul(4)).sum::<usize>().min(64);
+    for attempt in 0..=retries + 1 {
         let result =
             ezpz::solve(requests, guesses, Config::default().with_max_iterations(60).with_convergence_tolerance(1e-11))
                 .map_err(|error| error.error.to_string())?;
@@ -230,27 +249,54 @@ pub(super) fn finite_solve(
         }
         let outside: Vec<_> =
             attachments.iter().enumerate().filter(|(_, a)| !a.contains(&values)).map(|(i, _)| i).collect();
-        if outside.is_empty() {
+        let satisfied =
+            result.converged() && !result.unsatisfied().iter().any(|index| *index < geometric_request_count);
+        if outside.is_empty() && (satisfied || !clamped.is_empty()) {
             return Ok((result, clamped));
         }
-        if attempt == 4 {
+        if attempt == retries + 1 || !clamped.is_empty() {
             return Err("The point-on-spline relation has no solved finite parameter".into());
         }
-        for i in outside {
-            let attachment = &mut attachments[i];
-            let nearest = attachment.nearest(&values);
-            let seed = if attempt < 3 && nearest.span != attachment.selected {
-                attachment.select(nearest.span, requests);
-                nearest.parameter
-            } else if attempt < 3 {
-                [0.5, 0.25, 0.75][attempt]
-            } else {
+        let mut failed: Vec<_> = attachments
+            .iter()
+            .enumerate()
+            .filter(|(i, a)| {
+                outside.contains(i)
+                    || result
+                        .unsatisfied()
+                        .iter()
+                        .any(|index| (a.request_start..a.request_start + a.graph.len() * 2).contains(index))
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if failed.is_empty() && !satisfied {
+            // A dimension can be the only reported residual when PointOn stays exact.
+            failed.extend(0..attachments.len());
+        }
+        let mut changed = false;
+        if attempt < retries {
+            for i in failed {
+                let attachment = &mut attachments[i];
+                if let Some((span, parameter)) = attachment.retry_seed(&values, &mut tried[i]) {
+                    if span != attachment.selected {
+                        attachment.select(span, requests);
+                    }
+                    attachment.seed(&mut values, parameter);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            if outside.is_empty() {
+                return Ok((result, clamped));
+            }
+            for i in outside {
+                let attachment = &attachments[i];
                 let endpoint = if values[attachment.parameter as usize] < 0.0 { 0.0 } else { 1.0 };
                 requests.push(ConstraintRequest::highest_priority(Constraint::Fixed(attachment.parameter, endpoint)));
                 clamped.push(i);
-                endpoint
-            };
-            attachment.seed(&mut values, seed);
+                attachment.seed(&mut values, endpoint);
+            }
         }
         guesses = values.into_iter().enumerate().map(|(id, value)| (id as ezpz::Id, value)).collect();
     }
@@ -276,7 +322,8 @@ mod tests {
     }
     fn run(vars: Vars, constraints: Vec<Constraint>, attachments: &mut [Attachment]) -> Vec<f64> {
         let mut requests: Vec<_> = constraints.into_iter().map(ConstraintRequest::highest_priority).collect();
-        let (result, _) = finite_solve(&mut requests, vars.guesses, attachments).unwrap();
+        let count = requests.len();
+        let (result, _) = finite_solve(&mut requests, vars.guesses, attachments, count).unwrap();
         assert!(result.converged(), "{:?}", result.unsatisfied());
         result.final_values().to_vec()
     }

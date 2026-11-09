@@ -304,3 +304,90 @@ fn spline_copies_transform_the_whole_polynomial_in_both_modes() {
         }
     }
 }
+
+#[test]
+fn point_on_spline_keeps_constant_spans_solvable_after_dimension_edits() {
+    use soliddraft_sketch::{DistanceKind, SplineMode};
+    for solve_first in [false, true] {
+        for reversed in [false, true] {
+            let mut s = Sketch::new();
+            let mut points = vec![P2::ZERO; 4];
+            points.push(p(1.0, 0.0));
+            if reversed {
+                points.reverse();
+            }
+            let curve = s.add(EntityKind::Spline { mode: SplineMode::Control, points }, false);
+            fix(&mut s, curve);
+            let marker = PointRef::new(s.add(EntityKind::Point { p: P2::ZERO }, true), 0);
+            s.constrain(ConstraintKind::PointOn { point: marker, entity: curve });
+            if solve_first {
+                solved(&mut s);
+            }
+            let dimension = s.constrain(ConstraintKind::Distance {
+                a: marker,
+                b: PointRef::ORIGIN,
+                kind: DistanceKind::Horizontal,
+                value: 0.5,
+                label: P2::ZERO,
+            });
+            solved(&mut s);
+            near(s.point(marker).unwrap(), p(0.5, 0.0));
+            let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            for value in [0.125, 0.875, 0.5] {
+                reopened.constraint_mut(dimension).unwrap().set_value(value);
+                solved(&mut reopened);
+                near(reopened.point(marker).unwrap(), p(value, 0.0));
+            }
+            reopened.constraint_mut(dimension).unwrap().set_value(1.25);
+            solve::solve(&mut reopened, None, true);
+            assert!(matches!(reopened.status, SolveStatus::Failed(_) | SolveStatus::OverDefined { .. }));
+        }
+    }
+}
+
+#[test]
+fn point_on_spline_retries_a_parallel_return_span_after_two_dimensions() {
+    use soliddraft_sketch::{DistanceKind, SplineMode};
+    for mode in [SplineMode::Fit, SplineMode::Control] {
+        for reversed in [false, true] {
+            let mut s = Sketch::new();
+            let mut points = vec![
+                p(0.0, 0.0),
+                p(1.0, 0.0),
+                p(2.0, 0.0),
+                p(3.0, 0.0),
+                p(3.0, 1.0),
+                p(2.0, 1.0),
+                p(1.0, 1.0),
+                p(0.0, 1.0),
+            ];
+            if reversed {
+                points.reverse();
+            }
+            let curve = s.add(EntityKind::Spline { mode, points }, false);
+            fix(&mut s, curve);
+            near(s.entity(curve).unwrap().nearest(p(1.0, 1.0)).0, p(1.0, 1.0));
+            let marker = PointRef::new(s.add(EntityKind::Point { p: p(1.0, 0.01) }, true), 0);
+            s.constrain(ConstraintKind::PointOn { point: marker, entity: curve });
+            for kind in [DistanceKind::Horizontal, DistanceKind::Vertical] {
+                s.constrain(ConstraintKind::Distance {
+                    a: marker,
+                    b: PointRef::ORIGIN,
+                    kind,
+                    value: 1.0,
+                    label: P2::ZERO,
+                });
+            }
+            solve::solve(&mut s, None, true);
+            assert!(
+                matches!(s.status, SolveStatus::UnderDefined | SolveStatus::FullyDefined),
+                "{mode:?}, reversed={reversed}: {:?}",
+                s.status
+            );
+            near(s.point(marker).unwrap(), p(1.0, 1.0));
+            let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            solved(&mut reopened);
+            near(reopened.point(marker).unwrap(), p(1.0, 1.0));
+        }
+    }
+}

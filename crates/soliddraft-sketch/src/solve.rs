@@ -484,13 +484,14 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
     let config = Config::default().with_max_iterations(60).with_convergence_tolerance(1e-11);
     let guesses = vars.guesses.clone();
     let (outcome, under) = if !attachments.is_empty() {
-        let (outcome, clamped) = match spline::finite_solve(&mut requests, guesses, &mut attachments) {
-            Ok(result) => result,
-            Err(error) => {
-                sketch.status = SolveStatus::Failed(error);
-                return;
-            }
-        };
+        let (outcome, clamped) =
+            match spline::finite_solve(&mut requests, guesses, &mut attachments, geometric_request_count) {
+                Ok(result) => result,
+                Err(error) => {
+                    sketch.status = SolveStatus::Failed(error);
+                    return;
+                }
+            };
         owners.extend(clamped.into_iter().map(|i| Some(attachment_owners[i])));
         let under = if analyse {
             let initial =

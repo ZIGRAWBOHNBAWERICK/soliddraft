@@ -37,7 +37,10 @@ pub fn regular_polygon_corners(center: P2, point: P2, sides: u32, mode: PolygonM
         corners = polygon_corners(center, point - d.perp().scale(tangent), sides)?;
     }
     if !center.dist(point).is_finite()
-        || corners.iter().enumerate().any(|(i, &a)| !valid(EntityKind::Line { a, b: corners[(i + 1) % corners.len()] }))
+        || corners
+            .iter()
+            .enumerate()
+            .any(|(i, &a)| !valid(&EntityKind::Line { a, b: corners[(i + 1) % corners.len()] }))
     {
         return refuse("the polygon would produce non-finite or degenerate sides");
     }
@@ -126,9 +129,9 @@ impl Sketch {
             unreachable!()
         };
         let first = self.entity(group.edges[0]).expect("validated edge");
-        let direction = match (group.mode, first.kind) {
-            (PolygonMode::Circumscribed, EntityKind::Line { a, b }) => (a + b).scale(0.5) - center,
-            (_, EntityKind::Line { a, .. }) => a - center,
+        let direction = match (group.mode, &first.kind) {
+            (PolygonMode::Circumscribed, EntityKind::Line { a, b }) => (*a + *b).scale(0.5) - center,
+            (_, EntityKind::Line { a, .. }) => *a - center,
             _ => unreachable!(),
         };
         let corners = regular_polygon_corners(center, center + direction.normalized().scale(radius), sides, mode)?;

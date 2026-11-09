@@ -152,7 +152,7 @@ fn plane_visibility_persists_without_hiding_the_grid() {
     assert!(!session.sketch.entities.is_empty(), "with its entities");
     assert_eq!(readout(&app), None, "no grid in the sketch with Show grid off");
     let entities = session.sketch.entities.len();
-    click_button(&mut app, "Line");
+    click_ribbon_command(&mut app, "sketch_line");
     let rect = viewport(&app);
     click(&mut app, rect.center() + vec2(150.0, 120.0));
     click(&mut app, rect.center() + vec2(230.0, 170.0));

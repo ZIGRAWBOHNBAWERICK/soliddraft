@@ -34,16 +34,9 @@ fn pick(app: &mut App, at: P2) {
     let pos = screen(app, at);
     ribbon::click_at(app, pos);
 }
-fn tool(app: &mut App, label: &str) {
-    let window = ribbon::window(app);
-    let top = egui::Rect::from_min_max(window.min, egui::pos2(window.right(), app.state().state.viewport.rect.top()));
-    if ribbon::buttons_in(app, top).iter().any(|(name, _)| name == label) {
-        ribbon::click_button(app, label, top);
-    } else {
-        ribbon::click_button(app, "Modify group", top);
-        let popup = egui::Rect::from_min_max(egui::pos2(app.state().state.viewport.rect.left(), 0.0), window.max);
-        ribbon::click_button(app, label, popup);
-    }
+fn tool(app: &mut App, id: &str) {
+    let point = ribbon::reveal_ribbon_command(app, id).rect.center();
+    ribbon::click_at(app, point);
     app.run_steps(4);
 }
 fn panel_click(app: &mut App, label: &str) {
@@ -98,7 +91,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     let before = session(&app).sketch.clone();
-    tool(&mut app, "Sketch fillet");
+    tool(&mut app, "sketch_fillet");
     pick(&mut app, p(-10.0, -10.0));
     hover(&mut app, p(-15.0, -5.0));
     assert_eq!(session(&app).preview.as_ref().unwrap().added.len(), 3);
@@ -109,7 +102,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     assert_eq!(session(&app).tool, Tool::Select);
     assert!(session(&app).corner_first.is_none());
     assert_eq!(session(&app).sketch, before);
-    tool(&mut app, "Sketch fillet");
+    tool(&mut app, "sketch_fillet");
     pick(&mut app, p(-10.0, -10.0));
     pick(&mut app, p(-15.0, -5.0));
     assert_eq!(session(&app).sketch.drawn().count(), 6);
@@ -128,7 +121,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     app.run_steps(8);
     assert_eq!(session(&app).sketch, fillet);
     undo(&mut app);
-    tool(&mut app, "Sketch chamfer");
+    tool(&mut app, "sketch_chamfer");
     panel_click(&mut app, "Distance and angle");
     assert!(matches!(session(&app).modify.chamfer, ChamferSize::DistanceAngle { .. }));
     pick(&mut app, p(-10.0, -10.0));
@@ -140,7 +133,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     assert!(session(&app).sketch.drawn().last().unwrap().is_line());
     undo(&mut app);
     assert_eq!(session(&app).sketch, before);
-    tool(&mut app, "Split entities");
+    tool(&mut app, "sketch_split");
     hover(&mut app, p(0.0, -10.0));
     assert_eq!(session(&app).preview.as_ref().unwrap().added.len(), 2);
     assert_eq!(session(&app).sketch, before);
@@ -149,7 +142,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     assert_eq!(session(&app).sketch.drawn().count(), 6);
     undo(&mut app);
     assert_eq!(session(&app).sketch, before);
-    tool(&mut app, "Split entities");
+    tool(&mut app, "sketch_split");
     pick(&mut app, p(11.0, 3.0));
     assert!(session(&app).corner_first.is_some());
     hover(&mut app, p(8.0, 6.0));
@@ -158,7 +151,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     app.key_press(Key::Escape);
     app.run_steps(6);
     assert_eq!(session(&app).sketch, before);
-    tool(&mut app, "Split entities");
+    tool(&mut app, "sketch_split");
     pick(&mut app, p(11.0, 3.0));
     pick(&mut app, p(8.0, 6.0));
     let after = session(&app).sketch.clone();
@@ -183,7 +176,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
 #[test]
 fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    for (label, fillet) in [("Sketch fillet", true), ("Sketch chamfer", false)] {
+    for (command, fillet) in [("sketch_fillet", true), ("sketch_chamfer", false)] {
         for reverse_a in [false, true] {
             for reverse_b in [false, true] {
                 let name = format!("midpoint-{}-{reverse_a}-{reverse_b}", if fillet { "fillet" } else { "chamfer" });
@@ -224,7 +217,7 @@ fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
                 app.state_mut().state.push(AppAction::EditSketch(id));
                 app.run_steps(30);
                 let before = session(&app).sketch.clone();
-                tool(&mut app, label);
+                tool(&mut app, command);
                 pick(&mut app, p(-8.0, 0.0));
                 hover(&mut app, p(0.0, 8.0));
                 let preview = session(&app).preview.as_ref().expect("preview").added.clone();
@@ -353,7 +346,7 @@ fn split_retargets_symmetry_and_keeps_it_through_undo_redo_and_reopen() {
             app.state_mut().state.push(AppAction::EditSketch(id));
             app.run_steps(30);
             let before = session(&app).sketch.clone();
-            tool(&mut app, "Split entities");
+            tool(&mut app, "sketch_split");
             hover(&mut app, at);
             assert!(session(&app).preview.as_ref().unwrap().operation.is_some());
             pick(&mut app, at);

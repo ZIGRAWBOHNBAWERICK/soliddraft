@@ -24,8 +24,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
-#[path = "render_steps.rs"]
-pub mod render_steps;
+#[path = "ribbon.rs"]
+mod ribbon;
+
+pub use ribbon::render_steps;
 
 pub type App = Harness<'static, SolidDraftApp>;
 
@@ -47,7 +49,7 @@ impl Case {
     /// A case with no renderer: the settings file alone.
     pub fn settings(name: &str) -> Self {
         let serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/viewport-acceptance").join(name);
+        let dir = ribbon::target_dir().join("viewport-acceptance").join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("config")).unwrap();
         let log = std::fs::File::create(dir.join("run.log")).unwrap();
@@ -314,6 +316,12 @@ pub fn click_button(app: &mut App, label: &str) {
     app.run_steps(4);
     app.get_all_by_role_and_label(role, label).next().unwrap_or_else(|| panic!("missing button {label}")).click();
     settle(app);
+}
+
+/// Clicks a registered ribbon command after revealing its collapsed group.
+pub fn click_ribbon_command(app: &mut App, id: &str) {
+    let point = ribbon::reveal_ribbon_command(app, id).rect.center();
+    click(app, point);
 }
 
 /// Two clicks on a row, close enough to be a double click.

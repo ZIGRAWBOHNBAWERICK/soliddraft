@@ -5,6 +5,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -130,6 +131,27 @@ class Balancing(unittest.TestCase):
         with self.assertRaises(ValueError):
             partition(['a', 'a'], {}, 2)
 
+    def test_platform_uses_its_measured_durations(self):
+        from balance import timing_path
+        for platform, filename in (('darwin', 'test-durations-macos.json'), ('linux', 'test-durations.json')):
+            with mock.patch('balance.sys.platform', platform):
+                self.assertEqual(timing_path(), ROOT / 'ci' / filename)
+
+    def test_duration_record_uses_median_and_excludes_ignored_cases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            paths = []
+            for index, seconds in enumerate((100, 1, 2)):
+                path = root / f'{index}.xml'
+                path.write_text(f'<testsuites><testsuite><testcase classname="binary" name="live" time="{seconds}"/>'
+                                '<testcase classname="binary" name="ignored" time="99"><skipped/></testcase>'
+                                '</testsuite></testsuites>')
+                paths.append(str(path))
+            output = root / 'durations.json'
+            subprocess.run([sys.executable, str(ROOT / 'ci/balance.py'), 'record', '--source',
+                            'https://github.com/example/run', '--output', str(output), *paths], check=True)
+            self.assertEqual(json.loads(output.read_text())['seconds'], {'binary\tlive': 2.0})
+
     def test_live_inventory_preserves_filters_and_ignored_tests(self):
         listing = {'rust-suites': {'crate::test': {'testcases': {
             'run': {'ignored': False, 'filter-match': {'status': 'matches'}},
@@ -162,7 +184,7 @@ class Balancing(unittest.TestCase):
             invoke.assert_not_called()
 
     def test_pinned_duration_data_has_valid_positive_weights(self):
-        for name in ('test-durations.json', 'scenario-durations.json'):
+        for name in ('test-durations.json', 'test-durations-macos.json', 'scenario-durations.json'):
             data = json.loads((ROOT / 'ci' / name).read_text())
             self.assertTrue(data['seconds'])
             self.assertIn('https://github.com/', data['source'])

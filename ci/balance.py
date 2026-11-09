@@ -7,7 +7,9 @@ import json
 import math
 import pathlib
 import re
+import statistics
 import subprocess
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
@@ -32,7 +34,7 @@ def binary_partition(items, timings, count):
     if len(items) != len(set(items)):
         raise ValueError('duplicate inventory')
     groups, weights = {}, {}
-    for item in items:
+    for item in sorted(items):
         binary = item.split('\t', 1)[0]
         duration = timings.get(item, 1.0)
         if not math.isfinite(duration) or duration < 0:
@@ -74,6 +76,11 @@ def inventory_digest(items):
     return hashlib.sha256(json.dumps(sorted(items)).encode()).hexdigest()
 
 
+def timing_path():
+    name = 'test-durations-macos.json' if sys.platform == 'darwin' else 'test-durations.json'
+    return ROOT / 'ci' / name
+
+
 def run_shard(archive, shard, metadata=None, full_inventory=None):
     index, count = map(int, shard.split('/'))
     if not 1 <= index <= count:
@@ -85,7 +92,7 @@ def run_shard(archive, shard, metadata=None, full_inventory=None):
     listing = json.loads(result.stdout)
     local_items = inventory(listing)
     items = inventory(json.loads(full_inventory.read_text())) if full_inventory else local_items
-    timings = json.loads((ROOT / 'ci/test-durations.json').read_text())['seconds']
+    timings = json.loads(timing_path().read_text())['seconds']
     assign = binary_partition if full_inventory else partition
     shards, loads = assign(items, timings, count)
     chosen = shards[index - 1]
@@ -172,11 +179,13 @@ def main():
             raise ValueError('no scenario timings in log')
         args.output.write_text(json.dumps({'source': args.source, 'seconds': dict(sorted(timings.items()))}, indent=2) + '\n')
         return 0
+    samples = {}
     for path in args.junit:
         for test in ET.parse(path).getroot().iter('testcase'):
             if test.find('skipped') is None:
                 key = test.attrib['classname'] + '\t' + test.attrib['name']
-                timings[key] = max(timings.get(key, 0), float(test.attrib['time']))
+                samples.setdefault(key, []).append(float(test.attrib['time']))
+    timings = {key: statistics.median(values) for key, values in samples.items()}
     args.output.write_text(json.dumps({'source': args.source, 'seconds': dict(sorted(timings.items()))}, indent=2) + '\n')
     return 0
 

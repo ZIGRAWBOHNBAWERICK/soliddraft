@@ -20,6 +20,9 @@
       "test-linux",
       "test-macos"
     ],
+    "ci/test-durations-macos.json": [
+      "test-macos"
+    ],
     "ci/scenario-durations.json": [
       "application-loop"
     ],

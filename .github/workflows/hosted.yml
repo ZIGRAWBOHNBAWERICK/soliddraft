@@ -227,6 +227,7 @@ jobs:
           shared-key: native-test-opt2
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/compile-cache
+        if: runner.environment == 'github-hosted'
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
         with:

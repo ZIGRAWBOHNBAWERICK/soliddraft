@@ -141,39 +141,42 @@ fn line_direction_filters_preview_commit_and_cancel_through_native_input() {
     let guide = s.add(EntityKind::Line { a: p(-14.0, -8.0), b: p(-4.0, -3.0) }, true);
     let circle = s.add(EntityKind::Circle { center: p(6.0, -6.0), radius: 3.0 }, true);
     let mut app = launch(s, Tool::Line);
-    for (filter, start, end, snap) in [
-        (SnapFilter::Parallel, p(-8.0, -1.0), p(2.0, 4.05), Snap::Parallel(guide)),
-        (SnapFilter::Perpendicular, p(-5.0, -3.0), p(-8.95, 5.0), Snap::Perpendicular(guide)),
-        (SnapFilter::Tangent, p(9.0, -6.0), p(9.05, 4.0), Snap::Tangent(circle)),
-    ] {
-        app.state_mut().state.push(AppAction::SketchTool(Tool::Line));
-        app.run_steps(4);
-        quick(&mut app, if filter == SnapFilter::Tangent { SnapFilter::On } else { SnapFilter::None });
-        pick(&mut app, start);
-        quick(&mut app, filter);
-        let before = session(&app).sketch.clone();
-        hover(&mut app, end);
-        proof(&mut app, filter.label());
-        assert_eq!(session(&app).snaps, vec![snap]);
-        assert_eq!(session(&app).sketch, before);
-        pick(&mut app, end);
-        assert_eq!(session(&app).quick_snap, None);
-        assert!(session(&app).sketch.constraints.iter().any(|c| match (filter, &c.kind) {
-            (SnapFilter::Parallel, ConstraintKind::Parallel { a, .. }) => *a == guide,
-            (SnapFilter::Perpendicular, ConstraintKind::Perpendicular { a, .. }) => *a == guide,
-            (SnapFilter::Tangent, ConstraintKind::Tangent { a, .. }) => *a == circle,
-            _ => false,
-        }));
-        let committed = session(&app).sketch.clone();
-        quick(&mut app, filter);
-        app.key_press(Key::Escape);
-        app.run_steps(6);
-        assert_eq!(session(&app).quick_snap, None);
-        assert_eq!(session(&app).sketch, committed);
-        app.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
-        app.run_steps(8);
-        assert_eq!(session(&app).sketch.entities, before.entities);
-        assert_eq!(session(&app).sketch.constraints, before.constraints);
+    for tool in [Tool::Line, Tool::Centreline] {
+        for (filter, start, end, snap) in [
+            (SnapFilter::Parallel, p(-8.0, -1.0), p(2.0, 4.05), Snap::Parallel(guide)),
+            (SnapFilter::Perpendicular, p(-5.0, -3.0), p(-8.95, 5.0), Snap::Perpendicular(guide)),
+            (SnapFilter::Tangent, p(9.0, -6.0), p(9.05, 4.0), Snap::Tangent(circle)),
+        ] {
+            app.state_mut().state.push(AppAction::SketchTool(tool));
+            app.run_steps(4);
+            quick(&mut app, if filter == SnapFilter::Tangent { SnapFilter::On } else { SnapFilter::None });
+            pick(&mut app, start);
+            quick(&mut app, filter);
+            let before = session(&app).sketch.clone();
+            hover(&mut app, end);
+            proof(&mut app, filter.label());
+            assert_eq!(session(&app).snaps, vec![snap]);
+            assert_eq!(session(&app).sketch, before);
+            pick(&mut app, end);
+            assert_eq!(session(&app).quick_snap, None);
+            assert_eq!(session(&app).sketch.drawn().last().unwrap().construction, tool == Tool::Centreline);
+            assert!(session(&app).sketch.constraints.iter().any(|c| match (filter, &c.kind) {
+                (SnapFilter::Parallel, ConstraintKind::Parallel { a, .. }) => *a == guide,
+                (SnapFilter::Perpendicular, ConstraintKind::Perpendicular { a, .. }) => *a == guide,
+                (SnapFilter::Tangent, ConstraintKind::Tangent { a, .. }) => *a == circle,
+                _ => false,
+            }));
+            let committed = session(&app).sketch.clone();
+            quick(&mut app, filter);
+            app.key_press(Key::Escape);
+            app.run_steps(6);
+            assert_eq!(session(&app).quick_snap, None);
+            assert_eq!(session(&app).sketch, committed);
+            app.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+            app.run_steps(8);
+            assert_eq!(session(&app).sketch.entities, before.entities);
+            assert_eq!(session(&app).sketch.constraints, before.constraints);
+        }
     }
     drop(app);
     soliddraft_app::file::set_config_dir(None);

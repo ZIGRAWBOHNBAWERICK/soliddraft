@@ -179,7 +179,7 @@ pub fn run(
                 let filter = s.quick_snap.unwrap_or(if s.auto_relations { SnapFilter::All } else { SnapFilter::None });
                 let options = InferenceOptions {
                     filter,
-                    directions: s.tool == Tool::Line,
+                    directions: s.tool.draws_line(),
                     point_reach: f64::from(POINT_REACH),
                     curve_reach: f64::from(CURVE_REACH),
                     align_reach: f64::from(ALIGN_REACH),
@@ -957,7 +957,7 @@ fn draw_click(
             solve::solve(&mut s.sketch, None, analyse);
             commit(s, actions);
         }
-        Tool::Line => {
+        Tool::Line | Tool::Centreline => {
             if double {
                 // A double click ends the chain; the first click of it already landed.
                 s.pending.clear();
@@ -971,7 +971,7 @@ fn draw_click(
                         s.pending.push((a, a_snaps));
                         return;
                     }
-                    let id = s.sketch.add(EntityKind::Line { a, b: p }, s.construction);
+                    let id = s.sketch.add(EntityKind::Line { a, b: p }, s.draws_construction());
                     apply_snaps(&mut s.sketch, PointRef::new(id, 0), &a_snaps, Some(id));
                     apply_snaps(&mut s.sketch, PointRef::new(id, 1), &snaps, Some(id));
                     solve::solve(&mut s.sketch, None, analyse);
@@ -1947,7 +1947,15 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
                 seg(*c, p);
             }
         }
-        (Tool::Line, [(a, _)]) => seg(*a, p),
+        (Tool::Line | Tool::Centreline, [(a, _)]) => {
+            if s.draws_construction() {
+                if let (Some(a), Some(b)) = (frame.screen(*a), frame.screen(p)) {
+                    dashed(painter, &[a, b], st);
+                }
+            } else {
+                seg(*a, p);
+            }
+        }
         (Tool::Rectangle, [(a, _)]) => {
             let c = [*a, P2::new(p.u, a.v), p, P2::new(a.u, p.v)];
             for i in 0..4 {
@@ -2107,9 +2115,11 @@ fn paint_snaps(
         return;
     }
     let accent = theme::accent();
-    // Inference lines back to the previous point.
+    // Construction line previews already show this path. A second dash period
+    // would fill their gaps; keep the inference badges below without the overlay.
     if let Some((prev, _)) = s.pending.last()
         && let Some(sprev) = frame.screen(*prev)
+        && !(s.tool.draws_line() && s.draws_construction())
     {
         for snap in &s.snaps {
             if matches!(
@@ -2284,6 +2294,8 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Select, _) => "Click to select, drag to move, double-click a dimension to edit",
         (Tool::Line, 0) => "Line: click the start point",
         (Tool::Line, _) => "Line: click the end point; right-click or Esc ends the chain",
+        (Tool::Centreline, 0) => "Centreline: click the start point",
+        (Tool::Centreline, _) => "Centreline: click the end point; right-click or Esc ends the chain",
         (Tool::Rectangle, 0) => "Rectangle: click the first corner",
         (Tool::Rectangle, _) => "Rectangle: click the opposite corner",
         (Tool::Ellipse | Tool::PartialEllipse, 0) => "Ellipse: click the centre",

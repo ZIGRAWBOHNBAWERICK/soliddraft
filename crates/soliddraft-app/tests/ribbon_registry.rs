@@ -483,6 +483,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                 "Draw",
                 &[
                     "sketch_line",
+                    "sketch_centreline",
                     "sketch_circle",
                     "sketch_ellipse",
                     "sketch_partial_ellipse",

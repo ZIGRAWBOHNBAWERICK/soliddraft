@@ -399,6 +399,8 @@ impl FeatureEditor {
 pub enum Tool {
     Select,
     Line,
+    /// A construction line, independent of the session's ordinary drawing mode.
+    Centreline,
     Rectangle,
     Circle,
     Ellipse,
@@ -448,6 +450,7 @@ impl Tool {
         match self {
             Tool::Select => "Select",
             Tool::Line => "Line",
+            Tool::Centreline => "Centreline",
             Tool::Rectangle => "Rectangle",
             Tool::Circle => "Circle",
             Tool::Ellipse => "Ellipse",
@@ -476,11 +479,17 @@ impl Tool {
         }
     }
 
+    /// Tools that share chained line placement and directional inference.
+    pub fn draws_line(self) -> bool {
+        matches!(self, Tool::Line | Tool::Centreline)
+    }
+
     /// Tools that place points with the sketcher's inference, one click at a time.
     pub fn places_points(self) -> bool {
         matches!(
             self,
             Tool::Line
+                | Tool::Centreline
                 | Tool::Rectangle
                 | Tool::Circle
                 | Tool::Ellipse
@@ -813,6 +822,11 @@ impl SketchSession {
 
     /// Picks a tool. Whatever the old tool had started is dropped. A tool that works on
     /// the selection keeps it, so entities picked first are its input.
+    /// Effective construction mode without changing the ordinary drawing preference.
+    pub fn draws_construction(&self) -> bool {
+        self.construction || self.tool == Tool::Centreline
+    }
+
     pub fn set_tool(&mut self, tool: Tool) {
         self.modify.offset_group = None;
         if tool == Tool::Select {

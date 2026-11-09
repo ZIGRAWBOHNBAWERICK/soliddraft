@@ -22,6 +22,7 @@ fn a_circular_offset_follows_radius_edits_and_refuses_negative_radii() {
         reverse: false,
         opposite: false,
         ends: [None; 2],
+        join: None,
     });
     solved(&mut s);
     assert!((s.entity(b).unwrap().radius().unwrap() - 3.0).abs() < 1e-6);
@@ -316,6 +317,66 @@ fn ordinary_miter_joins_are_not_locked_to_source_normals() {
             ConstraintKind::Offset { a: 1, ends, .. } => assert!(ends[1].is_none()),
             ConstraintKind::Offset { a: 2, ends, .. } => assert!(ends[0].is_none()),
             _ => {}
+        }
+    }
+}
+
+#[test]
+fn join_anchors_follow_constraint_driven_straight_corner_transitions() {
+    for reverse_a in [false, true] {
+        for reverse_b in [false, true] {
+            for both_sides in [false, true] {
+                for initially_straight in [false, true] {
+                    let mut s = Sketch::new();
+                    let end = if initially_straight { p(20.0, 0.0) } else { p(10.0, 10.0) };
+                    for (a, b, reverse) in [(p(0.0, 0.0), p(10.0, 0.0), reverse_a), (p(10.0, 0.0), end, reverse_b)] {
+                        let (a, b) = if reverse { (b, a) } else { (a, b) };
+                        let id = s.add(EntityKind::Line { a, b }, false);
+                        for (index, at) in [(0, a), (1, b)] {
+                            s.constrain(ConstraintKind::Fix { point: PointRef::new(id, index), at });
+                        }
+                    }
+                    let ids = s
+                        .apply_operation(&Operation::Offset {
+                            entities: vec![1],
+                            distance: 2.0,
+                            options: OffsetOptions { chain: true, both_sides, ..Default::default() },
+                        })
+                        .unwrap();
+                    solved(&mut s);
+                    for straight in [!initially_straight, initially_straight] {
+                        let point = PointRef::new(2, u8::from(!reverse_b));
+                        let at = if straight { p(20.0, 0.0) } else { p(10.0, 10.0) };
+                        s.constraints
+                            .iter_mut()
+                            .find(|c| matches!(c.kind, ConstraintKind::Fix { point: r, .. } if r==point))
+                            .unwrap()
+                            .kind = ConstraintKind::Fix { point, at };
+                        // Geometry still has its previous angle when solve starts.
+                        solved(&mut s);
+                        for side in 0..if both_sides { 2 } else { 1 } {
+                            let negative = reverse_a != (side == 1);
+                            let expected = if straight {
+                                p(10.0, if negative { -2.0 } else { 2.0 })
+                            } else if negative {
+                                p(12.0, -2.0)
+                            } else {
+                                p(8.0, 2.0)
+                            };
+                            for point in [PointRef::new(ids[side * 2], 1), PointRef::new(ids[side * 2 + 1], 0)] {
+                                assert!(
+                                    s.point(point).unwrap().dist(expected) < 1e-6,
+                                    "straight={straight}, reversed=({reverse_a},{reverse_b}), side={side}: {:?} expected {expected:?}",
+                                    s.point(point)
+                                );
+                            }
+                        }
+                        let mut reopened: Sketch = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+                        solved(&mut reopened);
+                        assert_eq!(s.constraints, reopened.constraints);
+                    }
+                }
+            }
         }
     }
 }

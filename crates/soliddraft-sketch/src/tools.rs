@@ -5,7 +5,7 @@ use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, P2, PointRef, Sketch};
+use crate::{Constraint, ConstraintKind, Entity, EntityId, EntityKind, ORIGIN, OffsetJoin, P2, PointRef, Sketch};
 
 mod finishing;
 pub use finishing::{ChamferSize, JunctionPreview, SplitPreview};

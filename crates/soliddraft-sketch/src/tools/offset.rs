@@ -270,18 +270,19 @@ impl Sketch {
                 let kind = geometry[target].0;
                 let target_reverse = *reverse && matches!(kind, EntityKind::Arc { .. });
                 let mut locks = [None; 2];
-                let collinear_join = if i + 1 < count || closed {
-                    match (e.kind, source[(i + 1) % count].0.kind) {
-                        (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => {
-                            (b - a).normalized().cross((d - c).normalized()).abs() <= 1e-12
-                        }
-                        _ => false,
-                    }
-                } else {
-                    false
-                };
-                for (end, active) in [(false, !closed && i == 0), (true, (!closed && i + 1 == count) || collinear_join)]
+                let join = if (i + 1 < count || closed)
+                    && matches!(e.kind, EntityKind::Line { .. })
+                    && source[(i + 1) % count].0.is_line()
                 {
+                    Some(OffsetJoin {
+                        neighbor: source[(i + 1) % count].0.id,
+                        source: PointRef::new(e.id, endpoint(e.kind, *reverse, true)),
+                        target: PointRef::new(id(target), endpoint(kind, target_reverse, true)),
+                    })
+                } else {
+                    None
+                };
+                for (end, active) in [(false, !closed && i == 0), (true, !closed && i + 1 == count)] {
                     if active {
                         locks[usize::from(end)] = Some((
                             PointRef::new(e.id, endpoint(e.kind, *reverse, end)),
@@ -297,6 +298,7 @@ impl Sketch {
                     reverse: *reverse,
                     opposite: side == 1,
                     ends: locks,
+                    join,
                 });
                 if !circle && (i + 1 < count || closed) {
                     let next = side * count + (i + 1) % count;
@@ -442,7 +444,7 @@ impl Sketch {
         }
         for kind in plan.relations {
             let (kind, owner) = match kind {
-                ConstraintKind::Offset { a, b, distance, reverse, opposite, ends, .. } => (
+                ConstraintKind::Offset { a, b, distance, reverse, opposite, ends, join, .. } => (
                     ConstraintKind::Offset {
                         a,
                         b: map(b),
@@ -451,6 +453,11 @@ impl Sketch {
                         reverse,
                         opposite,
                         ends: ends.map(|pair| pair.map(|(a, b)| (reference(a), reference(b)))),
+                        join: join.map(|j| OffsetJoin {
+                            neighbor: j.neighbor,
+                            source: reference(j.source),
+                            target: reference(j.target),
+                        }),
                     },
                     Some(map(b)),
                 ),

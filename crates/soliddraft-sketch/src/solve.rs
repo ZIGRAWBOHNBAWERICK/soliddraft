@@ -102,6 +102,34 @@ fn line_equation(a: P2, b: P2) -> (f64, f64, f64) {
 /// Solves the sketch in place. `analyse` also computes which entities are
 /// still free, which is the expensive part; skip it while dragging.
 pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
+    let conditional = sketch.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Offset { join: Some(_), .. }));
+    if conditional {
+        // Let driving constraints change source angles before choosing the internal anchors.
+        solve_inner(sketch, drag, false, &[]);
+        if matches!(sketch.status, SolveStatus::Failed(_)) {
+            return;
+        }
+    }
+    let anchors = offset_join_anchors(sketch);
+    solve_inner(sketch, drag, analyse, &anchors);
+}
+
+fn offset_join_anchors(sketch: &Sketch) -> Vec<ConstraintId> {
+    sketch
+        .constraints
+        .iter()
+        .filter_map(|c| {
+            let ConstraintKind::Offset { a, join: Some(join), .. } = c.kind else { return None };
+            let EntityKind::Line { a: start, b: end } = sketch.entity(a)?.kind else { return None };
+            let EntityKind::Line { a: next_start, b: next_end } = sketch.entity(join.neighbor)?.kind else {
+                return None;
+            };
+            ((end - start).normalized().cross((next_end - next_start).normalized()).abs() <= 1e-8).then_some(c.id)
+        })
+        .collect()
+}
+
+fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: &[ConstraintId]) {
     if sketch.is_empty() {
         sketch.status = SolveStatus::Empty;
         sketch.free.clear();
@@ -288,7 +316,7 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
                     reqs.push(Constraint::Fixed(circle.radius.id, radius));
                 }
             }
-            ConstraintKind::Offset { a, b, distance, reverse, opposite, ends, .. } => {
+            ConstraintKind::Offset { a, b, distance, reverse, opposite, ends, join, .. } => {
                 let distance = distance * if reverse { -1.0 } else { 1.0 } * if opposite { -1.0 } else { 1.0 };
                 if let (Some(first), Some(second)) = (datums.get(&a).copied(), datums.get(&b).copied()) {
                     if let (Some(source), Some(_)) = (first.line(), second.line()) {
@@ -297,7 +325,8 @@ pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
                                 reqs.push(Constraint::PointLineDistance(point, source, distance));
                             }
                         }
-                        for (from, to) in ends.into_iter().flatten() {
+                        let internal = join.filter(|_| anchors.contains(&c.id)).map(|j| (j.source, j.target));
+                        for (from, to) in ends.into_iter().flatten().chain(internal) {
                             if let (Some(p), Some(q)) = (pt(&vars, from), pt(&vars, to)) {
                                 reqs.push(Constraint::LinesAtAngle(
                                     source,

@@ -351,3 +351,57 @@ fn collinear_offset_join_cannot_be_dragged_beyond_its_neighbor() {
     drop(app);
     soliddraft_app::file::set_config_dir(None);
 }
+
+#[test]
+fn a_collinear_offset_accepts_a_constraint_driven_source_corner() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut sketch = Sketch::new();
+    fixed_segment(&mut sketch, p(0.0, 0.0), p(10.0, 0.0));
+    fixed_segment(&mut sketch, p(10.0, 0.0), p(20.0, 0.0));
+    let mut app = review_app(sketch, "source-corner");
+    pick(&mut app, p(5.0, 0.0));
+    ribbon::click_ribbon(&mut app, "Offset");
+    distance(&mut app, 2.0);
+    button(&mut app, "Apply");
+    app.key_press(Key::Escape);
+    app.run_steps(6);
+    let before = session(&app).sketch.clone();
+    let mut edited = before.clone();
+    for c in &mut edited.constraints {
+        if let ConstraintKind::Fix { point, .. } = c.kind
+            && point == PointRef::new(2, 1)
+        {
+            c.kind = ConstraintKind::Fix { point, at: p(10.0, 10.0) };
+        }
+    }
+    // Change only the driving constraint. The solver must discover the new source angle.
+    solve::solve(&mut edited, None, true);
+    let id = session(&app).feature;
+    app.state_mut().state.sketch.as_mut().unwrap().sketch = edited.clone();
+    app.state_mut().state.push(AppAction::Command(Command::EditSketch { id, sketch: edited }));
+    app.run_steps(6);
+    proof(&mut app, "straight-to-corner");
+    let s = &session(&app).sketch;
+    assert!(
+        !matches!(
+            s.status,
+            soliddraft_app::sketch::SolveStatus::Failed(_) | soliddraft_app::sketch::SolveStatus::OverDefined { .. }
+        ),
+        "valid source corner must solve: {:?}",
+        s.status
+    );
+    for point in [PointRef::new(3, 1), PointRef::new(4, 0)] {
+        assert!(
+            s.point(point).unwrap().dist(p(8.0, 2.0)) < 1e-6,
+            "miter follows changed source angle: {:?}",
+            s.point(point)
+        );
+    }
+    let after = s.clone();
+    undo(&mut app);
+    assert_eq!(session(&app).sketch, before);
+    redo(&mut app);
+    assert_eq!(session(&app).sketch, after);
+    drop(app);
+    soliddraft_app::file::set_config_dir(None);
+}

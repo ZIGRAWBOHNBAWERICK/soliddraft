@@ -18,6 +18,47 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+class TestCommandWrapper(unittest.TestCase):
+    def test_optional_arguments_and_failures_reach_the_python_runner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            subprocess.run(['git', 'init', '-q', root], check=True)
+            (root / 'ci').mkdir()
+            shutil.copy2(ROOT / 'ci/run', root / 'ci/run')
+            binaries = root / 'bin'
+            binaries.mkdir()
+            python = binaries / 'python3'
+            python.write_text(f'#!{sys.executable}\n'
+                              'import json, os, pathlib, sys\n'
+                              'pathlib.Path(os.environ["WRAPPER_LOG"]).write_text(json.dumps(sys.argv[1:]))\n'
+                              'sys.exit(int(os.environ["WRAPPER_EXIT"]))\n')
+            python.chmod(0o755)
+            log = root / 'arguments.json'
+            cases = [
+                (['test-build', 'test archive.tar.zst'],
+                 ['ci/run-selected.py', 'test-build', 'test archive.tar.zst']),
+                (['test-build', 'test archive.tar.zst', 'selected work.json'],
+                 ['ci/run-selected.py', 'test-build', 'test archive.tar.zst', '--selection', 'selected work.json']),
+                (['test-doc'], ['ci/run-selected.py', 'test-doc']),
+                (['test-doc', 'selected work.json'],
+                 ['ci/run-selected.py', 'test-doc', '--selection', 'selected work.json']),
+                (['test-shard', 'test archive.tar.zst', '1/2'],
+                 ['ci/balance.py', 'run', 'test archive.tar.zst', '1/2']),
+                (['test-shard', 'test archive.tar.zst', '1/2', 'case report.json'],
+                 ['ci/balance.py', 'run', 'test archive.tar.zst', '1/2', '--metadata', 'case report.json']),
+            ]
+            for arguments, expected in cases:
+                for code in (0, 7):
+                    with self.subTest(arguments=arguments, code=code):
+                        log.unlink(missing_ok=True)
+                        env = dict(os.environ, PATH=f'{binaries}:{os.environ["PATH"]}',
+                                   WRAPPER_LOG=str(log), WRAPPER_EXIT=str(code))
+                        result = subprocess.run([root / 'ci/run', *arguments], cwd=root / 'ci',
+                                                env=env, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, code, result.stderr)
+                        self.assertEqual(json.loads(log.read_text()), expected)
+
+
 class LintHook(unittest.TestCase):
     def test_hook_runs_from_a_subdirectory_and_propagates_failures(self):
         with tempfile.TemporaryDirectory() as temporary:

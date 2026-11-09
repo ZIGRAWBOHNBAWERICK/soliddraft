@@ -5,6 +5,7 @@ cd "$root"
 
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 
+# Bash 3.2 treats empty arrays as unset under nounset, so guard optional arguments.
 case "${1:-}" in
   lint)
     cargo fmt --all --check
@@ -16,20 +17,20 @@ case "${1:-}" in
     export CARGO_PROFILE_TEST_OPT_LEVEL=2
     selection=()
     if [[ $# -eq 3 ]]; then selection=(--selection "$3"); fi
-    python3 ci/run-selected.py test-build "$2" "${selection[@]}"
+    python3 ci/run-selected.py test-build "$2" ${selection[@]+"${selection[@]}"}
     ;;
   test-doc)
     export CARGO_PROFILE_TEST_OPT_LEVEL=2
     [[ $# -eq 1 || $# -eq 2 ]]
     selection=()
     if [[ $# -eq 2 ]]; then selection=(--selection "$2"); fi
-    python3 ci/run-selected.py test-doc "${selection[@]}"
+    python3 ci/run-selected.py test-doc ${selection[@]+"${selection[@]}"}
     ;;
   test-shard)
     [[ $# -eq 3 || $# -eq 4 ]]
     metadata=()
     if [[ $# -eq 4 ]]; then metadata=(--metadata "$4"); fi
-    python3 ci/balance.py run "$2" "$3" "${metadata[@]}"
+    python3 ci/balance.py run "$2" "$3" ${metadata[@]+"${metadata[@]}"}
     ;;
   *)
     echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N [METADATA]" >&2

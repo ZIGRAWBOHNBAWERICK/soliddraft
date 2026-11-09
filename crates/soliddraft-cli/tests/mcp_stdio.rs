@@ -191,6 +191,11 @@ fn finishing_scenario_builds_and_reopens_through_the_application_protocol() {
     replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-fillet-chamfer-split.json"));
 }
 
+#[test]
+fn linked_mirror_scenario_builds_and_reopens_through_the_application_protocol() {
+    replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-linked-mirror.json"));
+}
+
 fn replay_sketch_volume_scenario(source: &str) {
     let mut c = Client::start(&["mcp"]);
     c.request(

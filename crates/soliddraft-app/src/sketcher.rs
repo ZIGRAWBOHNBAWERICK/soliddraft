@@ -168,6 +168,7 @@ pub fn run(
     let picks = s.tool.picks_curve();
     let copy_places = (matches!(s.tool, Tool::Mirror | Tool::LinearPattern | Tool::CircularPattern)
         || s.tool.transforms())
+        && (s.tool != Tool::Mirror || s.modify.mirror_axis.is_none())
         && !sketch_tools::selected_in_order(s).is_empty()
         && !ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
     let mut snapped: Option<P2> = None;
@@ -285,6 +286,8 @@ pub fn run(
         }
     }
 
+    s.dynamic_preview = dynamic_preview(s, snapped);
+
     // Drawing.
     paint_plane(&painter, &frame, doc, &s.sketch);
     paint_regions(&painter, &frame, &s.sketch);
@@ -292,6 +295,26 @@ pub fn run(
     paint_glyphs(&painter, s, &glyphs);
     paint_dimensions(&painter, &frame, s);
     paint_rubber_band(&painter, &frame, s, snapped);
+    for (kind, construction) in &s.dynamic_preview {
+        let entity = Entity { id: 0, kind: *kind, construction: *construction };
+        let points: Vec<_> = entity.polyline(64).into_iter().filter_map(|p| frame.screen(p)).collect();
+        if points.len() == 1 {
+            painter.circle_stroke(points[0], 4.0, Stroke::new(1.5, theme::accent()));
+        } else if *construction {
+            painter.extend(egui::Shape::dashed_line(&points, Stroke::new(1.5, theme::accent()), 6.0, 4.0));
+        } else if points.len() > 1 {
+            painter.add(egui::Shape::line(points, Stroke::new(1.5, theme::accent())));
+        }
+    }
+    if let Some(axis) = s.dynamic_mirror {
+        painter.text(
+            pos2(rect.left() + 18.0, rect.bottom() - 48.0),
+            Align2::LEFT_BOTTOM,
+            format!("Dynamic mirror · Line {axis} · Esc stops"),
+            theme::font_semibold(11.0),
+            theme::accent(),
+        );
+    }
     paint_tool_preview(&painter, &frame, s);
     paint_diagnostics(&painter, &frame, s);
     if let Some(drag) = &s.trim_drag
@@ -406,7 +429,12 @@ fn copy_input(
     if !clicked {
         return;
     }
-    if modifiers.ctrl || modifiers.shift || sketch_tools::selected_in_order(s).is_empty() || s.tool == Tool::Offset {
+    if modifiers.ctrl
+        || modifiers.shift
+        || sketch_tools::selected_in_order(s).is_empty()
+        || s.tool == Tool::Offset
+        || (s.tool == Tool::Mirror && s.modify.mirror_axis.is_some())
+    {
         if let Some(h) = resp.hover_pos().and_then(|pos| hit_test(frame, &s.sketch, pos, &[])) {
             if modifiers.ctrl || modifiers.shift {
                 let entity = |pick: &SketchSel| match pick {
@@ -842,11 +870,91 @@ fn curve_preview(s: &SketchSession, frame: &Frame<'_>, pos: Pos2) -> Option<Tool
 
 /// A click with a drawing tool.
 fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, actions: &mut Vec<AppAction>) {
+    mirrored_placement(s, p, snaps, double, actions, true);
+}
+
+fn mirrored_placement(
+    s: &mut SketchSession,
+    p: P2,
+    snaps: Vec<Snap>,
+    double: bool,
+    actions: &mut Vec<AppAction>,
+    analyse: bool,
+) -> Vec<EntityId> {
+    let Some(axis) = s.dynamic_mirror.filter(|_| s.tool.places_points()) else {
+        draw_click(s, p, snaps, double, actions, analyse);
+        return Vec::new();
+    };
+    if matches!(s.tool, Tool::Ellipse | Tool::PartialEllipse) {
+        s.say("Stop dynamic mirror with Esc before drawing an ellipse");
+        return Vec::new();
+    }
+    if !s.sketch.entity(axis).is_some_and(|e| e.is_line()) {
+        s.dynamic_mirror = None;
+        draw_click(s, p, snaps, double, actions, analyse);
+        s.say("Dynamic mirror stopped: its axis no longer exists");
+        return Vec::new();
+    }
+    let checkpoint = s.sketch.clone();
+    let pending = s.pending.clone();
+    let chain = s.chain_from;
+    let first_action = actions.len();
+    draw_click(s, p, snaps, double, actions, false);
+    let entities: Vec<_> = s.sketch.drawn().filter(|e| checkpoint.entity(e.id).is_none()).map(|e| e.id).collect();
+    if entities.is_empty() {
+        return Vec::new();
+    }
+    let operation =
+        Operation::MirrorLinked { entities, axis: crate::sketch::tools::MirrorAxis::Entity { entity: axis } };
+    match s.sketch.apply_operation(&operation) {
+        Ok(ids) => {
+            solve::solve(&mut s.sketch, None, analyse);
+            for action in &mut actions[first_action..] {
+                if let AppAction::Command(Command::EditSketch { sketch, .. }) = action {
+                    *sketch = s.sketch.clone();
+                }
+            }
+            ids
+        }
+        Err(error) => {
+            s.sketch = checkpoint;
+            s.pending = pending;
+            s.chain_from = chain;
+            actions.truncate(first_action);
+            s.say(error.to_string());
+            Vec::new()
+        }
+    }
+}
+
+fn dynamic_preview(s: &SketchSession, p: Option<P2>) -> Vec<(EntityKind, bool)> {
+    let Some(p) = p.filter(|_| s.dynamic_mirror.is_some() && s.tool.places_points()) else {
+        return Vec::new();
+    };
+    let mut copy = SketchSession::new(s.feature, s.plane, s.sketch.clone(), s.was_orthographic);
+    copy.tool = s.tool;
+    copy.pending = s.pending.clone();
+    copy.chain_from = s.chain_from;
+    copy.construction = s.construction;
+    copy.modify = s.modify.clone();
+    copy.dynamic_mirror = s.dynamic_mirror;
+    let ids = mirrored_placement(&mut copy, p, s.snaps.clone(), false, &mut Vec::new(), false);
+    ids.into_iter().filter_map(|id| copy.sketch.entity(id).map(|e| (e.kind, e.construction))).collect()
+}
+
+fn draw_click(
+    s: &mut SketchSession,
+    p: P2,
+    snaps: Vec<Snap>,
+    double: bool,
+    actions: &mut Vec<AppAction>,
+    analyse: bool,
+) {
     match s.tool {
         Tool::Point => {
             let id = s.sketch.add(EntityKind::Point { p }, false);
             apply_snaps(&mut s.sketch, PointRef::new(id, 0), &snaps, None);
-            solve::solve(&mut s.sketch, None, true);
+            solve::solve(&mut s.sketch, None, analyse);
             commit(s, actions);
         }
         Tool::Line => {
@@ -866,7 +974,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
                     let id = s.sketch.add(EntityKind::Line { a, b: p }, s.construction);
                     apply_snaps(&mut s.sketch, PointRef::new(id, 0), &a_snaps, Some(id));
                     apply_snaps(&mut s.sketch, PointRef::new(id, 1), &snaps, Some(id));
-                    solve::solve(&mut s.sketch, None, true);
+                    solve::solve(&mut s.sketch, None, analyse);
                     commit(s, actions);
                     let closed = snaps.iter().any(|x| matches!(x, Snap::Point(_)));
                     if closed {
@@ -905,7 +1013,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
                 };
                 apply_snaps(&mut s.sketch, PointRef::new(ids[0], 0), &keep(&a_snaps), None);
                 apply_snaps(&mut s.sketch, PointRef::new(ids[2], 0), &keep(&snaps), None);
-                solve::solve(&mut s.sketch, None, true);
+                solve::solve(&mut s.sketch, None, analyse);
                 commit(s, actions);
             }
         },
@@ -923,7 +1031,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
                 if let Some(Snap::Point(r)) = snaps.iter().find(|x| matches!(x, Snap::Point(_))) {
                     s.sketch.constrain(ConstraintKind::PointOn { point: *r, entity: id });
                 }
-                solve::solve(&mut s.sketch, None, true);
+                solve::solve(&mut s.sketch, None, analyse);
                 commit(s, actions);
             }
         },
@@ -953,7 +1061,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
             apply_snaps(&mut s.sketch, PointRef::new(id, 0), &c_snaps, None);
             apply_snaps(&mut s.sketch, PointRef::new(id, 1), &a_snaps, None);
             apply_snaps(&mut s.sketch, PointRef::new(id, 2), &b_snaps, None);
-            solve::solve(&mut s.sketch, None, true);
+            solve::solve(&mut s.sketch, None, analyse);
             commit(s, actions);
         }
         Tool::Slot => {
@@ -997,7 +1105,7 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
             s.sketch.constrain(ConstraintKind::Equal { a: left, b: right });
             apply_snaps(&mut s.sketch, PointRef::new(axis, 0), &c0_snaps, Some(axis));
             apply_snaps(&mut s.sketch, PointRef::new(axis, 1), &c1_snaps, Some(axis));
-            solve::solve(&mut s.sketch, None, true);
+            solve::solve(&mut s.sketch, None, analyse);
             commit(s, actions);
         }
         Tool::Polygon => match s.pending.pop() {
@@ -1005,12 +1113,12 @@ fn tool_click(s: &mut SketchSession, p: P2, snaps: Vec<Snap>, double: bool, acti
             Some((c, c_snaps)) => {
                 let operation = Operation::Polygon { center: c, vertex: p, sides: s.modify.sides };
                 let before = s.sketch.entities.len();
-                if sketch_tools::apply(s, &operation, actions) {
+                if sketch_tools::apply_with_analysis(s, &operation, actions, analyse) {
                     // The first vertex keeps the relation its snap showed; the centre is
                     // not a point of the sketch.
                     if let Some(first) = s.sketch.entities.get(before).map(|e| e.id) {
                         apply_snaps(&mut s.sketch, PointRef::new(first, 0), &snaps, None);
-                        solve::solve(&mut s.sketch, None, true);
+                        solve::solve(&mut s.sketch, None, analyse);
                         if let Some(AppAction::Command(Command::EditSketch { sketch, .. })) = actions.last_mut() {
                             *sketch = s.sketch.clone();
                         }
@@ -2215,6 +2323,7 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::Trim, _) => "Trim: click or drag",
         (Tool::Extend, _) => "Extend: click the end of a line or arc to lengthen; Esc or right-click ends",
         (Tool::Offset, _) => "Offset: drag a selected curve to set distance and side, then Apply",
+        (Tool::Mirror, _) if s.modify.mirror_axis.is_some() => "Mirror: select entities, then Apply",
         (Tool::Mirror, 0) => "Mirror: click the axis start; Ctrl-click selects entities",
         (Tool::Mirror, 1) => "Mirror: click the axis end, then Apply",
         (Tool::Mirror, _) => "Mirror: axis placed; Apply adds the copies",

@@ -4,12 +4,49 @@
     "platforms": {
       "Linux-x86_64": {
         "target": "x86_64-unknown-linux-gnu",
-        "sha256": "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc"
+        "sha256": "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc",
+        "url": "https://api.github.com/repos/nextest-rs/nextest/releases/assets/620598748"
       },
       "Darwin": {
         "target": "universal-apple-darwin",
-        "sha256": "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b"
+        "sha256": "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b",
+        "url": "https://api.github.com/repos/nextest-rs/nextest/releases/assets/620608067"
       }
     }
+  },
+  "sccache": {
+    "version": "0.19.0",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-musl",
+        "sha256": "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd",
+        "url": "https://api.github.com/repos/mozilla/sccache/releases/assets/671951070"
+      }
+    }
+  },
+  "trunk": {
+    "version": "0.22.0",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-gnu",
+        "sha256": "f78c1989240c56592d8cfc4df5cc27399a3ff66a3f9cc819e16f1e3d809ce7c2",
+        "url": "https://api.github.com/repos/trunk-rs/trunk/releases/assets/658784835"
+      }
+    }
+  },
+  "trunk-release": {
+    "version": "0.21.14",
+    "binary": "trunk",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-gnu",
+        "sha256": "f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b",
+        "url": "https://api.github.com/repos/trunk-rs/trunk/releases/assets/252890635"
+      }
+    }
+  },
+  "cargo-packager": {
+    "version": "0.11.8",
+    "source": "cargo"
   }
 }

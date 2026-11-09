@@ -71,9 +71,9 @@ jobs:
         with:
           shared-key: native-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
+      - uses: ./.github/actions/pinned-tool
         with:
-          tool: cargo-packager@0.11.8
+          tool: cargo-packager
       - name: Install Linux packaging and software rendering dependencies
         if: runner.os == 'Linux'
         run: |
@@ -170,9 +170,9 @@ jobs:
         with:
           shared-key: wasm-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
+      - uses: ./.github/actions/pinned-tool
         with:
-          tool: trunk@0.21.14
+          tool: trunk-release
       - name: Build the browser application for a relative Pages path
         working-directory: crates/soliddraft-web
         env:

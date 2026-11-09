@@ -1,0 +1,32 @@
+name: Cached pinned tool
+description: Restore a verified pinned binary before downloading on a cache miss
+inputs:
+  tool:
+    required: true
+    description: Tool name in ci/tools
+runs:
+  using: composite
+  steps:
+    - id: tool
+      shell: bash
+      env:
+        TOOL: ${{ inputs.tool }}
+      run: python3 ci/install-tool.py "$GITHUB_WORKSPACE" --info "$TOOL"
+    - id: restore
+      if: steps.tool.outputs.installed != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.tool.outputs.prefix }}
+        key: ${{ steps.tool.outputs.cache-key }}
+    - shell: bash
+      env:
+        PREFIX: ${{ steps.tool.outputs.prefix }}
+        TOOL: ${{ inputs.tool }}
+      run: |
+        ci/bootstrap --tools "$PREFIX" "$TOOL"
+        echo "$PREFIX/bin" >> "$GITHUB_PATH"
+    - if: steps.tool.outputs.installed != 'true' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.tool.outputs.prefix }}
+        key: ${{ steps.tool.outputs.cache-key }}

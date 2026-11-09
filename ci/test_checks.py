@@ -302,7 +302,7 @@ class CiOnly(unittest.TestCase):
     def test_tool_installer_keeps_consumers_in_mixed_changes(self):
         self.assertEqual(set(self.select([['M', 'ci/bootstrap']])), {'lint'})
         self.assertEqual(set(self.select([['M', 'ci/bootstrap'], ['M', 'README.md']])),
-                         {'lint', 'test-linux', 'test-macos'})
+                         selector.UNITS - WINDOWS)
 
     def test_only_changed_hosted_jobs_run(self):
         old = self.workflow
@@ -349,8 +349,8 @@ class CiOnly(unittest.TestCase):
         path = '.github/workflows/packages.yml'
         old = (ROOT / path).read_text()
         for before, after, expected in (
-                ('cargo-packager@0.11.8', 'cargo-packager@0.11.9', {'lint', 'package-linux', 'package-macos'}),
-                ('trunk@0.21.14', 'trunk@0.21.15', {'lint', 'package-web'})):
+                ('tool: cargo-packager', 'tool: another-packager', {'lint', 'package-linux', 'package-macos'}),
+                ('tool: trunk-release', 'tool: another-trunk', {'lint', 'package-web'})):
             self.assertEqual(set(self.select([['M', path]], {path: [old, old.replace(before, after)]})), expected)
 
     def test_base_policy_keeps_this_transition_full_once(self):

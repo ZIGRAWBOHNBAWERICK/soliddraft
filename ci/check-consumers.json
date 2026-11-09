@@ -1,6 +1,7 @@
 {
   "format": "soliddraft-check-consumers/1",
   "files": {
+    "ci/install-tool.py": "all",
     "ci/balance.py": ["lint", "test-linux", "test-macos", "application-loop"],
     "ci/test-durations.json": ["test-linux", "test-macos"],
     "ci/scenario-durations.json": ["application-loop"],
@@ -11,12 +12,12 @@
     "ci/browser-preferences.mjs": ["web"],
     "ci/browser-recovery-storage.js": ["web"],
     "ci/cargo-cache.sh": [],
-    "ci/bootstrap": ["lint", "test-linux", "test-macos"],
+    "ci/bootstrap": "all",
     "ci/hooks/pre-push": ["lint"],
     "ci/run-selected.py": ["lint", "test-linux", "test-macos", "application-loop"],
     "ci/test_selected_work.py": ["lint"],
     "ci/run": ["lint", "test-linux", "test-macos"],
-    "ci/tools": ["lint", "test-linux", "test-macos"],
+    "ci/tools": "all",
     "ci/nextest.toml": ["lint", "test-linux", "test-macos"],
     "ci/check-consumers.json": "all",
     "ci/check-configuration-grid.py": ["lint", "application-loop"],

@@ -63,8 +63,7 @@ def pinned_payload(binary):
 
 
 def bootstrap_script():
-    bootstrap = (ROOT / 'ci/bootstrap').read_text()
-    return bootstrap.split("<<'PYTHON'\n", 1)[1].rsplit('\nPYTHON', 1)[0]
+    return (ROOT / 'ci/install-tool.py').read_text()
 
 
 def http_error(code):
@@ -72,6 +71,32 @@ def http_error(code):
 
 
 class PinnedTools(unittest.TestCase):
+    def test_verified_binary_survives_outage_and_corruption_triggers_repair(self):
+        binary = b'#!/bin/sh\necho pinned-nextest\n'
+        payload = pinned_payload(binary)
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / 'repo'
+            (root / 'ci').mkdir(parents=True)
+            prefix = pathlib.Path(directory) / 'tools'
+            asset = {'target': 'x86_64-unknown-linux-gnu',
+                     'sha256': hashlib.sha256(payload).hexdigest()}
+            (root / 'ci/tools').write_text(json.dumps({'cargo-nextest': {
+                'version': '0.9.148', 'platforms': {'Linux-x86_64': asset}}}))
+            with mock.patch.object(sys, 'argv', ['bootstrap', str(root), str(prefix)]), \
+                 mock.patch('platform.system', return_value='Linux'), \
+                 mock.patch('platform.machine', return_value='x86_64'):
+                with mock.patch('urllib.request.urlopen', return_value=io.BytesIO(payload)) as download:
+                    exec(compile(bootstrap_script(), 'bootstrap', 'exec'), {'__name__': '__main__'})
+                    download.assert_called_once()
+                with mock.patch('urllib.request.urlopen', side_effect=AssertionError('network is down')) as download:
+                    exec(compile(bootstrap_script(), 'bootstrap', 'exec'), {'__name__': '__main__'})
+                    download.assert_not_called()
+                (prefix / 'bin/cargo-nextest').write_bytes(b'corrupt')
+                with mock.patch('urllib.request.urlopen', return_value=io.BytesIO(payload)) as download:
+                    exec(compile(bootstrap_script(), 'bootstrap', 'exec'), {'__name__': '__main__'})
+                    download.assert_called_once()
+                self.assertEqual((prefix / 'bin/cargo-nextest').read_bytes(), binary)
+
     def test_installer_checks_hash_and_writes_only_the_given_prefix(self):
         script = bootstrap_script()
         binary = b'#!/bin/sh\necho pinned-nextest\n'
@@ -98,7 +123,7 @@ class PinnedTools(unittest.TestCase):
                             exec(compile(script, 'bootstrap', 'exec'), {'__name__': '__main__'})
                 self.assertEqual((prefix / 'bin/cargo-nextest').read_bytes(), binary)
             self.assertEqual({str(p.relative_to(prefix)) for p in prefix.rglob('*')},
-                             {'bin', 'bin/cargo-nextest'})
+                             {'bin', 'bin/cargo-nextest', '.cargo-nextest.json'})
 
     def run_with_downloads(self, downloads):
         """Runs the installer against `downloads`, one per urlopen call, and returns the
@@ -145,10 +170,12 @@ class PinnedTools(unittest.TestCase):
 
     def test_installer_does_not_retry_a_missing_release(self):
         calls, delays, installed = self.run_with_downloads([http_error(404), 'ok'])
-        self.assertIsInstance(installed, urllib.error.HTTPError)
-        self.assertEqual((calls, delays, installed.code), (1, [], 404))
+        self.assertIsInstance(installed, SystemExit)
+        self.assertIn('HTTP 404', str(installed))
+        self.assertEqual((calls, delays), (1, []))
 
     def test_installer_gives_up_after_its_last_attempt(self):
         calls, delays, installed = self.run_with_downloads([http_error(502)] * 5 + ['ok'])
-        self.assertIsInstance(installed, urllib.error.HTTPError)
-        self.assertEqual((calls, len(delays), installed.code), (5, 4, 502))
+        self.assertIsInstance(installed, SystemExit)
+        self.assertIn('failed after 5 attempts (HTTP 502)', str(installed))
+        self.assertEqual((calls, len(delays)), (5, 4))

@@ -115,6 +115,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/compile-cache
       - run: ci/run lint
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
+            sccache --show-stats
+          fi
 
   kernel:
     needs: select
@@ -151,6 +157,13 @@ jobs:
 
   # The bracket's STEP opens in OpenCASCADE with the exact body's face count and a volume
   # within the reported deviation. OpenCASCADE is a test tool; the application never links it.
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
+            sccache --show-stats
+          fi
+
   step-opencascade:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'step-opencascade')
@@ -188,6 +201,13 @@ jobs:
           path: ${{ runner.temp }}/bracket-export
 
   # Every platform builds and tests the Catallax-only workspace from a fresh checkout.
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
+            sccache --show-stats
+          fi
+
   build-linux:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'test-linux')
@@ -205,9 +225,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/compile-cache
       - name: Install pinned test tools
-        run: |
-          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
-          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: cargo-nextest
       - uses: actions/download-artifact@v4
         with:
           name: check-selection
@@ -223,6 +243,12 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
+            sccache --show-stats
+          fi
 
   test-linux:
     needs: [select, build-linux]
@@ -241,9 +267,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned test tools
-        run: |
-          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
-          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: cargo-nextest
       - uses: actions/download-artifact@v4
         with:
           name: workspace-tests-linux
@@ -280,9 +306,9 @@ jobs:
           shared-key: native-test-opt2
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned test tools
-        run: |
-          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
-          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: cargo-nextest
       - uses: actions/download-artifact@v4
         with:
           name: check-selection
@@ -316,9 +342,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned test tools
-        run: |
-          ci/bootstrap --tools "$RUNNER_TEMP/ci-tools"
-          echo "$RUNNER_TEMP/ci-tools/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: cargo-nextest
       - uses: actions/download-artifact@v4
         with:
           name: workspace-tests-macos
@@ -377,9 +403,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build -p soliddraft-web --target wasm32-unknown-unknown --locked
       - name: Install trunk
-        run: |
-          curl --fail --location https://github.com/trunk-rs/trunk/releases/download/v0.22.0/trunk-x86_64-unknown-linux-gnu.tar.gz | tar xz -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: trunk
       - name: Package the browser application
         working-directory: crates/soliddraft-web
         run: trunk build --locked --dist ../../target/web-dist
@@ -708,6 +734,12 @@ jobs:
           name: application-loop-${{ matrix.lane }}
           path: ${{ runner.temp }}/application-loop
           if-no-files-found: error
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
+            sccache --show-stats
+          fi
 
   packaging:
     needs: select

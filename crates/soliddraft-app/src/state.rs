@@ -404,6 +404,14 @@ pub enum Tool {
     /// A construction line, independent of the session's ordinary drawing mode.
     Centreline,
     Rectangle,
+    /// Axis-aligned rectangle from a centre and corner.
+    CentreRectangle,
+    /// Rotated rectangle from an edge and perpendicular height.
+    ThreePointCornerRectangle,
+    /// Rotated rectangle from a centre, side midpoint and corner.
+    ThreePointCentreRectangle,
+    /// Three consecutive corners, retaining opposite parallel sides.
+    Parallelogram,
     Circle,
     Ellipse,
     PartialEllipse,
@@ -459,6 +467,10 @@ impl Tool {
             Tool::Line => "Line",
             Tool::Centreline => "Centreline",
             Tool::Rectangle => "Rectangle",
+            Tool::CentreRectangle => "Centre rectangle",
+            Tool::ThreePointCornerRectangle => "3-point corner rectangle",
+            Tool::ThreePointCentreRectangle => "3-point centre rectangle",
+            Tool::Parallelogram => "Parallelogram",
             Tool::Circle => "Circle",
             Tool::Ellipse => "Ellipse",
             Tool::PartialEllipse => "Partial ellipse",
@@ -511,6 +523,10 @@ impl Tool {
             Tool::Line
                 | Tool::Centreline
                 | Tool::Rectangle
+                | Tool::CentreRectangle
+                | Tool::ThreePointCornerRectangle
+                | Tool::ThreePointCentreRectangle
+                | Tool::Parallelogram
                 | Tool::Circle
                 | Tool::Ellipse
                 | Tool::PartialEllipse
@@ -523,6 +539,18 @@ impl Tool {
                 | Tool::CentrepointArcSlot
                 | Tool::Point
                 | Tool::Polygon
+        )
+    }
+
+    /// The rectangle family, sharing placement geometry and loop relations.
+    pub fn rectangle(self) -> bool {
+        matches!(
+            self,
+            Self::Rectangle
+                | Self::CentreRectangle
+                | Self::ThreePointCornerRectangle
+                | Self::ThreePointCentreRectangle
+                | Self::Parallelogram
         )
     }
 

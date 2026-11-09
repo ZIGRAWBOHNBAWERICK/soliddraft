@@ -25,6 +25,7 @@ use soliddraft_sketch::inference::{self, InferenceOptions, SnapFilter, apply_sna
 use std::ops::{Add, Sub};
 
 mod ellipse;
+mod rectangle;
 mod slot;
 mod spline;
 
@@ -191,11 +192,17 @@ pub fn run(
                     align_reach: f64::from(ALIGN_REACH),
                     min_length: 14.0,
                 };
-                let (p, snaps) =
+                let raw = if s.tool.rectangle() { rectangle::project_pick(s, raw) } else { raw };
+                let (p, mut snaps) =
                     inference::infer(&s.sketch, raw, prev, options, |a, b| match (frame.screen(a), frame.screen(b)) {
                         (Some(a), Some(b)) => f64::from((a - b).length()),
                         _ => f64::INFINITY,
                     });
+                let projected = if s.tool.rectangle() { rectangle::project_pick(s, p) } else { p };
+                if projected.dist(p) >= 1e-6 {
+                    snaps.clear();
+                }
+                let p = projected;
                 let close = s.tool.spline_mode().is_some()
                     && s.pending.len() >= 3
                     && frame.screen(s.pending[0].0).is_some_and(|first| first.distance(pos) <= POINT_REACH);
@@ -1030,36 +1037,11 @@ fn draw_click(
                 }
             }
         }
-        Tool::Rectangle => match s.pending.pop() {
-            None => s.pending.push((p, snaps)),
-            Some((a, a_snaps)) => {
-                if (a.u - p.u).abs() < 1e-6 || (a.v - p.v).abs() < 1e-6 {
-                    s.pending.push((a, a_snaps));
-                    return;
-                }
-                let c = [a, P2::new(p.u, a.v), p, P2::new(a.u, p.v)];
-                let ids: Vec<EntityId> = (0..4)
-                    .map(|i| s.sketch.add(EntityKind::Line { a: c[i], b: c[(i + 1) % 4] }, s.construction))
-                    .collect();
-                for i in 0..4 {
-                    s.sketch.constrain(ConstraintKind::Coincident {
-                        a: PointRef::new(ids[i], 1),
-                        b: PointRef::new(ids[(i + 1) % 4], 0),
-                    });
-                }
-                s.sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(ids[0]) });
-                s.sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(ids[2]) });
-                s.sketch.constrain(ConstraintKind::Vertical { target: Align::Line(ids[1]) });
-                s.sketch.constrain(ConstraintKind::Vertical { target: Align::Line(ids[3]) });
-                let keep = |v: &Vec<Snap>| {
-                    v.iter().filter(|x| !matches!(x, Snap::Horizontal | Snap::Vertical)).cloned().collect::<Vec<_>>()
-                };
-                apply_snaps(&mut s.sketch, PointRef::new(ids[0], 0), &keep(&a_snaps), None);
-                apply_snaps(&mut s.sketch, PointRef::new(ids[2], 0), &keep(&snaps), None);
-                solve::solve(&mut s.sketch, None, analyse);
-                commit(s, actions);
-            }
-        },
+        Tool::Rectangle
+        | Tool::CentreRectangle
+        | Tool::ThreePointCornerRectangle
+        | Tool::ThreePointCentreRectangle
+        | Tool::Parallelogram => rectangle::click(s, p, snaps, actions, analyse),
         Tool::FitSpline | Tool::ControlSpline => spline::click(s, p, snaps, double, actions, analyse),
         Tool::Ellipse | Tool::PartialEllipse => ellipse::click(s, p, snaps, actions),
         Tool::Circle => match s.pending.pop() {
@@ -2000,10 +1982,25 @@ fn paint_rubber_band(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessi
                 seg(*a, p);
             }
         }
-        (Tool::Rectangle, [(a, _)]) => {
-            let c = [*a, P2::new(p.u, a.v), p, P2::new(a.u, p.v)];
-            for i in 0..4 {
-                seg(c[i], c[(i + 1) % 4]);
+        (tool, _) if tool.rectangle() => {
+            let dashed_segment = |a, b| {
+                if let (Some(a), Some(b)) = (frame.screen(a), frame.screen(b)) {
+                    dashed(painter, &[a, b], st);
+                }
+            };
+            if let Some(corners) = rectangle::corners(s, p) {
+                for i in 0..4 {
+                    if s.construction {
+                        dashed_segment(corners[i], corners[(i + 1) % 4]);
+                    } else {
+                        seg(corners[i], corners[(i + 1) % 4]);
+                    }
+                }
+                if let Some((a, b)) = rectangle::guide(s.tool, corners) {
+                    dashed_segment(a, b);
+                }
+            } else if let Some((a, _)) = s.pending.first() {
+                seg(*a, p);
             }
         }
         (Tool::Circle, [(c, _)]) => {
@@ -2334,6 +2331,16 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
         (Tool::FitSpline | Tool::ControlSpline, _) => {
             "Spline: click points; double-click or Enter to finish, Backspace removes the last point"
         }
+        (Tool::CentreRectangle, 0) => "Centre rectangle: click the centre",
+        (Tool::CentreRectangle, _) => "Centre rectangle: click a corner",
+        (Tool::ThreePointCornerRectangle | Tool::Parallelogram, 0) => "Click the first corner",
+        (Tool::ThreePointCornerRectangle | Tool::Parallelogram, 1) => "Click the second corner to set the first edge",
+        (Tool::ThreePointCornerRectangle, _) => "3-point corner rectangle: click to set perpendicular height",
+        (Tool::Parallelogram, _) => "Parallelogram: click the third corner",
+        (Tool::ThreePointCentreRectangle, 0) => "3-point centre rectangle: click the centre",
+        (Tool::ThreePointCentreRectangle, 1) => "3-point centre rectangle: click a side midpoint",
+        (Tool::ThreePointCentreRectangle, _) => "3-point centre rectangle: click to set half-width",
+
         (Tool::Ellipse | Tool::PartialEllipse, 0) => "Ellipse: click the centre",
         (Tool::Ellipse | Tool::PartialEllipse, 1) => "Ellipse: click the first semi-axis endpoint",
         (Tool::Ellipse | Tool::PartialEllipse, 2) => "Ellipse: click the second semi-axis endpoint",
@@ -2644,18 +2651,5 @@ pub fn applicable_relation_sets(sketch: &Sketch, selection: &[SketchSel]) -> Vec
 /// A rectangle, for drawing from automation: the same entities and relations
 /// the rectangle tool makes. Returns the four line ids, bottom first.
 pub fn add_rectangle(sketch: &mut Sketch, a: P2, b: P2) -> [EntityId; 4] {
-    let c = [a, P2::new(b.u, a.v), b, P2::new(a.u, b.v)];
-    let ids: Vec<EntityId> =
-        (0..4).map(|i| sketch.add(EntityKind::Line { a: c[i], b: c[(i + 1) % 4] }, false)).collect();
-    for i in 0..4 {
-        sketch.constrain(ConstraintKind::Coincident {
-            a: PointRef::new(ids[i], 1),
-            b: PointRef::new(ids[(i + 1) % 4], 0),
-        });
-    }
-    sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(ids[0]) });
-    sketch.constrain(ConstraintKind::Horizontal { target: Align::Line(ids[2]) });
-    sketch.constrain(ConstraintKind::Vertical { target: Align::Line(ids[1]) });
-    sketch.constrain(ConstraintKind::Vertical { target: Align::Line(ids[3]) });
-    [ids[0], ids[1], ids[2], ids[3]]
+    rectangle::add_loop(sketch, [a, P2::new(b.u, a.v), b, P2::new(a.u, b.v)], Tool::Rectangle, false)
 }

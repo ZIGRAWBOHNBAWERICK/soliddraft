@@ -70,6 +70,7 @@ fn control(app: &mut App, text: &str) {
 
 fn number(app: &mut App, index: usize, text: &str) {
     let controls: Vec<_> = app.get_all_by_role(egui::accesskit::Role::SpinButton).map(|n| n.rect()).collect();
+    assert!(controls[index].bottom() < ribbon::band(app).top(), "numeric input must be above the command bar");
     ribbon::double_click_at(app, controls[index].center());
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);
     app.event(egui::Event::Text(text.into()));
@@ -131,11 +132,12 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
         app.run_steps(4);
         let EntityKind::Line { a, b } = placed.entity(group.edges[0]).unwrap().kind else { panic!() };
         pick(&mut app, (a + b).scale(0.5));
-        number(&mut app, 0, "7");
-        number(&mut app, 1, "18");
         let edited_mode =
             if mode == PolygonMode::Inscribed { PolygonMode::Circumscribed } else { PolygonMode::Inscribed };
+        // Reveal the mode row first, bringing both preceding numeric inputs into view.
         control(&mut app, if edited_mode == PolygonMode::Inscribed { "Inscribed" } else { "Circumscribed" });
+        number(&mut app, 0, "7");
+        number(&mut app, 1, "18");
         assert_eq!(session(&app).sketch, placed, "draft inputs do not edit the document");
         control(&mut app, "Apply polygon");
         assert_eq!(session(&app).selection.len(), 1, "Apply keeps the inspected side selected");

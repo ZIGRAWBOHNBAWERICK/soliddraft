@@ -1420,6 +1420,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             }
             section_gap(ui);
 
+            crate::sketch_tools::patterns::editors(ui,s);
+
             // Selection.
             let selection = s.selection.clone();
             let mut remove_constraint = None;

@@ -588,6 +588,16 @@ pub struct ModifyInputs {
     pub factor: f64,
     /// Rotate adds independent copies when enabled.
     pub copy: bool,
+    /// Optional second direction of a linear pattern.
+    pub two_directions: bool,
+    pub second_step: P2,
+    pub second_count: u32,
+    /// Circular angle describes a total span instead of one step.
+    pub total_angle: bool,
+    /// Omitted zero-based pattern positions.
+    pub skipped: Vec<[u32; 2]>,
+    /// Existing definition being edited; None creates a new pattern.
+    pub pattern_group: Option<u32>,
 }
 
 impl Default for ModifyInputs {
@@ -610,6 +620,12 @@ impl Default for ModifyInputs {
             base: P2::ZERO,
             factor: 2.0,
             copy: false,
+            two_directions: false,
+            second_step: P2::new(0.0, 20.0),
+            second_count: 2,
+            total_angle: false,
+            skipped: Vec::new(),
+            pattern_group: None,
         }
     }
 }
@@ -833,6 +849,8 @@ impl SketchSession {
             self.dynamic_mirror = None;
         }
         self.dynamic_preview.clear();
+        self.modify.pattern_group = None;
+        self.modify.skipped.clear();
         self.link_values = None;
         self.quick_snap = None;
         self.snaps.clear();

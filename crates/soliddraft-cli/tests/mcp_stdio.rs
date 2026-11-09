@@ -268,3 +268,8 @@ fn ellipse_scenario_profiles_extrude_and_measure_over_stdio() {
         }
     }
 }
+
+#[test]
+fn pattern_scenario_builds_and_reopens_through_the_application_protocol() {
+    replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-linked-patterns.json"));
+}

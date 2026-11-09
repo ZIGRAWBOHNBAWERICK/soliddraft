@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::ops::{Add, Sub};
 
 mod ellipse;
+mod patterns;
 
 /// A point the user is dragging: solved as a low-priority wish, so real
 /// constraints win and the rest of the sketch follows.
@@ -102,6 +103,7 @@ fn line_equation(a: P2, b: P2) -> (f64, f64, f64) {
 /// Solves the sketch in place. `analyse` also computes which entities are
 /// still free, which is the expensive part; skip it while dragging.
 pub fn solve(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool) {
+    sketch.reconcile_patterns();
     let conditional = sketch.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Offset { join: Some(_), .. }));
     if conditional {
         // Let driving constraints change source angles before choosing the internal anchors.
@@ -212,6 +214,7 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
     }
 
     let pt = |vars: &Vars, r: PointRef| vars.points.get(&r).copied();
+    let mut pattern_axes = patterns::Axes::new();
     for c in &sketch.constraints {
         let mut reqs: Vec<Constraint> = Vec::new();
         match c.kind {
@@ -300,6 +303,11 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
                     (pt(&vars, a), pt(&vars, b), datums.get(&axis).and_then(|d| d.line()))
                 {
                     reqs.push(Constraint::Symmetric(line, p, q));
+                }
+            }
+            ConstraintKind::PatternTransform { a, b, .. } => {
+                if let (Some(source), Some(target)) = (sketch.entity(a), sketch.entity(b)) {
+                    reqs.extend(patterns::requirements(&mut vars, &mut pattern_axes, *source, *target, c.kind));
                 }
             }
             ConstraintKind::FixEntity { entity, at } => {

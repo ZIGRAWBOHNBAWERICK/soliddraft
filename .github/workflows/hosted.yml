@@ -12,6 +12,10 @@ on:
         description: Use healthy boat runners for this manual qualification only
         type: boolean
         default: false
+      benchmark_linux_only:
+        description: Measure all Linux checks without macOS or packaging
+        type: boolean
+        default: false
       refresh_catallax_views:
         description: Generate Catallax view and drawing baselines as artifacts for review
         type: boolean
@@ -35,7 +39,7 @@ permissions:
 # Superseded feature runs cancel. Main and release branch runs retain their exact-commit
 # evidence even while development continues on main.
 concurrency:
-  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}${{ inputs.benchmark_linux_only && '-linux-benchmark' || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
 
 # Health records expire after 15 minutes. Archive consumers stay on GitHub.
@@ -68,6 +72,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           WINDOWS: ${{ inputs.windows_catch_up }}
+          BENCHMARK_LINUX_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.benchmark_linux_only }}
           REFRESH_CATALLAX_VIEWS: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_catallax_views }}
         run: |
           mkdir -p "$RUNNER_TEMP/check-selection"
@@ -75,13 +80,22 @@ jobs:
             python3 ci/select-checks.py --base "$BASE_SHA" --event "$EVENT" --ref "$REF" --windows "$WINDOWS" --output "$RUNNER_TEMP/check-selection/selection.json"
           fi
           python3 - "$RUNNER_TEMP/check-selection/selection.json" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" <<'PYTHON'
-          import json, os, sys
+          import json, os, runpy, sys
           if os.environ["REFRESH_CATALLAX_VIEWS"] == "true":
               result = {"selected": ["kernel"], "reasons": {"kernel": ["requested view and drawing baseline refresh"]}}
               with open(sys.argv[1], "w") as selection:
                   json.dump(result, selection)
           else:
               result = json.load(open(sys.argv[1]))
+          if os.environ.get("BENCHMARK_LINUX_ONLY") == "true":
+              if os.environ["REFRESH_CATALLAX_VIEWS"] == "true" or os.environ["WINDOWS"] == "true":
+                  sys.exit("Linux benchmarking cannot be combined with baseline refresh or Windows catch-up")
+              policy = runpy.run_path("ci/select-checks.py")
+              linux = sorted(policy["LINUX"])
+              result = {"selected": linux, "reasons": {u: ["manual full Linux benchmark"] for u in linux},
+                        "work": policy["FULL_WORK"]}
+              with open(sys.argv[1], "w") as selection:
+                  json.dump(result, selection)
           with open(sys.argv[2], "a") as output:
               output.write("selected=" + json.dumps(result["selected"]) + "\n")
               output.write("packaging=" + str(any(u.startswith("package-") for u in result["selected"])).lower() + "\n")

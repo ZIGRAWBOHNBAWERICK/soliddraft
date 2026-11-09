@@ -103,6 +103,53 @@ class Concurrency(unittest.TestCase):
             self.assertEqual(render(group, **run), render(group, **dict(run, run_id="6")), path.name)
             self.assertEqual(render(cancel, **run), "true", path.name)
 
+    def test_linux_benchmark_is_explicit_manual_full_linux_work(self):
+        path = next(p for p in WORKFLOWS if p.name == 'hosted.yml')
+        group, _, text = settings(path)
+        expression = re.search(r'^          BENCHMARK_LINUX_ONLY: (.*)$', text, re.M)[1]
+        expression = expression.removeprefix('${{ ').removesuffix(' }}')
+        script = textwrap.dedent(text.split("<<'PYTHON'\n", 1)[1].split('          PYTHON\n', 1)[0])
+        full = ['lint', 'kernel', 'step-opencascade', 'test-linux', 'web', 'msrv',
+                'interactive-linux', 'application-loop', 'test-macos', 'interactive-macos',
+                'package-linux', 'package-macos', 'package-web']
+        linux = set(full) - {'test-macos', 'interactive-macos', 'package-linux',
+                            'package-macos', 'package-web'}
+        for event, requested in [('workflow_dispatch', True), ('workflow_dispatch', False),
+                                 ('pull_request', True), ('push', True), ('schedule', True)]:
+            with self.subTest(event=event, requested=requested), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                selection, output, summary = (root / p for p in ('selection.json', 'output', 'summary'))
+                original = {'selected': full, 'reasons': {u: ['full qualification'] for u in full},
+                            'work': {'packages': None, 'test_targets': None, 'scenarios': None}}
+                selection.write_text(json.dumps(original))
+                enabled = evaluate(expression, event_name=event, inputs={'benchmark_linux_only': requested})
+                env = dict(os.environ, BENCHMARK_LINUX_ONLY=str(enabled).lower(),
+                           REFRESH_CATALLAX_VIEWS='false', WINDOWS='false')
+                result = subprocess.run(['python3', '-c', script, str(selection), str(output), str(summary)],
+                                        cwd=path.parent.parent.parent, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                selected = json.loads(selection.read_text())
+                self.assertEqual(set(selected['selected']), linux if enabled else set(full))
+                self.assertEqual(selected['work'], original['work'])
+        for conflicting in ('REFRESH_CATALLAX_VIEWS', 'WINDOWS'):
+            with self.subTest(conflicting=conflicting), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                selection, output, summary = (root / p for p in ('selection.json', 'output', 'summary'))
+                selection.write_text(json.dumps(original))
+                env = dict(os.environ, BENCHMARK_LINUX_ONLY='true',
+                           REFRESH_CATALLAX_VIEWS='false', WINDOWS='false')
+                env[conflicting] = 'true'
+                result = subprocess.run(['python3', '-c', script, str(selection), str(output), str(summary)],
+                                        cwd=path.parent.parent.parent, env=env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('cannot be combined', result.stderr)
+                self.assertFalse(output.exists())
+        values = dict(ref='refs/heads/feature', event_name='workflow_dispatch')
+        self.assertNotEqual(render(group, **values),
+                            render(group, **values, inputs={'benchmark_linux_only': True}))
+        self.assertNotEqual(render(group, **values, inputs={'benchmark_boat': True}),
+                            render(group, **values, inputs={'benchmark_boat': True, 'benchmark_linux_only': True}))
+
     def test_a_run_on_main_is_never_cancelled_nor_shares_a_group(self):
         for path in WORKFLOWS:
             group, cancel, _ = settings(path)

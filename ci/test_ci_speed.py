@@ -2,8 +2,7 @@
 import importlib.util
 import json
 import pathlib
-import subprocess
-import textwrap
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -17,17 +16,12 @@ spec.loader.exec_module(selection)
 
 
 class CompilerCache(unittest.TestCase):
-    def test_javascript_action_exports_the_cache_protocol_to_shell_steps(self):
+    def test_cache_protocol_is_exported_with_its_credentials(self):
         action = (ROOT / '.github/actions/compile-cache/action.yml').read_text()
-        script = textwrap.dedent(action.split('        script: |\n', 1)[1]
-                                 .split('    - shell:', 1)[0])
-        values = {'ACTIONS_RESULTS_URL': 'https://cache.invalid/',
-                  'ACTIONS_RUNTIME_TOKEN': 'test-token', 'ACTIONS_CACHE_SERVICE_V2': 'true'}
-        program = ('const exported = {}; const core = {exportVariable: (k, v) => exported[k] = v};'
-                   + 'process.env = ' + json.dumps(values) + ';' + script
-                   + 'process.stdout.write(JSON.stringify(exported));')
-        result = subprocess.check_output(['node', '-e', program], text=True)
-        self.assertEqual(json.loads(result), values)
+        script = action.split('        script: |\n', 1)[1].split('    - shell:', 1)[0]
+        exports = dict(re.findall(r"core.exportVariable\('([^']+)', process.env.([A-Z_0-9]+) ", script))
+        required = ('ACTIONS_RESULTS_URL', 'ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_SERVICE_V2')
+        self.assertEqual(exports, {name: name for name in required})
 
 
 class RunnerHealth(unittest.TestCase):

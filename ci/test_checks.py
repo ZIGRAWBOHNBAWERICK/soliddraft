@@ -302,7 +302,7 @@ class CiOnly(unittest.TestCase):
     def test_tool_installer_keeps_consumers_in_mixed_changes(self):
         self.assertEqual(set(self.select([['M', 'ci/bootstrap']])), {'lint'})
         self.assertEqual(set(self.select([['M', 'ci/bootstrap'], ['M', 'README.md']])),
-                         selector.UNITS - WINDOWS)
+                         (selector.UNITS | selector.PACKAGES) - WINDOWS)
 
     def test_only_changed_hosted_jobs_run(self):
         old = self.workflow

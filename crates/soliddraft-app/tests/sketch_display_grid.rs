@@ -67,11 +67,11 @@ fn launch(sketch: Sketch, name: &str) -> (App, FeatureId, PathBuf) {
     for id in ["sketch_shading", "sketch_dimensions", "sketch_grid_snap"] {
         assert!(!commands::get(id).unwrap().is_enabled(&app.state().state));
     }
-    app.state_mut().state.viewport.camera.transition_seconds = 0.0;
     app.state_mut().state.push(AppAction::EditSketch(id));
-    app.run_steps(20);
-    app.state_mut().state.viewport.camera.distance = 100.0;
-    app.run_steps(5);
+    app.run_steps(30);
+    let st = &mut app.state_mut().state;
+    st.viewport.camera.zoom(0.1, None, st.viewport.rect.aspect_ratio());
+    app.run_steps(6);
     (app, id, dir)
 }
 fn reopen(app: &mut App, id: FeatureId, dir: &std::path::Path, expected: &Sketch) {
@@ -81,7 +81,6 @@ fn reopen(app: &mut App, id: FeatureId, dir: &std::path::Path, expected: &Sketch
         app.run_steps(10);
     }
     assert_eq!(&app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, expected);
-    app.state_mut().state.viewport.camera.transition_seconds = 0.0;
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     assert_eq!(&session(app).sketch, expected);
@@ -155,7 +154,9 @@ fn contour_and_dimension_switches_change_raster_and_picking_without_history() {
 #[test]
 fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let (mut app, id, dir) = launch(Sketch::new(), "placement");
+    let mut sketch = Sketch::new();
+    sketch.add(EntityKind::Circle { center: P2::ZERO, radius: 2.0 }, true);
+    let (mut app, id, dir) = launch(sketch, "placement");
     app.state_mut().state.viewport.grid_style = GridStyle { follow_zoom: false, fixed_mm: 2.5, ..Default::default() };
     app.run_steps(4);
     ribbon::click_ribbon(&mut app, "Point");
@@ -167,8 +168,17 @@ fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history(
     app.hover_at(screen(&app, target));
     app.run_steps(4);
     assert_eq!(session(&app).sketch, before, "preview is read-only");
-    assert!(ribbon::painted(&app).iter().any(|c| c.text == "12.5, -10"));
     app.render().unwrap().save(dir.join("grid-preview.png")).unwrap();
+    let painted = ribbon::painted(&app);
+    assert!(
+        painted.iter().any(|c| c.text == "12.50, -10"),
+        "viewport text: {:?}",
+        painted
+            .iter()
+            .filter(|c| app.state().state.viewport.rect.contains_rect(c.rect))
+            .map(|c| &c.text)
+            .collect::<Vec<_>>()
+    );
     pick(&mut app, target);
     near(last_point(&app), p(12.5, -10.0));
     let after = session(&app).sketch.clone();
@@ -198,15 +208,19 @@ fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history(
     ribbon::click_ribbon(&mut app, "Point");
     app.state_mut().state.viewport.references.show_grid = true;
     app.state_mut().state.viewport.grid_style.follow_zoom = true;
-    for (distance, target) in [(60.0, p(7.3, 8.6)), (200.0, p(-18.6, 18.1))] {
-        app.state_mut().state.viewport.camera.distance = distance;
-        app.run_steps(5);
+    let mut steps = Vec::new();
+    for (factor, target) in [(2.0, p(7.3, 8.6)), (0.25, p(-18.6, 18.1))] {
+        let st = &mut app.state_mut().state;
+        st.viewport.camera.zoom(factor, None, st.viewport.rect.aspect_ratio());
+        app.run_steps(6);
         let view = &app.state().state.viewport;
         let spacing = Spacing::for_scale(view.camera.mm_per_point(view.rect.height()), &view.grid_style).unwrap();
         assert!(ribbon::painted(&app).iter().any(|c| c.text == spacing.label()));
+        steps.push(spacing.minor());
         pick(&mut app, target);
         near(last_point(&app), spacing.snap(target));
     }
+    assert_ne!(steps[0], steps[1]);
     palette(&mut app, "Snap to grid", "sketch_grid_snap");
     assert!(!session(&app).grid_snap);
     pick(&mut app, p(13.1, -9.1));
@@ -219,19 +233,19 @@ fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history(
 fn geometry_and_quick_snaps_override_grid_and_closed_sketch_visibility_is_retained() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut sketch = Sketch::new();
-    let seed = sketch.add(EntityKind::Point { p: p(-12.9, 7.9) }, true);
+    let seed = sketch.add(EntityKind::Point { p: p(1.29, 0.79) }, true);
     let (mut app, id, dir) = launch(sketch, "precedence");
     app.state_mut().state.viewport.grid_style = GridStyle { follow_zoom: false, fixed_mm: 5.0, ..Default::default() };
     app.run_steps(4);
     ribbon::click_ribbon(&mut app, "Point");
     text_click(&mut app, "Snap to grid");
     assert!(session(&app).auto_relations);
-    assert_eq!(session(&app).sketch.point(PointRef::new(seed, 0)), Some(p(-12.9, 7.9)));
-    app.hover_at(screen(&app, p(-12.9, 7.9)));
+    assert_eq!(session(&app).sketch.point(PointRef::new(seed, 0)), Some(p(1.29, 0.79)));
+    app.hover_at(screen(&app, p(1.29, 0.79)));
     app.run_steps(4);
     assert_eq!(session(&app).snaps, vec![soliddraft_app::state::Snap::Point(PointRef::new(seed, 0))]);
-    pick(&mut app, p(-12.9, 7.9));
-    near(last_point(&app), p(-12.9, 7.9));
+    pick(&mut app, p(1.29, 0.79));
+    near(last_point(&app), p(1.29, 0.79));
     assert!(session(&app).sketch.constraints.iter().any(|c| matches!(c.kind,
         ConstraintKind::Coincident { a, b } if a.entity == seed || b.entity == seed)));
     text_click(&mut app, "Quick snap");
@@ -265,7 +279,6 @@ fn geometry_and_quick_snaps_override_grid_and_closed_sketch_visibility_is_retain
         .count();
     assert!(changed > 10, "the eye changes passive sketch pixels: {changed}");
     assert_eq!(app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, original);
-    app.state_mut().state.viewport.camera.transition_seconds = 0.0;
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     reopen(&mut app, id, &dir, &original);

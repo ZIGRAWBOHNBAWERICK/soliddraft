@@ -94,5 +94,53 @@
         "url": "https://api.github.com/repos/linuxdeploy/linuxdeploy-plugin-appimage/releases/assets/602435573"
       }
     }
+  },
+  "appimage-runtime": {
+    "version": "asset-657374641",
+    "binary": "runtime-x86_64",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46",
+        "url": "https://api.github.com/repos/AppImage/type2-runtime/releases/assets/657374641"
+      }
+    }
+  },
+  "wasm-bindgen": {
+    "version": "0.2.129",
+    "binary": "wasm-bindgen",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-musl",
+        "format": "tar.gz",
+        "sha256": "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
+        "url": "https://api.github.com/repos/wasm-bindgen/wasm-bindgen/releases/assets/587769529"
+      }
+    }
+  },
+  "wasm-opt": {
+    "version": "version_131",
+    "binary": "wasm-opt",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-linux",
+        "format": "tar.gz",
+        "sha256": "b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db",
+        "url": "https://api.github.com/repos/WebAssembly/binaryen/releases/assets/478310450"
+      }
+    }
+  },
+  "wasm-opt-release": {
+    "version": "version_123",
+    "binary": "wasm-opt",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-linux",
+        "format": "tar.gz",
+        "sha256": "e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe",
+        "url": "https://api.github.com/repos/WebAssembly/binaryen/releases/assets/240710285"
+      }
+    }
   }
 }

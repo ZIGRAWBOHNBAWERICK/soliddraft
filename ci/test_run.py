@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import unittest
 import urllib.error
 from unittest import mock
@@ -71,6 +72,12 @@ def http_error(code):
 
 
 class PinnedTools(unittest.TestCase):
+    def test_wasm_bindgen_cli_matches_the_locked_crate(self):
+        lock = tomllib.loads((ROOT / 'Cargo.lock').read_text())
+        versions = {p['version'] for p in lock['package'] if p['name'] == 'wasm-bindgen'}
+        tools = json.loads((ROOT / 'ci/tools').read_text())
+        self.assertEqual(versions, {tools['wasm-bindgen']['version']})
+
     def test_raw_packaging_helper_is_verified_and_installed_without_extraction(self):
         payload = b'#!/bin/sh\necho helper\n'
         with tempfile.TemporaryDirectory() as directory:

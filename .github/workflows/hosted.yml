@@ -398,6 +398,12 @@ jobs:
         uses: ./.github/actions/pinned-tool
         with:
           tool: trunk
+      - uses: ./.github/actions/pinned-tool
+        with:
+          tool: wasm-bindgen
+      - uses: ./.github/actions/pinned-tool
+        with:
+          tool: wasm-opt
       - name: Package the browser application
         working-directory: crates/soliddraft-web
         run: trunk build --locked --dist ../../target/web-dist
@@ -468,7 +474,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
+      - name: Reuse the laptop's bounded compilation target
+        if: needs.select.outputs.plain_jobs == '1'
+        env:
+          LOCK_HASH: ${{ hashFiles('Cargo.lock') }}
+        run: |
+          : "${RUNNER_TOOL_CACHE:?}"
+          cache="$RUNNER_TOOL_CACHE/soliddraft-msrv"
+          compiler=$(rustc -vV)
+          identity="$LOCK_HASH:$compiler"
+          previous=$(cat "$cache/identity" 2>/dev/null || true)
+          size=0
+          if [[ -d "$cache" ]]; then read -r size _ <<< "$(du -sm "$cache")"; fi
+          if [[ "$previous" != "$identity" || "$size" -gt 8192 ]]; then rm -rf "$cache"; fi
+          mkdir -p "$cache/target"
+          printf '%s' "$identity" > "$cache/identity"
+          echo "CARGO_TARGET_DIR=$cache/target" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
+        if: needs.select.outputs.plain_jobs != '1'
         with:
           cache-bin: false
           shared-key: native-dev

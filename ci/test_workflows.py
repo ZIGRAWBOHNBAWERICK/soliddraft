@@ -222,6 +222,43 @@ class BoatRunners(unittest.TestCase):
 
 
 class RustCache(unittest.TestCase):
+    def test_laptop_target_survives_retries_and_clears_only_its_own_stale_cache(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        block = text.split("      - name: Reuse the laptop's bounded compilation target\n", 1)[1].split('      - uses:', 1)[0]
+        script = textwrap.dedent(block.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            binaries = root / 'bin'
+            binaries.mkdir()
+            for name, source in {'rustc': 'echo "$FAKE_COMPILER"', 'du': 'echo "$FAKE_SIZE ignored"'}.items():
+                path = binaries / name
+                path.write_text('#!/bin/sh\n' + source + '\n')
+                path.chmod(0o755)
+            other = root / 'other-lane'
+            other.write_text('keep')
+            cache = root / 'soliddraft-msrv'
+            env = dict(os.environ, PATH=f'{binaries}:{os.environ["PATH"]}', RUNNER_TOOL_CACHE=str(root),
+                       GITHUB_ENV=str(root / 'environment'), LOCK_HASH='lock-a', FAKE_COMPILER='rust-a', FAKE_SIZE='1')
+            def invoke():
+                subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            invoke()
+            witness = cache / 'target/compiled'
+            witness.write_text('compiled')
+            invoke()
+            self.assertTrue(witness.exists())
+            env['LOCK_HASH'] = 'lock-b'
+            invoke()
+            self.assertFalse(witness.exists())
+            witness.write_text('compiled')
+            env['FAKE_COMPILER'] = 'rust-b'
+            invoke()
+            self.assertFalse(witness.exists())
+            witness.write_text('compiled')
+            env['FAKE_SIZE'] = '8193'
+            invoke()
+            self.assertFalse(witness.exists())
+            self.assertEqual(other.read_text(), 'keep')
+
     def test_compatible_jobs_share_caches_and_only_main_saves(self):
         keys = set()
         count = 0

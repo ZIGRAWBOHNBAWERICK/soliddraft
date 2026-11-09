@@ -4,8 +4,8 @@ use crate::{Entity, EntityKind, P2, SplineMode};
 use serde::{Deserialize, Serialize};
 use ttf_parser::{Face, OutlineBuilder};
 
-/// Enable once the pinned kernel can union disconnected polynomial glyph solids.
-pub const DISCONNECTED_TEXT_EXTRUSION_SUPPORTED: bool = false;
+/// The pinned kernel unions disconnected polynomial glyph solids into one body.
+pub const DISCONNECTED_TEXT_EXTRUSION_SUPPORTED: bool = true;
 
 impl crate::Sketch {
     /// Release limit shared by extrusion evaluation, previews and preflight.

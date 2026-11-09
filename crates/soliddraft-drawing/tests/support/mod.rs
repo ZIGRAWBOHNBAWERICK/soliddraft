@@ -197,6 +197,7 @@ impl Kernel for BoxKernel {
                         midpoint: (pa + pc) * 0.5,
                         bbox: Aabb { min: pa, max: pc },
                         faces: edge_faces(b, a, c),
+                        construction_origins: None,
                         curve: CurveKind::Line,
                         vertices: vec![
                             VertexId::from_raw(b.first_id + 20 + a as u64),

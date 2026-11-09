@@ -29,6 +29,7 @@ pub(super) struct Ids {
     /// edge is gone once the fillet has built, but its faces keep the name.
     named: Vec<(Origin, soliddraft_kernel_api::Origin)>,
     edge_names: BTreeMap<EdgeId, String>,
+    edge_origins: BTreeMap<EdgeId, [soliddraft_kernel_api::Origin; 2]>,
     vertex_names: BTreeMap<VertexId, String>,
 }
 
@@ -66,6 +67,7 @@ impl Ids {
             face_origins: BTreeMap::new(),
             named: Vec::new(),
             edge_names: BTreeMap::new(),
+            edge_origins: BTreeMap::new(),
             vertex_names: BTreeMap::new(),
         };
         for face in app.names.faces.keys() {
@@ -99,6 +101,13 @@ impl Ids {
             ids.edge_keys.insert(id, key);
             if let Some(name) = name {
                 ids.edge_names.insert(id, serde_json::to_string(name).expect("edge name serializes"));
+                let [a, b] = name.between();
+                if let (Some(a), Some(b)) = (
+                    named_origin_for_edges(a, parents, tags, selected_edges),
+                    named_origin_for_edges(b, parents, tags, selected_edges),
+                ) {
+                    ids.edge_origins.insert(id, [a, b]);
+                }
             }
         }
         for (vertex, name) in &app.names.vertices {
@@ -513,6 +522,7 @@ pub(super) fn topology(
             midpoint: middle,
             bbox: bounds(points.into_iter(), e.max_chord_error.to_f64_nearest()),
             faces: adjacency.remove(&id).unwrap_or_default(),
+            construction_origins: ids.edge_origins.get(&ids.edges[&id]).cloned(),
             vertices: vertices.into_iter().collect(),
         });
     }

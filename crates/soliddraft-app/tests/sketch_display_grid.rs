@@ -40,6 +40,29 @@ fn text_click(app: &mut App, label: &str) {
         .unwrap_or_else(|| panic!("visible control {label}"));
     ribbon::click_at(app, control.rect.center());
 }
+fn property_text(app: &mut App, label: &str) {
+    for _ in 0..12 {
+        let view = app.state().state.viewport.rect;
+        let pane = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
+        if let Some(control) = ribbon::painted(app)
+            .into_iter()
+            .find(|c| c.text == label && c.rect.contains_rect(c.full) && pane.contains_rect(c.full))
+        {
+            ribbon::click_at(app, control.rect.center());
+            app.run_steps(6);
+            return;
+        }
+        app.hover_at(Pos2::new(pane.right() - 15.0, pane.bottom() - 40.0));
+        app.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -100.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        app.run_steps(6);
+    }
+    panic!("visible property control {label}");
+}
 fn palette(app: &mut App, query: &str, id: &str) {
     app.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
     app.run_steps(3);
@@ -121,18 +144,7 @@ fn contour_and_dimension_switches_change_raster_and_picking_without_history() {
     ribbon::click_at(&mut app, label);
     assert_eq!(session(&app).selection, vec![SketchSel::Constraint(radius)]);
     text_click(&mut app, "Sketch display");
-    let ribbon = ribbon::ribbon_region(&app);
-    let viewport = app.state().state.viewport.rect;
-    let checkbox = ribbon::painted(&app)
-        .into_iter()
-        .find(|c| {
-            c.text == "Sketch dimensions"
-                && !ribbon.intersects(c.rect)
-                && !viewport.intersects(c.rect)
-                && c.rect.contains_rect(c.full)
-        })
-        .expect("dimension visibility in the property panel");
-    ribbon::click_at(&mut app, checkbox.rect.center());
+    property_text(&mut app, "Sketch dimensions");
     assert!(!session(&app).show_dimensions);
     assert!(session(&app).selection.is_empty());
     assert!(!ribbon::painted(&app).iter().any(|c| c.text == "R10"));

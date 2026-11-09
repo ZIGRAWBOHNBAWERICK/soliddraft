@@ -32,6 +32,20 @@ fn glyph_contours_close_and_counters_remain_holes() {
 }
 
 #[test]
+fn unconvertible_glyph_contour_refuses_the_whole_text() {
+    // Inter Regular "ơ" has an outer quadratic whose control coincides with its end point.
+    let text = SketchText { content: "\u{1a1}".into(), height: 10.0, ..Default::default() };
+    let mut sketch = Sketch::new();
+    let id = sketch.add(EntityKind::Text { text }, false);
+    assert!(sketch.regions().is_err(), "never the counter alone as a filled region");
+    assert!(soliddraft_sketch::profile::region_outlines(&sketch).is_empty());
+    assert!(soliddraft_sketch::profile::diagnostics::inspect(&sketch).iter().any(|d| d.entities.contains(&id)));
+    // A separate valid loop does not hide the text failure.
+    sketch.add(EntityKind::Circle { center: P2::new(50.0, 0.0), radius: 5.0 }, false);
+    assert!(sketch.regions().is_err());
+}
+
+#[test]
 fn edits_regenerate_profiles_and_survive_serialization() {
     let mut sketch = Sketch::new();
     let id = sketch.add(EntityKind::Text { text: SketchText { content: "o".into(), ..Default::default() } }, false);

@@ -300,6 +300,8 @@ struct Loops {
     /// Loops that are made of lines and arcs, so they can be turned around.
     reversible: Vec<bool>,
     first_error: Option<ProfileError>,
+    /// A text entity that did not convert whole; it refuses every region.
+    text_error: Option<ProfileError>,
     issues: Vec<Diagnostic>,
 }
 
@@ -364,6 +366,39 @@ fn segments(edges: &[Edge], nodes: &[P2], chain: &Chain) -> RegionLoop {
     }
 }
 
+/// One glyph contour as a closed chain, or an error if any span fails to convert
+/// or the contour encloses no area.
+fn text_chain(e: &Entity, contour: Vec<EntityKind>) -> Result<Chain, ProfileError> {
+    let mut segments = Vec::new();
+    for kind in contour {
+        match kind {
+            EntityKind::Line { a, b } => segments.push(Segment::Line { from: pt(a), to: pt(b) }),
+            kind => segments.extend(
+                spline::segments(&Entity { id: e.id, kind, construction: false })
+                    .ok_or_else(|| ProfileError::Degenerate(name(e)))?,
+            ),
+        }
+    }
+    let Some(last) = segments.last() else {
+        return Err(ProfileError::Degenerate(name(e)));
+    };
+    // B-spline conversion may round an endpoint by a few ulps.
+    // Font contours are closed by definition: share exact joins.
+    let mut previous = last.end();
+    for segment in &mut segments {
+        match segment {
+            Segment::Line { from, .. } | Segment::Bezier { from, .. } => *from = previous,
+            _ => unreachable!("font outline segment"),
+        }
+        previous = segment.end();
+    }
+    let area = segments.iter().map(segment_area).sum::<f64>();
+    if area.abs() <= JOIN_TOLERANCE * JOIN_TOLERANCE {
+        return Err(ProfileError::Degenerate(name(e)));
+    }
+    Ok(Chain::Spline { entity: e.id, segments })
+}
+
 /// Every closed loop among the non-construction lines, arcs and circles, in
 /// entity order. Pieces that do not close are skipped and the first one is
 /// remembered.
@@ -375,6 +410,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
     let mut drawn: Vec<&Entity> = sketch.drawn().filter(|e| !e.construction).collect();
     drawn.sort_by_key(|e| e.id);
     let mut first_error: Option<ProfileError> = None;
+    let mut text_error: Option<ProfileError> = None;
     let mut issues = Vec::new();
     let mut chains: Vec<Chain> = Vec::new();
 
@@ -387,42 +423,17 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
         }
         match e.kind {
             EntityKind::Text { ref text } => {
-                let contours = match text.outlines() {
-                    Ok(contours) => contours,
+                // All or nothing: a dropped outer contour would leave its counter as a filled region.
+                let converted = text.outlines().map_err(ProfileError::Degenerate).and_then(|contours| {
+                    contours.into_iter().map(|contour| text_chain(e, contour)).collect::<Result<Vec<_>, _>>()
+                });
+                match converted {
+                    Ok(converted) => chains.extend(converted),
                     Err(error) => {
-                        first_error.get_or_insert(ProfileError::Degenerate(error));
-                        continue;
-                    }
-                };
-                for contour in contours {
-                    let mut segments = Vec::new();
-                    let mut valid = true;
-                    for kind in contour {
-                        match kind {
-                            EntityKind::Line { a, b } => segments.push(Segment::Line { from: pt(a), to: pt(b) }),
-                            kind => match spline::segments(&Entity { id: e.id, kind, construction: false }) {
-                                Some(curve) => segments.extend(curve),
-                                None => {
-                                    valid = false;
-                                    break;
-                                }
-                            },
+                        if diagnose {
+                            issues.push(Diagnostic::new(DiagnosticKind::Degenerate, vec![e.id], e.points()));
                         }
-                    }
-                    if valid && !segments.is_empty() {
-                        // B-spline conversion may round an endpoint by a few ulps.
-                        // Font contours are closed by definition: share exact joins.
-                        let mut previous = segments.last().unwrap().end();
-                        for segment in &mut segments {
-                            match segment {
-                                Segment::Line { from, .. } | Segment::Bezier { from, .. } => *from = previous,
-                                _ => unreachable!("font outline segment"),
-                            }
-                            previous = segment.end();
-                        }
-                        chains.push(Chain::Spline { entity: e.id, segments });
-                    } else {
-                        first_error.get_or_insert(ProfileError::Degenerate(name(e)));
+                        text_error.get_or_insert(error);
                     }
                 }
             }
@@ -594,7 +605,7 @@ fn loops(sketch: &Sketch, diagnose: bool) -> Loops {
         chains.push(Chain::Edges(walk));
     }
 
-    let mut out = Loops { loops: Vec::new(), reversible: Vec::new(), first_error, issues };
+    let mut out = Loops { loops: Vec::new(), reversible: Vec::new(), first_error, text_error, issues };
     for chain in &chains {
         let lp = segments(&edges, &nodes, chain);
         if lp.signed_area().abs() <= JOIN_TOLERANCE * JOIN_TOLERANCE {
@@ -648,12 +659,17 @@ fn oriented(lp: &RegionLoop, reversible: bool, ccw: bool) -> RegionLoop {
 ///
 /// Ends join when a coincident constraint joins them or they lie within 1e-6 of
 /// each other. Pieces that do not close are skipped; they are an error only when
-/// nothing closes at all. Loops nest by containment: a loop inside an even number
-/// of others is an outer loop, and the loops directly inside it are its holes.
+/// nothing closes at all. Text that does not convert whole is always an error, as a
+/// partial glyph would fill its counters. Loops nest by containment: a loop inside
+/// an even number of others is an outer loop, and the loops directly inside it are
+/// its holes.
 /// Overlapping loops are not detected. Regions are ordered by the smallest entity
 /// of their outer loop, holes likewise, and each loop starts at its smallest entity.
 pub fn regions(sketch: &Sketch) -> Result<Vec<Region>, ProfileError> {
-    let Loops { loops, reversible, first_error, .. } = loops(sketch, false);
+    let Loops { loops, reversible, first_error, text_error, .. } = loops(sketch, false);
+    if let Some(error) = text_error {
+        return Err(error);
+    }
     if loops.is_empty() {
         return Err(first_error.unwrap_or(ProfileError::NoLoop));
     }

@@ -232,6 +232,9 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
     assert_eq!(session(&app).tool, Tool::Select);
     assert_eq!(session(&app).sketch, rotated);
     tool(&mut app, "Scale entities");
+    // Reactivation starts live base placement; a collapsed ribbon popup can leave
+    // the cursor over the viewport. Place the base again before comparing previews.
+    click(&mut app, P2::new(5.0, 0.0), Modifiers::NONE);
     assert_eq!(session(&app).preview.as_ref().unwrap().added, preview);
     app.render().unwrap().save(dir.join("03-scale-preview.png")).unwrap();
     button(&mut app, "Apply");

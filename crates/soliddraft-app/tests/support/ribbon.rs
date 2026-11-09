@@ -276,7 +276,7 @@ pub fn ribbon_button(app: &App, label: &str) -> Control {
 /// Clicks a ribbon command, opening its collapsed group when needed.
 pub fn click_ribbon(app: &mut App, label: &str) {
     let band = ribbon_region(app);
-    if !app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| band.intersects(n.rect())) {
+    if !app.query_all(By::new().role(egui::accesskit::Role::Button).label(label)).any(|n| band.intersects(n.rect())) {
         let group = {
             let state = &app.state().state;
             let tab = if state.drawing.is_active() {

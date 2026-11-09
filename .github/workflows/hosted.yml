@@ -144,8 +144,6 @@ jobs:
           path: recipes/golden/catallax-*
           if-no-files-found: error
 
-  # The bracket's STEP opens in OpenCASCADE with the exact body's face count and a volume
-  # within the reported deviation. OpenCASCADE is a test tool; the application never links it.
       - name: Compiler cache statistics
         if: always()
         run: |
@@ -154,6 +152,8 @@ jobs:
             sccache --stop-server
           fi
 
+  # The bracket's STEP opens in OpenCASCADE with the exact body's face count and a volume
+  # within the reported deviation. OpenCASCADE is a test tool; the application never links it.
   step-opencascade:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'step-opencascade')

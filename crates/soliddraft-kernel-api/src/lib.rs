@@ -529,6 +529,10 @@ pub struct EdgeInfo {
     pub bbox: Aabb,
     /// Faces that use the edge: two on a closed solid. A seam lists its face twice.
     pub faces: Vec<FaceId>,
+    /// Canonical construction origins of the two incident faces, when the backend
+    /// supplies them. These survive face merging; their order need not match `faces`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub construction_origins: Option<[Origin; 2]>,
     /// Start and end vertex; one vertex for a closed edge such as a full circle.
     #[serde(default)]
     pub vertices: Vec<VertexId>,

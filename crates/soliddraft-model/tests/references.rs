@@ -128,6 +128,89 @@ fn diameter(doc: &Document, sketch: FeatureId) -> ConstraintId {
     s.sketch.constraints.iter().find(|c| c.is_dimension()).unwrap().id
 }
 
+/// A merged cap must not lend the earlier block's name to the later block's edge. The
+/// edge is straight, ends on flat sides and stays clear of the earlier block's side
+/// planes, which the kernel needs to chamfer it; it cannot yet end either blend on an
+/// open arc, such as an overlapping cylinder's rim.
+#[test]
+fn merged_cap_edges_keep_their_construction_pair_through_blends_edits_and_reload() {
+    use soliddraft_model::{BlendFeature, EdgeRef};
+
+    for fillet in [true, false] {
+        let mut doc = Document::new("Merged caps", Arc::new(CatallaxKernel::new()));
+        let block = |centre, height| {
+            sketch(top(), move |s| {
+                s.rectangle(centre, 20.0, height).unwrap();
+            })
+        };
+        let a_sketch = add(&mut doc, "a profile", block(P2::ZERO, 20.0));
+        let a = add(&mut doc, "a", extrude(a_sketch, ExtrudeOp::Boss, blind(10.0)));
+        let b_sketch = add(&mut doc, "b profile", block(P2::new(18.0, 0.0), 10.0));
+        let b = add(&mut doc, "b", extrude(b_sketch, ExtrudeOp::Boss, blind(10.0)));
+        let end_cap = |feature| {
+            doc.generated_faces(feature).iter().find(|n| n.generator == Generator::EndCap).unwrap().origin.clone()
+        };
+        let (a_end, b_end) = (end_cap(a), end_cap(b));
+        let t = doc.kernel().topology(doc.body().unwrap()).unwrap();
+        let merged = t.faces.iter().find(|f| f.origins.contains(&a_end) && f.origins.contains(&b_end)).unwrap();
+        // Select by position, independently of the construction-pair field: b's far
+        // edge on the merged cap.
+        let edge = t.edges.iter().find(|e| e.faces.contains(&merged.id) && e.midpoint.x > 27.0).unwrap();
+        let wall = t.face(*edge.faces.iter().find(|f| **f != merged.id).unwrap()).unwrap();
+        let [b_wall] = wall.origins.as_slice() else { panic!("{wall:?}") };
+        let pair = edge.construction_origins.as_ref().expect("the adapter preserves the pair");
+        assert!(pair.contains(&b_end) && pair.contains(b_wall), "{pair:?}");
+        let saved = doc.edge_ref(edge.id).unwrap();
+        let check_pair = |r: &EdgeRef| {
+            assert!(r.faces.iter().all(|f| f.feature == b && f.ordinal == 0), "{r:?}");
+            assert!(r.faces.iter().any(|f| f.generator == Generator::EndCap));
+            assert!(r.faces.iter().any(|f| matches!(f.generator, Generator::Side { .. })));
+        };
+        check_pair(&saved);
+        for face in &saved.faces {
+            let actual = if face.generator == Generator::EndCap { merged } else { wall };
+            assert_eq!(face.fingerprint, soliddraft_model::FaceFingerprint::of(actual));
+        }
+        let blend = BlendFeature { edges: vec![saved.clone()], size: 0.5 };
+        let kind = if fillet { FeatureKind::Fillet(blend) } else { FeatureKind::Chamfer(blend) };
+        let downstream = add(&mut doc, "Blend", kind);
+        assert_eq!(doc.status(downstream), Some(&FeatureStatus::Ok), "{}", report(&doc));
+
+        // Reopen while the caps are still merged; only the saved references survive.
+        let bytes = doc.to_bytes().unwrap();
+        drop(doc);
+        let mut doc = Document::from_bytes(&bytes, Arc::new(CatallaxKernel::new())).unwrap();
+        doc.execute(Command::EditFeature { id: a, kind: extrude(a_sketch, ExtrudeOp::Boss, blind(14.0)) }).unwrap();
+        assert_eq!(doc.status(downstream), Some(&FeatureStatus::Ok), "{}", report(&doc));
+        let input = doc.body_before(downstream).unwrap();
+        let resolved = doc.resolve_edge(&saved, input).unwrap();
+        let t = doc.kernel().topology(input).unwrap();
+        let pair = t.edge(resolved).unwrap().construction_origins.as_ref().unwrap();
+        assert!(pair.contains(&b_end) && pair.contains(b_wall), "{pair:?}");
+        let stored = match &doc.feature(downstream).unwrap().kind {
+            FeatureKind::Fillet(blend) | FeatureKind::Chamfer(blend) => &blend.edges[0],
+            _ => unreachable!(),
+        };
+        assert_eq!(stored, &saved);
+        check_pair(stored);
+
+        let bytes = doc.to_bytes().unwrap();
+        drop(doc);
+        let mut doc = Document::from_bytes(&bytes, Arc::new(CatallaxKernel::new())).unwrap();
+        assert_eq!(doc.status(downstream), Some(&FeatureStatus::Ok), "{}", report(&doc));
+        // A through cut removes b's entire end/wall incidence while a survives.
+        doc.execute(Command::EditFeature { id: b, kind: extrude(b_sketch, ExtrudeOp::Cut, EndCondition::ThroughAll) })
+            .unwrap();
+        assert!(
+            matches!(doc.status(downstream), Some(FeatureStatus::RepairNeeded(items))
+            if items.iter().any(|item| item.reason == RepairReason::Missing)),
+            "{}",
+            report(&doc)
+        );
+        assert!(doc.resolve_edge(&saved, doc.body_before(downstream).unwrap()).is_err());
+    }
+}
+
 /// A sketch on a split face takes the plane the display topology gives, with no mesh of
 /// the body under it. Only the part's final body is meshed.
 #[test]

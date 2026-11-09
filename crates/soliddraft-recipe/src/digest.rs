@@ -120,6 +120,7 @@ mod tests {
                 midpoint: Vec3::new(i as f64, 0.0, -offset),
                 bbox,
                 faces: vec![],
+                construction_origins: None,
                 vertices: vec![],
             })
             .collect();

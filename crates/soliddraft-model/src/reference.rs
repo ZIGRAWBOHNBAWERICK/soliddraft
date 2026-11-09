@@ -601,6 +601,35 @@ fn origin_name(face: FaceId, view: &View, names: &NameMap) -> Result<FaceRef, Na
     Err(NamingError::NoOrigin(face.to_string()))
 }
 
+/// The names of an edge's two faces from the construction pair the kernel reports. A
+/// merged face carries several origins, and only the pair says which one this edge
+/// bounds; [`origin_name`] would take the earliest feature's. Each name keeps the
+/// fingerprint of the incident face that carries its origin, whatever the pair's order.
+fn construction_names(info: &EdgeInfo, view: &View, names: &NameMap) -> Option<[FaceRef; 2]> {
+    let pair = info.construction_origins.as_ref()?;
+    let [a, b] = info.faces.as_slice() else { return None };
+    let (a, b) = (view.topology.face(*a)?, view.topology.face(*b)?);
+    let incident = if a.origins.contains(&pair[0]) && b.origins.contains(&pair[1]) {
+        [a, b]
+    } else if b.origins.contains(&pair[0]) && a.origins.contains(&pair[1]) {
+        [b, a]
+    } else {
+        return None;
+    };
+    let named = |side: usize| {
+        names.iter().find_map(|(feature, made)| {
+            made.iter().find(|n| n.origin == pair[side]).map(|n| FaceRef {
+                feature: *feature,
+                generator: n.generator.clone(),
+                ordinal: n.ordinal,
+                fingerprint: FaceFingerprint::of(incident[side]),
+                label: String::new(),
+            })
+        })
+    };
+    Some([named(0)?, named(1)?])
+}
+
 /// A persistent name for a face of the body, checked to resolve back to that face.
 pub(crate) fn name_face(face: FaceId, view: &View, names: &NameMap) -> Result<FaceRef, NamingError> {
     let r = origin_name(face, view, names)?;
@@ -634,12 +663,11 @@ pub(crate) fn name_edge(edge: EdgeId, view: &View, names: &NameMap) -> Result<Ed
     let [a, b] = info.faces.as_slice() else {
         return Err(NamingError::NotUnique(edge.to_string(), format!("it bounds {} faces", info.faces.len())));
     };
-    let mut r = EdgeRef {
-        disambiguate: false,
-        faces: [origin_name(*a, view, names)?, origin_name(*b, view, names)?],
-        fingerprint: EdgeFingerprint::of(info),
-        label: String::new(),
+    let faces = match construction_names(info, view, names) {
+        Some(faces) => faces,
+        None => [origin_name(*a, view, names)?, origin_name(*b, view, names)?],
     };
+    let mut r = EdgeRef { disambiguate: false, faces, fingerprint: EdgeFingerprint::of(info), label: String::new() };
     let mut resolved = resolve_edge(&r, view, names);
     let supports = [r.faces[0].fingerprint.surface, r.faces[1].fingerprint.surface];
     if info.curve == CurveKind::Line
@@ -795,6 +823,7 @@ mod tests {
                 midpoint: Vec3::new(x, 3.0, 6.0),
                 bbox: Aabb { min: Vec3::new(x, 3.0, 0.0), max: Vec3::new(x, 3.0, 12.0) },
                 faces: vec![FaceId::from_raw(1), FaceId::from_raw(2)],
+                construction_origins: None,
                 vertices: vec![],
             })
             .collect();

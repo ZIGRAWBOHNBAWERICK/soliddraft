@@ -160,13 +160,13 @@ pub fn try_operation(s: &SketchSession, operation: Operation) -> ToolPreview {
                 Operation::Move { entities, .. }
                 | Operation::Rotate { entities, copy: false, .. }
                 | Operation::Scale { entities, .. } => {
-                    entities.iter().filter_map(|id| s.sketch.entity(*id).map(|e| e.kind)).collect()
+                    entities.iter().filter_map(|id| s.sketch.entity(*id).map(|e| e.kind.clone())).collect()
                 }
                 _ => Vec::new(),
             };
             let entities: Vec<_> = ids.iter().filter_map(|id| copy.entity(*id)).collect();
             ToolPreview {
-                added: entities.iter().map(|e| e.kind).collect(),
+                added: entities.iter().map(|e| e.kind.clone()).collect(),
                 construction: entities.iter().map(|e| e.construction).collect(),
                 replaced,
                 removed,
@@ -425,9 +425,9 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
                 });
             }
             if let Some(entity) = s.modify.mirror_axis {
-                if let Some(crate::sketch::EntityKind::Line { a, b }) = s.sketch.entity(entity).map(|e| e.kind) {
-                    s.modify.axis_start = a;
-                    s.modify.axis_end = b;
+                if let Some(crate::sketch::EntityKind::Line { a, b }) = s.sketch.entity(entity).map(|e| &e.kind) {
+                    s.modify.axis_start = *a;
+                    s.modify.axis_end = *b;
                 }
             } else {
                 point(ui, "Axis start", &mut s.modify.axis_start);
@@ -598,7 +598,13 @@ pub fn operation_schema() -> Value {
     ]);
     let ids = non_empty_array(id.clone(), "Distinct entity ids, in selection order");
     let count = integer("Instances including the seed, from 2 to 1000");
+    let spline_points = non_empty_array(point.clone(), "At least two fit or control points in traversal order");
     let geometry = any_of(vec![
+        object(&[
+            ("type", constant("spline")),
+            ("mode", one_of(&["fit", "control"], "Fit through points or use their control polygon")),
+            ("points", spline_points),
+        ]),
         object(&[("type", constant("point")), ("p", point.clone())]),
         object(&[("type", constant("line")), ("a", point.clone()), ("b", point.clone())]),
         object(&[

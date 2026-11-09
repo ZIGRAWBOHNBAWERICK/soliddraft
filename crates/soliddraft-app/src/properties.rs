@@ -1344,6 +1344,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::Circle, Icon::Circle, "Circle (C)"),
                 (Tool::Ellipse, Icon::Circle, "Ellipse"),
                 (Tool::PartialEllipse, Icon::Arc, "Partial ellipse"),
+                (Tool::FitSpline,Icon::Arc,"Fit-point spline"),
+                (Tool::ControlSpline,Icon::Arc,"Control-point spline"),
                 (Tool::Arc, Icon::Arc, "Arc (A)"),
                 (Tool::Slot, Icon::Slot, "Slot (S)"),
                 (Tool::Point, Icon::Point, "Point (P)"),
@@ -1364,6 +1366,8 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 (Tool::Scale, Icon::Rectangle, "Scale entities"),
             ];
             ui.horizontal_wrapped(|ui| {
+                // Keep Modify controls above the command bar as the palette gains tools.
+                ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
                 for (tool, icon, tip) in tools {
                     let (r, resp) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
                     resp.widget_info(|| {
@@ -1439,6 +1443,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         SketchSel::Entity(id) => {
                             if let Some(e) = s.sketch.entity(*id) {
                                 let detail = match e.kind {
+                                    EntityKind::Spline {ref points,..} => format!("{} points",points.len()),
                                     EntityKind::Line { a, b } => format!("{} mm long", fmt_value(a.dist(b))),
                                     EntityKind::Circle { radius, .. } => format!("Ø{} mm", fmt_value(radius * 2.0)),
                                     EntityKind::Arc { .. } => format!("R{} mm", fmt_value(e.radius().unwrap_or(0.0))),
@@ -1469,7 +1474,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                             }
                         }
                         SketchSel::Constraint(c) => {
-                            if let Some(con) = s.sketch.constraint(*c).copied() {
+                            if let Some(con) = s.sketch.constraint(*c).cloned() {
                                 ui.horizontal(|ui| {
                                     ui.label(egui::RichText::new(con.name()).size(12.0));
                                     if con.is_reference() {
@@ -1597,7 +1602,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                     RelationFilter::Conflicting => conflicting(c.id),
                     RelationFilter::Dangling => dangling(c),
                 })
-                .map(|c| (*c, conflicting(c.id), dangling(c)))
+                .map(|c| (c.clone(), conflicting(c.id), dangling(c)))
                 .collect();
             hint(ui, &format!("{} of {} shown", rels.len(), s.sketch.constraints.len()));
             if rels.is_empty() {

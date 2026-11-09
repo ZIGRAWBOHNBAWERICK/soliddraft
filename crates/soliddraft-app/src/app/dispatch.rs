@@ -844,6 +844,15 @@ impl SolidDraftApp {
                     self.state.note("Select a solid feature with measurable properties", NoteKind::Error);
                 }
             }
+            AppAction::FinishSpline => {
+                let mut actions = Vec::new();
+                if let Some(s) = self.state.sketch.as_mut() {
+                    crate::sketcher::finish_spline(s, &mut actions);
+                }
+                for action in actions {
+                    self.apply(ctx, action);
+                }
+            }
             AppAction::SketchTool(tool) => {
                 if let Some(s) = self.state.sketch.as_mut() {
                     s.set_tool(tool);
@@ -922,6 +931,11 @@ impl SolidDraftApp {
             }
             AppAction::DeleteSelection => {
                 if let Some(s) = self.state.sketch.as_mut() {
+                    if s.tool.spline_mode().is_some() && !s.pending.is_empty() {
+                        s.pending.pop();
+                        s.snaps.clear();
+                        return;
+                    }
                     if s.selection.is_empty() {
                         return;
                     }

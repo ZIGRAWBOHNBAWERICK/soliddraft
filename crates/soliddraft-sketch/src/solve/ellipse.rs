@@ -20,7 +20,7 @@ impl Vars {
 }
 
 pub(super) fn datum(vars: &mut Vars, e: &Entity) -> (EllipseDatum, Vec<Constraint>) {
-    let geometry = Ellipse::of(e.kind).unwrap();
+    let geometry = Ellipse::of(&e.kind).unwrap();
     let c = vars.point(PointRef::new(e.id, 0), geometry.center);
     let a = vars.point(PointRef::new(e.id, 1), geometry.major);
     let b = vars.point(PointRef::new(e.id, 2), geometry.minor);

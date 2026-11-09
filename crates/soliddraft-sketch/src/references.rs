@@ -62,7 +62,7 @@ pub(super) fn resolve(sketch: &mut Sketch) {
             ConstraintKind::OffsetCap { cap, a, b, .. } => {
                 let arc = sketch.entity(cap).is_some_and(|e| matches!(e.kind, crate::EntityKind::Arc { .. }));
                 for (endpoint, point) in [a, b].into_iter().enumerate() {
-                    let end = PointRef::new(cap, u8::from(arc) + endpoint as u8);
+                    let end = PointRef::new(cap, usize::from(arc) + endpoint);
                     for axis in 0..2 {
                         link(&mut parent, end, point, axis);
                     }

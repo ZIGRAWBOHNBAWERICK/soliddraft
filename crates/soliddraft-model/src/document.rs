@@ -571,7 +571,7 @@ impl Document {
         let f = self.feature(feature)?;
         let what = match &generator {
             Generator::Side { entity, path } => {
-                let kind = self.profile_sketch(feature).and_then(|s| s.entity(*entity).map(|e| e.kind));
+                let kind = self.profile_sketch(feature).and_then(|s| s.entity(*entity).map(|e| e.kind.clone()));
                 let along = path.as_ref().map(|p| format!(" along {p}")).unwrap_or_default();
                 match kind {
                     Some(EntityKind::Line { .. }) => format!("Side of line {entity}{along}"),

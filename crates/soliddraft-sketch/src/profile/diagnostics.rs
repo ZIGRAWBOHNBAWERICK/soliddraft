@@ -100,10 +100,10 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
         }
     }
     let line = |id| sketch.entity(id).is_some_and(|e| e.is_line());
-    let ellipse = |id| sketch.entity(id).is_some_and(|e| crate::ellipse::Ellipse::of(e.kind).is_some());
+    let ellipse = |id| sketch.entity(id).is_some_and(|e| crate::ellipse::Ellipse::of(&e.kind).is_some());
     let centered =
-        |id| sketch.entity(id).is_some_and(|e| e.is_curve() || crate::ellipse::Ellipse::of(e.kind).is_some());
-    let circular = |id| sketch.entity(id).is_some_and(|e| tools::circle(e.kind).is_some());
+        |id| sketch.entity(id).is_some_and(|e| e.is_curve() || crate::ellipse::Ellipse::of(&e.kind).is_some());
+    let circular = |id| sketch.entity(id).is_some_and(|e| tools::circle(&e.kind).is_some());
     let reason = match constraint.geometry_kind() {
         ConstraintKind::Horizontal { target: Align::Line(id) }
         | ConstraintKind::Vertical { target: Align::Line(id) }
@@ -125,7 +125,7 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
             Some("Symmetry requires two distinct points outside the axis entity")
         }
         ConstraintKind::FixEntity { entity, at }
-            if !tools::valid(at)
+            if !tools::valid(&at)
                 || sketch
                     .entity(entity)
                     .is_some_and(|e| std::mem::discriminant(&e.kind) != std::mem::discriminant(&at)) =>
@@ -166,10 +166,8 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
         {
             Some("Equal requires two lines, two circular targets or two ellipses")
         }
-        ConstraintKind::Tangent { a, b }
-            if !((line(a) && circular(b)) || (circular(a) && line(b)) || (circular(a) && circular(b))) =>
-        {
-            Some("Tangent requires a line and circular curve, or two circular curves")
+        ConstraintKind::Tangent { a, b } if !crate::relations::tangent_supported(sketch, a, b) => {
+            Some("Tangent requires supported curves; spline endpoints must be joined")
         }
         _ => None,
     };
@@ -190,8 +188,9 @@ fn intervals(kind: EntityKind) -> Vec<(f64, f64)> {
     }
 }
 
-fn overlap(a: EntityKind, b: EntityKind) -> Vec<P2> {
+fn overlap(a: &EntityKind, b: &EntityKind) -> Vec<P2> {
     if let (EntityKind::Line { a: p, b: q }, EntityKind::Line { a: r, b: s }) = (a, b) {
+        let (p, q, r, s) = (*p, *q, *r, *s);
         let direction = (q - p).normalized();
         if direction.cross(r - p).abs() > JOIN_TOLERANCE || direction.cross(s - p).abs() > JOIN_TOLERANCE {
             return Vec::new();
@@ -210,8 +209,8 @@ fn overlap(a: EntityKind, b: EntityKind) -> Vec<P2> {
         return Vec::new();
     }
     let mut points = Vec::new();
-    let limits = intervals(b);
-    for (from, to) in intervals(a) {
+    let limits = intervals(b.clone());
+    for (from, to) in intervals(a.clone()) {
         for &(other_from, other_to) in &limits {
             let lo = from.max(other_from);
             let hi = to.min(other_to);
@@ -227,27 +226,27 @@ fn overlap(a: EntityKind, b: EntityKind) -> Vec<P2> {
 
 pub(super) fn append_pairs(drawn: &[&Entity], issues: &mut Vec<Diagnostic>) {
     for (i, a) in drawn.iter().enumerate() {
-        if a.is_point() || !tools::valid(a.kind) {
+        if a.is_point() || !tools::valid(&a.kind) {
             continue;
         }
         for b in &drawn[i + 1..] {
-            if b.is_point() || !tools::valid(b.kind) {
+            if b.is_point() || !tools::valid(&b.kind) {
                 continue;
             }
-            let locations = overlap(a.kind, b.kind);
+            let locations = overlap(&a.kind, &b.kind);
             if !locations.is_empty() {
                 issues.push(Diagnostic::new(DiagnosticKind::Overlap, vec![a.id, b.id], locations));
                 continue;
             }
-            for at in tools::intersections(a.kind, b.kind)
+            for at in tools::intersections(&a.kind, &b.kind)
                 .into_iter()
-                .filter(|p| tools::on_curve(a.kind, *p) && tools::on_curve(b.kind, *p))
+                .filter(|p| tools::on_curve(&a.kind, *p) && tools::on_curve(&b.kind, *p))
             {
-                let degree = |kind| {
+                let degree = |kind: &EntityKind| {
                     tools::ends(kind)
                         .map_or(2, |ends| if ends.iter().any(|p| p.dist(at) <= JOIN_TOLERANCE) { 1 } else { 2 })
                 };
-                if degree(a.kind) + degree(b.kind) <= 2 {
+                if degree(&a.kind) + degree(&b.kind) <= 2 {
                     continue;
                 }
                 if let Some(issue) = issues.iter_mut().find(|issue| {

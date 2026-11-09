@@ -100,7 +100,7 @@ fn launch(sketch: Sketch) -> (App, u64) {
 }
 fn axis(s: &mut Sketch) {
     let at = EntityKind::Line { a: p(0.0, -20.0), b: p(0.0, 20.0) };
-    let entity = s.add(at, true);
+    let entity = s.add(at.clone(), true);
     assert_eq!(entity, 1);
     s.constrain(ConstraintKind::FixEntity { entity, at });
 }

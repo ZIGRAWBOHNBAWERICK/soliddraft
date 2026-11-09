@@ -168,7 +168,7 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
     let moved = session(&app).sketch.clone();
     near(moved.entity(1).unwrap().point(0).unwrap(), P2::new(-16.0, -4.0));
     near(moved.entity(2).unwrap().point(0).unwrap(), P2::new(24.0, 16.0));
-    assert_eq!(moved.drawn().map(|e| e.kind).collect::<Vec<_>>(), preview);
+    assert_eq!(moved.drawn().map(|e| e.kind.clone()).collect::<Vec<_>>(), preview);
     undo_redo(&mut app, &original, &moved);
 
     // Copy placement follows the destination until the second click and then freezes.
@@ -201,7 +201,7 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
     button(&mut app, "Apply");
     let in_place = session(&app).sketch.clone();
     assert_eq!(in_place.drawn().count(), 4);
-    assert_eq!(in_place.drawn().skip(2).map(|e| e.kind).collect::<Vec<_>>(), in_place_preview);
+    assert_eq!(in_place.drawn().skip(2).map(|e| e.kind.clone()).collect::<Vec<_>>(), in_place_preview);
     undo_redo(&mut app, &copied, &in_place);
     app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     settle(&mut app);
@@ -213,7 +213,7 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
     button(&mut app, "Apply");
     let rotated = session(&app).sketch.clone();
     assert_eq!(rotated.drawn().count(), 6);
-    assert_eq!(rotated.drawn().skip(4).map(|e| e.kind).collect::<Vec<_>>(), preview);
+    assert_eq!(rotated.drawn().skip(4).map(|e| e.kind.clone()).collect::<Vec<_>>(), preview);
     undo_redo(&mut app, &copied, &rotated);
 
     // Uniform scale includes circle radii, and Cancel/Escape discard preview-only edits.

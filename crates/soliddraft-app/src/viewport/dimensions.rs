@@ -74,8 +74,8 @@ impl ShownDimension {
 }
 
 /// The field of a built-in profile that a dimension of its sketch shows.
-fn profile_field(kind: ConstraintKind) -> Option<FeatureField> {
-    match kind {
+fn profile_field(kind: &ConstraintKind) -> Option<FeatureField> {
+    match *kind {
         ConstraintKind::Distance { kind: DistanceKind::Horizontal, .. } => Some(FeatureField::Width),
         ConstraintKind::Distance { kind: DistanceKind::Vertical, .. } => Some(FeatureField::Height),
         ConstraintKind::Radius { diameter: true, .. } => Some(FeatureField::Diameter),
@@ -143,7 +143,7 @@ pub fn paint(
                 DimensionTarget::Feature(f.id)
             };
             // A built-in profile's sizes are the extrude's own values.
-            let field = c.and_then(|c| profile_field(c.kind)).filter(|_| !edit_sketch);
+            let field = c.and_then(|c| profile_field(&c.kind)).filter(|_| !edit_sketch);
             let name = field.map(FeatureField::label).or(c.map(|c| c.name())).unwrap_or("Dimension");
             shown.push(ShownDimension {
                 target,

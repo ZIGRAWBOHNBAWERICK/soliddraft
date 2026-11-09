@@ -15,6 +15,7 @@ use std::ops::{Add, Sub};
 
 mod ellipse;
 mod patterns;
+mod spline;
 
 /// A point the user is dragging: solved as a low-priority wish, so real
 /// constraints win and the rest of the sketch follows.
@@ -64,6 +65,7 @@ enum Datum {
     Arc(DatumCircularArc, DatumCircle),
     Circle(DatumCircle),
     Ellipse(ellipse::EllipseDatum),
+    Spline { start: DatumLineSegment, end: DatumLineSegment, last: usize },
 }
 
 impl Datum {
@@ -140,6 +142,9 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
     let mut vars =
         Vars { ids: ezpz::IdGenerator::default(), points: HashMap::new(), radii: HashMap::new(), guesses: Vec::new() };
     let mut datums: HashMap<EntityId, Datum> = HashMap::new();
+    let mut splines = HashMap::new();
+    let mut attachments = Vec::new();
+    let mut attachment_owners = Vec::new();
     let mut requests: Vec<ConstraintRequest> = Vec::new();
     // Which sketch constraint each request belongs to; None for internal ones.
     let mut owners: Vec<Option<ConstraintId>> = Vec::new();
@@ -153,6 +158,18 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
 
     for e in &sketch.entities {
         let d = match e.kind {
+            EntityKind::Spline { .. } => {
+                let Some((datum, internal)) = spline::datum(&mut vars, e) else {
+                    sketch.status = SolveStatus::Failed("A spline needs at least two finite points".into());
+                    return;
+                };
+                for request in internal {
+                    push(ConstraintRequest::highest_priority(request), None, &mut requests, &mut owners);
+                }
+                let [start, end] = datum.tangents();
+                splines.insert(e.id, datum);
+                Datum::Spline { start, end, last: e.point_count() - 1 }
+            }
             EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. } => {
                 let (datum, internal) = ellipse::datum(&mut vars, e);
                 for req in internal {
@@ -236,6 +253,18 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
                                 reqs.extend(datum.point_on(&mut vars, p, at));
                             }
                         }
+                        Datum::Spline { .. } => {
+                            if let Some(at) = drag
+                                .filter(|drag| drag.point == point)
+                                .map(|drag| drag.to)
+                                .or_else(|| sketch.point(point))
+                            {
+                                let mut attachment = splines[&entity].point_on(&mut vars, p, at, &mut reqs);
+                                attachment.offset_requests(requests.len());
+                                attachments.push(attachment);
+                                attachment_owners.push(c.id);
+                            }
+                        }
                         Datum::Point(q) => reqs.push(Constraint::PointsCoincident(p, *q)),
                     }
                 }
@@ -269,6 +298,13 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
                 }
             }
             ConstraintKind::Tangent { a, b } => {
+                let spline_target = |id| sketch.entity(id).is_some_and(|e| matches!(e.kind, EntityKind::Spline { .. }));
+                if (spline_target(a) || spline_target(b)) && !crate::relations::tangent_supported(sketch, a, b) {
+                    sketch.status = SolveStatus::Failed(
+                        "Spline tangency requires joined endpoints on lines, arcs or splines".into(),
+                    );
+                    return;
+                }
                 if let Some(r) = tangent(sketch, &datums, a, b) {
                     reqs.push(r);
                 }
@@ -307,11 +343,11 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
             }
             ConstraintKind::PatternTransform { a, b, .. } => {
                 if let (Some(source), Some(target)) = (sketch.entity(a), sketch.entity(b)) {
-                    reqs.extend(patterns::requirements(&mut vars, &mut pattern_axes, *source, *target, c.kind));
+                    reqs.extend(patterns::requirements(&mut vars, &mut pattern_axes, source, target, &c.kind));
                 }
             }
-            ConstraintKind::FixEntity { entity, at } => {
-                let snapshot = Entity { id: entity, kind: at, construction: false };
+            ConstraintKind::FixEntity { entity, ref at } => {
+                let snapshot = Entity { id: entity, kind: at.clone(), construction: false };
                 for index in 0..snapshot.point_count() {
                     if let (Some(p), Some(at)) = (pt(&vars, PointRef::new(entity, index)), snapshot.point(index)) {
                         reqs.push(Constraint::Fixed(p.id_x(), at.u));
@@ -321,7 +357,7 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
                 if let EntityKind::Circle { radius, .. } = at
                     && let Some(circle) = datums.get(&entity).and_then(|d| d.circle())
                 {
-                    reqs.push(Constraint::Fixed(circle.radius.id, radius));
+                    reqs.push(Constraint::Fixed(circle.radius.id, *radius));
                 }
             }
             ConstraintKind::Offset { a, b, distance, reverse, opposite, ends, join, .. } => {
@@ -375,8 +411,8 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
             ConstraintKind::OffsetCap { cap, a, b, .. } => {
                 if let (Some(p), Some(q), Some(entity)) = (pt(&vars, a), pt(&vars, b), sketch.entity(cap)) {
                     let arc = entity.is_curve();
-                    let start = pt(&vars, PointRef::new(cap, u8::from(arc)));
-                    let end = pt(&vars, PointRef::new(cap, 1 + u8::from(arc)));
+                    let start = pt(&vars, PointRef::new(cap, usize::from(arc)));
+                    let end = pt(&vars, PointRef::new(cap, 1 + usize::from(arc)));
                     if let (Some(start), Some(end)) = (start, end) {
                         reqs.push(Constraint::PointsCoincident(start, p));
                         reqs.push(Constraint::PointsCoincident(end, q));
@@ -434,6 +470,7 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
             push(ConstraintRequest::highest_priority(r), Some(c.id), &mut requests, &mut owners);
         }
     }
+    let geometric_request_count = requests.len();
     if let Some(d) = drag
         && let Some(p) = pt(&vars, d.point)
     {
@@ -446,7 +483,31 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
     // dimensioned corners within 1e-9.
     let config = Config::default().with_max_iterations(60).with_convergence_tolerance(1e-11);
     let guesses = vars.guesses.clone();
-    let (outcome, under) = if analyse {
+    let (outcome, under) = if !attachments.is_empty() {
+        let (outcome, clamped) =
+            match spline::finite_solve(&mut requests, guesses, &mut attachments, geometric_request_count) {
+                Ok(result) => result,
+                Err(error) => {
+                    sketch.status = SolveStatus::Failed(error);
+                    return;
+                }
+            };
+        owners.extend(clamped.into_iter().map(|i| Some(attachment_owners[i])));
+        let under = if analyse {
+            let initial =
+                outcome.final_values().iter().copied().enumerate().map(|(i, value)| (i as ezpz::Id, value)).collect();
+            match ezpz::solve_analysis(&requests[..geometric_request_count], initial, config) {
+                Ok(result) => Some(result.analysis.into_underconstrained()),
+                Err(error) => {
+                    sketch.status = SolveStatus::Failed(error.error.to_string());
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        (outcome, under)
+    } else if analyse {
         match ezpz::solve_analysis(&requests, guesses, config) {
             Ok(r) => (r.outcome, Some(r.analysis.into_underconstrained())),
             Err(e) => {
@@ -501,13 +562,13 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
     }
 
     for e in &mut sketch.entities {
-        if let Some(geometry) = crate::ellipse::Ellipse::of(e.kind) {
+        if let Some(geometry) = crate::ellipse::Ellipse::of(&e.kind) {
             let perpendicular = geometry.axis().perp().normalized();
             let length =
                 geometry.center.dist(geometry.minor).copysign((geometry.minor - geometry.center).dot(perpendicular));
             let minor = geometry.center + perpendicular.scale(length);
             e.set_point(2, minor);
-            let geometry = crate::ellipse::Ellipse::of(e.kind).unwrap();
+            let geometry = crate::ellipse::Ellipse::of(&e.kind).unwrap();
             if let EntityKind::EllipticArc { start, end, .. } = e.kind {
                 e.set_point(3, geometry.at(geometry.parameter(start)));
                 e.set_point(4, geometry.at(geometry.parameter(end)));
@@ -556,6 +617,24 @@ fn solve_inner(sketch: &mut Sketch, drag: Option<Drag>, analyse: bool, anchors: 
 fn tangent(sketch: &Sketch, datums: &HashMap<EntityId, Datum>, a: EntityId, b: EntityId) -> Option<Constraint> {
     let (da, db) = (*datums.get(&a)?, *datums.get(&b)?);
     let shared = shared_point(sketch, a, b);
+    if matches!(da, Datum::Spline { .. }) || matches!(db, Datum::Spline { .. }) {
+        let (pa, pb) = shared?;
+        let direction = |datum: Datum, point: PointRef| match datum {
+            Datum::Spline { start, .. } if point.index == 0 => Some((start, false)),
+            Datum::Spline { end, last, .. } if point.index == last => Some((end, false)),
+            Datum::Line(line) => Some((line, false)),
+            other => other
+                .circle()
+                .and_then(|circle| curve_point(datums, point).map(|p| (DatumLineSegment::new(circle.center, p), true))),
+        };
+        let (first, circular_a) = direction(da, pa)?;
+        let (second, circular_b) = direction(db, pb)?;
+        return Some(Constraint::LinesAtAngle(
+            first,
+            second,
+            if circular_a != circular_b { AngleKind::Perpendicular } else { AngleKind::Parallel },
+        ));
+    }
     match (da, db) {
         (Datum::Line(l), other) | (other, Datum::Line(l)) if other.circle().is_some() => {
             let circle = other.circle()?;
@@ -586,11 +665,14 @@ fn tangent(sketch: &Sketch, datums: &HashMap<EntityId, Datum>, a: EntityId, b: E
 }
 
 /// An end of `a` and an end of `b` joined by coincident constraints, in that order.
-fn shared_point(sketch: &Sketch, a: EntityId, b: EntityId) -> Option<(PointRef, PointRef)> {
+pub(crate) fn shared_point(sketch: &Sketch, a: EntityId, b: EntityId) -> Option<(PointRef, PointRef)> {
     let ea = sketch.entity(a)?;
     let eb = sketch.entity(b)?;
     let ends = |e: &Entity| -> Vec<PointRef> {
         match e.kind {
+            EntityKind::Spline { ref points, .. } if points.len() >= 2 => {
+                vec![PointRef::new(e.id, 0), PointRef::new(e.id, points.len() - 1)]
+            }
             EntityKind::Line { .. } => vec![PointRef::new(e.id, 0), PointRef::new(e.id, 1)],
             EntityKind::Arc { .. } => vec![PointRef::new(e.id, 1), PointRef::new(e.id, 2)],
             _ => Vec::new(),
@@ -617,7 +699,9 @@ fn curve_point(datums: &HashMap<EntityId, Datum>, r: PointRef) -> Option<DatumPo
         Datum::Line(l) => Some(if r.index == 0 { l.p0 } else { l.p1 }),
         Datum::Point(p) => Some(*p),
         Datum::Circle(c) => Some(c.center),
-        Datum::Ellipse(_) => None,
+        Datum::Spline { start, .. } if r.index == 0 => Some(start.p0),
+        Datum::Spline { end, last, .. } if r.index == *last => Some(end.p1),
+        Datum::Spline { .. } | Datum::Ellipse(_) => None,
     }
 }
 

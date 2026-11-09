@@ -23,12 +23,15 @@ pub enum MirrorAxis {
 
 /// Reflect geometry, reversing arc endpoints to retain counter-clockwise storage.
 pub fn reflected(kind: EntityKind, start: P2, end: P2) -> Result<EntityKind> {
-    if !valid(kind) || !finite(start) || !finite(end) || start.dist(end) <= EPS {
+    if !valid(&kind) || !finite(start) || !finite(end) || start.dist(end) <= EPS {
         return refuse("reflection needs valid geometry and two distinct finite axis points");
     }
     let dir = (end - start).normalized();
     let map = |p: P2| start + dir.scale(2.0 * (p - start).dot(dir)) - (p - start);
     let kind = match kind {
+        EntityKind::Spline { mode, points } => {
+            EntityKind::Spline { mode, points: points.into_iter().map(map).collect() }
+        }
         EntityKind::Point { p } => EntityKind::Point { p: map(p) },
         EntityKind::Line { a, b } => EntityKind::Line { a: map(a), b: map(b) },
         EntityKind::Circle { center, radius } => EntityKind::Circle { center: map(center), radius },
@@ -36,26 +39,32 @@ pub fn reflected(kind: EntityKind, start: P2, end: P2) -> Result<EntityKind> {
             EntityKind::Arc { center: map(center), start: map(end), end: map(start) }
         }
         EntityKind::Ellipse { .. } | EntityKind::EllipticArc { .. } => {
-            return refuse("linked mirror supports points, lines, circles and circular arcs");
+            return refuse("linked mirror does not support ellipses or partial ellipses; turn off Keep symmetry");
         }
     };
-    if !valid(kind) {
+    if !valid(&kind) {
         return refuse("reflection would produce invalid geometry");
     }
     Ok(kind)
 }
 
-fn same(a: EntityKind, b: EntityKind) -> bool {
+fn same(a: &EntityKind, b: &EntityKind) -> bool {
     match (a, b) {
-        (EntityKind::Point { p }, EntityKind::Point { p: q }) => p.dist(q) <= EPS,
+        (EntityKind::Spline { mode, points }, EntityKind::Spline { mode: other_mode, points: other_points }) => {
+            mode == other_mode
+                && points.len() == other_points.len()
+                && (points.iter().zip(other_points).all(|(a, b)| a.dist(*b) <= EPS)
+                    || points.iter().zip(other_points.iter().rev()).all(|(a, b)| a.dist(*b) <= EPS))
+        }
+        (EntityKind::Point { p }, EntityKind::Point { p: q }) => p.dist(*q) <= EPS,
         (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) => {
-            (a.dist(c) <= EPS && b.dist(d) <= EPS) || (a.dist(d) <= EPS && b.dist(c) <= EPS)
+            (a.dist(*c) <= EPS && b.dist(*d) <= EPS) || (a.dist(*d) <= EPS && b.dist(*c) <= EPS)
         }
         (EntityKind::Circle { center, radius }, EntityKind::Circle { center: c, radius: r }) => {
-            center.dist(c) <= EPS && (radius - r).abs() <= EPS
+            center.dist(*c) <= EPS && (radius - r).abs() <= EPS
         }
         (EntityKind::Arc { center, start, end }, EntityKind::Arc { center: c, start: a, end: b }) => {
-            center.dist(c) <= EPS && start.dist(a) <= EPS && end.dist(b) <= EPS
+            center.dist(*c) <= EPS && start.dist(*a) <= EPS && end.dist(*b) <= EPS
         }
         _ => false,
     }
@@ -77,15 +86,15 @@ impl Sketch {
             if Some(e.id) == existing {
                 return refuse("the mirror axis cannot also be copied");
             }
-            let kind = reflected(e.kind, start, end)?;
+            let kind = reflected(e.kind.clone(), start, end)?;
             if let Some(partner) =
-                selected.iter().find(|source| source.construction == e.construction && same(source.kind, kind))
+                selected.iter().find(|source| source.construction == e.construction && same(&source.kind, &kind))
             {
                 if e.id <= partner.id {
-                    retained.push((*e, partner.id));
+                    retained.push((e.clone(), partner.id));
                 }
             } else {
-                pairs.push((*e, kind));
+                pairs.push((e.clone(), kind));
             }
         }
         let mut trial = self.clone();
@@ -93,7 +102,7 @@ impl Sketch {
             Some(id) => id,
             None => {
                 let kind = EntityKind::Line { a: start, b: end };
-                let id = trial.add(kind, true);
+                let id = trial.add(kind.clone(), true);
                 trial.constrain(ConstraintKind::FixEntity { entity: id, at: kind });
                 id
             }
@@ -106,6 +115,21 @@ impl Sketch {
             let kinds = {
                 let point = |index| PointRef::new(source.id, index);
                 match source.kind {
+                    EntityKind::Spline { ref points, .. } => {
+                        let direction = (end - start).normalized();
+                        let reflect = |p: P2| start + direction.scale(2.0 * (p - start).dot(direction)) - (p - start);
+                        let on_axis = points.iter().all(|p| p.dist(reflect(*p)) <= EPS);
+                        (0..points.len())
+                            .filter_map(|i| {
+                                let j = if on_axis { i } else { points.len() - 1 - i };
+                                if i == j {
+                                    Some(ConstraintKind::PointOn { point: point(i), entity: axis })
+                                } else {
+                                    (i < j).then_some(ConstraintKind::Symmetric { a: point(i), b: point(j), axis })
+                                }
+                            })
+                            .collect()
+                    }
                     EntityKind::Point { .. } | EntityKind::Circle { .. } => {
                         vec![ConstraintKind::PointOn { point: point(0), entity: axis }]
                     }
@@ -129,10 +153,10 @@ impl Sketch {
                 }
             }
         }
-        let copies =
-            trial.add_tool_entities(pairs.iter().map(|(source, kind)| (*kind, source.construction)).collect())?;
+        let copies = trial
+            .add_tool_entities(pairs.iter().map(|(source, kind)| (kind.clone(), source.construction)).collect())?;
         for ((source, _), &copy) in pairs.iter().zip(&copies) {
-            trial.mirror_pair(*source, copy, axis, start, end)?;
+            trial.mirror_pair(source.clone(), copy, axis, start, end)?;
         }
         *self = trial;
         Ok(copies)
@@ -142,12 +166,13 @@ impl Sketch {
         let kinds = self.relation_constraints(&Relation::SymmetricEntities { a: source.id, b: partner, axis })?;
         for kind in &kinds {
             if !self.constraints.iter().any(|c| c.kind == *kind) {
-                self.constrain(*kind);
+                self.constrain(kind.clone());
             }
         }
         for kind in kinds {
             let ConstraintKind::Symmetric { a, b, .. } = kind else { continue };
             let endpoint = match source.kind {
+                EntityKind::Spline { ref points, .. } => a.index == 0 || a.index == points.len() - 1,
                 EntityKind::Line { .. } => a.index < 2,
                 EntityKind::Arc { .. } => a.index == 1 || a.index == 2,
                 _ => false,

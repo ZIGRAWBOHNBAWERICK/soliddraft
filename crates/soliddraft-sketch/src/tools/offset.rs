@@ -42,16 +42,16 @@ struct Plan {
     relations: Vec<ConstraintKind>,
 }
 
-fn endpoint(kind: EntityKind, reverse: bool, end: bool) -> u8 {
-    u8::from(matches!(kind, EntityKind::Arc { .. })) + u8::from(end != reverse)
+fn endpoint(kind: &EntityKind, reverse: bool, end: bool) -> usize {
+    usize::from(matches!(kind, EntityKind::Arc { .. })) + usize::from(end != reverse)
 }
 
-fn point(kind: EntityKind, index: u8) -> P2 {
-    entity(kind).point(index).expect("validated chain endpoint")
+fn point(kind: &EntityKind, index: usize) -> P2 {
+    entity(kind.clone()).point(index).expect("validated chain endpoint")
 }
 
-fn outward(kind: EntityKind, reverse: bool, end: bool) -> P2 {
-    let direction = match kind {
+fn outward(kind: &EntityKind, reverse: bool, end: bool) -> P2 {
+    let direction = match *kind {
         EntityKind::Line { a, b } => (b - a).normalized(),
         EntityKind::Arc { center, .. } => (point(kind, endpoint(kind, reverse, end)) - center).normalized().perp(),
         _ => unreachable!(),
@@ -63,14 +63,17 @@ impl Sketch {
     /// Find a nonbranching connected chain, walking through the seed in its stored direction.
     pub fn offset_chain_from(&self, seed: EntityId) -> Result<Vec<(EntityId, bool)>> {
         let seed = self.tool_entity(seed)?;
+        if matches!(seed.kind, EntityKind::Spline { .. }) {
+            return refuse("spline offset is unsupported");
+        }
         if matches!(seed.kind, EntityKind::Circle { .. }) {
             return Ok(vec![(seed.id, false)]);
         }
-        let Some([start, end]) = ends(seed.kind) else {
+        let Some([start, end]) = ends(&seed.kind) else {
             return refuse("offset needs lines, arcs or a lone circle");
         };
         let curves: Vec<_> =
-            self.drawn().filter(|e| e.construction == seed.construction && ends(e.kind).is_some()).collect();
+            self.drawn().filter(|e| e.construction == seed.construction && ends(&e.kind).is_some()).collect();
         let mut ordered = vec![(seed.id, false)];
         let mut used = vec![seed.id];
         let mut at = end;
@@ -78,7 +81,7 @@ impl Sketch {
             let mut degree = 0;
             let mut choices = Vec::new();
             for e in &curves {
-                for (index, p) in ends(e.kind).expect("open curve").into_iter().enumerate() {
+                for (index, p) in ends(&e.kind).expect("open curve").into_iter().enumerate() {
                     if p.dist(at) <= EPS {
                         degree += 1;
                         if !used.contains(&e.id) {
@@ -96,7 +99,7 @@ impl Sketch {
             let e = self.tool_entity(id)?;
             ordered.push((id, reverse));
             used.push(id);
-            at = point(e.kind, endpoint(e.kind, reverse, true));
+            at = point(&e.kind, endpoint(&e.kind, reverse, true));
         }
         if at.dist(start) > EPS {
             at = start;
@@ -105,7 +108,7 @@ impl Sketch {
                 let e = self.tool_entity(id)?;
                 ordered.insert(0, (id, reverse));
                 used.push(id);
-                at = point(e.kind, endpoint(e.kind, reverse, false));
+                at = point(&e.kind, endpoint(&e.kind, reverse, false));
             }
         }
         Ok(ordered)
@@ -113,6 +116,9 @@ impl Sketch {
 
     fn offset_sources(&self, ids: &[EntityId], chain: bool) -> Result<Vec<(Entity, bool)>> {
         let selected = self.tool_selection(ids)?;
+        if selected.iter().any(|e| matches!(e.kind, EntityKind::Spline { .. })) {
+            return refuse("spline offset is unsupported");
+        }
         if chain {
             let ordered = self.offset_chain_from(selected[0].id)?;
             if selected.iter().any(|e| !ordered.iter().any(|(id, _)| e.id == *id)) {
@@ -126,7 +132,7 @@ impl Sketch {
             if matches!(e.kind, EntityKind::Circle { .. }) && ids.len() == 1 {
                 return Ok(vec![(e, false)]);
             }
-            let Some([a, b]) = ends(e.kind) else {
+            let Some([a, b]) = ends(&e.kind) else {
                 return refuse("offset needs a connected line/arc chain or a lone circle");
             };
             let reverse = if let Some(p) = previous {
@@ -157,7 +163,8 @@ fn shifted(source: &[(Entity, bool)], distance: f64, closed: bool) -> Result<Vec
         return Ok(vec![EntityKind::Circle { center, radius: radius - distance }]);
     }
     let mut out = Vec::new();
-    for &(e, reverse) in source {
+    for (e, reverse) in source {
+        let reverse = *reverse;
         let d = if reverse { -distance } else { distance };
         out.push(match e.kind {
             EntityKind::Line { a, b } => {
@@ -184,12 +191,12 @@ fn shifted(source: &[(Entity, bool)], distance: f64, closed: bool) -> Result<Vec
         let j = (i + 1) % out.len();
         let ri = source[i].1 && matches!(out[i], EntityKind::Arc { .. });
         let rj = source[j].1 && matches!(out[j], EntityKind::Arc { .. });
-        let pi = point(out[i], endpoint(out[i], ri, true));
-        let pj = point(out[j], endpoint(out[j], rj, false));
+        let pi = point(&out[i], endpoint(&out[i], ri, true));
+        let pj = point(&out[j], endpoint(&out[j], rj, false));
         let at = if pi.dist(pj) <= EPS {
             pi
         } else {
-            intersections(out[i], out[j])
+            intersections(&out[i], &out[j])
                 .into_iter()
                 .min_by(|a, b| (a.dist(pi) + a.dist(pj)).total_cmp(&(b.dist(pi) + b.dist(pj))))
                 .ok_or_else(|| ToolError("offset neighbours do not intersect".into()))?
@@ -198,8 +205,8 @@ fn shifted(source: &[(Entity, bool)], distance: f64, closed: bool) -> Result<Vec
         set_end(&mut out[j], if rj { End::End } else { End::Start }, at);
     }
     for ((e, reverse), kind) in source.iter().zip(&out) {
-        if let (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) = (e.kind, *kind)
-            && (b - a).dot(d - c) * if *reverse { -1.0 } else { 1.0 } <= EPS * EPS
+        if let (EntityKind::Line { a, b }, EntityKind::Line { a: c, b: d }) = (&e.kind, kind)
+            && (*b - *a).dot(*d - *c) * if *reverse { -1.0 } else { 1.0 } <= EPS * EPS
         {
             return refuse("offset consumes a chain edge");
         }
@@ -208,11 +215,11 @@ fn shifted(source: &[(Entity, bool)], distance: f64, closed: bool) -> Result<Vec
 }
 
 fn validate_crossings(curves: &[EntityKind]) -> Result<()> {
-    if curves.iter().any(|kind| !valid(*kind)) {
+    if curves.iter().any(|kind| !valid(kind)) {
         return refuse("offset would create invalid geometry");
     }
-    for (i, &a) in curves.iter().enumerate() {
-        for &b in &curves[i + 1..] {
+    for (i, a) in curves.iter().enumerate() {
+        for b in &curves[i + 1..] {
             for p in intersections(a, b) {
                 let shared_end = ends(a).is_some_and(|ends| ends.iter().any(|q| q.dist(p) <= EPS))
                     && ends(b).is_some_and(|ends| ends.iter().any(|q| q.dist(p) <= EPS));
@@ -227,14 +234,17 @@ fn validate_crossings(curves: &[EntityKind]) -> Result<()> {
 
 impl Sketch {
     fn offset_plan(&self, source: &[(Entity, bool)], distance: f64, options: OffsetOptions) -> Result<Plan> {
+        if source.iter().any(|(entity, _)| matches!(entity.kind, EntityKind::Spline { .. })) {
+            return refuse("spline offset is unsupported");
+        }
         if source.is_empty() || !distance.is_finite() || distance.abs() <= EPS {
             return refuse("offset distance must be finite and nonzero");
         }
         let circle = matches!(source[0].0.kind, EntityKind::Circle { .. });
         let closed = circle
-            || point(source[0].0.kind, endpoint(source[0].0.kind, source[0].1, false)).dist(point(
-                source.last().expect("source").0.kind,
-                endpoint(source.last().expect("source").0.kind, source.last().expect("source").1, true),
+            || point(&source[0].0.kind, endpoint(&source[0].0.kind, source[0].1, false)).dist(point(
+                &source.last().expect("source").0.kind,
+                endpoint(&source.last().expect("source").0.kind, source.last().expect("source").1, true),
             )) <= EPS;
         let caps = options.cap != OffsetCap::None && !closed;
         if caps && source.iter().any(|(e, _)| e.construction != source[0].0.construction) {
@@ -267,7 +277,7 @@ impl Sketch {
         for side in 0..sides {
             for (i, (e, reverse)) in source.iter().enumerate() {
                 let target = side * count + i;
-                let kind = geometry[target].0;
+                let kind = &geometry[target].0;
                 let target_reverse = *reverse && matches!(kind, EntityKind::Arc { .. });
                 let mut locks = [None; 2];
                 let join = if (i + 1 < count || closed)
@@ -276,7 +286,7 @@ impl Sketch {
                 {
                     Some(OffsetJoin {
                         neighbor: source[(i + 1) % count].0.id,
-                        source: PointRef::new(e.id, endpoint(e.kind, *reverse, true)),
+                        source: PointRef::new(e.id, endpoint(&e.kind, *reverse, true)),
                         target: PointRef::new(id(target), endpoint(kind, target_reverse, true)),
                     })
                 } else {
@@ -285,7 +295,7 @@ impl Sketch {
                 for (end, active) in [(false, !closed && i == 0), (true, !closed && i + 1 == count)] {
                     if active {
                         locks[usize::from(end)] = Some((
-                            PointRef::new(e.id, endpoint(e.kind, *reverse, end)),
+                            PointRef::new(e.id, endpoint(&e.kind, *reverse, end)),
                             PointRef::new(id(target), endpoint(kind, target_reverse, end)),
                         ));
                     }
@@ -305,7 +315,7 @@ impl Sketch {
                     let next_reverse = source[(i + 1) % count].1 && matches!(geometry[next].0, EntityKind::Arc { .. });
                     joins.push(ConstraintKind::Coincident {
                         a: PointRef::new(id(target), endpoint(kind, target_reverse, true)),
-                        b: PointRef::new(id(next), endpoint(geometry[next].0, next_reverse, false)),
+                        b: PointRef::new(id(next), endpoint(&geometry[next].0, next_reverse, false)),
                     });
                 }
             }
@@ -313,25 +323,25 @@ impl Sketch {
         if caps {
             for end in [false, true] {
                 let i = if end { count - 1 } else { 0 };
-                let (e, reverse) = source[i];
+                let (ref e, reverse) = source[i];
                 let target_reverse = reverse && matches!(geometry[i].0, EntityKind::Arc { .. });
-                let mut a = PointRef::new(id(i), endpoint(geometry[i].0, target_reverse, end));
-                let mut pa = point(geometry[i].0, a.index);
+                let mut a = PointRef::new(id(i), endpoint(&geometry[i].0, target_reverse, end));
+                let mut pa = point(&geometry[i].0, a.index);
                 let (mut b, mut pb) = if options.both_sides {
                     let j = count + i;
                     let rev = reverse && matches!(geometry[j].0, EntityKind::Arc { .. });
-                    let index = endpoint(geometry[j].0, rev, end);
-                    (PointRef::new(id(j), index), point(geometry[j].0, index))
+                    let index = endpoint(&geometry[j].0, rev, end);
+                    (PointRef::new(id(j), index), point(&geometry[j].0, index))
                 } else {
-                    let index = endpoint(e.kind, reverse, end);
-                    (PointRef::new(e.id, index), point(e.kind, index))
+                    let index = endpoint(&e.kind, reverse, end);
+                    (PointRef::new(e.id, index), point(&e.kind, index))
                 };
                 let kind = match options.cap {
                     OffsetCap::Lines => EntityKind::Line { a: pa, b: pb },
                     OffsetCap::Round => {
                         let center = pa.mid(pb);
                         let mut arc = EntityKind::Arc { center, start: pa, end: pb };
-                        if (entity(arc).midpoint() - center).dot(outward(e.kind, reverse, end)) < 0.0 {
+                        if (entity(arc.clone()).midpoint() - center).dot(outward(&e.kind, reverse, end)) < 0.0 {
                             std::mem::swap(&mut a, &mut b);
                             std::mem::swap(&mut pa, &mut pb);
                             arc = EntityKind::Arc { center, start: pa, end: pb };
@@ -344,9 +354,9 @@ impl Sketch {
                 geometry.push((kind, e.construction));
             }
         }
-        let mut bounds: Vec<_> = geometry.iter().map(|(kind, _)| *kind).collect();
+        let mut bounds: Vec<_> = geometry.iter().map(|(kind, _)| kind.clone()).collect();
         if caps && !options.both_sides {
-            bounds.extend(source.iter().map(|(e, _)| e.kind));
+            bounds.extend(source.iter().map(|(e, _)| e.kind.clone()));
         }
         validate_crossings(&bounds)?;
         relations.extend(joins);
@@ -487,7 +497,7 @@ impl Sketch {
         }
         crate::solve::solve(&mut trial, None, false);
         if matches!(trial.status, crate::SolveStatus::OverDefined { .. } | crate::SolveStatus::Failed(_))
-            || trial.drawn().any(|e| !valid(e.kind))
+            || trial.drawn().any(|e| !valid(&e.kind))
         {
             return refuse("that offset distance conflicts with existing relations");
         }

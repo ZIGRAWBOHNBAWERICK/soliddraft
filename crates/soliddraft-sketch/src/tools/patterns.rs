@@ -161,6 +161,9 @@ fn transformed(kind: EntityKind, p: Placement) -> EntityKind {
         p.center + P2::new(cos * d.u - sin * d.v, sin * d.u + cos * d.v) + p.translation
     };
     match kind {
+        EntityKind::Spline { mode, points } => {
+            EntityKind::Spline { mode, points: points.into_iter().map(map).collect() }
+        }
         EntityKind::Point { p } => EntityKind::Point { p: map(p) },
         EntityKind::Line { a, b } => EntityKind::Line { a: map(a), b: map(b) },
         EntityKind::Circle { center, radius } => EntityKind::Circle { center: map(center), radius },
@@ -246,8 +249,8 @@ impl Sketch {
             }
             let mut ids = Vec::new();
             for (index, source) in sources.iter().enumerate() {
-                let kind = transformed(source.kind, p);
-                if !valid(kind) {
+                let kind = transformed(source.kind.clone(), p);
+                if !valid(&kind) {
                     return refuse("the pattern would produce non-finite or degenerate geometry");
                 }
                 let existing = previous.map(|i| i.entities[index]);
@@ -257,7 +260,7 @@ impl Sketch {
                         return refuse("a pattern member changed type; recreate the pattern");
                     }
                 }
-                geometry.push((p, *source, existing, kind));
+                geometry.push((p, source.clone(), existing, kind));
                 ids.push(existing);
             }
             instances.push((p.position, ids));

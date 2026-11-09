@@ -58,7 +58,7 @@ pub use import::{
     ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange,
     RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
 };
-pub use profile::{Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
+pub use profile::{BezierControls, Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
 
 use serde::{Deserialize, Serialize};

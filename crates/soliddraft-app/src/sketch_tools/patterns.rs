@@ -47,7 +47,7 @@ pub(crate) fn preview(s: &SketchSession, operation: Operation) -> ToolPreview {
                 })
                 .collect();
             ToolPreview {
-                added: changed.iter().map(|e| e.kind).collect(),
+                added: changed.iter().map(|e| e.kind.clone()).collect(),
                 construction: changed.iter().map(|e| e.construction).collect(),
                 replaced,
                 operation: Some(operation),

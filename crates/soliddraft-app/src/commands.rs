@@ -1505,6 +1505,18 @@ fn registry() -> Vec<CommandSpec> {
             .when(AppState::in_sketch)
             .lit(|s| tool_is(s, Tool::PartialEllipse))
 .app_only(SKETCHER),
+        cmd("sketch_fit_spline", "Fit-point spline", Icon::Arc, "Spline through picked points; double-click or Enter to finish")
+            .on(Sketch,"Draw",Small)
+            .run(|_| AppAction::SketchTool(Tool::FitSpline))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s,Tool::FitSpline))
+.app_only(SKETCHER),
+        cmd("sketch_control_spline", "Control-point spline", Icon::Arc, "Spline from a control polygon; double-click or Enter to finish")
+            .on(Sketch,"Draw",Small)
+            .run(|_| AppAction::SketchTool(Tool::ControlSpline))
+            .when(AppState::in_sketch)
+            .lit(|s| tool_is(s,Tool::ControlSpline))
+.app_only(SKETCHER),
         cmd("sketch_rectangle", "Rectangle", Icon::Cad("rect"), "Corner rectangle")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::R)
@@ -2354,6 +2366,8 @@ fn registry() -> Vec<CommandSpec> {
                     AppAction::Drawing(DrawingAction::CreateDrawing)
                 } else if s.editor.is_some() {
                     AppAction::CommitEditor
+                } else if s.sketch.as_ref().is_some_and(|s| s.tool.spline_mode().is_some() && !s.pending.is_empty()) {
+                    AppAction::FinishSpline
                 } else {
                     AppAction::ExitSketch(None)
                 }

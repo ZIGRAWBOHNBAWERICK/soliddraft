@@ -54,7 +54,7 @@ fn copies_of_fixed_geometry_are_independent_and_join_only_copied_endpoints() {
     let a = s.add(EntityKind::Line { a: p(1.0, 2.0), b: p(5.0, 2.0) }, false);
     let b = s.add(EntityKind::Line { a: p(5.0, 2.0), b: p(5.0, 6.0) }, true);
     for id in [a, b] {
-        s.constrain(ConstraintKind::FixEntity { entity: id, at: s.entity(id).unwrap().kind });
+        s.constrain(ConstraintKind::FixEntity { entity: id, at: s.entity(id).unwrap().kind.clone() });
     }
     let source = s.entities.clone();
     refused(&mut s, Operation::Move { entities: vec![a, b], displacement: p(3.0, 7.0) });

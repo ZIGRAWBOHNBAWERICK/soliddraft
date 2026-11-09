@@ -101,8 +101,8 @@ impl ReferenceDimension {
 
 impl ConstraintKind {
     /// The same numeric annotation without a driving value, or `None` for a relation.
-    pub fn as_reference(self) -> Option<Self> {
-        let c = Constraint { id: 0, kind: self };
+    pub fn as_reference(&self) -> Option<Self> {
+        let c = Constraint { id: 0, kind: self.clone() };
         Some(Self::Reference { dimension: c.dimension()?, label: c.label()? })
     }
 }
@@ -131,7 +131,7 @@ impl Constraint {
     pub fn geometry_kind(&self) -> ConstraintKind {
         match self.kind {
             ConstraintKind::Reference { dimension, label } => dimension.driving(0.0, label),
-            kind => kind,
+            ref kind => kind.clone(),
         }
     }
 
@@ -150,7 +150,7 @@ impl Sketch {
     /// Switch dimension mode atomically, preserving its ID and label. Driving uses
     /// the current measurement and must leave a satisfiable sketch.
     pub fn set_dimension_reference(&mut self, id: ConstraintId, reference: bool) -> Result<(), String> {
-        let c = *self.constraint(id).ok_or("No such dimension")?;
+        let c = self.constraint(id).ok_or("No such dimension")?;
         let dimension = c.dimension().ok_or("Only a numeric dimension can be reference")?;
         if c.is_reference() == reference {
             return Ok(());

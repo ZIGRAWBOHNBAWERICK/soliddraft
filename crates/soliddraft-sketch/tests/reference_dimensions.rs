@@ -131,9 +131,9 @@ fn reference_creation_is_value_free_and_legacy_driving_json_is_unchanged() {
     let legacy =
         r#"{"id":9,"kind":{"type":"radius","entity":1,"value":10.0,"diameter":true,"label":{"u":9.0,"v":7.0}}}"#;
     let c: Constraint = serde_json::from_str(legacy).unwrap();
-    assert_eq!(serde_json::to_value(c).unwrap(), serde_json::from_str::<serde_json::Value>(legacy).unwrap());
+    assert_eq!(serde_json::to_value(&c).unwrap(), serde_json::from_str::<serde_json::Value>(legacy).unwrap());
     let r = Constraint { id: c.id, kind: c.kind.as_reference().unwrap() };
-    let json = serde_json::to_value(r).unwrap();
+    let json = serde_json::to_value(&r).unwrap();
     assert_eq!(json["kind"]["type"], "reference");
     assert!(json["kind"].get("value").is_none());
     assert!(json["kind"]["dimension"].get("value").is_none());

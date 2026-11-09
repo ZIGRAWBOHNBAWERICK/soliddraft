@@ -35,7 +35,7 @@ pub struct JunctionPreview {
     /// Original point references whose positions change.
     pub joint: [PointRef; 2],
     /// Bridge point indices corresponding to the first and second curves.
-    pub bridge_points: [u8; 2],
+    pub bridge_points: [usize; 2],
 }
 
 /// Two pieces made by a split, with their shared endpoints.
@@ -44,15 +44,15 @@ pub struct SplitPreview {
     /// Pieces in the original curve's direction.
     pub pieces: [EntityKind; 2],
     /// Shared endpoint indices on the first and second pieces.
-    pub joints: Vec<(u8, u8)>,
+    pub joints: Vec<(usize, usize)>,
 }
 
 fn positive(value: f64) -> bool {
     value.is_finite() && value > EPS
 }
 
-fn loci(kind: EntityKind, radius: f64) -> Vec<EntityKind> {
-    match kind {
+fn loci(kind: &EntityKind, radius: f64) -> Vec<EntityKind> {
+    match *kind {
         EntityKind::Line { a, b } => {
             let d = (b - a).normalized();
             let n = P2::new(-d.v, d.u).scale(radius);
@@ -70,8 +70,8 @@ fn loci(kind: EntityKind, radius: f64) -> Vec<EntityKind> {
     }
 }
 
-fn contacts(kind: EntityKind, center: P2, radius: f64) -> Vec<P2> {
-    match kind {
+fn contacts(kind: &EntityKind, center: P2, radius: f64) -> Vec<P2> {
+    match *kind {
         EntityKind::Line { a, b } => {
             let d = (b - a).normalized();
             vec![a + d.scale((center - a).dot(d))]
@@ -84,8 +84,8 @@ fn contacts(kind: EntityKind, center: P2, radius: f64) -> Vec<P2> {
     }
 }
 
-fn away(kind: EntityKind, index: u8) -> P2 {
-    match kind {
+fn away(kind: &EntityKind, index: usize) -> P2 {
+    match *kind {
         EntityKind::Line { a, b } => if index == 0 { b - a } else { a - b }.normalized(),
         EntityKind::Arc { center, start, end } => {
             let r = if index == 1 { start - center } else { end - center };
@@ -99,6 +99,9 @@ impl Sketch {
     fn junction_preview(&self, a: EntityId, b: EntityId, keep_a: P2, keep_b: P2) -> Result<CornerPreview> {
         let first = self.tool_entity(a)?;
         let second = self.tool_entity(b)?;
+        if matches!(first.kind, EntityKind::Spline { .. }) || matches!(second.kind, EntityKind::Spline { .. }) {
+            return refuse("spline fillet and corner treatments are unsupported");
+        }
         if first.construction != second.construction {
             return refuse("use two profile curves or two construction curves for a corner treatment");
         }
@@ -123,30 +126,31 @@ impl Sketch {
         let corner = self.junction_preview(a, b, keep_a, keep_b)?;
         let first = self.tool_entity(a)?;
         let second = self.tool_entity(b)?;
-        let at = Entity { id: a, kind: corner.kept[0], construction: false }
+        let at = Entity { id: a, kind: corner.kept[0].clone(), construction: false }
             .point(corner.joint[0].index)
             .expect("corner endpoint");
         let mut choices = Vec::new();
-        for left in loci(first.kind, radius) {
-            for right in loci(second.kind, radius) {
-                for center in intersections(left, right) {
-                    for pa in contacts(first.kind, center, radius) {
-                        for pb in contacts(second.kind, center, radius) {
+        for left in loci(&first.kind, radius) {
+            for right in loci(&second.kind, radius) {
+                for center in intersections(&left, &right) {
+                    for pa in contacts(&first.kind, center, radius) {
+                        for pb in contacts(&second.kind, center, radius) {
                             if pa.dist(pb) <= EPS {
                                 continue;
                             }
-                            let (Ok((ka, ea)), Ok((kb, eb))) =
-                                (corner_piece(first.kind, keep_a, pa), corner_piece(second.kind, keep_b, pb))
-                            else {
+                            let (Ok((ka, ea)), Ok((kb, eb))) = (
+                                corner_piece(first.kind.clone(), keep_a, pa),
+                                corner_piece(second.kind.clone(), keep_b, pb),
+                            ) else {
                                 continue;
                             };
                             let indices = [
-                                u8::from(first.is_curve()) + u8::from(ea == End::End),
-                                u8::from(second.is_curve()) + u8::from(eb == End::End),
+                                usize::from(first.is_curve()) + usize::from(ea == End::End),
+                                usize::from(second.is_curve()) + usize::from(eb == End::End),
                             ];
                             if indices != [corner.joint[0].index, corner.joint[1].index]
-                                || !on_curve(ka, first.nearest(keep_a).0)
-                                || !on_curve(kb, second.nearest(keep_b).0)
+                                || !on_curve(&ka, first.nearest(keep_a).0)
+                                || !on_curve(&kb, second.nearest(keep_b).0)
                             {
                                 continue;
                             }
@@ -156,31 +160,36 @@ impl Sketch {
                             } else {
                                 EntityKind::Arc { center, start: pb, end: pa }
                             };
-                            if !valid(bridge) {
+                            if !valid(&bridge) {
                                 continue;
                             }
                             let bridge_points = if forward { [1, 2] } else { [2, 1] };
-                            if away(ka, indices[0]).dot(away(bridge, bridge_points[0])) > -1.0 + 1e-6
-                                || away(kb, indices[1]).dot(away(bridge, bridge_points[1])) > -1.0 + 1e-6
+                            if away(&ka, indices[0]).dot(away(&bridge, bridge_points[0])) > -1.0 + 1e-6
+                                || away(&kb, indices[1]).dot(away(&bridge, bridge_points[1])) > -1.0 + 1e-6
                             {
                                 continue;
                             }
                             let preview = JunctionPreview {
-                                kept: [ka, kb],
+                                kept: [ka.clone(), kb.clone()],
                                 bridge,
-                                removed: [corner_removed(first.kind, ka, ea), corner_removed(second.kind, kb, eb)]
-                                    .into_iter()
-                                    .flatten()
-                                    .collect(),
+                                removed: [
+                                    corner_removed(first.kind.clone(), ka, ea),
+                                    corner_removed(second.kind.clone(), kb, eb),
+                                ]
+                                .into_iter()
+                                .flatten()
+                                .collect(),
                                 joint: corner.joint,
                                 bridge_points,
                             };
-                            if !choices.iter().any(|(_, p): &(f64, JunctionPreview)| match (p.bridge, preview.bridge) {
-                                (
-                                    EntityKind::Arc { center: c, start: s, end: e },
-                                    EntityKind::Arc { center: d, start: t, end: f },
-                                ) => c.dist(d) <= EPS && s.dist(t) <= EPS && e.dist(f) <= EPS,
-                                _ => false,
+                            if !choices.iter().any(|(_, p): &(f64, JunctionPreview)| {
+                                match (&p.bridge, &preview.bridge) {
+                                    (
+                                        EntityKind::Arc { center: c, start: s, end: e },
+                                        EntityKind::Arc { center: d, start: t, end: f },
+                                    ) => c.dist(*d) <= EPS && s.dist(*t) <= EPS && e.dist(*f) <= EPS,
+                                    _ => false,
+                                }
                             }) {
                                 choices.push((center.dist(at), preview));
                             }
@@ -212,15 +221,18 @@ impl Sketch {
     ) -> Result<JunctionPreview> {
         let first = self.tool_entity(a)?;
         let second = self.tool_entity(b)?;
+        if matches!(first.kind, EntityKind::Spline { .. }) || matches!(second.kind, EntityKind::Spline { .. }) {
+            return refuse("spline chamfer is unsupported");
+        }
         if !first.is_line() || !second.is_line() {
             return refuse("chamfer needs two nonparallel lines");
         }
         let corner = self.junction_preview(a, b, keep_a, keep_b)?;
-        let at = Entity { id: a, kind: corner.kept[0], construction: false }
+        let at = Entity { id: a, kind: corner.kept[0].clone(), construction: false }
             .point(corner.joint[0].index)
             .expect("corner endpoint");
         let far = |i: usize| {
-            Entity { id: 0, kind: corner.kept[i], construction: false }
+            Entity { id: 0, kind: corner.kept[i].clone(), construction: false }
                 .point(1 - corner.joint[i].index)
                 .expect("other line endpoint")
         };
@@ -252,12 +264,15 @@ impl Sketch {
         let ea = if corner.joint[0].index == 0 { End::Start } else { End::End };
         let eb = if corner.joint[1].index == 0 { End::Start } else { End::End };
         Ok(JunctionPreview {
-            kept,
+            kept: kept.clone(),
             bridge: EntityKind::Line { a: pa, b: pb },
-            removed: [corner_removed(first.kind, kept[0], ea), corner_removed(second.kind, kept[1], eb)]
-                .into_iter()
-                .flatten()
-                .collect(),
+            removed: [
+                corner_removed(first.kind.clone(), kept[0].clone(), ea),
+                corner_removed(second.kind.clone(), kept[1].clone(), eb),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             joint: corner.joint,
             bridge_points: [0, 1],
         })
@@ -277,9 +292,9 @@ impl Sketch {
         self.constraints.retain(|c| c.is_reference() || (!c.points().iter().any(|p| preview.joint.contains(p))
             && !matches!(c.kind, ConstraintKind::Equal { a, b } if line_changes.contains(&a) || line_changes.contains(&b))
             && !matches!(c.kind, ConstraintKind::Midpoint { line, .. } if line_changes.contains(&line))));
-        self.entity_mut(a).expect("validated target").kind = preview.kept[0];
-        self.entity_mut(b).expect("validated target").kind = preview.kept[1];
-        let bridge = self.add(preview.bridge, construction);
+        self.entity_mut(a).expect("validated target").kind = preview.kept[0].clone();
+        self.entity_mut(b).expect("validated target").kind = preview.kept[1].clone();
+        let bridge = self.add(preview.bridge.clone(), construction);
         for i in 0..2 {
             self.constrain(ConstraintKind::Coincident {
                 a: preview.joint[i],
@@ -327,11 +342,14 @@ impl Sketch {
     /// Split a line or arc at one point, or a circle at two distinct points.
     pub fn split_preview(&self, id: EntityId, at: P2, second: Option<P2>) -> Result<SplitPreview> {
         let target = self.tool_entity(id)?;
+        if matches!(target.kind, EntityKind::Spline { .. }) {
+            return refuse("spline split is unsupported");
+        }
         if !finite(at) || second.is_some_and(|p| !finite(p)) || target.is_point() {
             return refuse("split needs a curve and finite points");
         }
         let at = target.nearest(at).0;
-        let pieces = match target.kind {
+        let pieces = match target.kind.clone() {
             EntityKind::Circle { center, .. } => {
                 let Some(other) = second else {
                     return refuse("pick two distinct points to split a circle");
@@ -346,20 +364,20 @@ impl Sketch {
                 if second.is_some() {
                     return refuse("a line or arc needs only one split point");
                 }
-                let [start, end] = ends(kind).ok_or_else(|| ToolError("split needs a line, arc or circle".into()))?;
+                let [start, end] = ends(&kind).ok_or_else(|| ToolError("split needs a line, arc or circle".into()))?;
                 if at.dist(start) <= EPS || at.dist(end) <= EPS {
                     return refuse("pick inside the curve, away from its endpoints");
                 }
-                let mut pieces = [kind, kind];
+                let mut pieces = [kind.clone(), kind];
                 set_end(&mut pieces[0], End::End, at);
                 set_end(&mut pieces[1], End::Start, at);
                 pieces
             }
         };
-        if pieces.iter().any(|k| !valid(*k)) {
+        if pieces.iter().any(|k| !valid(k)) {
             return refuse("the split would create a degenerate curve");
         }
-        let joints = match target.kind {
+        let joints = match target.kind.clone() {
             EntityKind::Line { .. } => vec![(1, 0)],
             EntityKind::Arc { .. } => vec![(2, 1)],
             EntityKind::Circle { .. } => vec![(2, 1), (1, 2)],
@@ -371,8 +389,8 @@ impl Sketch {
     pub(super) fn split(&mut self, id: EntityId, at: P2, second: Option<P2>) -> Result<Vec<EntityId>> {
         let preview = self.split_preview(id, at, second)?;
         let old = self.tool_entity(id)?;
-        self.entity_mut(id).expect("validated target").kind = preview.pieces[0];
-        let new = self.add(preview.pieces[1], old.construction);
+        self.entity_mut(id).expect("validated target").kind = preview.pieces[0].clone();
+        let new = self.add(preview.pieces[1].clone(), old.construction);
         if !matches!(old.kind, EntityKind::Circle { .. }) {
             let endpoint = PointRef::new(id, old.point_count() - 1);
             let replacement = PointRef::new(new, endpoint.index);
@@ -386,7 +404,7 @@ impl Sketch {
                     {
                         return None;
                     }
-                    remap_split(*c, endpoint, replacement)
+                    remap_split(c.clone(), endpoint, replacement)
                 })
                 .collect();
         }

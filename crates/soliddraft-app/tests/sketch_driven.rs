@@ -483,7 +483,7 @@ fn smart_distance_placement_selects_axis_or_aligned_without_moving_geometry() {
             let at = screen(&app, label);
             ribbon::click_at(&mut app, at);
             let dimension =
-                session(&app).sketch.constraints.iter().find(|c| c.is_dimension()).copied().expect("distance placed");
+                session(&app).sketch.constraints.iter().find(|c| c.is_dimension()).cloned().expect("distance placed");
             let ConstraintKind::Distance { kind: actual, .. } = dimension.kind else {
                 panic!("distance family");
             };
@@ -529,7 +529,7 @@ fn smart_radius_defaults_preserve_arc_and_circle_geometry() {
             .constraints
             .iter()
             .find(|c| c.is_dimension())
-            .copied()
+            .cloned()
             .expect("circular dimension placed");
         let ConstraintKind::Radius { diameter, .. } = dimension.kind else {
             panic!("circular dimension family");
@@ -626,7 +626,7 @@ fn smart_angle_defaults_preserve_geometry_in_every_quadrant_and_pick_order() {
                 .constraints
                 .iter()
                 .find(|c| matches!(c.kind, ConstraintKind::Angle { .. }))
-                .copied()
+                .cloned()
                 .expect("angle dimension placed");
             frame(&mut app, &format!("angle-{degrees}-swap-{swap}"));
             assert!(
@@ -686,7 +686,7 @@ fn perpendicular_defaults_use_supporting_lines_without_moving_geometry() {
                 .constraints
                 .iter()
                 .find(|c| matches!(c.geometry_kind(), ConstraintKind::PointLineDistance { .. }))
-                .copied()
+                .cloned()
                 .unwrap_or_else(|| panic!("{name}, reference {reference}: perpendicular dimension placed"));
             frame(&mut app, &format!("perpendicular-{name}-{}", if reference { "reference" } else { "driving" }));
             assert_eq!(
@@ -719,8 +719,13 @@ fn reference_creation_is_read_only_updates_with_driving_edits_and_survives_reope
         let at = screen(&app, p);
         ribbon::click_at(&mut app, at);
     }
-    let reference =
-        *session(&app).sketch.constraints.iter().find(|c| c.is_reference()).expect("reference annotation created");
+    let reference = session(&app)
+        .sketch
+        .constraints
+        .iter()
+        .find(|c| c.is_reference())
+        .expect("reference annotation created")
+        .clone();
     assert!(session(&app).dim_edit.is_none());
     assert_eq!(session(&app).sketch.status, SolveStatus::FullyDefined);
     assert_eq!(session(&app).sketch.entities, entities);

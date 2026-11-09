@@ -32,19 +32,19 @@ fn solve_full(s: &mut Sketch) {
     assert!(s.free.is_empty());
 }
 
-fn at(s: &Sketch, entity: EntityId, index: u8) -> P2 {
+fn at(s: &Sketch, entity: EntityId, index: usize) -> P2 {
     s.point(PointRef::new(entity, index)).unwrap()
 }
 
 /// Moves one point without moving the points joined to it, so the solver has work to do.
-fn nudge(s: &mut Sketch, entity: EntityId, index: u8, to: P2) {
+fn nudge(s: &mut Sketch, entity: EntityId, index: usize, to: P2) {
     s.entity_mut(entity).unwrap().set_point(index, to);
 }
 
 fn line_ends(s: &Sketch, line: EntityId) -> (P2, P2) {
     match s.entity(line).unwrap().kind {
         EntityKind::Line { a, b } => (a, b),
-        k => panic!("{line} is {k:?}"),
+        ref k => panic!("{line} is {k:?}"),
     }
 }
 
@@ -104,7 +104,7 @@ fn assert_regions_sound(s: &Sketch, regions: &[Region]) {
                 assert_eq!(id, lp.entities[si]);
                 let e = s.entity(id).unwrap();
                 let q = |x: soliddraft_kernel_api::Point2| P2::new(x.u, x.v);
-                match (*seg, e.kind) {
+                match (*seg, e.kind.clone()) {
                     (Segment::Line { from, to }, EntityKind::Line { a, b }) => {
                         let (f, t) = (q(from), q(to));
                         assert!(

@@ -207,9 +207,23 @@ fn before_trim_modes(id: &str, current: &mut Value) {
         assert_eq!(
             kinds.remove(index),
             json!({"type":"object", "additionalProperties":false, "properties":properties, "required":required}),
-            "the declared ellipse schema is the only geometry addition"
+            "the declared ellipse schema must stay exact"
         );
     }
+    let index = kinds.iter().position(|variant| variant["properties"]["type"]["const"] == "spline").unwrap();
+    assert_eq!(
+        kinds.remove(index),
+        json!({
+            "type":"object","additionalProperties":false,
+            "properties": {
+                "type":{"type":"string","const":"spline"},
+                "mode":{"type":"string","enum":["fit","control"]},
+                "points":{"type":"array","items":point,"minItems":1}
+            },
+            "required":["type","mode","points"]
+        }),
+        "the spline schema declares both modes without a fixed point limit"
+    );
 }
 
 fn before_inference_snaps(id: &str, current: &mut Value) {
@@ -524,6 +538,8 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                     "sketch_circle",
                     "sketch_ellipse",
                     "sketch_partial_ellipse",
+                    "sketch_fit_spline",
+                    "sketch_control_spline",
                     "sketch_rectangle",
                     "sketch_arc",
                     "sketch_slot",

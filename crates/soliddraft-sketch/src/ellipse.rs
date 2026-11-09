@@ -16,10 +16,10 @@ pub struct Ellipse {
 
 impl Ellipse {
     /// Ellipse geometry of a full or partial ellipse entity.
-    pub fn of(kind: EntityKind) -> Option<Self> {
+    pub fn of(kind: &EntityKind) -> Option<Self> {
         match kind {
             EntityKind::Ellipse { center, major, minor } | EntityKind::EllipticArc { center, major, minor, .. } => {
-                Some(Self { center, major, minor })
+                Some(Self { center: *center, major: *major, minor: *minor })
             }
             _ => None,
         }
@@ -49,10 +49,10 @@ impl Ellipse {
     }
 
     /// Counterclockwise start parameter and positive sweep, or one full turn.
-    pub fn span(self, kind: EntityKind) -> (f64, f64) {
+    pub fn span(self, kind: &EntityKind) -> (f64, f64) {
         if let EntityKind::EllipticArc { start, end, .. } = kind {
-            let start = self.parameter(start);
-            let sweep = (self.parameter(end) - start).rem_euclid(TAU);
+            let start = self.parameter(*start);
+            let sweep = (self.parameter(*end) - start).rem_euclid(TAU);
             (start, sweep)
         } else {
             (0.0, TAU)
@@ -69,7 +69,7 @@ impl Ellipse {
     }
 
     /// Closest point on a full or partial ellipse, found over every stationary interval.
-    pub fn nearest(self, kind: EntityKind, p: P2) -> (P2, f64) {
+    pub fn nearest(self, kind: &EntityKind, p: P2) -> (P2, f64) {
         let (start, sweep) = self.span(kind);
         let distance = |t| self.at(start + t).dist(p);
         let mut best = (0.0, distance(0.0));

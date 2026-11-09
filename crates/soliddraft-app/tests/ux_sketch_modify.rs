@@ -55,7 +55,7 @@ fn session(app: &App) -> &SketchSession {
 }
 
 fn entity(app: &App, id: EntityId) -> Option<Entity> {
-    session(app).sketch.entity(id).copied()
+    session(app).sketch.entity(id).cloned()
 }
 
 fn drawn(app: &App) -> usize {
@@ -151,15 +151,21 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         open_sketch(app);
         assert_eq!(app.state().state.ribbon_tab, soliddraft_app::state::RibbonTab::Sketch, "the Sketch tab opens");
         for label in ["Polygon", "Trim", "Extend", "Offset", "Mirror entities", "Linear pattern", "Circular pattern"] {
-            let button = ribbon::ribbon_button(app, label);
-            assert!(button.enabled, "{label} is enabled in a sketch");
+            ribbon::click_ribbon(app, label);
+            assert_eq!(session(app).tool.label(), label, "{label} is enabled in a sketch");
         }
         case.frame(app, "01-sketch-tab");
 
         // Polygon: the centre on the origin, the vertex under the pointer, previewed live.
         ribbon::click_ribbon(app, "Polygon");
         assert_eq!(session(app).tool, Tool::Polygon);
-        assert!(ribbon::ribbon_button(app, "Polygon").selected, "the tile is lit");
+        let band = ribbon::ribbon_region(app);
+        let active = if ribbon::buttons_in(app, band).iter().any(|(name, _)| name == "Polygon") {
+            "Polygon"
+        } else {
+            "Modify group"
+        };
+        assert!(ribbon::ribbon_button(app, active).selected, "the tool or its folded group is lit");
         sketch_click(app, P2::ZERO);
         assert_eq!(session(app).pending.len(), 1, "the centre is placed");
         hover_sketch(app, P2::new(R, 0.0));
@@ -203,7 +209,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         let preview = session(app).preview.clone().expect("a preview at the chord");
         assert_eq!(preview.operation, Some(Operation::Extend { entity: 7, end: End::Start, boundary: 3 }));
         assert_eq!(preview.boundary, Some(3));
-        let (pa, _) = line_ends(preview.added[0]);
+        let (pa, _) = line_ends(preview.added[0].clone());
         assert!(near(pa, P2::new(-chord_reach(), CHORD_V), 0.05), "the preview reaches the edge: {pa:?}");
         case.frame(app, "04-extend-preview");
         sketch_click(app, P2::new(-9.0, CHORD_V));
@@ -229,7 +235,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         app.run_steps(2);
         let preview = session(app).preview.clone().expect("a pattern preview");
         assert_eq!(preview.added.len(), 2, "two copies of the chord at the default count");
-        let (ca, _) = line_ends(preview.added[0]);
+        let (ca, _) = line_ends(preview.added[0].clone());
         assert!(near(ca, P2::new(-chord_reach() + 20.0, CHORD_V), 0.05), "the copy sits one step over: {ca:?}");
         case.frame(app, "06-linear-pattern-preview");
         escape(app);
@@ -244,7 +250,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         let preview = session(app).preview.clone().expect("a trim preview on the top side");
         assert_eq!(preview.target, Some(2));
         assert_eq!(preview.removed.len(), 1);
-        let (ra, rb) = line_ends(preview.removed[0]);
+        let (ra, rb) = line_ends(preview.removed[0].clone());
         assert!((ra.v - apothem).abs() < 0.05 && (rb.v - apothem).abs() < 0.05, "the whole top side goes");
         assert!(preview.added.is_empty(), "nothing of it stays");
         case.frame(app, "07-trim-preview");
@@ -255,7 +261,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
             hover_sketch(app, P2::new(u, 13.0));
             let preview = session(app).preview.clone().expect("a trim preview on a slanted side");
             assert_eq!(preview.target, Some(side));
-            let (ra, rb) = line_ends(preview.removed[0]);
+            let (ra, rb) = line_ends(preview.removed[0].clone());
             let (lo, hi) = if ra.v < rb.v { (ra, rb) } else { (rb, ra) };
             assert!((lo.v - CHORD_V).abs() < 0.05, "the piece starts at the chord: {lo:?}");
             assert!((hi.v - apothem).abs() < 0.05, "and ends at the top: {hi:?}");

@@ -49,7 +49,7 @@ impl Case {
     /// Starts a case. A missing renderer fails it.
     pub fn new(name: &str) -> Self {
         let serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ux-tools").join(name);
+        let dir = ribbon::target_dir().join("ux-tools").join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("config")).unwrap();
         soliddraft_app::file::set_config_dir(Some(dir.join("config")));

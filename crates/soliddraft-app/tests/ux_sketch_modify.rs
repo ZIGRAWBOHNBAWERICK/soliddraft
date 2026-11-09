@@ -150,9 +150,24 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
     case.run(&mut app, |case, app| {
         open_sketch(app);
         assert_eq!(app.state().state.ribbon_tab, soliddraft_app::state::RibbonTab::Sketch, "the Sketch tab opens");
-        for label in ["Polygon", "Trim", "Extend", "Offset", "Mirror entities", "Linear pattern", "Circular pattern"] {
-            ribbon::click_ribbon(app, label);
-            assert_eq!(session(app).tool.label(), label, "{label} is enabled in a sketch");
+        for id in [
+            "sketch_polygon",
+            "sketch_trim",
+            "sketch_extend",
+            "sketch_offset",
+            "sketch_mirror",
+            "sketch_linear_pattern",
+            "sketch_circular_pattern",
+        ] {
+            let button = ribbon::reveal_ribbon_command(app, id);
+            assert!(button.enabled, "{id} is enabled in a sketch");
+            ribbon::click_at(app, button.rect.center());
+            assert_eq!(
+                session(app).tool.label(),
+                soliddraft_app::commands::get(id).unwrap().label,
+                "{id} runs its registered tool"
+            );
+            ribbon::dismiss_ribbon_popup(app);
         }
         case.frame(app, "01-sketch-tab");
 
@@ -166,6 +181,9 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
             "Modify group"
         };
         assert!(ribbon::ribbon_button(app, active).selected, "the tool or its folded group is lit");
+        assert!(ribbon::reveal_ribbon_command(app, "sketch_polygon").selected, "the tile is lit");
+        ribbon::dismiss_ribbon_popup(app);
+        assert_eq!(session(app).tool, Tool::Polygon, "inspecting the tile keeps the tool active");
         sketch_click(app, P2::ZERO);
         assert_eq!(session(app).pending.len(), 1, "the centre is placed");
         hover_sketch(app, P2::new(R, 0.0));

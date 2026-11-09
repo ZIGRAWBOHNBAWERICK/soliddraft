@@ -1270,7 +1270,15 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(s) = state.sketch.as_mut() else { return };
     let profiles = crate::sketch::profile::profiles(&s.sketch, s.plane);
     let has_profile = profiles.is_ok();
-    egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
+    let reset_scroll = ui.data_mut(|data| {
+        let id = ui.id().with("sketch_active_tool");
+        let previous = data.get_temp::<Tool>(id);
+        data.insert_temp(id, s.tool);
+        previous != Some(s.tool) && s.tool.modifies()
+    });
+    let scroll = egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]);
+    let scroll = if reset_scroll { scroll.vertical_scroll_offset(0.0) } else { scroll };
+    scroll.show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
             // Status.
             let mut reveal_relations = false;
@@ -1309,6 +1317,12 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             section_gap(ui);
 
             crate::sketch_diagnostics::panel(ui, s, &mut actions, &profiles, has_body);
+
+            // Keep the active tool's controls ahead of the growing tool palette.
+            if s.tool.modifies() {
+                crate::sketch_tools::panel(ui, s, &mut actions);
+                section_gap(ui);
+            }
 
             // Exit into a feature.
             theme::section_label(ui, "Use the sketch");
@@ -1420,10 +1434,6 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             if s.tool == Tool::Dimension {
                 ui.checkbox(&mut s.reference_dimensions, "Reference dimensions")
                     .on_hover_text("Measure geometry without adding a solver equation");
-            }
-            if s.tool.modifies() {
-                section_gap(ui);
-                crate::sketch_tools::panel(ui, s, &mut actions);
             }
             section_gap(ui);
 

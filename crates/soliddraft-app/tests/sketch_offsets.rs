@@ -76,6 +76,10 @@ fn distance(app: &mut App, value: f64) {
     let rect = app.get_by_role(egui::accesskit::Role::SpinButton).rect();
     proof(app, "distance-field");
     assert!(pane(app).contains_rect(rect), "the distance field must be fully visible before clicking it");
+    assert!(
+        rect.bottom() <= ribbon::band(app).top(),
+        "the distance field must be visible above the command bar: {rect:?}"
+    );
     ribbon::double_click_at(app, rect.center());
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);
     app.event(egui::Event::Text(value.to_string()));

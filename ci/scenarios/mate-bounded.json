@@ -1604,12 +1604,18 @@
       "checks": []
     },
     {
-      "tool": "assembly_mate_gear",
-      "arguments": {},
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "L",
+        "angle_limits": [
+          10,
+          -10
+        ]
+      },
       "checks": [
         {
           "pointer": "/result/refused",
-          "equals": "unsupported_motion"
+          "equals": "invalid_value"
         },
         {
           "pointer": "/summary/assembly/accepted_state/truth",
@@ -1619,43 +1625,7 @@
           }
         }
       ],
-      "refused": "unsupported_motion"
-    },
-    {
-      "tool": "assembly_mate_rack_and_pinion",
-      "arguments": {},
-      "checks": [
-        {
-          "pointer": "/result/refused",
-          "equals": "unsupported_motion"
-        },
-        {
-          "pointer": "/summary/assembly/accepted_state/truth",
-          "same_as": {
-            "step": 81,
-            "pointer": "/summary/assembly/accepted_state/truth"
-          }
-        }
-      ],
-      "refused": "unsupported_motion"
-    },
-    {
-      "tool": "assembly_mate_screw",
-      "arguments": {},
-      "checks": [
-        {
-          "pointer": "/result/refused",
-          "equals": "unsupported_motion"
-        },
-        {
-          "pointer": "/summary/assembly/accepted_state/truth",
-          "same_as": {
-            "step": 81,
-            "pointer": "/summary/assembly/accepted_state/truth"
-          }
-        }
-      ],
-      "refused": "unsupported_motion"
+      "refused": "invalid_value"
     },
     {
       "tool": "redo",
@@ -1719,7 +1689,7 @@
         {
           "pointer": "/summary/assembly/accepted_state/truth",
           "same_as": {
-            "step": 86,
+            "step": 84,
             "pointer": "/summary/assembly/accepted_state/truth"
           }
         },

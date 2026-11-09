@@ -1681,6 +1681,14 @@ impl AssemblyDocument {
         }
         let placed: Vec<(OccurrencePath, Placement)> = kept.iter().map(|k| (k.path.clone(), k.local)).collect();
         bodies::keep(&mut candidate.assembly, kept);
+        let mut truth = candidate.assembly.clone();
+        candidate.refresh_mechanical(&mut truth, None)?;
+        for o in &truth.overrides {
+            if candidate.assembly.override_at(&o.path) != Some(o) && !overrides.contains(&o.path) {
+                overrides.push(o.path.clone());
+            }
+        }
+        candidate.assembly = truth;
         if !solved.status.bounded.is_empty() {
             let problem = self.gather(&Scope::new(&candidate.assembly, &candidate.table, &candidate.store))?;
             self.verify_problem(problem)?;

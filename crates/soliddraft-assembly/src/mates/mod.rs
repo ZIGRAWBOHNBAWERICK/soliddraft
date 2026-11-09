@@ -23,6 +23,8 @@
 pub(crate) mod bodies;
 pub(crate) mod command;
 pub(crate) mod drag;
+mod mechanical;
+pub use mechanical::Mechanism;
 mod motion;
 mod reference;
 pub(crate) mod solver;
@@ -561,6 +563,29 @@ pub enum Mate {
         /// plane from behind it.
         alignment: Alignment,
     },
+    /// A motion relation between existing joints and optionally a translating entity.
+    Mechanical {
+        /// Stable mate id.
+        id: MateId,
+        /// Authored label.
+        name: String,
+        /// Gear, Rack and Pinion, or Screw.
+        mechanism: Mechanism,
+        /// Source joint ids, in coordinate order.
+        joints: Vec<MateId>,
+        /// Source axes and, for a rack, its sliding direction.
+        ends: Vec<FaceEndpoint>,
+        /// Optional rack reference component; otherwise the holding assembly's origin.
+        reference: Option<PartEndpoint>,
+        /// Gear ratio, or millimetres per turn followed by one.
+        factor: [f64; 2],
+        /// Reverse the default motion direction.
+        reverse: bool,
+        /// Initial relation value, preserved during motion.
+        offset: f64,
+        /// Last accepted unwrapped joint angles in radians.
+        angles: [f64; 2],
+    },
     /// A concentric pair and a coincident pair under one name: a pin turning in a hole,
     /// with its shoulder on the face round the hole.
     Hinge {
@@ -690,7 +715,8 @@ impl Mate {
     /// The mate's id.
     pub fn id(&self) -> MateId {
         match self {
-            Mate::Angle { id, .. }
+            Mate::Mechanical { id, .. }
+            | Mate::Angle { id, .. }
             | Mate::LimitAngle { id, .. }
             | Mate::Origin { id, .. }
             | Mate::Distance { id, .. }
@@ -713,7 +739,8 @@ impl Mate {
     /// The mate's label.
     pub fn name(&self) -> &str {
         match self {
-            Mate::Angle { name, .. }
+            Mate::Mechanical { name, .. }
+            | Mate::Angle { name, .. }
             | Mate::LimitAngle { name, .. }
             | Mate::Origin { name, .. }
             | Mate::Distance { name, .. }
@@ -736,6 +763,7 @@ impl Mate {
     /// The family, as `assembly.json` names it.
     pub fn kind(&self) -> &'static str {
         match self {
+            Mate::Mechanical { mechanism, .. } => mechanism.kind(),
             Mate::Angle { .. } => "angle",
             Mate::LimitAngle { .. } => "limit_angle",
             Mate::Origin { .. } => "origin",
@@ -790,6 +818,7 @@ impl Mate {
     /// Every face or plane the mate names, in order.
     pub fn faces(&self) -> Vec<&FaceEndpoint> {
         match self {
+            Mate::Mechanical { ends, .. } => ends.iter().collect(),
             Mate::Distance { a, b, .. }
             | Mate::Coincident { a, b, .. }
             | Mate::Parallel { a, b, .. }
@@ -811,6 +840,7 @@ impl Mate {
     /// The same endpoints, to change.
     pub(crate) fn faces_mut(&mut self) -> Vec<&mut FaceEndpoint> {
         match self {
+            Mate::Mechanical { ends, .. } => ends.iter_mut().collect(),
             Mate::Distance { a, b, .. }
             | Mate::Coincident { a, b, .. }
             | Mate::Parallel { a, b, .. }
@@ -832,6 +862,7 @@ impl Mate {
     /// The parts a Linear Coupler measures from, as it names them.
     pub fn references(&self) -> Vec<&PartEndpoint> {
         match self {
+            Mate::Mechanical { reference, .. } => reference.iter().collect(),
             Mate::LinearCoupler { reference_a, reference_b, .. } => reference_a.iter().chain(reference_b).collect(),
             _ => Vec::new(),
         }
@@ -853,7 +884,8 @@ impl Mate {
                     };
                 (parallel(groove) && parallel(tab)).then_some([&groove[0], &tab[0]])
             }
-            Mate::Angle { .. }
+            Mate::Mechanical { .. }
+            | Mate::Angle { .. }
             | Mate::LimitAngle { .. }
             | Mate::Origin { .. }
             | Mate::Perpendicular { .. }
@@ -881,7 +913,8 @@ impl Mate {
             | Mate::ProfileCenter { alignment, .. }
             | Mate::Slot { alignment, .. } => Some(*alignment),
             Mate::Concentric { alignment, .. } | Mate::Symmetric { alignment, .. } => *alignment,
-            Mate::Angle { .. }
+            Mate::Mechanical { .. }
+            | Mate::Angle { .. }
             | Mate::LimitAngle { .. }
             | Mate::Origin { .. }
             | Mate::Perpendicular { .. }
@@ -910,6 +943,9 @@ impl Mate {
     /// The occurrence paths the mate reads, to change them.
     pub(crate) fn paths_mut(&mut self) -> Vec<&mut OccurrencePath> {
         match self {
+            Mate::Mechanical { ends, reference, .. } => {
+                ends.iter_mut().map(|e| &mut e.path).chain(reference.iter_mut().map(|r| &mut r.path)).collect()
+            }
             Mate::Distance { a, b, .. }
             | Mate::Coincident { a, b, .. }
             | Mate::Parallel { a, b, .. }

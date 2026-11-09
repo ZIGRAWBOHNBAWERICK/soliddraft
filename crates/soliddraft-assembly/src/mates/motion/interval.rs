@@ -44,14 +44,9 @@ impl Number for f64 {
         self.sqrt()
     }
     fn atan2(self, x: Self, near: f64) -> Self {
-        let mut a = libm::atan2(self, x);
-        if a - near > std::f64::consts::PI {
-            a -= 2.0 * std::f64::consts::PI;
-        }
-        if a - near < -std::f64::consts::PI {
-            a += 2.0 * std::f64::consts::PI;
-        }
-        a
+        let a = libm::atan2(self, x);
+        let turns = libm::round((near - a) / (2.0 * std::f64::consts::PI));
+        if turns == 0.0 { a } else { a + turns * (2.0 * std::f64::consts::PI) }
     }
     fn middle(self) -> f64 {
         self
@@ -232,17 +227,13 @@ impl Number for Interval {
         self.lo * 0.5 + self.hi * 0.5
     }
     fn atan2(self, x: Self, near: f64) -> Self {
-        if x.hi < 0.0 && self.lo <= 0.0 && self.hi >= 0.0 {
-            return (self / x).atan() + if near < 0.0 { -pi() } else { pi() };
-        }
-        let mut result = self.principal_atan2(x);
-        if result.middle() - near > std::f64::consts::PI {
-            result = result - pi() * Self::f(2.0);
-        }
-        if result.middle() - near < -std::f64::consts::PI {
-            result = result + pi() * Self::f(2.0);
-        }
-        result
+        let result = if x.hi < 0.0 && self.lo <= 0.0 && self.hi >= 0.0 {
+            (self / x).atan() + pi()
+        } else {
+            self.principal_atan2(x)
+        };
+        let turns = libm::round((near - result.middle()) / (2.0 * std::f64::consts::PI));
+        if turns == 0.0 { result } else { result + pi() * Self::f(2.0 * turns) }
     }
     fn sin_cos(self) -> (Self, Self) {
         let square = self * self;

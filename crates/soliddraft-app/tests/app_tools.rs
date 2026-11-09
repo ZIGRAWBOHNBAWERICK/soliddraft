@@ -471,15 +471,9 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
         json!({ "name": "LA", "a": top, "b": bottom, "reference": reference, "min_degrees": -180, "max_degrees": 180 }),
     );
     s.call("assembly_delete_mate", json!({ "mate": "LA" }));
-    for command in [
-        "assembly_mate_gear",
-        "assembly_mate_rack_and_pinion",
-        "assembly_mate_screw",
-        "assembly_mate_path",
-        "assembly_mate_cam",
-        "assembly_mate_universal_joint",
-        "assembly_physical_dynamics",
-    ] {
+    for command in
+        ["assembly_mate_path", "assembly_mate_cam", "assembly_mate_universal_joint", "assembly_physical_dynamics"]
+    {
         s.refuse_motion(command);
     }
     // The B1 families, each added and taken away again.
@@ -542,6 +536,22 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     });
     s.call("assembly_mate_hinge", hinge);
     s.call("assembly_delete_mate", json!({ "mate": "H" }));
+    let third = s.call("insert_component", json!({"paths":[pin]}));
+    let third = third["inserted"].as_str().unwrap().parse::<u32>().unwrap();
+    s.call("assembly_mate_concentric", json!({"name":"C1","a":shaft(pins[0]),"b":shaft(pins[1])}));
+    s.call("assembly_mate_concentric", json!({"name":"C2","a":shaft(pins[0]),"b":shaft(third as u64)}));
+    s.call("assembly_mate_gear", json!({"name":"G","joint_a":"C1","joint_b":"C2","ratio":[2,1]}));
+    s.call("assembly_delete_mate", json!({"mate":"G"}));
+    s.call(
+        "assembly_mate_rack_and_pinion",
+        json!({"name":"RP","joint":"C1","rack":bottom,"reference":parts[0],"travel_per_turn":40}),
+    );
+    s.call("assembly_delete_mate", json!({"mate":"RP"}));
+    s.call("assembly_mate_screw", json!({"name":"SC","joint":"C1","pitch":8}));
+    s.call("assembly_delete_mate", json!({"mate":"SC"}));
+    s.call("assembly_delete_mate", json!({"mate":"C2"}));
+    s.call("assembly_delete_mate", json!({"mate":"C1"}));
+    s.state.assembly.session.as_mut().unwrap().doc.delete(&[soliddraft_assembly::ComponentId(third)]).unwrap();
     // The B4 families: each added, edited where it has something to edit, and taken away.
     let below = cap(pins[0], "Boss-Extrude1", "start_cap");
     let mirror = json!({ "component": parts[0], "plane": "Top plane" });

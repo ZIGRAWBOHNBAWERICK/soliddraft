@@ -6,13 +6,20 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 
 fn call(state: &mut AppState, name: &str, args: Value) -> (bool, Value) {
     let out = call_checked(&mut AppTools { state }, name, args, &Caller::Mcp { client: "B6-loop".into() });
-    (out.is_error, serde_json::from_str(&out.content).unwrap())
+    let result = serde_json::from_str(&out.content)
+        .unwrap_or_else(|error| panic!("{name} returned invalid JSON ({error}): {}", out.content));
+    (out.is_error, result)
 }
 
 #[test]
 fn drag_and_hinge_limit_application_loops() {
     for source in [
+        include_str!("../../../ci/scenarios/mate-bounded.json"),
         include_str!("../../../ci/scenarios/mate-drag.json"),
+        include_str!("../../../ci/scenarios/mate-gear-motion.json"),
+        include_str!("../../../ci/scenarios/mate-rack-motion.json"),
+        include_str!("../../../ci/scenarios/mate-screw-motion.json"),
+        include_str!("../../../ci/scenarios/mate-linear-motion.json"),
         include_str!("../../../ci/scenarios/mate-drag-hinge.json"),
     ] {
         let spec: Value = serde_json::from_str(source).unwrap();

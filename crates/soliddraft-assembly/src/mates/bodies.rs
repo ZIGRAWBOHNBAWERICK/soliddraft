@@ -48,6 +48,17 @@ pub(crate) struct End {
 #[allow(clippy::large_enum_variant, reason = "a solve holds one per mate, read one by one")]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Rule {
+    Mechanical {
+        id: super::MateId,
+        scope: OccurrencePath,
+        mechanism: super::Mechanism,
+        factor: [f64; 2],
+        reverse: bool,
+        offset: f64,
+        angles: [f64; 2],
+        reference: Option<Body>,
+        frame: [BigRational; 3],
+    },
     Angle {
         min: f64,
         max: f64,
@@ -135,6 +146,9 @@ impl Gathered {
             Gathered::Origin { body, .. } => vec![body],
             Gathered::Between { ends, rule, .. } => {
                 let mut out: Vec<&Body> = ends.iter().map(|e| &e.body).collect();
+                if let Rule::Mechanical { reference: Some(body), .. } = rule {
+                    out.push(body);
+                }
                 if let Rule::Coupler { references, .. } = rule {
                     out.extend(references.iter().flatten());
                 }
@@ -213,6 +227,20 @@ impl<'a> Scope<'a> {
                 None => self.base(path),
             },
         }
+    }
+
+    fn mechanical_angles(&self, path: &OccurrencePath, id: super::MateId, fallback: [f64; 2]) -> [f64; 2] {
+        for depth in 0..path.steps().len() {
+            let rest = OccurrencePath(path.steps()[depth..].to_vec());
+            if let Some(angles) = self
+                .assembly_at(path, depth)
+                .and_then(|a| a.override_at(&rest))
+                .and_then(|o| o.mechanical_angles.get(&id))
+            {
+                return *angles;
+            }
+        }
+        fallback
     }
 
     /// The frame of the assembly that holds the occurrence at `path`, in the root's.
@@ -409,6 +437,73 @@ impl AssemblyDocument {
                     _ => {
                         let length = |e| holder.values.length(e).map_err(|e| super::command::value_refusal(&name, e));
                         let rule = match mate {
+                            Mate::Mechanical {
+                                id,
+                                mechanism,
+                                joints,
+                                ends,
+                                reference,
+                                factor,
+                                reverse,
+                                offset,
+                                angles,
+                                ..
+                            } => {
+                                let angles = scope.mechanical_angles(&prefix, *id, *angles);
+                                let count = if *mechanism == super::Mechanism::Gear { 2 } else { 1 };
+                                if joints.len() != count
+                                    || ends.len()
+                                        != if *mechanism == super::Mechanism::Gear {
+                                            4
+                                        } else if *mechanism == super::Mechanism::RackAndPinion {
+                                            3
+                                        } else {
+                                            2
+                                        }
+                                    || !factor.iter().all(|v| v.is_finite() && *v > 0.0)
+                                    || !offset.is_finite()
+                                    || !angles.iter().all(|v| v.is_finite())
+                                {
+                                    return Err(invalid(format!("{name}: invalid mechanical coordinates")));
+                                }
+                                for (i, id) in joints.iter().enumerate() {
+                                    let axes = super::mechanical::joint(holder, *id)
+                                        .map_err(|r| MateRefusal { mates: vec![name.clone()], ..r })?;
+                                    if axes.iter().zip(&ends[i * 2..i * 2 + 2]).any(|(a, b)| {
+                                        a.path != b.path || a.entity != b.entity || a.document != b.document
+                                    }) {
+                                        return Err(invalid(format!("{name}: source joint endpoints changed")));
+                                    }
+                                }
+                                if let Some(r) = reference {
+                                    let body = under(&prefix, &r.path);
+                                    let source = scope.part_source(&body)?;
+                                    if source.id != Some(r.document) {
+                                        return Err(invalid(format!("{name}: rack reference places another document")));
+                                    }
+                                }
+                                let reference = reference.as_ref().map(|r| under(&prefix, &r.path));
+                                if let Some(body) = &reference {
+                                    place(body)?;
+                                }
+                                let frame = scope
+                                    .world(&prefix)
+                                    .unwrap_or_default()
+                                    .translation
+                                    .to_array()
+                                    .map(|v| solver::exact(v).expect("finite frame"));
+                                Rule::Mechanical {
+                                    id: *id,
+                                    scope: prefix.clone(),
+                                    mechanism: *mechanism,
+                                    factor: *factor,
+                                    reverse: *reverse,
+                                    offset: *offset,
+                                    angles,
+                                    reference,
+                                    frame,
+                                }
+                            }
                             Mate::Distance { alignment, distance, .. } => Rule::Parallel {
                                 sign: sign(alignment),
                                 distance: Some(length(distance)?),

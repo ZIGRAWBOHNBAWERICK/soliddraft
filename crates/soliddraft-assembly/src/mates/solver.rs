@@ -1919,9 +1919,19 @@ fn place<'a>(
             extra.extend(behind(axis, bound.from));
             let names = named(&sources, &extra);
             let index = bound_list.len();
-            let (lo, hi) = (&bound.lo - &reduced.constant, &bound.hi - &reduced.constant);
+            let (mut lo, mut hi) = (&bound.lo - &reduced.constant, &bound.hi - &reduced.constant);
             let one = int(1);
-            let terms: Vec<(usize, BigRational)> = reduced.terms.iter().map(|(k, v)| (*k, v.clone())).collect();
+            let mut terms: Vec<(usize, BigRational)> = reduced.terms.iter().map(|(k, v)| (*k, v.clone())).collect();
+            if let Some((_, first)) = terms.first() {
+                let scale = first.abs();
+                if !scale.is_zero() && scale != one {
+                    lo /= &scale;
+                    hi /= &scale;
+                    for (_, value) in &mut terms {
+                        *value /= &scale;
+                    }
+                }
+            }
             let (to, from) = match &terms[..] {
                 [] => {
                     let (lo, hi) = (nearest(&lo), nearest(&hi));
@@ -3695,9 +3705,9 @@ mod tests {
     }
 
     /// The mirror is the latest body, so it is the one the Symmetric moves, halfway between
-    /// A and B. A limit on it moves by half of B: not a difference, so refused by name.
+    /// A and B. A scalar bound on that half-coordinate is normalized exactly.
     #[test]
-    fn a_limit_on_a_coordinate_a_relation_scales_is_refused_by_name() {
+    fn a_limit_on_a_scaled_coordinate_is_normalized_exactly() {
         let at = three([-30.0, 0.0, 0.0], [20.0, 0.0, 0.0]);
         let mates = [
             origin_of("O", a()),
@@ -3714,8 +3724,9 @@ mod tests {
                 says: "limited".into(),
             },
         ];
-        let refused = solve(&at, &mates).unwrap_err();
-        assert_eq!(refused.code, RefusalCode::UnsupportedReference, "{refused}");
-        assert!(refused.message.contains("one for one"), "{}", refused.message);
+        let placed = solve(&at, &mates).unwrap();
+        assert_eq!(placed[&a()].translation, DVec3::ZERO);
+        assert_eq!(placed[&b()].translation, DVec3::new(20.0, 0.0, 0.0));
+        assert_eq!(placed[&c()].translation, DVec3::new(10.0, 0.0, 0.0));
     }
 }

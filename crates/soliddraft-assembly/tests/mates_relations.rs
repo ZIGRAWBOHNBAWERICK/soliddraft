@@ -360,18 +360,15 @@ fn a_limit_a_later_coupler_makes_constant_holds_in_any_component_order() {
         }
         r.reopen();
     }
-    // Without K2 nothing makes the bound constant: a limit on a coordinate that a coupler
-    // scales is still refused by name.
+    // A scalar coefficient is normalized exactly before applying the bound.
     let mut r = loose("limit-scaled", &three);
     let [a, b, c] = [0, 1, 2].map(|k| r.face(k, X));
     r.doc.mate_origin("O", r.ids[2], false, false).unwrap();
     r.doc.mate_linear_coupler("K1", &a, &b, [None, None], [1.0, 3.0], false, false).unwrap();
     r.doc.mate_parallel("P", &a, &c, Alignment::Aligned, false).unwrap();
-    let before = r.doc.assembly().clone();
-    let refused = r.doc.mate_limit_distance("L", &a, &b, ["0 mm", "20 mm"], Alignment::Aligned, false).unwrap_err();
-    assert_eq!(refused.code, RefusalCode::UnsupportedReference, "{}", refused.message);
-    assert!(refused.message.contains("one for one"), "{}", refused.message);
-    assert_eq!(r.doc.assembly(), &before);
+    r.doc.mate_limit_distance("L", &a, &b, ["0 mm", "20 mm"], Alignment::Aligned, false).unwrap();
+    assert!(r.doc.solver().bounded.is_empty());
+    r.reopen();
 }
 
 /// B's bottom stays 5 to 10 above A's top: brought down to 10, kept where a move inside the

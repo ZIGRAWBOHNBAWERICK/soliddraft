@@ -22,6 +22,9 @@ are in `crates/soliddraft-app/src/mates/`.
 | Angle | A signed angle between two projected directions about an explicit reference direction |
 | Limit Angle | The same signed angle, free between inclusive angular stops |
 | Hinge | A Concentric between two axes and a Coincident between two planes, under one name: everything but the turn about the axis, optionally between signed angular stops |
+| Gear | Rotation of two existing Hinge or unlocked Concentric joints, in a ratio, opposite by default |
+| Rack and Pinion | A pinion joint rotation coupled to translation along the rack's selected plane normal or axis |
+| Screw | Rotation and axial translation of an unlocked Concentric joint, at a positive pitch |
 | Symmetric | One part's plane, line or point the mirror image of another's about a plane: two turns and a translation for planes, two turns and two translations for lines, three translations for points |
 | Linear Coupler | One translation: how far one part slides along its plane's normal or axis is a ratio of how far another slides |
 | Limit Distance | The turns a Distance fixes; its translation stays free between a least and a greatest distance |
@@ -44,7 +47,7 @@ conflict as a numerical solve. Independent exact groups keep that path when anot
 needs bounded motions.
 
 A group with general rotations, an Angle or Limit Angle, a curved-curved Tangent, a
-point-point or axis-axis Distance, or enclosed native supports uses the bounded solver.
+point-point or axis-axis Distance, a mechanical coupling, or enclosed native supports uses the bounded solver.
 Every accepted mate in that group reports a `proof` with `certainty: "bounded"`,
 `bound_mm: 1e-9`, `bound_angle: 1e-9`, and the certified residuals. The angular bound is in
 radians. These are residual bounds at the stored pose, not an exact-coincidence claim or a
@@ -131,6 +134,50 @@ within [-180,180]. The angle runs about the first selected axis by the right-han
 Each component's zero direction is its local axis crossed with the local coordinate axis
 least parallel to it, with X first on ties. This definition comes from the selected analytic
 axis, independently of the pick position. Hinges without stops keep their existing bytes.
+
+## Mechanical motion
+
+`assembly_mate_gear` takes `joint_a` and `joint_b`, the names of two existing Hinge or unlocked
+axis-axis Concentric mates. `ratio: [a,b]` means the first turns through `a` revolutions while
+the second turns through `b`. The default direction is opposite. `reverse: true` makes their
+rotations have the same sign. The joints must represent different pairs of components.
+
+`assembly_mate_rack_and_pinion` takes a pinion `joint`, a `rack` endpoint and positive
+`travel_per_turn` in millimetres. The rack endpoint is a plane or an axis whose local normal
+or direction defines positive travel. `reference` optionally names the component whose origin
+is the rack's reference; otherwise the holding assembly's origin is used. Positive travel
+goes with positive pinion rotation, and `reverse` changes its sign. Use ordinary mates to
+hold the rack's orientation and other translations.
+
+`assembly_mate_screw` takes an unlocked axis-axis Concentric `joint` and positive `pitch` in
+millimetres per revolution. Positive rotation about the joint's first axis advances the second
+component along that axis. `reverse` reverses this travel. Screw cannot use a Hinge, which
+already holds axial travel.
+
+These relations capture the current pose as their initial phase. They reference the source
+joint ids and analytic endpoints. Deleting a referenced source joint or enabling a source
+Concentric's Lock rotation is refused atomically. `assembly_edit_mate` accepts a Gear's `ratio`,
+any mechanical relation's `reverse`,
+and a Rack or Screw's `pitch`. Editing these settings captures the current pose as the new
+phase, as editing a Linear Coupler's ratio does.
+
+The angle uses the same local transverse frames as Hinge stops. Each relation saves its last
+accepted unwrapped angles, so continuous dragging follows multiple revolutions and resumes
+that motion after reopen. For nested joints, the parent saves these angles in occurrence
+overrides. Each occurrence keeps its own winding, and the child file stays unchanged.
+Consecutive target orientations must differ by less than 180 degrees
+to identify the intended turn. A quaternion alone cannot distinguish whole revolutions in
+one update. A rotation drag can advance a screw axially; a translation drag can turn it.
+Gear, Rack and Screw report bounded proofs under B5's residual contract. Their stored file
+entry has `kind: "mechanical"` and `mechanism: "gear"`, `"rack_and_pinion"` or `"screw"`.
+
+Linear Coupler remains exact on axis-aligned supports. Dragging either component drives its
+partner. Scalar coefficients in bounds are divided out exactly, so a scaled slide can stop
+at a Limit Distance. Bounds that cannot reduce to a coordinate or a difference after this
+normalization remain refused by name. Exact drag wishes beyond a stop approach the nearest
+feasible point along the requested translation; every accepted pose still uses the exact solve.
+
+These are kinematic relations. They do not model teeth, thread contact, collision or dynamics.
 
 ## In assembly.json
 
@@ -411,8 +458,8 @@ In the exact tier, plane normals are signed axes, which splits a solve in two:
    constraints, decided exactly by Bellman-Ford; a negative cycle is a conflict that names its
    mates. Each free coordinate then keeps its authored value where the bounds allow it and
    otherwise takes the nearest value they allow, earlier components first, so the same file
-   always gives the same placements. A bound on a coordinate a relation moves by a ratio other
-   than one is not a difference and is refused as `unsupported_reference`.
+   always gives the same placements. Scalar coefficients are divided out exactly. A bound
+   that still cannot reduce to a coordinate or a difference is refused as `unsupported_reference`.
 
 The two steps are solved together. Which axis a distance's planes face decides which
 coordinate it moves, so a turn that keeps every normal right can still leave a distance
@@ -420,7 +467,7 @@ that cannot hold, while another turn holds it exactly. The search therefore acce
 only when the translations they leave also hold, checking each mate's translation as soon
 as its parts' turns are chosen, and backtracks otherwise. While some mates still wait for
 their parts' turns, a bound that reads a ratio is left out of that check, because a mate not
-yet in may make it a difference or a constant; it is refused only if it still reads a ratio
+yet in may make it a difference or a constant; it is refused only if it cannot reduce to a coordinate or a difference
 once every mate is in. Turns that take a group's mated
 normals onto the same axes decide the same, so only one of them is tried. An assembly is
 over-constrained only when no supported turns work. The refusal then names a smallest set
@@ -463,6 +510,10 @@ a time. `require_fully_constrained` refuses a result with any freedom left.
 | `assembly_mate_limit_angle` | Bounds that angle by `min_degrees` and `max_degrees` |
 | `assembly_mate_hinge` | Puts two axes on one line and two planes on one plane, under one name |
 | `assembly_mate_symmetric` | Mirrors `a` onto `b` about `plane`; `alignment` between planes or axes |
+| `assembly_mate_gear` | Couples two joint rotations by a ratio |
+| `assembly_mate_rack_and_pinion` | Couples a pinion joint to rack translation in millimetres per revolution |
+| `assembly_mate_screw` | Couples a Concentric joint's rotation and axial travel by pitch |
+| `assembly_drag` | Begins, updates, commits or cancels a placement preview, or performs one complete move |
 | `assembly_mate_linear_coupler` | Couples `b`'s slide to `a`'s by `ratio`, with `reverse` and optional `reference_a` and `reference_b` components |
 | `assembly_mate_limit_distance` | Holds a distance between `min` and `max`, `aligned` or `opposed` |
 | `assembly_mate_profile_center` | Centres two profiles `distance` apart; `lock_rotation` for circles |
@@ -495,11 +546,11 @@ the redo stack. Refusals are JSON: `refused` holds the code, with `message`, `ma
 | `no_such_face` | A selector finds nothing |
 | `unsupported_configuration` | A mate or its source names a configuration other than the default |
 | `unsupported_plane` | The kernel will not prove this face's plane |
-| `unsupported_reference` | A support or pair is outside the family's contract, a profile or slot lacks a proof, a nonparallel Width uses a mode other than Centered, or an exact bound falls on a coordinate a relation scales |
+| `unsupported_reference` | A support or pair is outside the family's contract, a profile or slot lacks a proof, a nonparallel Width uses a mode other than Centered, or an exact bound cannot reduce to a coordinate or a difference |
 | `unsupported_placement` | The exact tier cannot prove the requested placement |
 | `uncertified` | The bounded solver could not find or enclose an acceptable stored pose |
 | `uncertain_rank` | The numerical constraint rank is uncertain near a singular pose |
-| `unsupported_motion` | A named dragging or mechanical command belongs to a later batch |
+| `unsupported_motion` | A mechanical relation references an unsupported or locked joint |
 | `not_parallel` | The two planes are not parallel, or a Width's groove or tab faces are not |
 | `proof_unavailable` | The pinned revision's bytes or a kernel are not available |
 | `unknown_mate` | The assembly holds a mate this version cannot solve |
@@ -558,10 +609,9 @@ still shows, solves nothing and reports `proof_unavailable` per mate until Updat
 
 ## Limits for later batches
 
-Dragging under mates and Hinge angular stops are supported. Gear, Rack and Pinion and Screw
-remain unsupported until the second B6 stage. Their named commands return `unsupported_motion`.
-Path, Cam, arc Slot, Universal Joint, Physical Dynamics, collision while dragging and Mate
-Controller remain outside this version.
+Path, Cam, arc Slot, Universal Joint and Physical Dynamics remain unsupported. Collision
+while dragging and Mate Controller are deferred. Mechanical relations add kinematics without
+contact simulation.
 
 Nonparallel Width Free, angular Dimension and Percent; Distance limits across two points or
 two axes; the misaligned Concentric option; Parallel or Perpendicular between a plane and an

@@ -1,0 +1,656 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "mate-screw-motion",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              5,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "through_all": true,
+        "depth": 10,
+        "flip": true
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "diameter": 8
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 30,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/shaft.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/shaft.dwprt"
+      ]
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/shaft.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        },
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 12
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_origin",
+      "arguments": {
+        "name": "O",
+        "component": 2,
+        "align_axes": true
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/0",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/1",
+          "approx": 0,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/0/translation/2",
+          "approx": 0,
+          "tolerance": 1e-09
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_concentric",
+      "arguments": {
+        "name": "C",
+        "a": {
+          "component": 2,
+          "feature": "Cut-Extrude1",
+          "generator": "side"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "alignment": "aligned",
+        "require_fully_constrained": true
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "under_constrained"
+        },
+        {
+          "pointer": "/summary/assembly/accepted_state",
+          "same_as": {
+            "step": 14,
+            "pointer": "/summary/assembly/accepted_state"
+          }
+        },
+        {
+          "pointer": "/result/remaining_dof",
+          "equals": 2
+        }
+      ],
+      "refused": "under_constrained"
+    },
+    {
+      "tool": "assembly_mate_concentric",
+      "arguments": {
+        "name": "C",
+        "a": {
+          "component": 2,
+          "feature": "Cut-Extrude1",
+          "generator": "side"
+        },
+        "b": {
+          "component": 4,
+          "feature": "Boss-Extrude1",
+          "generator": "side"
+        },
+        "alignment": "aligned"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/remaining_dof",
+          "equals": 2
+        },
+        {
+          "pointer": "/summary/assembly/solver/state",
+          "equals": "underconstrained"
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/0",
+          "approx": 10,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/1",
+          "approx": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 30,
+          "tolerance": 1e-09
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/kind",
+          "equals": "concentric"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/support/kind",
+          "equals": "axis"
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/a/support/through",
+          "equals": [
+            10.0,
+            5.0,
+            0.0
+          ]
+        },
+        {
+          "pointer": "/summary/assembly/mates/1/status",
+          "equals": "ok"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_mate_screw",
+      "arguments": {
+        "name": "S",
+        "joint": "C",
+        "pitch": 8
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "begin",
+        "path": "4"
+      },
+      "checks": []
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            30
+          ],
+          "rotation": [
+            0,
+            0,
+            0.7071067811865475,
+            0.7071067811865476
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 32,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            32
+          ],
+          "rotation": [
+            0,
+            0,
+            1.0,
+            6.123233995736766e-17
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 34,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            34
+          ],
+          "rotation": [
+            0,
+            0,
+            0.7071067811865476,
+            -0.7071067811865475
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 36,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            36
+          ],
+          "rotation": [
+            0,
+            0,
+            1.2246467991473532e-16,
+            -1.0
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 38,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            38
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.7071067811865475,
+            -0.7071067811865477
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 40,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            40
+          ],
+          "rotation": [
+            0,
+            0,
+            -1.0,
+            -1.8369701987210297e-16
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 42,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            42
+          ],
+          "rotation": [
+            0,
+            0,
+            -0.7071067811865477,
+            0.7071067811865474
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 44,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            44
+          ],
+          "rotation": [
+            0,
+            0,
+            -2.4492935982947064e-16,
+            1.0
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 46,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            46
+          ],
+          "rotation": [
+            0,
+            0,
+            0.7071067811865474,
+            0.7071067811865477
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 48,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "update",
+        "placement": {
+          "translation": [
+            10,
+            5,
+            48
+          ],
+          "rotation": [
+            0,
+            0,
+            1.0,
+            3.061616997868383e-16
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 50,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_drag",
+      "arguments": {
+        "phase": "commit"
+      },
+      "checks": []
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 30,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/translation/2",
+          "approx": 50,
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    {
+      "tool": "assembly_edit_mate",
+      "arguments": {
+        "mate": "S",
+        "pitch": 0
+      },
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid_value"
+        }
+      ],
+      "refused": "invalid_value"
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": []
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/solver/diagnostics",
+          "equals": []
+        }
+      ]
+    }
+  ]
+}

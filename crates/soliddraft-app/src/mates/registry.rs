@@ -289,6 +289,7 @@ fn drive_params() -> Vec<(&'static str, Value)> {
 
 fn edit_params() -> Vec<(&'static str, Value)> {
     vec![
+        ("pitch", optional(number("New positive Rack or Screw millimetres per revolution"))),
         ("degrees", optional(number("New signed Angle degrees"))),
         ("angle_limits", optional(array(number("Signed degrees"), "New [min_degrees, max_degrees]"))),
         ("mate", string("The mate's name")),
@@ -344,9 +345,9 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         ),
         row("assembly_drag", "Move and rotate under mates", "Preview a component placement while mates hold")
             .agents(Agents::Mcp, "Begin, update and commit one drag, or cancel it. Move performs one complete drag. Limits act as stops.", drag_params).undo(Undo::Carried),
-        row("assembly_mate_gear", "Gear mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
-        row("assembly_mate_rack_and_pinion", "Rack and Pinion mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
-        row("assembly_mate_screw", "Screw mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
+        row("assembly_mate_gear", "Gear mate", "Couple rotations of two Hinge or Concentric joints").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", gear_params).undo(Undo::Step),
+        row("assembly_mate_rack_and_pinion", "Rack and Pinion mate", "Couple a joint rotation to a signed rack slide").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", rack_params).undo(Undo::Step),
+        row("assembly_mate_screw", "Screw mate", "Couple axial travel and rotation of a Concentric joint").agents(Agents::Mcp, "Saves a motion relation with continuous angles and certified residuals; does not model collisions.", screw_params).undo(Undo::Step),
         row("assembly_mate_path", "Path mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
         row("assembly_mate_cam", "Cam mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
         row("assembly_mate_universal_joint", "Universal Joint mate", "Unavailable in the static mate solver").agents(Agents::Mcp, "Returns a named unsupported_motion refusal.", unsupported_motion_params),
@@ -484,5 +485,36 @@ fn drag_params() -> Vec<(&'static str, Value)> {
                 serde_json::json!({"type":"object", "description":"Target in the parent frame, required for update or move", "properties":{"translation":{"type":"array","items":{"type":"number"}},"rotation":{"type":"array","items":{"type":"number"}}},"required":["translation","rotation"],"additionalProperties":false}),
             ),
         ),
+    ]
+}
+
+fn gear_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("Mate name")),
+        ("joint_a", string("First Hinge or unlocked Concentric mate name")),
+        ("joint_b", string("Second Hinge or unlocked Concentric mate name")),
+        ("ratio", optional(array(number("Positive ratio"), "First rotation : second rotation, default [1,1]"))),
+        ("reverse", optional(boolean("Same direction instead of the default opposite rotation"))),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
+    ]
+}
+fn screw_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("Mate name")),
+        ("joint", string("Unlocked axis-axis Concentric mate name")),
+        ("pitch", number("Positive axial travel in millimetres per revolution")),
+        ("reverse", optional(boolean("Reverse travel direction"))),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
+    ]
+}
+fn rack_params() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", string("Mate name")),
+        ("joint", string("Pinion Hinge or unlocked Concentric mate name")),
+        ("rack", face("Rack plane normal or axis giving its translation direction")),
+        ("reference", optional(integer("Reference component id; otherwise the assembly origin"))),
+        ("travel_per_turn", number("Positive rack travel in millimetres per revolution")),
+        ("reverse", optional(boolean("Reverse travel direction"))),
+        ("require_fully_constrained", optional(boolean("Refuse remaining freedom"))),
     ]
 }

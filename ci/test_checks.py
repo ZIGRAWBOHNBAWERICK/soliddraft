@@ -820,7 +820,7 @@ class Wiring(unittest.TestCase):
     def test_windows_jobs_stay_defined_behind_one_manual_input(self):
         hosted = (ROOT / '.github/workflows/hosted.yml').read_text()
         self.assertEqual(re.findall(r'^      (\w+):\n        description:', hosted, re.M),
-                         ['refresh_catallax_views', 'windows_catch_up'])
+                         ['benchmark_boat', 'refresh_catallax_views', 'windows_catch_up'])
         self.assertRegex(hosted, r'      windows_catch_up:\n        description: .*\n        type: boolean\n'
                                  r'        default: false\n')
         parsed = jobs(hosted)

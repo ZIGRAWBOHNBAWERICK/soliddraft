@@ -107,6 +107,15 @@ accepts raw `start` and `end` points, a positive `reach` in mm, optional
 filters offer all classes. The resulting profile extrudes to 240 mm³ and retains
 that volume after save/reopen. The MCP stdio test replays the same scenario.
 
+`relate` accepts a `relation` object with `type` and existing entity ids. Choices
+are `collinear` and `coradial` (`a`, `b`), `intersection` (`point`, `a`, `b`),
+`symmetric_points` or `symmetric_entities` (`a`, `b`, `axis`), and `fix_entity`
+(`entity`). Point references use `{ "entity": id, "index": n }`; line endpoints
+are indices 0 and 1, arc centre/start/end are 0/1/2, and circle centres are 0.
+The same selection validation serves the native menu and property panel.
+`sketch-relations.json` uses these choices on two symmetric square profiles and
+construction guides, then checks a 96 mm³ extrusion before and after reopening.
+
 Both sketch tools accept an optional signed `offset` in millimetres along a
 reference plane's or planar face's normal. Omitted offsets are zero. A face
 offset follows the persistently named face on rebuild, including coplanar

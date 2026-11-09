@@ -173,14 +173,22 @@ fn mcp_bundle_keeps_the_part_and_question_after_a_refused_extrusion() {
 
 #[test]
 fn snap_scenario_builds_and_reopens_through_the_application_protocol() {
+    replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-snaps.json"));
+}
+
+#[test]
+fn relation_scenario_builds_and_reopens_through_the_application_protocol() {
+    replay_sketch_volume_scenario(include_str!("../../../ci/scenarios/sketch-relations.json"));
+}
+
+fn replay_sketch_volume_scenario(source: &str) {
     let mut c = Client::start(&["mcp"]);
     c.request(
         "initialize",
         json!({"protocolVersion":"2025-06-18","capabilities":{},
-        "clientInfo":{"name":"snap-test","version":"1"}}),
+        "clientInfo":{"name":"sketch-volume-test","version":"1"}}),
     );
-    let source =
-        include_str!("../../../ci/scenarios/sketch-snaps.json").replace("{bundle}", c.config.to_str().unwrap());
+    let source = source.replace("{bundle}", c.config.to_str().unwrap());
     let scenario: Value = serde_json::from_str(&source).unwrap();
     for step in scenario["steps"].as_array().unwrap() {
         let name = step["tool"].as_str().unwrap();
@@ -190,7 +198,12 @@ fn snap_scenario_builds_and_reopens_through_the_application_protocol() {
             let measured = c.call("mass_properties", json!({"name":"Boss-Extrude1"}));
             assert_eq!(measured["isError"], false, "{measured}");
             let volume = measured["structuredContent"]["volume_mm3"].as_f64().unwrap();
-            assert!((volume - 240.0).abs() < 0.005, "{volume}");
+            for check in step["checks"].as_array().unwrap() {
+                assert_eq!(check["pointer"], "/measurement/volume_mm3");
+                let expected = check["approx"].as_f64().unwrap();
+                let tolerance = check["tolerance"].as_f64().unwrap();
+                assert!((volume - expected).abs() < tolerance, "{volume} != {expected}");
+            }
         }
     }
 }

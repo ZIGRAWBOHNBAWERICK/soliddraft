@@ -930,6 +930,16 @@
       ]
     },
     {
+      "id": "sketch-relations",
+      "file": "ci/scenarios/sketch-relations.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-snaps",
       "file": "ci/scenarios/sketch-snaps.json",
       "acceptance": false,

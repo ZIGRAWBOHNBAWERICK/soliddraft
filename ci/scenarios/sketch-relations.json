@@ -1,0 +1,292 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "sketch-relations",
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "polygon",
+            "center": {
+              "u": -5,
+              "v": 0
+            },
+            "vertex": {
+              "u": -3,
+              "v": -2
+            },
+            "sides": 4
+          },
+          {
+            "tool": "mirror",
+            "entities": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "axis_start": {
+              "u": 0,
+              "v": -12
+            },
+            "axis_end": {
+              "u": 0,
+              "v": 12
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0,
+                "v": -12
+              },
+              "b": {
+                "u": 0,
+                "v": 12
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 1
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 2
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 3
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 4
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 9
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "symmetric_entities",
+              "a": 1,
+              "b": 5,
+              "axis": 9
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "symmetric_entities",
+              "a": 2,
+              "b": 6,
+              "axis": 9
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "symmetric_entities",
+              "a": 3,
+              "b": 7,
+              "axis": 9
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "symmetric_entities",
+              "a": 4,
+              "b": 8,
+              "axis": 9
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -12,
+                "v": 15
+              },
+              "b": {
+                "u": 12,
+                "v": 15
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 14,
+                "v": 15.1
+              },
+              "b": {
+                "u": 20,
+                "v": 15.2
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 10
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "collinear",
+              "a": 10,
+              "b": 11
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 20,
+                "v": 20
+              },
+              "radius": 3
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "circle",
+              "center": {
+                "u": 20.1,
+                "v": 20.1
+              },
+              "radius": 3.1
+            },
+            "construction": true
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 12
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "coradial",
+              "a": 12,
+              "b": 13
+            }
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "point",
+              "p": {
+                "u": 4.1,
+                "v": 15.1
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 4,
+                "v": 12
+              },
+              "b": {
+                "u": 4,
+                "v": 18
+              }
+            },
+            "construction": true
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "fix_entity",
+              "entity": 15
+            }
+          },
+          {
+            "tool": "relate",
+            "relation": {
+              "type": "intersection",
+              "point": {
+                "entity": 14,
+                "index": 0
+              },
+              "a": 10,
+              "b": 15
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 3,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 96,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/relations.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/relations.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 96,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

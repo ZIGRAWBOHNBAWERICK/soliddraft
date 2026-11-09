@@ -118,6 +118,17 @@ fn invalid_relation(sketch: &Sketch, constraint: &Constraint) -> Option<String> 
         ConstraintKind::Midpoint { line: id, .. } | ConstraintKind::PointLineDistance { line: id, .. } if !line(id) => {
             Some("This relation requires a line target")
         }
+        ConstraintKind::Symmetric { a, b, axis } if !line(axis) || a == b || a.entity == axis || b.entity == axis => {
+            Some("Symmetry requires two distinct points outside the axis entity")
+        }
+        ConstraintKind::FixEntity { entity, at }
+            if !tools::valid(at)
+                || sketch
+                    .entity(entity)
+                    .is_some_and(|e| std::mem::discriminant(&e.kind) != std::mem::discriminant(&at)) =>
+        {
+            Some("Fixed geometry no longer matches its recorded type")
+        }
         ConstraintKind::Radius { entity, .. } if !circular(entity) => Some("Radius requires a circle or arc target"),
         ConstraintKind::Concentric { a, b } if !circular(a) || !circular(b) => {
             Some("Concentric requires two circular targets")

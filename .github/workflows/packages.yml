@@ -268,13 +268,16 @@ jobs:
           note_args=(${{ inputs.windows && '--windows' || '' }})
           if [[ -n "$previous" ]]; then note_args+=(--previous "$previous"); fi
           python3 packaging/release.py notes "$RUNNER_TEMP/pulls.json" "${note_args[@]}"
-      - uses: anchore/sbom-action@v0
+      - uses: ./.github/actions/pinned-tool
         with:
-          path: .
-          format: spdx-json
-          output-file: dist/soliddraft-${{ needs.plan.outputs.version }}.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
+          tool: syft
+      - name: Generate the required SPDX inventory with pinned syft
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          SYFT_CHECK_FOR_APP_UPDATE: 'false'
+        run: |
+          syft scan dir:. -o spdx-json > "$RUNNER_TEMP/sbom.json"
+          mv "$RUNNER_TEMP/sbom.json" "dist/soliddraft-$VERSION.spdx.json"
       - name: Require the complete artifact set and hash every download
         run: python3 packaging/release.py checksums ${{ inputs.windows && '--windows' || '' }}
       - uses: actions/upload-artifact@v4

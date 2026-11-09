@@ -111,15 +111,7 @@ jobs:
         with:
           shared-key: native-dev
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/compile-cache
       - run: ci/run lint
-      - name: Compiler cache statistics
-        if: always()
-        run: |
-          if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
-            sccache --show-stats
-            sccache --stop-server
-          fi
 
   kernel:
     needs: select

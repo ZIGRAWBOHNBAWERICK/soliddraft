@@ -48,5 +48,15 @@
   "cargo-packager": {
     "version": "0.11.8",
     "source": "cargo"
+  },
+  "syft": {
+    "version": "1.42.3",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-gnu",
+        "sha256": "0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509",
+        "url": "https://api.github.com/repos/anchore/syft/releases/assets/377338300"
+      }
+    }
   }
 }

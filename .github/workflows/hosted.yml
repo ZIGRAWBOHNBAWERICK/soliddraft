@@ -167,8 +167,8 @@ jobs:
         if: always()
         run: |
           if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
-            sccache --show-stats
-            sccache --stop-server
+            sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
+            sccache --stop-server || echo "::warning::Compiler cache server unavailable."
           fi
 
   # The bracket's STEP opens in OpenCASCADE with the exact body's face count and a volume
@@ -214,8 +214,8 @@ jobs:
         if: always()
         run: |
           if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
-            sccache --show-stats
-            sccache --stop-server
+            sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
+            sccache --stop-server || echo "::warning::Compiler cache server unavailable."
           fi
 
   build-linux:
@@ -273,8 +273,8 @@ jobs:
         if: always()
         run: |
           if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
-            sccache --show-stats
-            sccache --stop-server
+            sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
+            sccache --stop-server || echo "::warning::Compiler cache server unavailable."
           fi
 
   partition-linux:
@@ -823,8 +823,8 @@ jobs:
         if: always()
         run: |
           if [[ -n "${SCCACHE_SERVER_UDS:-}" ]]; then
-            sccache --show-stats
-            sccache --stop-server
+            sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
+            sccache --stop-server || echo "::warning::Compiler cache server unavailable."
           fi
 
   packaging:

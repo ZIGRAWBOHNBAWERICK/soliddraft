@@ -4,6 +4,8 @@ runs:
   using: composite
   steps:
     - uses: ./.github/actions/pinned-tool
+      id: tool
+      continue-on-error: true
       with:
         tool: sccache
     - uses: actions/github-script@v7
@@ -14,12 +16,21 @@ runs:
           // OpenDAL defaults to the retired cache API without this flag.
           core.exportVariable('ACTIONS_CACHE_SERVICE_V2', process.env.ACTIONS_CACHE_SERVICE_V2 || 'true');
     - shell: bash
+      if: steps.tool.outcome == 'success'
       env:
         CACHE_VERSION: ${{ hashFiles('Cargo.lock', 'crates/soliddraft-kernel-catallax/Cargo.toml') }}
       run: |
-        echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
-        echo 'SCCACHE_GHA_ENABLED=on' >> "$GITHUB_ENV"
-        echo "SCCACHE_GHA_VERSION=soliddraft-v1-$CACHE_VERSION" >> "$GITHUB_ENV"
+        export SCCACHE_GHA_ENABLED=on
+        export SCCACHE_GHA_VERSION="soliddraft-v1-$CACHE_VERSION"
         # Keep absolute checkout paths in keys because Rust embeds fixture paths.
-        echo 'SCCACHE_IDLE_TIMEOUT=0' >> "$GITHUB_ENV"
-        echo "SCCACHE_SERVER_UDS=$RUNNER_TEMP/sccache-$GITHUB_JOB.sock" >> "$GITHUB_ENV"
+        export SCCACHE_IDLE_TIMEOUT=0
+        export SCCACHE_SERVER_UDS="$RUNNER_TEMP/sccache-$GITHUB_JOB.sock"
+        export SCCACHE_IGNORE_SERVER_IO_ERROR=1
+        if timeout 30s sccache --start-server; then
+          echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
+          for variable in SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION SCCACHE_IDLE_TIMEOUT SCCACHE_SERVER_UDS SCCACHE_IGNORE_SERVER_IO_ERROR; do
+            printf '%s=%s\n' "$variable" "${!variable}" >> "$GITHUB_ENV"
+          done
+        else
+          echo '::warning::Compiler cache unavailable; compiling without it.'
+        fi

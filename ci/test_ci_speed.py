@@ -1,9 +1,12 @@
 """Runner trust, duration balancing and complete partition coverage."""
 import importlib.util
 import json
+import os
 import pathlib
 import re
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -16,6 +19,53 @@ spec.loader.exec_module(selection)
 
 
 class CompilerCache(unittest.TestCase):
+    def test_server_start_failure_leaves_the_compiler_unwrapped(self):
+        action = (ROOT / '.github/actions/compile-cache/action.yml').read_text()
+        script = textwrap.dedent(action.split('      run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            binary = root / 'sccache'
+            binary.write_text('#!/bin/sh\n[ "$1" = --start-server ] || exit 9\n'
+                              'exit "$CACHE_START_EXIT"\n')
+            binary.chmod(0o755)
+            output = root / 'environment'
+            for code in (0, 2):
+                with self.subTest(startup_exit=code):
+                    output.write_text('')
+                    env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
+                               GITHUB_ENV=str(output), RUNNER_TEMP=str(root), GITHUB_JOB='probe',
+                               CACHE_VERSION='fixture', CACHE_START_EXIT=str(code))
+                    result = subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env,
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                    if code:
+                        self.assertEqual(values, {})
+                        self.assertIn('compiling without it', result.stdout)
+                    else:
+                        self.assertEqual(values['RUSTC_WRAPPER'], 'sccache')
+                        self.assertEqual(values['SCCACHE_SERVER_UDS'], str(root / 'sccache-probe.sock'))
+                        self.assertEqual(values['SCCACHE_IGNORE_SERVER_IO_ERROR'], '1')
+
+    def test_optional_statistics_cannot_fail_required_checks(self):
+        workflow = (ROOT / '.github/workflows/hosted.yml').read_text()
+        blocks = workflow.split('      - name: Compiler cache statistics\n')[1:]
+        self.assertTrue(blocks)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            binary = root / 'sccache'
+            binary.write_text('#!/bin/sh\nexit 2\n')
+            binary.chmod(0o755)
+            for block in blocks:
+                script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('\n\n', 1)[0])
+                result = subprocess.run(['bash', '-euo', 'pipefail', '-c', script],
+                                        env=dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
+                                                 SCCACHE_SERVER_UDS=str(root / 'probe.sock')),
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('::warning::Compiler cache statistics unavailable.', result.stdout)
+                self.assertIn('::warning::Compiler cache server unavailable.', result.stdout)
+
     def test_cache_protocol_is_exported_with_its_credentials(self):
         action = (ROOT / '.github/actions/compile-cache/action.yml').read_text()
         self.assertNotIn('SCCACHE_BASEDIRS', action)

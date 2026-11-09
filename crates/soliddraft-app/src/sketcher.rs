@@ -2377,9 +2377,9 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     let hint = match (s.tool, s.pending.len()) {
         (Tool::Select, _) => "Click to select, drag to move, double-click a dimension to edit",
         (Tool::Line, 0) => "Line: click the start point",
-        (Tool::Line, _) => "Line: click the end point; right-click or Esc ends the chain",
+        (Tool::Line, _) => "Line: click end; right-click or double-click ends chain; Esc: Select",
         (Tool::Centreline, 0) => "Centreline: click the start point",
-        (Tool::Centreline, _) => "Centreline: click the end point; right-click or Esc ends the chain",
+        (Tool::Centreline, _) => "Centreline: click end; right-click or double-click ends chain; Esc: Select",
         (Tool::Rectangle, 0) => "Rectangle: click the first corner",
         (Tool::Rectangle, _) => "Rectangle: click the opposite corner",
         (Tool::FitSpline | Tool::ControlSpline, _) => {

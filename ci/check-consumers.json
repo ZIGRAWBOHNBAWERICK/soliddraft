@@ -2,92 +2,326 @@
   "format": "soliddraft-check-consumers/1",
   "files": {
     "ci/install-tool.py": "all",
-    "ci/balance.py": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/compact-archive.py": ["lint", "test-linux", "test-macos"],
-    "ci/test_compact_archive.py": ["lint"],
-    "ci/test-durations.json": ["test-linux", "test-macos"],
-    "ci/scenario-durations.json": ["application-loop"],
+    "ci/balance.py": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/compact-archive.py": [
+      "lint",
+      "test-linux",
+      "test-macos"
+    ],
+    "ci/test_compact_archive.py": [
+      "lint"
+    ],
+    "ci/test-durations.json": [
+      "test-linux",
+      "test-macos"
+    ],
+    "ci/scenario-durations.json": [
+      "application-loop"
+    ],
     "ci/select-runner.py": "all",
-    "ci/test_ci_speed.py": ["lint"],
-    "ci/browser-documents.mjs": ["web"],
-    "ci/browser-journal.js": ["web"],
-    "ci/browser-preferences.mjs": ["web"],
-    "ci/browser-recovery-storage.js": ["web"],
+    "ci/test_ci_speed.py": [
+      "lint"
+    ],
+    "ci/browser-documents.mjs": [
+      "web"
+    ],
+    "ci/browser-journal.js": [
+      "web"
+    ],
+    "ci/browser-preferences.mjs": [
+      "web"
+    ],
+    "ci/browser-recovery-storage.js": [
+      "web"
+    ],
     "ci/cargo-cache.sh": [],
     "ci/bootstrap": "all",
-    "ci/hooks/pre-push": ["lint"],
-    "ci/run-selected.py": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/test_selected_work.py": ["lint"],
-    "ci/run": ["lint", "test-linux", "test-macos"],
+    "ci/hooks/pre-push": [
+      "lint"
+    ],
+    "ci/run-selected.py": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/test_selected_work.py": [
+      "lint"
+    ],
+    "ci/run": [
+      "lint",
+      "test-linux",
+      "test-macos"
+    ],
     "ci/tools": "all",
-    "ci/nextest.toml": ["lint", "test-linux", "test-macos"],
+    "ci/nextest.toml": [
+      "lint",
+      "test-linux",
+      "test-macos"
+    ],
     "ci/check-consumers.json": "all",
-    "ci/check-configuration-grid.py": ["lint", "application-loop"],
-    "ci/check-field-moments.py": ["application-loop"],
+    "ci/check-configuration-grid.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/check-field-moments.py": [
+      "application-loop"
+    ],
     "ci/check-gate.py": "all",
-    "ci/check-graded-stl.py": ["application-loop"],
-    "ci/check-gyroid-stl.py": ["application-loop"],
-    "ci/check-lattice-stl.py": ["application-loop"],
-    "ci/check-ownership.py": ["lint"],
+    "ci/check-graded-stl.py": [
+      "application-loop"
+    ],
+    "ci/check-gyroid-stl.py": [
+      "application-loop"
+    ],
+    "ci/check-lattice-stl.py": [
+      "application-loop"
+    ],
+    "ci/check-ownership.py": [
+      "lint"
+    ],
     "ci/check-registry.json": "all",
-    "ci/check-step-oracle.py": ["application-loop"],
-    "ci/check-iges.py": ["lint", "application-loop"],
-    "ci/check-step.py": ["step-opencascade", "application-loop"],
+    "ci/check-step-oracle.py": [
+      "application-loop"
+    ],
+    "ci/check-iges.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/check-step.py": [
+      "step-opencascade",
+      "application-loop"
+    ],
     "ci/check-unchanged-tests.py": [],
     "ci/compare-scenario-bundles.py": [],
-    "ci/configuration-grid-fixtures.py": ["lint", "application-loop"],
-    "ci/edit_speed.py": ["lint"],
-    "ci/fake_mcp_server.py": ["lint", "application-loop"],
-    "ci/fixtures/import/block-seam-4um.step": ["lint", "kernel", "test-linux", "application-loop"],
-    "ci/fixtures/import/block-seam-20um.step": ["lint", "kernel", "test-linux", "application-loop"],
-    "ci/fixtures/import/two-blocks-5um.step": ["lint", "kernel", "test-linux", "application-loop"],
-    "ci/fixtures/scene-import/README.md": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/omniverse-cubebox/cubebox_a02.usd": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-bracket/bracket.glb": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-bracket/bracket.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-bracket/bracket.stl": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-bracket/bracket.urdf": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-bracket/bracket.usda": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-bracket/bracket_meshes/plate.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer.glb": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer.urdf": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer.usda": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/cabinet.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/dial.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/drawer.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/drum.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/glass.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/handle.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/ring.obj": ["lint", "test-linux", "test-macos", "application-loop"],
-    "ci/gate-cases.json": ["lint"],
-    "ci/known-over-budget.json": ["lint", "application-loop"],
-    "ci/ownership.toml": ["lint"],
+    "ci/configuration-grid-fixtures.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/edit_speed.py": [
+      "lint"
+    ],
+    "ci/fake_mcp_server.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/fixtures/import/block-seam-4um.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/import/block-seam-20um.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/import/two-blocks-5um.step": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/README.md": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/omniverse-cubebox/cubebox_a02.usd": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.glb": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.stl": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.urdf": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket.usda": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-bracket/bracket_meshes/plate.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer.glb": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer.urdf": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer.usda": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/cabinet.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/dial.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/drawer.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/drum.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/glass.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/handle.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/scene-import/sand3d-washer/washer_meshes/ring.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/gate-cases.json": [
+      "lint"
+    ],
+    "ci/known-over-budget.json": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/ownership.toml": [
+      "lint"
+    ],
     "ci/public-items.py": [],
     "ci/refactor_baseline.py": [],
-    "ci/routing-cases.json": ["lint"],
-    "ci/routing-replays/Cargo.lock.cea2704": ["lint"],
-    "ci/routing-replays/hosted.yml.cea2704": ["lint"],
-    "ci/routing-replays/packages.yml.cea2704": ["lint"],
-    "ci/routing-replays/round2-replays.json": ["lint"],
-    "ci/routing-replays/scenario-inventory.json.cea2704": ["lint"],
-    "ci/routing-replays/select-checks.py.23e47cd": ["lint"],
-    "ci/routing-replays/select-checks.py.9e81eb4": ["lint"],
-    "ci/routing-replays/soliddraft-kernel-catallax.Cargo.toml.cea2704": ["lint"],
-    "ci/run-scenarios.py": ["lint", "application-loop"],
-    "ci/scenario-inventory.json": ["lint"],
+    "ci/routing-cases.json": [
+      "lint"
+    ],
+    "ci/routing-replays/Cargo.lock.cea2704": [
+      "lint"
+    ],
+    "ci/routing-replays/hosted.yml.cea2704": [
+      "lint"
+    ],
+    "ci/routing-replays/packages.yml.cea2704": [
+      "lint"
+    ],
+    "ci/routing-replays/round2-replays.json": [
+      "lint"
+    ],
+    "ci/routing-replays/scenario-inventory.json.cea2704": [
+      "lint"
+    ],
+    "ci/routing-replays/select-checks.py.23e47cd": [
+      "lint"
+    ],
+    "ci/routing-replays/select-checks.py.9e81eb4": [
+      "lint"
+    ],
+    "ci/routing-replays/soliddraft-kernel-catallax.Cargo.toml.cea2704": [
+      "lint"
+    ],
+    "ci/run-scenarios.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/scenario-inventory.json": [
+      "lint"
+    ],
     "ci/scenarios/p3-rounded-boss.md": [],
     "ci/scenarios/p5-flanged-housing.md": [],
     "ci/select-checks.py": "all",
-    "ci/test_checks.py": ["lint"],
-    "ci/test_edit_speed.py": ["lint"],
-    "ci/test_run.py": ["lint"],
-    "ci/test_icons.py": ["lint"],
-    "ci/test_ownership.py": ["lint"],
-    "ci/test_scenario_bundles.py": ["lint"],
-    "ci/test_scenarios.py": ["lint", "application-loop"],
-    "ci/test_workflows.py": ["lint"]
+    "ci/test_checks.py": [
+      "lint"
+    ],
+    "ci/test_edit_speed.py": [
+      "lint"
+    ],
+    "ci/test_run.py": [
+      "lint"
+    ],
+    "ci/test_icons.py": [
+      "lint"
+    ],
+    "ci/test_ownership.py": [
+      "lint"
+    ],
+    "ci/test_scenario_bundles.py": [
+      "lint"
+    ],
+    "ci/test_scenarios.py": [
+      "lint",
+      "application-loop"
+    ],
+    "ci/test_workflows.py": [
+      "lint"
+    ],
+    "ci/merge-shards.py": [
+      "lint",
+      "test-linux"
+    ],
+    "ci/test_merge_shards.py": [
+      "lint"
+    ]
   },
   "patterns": {
-    "ci/scenarios/[^/]+\\.json": ["lint", "application-loop"]
+    "ci/scenarios/[^/]+\\.json": [
+      "lint",
+      "application-loop"
+    ]
   }
 }

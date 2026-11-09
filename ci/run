@@ -26,11 +26,13 @@ case "${1:-}" in
     python3 ci/run-selected.py test-doc "${selection[@]}"
     ;;
   test-shard)
-    [[ $# -eq 3 ]]
-    python3 ci/balance.py run "$2" "$3"
+    [[ $# -eq 3 || $# -eq 4 ]]
+    metadata=()
+    if [[ $# -eq 4 ]]; then metadata=(--metadata "$4"); fi
+    python3 ci/balance.py run "$2" "$3" "${metadata[@]}"
     ;;
   *)
-    echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N" >&2
+    echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N [METADATA]" >&2
     exit 2
     ;;
 esac

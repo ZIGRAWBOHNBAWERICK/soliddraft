@@ -730,21 +730,22 @@ class Gate(unittest.TestCase):
                 self.assertEqual(self.gate_exit(selected, needs), code)
         self.assertEqual(self.gate_exit(tests, {'select': 'success', 'lint': 'success', 'packaging': 'skipped'}), 1)
 
-    def test_workspace_unit_requires_both_build_and_shards(self):
-        for platform in ('linux', 'macos'):
-            build, shard = f'build-{platform}', f'test-{platform}'
-            for build_result, shard_result, expected in (
-                    ('success', 'success', 0), ('failure', 'success', 1),
-                    ('cancelled', 'success', 1), ('skipped', 'success', 1),
-                    ('success', 'failure', 1), ('success', 'cancelled', 1),
-                    ('success', 'skipped', 1), (None, 'success', 1), ('success', None, 1)):
-                with self.subTest(platform=platform, build=build_result, shards=shard_result):
-                    needs = {'select': 'success', 'lint': 'success'}
-                    if build_result is not None:
-                        needs[build] = build_result
-                    if shard_result is not None:
-                        needs[shard] = shard_result
-                    self.assertEqual(self.gate_exit(['lint', shard], needs), expected)
+    def test_workspace_unit_requires_all_execution_stages(self):
+        for platform, required in (
+                ('linux', ('build-linux', 'partition-linux', 'test-linux')),
+                ('macos', ('build-macos', 'test-macos'))):
+            successful = {'select': 'success', 'lint': 'success', **dict.fromkeys(required, 'success')}
+            selected = ['lint', f'test-{platform}']
+            self.assertEqual(self.gate_exit(selected, successful), 0)
+            for job in required:
+                for result in ('failure', 'cancelled', 'skipped', 'abandoned', None):
+                    with self.subTest(platform=platform, job=job, result=result):
+                        needs = dict(successful)
+                        if result is None:
+                            del needs[job]
+                        else:
+                            needs[job] = result
+                        self.assertEqual(self.gate_exit(selected, needs), 1)
 
     def test_every_selected_job_rejects_a_silent_skip(self):
         registry = read('check-registry.json')['jobs']
@@ -788,18 +789,25 @@ class Wiring(unittest.TestCase):
         for platform, count in (('linux', 4), ('macos', 2)):
             with self.subTest(platform=platform):
                 build, shards = parsed[f'build-{platform}'], parsed[f'test-{platform}']
+                execution = parsed['partition-linux'] if platform == 'linux' else shards
                 self.assertIn('ci/run test-build', build)
                 self.assertIn('ci/run test-doc', build)
-                self.assertIn(f'needs: [select, build-{platform}]', shards)
+                self.assertIn(f'needs: [select, build-{platform}]', execution)
                 self.assertIn('fail-fast: false', shards)
                 matrix = re.search(r'shard: \[(.*?)\]', shards)[1]
                 self.assertEqual([int(n) for n in matrix.split(',')], list(range(1, count + 1)))
-                self.assertIn('ci/run test-shard', shards)
-                self.assertIn('SOLIDDRAFT_REQUIRE_GPU: "1"', shards)
-                self.assertIn('LP_NUM_THREADS: "1"', shards)
-                self.assertNotIn('ci/run test-build', shards)
-                self.assertNotIn('cargo test', shards)
-                self.assertNotIn('Swatinem/rust-cache', shards)
+                self.assertIn('ci/run test-shard', execution)
+                self.assertIn('SOLIDDRAFT_REQUIRE_GPU: "1"', execution)
+                self.assertIn('LP_NUM_THREADS: "1"', execution)
+                self.assertNotIn('ci/run test-build', execution)
+                self.assertNotIn('cargo test', execution)
+                self.assertNotIn('Swatinem/rust-cache', execution)
+        self.assertIn('needs.build-linux.outputs.partitions', parsed['partition-linux'])
+        self.assertIn('fail-fast: false', parsed['partition-linux'])
+        self.assertIn('ci/merge-shards.py', parsed['test-linux'])
+        self.assertIn('partition-linux', parsed['test-linux'])
+        self.assertIn('inventory.json', parsed['partition-linux'])
+        self.assertIn('partition-linux', parsed['gate'])
 
     def test_selected_work_consumes_the_selection_artifact_in_each_job(self):
         parsed = jobs((ROOT / '.github/workflows/hosted.yml').read_text())

@@ -2,6 +2,7 @@
 """Balance the current inventory using recorded durations, never a frozen test list."""
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import pathlib
@@ -53,7 +54,11 @@ def inventory(listing):
             if not case['ignored'] and case['filter-match']['status'] == 'matches']
 
 
-def run_shard(archive, shard):
+def inventory_digest(items):
+    return hashlib.sha256(json.dumps(sorted(items)).encode()).hexdigest()
+
+
+def run_shard(archive, shard, metadata=None):
     index, count = map(int, shard.split('/'))
     if not 1 <= index <= count:
         raise ValueError('shard must be K/N with 1 <= K <= N')
@@ -79,12 +84,24 @@ def run_shard(archive, shard):
                      + f'\npriority = {priority}\n')
         config.write_text(text)
         # List extracts once; reuse the extracted binaries without another decompression.
-        return subprocess.run(['cargo', 'nextest', 'run', '--config-file', str(config),
+        if metadata is not None:
+            (ROOT / 'target/nextest/ci/junit.xml').unlink(missing_ok=True)
+        result = subprocess.run(['cargo', 'nextest', 'run', '--config-file', str(config),
                                '--profile', 'ci', '--cargo-metadata', str(ROOT / 'target/nextest/cargo-metadata.json'),
                                '--binaries-metadata', str(ROOT / 'target/nextest/binaries-metadata.json'),
                                '--target-dir-remap', str(ROOT / 'target'),
                                '--workspace-remap', str(ROOT), '--filter-expr', filters,
-                               '--no-tests', 'pass', '--no-fail-fast'], cwd=ROOT).returncode
+                               '--no-tests', 'pass', '--no-fail-fast'], cwd=ROOT)
+        if metadata is not None:
+            metadata.parent.mkdir(parents=True, exist_ok=True)
+            metadata.write_text(json.dumps({
+                'format': 'soliddraft-partition/1', 'partition': index, 'partitions': count,
+                'inventory_count': len(items), 'inventory_sha256': inventory_digest(items),
+                'selected_count': len(chosen), 'selected_sha256': inventory_digest(chosen),
+                'returncode': result.returncode,
+                'finished_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }, indent=2) + '\n')
+        return result.returncode
 
 
 def main():
@@ -101,9 +118,10 @@ def main():
     run = sub.add_parser('run')
     run.add_argument('archive')
     run.add_argument('shard')
+    run.add_argument('--metadata', type=pathlib.Path)
     args = parser.parse_args()
     if args.command == 'run':
-        return run_shard(args.archive, args.shard)
+        return run_shard(args.archive, args.shard, args.metadata)
     timings = {}
     if args.command == 'record-scenarios':
         for path in args.inputs:

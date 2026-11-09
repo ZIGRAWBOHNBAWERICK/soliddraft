@@ -60,6 +60,12 @@ class Codec(unittest.TestCase):
 
 
 class Availability(unittest.TestCase):
+    def test_execution_partitions_respect_the_previous_transfer_budget(self):
+        for remaining in range(1, 1001):
+            count = archive.execution_partitions({'before_bytes': 1000, 'after_bytes': remaining})
+            self.assertIn(count, (4, 8, 12))
+            self.assertLessEqual(count * remaining, 4 * 1000)
+
     def test_a_missing_codec_keeps_the_original(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / 'archive.tar.zst'

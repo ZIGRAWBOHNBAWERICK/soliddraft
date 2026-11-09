@@ -225,6 +225,9 @@ jobs:
     env:
       CARGO_PROFILE_TEST_OPT_LEVEL: 2
     runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
+    outputs:
+      partitions: ${{ steps.compact.outputs.partitions }}
+      partition_count: ${{ steps.compact.outputs.count }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the portable archive workspace
@@ -257,7 +260,8 @@ jobs:
         working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}
         run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
       - name: Reduce the test archive transfer size
-        run: python3 ci/compact-archive.py "$RUNNER_TEMP/workspace-tests.tar.zst"
+        id: compact
+        run: python3 ci/compact-archive.py "$RUNNER_TEMP/workspace-tests.tar.zst" --partition-output "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-tests-linux
@@ -273,14 +277,14 @@ jobs:
             sccache --stop-server
           fi
 
-  test-linux:
+  partition-linux:
     needs: [select, build-linux]
     if: contains(fromJSON(needs.select.outputs.selected), 'test-linux')
-    name: Workspace (Linux, shard ${{ matrix.shard }}/4)
+    name: Execute Linux partition ${{ matrix.shard }}/${{ needs.build-linux.outputs.partition_count }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.build-linux.outputs.partitions) }}
     env:
       SOLIDDRAFT_REQUIRE_GPU: "1"
       LP_NUM_THREADS: "1"
@@ -307,11 +311,40 @@ jobs:
           chmod 700 "$RUNNER_TEMP/soliddraft-runtime"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/soliddraft-runtime" >> "$GITHUB_ENV"
       - name: Run the workspace archive partition
-        run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/4"
+        run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/${{ needs.build-linux.outputs.partition_count }}" "target/nextest/ci/inventory.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-partition-linux-${{ matrix.shard }}
+          overwrite: true
+          path: |
+            target/nextest/ci/junit.xml
+            target/nextest/ci/inventory.json
+          if-no-files-found: error
+          retention-days: 1
+
+  test-linux:
+    needs: [select, build-linux, partition-linux]
+    if: always() && contains(fromJSON(needs.select.outputs.selected), 'test-linux')
+    name: Workspace (Linux, shard ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: workspace-partition-linux-*
+          path: ${{ runner.temp }}/partitions
+      - name: Require complete execution coverage and publish this shard
+        run: python3 ci/merge-shards.py "$RUNNER_TEMP/partitions" "${{ matrix.shard }}/4" "${{ needs.build-linux.outputs.partition_count }}" target/nextest/ci/junit.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: workspace-results-linux-${{ matrix.shard }}
+          overwrite: true
           path: target/nextest/ci/junit.xml
           if-no-files-found: error
           retention-days: 1
@@ -806,7 +839,7 @@ jobs:
   gate:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_catallax_views && 'Baseline refresh gate' || 'Merge gate' }}
     if: always()
-    needs: [select, lint, kernel, step-opencascade, build-linux, test-linux, build-macos, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
+    needs: [select, lint, kernel, step-opencascade, build-linux, partition-linux, test-linux, build-macos, test-macos, test-windows, web, msrv, interactive-linux, interactive-macos, application-loop, packaging]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

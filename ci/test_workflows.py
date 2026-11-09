@@ -274,7 +274,7 @@ class BoatRunners(unittest.TestCase):
                 trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
                 self.assertEqual(evaluate(expression, **values),
                                  ['boat-large'] if trusted else ['ubuntu-latest'])
-        for job in ('select', 'gate', 'test-linux'):
+        for job in ('select', 'gate', 'test-linux', 'partition-linux'):
             self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
         self.assertIn('ci/select-runner.py', jobs['select'])
         self.assertIn('needs.select.outputs.plain_runner', jobs['msrv'])

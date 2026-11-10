@@ -103,6 +103,28 @@ fn the_page_is_served_and_paths_stay_inside() {
 }
 
 #[test]
+fn client_modules_and_declarations_have_text_content_types() {
+    let dir = web_dir("client-modules");
+    std::fs::create_dir_all(dir.join("client")).unwrap();
+    let files = [
+        ("app.mjs", "export const ready = true;", "text/javascript"),
+        ("form.d.mts", "export declare function mount(): void;", "text/plain; charset=utf-8"),
+    ];
+    for (name, body, _) in files {
+        std::fs::write(dir.join("client").join(name), body).unwrap();
+    }
+    let base = start("client-modules", Err("off".into()));
+    let http = Http::new(&base);
+    for (name, body, content_type) in files {
+        let response = http.client.get(format!("{base}/client/{name}")).send().unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        assert_eq!(response.headers()["content-type"], content_type, "{name}");
+        assert_eq!(response.text().unwrap(), body);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn version_names_the_commit() {
     let base = start("version", Err("off".into()));
     let client = reqwest::blocking::Client::builder().no_proxy().build().unwrap();

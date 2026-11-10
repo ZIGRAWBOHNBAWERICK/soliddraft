@@ -76,9 +76,9 @@ def inventory_digest(items):
     return hashlib.sha256(json.dumps(sorted(items)).encode()).hexdigest()
 
 
-def timing_path():
+def read_timings(root):
     name = 'test-durations-macos.json' if sys.platform == 'darwin' else 'test-durations.json'
-    return ROOT / 'ci' / name
+    return json.loads((root / 'ci' / name).read_text())['seconds']
 
 
 def run_shard(archive, shard, metadata=None, full_inventory=None):
@@ -92,7 +92,7 @@ def run_shard(archive, shard, metadata=None, full_inventory=None):
     listing = json.loads(result.stdout)
     local_items = inventory(listing)
     items = inventory(json.loads(full_inventory.read_text())) if full_inventory else local_items
-    timings = json.loads(timing_path().read_text())['seconds']
+    timings = read_timings(ROOT)
     assign = binary_partition if full_inventory else partition
     shards, loads = assign(items, timings, count)
     chosen = shards[index - 1]

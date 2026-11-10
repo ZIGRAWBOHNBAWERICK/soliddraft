@@ -131,11 +131,16 @@ class Balancing(unittest.TestCase):
         with self.assertRaises(ValueError):
             partition(['a', 'a'], {}, 2)
 
-    def test_platform_uses_its_measured_durations(self):
-        from balance import timing_path
-        for platform, filename in (('darwin', 'test-durations-macos.json'), ('linux', 'test-durations.json')):
-            with mock.patch('balance.sys.platform', platform):
-                self.assertEqual(timing_path(), ROOT / 'ci' / filename)
+    def test_platform_reads_durations_from_the_requested_workspace(self):
+        from balance import read_timings
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / 'ci').mkdir()
+            (root / 'ci/test-durations.json').write_text('{"seconds": {"linux": 1}}')
+            (root / 'ci/test-durations-macos.json').write_text('{"seconds": {"macos": 2}}')
+            for platform, expected in (('darwin', {'macos': 2}), ('linux', {'linux': 1})):
+                with mock.patch('balance.sys.platform', platform):
+                    self.assertEqual(read_timings(root), expected)
 
     def test_duration_record_uses_median_and_excludes_ignored_cases(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -37,15 +37,20 @@ class PartitionBuild(unittest.TestCase):
             root = pathlib.Path(temporary)
             (root / 'ci').mkdir()
             output = root / 'matrix'
-            for duration, count in ((1, 4), (2000, 8)):
+            for platform, duration, count in (('linux', 1, 4), ('linux', 2000, 8), ('darwin', 2000, 8)):
                 with self.subTest(count=count):
                     (root / 'ci/test-durations.json').write_text(json.dumps({
+                        'seconds': {'a\tcase': duration if platform == 'linux' else 1,
+                                    'b\tcase': duration if platform == 'linux' else 1,
+                                    'new\tcase': duration if platform == 'linux' else 1}}))
+                    (root / 'ci/test-durations-macos.json').write_text(json.dumps({
                         'seconds': {'a\tcase': duration, 'b\tcase': duration, 'new\tcase': duration}}))
                     output.write_text('')
                     def archive(command, **kwargs):
                         pathlib.Path(command[command.index('--archive-file') + 1]).write_bytes(b'native')
                         return mock.Mock(returncode=0)
                     with mock.patch.object(runner, 'ROOT', root), \
+                            mock.patch('balance.sys.platform', platform), \
                             mock.patch.object(runner.subprocess, 'run', side_effect=archive) as invoke, \
                             contextlib.redirect_stdout(io.StringIO()):
                         self.assertEqual(runner.build_shards(runner.read_plan(None), listing, root / 'archives', output), 0)

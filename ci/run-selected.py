@@ -62,11 +62,11 @@ def scenario_paths(plan, root):
 
 
 def build_shards(plan, listing, directory, output):
-    from balance import binary_partition, inventory, matcher
+    from balance import binary_partition, inventory, matcher, read_timings
     items = inventory(listing)
     if not items:
         raise ValueError('selected archive must contain runnable tests')
-    timings = json.loads((ROOT / 'ci/test-durations.json').read_text())['seconds']
+    timings = read_timings(ROOT)
     # Five-minute execution target, with four threads per worker.
     total = sum(timings.get(item, 1.0) for item in items)
     count = 8 if total > 4 * 4 * 300 else 4

@@ -279,7 +279,8 @@ fn static_file(root: &Path, url_path: &str) -> HandlerResult {
     let body = std::fs::read(&path).map_err(|_| not_found())?;
     let content_type = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "html" => "text/html; charset=utf-8",
-        "js" => "text/javascript",
+        "js" | "mjs" => "text/javascript",
+        "mts" => "text/plain; charset=utf-8",
         "wasm" => "application/wasm",
         "css" => "text/css",
         "json" => "application/json",

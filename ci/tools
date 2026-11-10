@@ -4,11 +4,152 @@
     "platforms": {
       "Linux-x86_64": {
         "target": "x86_64-unknown-linux-gnu",
-        "sha256": "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc"
+        "sha256": "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc",
+        "url": "https://api.github.com/repos/nextest-rs/nextest/releases/assets/620598748"
       },
       "Darwin": {
         "target": "universal-apple-darwin",
-        "sha256": "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b"
+        "sha256": "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b",
+        "url": "https://api.github.com/repos/nextest-rs/nextest/releases/assets/620608067"
+      }
+    }
+  },
+  "sccache": {
+    "version": "0.19.0",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-musl",
+        "sha256": "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd",
+        "url": "https://api.github.com/repos/mozilla/sccache/releases/assets/671951070"
+      },
+      "Darwin-arm64": {
+        "target": "aarch64-apple-darwin",
+        "sha256": "a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af",
+        "url": "https://api.github.com/repos/mozilla/sccache/releases/assets/671950630"
+      },
+      "Darwin-x86_64": {
+        "target": "x86_64-apple-darwin",
+        "sha256": "2db7344bb96de350df79cd9f0124dd4e9baa47b3de2fac1e63e1346b66b20684",
+        "url": "https://api.github.com/repos/mozilla/sccache/releases/assets/671951000"
+      }
+    }
+  },
+  "trunk": {
+    "version": "0.22.0",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-gnu",
+        "sha256": "f78c1989240c56592d8cfc4df5cc27399a3ff66a3f9cc819e16f1e3d809ce7c2",
+        "url": "https://api.github.com/repos/trunk-rs/trunk/releases/assets/658784835"
+      }
+    }
+  },
+  "trunk-release": {
+    "version": "0.21.14",
+    "binary": "trunk",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-gnu",
+        "sha256": "f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b",
+        "url": "https://api.github.com/repos/trunk-rs/trunk/releases/assets/252890635"
+      }
+    }
+  },
+  "cargo-packager": {
+    "version": "0.11.8",
+    "source": "cargo"
+  },
+  "syft": {
+    "version": "1.42.3",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-gnu",
+        "sha256": "0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509",
+        "url": "https://api.github.com/repos/anchore/syft/releases/assets/377338300"
+      }
+    }
+  },
+  "linuxdeploy": {
+    "version": "asset-182515537",
+    "binary": "linuxdeploy-x86_64.AppImage",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef",
+        "url": "https://api.github.com/repos/tauri-apps/binary-releases/releases/assets/182515537"
+      }
+    }
+  },
+  "apprun": {
+    "version": "asset-274691722",
+    "binary": "AppRun-x86_64",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f",
+        "url": "https://api.github.com/repos/tauri-apps/binary-releases/releases/assets/274691722"
+      }
+    }
+  },
+  "appimage-plugin": {
+    "version": "asset-602435573",
+    "binary": "linuxdeploy-plugin-appimage.AppImage",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e",
+        "url": "https://api.github.com/repos/linuxdeploy/linuxdeploy-plugin-appimage/releases/assets/602435573"
+      }
+    }
+  },
+  "appimage-runtime": {
+    "version": "asset-657374641",
+    "binary": "runtime-x86_64",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64",
+        "format": "raw",
+        "sha256": "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46",
+        "url": "https://api.github.com/repos/AppImage/type2-runtime/releases/assets/657374641"
+      }
+    }
+  },
+  "wasm-bindgen": {
+    "version": "0.2.129",
+    "binary": "wasm-bindgen",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-unknown-linux-musl",
+        "format": "tar.gz",
+        "sha256": "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
+        "url": "https://api.github.com/repos/wasm-bindgen/wasm-bindgen/releases/assets/587769529"
+      }
+    }
+  },
+  "wasm-opt": {
+    "version": "version_131",
+    "binary": "wasm-opt",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-linux",
+        "format": "tar.gz",
+        "sha256": "b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db",
+        "url": "https://api.github.com/repos/WebAssembly/binaryen/releases/assets/478310450"
+      }
+    }
+  },
+  "wasm-opt-release": {
+    "version": "version_123",
+    "binary": "wasm-opt",
+    "platforms": {
+      "Linux-x86_64": {
+        "target": "x86_64-linux",
+        "format": "tar.gz",
+        "sha256": "e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe",
+        "url": "https://api.github.com/repos/WebAssembly/binaryen/releases/assets/240710285"
       }
     }
   }

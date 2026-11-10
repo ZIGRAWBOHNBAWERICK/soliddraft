@@ -6,6 +6,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 KEYS = {'packages', 'test_targets', 'scenarios'}
@@ -60,9 +61,43 @@ def scenario_paths(plan, root):
     return paths
 
 
+def build_shards(plan, listing, directory, output):
+    from balance import binary_partition, inventory, matcher, read_timings
+    items = inventory(listing)
+    if not items:
+        raise ValueError('selected archive must contain runnable tests')
+    timings = read_timings(ROOT)
+    # Five-minute execution target, with four threads per worker.
+    total = sum(timings.get(item, 1.0) for item in items)
+    count = 8 if total > 4 * 4 * 300 else 4
+    shards, loads = binary_partition(items, timings, count)
+    print(f'Binary partitions: {count}; estimated seconds {loads}', flush=True)
+    records = []
+    for index, chosen in enumerate(shards, 1):
+        folder = directory / str(index)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'listing.json').write_text(json.dumps(listing) + '\n')
+        # Empty workers still need a valid native archive for nextest's no-tests mode.
+        binaries = sorted({item.split('\t', 1)[0] for item in chosen}) or [items[0].split('\t', 1)[0]]
+        filters = ' | '.join(f'binary_id({matcher(binary)})' for binary in binaries)
+        archive = folder / 'workspace-tests.tar.zst'
+        command = ['cargo', 'nextest', 'archive', *cargo_args(plan), '-E', filters,
+                   '--archive-file', str(archive)]
+        print(json.dumps(command), flush=True)
+        result = subprocess.run(command, cwd=ROOT)
+        if result.returncode:
+            return result.returncode
+        records.append({'partition': index, 'binaries': len(binaries),
+                        'tests': len(chosen), 'bytes': archive.stat().st_size})
+    print(json.dumps({'archive_partitions': records, 'total_bytes': sum(r['bytes'] for r in records)}), flush=True)
+    with output.open('a') as stream:
+        stream.write(f'count={count}\npartitions={json.dumps(list(range(1, count + 1)))}\n')
+    return 0
+
+
 def run(args):
     plan = read_plan(args.selection)
-    if args.command == 'test-build':
+    if args.command in ('test-build', 'test-build-shards'):
         # Shards may be empty, but the archive as a whole must contain real tests.
         # Listing compiles the same selection; archive reuses those build outputs.
         listing = ['cargo', 'nextest', 'list', *cargo_args(plan), '--message-format', 'json']
@@ -71,10 +106,13 @@ def run(args):
         if result.returncode:
             print(result.stderr, file=sys.stderr)
             return result.returncode
-        count = json.loads(result.stdout)['test-count']
+        live = json.loads(result.stdout)
+        count = live['test-count']
         if type(count) is not int or count <= 0:
             raise ValueError('selected archive must contain at least one test')
         print(f'Selected archive contains {count} tests', flush=True)
+        if args.command == 'test-build-shards':
+            return build_shards(plan, live, args.directory, args.partition_output)
         command = ['cargo', 'nextest', 'archive', *cargo_args(plan), '--archive-file', args.archive]
         print(json.dumps(command), flush=True)
         return subprocess.run(command, cwd=ROOT).returncode
@@ -95,28 +133,48 @@ def run(args):
         print(json.dumps(command), flush=True)
         return subprocess.run(command, cwd=ROOT).returncode
     paths = scenario_paths(plan, ROOT)
+    if getattr(args, 'shard', None):
+        from balance import partition
+        index, count = map(int, args.shard.split('/'))
+        if not 1 <= index <= count:
+            raise ValueError('shard must be K/N with 1 <= K <= N')
+        timings = json.loads((ROOT / 'ci/scenario-durations.json').read_text())['seconds']
+        shards, loads = partition(paths, timings, count)
+        paths = shards[index - 1]
+        print(f'Scenario shard {args.shard}: estimated seconds {loads}', flush=True)
     print(f'Running {len(paths)} application scenarios: {json.dumps(paths)}', flush=True)
     failed = False
+    durations = {}
+    args.out.mkdir(parents=True, exist_ok=True)
     for path in paths:
         command = [sys.executable, str(ROOT / 'ci/run-scenarios.py'), path,
                    '--soliddraft', 'target/release/soliddraft',
                    '--catallax-verify', 'target/release/catallax-verify',
                    '--out', str(args.out / pathlib.PurePosixPath(path).stem)]
+        started = time.monotonic()
         if subprocess.run(command, cwd=ROOT).returncode:
             failed = True
+        durations[path] = round(time.monotonic() - started, 3)
+        (args.out / 'scenario-times.json').write_text(json.dumps({'seconds': durations}, indent=2) + '\n')
+    if not paths:
+        (args.out / 'scenario-times.json').write_text('{"seconds": {}}\n')
     return int(failed)
 
 
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('test-build', 'test-doc', 'scenarios'):
+    for name in ('test-build', 'test-build-shards', 'test-doc', 'scenarios'):
         command = sub.add_parser(name)
         command.add_argument('--selection', type=pathlib.Path)
         if name == 'test-build':
             command.add_argument('archive')
+        if name == 'test-build-shards':
+            command.add_argument('directory', type=pathlib.Path)
+            command.add_argument('--partition-output', required=True, type=pathlib.Path)
         if name == 'scenarios':
             command.add_argument('--out', type=pathlib.Path, required=True)
+            command.add_argument('--shard', help='duration-balanced K/N partition of selected scenarios')
     return run(parser.parse_args())
 
 

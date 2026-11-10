@@ -7,6 +7,7 @@
     "step-opencascade": "step-opencascade",
     "test-linux": [
       "build-linux",
+      "partition-linux",
       "test-linux"
     ],
     "test-macos": [

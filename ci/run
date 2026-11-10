@@ -5,35 +5,38 @@ cd "$root"
 
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 
+# Bash 3.2 treats empty arrays as unset under nounset, so guard optional arguments.
 case "${1:-}" in
   lint)
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     python3 -m unittest discover -s ci -p 'test_*.py'
     ;;
-  test-build)
+  test-build|test-build-shards)
     [[ $# -eq 2 || $# -eq 3 ]]
     export CARGO_PROFILE_TEST_OPT_LEVEL=2
     selection=()
     if [[ $# -eq 3 ]]; then selection=(--selection "$3"); fi
-    python3 ci/run-selected.py test-build "$2" "${selection[@]}"
+    options=()
+    if [[ "$1" = test-build-shards ]]; then options=(--partition-output "${GITHUB_OUTPUT:?}"); fi
+    python3 ci/run-selected.py "$1" "$2" ${selection[@]+"${selection[@]}"} ${options[@]+"${options[@]}"}
     ;;
   test-doc)
     export CARGO_PROFILE_TEST_OPT_LEVEL=2
     [[ $# -eq 1 || $# -eq 2 ]]
     selection=()
     if [[ $# -eq 2 ]]; then selection=(--selection "$2"); fi
-    python3 ci/run-selected.py test-doc "${selection[@]}"
+    python3 ci/run-selected.py test-doc ${selection[@]+"${selection[@]}"}
     ;;
   test-shard)
-    [[ $# -eq 3 ]]
-    # A small selected archive can leave one partition empty.
-    cargo nextest run --config-file "$root/ci/nextest.toml" --profile ci \
-      --archive-file "$2" --workspace-remap "$root" --extract-to "$root" --extract-overwrite \
-      --partition "slice:$3" --no-tests pass --no-fail-fast
+    [[ $# -ge 3 && $# -le 5 ]]
+    metadata=()
+    if [[ $# -ge 4 ]]; then metadata=(--metadata "$4"); fi
+    if [[ $# -eq 5 ]]; then metadata+=(--inventory "$5"); fi
+    python3 ci/balance.py run "$2" "$3" ${metadata[@]+"${metadata[@]}"}
     ;;
   *)
-    echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N" >&2
+    echo "Usage: ci/run lint | test-build ARCHIVE [SELECTION] | test-build-shards DIR [SELECTION] | test-doc [SELECTION] | test-shard ARCHIVE K/N [METADATA [INVENTORY]]" >&2
     exit 2
     ;;
 esac

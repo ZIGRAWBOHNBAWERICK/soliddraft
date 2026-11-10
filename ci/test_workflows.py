@@ -23,9 +23,11 @@ def evaluate(expr, **github):
     """Evaluates the expression subset used by the workflow settings under test."""
     inputs = github.pop("inputs", {})
     variables = github.pop("variables", {})
+    needs = github.pop("needs", {})
     python = re.sub(r"github((?:\.\w+)+)",
                     lambda m: "g" + "".join(f"[{key!r}]" for key in m[1][1:].split('.')),
                     expr).replace("&&", " and ").replace("||", " or ")
+    python = re.sub(r"needs\.select\.outputs\.(\w+)", r"n.get('\1', '')", python)
     python = re.sub(r"vars\.(\w+)", r"v.get('\1', '')", python)
     python = re.sub(r"inputs\.(\w+)", r"i.get('\1', False)", python)
     python = re.sub(r"!(?!=)", " not ", python)
@@ -34,6 +36,8 @@ def evaluate(expr, **github):
         "g": context,
         "i": inputs,
         "v": variables,
+        "n": needs,
+        "fromJSON": json.loads,
         "startsWith": lambda value, prefix: value.lower().startswith(prefix.lower()),
     })
 
@@ -75,12 +79,76 @@ class Concurrency(unittest.TestCase):
             two = render(group, ref="refs/pull/8/merge", head_ref="feature-two")
             self.assertNotEqual(one, two, path.name)
 
+    def test_boat_benchmark_does_not_cancel_the_normal_qualification(self):
+        path = next(p for p in WORKFLOWS if p.name == 'hosted.yml')
+        group, _, text = settings(path)
+        values = dict(ref='refs/heads/feature', event_name='workflow_dispatch')
+        self.assertNotEqual(render(group, **values),
+                            render(group, **values, inputs={'benchmark_boat': True}))
+        boat = re.search(r"^          USE_BOAT: (.*)$", text, re.M)[1]
+        for event, requested, enabled, expected in [
+            ('pull_request', True, 'false', False),
+            ('workflow_dispatch', False, 'false', False),
+            ('workflow_dispatch', True, 'false', True),
+            ('pull_request', False, 'true', True),
+        ]:
+            self.assertEqual(evaluate(boat.removeprefix('${{ ').removesuffix(' }}'),
+                                      event_name=event, inputs={'benchmark_boat': requested},
+                                      variables={'USE_BOAT': enabled}), expected)
+
     def test_a_manual_run_on_a_branch_is_grouped_by_the_branch(self):
         for path in WORKFLOWS:
             group, cancel, _ = settings(path)
             run = dict(ref="refs/heads/feature", run_id="5")
             self.assertEqual(render(group, **run), render(group, **dict(run, run_id="6")), path.name)
             self.assertEqual(render(cancel, **run), "true", path.name)
+
+    def test_linux_benchmark_is_explicit_manual_full_linux_work(self):
+        path = next(p for p in WORKFLOWS if p.name == 'hosted.yml')
+        group, _, text = settings(path)
+        expression = re.search(r'^          BENCHMARK_LINUX_ONLY: (.*)$', text, re.M)[1]
+        expression = expression.removeprefix('${{ ').removesuffix(' }}')
+        script = textwrap.dedent(text.split("<<'PYTHON'\n", 1)[1].split('          PYTHON\n', 1)[0])
+        full = ['lint', 'kernel', 'step-opencascade', 'test-linux', 'web', 'msrv',
+                'interactive-linux', 'application-loop', 'test-macos', 'interactive-macos',
+                'package-linux', 'package-macos', 'package-web']
+        linux = set(full) - {'test-macos', 'interactive-macos', 'package-linux',
+                            'package-macos', 'package-web'}
+        for event, requested in [('workflow_dispatch', True), ('workflow_dispatch', False),
+                                 ('pull_request', True), ('push', True), ('schedule', True)]:
+            with self.subTest(event=event, requested=requested), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                selection, output, summary = (root / p for p in ('selection.json', 'output', 'summary'))
+                original = {'selected': full, 'reasons': {u: ['full qualification'] for u in full},
+                            'work': {'packages': None, 'test_targets': None, 'scenarios': None}}
+                selection.write_text(json.dumps(original))
+                enabled = evaluate(expression, event_name=event, inputs={'benchmark_linux_only': requested})
+                env = dict(os.environ, BENCHMARK_LINUX_ONLY=str(enabled).lower(),
+                           REFRESH_CATALLAX_VIEWS='false', WINDOWS='false')
+                result = subprocess.run(['python3', '-c', script, str(selection), str(output), str(summary)],
+                                        cwd=path.parent.parent.parent, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                selected = json.loads(selection.read_text())
+                self.assertEqual(set(selected['selected']), linux if enabled else set(full))
+                self.assertEqual(selected['work'], original['work'])
+        for conflicting in ('REFRESH_CATALLAX_VIEWS', 'WINDOWS'):
+            with self.subTest(conflicting=conflicting), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                selection, output, summary = (root / p for p in ('selection.json', 'output', 'summary'))
+                selection.write_text(json.dumps(original))
+                env = dict(os.environ, BENCHMARK_LINUX_ONLY='true',
+                           REFRESH_CATALLAX_VIEWS='false', WINDOWS='false')
+                env[conflicting] = 'true'
+                result = subprocess.run(['python3', '-c', script, str(selection), str(output), str(summary)],
+                                        cwd=path.parent.parent.parent, env=env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('cannot be combined', result.stderr)
+                self.assertFalse(output.exists())
+        values = dict(ref='refs/heads/feature', event_name='workflow_dispatch')
+        self.assertNotEqual(render(group, **values),
+                            render(group, **values, inputs={'benchmark_linux_only': True}))
+        self.assertNotEqual(render(group, **values, inputs={'benchmark_boat': True}),
+                            render(group, **values, inputs={'benchmark_boat': True, 'benchmark_linux_only': True}))
 
     def test_a_run_on_main_is_never_cancelled_nor_shares_a_group(self):
         for path in WORKFLOWS:
@@ -122,7 +190,7 @@ class Concurrency(unittest.TestCase):
 
 
 class BaselineRefresh(unittest.TestCase):
-    def test_only_an_explicit_refresh_dispatch_changes_the_gate(self):
+    def test_refresh_dispatch_has_its_own_gate(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         refresh = re.search(r"REFRESH_CATALLAX_VIEWS: (.*)", text)[1]
         kernel = text.split("\n  kernel:\n", 1)[1].split("\n  step-opencascade:", 1)[0]
@@ -139,6 +207,18 @@ class BaselineRefresh(unittest.TestCase):
                 self.assertEqual(evaluate(condition, **values), not refreshing)
                 self.assertEqual(render(name, **values),
                                  'Baseline refresh gate' if refreshing else 'Merge gate')
+
+    def test_linux_benchmark_has_its_own_gate(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        gate = text.split('\n  gate:\n', 1)[1]
+        name = re.search(r'^    name: (.*)$', gate, re.M)[1]
+        for event in ('pull_request', 'push', 'schedule', 'workflow_dispatch'):
+            for requested in (False, True):
+                with self.subTest(event=event, requested=requested):
+                    values = dict(event_name=event, inputs={'benchmark_linux_only': requested})
+                    expected = ('Linux benchmark gate' if event == 'workflow_dispatch' and requested
+                                else 'Merge gate')
+                    self.assertEqual(render(name, **values), expected)
 
     def test_selection_step_runs_only_generators_for_refresh(self):
         root = pathlib.Path(__file__).resolve().parent.parent
@@ -186,42 +266,109 @@ class NightlyQualification(unittest.TestCase):
 
 
 class BoatRunners(unittest.TestCase):
-    def test_only_owner_runs_from_this_repository_use_boat(self):
+    def test_outside_runs_cannot_override_runner_selection(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
-        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)",
-                               text, re.M | re.S))
-        moved = {'step-opencascade', 'application-loop'}
-        self.assertEqual({job for job, block in jobs.items() if 'vars.USE_BOAT' in block}, moved)
-        self.assertEqual(len(moved), 2)
-        self.assertIn('shard: [1, 2, 3, 4]', jobs['test-linux'])
-        for job in ('lint', 'kernel', 'build-linux', 'test-linux', 'web', 'msrv', 'interactive-linux'):
-            self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
-        owner = 'BohnBawerick'
-        repo = 'ZIGRAWBOHNBAWERICK/soliddraft'
-        for job in moved:
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
+        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop', 'msrv'):
             expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
-            size = re.search(r"&& '(boat(?:-large)?)' \|\| 'ubuntu-latest'$", expression)[1]
-            self.assertNotIn('USE_LOCAL_RUNNERS', expression)
-            for event in ('push', 'workflow_dispatch', 'pull_request'):
-                for enabled in ('true', 'false', ''):
-                    for repository in (repo, 'elsewhere/soliddraft'):
-                        for actor in (owner, 'dependabot[bot]'):
-                            for starter in (owner, 'another-user'):
-                                for author in (owner, 'another-user'):
-                                    for source in (repo, 'fork/soliddraft'):
-                                        values = dict(variables={'USE_BOAT': enabled},
-                                                      repository=repository, actor=actor,
-                                                      triggering_actor=starter, event_name=event,
-                                                      event={'pull_request': {
-                                                          'user': {'login': author},
-                                                          'head': {'repo': {'full_name': source}}}})
-                                        allowed = (enabled == 'true' and repository == repo
-                                                   and actor == owner and starter == owner
-                                                   and (event != 'pull_request'
-                                                        or (author == owner and source == repo)))
-                                        with self.subTest(job=job, **values):
-                                            self.assertEqual(evaluate(expression, **values),
-                                                             size if allowed else 'ubuntu-latest')
+            for actor, author, source, starter in (
+                    ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
+                    ('outsider', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
+                    ('BohnBawerick', 'outsider', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
+                    ('BohnBawerick', 'BohnBawerick', 'fork/soliddraft', 'BohnBawerick'),
+                    ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'outsider')):
+                values = dict(repository='ZIGRAWBOHNBAWERICK/soliddraft', actor=actor,
+                              triggering_actor=starter, event_name='pull_request',
+                              event={'pull_request': {'user': {'login': author},
+                                     'head': {'repo': {'full_name': source}}}},
+                              needs={k: '["boat-large"]' for k in
+                                     ('plain_runner', 'archive_runner', 'application_runner')})
+                trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
+                self.assertEqual(evaluate(expression, **values),
+                                 ['boat-large'] if trusted else ['ubuntu-latest'])
+        for job in ('select', 'gate', 'test-linux', 'partition-linux'):
+            self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
+        self.assertIn('ci/select-runner.py', jobs['select'])
+        self.assertIn('needs.select.outputs.plain_runner', jobs['msrv'])
+        for job in ('lint', 'kernel'):
+            self.assertNotIn('needs.select.outputs.plain_runner', jobs[job])
+        self.assertIn('lane: [proof, 1, 2, 3]', jobs['application-loop'])
+        self.assertIn("if: matrix.lane == 'proof'", jobs['application-loop'])
+        self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
+
+
+class BrowserStartup(unittest.TestCase):
+    def test_only_a_lost_bridge_retries_open_once(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        start = text.index('          open_browser() {')
+        end = text.index('          python3 -m http.server', start)
+        script = textwrap.dedent(text[start:end]) + '\nopen_browser http://127.0.0.1:8766/\n'
+        for mode, expected, calls in [
+            ('bridge_once', 0, ['open', 'stop', 'open']),
+            ('bridge_always', 7, ['open', 'stop', 'open']),
+            ('other', 7, ['open']),
+            ('stop_failed', 0, ['open', 'stop', 'open']),
+        ]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                tool = root / 'chrome-devtools-axi'
+                tool.write_text('#!/usr/bin/env python3\n'
+                                'import os, pathlib, sys\n'
+                                'log = pathlib.Path(os.environ["CALLS"])\n'
+                                'previous = log.read_text().splitlines() if log.exists() else []\n'
+                                'command = sys.argv[1]\n'
+                                'log.write_text("\\n".join(previous + [command]) + "\\n")\n'
+                                'mode = os.environ["MODE"]\n'
+                                'if command == "stop": sys.exit(7 if mode == "stop_failed" else 0)\n'
+                                'if mode != "other" and mode != "bridge_always" and "open" in previous: sys.exit(0)\n'
+                                'print("code: " + ("OTHER_ERROR" if mode == "other" else "BRIDGE_NOT_READY"))\n'
+                                'sys.exit(7)\n')
+                tool.chmod(0o755)
+                env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', MODE=mode,
+                           CALLS=str(root / 'calls'), RUNNER_TEMP=str(root))
+                result = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual((root / 'calls').read_text().splitlines(), calls)
+        for name in ('browser-journal.js', 'browser-recovery-storage.js'):
+            self.assertEqual(text.count(f'chrome-devtools-axi run < ci/{name}'), 1)
+
+
+class ArchiveWorkspace(unittest.TestCase):
+    def test_archive_preparation_keeps_the_commit_without_copying_credentials(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        block = text.split('      - name: Prepare the portable archive workspace\n', 1)[1].split('      - uses:', 1)[0]
+        script = textwrap.dedent(block.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / 'producer'
+            destination = root / 'hosted/project'
+            subprocess.run(['git', 'init', '-q', source], check=True)
+            (source / 'fixture').write_text('source')
+            subprocess.run(['git', '-C', source, 'add', 'fixture'], check=True)
+            subprocess.run(['git', '-C', source, '-c', 'user.name=Fixture', '-c',
+                            'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            subprocess.run(['git', '-C', source, 'config', 'http.extraheader', 'auth-marker'], check=True)
+            (source / 'untracked').write_text('runtime data')
+            binaries = root / 'bin'
+            binaries.mkdir()
+            sudo = binaries / 'sudo'
+            sudo.write_text('#!/bin/sh\necho called >> "$SUDO_LOG"\nexec "$@"\n')
+            sudo.chmod(0o755)
+            env = dict(os.environ, GITHUB_WORKSPACE=str(source),
+                       LINUX_ARCHIVE_WORKSPACE=str(destination), SUDO_LOG=str(root / 'sudo.log'),
+                       PATH=f'{binaries}:{os.environ["PATH"]}')
+            subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            self.assertEqual((destination / 'fixture').read_text(), 'source')
+            self.assertNotIn('auth-marker', (destination / '.git/config').read_text())
+            self.assertFalse((destination / 'untracked').exists())
+            self.assertEqual(subprocess.check_output(['git', '-C', source, 'rev-parse', 'HEAD']),
+                             subprocess.check_output(['git', '-C', destination, 'rev-parse', 'HEAD']))
+            env['GITHUB_WORKSPACE'] = str(destination)
+            subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            self.assertEqual((root / 'sudo.log').read_text().splitlines(), ['called'])
+        linux = text.split('\n  build-linux:', 1)[1].split('\n  test-linux:', 1)[0]
+        self.assertEqual(linux.count('working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}'), 2)
+        self.assertIn('run: test "$GITHUB_WORKSPACE" = "$LINUX_ARCHIVE_WORKSPACE"', text)
 
 
 class RustCache(unittest.TestCase):

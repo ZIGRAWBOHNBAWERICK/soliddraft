@@ -71,9 +71,51 @@ jobs:
         with:
           shared-key: native-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
+      - uses: ./.github/actions/pinned-tool
         with:
-          tool: cargo-packager@0.11.8
+          tool: cargo-packager
+      - id: apprun
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: apprun
+      - id: linuxdeploy
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: linuxdeploy
+      - id: appimage-plugin
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: appimage-plugin
+      - id: appimage-runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/pinned-tool
+        with:
+          tool: appimage-runtime
+      - name: Seed the packager's AppImage helper cache
+        if: runner.os == 'Linux'
+        env:
+          APPRUN: ${{ steps.apprun.outputs.prefix }}
+          LINUXDEPLOY: ${{ steps.linuxdeploy.outputs.prefix }}
+          APPIMAGE_PLUGIN: ${{ steps.appimage-plugin.outputs.prefix }}
+          APPIMAGE_RUNTIME: ${{ steps.appimage-runtime.outputs.prefix }}
+        run: |
+          cache="$RUNNER_TOOL_CACHE/soliddraft-packaging-cache"
+          helpers="$cache/.cargo-packager/AppImage"
+          mkdir -p "$helpers"
+          install -m755 "$APPRUN/bin/AppRun-x86_64" "$helpers/AppRun-x86_64"
+          install -m755 "$LINUXDEPLOY/bin/linuxdeploy-x86_64.AppImage" "$helpers/linuxdeploy-x86_64.AppImage"
+          install -m755 "$APPIMAGE_PLUGIN/bin/linuxdeploy-plugin-appimage.AppImage" "$helpers/linuxdeploy-plugin-appimage.AppImage"
+          install -m755 "$APPIMAGE_RUNTIME/bin/runtime-x86_64" "$helpers/runtime-x86_64"
+          cmp "$APPRUN/bin/AppRun-x86_64" "$helpers/AppRun-x86_64"
+          cmp "$LINUXDEPLOY/bin/linuxdeploy-x86_64.AppImage" "$helpers/linuxdeploy-x86_64.AppImage"
+          cmp "$APPIMAGE_PLUGIN/bin/linuxdeploy-plugin-appimage.AppImage" "$helpers/linuxdeploy-plugin-appimage.AppImage"
+          cmp "$APPIMAGE_RUNTIME/bin/runtime-x86_64" "$helpers/runtime-x86_64"
+          sha256sum "$helpers"/*
+          echo "LDAI_RUNTIME_FILE=$helpers/runtime-x86_64" >> "$GITHUB_ENV"
+          echo "XDG_CACHE_HOME=$cache" >> "$GITHUB_ENV"
       - name: Install Linux packaging and software rendering dependencies
         if: runner.os == 'Linux'
         run: |
@@ -170,9 +212,15 @@ jobs:
         with:
           shared-key: wasm-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
+      - uses: ./.github/actions/pinned-tool
         with:
-          tool: trunk@0.21.14
+          tool: trunk-release
+      - uses: ./.github/actions/pinned-tool
+        with:
+          tool: wasm-bindgen
+      - uses: ./.github/actions/pinned-tool
+        with:
+          tool: wasm-opt-release
       - name: Build the browser application for a relative Pages path
         working-directory: crates/soliddraft-web
         env:
@@ -268,13 +316,16 @@ jobs:
           note_args=(${{ inputs.windows && '--windows' || '' }})
           if [[ -n "$previous" ]]; then note_args+=(--previous "$previous"); fi
           python3 packaging/release.py notes "$RUNNER_TEMP/pulls.json" "${note_args[@]}"
-      - uses: anchore/sbom-action@v0
+      - uses: ./.github/actions/pinned-tool
         with:
-          path: .
-          format: spdx-json
-          output-file: dist/soliddraft-${{ needs.plan.outputs.version }}.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
+          tool: syft
+      - name: Generate the required SPDX inventory with pinned syft
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          SYFT_CHECK_FOR_APP_UPDATE: 'false'
+        run: |
+          syft scan dir:. -o spdx-json > "$RUNNER_TEMP/sbom.json"
+          mv "$RUNNER_TEMP/sbom.json" "dist/soliddraft-$VERSION.spdx.json"
       - name: Require the complete artifact set and hash every download
         run: python3 packaging/release.py checksums ${{ inputs.windows && '--windows' || '' }}
       - uses: actions/upload-artifact@v4

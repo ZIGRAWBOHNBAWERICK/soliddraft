@@ -327,7 +327,8 @@ fn loft_scenario_builds_edits_refuses_and_reopens_over_stdio() {
     let source = include_str!("../../../ci/scenarios/loft.json").replace("{bundle}", bundle.to_str().unwrap());
     let scenario: Value = serde_json::from_str(&source).unwrap();
     let start = || {
-        let mut client = Client::start(&["mcp"]);
+        let evidence = bundle.join(format!("commands-{}", soliddraft_document::DocumentId::new()));
+        let mut client = Client::start(&["mcp", "--bundle", evidence.to_str().unwrap()]);
         client.request(
             "initialize",
             json!({"protocolVersion":"2025-06-18","capabilities":{},
@@ -349,7 +350,7 @@ fn loft_scenario_builds_edits_refuses_and_reopens_over_stdio() {
             assert_eq!(reply["isError"], false, "{name}: {reply}");
         }
         if let Some(checks) = step["checks"].as_array() {
-            let measured = client.call("mass_properties", json!({"name":"Loft1"}));
+            let measured = client.call("scenario_measure", json!({}));
             assert_eq!(measured["isError"], false, "{measured}");
             let actual = measured["structuredContent"]["volume_mm3"].as_f64().unwrap();
             for check in checks {

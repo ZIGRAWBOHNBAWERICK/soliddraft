@@ -112,6 +112,8 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     let mut doc = profiles();
     doc.selection = Some(Selection::Feature(doc.features[0].id));
     let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
+    app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+    ux_tools::settle(&mut app);
     ribbon::click_ribbon(&mut app, "Loft");
     ux_tools::settle(&mut app);
     assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));

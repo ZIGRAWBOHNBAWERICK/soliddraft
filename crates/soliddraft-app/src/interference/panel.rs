@@ -197,7 +197,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.colored_label(theme::warn(), "The assembly changed since this check; check again");
         }
         ui.label(summary(report));
-        ui.label(egui::RichText::new(format!("Mesh chord bound {} mm per part", report.chord_mm)).color(theme::muted()));
+        ui.label(
+            egui::RichText::new(format!("Mesh chord bound {} mm per part", report.chord_mm)).color(theme::muted()),
+        );
         for part in &report.skipped {
             ui.colored_label(theme::error(), format!("Not checked: {}. {}", part.label, part.message));
         }

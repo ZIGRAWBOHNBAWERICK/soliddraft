@@ -86,7 +86,7 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
 #[test]
 fn loft_uses_an_exact_face_boundary_and_joins_to_the_existing_part() {
     let mut doc = profiles();
-    call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":1}));
+    call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":1,"flip":false}));
     let top = doc
         .faces
         .iter()
@@ -116,14 +116,20 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     ux_tools::settle(&mut app);
     assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
     assert!(app.query_by_label("Loft needs at least two profiles in order").is_some());
+    app.get_by_label("OK (Enter)").click();
+    ux_tools::settle(&mut app);
+    assert!(app.state().state.editor.is_some());
+    assert_eq!(app.state().state.doc.features.len(), 3);
+    case.frame(&mut app, "refused");
     app.query_by_label("Add profile").unwrap().click();
     ux_tools::settle(&mut app);
-    app.query_by_label("Sketch2").unwrap().click();
+    // The open menu follows the tree row with the same sketch name.
+    app.get_all_by_label("Sketch2").last().unwrap().click();
     ux_tools::settle(&mut app);
     assert!(app.state().state.editor.as_ref().unwrap().error.is_none());
     assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
     case.frame(&mut app, "preview");
-    app.state_mut().state.push(soliddraft_app::state::AppAction::CommitEditor);
+    app.get_by_label("OK (Enter)").click();
     ux_tools::rebuilt(&mut app);
     ux_tools::settle(&mut app);
     assert!(matches!(app.state().state.doc.features[3].kind, FeatureKind::Loft(_)));

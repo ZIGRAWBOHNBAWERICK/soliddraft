@@ -269,7 +269,12 @@ impl CatallaxKernel {
         let recipe = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
             "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
         let swept = stored.steps.values().any(|s| s["op"] == "path_sweep");
-        if swept || stored.steps.values().any(|s| matches!(s["op"].as_str(), Some("import_step" | "loft"))) {
+        if swept
+            || stored
+                .steps
+                .values()
+                .any(|s| matches!(s["op"].as_str(), Some("import_step" | "loft" | "native_profile")))
+        {
             let op = if swept { OpKind::Sweep } else { OpKind::ImportStep };
             return serde_json::to_value(converted_recipe(&recipe, op)?.recipe)
                 .map_err(|e| KernelError::InvalidInput(e.to_string()));

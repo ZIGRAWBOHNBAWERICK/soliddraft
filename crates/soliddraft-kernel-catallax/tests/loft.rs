@@ -20,6 +20,7 @@ fn face_profiles_keep_exact_holes_and_a_rotated_polygon_frame() {
         let body =
             k.extrude(&OpTag::new("from_face"), extracted.body, &Extrude { distance: 2.0, direction: None }).unwrap();
         assert!((k.mass_properties(body.body).unwrap().volume - area * 2.0).abs() < 1e-7);
+        catallax_recipe::Recipe::parse(&k.body_recipe(body.body).unwrap().to_string()).unwrap();
         for body in [p.body, original.body, extracted.body, body.body] {
             k.release(body).unwrap();
         }

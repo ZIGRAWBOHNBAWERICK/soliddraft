@@ -44,19 +44,19 @@
                 0
               ],
               [
-                1,
+                2,
                 0,
-                1
+                10
               ],
               [
-                1,
-                1,
-                2
+                2,
+                2,
+                20
               ],
               [
                 0,
-                1,
-                3
+                2,
+                30
               ]
             ],
             "weights": [
@@ -81,7 +81,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 24,
+          "approx": 240,
           "tolerance": 0.001
         }
       ]
@@ -107,19 +107,19 @@
                 0
               ],
               [
-                1,
+                2,
                 0,
-                2
+                20
               ],
               [
-                1,
-                1,
-                4
+                2,
+                2,
+                40
               ],
               [
                 0,
-                1,
-                6
+                2,
+                60
               ]
             ],
             "weights": [
@@ -144,7 +144,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 48,
+          "approx": 480,
           "tolerance": 0.001
         }
       ]
@@ -155,7 +155,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 24,
+          "approx": 240,
           "tolerance": 0.001
         },
         {
@@ -171,7 +171,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 48,
+          "approx": 480,
           "tolerance": 0.001
         },
         {
@@ -202,14 +202,14 @@
                 0
               ],
               [
-                1,
+                2,
                 0,
-                1
+                10
               ],
               [
-                1,
-                1,
-                2
+                2,
+                2,
+                20
               ],
               [
                 0,
@@ -240,7 +240,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 48,
+          "approx": 480,
           "tolerance": 0.001
         }
       ],
@@ -265,7 +265,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 48,
+          "approx": 480,
           "tolerance": 0.001
         }
       ]

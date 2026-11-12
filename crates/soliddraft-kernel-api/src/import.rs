@@ -10,6 +10,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::OpResult;
 
+/// The parser used for an immutable imported source, also saved with the feature.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportFormat {
+    #[default]
+    Step,
+    Iges,
+}
+
+impl ImportFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Step => "STEP",
+            Self::Iges => "IGES",
+        }
+    }
+
+    pub fn is_step(&self) -> bool {
+        *self == Self::Step
+    }
+}
+
 /// The format tag of a change record.
 pub const REPAIR_FORMAT: &str = "catallax-import-repair/2";
 

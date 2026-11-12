@@ -1,4 +1,4 @@
-//! Review immutable STEP source bytes before committing the imported feature.
+//! Review immutable STEP or IGES source bytes before committing the imported feature.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use soliddraft_assistant::tools::schema::{array, object, optional, string};
 use soliddraft_kernel_api::{
-    Approval, Disposition, ImportOptions, KernelError, Proposal, ProposalSet, RepairChange, RepairRecord,
+    Approval, Disposition, ImportFormat, ImportOptions, KernelError, Proposal, ProposalSet, RepairChange, RepairRecord,
 };
 use soliddraft_model::{ImportStepFeature, sha256_hex};
 
@@ -36,11 +36,25 @@ pub fn params() -> Vec<(&'static str, Value)> {
 }
 
 pub fn preview_params() -> Vec<(&'static str, Value)> {
-    vec![("path", string("A STEP source file path."))]
+    vec![
+        ("path", string("A STEP or IGES source file path.")),
+        (
+            "format",
+            optional(string("Source format: step (default) or iges. Use the same format for preview and import.")),
+        ),
+    ]
+}
+
+pub fn source_format(input: &Value) -> Result<ImportFormat, String> {
+    match input["format"].as_str().unwrap_or("step") {
+        "step" => Ok(ImportFormat::Step),
+        "iges" => Ok(ImportFormat::Iges),
+        _ => Err("Choose step or iges as the import format.".into()),
+    }
 }
 
 pub fn source_path(input: &Value) -> Result<std::path::PathBuf, String> {
-    let path = input["path"].as_str().filter(|p| !p.trim().is_empty()).ok_or("missing STEP source path")?;
+    let path = input["path"].as_str().filter(|p| !p.trim().is_empty()).ok_or("missing import source path")?;
     Ok(path.into())
 }
 
@@ -117,13 +131,23 @@ fn plain_mm(text: &str) -> bool {
 
 impl Preview {
     pub fn read(doc: &Document, path: &Path) -> Result<Self, String> {
+        Self::read_source(doc, path, ImportFormat::Step)
+    }
+
+    pub fn read_source(doc: &Document, path: &Path, format: ImportFormat) -> Result<Self, String> {
         let source = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        Self::from_bytes(doc, &path.file_name().unwrap_or_default().to_string_lossy(), source)
+        Self::from_source(doc, &path.file_name().unwrap_or_default().to_string_lossy(), source, format)
     }
 
     pub fn from_bytes(doc: &Document, name: &str, source: Vec<u8>) -> Result<Self, String> {
-        let feature = ImportStepFeature::new(name, source);
-        let proposals = doc.kernel().propose_import(&feature.source, &ImportOptions::default()).map_err(plain)?;
+        Self::from_source(doc, name, source, ImportFormat::Step)
+    }
+
+    pub fn from_source(doc: &Document, name: &str, source: Vec<u8>, format: ImportFormat) -> Result<Self, String> {
+        let mut feature = ImportStepFeature::new(name, source);
+        feature.format = format;
+        let proposals =
+            doc.kernel().propose_import_source(format, &feature.source, &ImportOptions::default()).map_err(plain)?;
         if proposals.source_sha256 != feature.sha256 {
             return Err("the repair preview does not match the source file".into());
         }
@@ -141,6 +165,9 @@ impl Preview {
             &self.proposals,
         ))
         .expect("import previews serialize");
+        if self.feature.format == ImportFormat::Iges {
+            return sha256_hex(&[b"iges:".as_slice(), &reviewed].concat());
+        }
         sha256_hex(&reviewed)
     }
 
@@ -282,7 +309,8 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
     let mut open = true;
     let mut choice = None;
     let mut cancelled = false;
-    egui::Window::new("Import STEP").collapsible(false).open(&mut open).show(ctx, |ui| {
+    let format = preview.feature.format;
+    egui::Window::new(format!("Import {}", format.label())).collapsible(false).open(&mut open).show(ctx, |ui| {
         ui.label(&preview.feature.source_name);
         ui.label("Review repairs before importing. The original file stays unchanged.");
         let Preview { proposals, allowed, approver, .. } = &mut preview;
@@ -329,7 +357,11 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         };
         match commit(&mut state.doc, &preview, &review) {
             Ok(_) => state.note(
-                if decline { "Import saved with declined repairs; the solid stays open" } else { "Imported STEP body" },
+                if decline {
+                    "Import saved with declined repairs; the solid stays open".into()
+                } else {
+                    format!("Imported {} body", format.label())
+                },
                 NoteKind::Info,
             ),
             Err(error) => {

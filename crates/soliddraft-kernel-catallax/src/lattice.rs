@@ -222,7 +222,13 @@ impl CatallaxKernel {
                 .and(Err(KernelError::InvalidInput(format!("the {} needs a CAD body", op.name()))));
         }
         // The stage evaluates the part again and has no way to read an imported file.
-        if self.state()?.get(body)?.steps.values().any(|s| s["op"] == "import_step") {
+        if self
+            .state()?
+            .get(body)?
+            .steps
+            .values()
+            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges")))
+        {
             return Err(gap(&format!("A {} on an imported body", op.name())));
         }
         let recipe = converted_recipe(&self.body_recipe(body)?, op)?.recipe;

@@ -54,9 +54,9 @@ pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, 
 pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
-    Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportOptions, ImportStepRequest, ImportStepResult,
-    ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange,
-    RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
+    Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportFormat, ImportOptions, ImportStepRequest,
+    ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT,
+    RepairChange, RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
 };
 pub use profile::{BezierControls, Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
@@ -1131,6 +1131,32 @@ pub trait Kernel: Send + Sync {
     fn import_step(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
         let _ = (tag, request);
         Err(KernelError::Unsupported("import_step".into()))
+    }
+
+    /// Measures the explicitly selected source format without changing its geometry.
+    fn propose_import_source(
+        &self,
+        format: ImportFormat,
+        source: &[u8],
+        options: &ImportOptions,
+    ) -> KernelResult<ProposalSet> {
+        match format {
+            ImportFormat::Step => self.propose_import(source, options),
+            ImportFormat::Iges => Err(KernelError::Unsupported("IGES import".into())),
+        }
+    }
+
+    /// Builds or replays the explicitly selected source format and its repair decisions.
+    fn import_source(
+        &self,
+        format: ImportFormat,
+        tag: &OpTag,
+        request: &ImportStepRequest<'_>,
+    ) -> KernelResult<ImportStepResult> {
+        match format {
+            ImportFormat::Step => self.import_step(tag, request),
+            ImportFormat::Iges => Err(KernelError::Unsupported("IGES import".into())),
+        }
     }
 
     /// Writes exact supported surfaces as IGES 5.3, refusing unsupported definitions

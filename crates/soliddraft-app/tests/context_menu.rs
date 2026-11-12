@@ -4,7 +4,7 @@
 mod ribbon;
 
 use egui::{Key, Modifiers, PointerButton, Pos2};
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use glam::Vec3;
 use ribbon::{App, render_steps};
 use soliddraft_app::{
@@ -38,6 +38,17 @@ fn right_click(app: &mut App, pos: Pos2, model: bool) {
     app.run_steps(3);
 }
 
+fn menu_command(app: &mut App, id: &str) {
+    let command = soliddraft_app::commands::get(id).unwrap();
+    let state = &app.state().state;
+    let mut label = command.label_in(state);
+    if let Some(shortcut) = state.shortcuts.shortcut_text(id) {
+        label = format!("{label} {shortcut}");
+    }
+    let point = app.get_by_label(&label).rect().center();
+    ribbon::click_at(app, point);
+}
+
 fn groups(app: &App, expected: &[&str]) {
     let painted = ribbon::painted(app);
     for label in expected {
@@ -69,7 +80,7 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))));
         groups(app, &["Face", "Feature", "Body"]);
         case.frame(app, "face");
-        app.get_by_label("Suppress").click();
+        menu_command(app, "suppress");
         app.run_steps(6);
         assert!(app.state().state.doc.feature(feature).unwrap().suppressed);
 
@@ -77,7 +88,7 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         right_click(app, row, false);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(feature)));
         groups(app, &["Feature", "Body"]);
-        app.get_by_label("Unsuppress").click();
+        menu_command(app, "suppress");
         app.run_steps(6);
         assert!(!app.state().state.doc.feature(feature).unwrap().suppressed);
 
@@ -99,7 +110,7 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         assert_eq!(app.state().state.doc.selection, None, "empty space clears the old target");
         groups(app, &["View", "Scene", "Display", "Show"]);
         case.frame(app, "empty");
-        app.get_by_label("Graphite").click();
+        menu_command(app, "scene_graphite");
         app.run_steps(5);
         assert_eq!(app.state().state.viewport.scene, Some(Scene::Graphite));
         assert!(app.query_all_by_label("Plain white").next().is_none(), "a command closes the menu");
@@ -150,7 +161,7 @@ fn sketch_right_click_ends_the_chain_before_offering_entity_or_empty_menus() {
         groups(app, &["Line", "Sketch"]);
         assert_eq!(app.state().state.sketch.as_ref().unwrap().selection.len(), 1);
         case.frame(app, "line");
-        app.get_by_label("Delete").click();
+        menu_command(app, "delete");
         app.run_steps(5);
         assert_eq!(app.state().state.sketch.as_ref().unwrap().sketch.drawn().count(), 0);
 

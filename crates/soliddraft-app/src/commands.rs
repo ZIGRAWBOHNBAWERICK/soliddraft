@@ -2335,6 +2335,7 @@ fn registry() -> Vec<CommandSpec> {
 .app_only("It closes the window"),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
+            .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))
             .run(|s| {
                 let id = s.selected_feature().expect("enabled with a selected feature");
                 if selected_feature_is(s, |f| f.is_sketch()) {

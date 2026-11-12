@@ -131,6 +131,29 @@ fn minimum_gap(
             for a in &first {
                 for b in &second {
                     let bounds = a.face_to_face(b, model, &options, dec)?;
+                    if std::env::var_os("SOLIDDRAFT_F13_TRACE").is_some()
+                        && clearance.is_some_and(|c| (0.29..0.31).contains(&c))
+                    {
+                        let c = crate::native::number(clearance.unwrap(), "clearance").unwrap().value().clone();
+                        if bounds.lower <= c
+                            && bounds.upper.as_ref().is_some_and(|hi| hi > &c)
+                            && let Some([p, q]) = &bounds.witnesses
+                        {
+                            use catallax_numbers::{Outcome, Real, StrictSign};
+                            let squared = p.minus(q).norm_squared();
+                            let exact = squared.as_rational().map(|r| format!("{}/{}", r.numerator(), r.denominator()));
+                            let sign = match dec.sign(&(&squared - &Real::from(&c * &c))) {
+                                Outcome::Proven(StrictSign::Negative) => "proven_negative",
+                                Outcome::Proven(StrictSign::Positive) => "proven_positive",
+                                Outcome::ProvenCoincident(_) => "proven_zero",
+                                Outcome::NotExact(_) => "not_exact",
+                                Outcome::Refused(_) => "refused",
+                            };
+                            eprintln!(
+                                "[DEBUG-sd-f13] admitted_witness_squared={exact:?} squared_minus_threshold_squared={sign}"
+                            );
+                        }
+                    }
                     lower = Some(lower.map_or(bounds.lower.clone(), |lo| lo.min(bounds.lower)));
                     if let Some(hi) = bounds.upper {
                         upper = Some(upper.map_or(hi.clone(), |old| old.min(hi)));

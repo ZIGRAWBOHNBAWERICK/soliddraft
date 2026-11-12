@@ -9,7 +9,7 @@ use crate::drag::Dimension;
 use crate::icons::{self, Icon};
 use crate::sketch::{ConstraintKind, EntityKind, fmt_value, solve};
 use crate::sketcher;
-use crate::state::{AppAction, AppState, DragStep, EditorParams, ExitInto, RelationFilter, SketchSel, Tool};
+use crate::state::{AppAction, AppState, DragStep, EditorParams, RelationFilter, SketchSel, Tool};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
 use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, Vec3};
@@ -1297,7 +1297,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let head = header(ui, Icon::Sketch, &name);
     let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
     if ok || cancel {
-        state.push(AppAction::ExitSketch(None));
+        state.push(AppAction::ExitSketch);
     }
     let mut actions = Vec::new();
     let has_body = state.doc.model().body().is_some();
@@ -1305,8 +1305,6 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         state.sketch.as_ref().map(|s| crate::sketch_values::links(state.doc.model(), s.feature)).unwrap_or_default();
     let Some(s) = state.sketch.as_mut() else { return };
     let profiles = crate::sketch::profile::profiles(&s.sketch, s.plane);
-    let text_limit = profiles.as_ref().ok().and_then(|profiles| s.sketch.text_extrusion_notice(profiles.len()));
-    let has_profile = profiles.is_ok() && text_limit.is_none();
     let reset_scroll = ui.data_mut(|data| {
         let id = ui.id().with("sketch_active_tool");
         let previous = data.get_temp::<Tool>(id);
@@ -1366,32 +1364,6 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 crate::sketch_tools::panel(ui, s, &mut actions);
                 section_gap(ui);
             }
-
-            // Exit into a feature.
-            theme::section_label(ui, "Use the sketch");
-            ui.horizontal(|ui| {
-                let w = (ui.available_width() - 6.0) / 2.0;
-                if ui
-                    .add_enabled(has_profile, egui::Button::new("Extrude").min_size(vec2(w, 24.0)))
-                    .on_hover_text("Exit the sketch into a boss extrude")
-                    .clicked()
-                {
-                    actions.push(AppAction::ExitSketch(Some(ExitInto::Extrude)));
-                }
-                if ui
-                    .add_enabled(has_profile, egui::Button::new("Cut").min_size(vec2(w, 24.0)))
-                    .on_hover_text("Exit the sketch into a cut")
-                    .clicked()
-                {
-                    actions.push(AppAction::ExitSketch(Some(ExitInto::Cut)));
-                }
-            });
-            if let Some(message) = text_limit {
-                error_row(ui, message);
-            } else if !has_profile {
-                hint(ui, "Close a loop to extrude or cut.");
-            }
-            section_gap(ui);
 
             // Tools.
             theme::section_label(ui, "Tools");

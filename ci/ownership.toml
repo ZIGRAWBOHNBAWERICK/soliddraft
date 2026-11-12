@@ -288,6 +288,13 @@ paths = ["crates/soliddraft-app/src/theme.rs"]
 module = ["theme"]
 
 [[areas]]
+name = "app.tool_palette"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/tool_palette.rs"]
+module = ["tool_palette"]
+
+[[areas]]
 name = "app.tree"
 owner = "core"
 crate = "soliddraft-app"

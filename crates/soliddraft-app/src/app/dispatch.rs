@@ -6,7 +6,7 @@ use crate::document::{
 };
 use crate::file;
 use crate::panels::{Layout, Side};
-use crate::state::{AppAction, EditorParams, ExitInto, FeatureEditor, NoteKind, SketchSession};
+use crate::state::{AppAction, EditorParams, FeatureEditor, NoteKind, SketchSession};
 use crate::theme;
 use crate::viewport::dimensions::DimensionTarget;
 use crate::viewport::render::{DisplayMode, Picked};
@@ -224,50 +224,25 @@ impl SolidDraftApp {
                 if self.state.sketch.as_ref().is_some_and(|s| s.feature == id) {
                     return;
                 }
-                self.apply(ctx, AppAction::ExitSketch(None));
+                self.apply(ctx, AppAction::ExitSketch);
                 self.open_sketch(id);
             }
-            AppAction::ExitSketch(into) => {
+            AppAction::ExitSketch => {
                 let Some(session) = self.state.sketch.take() else { return };
                 self.state.viewport.camera.orthographic = session.was_orthographic;
                 self.state.ribbon_tab = crate::state::RibbonTab::Solid;
                 let id = session.feature;
                 let empty = self.state.doc.feature(id).and_then(|f| f.sketch()).is_some_and(|s| s.sketch.is_empty());
-                if empty && into.is_none() && self.state.doc.consumer_of(id).is_none() {
+                if empty && self.state.doc.consumer_of(id).is_none() {
                     // An empty new sketch leaves nothing behind.
                     let _ = self.state.doc.apply(Command::DeleteFeature(id));
                     self.state.doc.selection = None;
                     return;
                 }
                 self.state.doc.selection = Some(Selection::Feature(id));
-                match into {
-                    Some(ExitInto::Extrude) => {
-                        self.open_editor(
-                            None,
-                            EditorParams::Extrude(ExtrudeParams {
-                                sketch: Some(id),
-                                depth: 10.0,
-                                ..Default::default()
-                            }),
-                        );
-                    }
-                    Some(ExitInto::Sweep) => {
-                        self.state.doc.selection = Some(Selection::Feature(id));
-                        self.apply(ctx, AppAction::StartSweep);
-                    }
-                    Some(ExitInto::Revolve) => {
-                        self.state.doc.selection = Some(Selection::Feature(id));
-                        self.apply(ctx, AppAction::StartRevolve);
-                    }
-                    Some(ExitInto::Cut) => {
-                        self.open_editor(None, EditorParams::Cut(CutParams::new(id)));
-                    }
-                    None => {}
-                }
             }
             AppAction::StartExtrude => {
                 if self.state.in_sketch() {
-                    self.apply(ctx, AppAction::ExitSketch(Some(ExitInto::Extrude)));
                     return;
                 }
                 let sketch = self.state.selected_sketch().filter(|s| self.state.doc.consumer_of(*s).is_none());
@@ -303,7 +278,6 @@ impl SolidDraftApp {
             }
             AppAction::StartSweep => {
                 if self.state.in_sketch() {
-                    self.apply(ctx, AppAction::ExitSketch(Some(ExitInto::Sweep)));
                     return;
                 }
                 match self.state.selected_sketch().filter(|id| self.state.doc.consumer_of(*id).is_none()) {
@@ -331,7 +305,6 @@ impl SolidDraftApp {
             }
             AppAction::StartRevolve => {
                 if self.state.in_sketch() {
-                    self.apply(ctx, AppAction::ExitSketch(Some(ExitInto::Revolve)));
                     return;
                 }
                 match self.state.selected_sketch().filter(|id| self.state.doc.consumer_of(*id).is_none()) {
@@ -349,7 +322,6 @@ impl SolidDraftApp {
             }
             AppAction::StartCut => {
                 if self.state.in_sketch() {
-                    self.apply(ctx, AppAction::ExitSketch(Some(ExitInto::Cut)));
                     return;
                 }
                 match self.state.selected_sketch() {
@@ -533,7 +505,7 @@ impl SolidDraftApp {
                     FeatureKind::Gyroid(g) => EditorParams::Gyroid(*g),
                 };
                 if self.state.in_sketch() {
-                    self.apply(ctx, AppAction::ExitSketch(None));
+                    self.apply(ctx, AppAction::ExitSketch);
                 }
                 self.open_editor(Some(id), params);
                 self.state.doc.selection = Some(Selection::Feature(id));

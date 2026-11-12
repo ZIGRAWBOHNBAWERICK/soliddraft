@@ -103,7 +103,9 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     for mode in [PolygonMode::Inscribed, PolygonMode::Circumscribed] {
-        ribbon::run_command(&mut app, "sketch_polygon");
+        let polygon = ribbon::reveal_ribbon_command(&mut app, "sketch_polygon").rect;
+        ribbon::click_at(&mut app, polygon.center());
+        assert_eq!(session(&app).tool, Tool::Polygon, "the ribbon activates polygon placement");
         control(&mut app, if mode == PolygonMode::Inscribed { "Inscribed" } else { "Circumscribed" });
         number(&mut app, 0, "5");
         let before = session(&app).sketch.clone();
@@ -114,7 +116,9 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
         app.run_steps(5);
         assert_eq!(session(&app).tool, Tool::Select);
         assert_eq!(session(&app).sketch, before);
-        ribbon::run_command(&mut app, "sketch_polygon");
+        let polygon = ribbon::reveal_ribbon_command(&mut app, "sketch_polygon").rect;
+        ribbon::click_at(&mut app, polygon.center());
+        assert_eq!(session(&app).tool, Tool::Polygon, "the ribbon activates polygon placement");
         pick(&mut app, center);
         preview(&mut app, center + P2::new(24.0, 12.0));
         assert_eq!(session(&app).sketch, before);
@@ -155,7 +159,7 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
     }
     let expected = session(&app).sketch.clone();
     let path = dir.join("polygon.sldraft");
-    for action in [AppAction::ExitSketch(None), AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
+    for action in [AppAction::ExitSketch, AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
         app.state_mut().state.push(action);
         app.run_steps(12);
     }

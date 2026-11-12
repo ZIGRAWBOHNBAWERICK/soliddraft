@@ -305,7 +305,7 @@ fn polygon_tool_commits_undoes_redoes_and_extrudes_on_catallax() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test/sketch-polygon.png");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     image.save(path).unwrap();
-    harness.state_mut().state.push(AppAction::ExitSketch(None));
+    harness.state_mut().state.push(AppAction::ExitSketch);
     harness.run_steps(4);
     let doc = &mut harness.state_mut().state.doc;
     doc.apply(Command::AddExtrude {

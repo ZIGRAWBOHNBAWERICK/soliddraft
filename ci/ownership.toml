@@ -260,6 +260,13 @@ paths = ["crates/soliddraft-app/src/start_page.rs"]
 module = ["start_page"]
 
 [[areas]]
+name = "app.loft_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/loft_panel.rs"]
+module = ["loft_panel"]
+
+[[areas]]
 name = "app.sweep_panel"
 owner = "core"
 crate = "soliddraft-app"

@@ -54,6 +54,24 @@ fn assistant_from(all: &Value) -> AssistantSettings {
     serde_json::from_value(all["assistant"].clone()).unwrap_or_default()
 }
 
+/// Internal frame selection during the layout rebuild. No preference control exposes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameLayout {
+    #[default]
+    Classic,
+    EditSuite,
+}
+
+/// Reads the internal `frame_layout` key. Older and unknown values keep the classic frame.
+pub fn frame_layout() -> FrameLayout {
+    frame_layout_from(&stored())
+}
+
+fn frame_layout_from(all: &Value) -> FrameLayout {
+    serde_json::from_value(all["frame_layout"].clone()).unwrap_or_default()
+}
+
 /// The panel layout, or the default when there is none or it is unreadable.
 pub fn layout() -> Layout {
     layout_from(&stored())
@@ -442,6 +460,22 @@ mod tests {
 
     fn file_store(file: &Path) -> Store {
         Store::File(file.to_owned())
+    }
+
+    #[test]
+    fn internal_frame_layout_defaults_and_accepts_both_frames() {
+        for all in [
+            serde_json::json!({}),
+            serde_json::json!({"frame_layout": "unknown"}),
+            serde_json::json!({"frame_layout": null}),
+            serde_json::json!({"frame_layout": 7}),
+        ] {
+            assert_eq!(frame_layout_from(&all), FrameLayout::Classic);
+        }
+        for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+            let all = serde_json::json!({"frame_layout": layout, "layout": {"tree_width": 300}});
+            assert_eq!(frame_layout_from(&all), layout);
+        }
     }
 
     #[test]

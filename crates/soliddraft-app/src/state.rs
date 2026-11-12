@@ -199,20 +199,11 @@ pub enum RibbonTab {
     Assembly,
     Inspect,
     View,
-    Surface,
-    PointCloud,
 }
 
 impl RibbonTab {
-    pub const ALL: [RibbonTab; 7] = [
-        RibbonTab::Solid,
-        RibbonTab::Sketch,
-        RibbonTab::Assembly,
-        RibbonTab::Inspect,
-        RibbonTab::View,
-        RibbonTab::Surface,
-        RibbonTab::PointCloud,
-    ];
+    pub const ALL: [RibbonTab; 5] =
+        [RibbonTab::Solid, RibbonTab::Sketch, RibbonTab::Assembly, RibbonTab::Inspect, RibbonTab::View];
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -221,8 +212,6 @@ impl RibbonTab {
             RibbonTab::Assembly => "Assembly",
             RibbonTab::Inspect => "Inspect",
             RibbonTab::View => "View",
-            RibbonTab::Surface => "Surface",
-            RibbonTab::PointCloud => "Point cloud",
         }
     }
 
@@ -234,16 +223,6 @@ impl RibbonTab {
             RibbonTab::Assembly => "assembly",
             RibbonTab::Inspect => "inspect",
             RibbonTab::View => "view",
-            RibbonTab::Surface => "surface",
-            RibbonTab::PointCloud => "point_cloud",
-        }
-    }
-
-    /// The placeholder tooltip for an unfinished tab.
-    pub fn planned(&self) -> Option<&'static str> {
-        match self {
-            RibbonTab::Surface | RibbonTab::PointCloud => Some("Coming soon"),
-            _ => None,
         }
     }
 }
@@ -1060,7 +1039,6 @@ pub struct AppState {
     pub origin_open: bool,
     pub hover_info: Option<EntityInfo>,
     pub hover_point: Option<Vec3>,
-    pub search: String,
     pub show_about: bool,
     pub show_shortcuts: bool,
     /// The open command palette.
@@ -1136,7 +1114,6 @@ impl AppState {
             origin_open: false,
             hover_info: None,
             hover_point: None,
-            search: String::new(),
             show_about: false,
             show_shortcuts: false,
             palette: None,

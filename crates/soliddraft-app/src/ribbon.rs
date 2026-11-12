@@ -89,13 +89,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         let w = galley.size().x + 24.0;
         let r = Rect::from_min_size(pos2(x, strip.top() + 4.0), vec2(w, strip.height() - 4.0));
         x += w + 2.0;
-        let planned = tab.planned();
-        let sense = if planned.is_some() { Sense::hover() } else { Sense::click() };
-        let resp = ui.interact(r, ui.id().with(("ribbon_tab", tab.label())), sense);
+        let resp = ui.interact(r, ui.id().with(("ribbon_tab", tab.label())), Sense::click());
         resp.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Button,
-                planned.is_none(),
+                true,
                 state.ribbon_tab == tab,
                 format!("{} tab", tab.label()),
             )
@@ -110,24 +108,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 StrokeKind::Inside,
             );
             ui.painter().hline(r.x_range().shrink(1.0), r.bottom() - 0.5, Stroke::new(1.5, theme::panel()));
-        } else if planned.is_none() && resp.hovered() {
+        } else if resp.hovered() {
             ui.painter().rect_filled(
                 r,
                 CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 },
                 theme::hover(),
             );
         }
-        let color = if planned.is_some() {
-            theme::muted().gamma_multiply(0.55)
-        } else if on {
-            theme::ink()
-        } else {
-            theme::muted()
-        };
+        let color = if on { theme::ink() } else { theme::muted() };
         ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
-        if let Some(why) = planned {
-            resp.on_hover_text(why);
-        } else if resp.clicked() {
+        if resp.clicked() {
             state.ribbon_tab = tab;
         }
     }

@@ -98,7 +98,7 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
         }
         Tab::Part(RibbonTab::Inspect) => &["Measure", "Check", "Surface quality"],
         Tab::Part(RibbonTab::View) => &["Orientation", "Display", "Projection", "Panels"],
-        Tab::Part(RibbonTab::Assembly | RibbonTab::Surface | RibbonTab::PointCloud) => &[],
+        Tab::Part(RibbonTab::Assembly) => &[],
         Tab::Drawing(D::Views) => &["Edit", "Standard", "Derived", "Arrange", "Display", "Model", "Assistant"],
         Tab::Drawing(D::Annotate) => &["Edit", "Dimension", "Notes", "Centre", "Symbols", "Tables", "Assistant"],
         Tab::Drawing(D::Sheet) => &["Edit", "Sheet", "Format", "Export"],
@@ -3064,7 +3064,6 @@ mod tests {
         assert_eq!(panels(RibbonTab::Assembly), ["Edit", "Component", "File", "View"]);
         assert_eq!(panels(RibbonTab::Inspect), ["Measure", "Check", "Surface quality"]);
         assert_eq!(panels(RibbonTab::View), ["Orientation", "Display", "Projection", "Panels"]);
-        assert!(panels(RibbonTab::Surface).is_empty() && panels(RibbonTab::PointCloud).is_empty());
         let ids = |tab: RibbonTab, panel: &str| {
             ribbon(tab).into_iter().find(|(p, _)| *p == panel).unwrap().1.iter().map(|(c, _)| c.id).collect::<Vec<_>>()
         };

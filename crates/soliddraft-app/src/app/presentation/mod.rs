@@ -4,7 +4,6 @@ pub(super) mod docks;
 
 use crate::command_line::{Status, StatusNote};
 use crate::commands;
-use crate::document::Selection;
 use crate::file;
 use crate::icons::{self, Icon};
 use crate::panels::{self, Side};
@@ -12,7 +11,7 @@ use crate::state::{AppAction, AppState, EditorParams, NoteKind};
 use crate::theme;
 use crate::viewport::look::Preset;
 use crate::viewport::render::DisplayMode;
-use egui::{Align2, CornerRadius, Key, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Align2, CornerRadius, Key, Rect, Sense, pos2, vec2};
 
 use super::workspace::SolidDraftApp;
 use docks::{Panels, show_dock, strip};
@@ -299,33 +298,6 @@ impl SolidDraftApp {
             if !st.drawing.is_active() && !st.assembly.is_active() {
                 quick_access(ui, st);
             }
-            ui.add_space(6.0);
-            // Command search.
-            let search_w = 270.0_f32.min(ui.available_width() - 180.0).max(120.0);
-            let frame = egui::Frame::new()
-                .fill(theme::panel())
-                .stroke(Stroke::new(1.0, theme::line()))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(6, 1));
-            let inner = frame.show(ui, |ui| {
-                ui.set_width(search_w);
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
-                    icons::paint(ui.painter(), Icon::Search, r, theme::muted());
-                    ui.add(
-                        egui::TextEdit::singleline(&mut st.search)
-                            .hint_text("Search commands and features")
-                            .frame(egui::Frame::NONE)
-                            .desired_width(search_w - 26.0),
-                    )
-                })
-                .inner
-            });
-            let resp = inner.inner;
-            if resp.has_focus() || resp.changed() {
-                search_popup(ui, st, &resp);
-            }
-
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(10.0);
                 if st.start.is_some() {
@@ -695,58 +667,4 @@ fn shortcuts_grid(ui: &mut egui::Ui, shortcuts: &commands::Shortcuts) {
             ui.end_row();
         }
     });
-}
-
-/// The command search under the menu bar: registry commands through
-/// [`commands::search`], then features by name.
-fn search_popup(ui: &mut egui::Ui, st: &mut AppState, anchor: &egui::Response) {
-    enum Pick {
-        Command(&'static commands::CommandSpec),
-        Feature(crate::document::FeatureId),
-    }
-    let query = st.search.trim().to_lowercase();
-    if query.is_empty() {
-        return;
-    }
-    let mut entries: Vec<(String, String, bool, Pick)> = commands::search(&query, &st.commands)
-        .into_iter()
-        .filter(|m| (m.command.shown)(st))
-        .map(|m| {
-            let c = m.command;
-            (
-                c.label.to_owned(),
-                st.shortcuts.shortcut_text(c.id).unwrap_or_default(),
-                c.is_enabled(st),
-                Pick::Command(c),
-            )
-        })
-        .collect();
-    for f in &st.doc.features {
-        if f.name.to_lowercase().contains(&query) {
-            entries.push((format!("{} (feature)", f.name), String::new(), true, Pick::Feature(f.id)));
-        }
-    }
-    entries.truncate(8);
-    let enter = ui.input(|i| i.key_pressed(Key::Enter));
-    let mut chosen = None;
-    egui::Popup::from_response(anchor).id(egui::Id::new("search_popup")).open(true).show(|ui| {
-        ui.set_min_width(anchor.rect.width());
-        if entries.is_empty() {
-            ui.label(egui::RichText::new("No matching command").color(theme::muted()));
-        }
-        for (i, (name, keys, enabled, _)) in entries.iter().enumerate() {
-            let r =
-                ui.add_enabled(*enabled, egui::Button::selectable(i == 0, name.as_str()).shortcut_text(keys.as_str()));
-            if r.clicked() || (enter && i == 0 && *enabled) {
-                chosen = Some(i);
-            }
-        }
-    });
-    if let Some(i) = chosen {
-        st.search.clear();
-        match entries.swap_remove(i).3 {
-            Pick::Command(c) => st.run_command(c),
-            Pick::Feature(id) => st.push(AppAction::Select(Some(Selection::Feature(id)))),
-        }
-    }
 }

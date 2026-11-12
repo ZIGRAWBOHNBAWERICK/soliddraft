@@ -2935,7 +2935,10 @@ impl Document {
             _ => return Err("A loft profile is missing or needs repair. Select it again".into()),
         }
         let body = fork.body_after(id).ok_or("Loft did not produce a solid")?;
-        let mesh = self.mesh_of(body).map_err(|_| "Loft could not be displayed. Try simpler profiles")?;
+        let mesh = self.mesh_of(body).map_err(|error| {
+            log::warn!("Loft preview: {error}");
+            "Loft could not be displayed. Try simpler profiles"
+        })?;
         Ok(Preview { result: Some(mesh), tool: None, removes: false })
     }
 

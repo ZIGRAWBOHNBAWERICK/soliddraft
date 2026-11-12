@@ -33,7 +33,7 @@ fn decimal_clearance() -> Value {
 
 #[test]
 fn interference_clearance_and_hole_alignment_application_loops() {
-    for source in [
+    for spec in [
         include_str!("../../../ci/scenarios/interference-detection.json"),
         include_str!("../../../ci/scenarios/exact-body-relations.json"),
         include_str!("../../../ci/scenarios/clearance-verification.json"),

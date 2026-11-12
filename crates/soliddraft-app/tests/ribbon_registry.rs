@@ -565,6 +565,34 @@ fn before_retained_polygons(id: &str, current: &mut Value) {
     }
 }
 
+fn before_loft_verbs(id: &str, current: &mut Value) {
+    if id != "propose" {
+        return;
+    }
+    let variants = current
+        .pointer_mut("/tool/input/properties/commands/items/anyOf")
+        .and_then(Value::as_array_mut)
+        .expect("proposal variants");
+    let profiles = json!({"type":"array","items":{"type":"string"},"minItems":2});
+    let shape = json!({"type":"string","enum":["ruled","smooth"]});
+    for (op, required) in
+        [("loft", json!(["op", "profiles"])), ("edit_loft", json!(["op", "feature", "profiles", "shape"]))]
+    {
+        let mut properties = json!({"op":{"type":"string","const":op},"profiles":profiles,"shape":shape});
+        if op == "edit_loft" {
+            properties["feature"] = json!({"type":"string"});
+        }
+        let index = variants.iter().position(|v| v["properties"]["op"]["const"] == op).expect(op);
+        assert_eq!(
+            variants.remove(index),
+            json!({
+                "type":"object", "additionalProperties":false, "properties":properties, "required":required
+            }),
+            "the documented Loft verbs extend the frozen proposal schema"
+        );
+    }
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -708,6 +736,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_retained_patterns(id, &mut current);
         before_retained_polygons(id, &mut current);
         before_circular_placement(id, &mut current);
+        before_loft_verbs(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

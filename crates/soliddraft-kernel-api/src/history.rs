@@ -51,6 +51,8 @@ pub enum OpKind {
     Draft,
     /// An imported STEP body.
     ImportStep,
+    /// An imported IGES body.
+    ImportIges,
     /// Terminal field lattice.
     Lattice,
     /// Terminal field gyroid.
@@ -79,6 +81,7 @@ impl OpKind {
             OpKind::Lattice => "lattice",
             OpKind::Gyroid => "gyroid",
             OpKind::ImportStep => "import_step",
+            OpKind::ImportIges => "import_iges",
         }
     }
 }

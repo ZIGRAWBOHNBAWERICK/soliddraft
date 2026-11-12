@@ -55,7 +55,7 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 ## STEP import
 
-The next feature batch adds clean single-body analytic STEP import. This addition is not part of 0.2.0. A self-authored block and cylinder exercise preview, acceptance, the rendered coarse, standard and fine display levels, source preservation, save/reopen and checked STEP export. General cone angles, sphere and torus poles, spline files and IGES import remain outside this coverage. Unsupported geometry gets a plain message and leaves the part unchanged.
+The next feature batch adds clean single-body analytic STEP import. This addition is not part of 0.2.0. A self-authored block and cylinder exercise preview, acceptance, the rendered coarse, standard and fine display levels, source preservation, save/reopen and checked STEP export. General cone angles, sphere and torus poles and spline files remain outside this STEP coverage. Unsupported geometry gets a plain message and leaves the part unchanged.
 
 File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. Files with several solids are refused because a part holds one body.
 
@@ -68,6 +68,31 @@ Selecting the import shows the record. Each gap has its answer, its approved lim
 MCP clients use `preview_import {"path":"source.step"}` to read the preview, then pass its token to `import_step {"path":"source.step","preview_token":"<token>","decline":["g0"]}` to decline a gap. The token binds the source digest and the repair questions shown. A changed file or changed questions require another preview. An empty decline list applies automatic repairs. A repair that asks for approval goes in `accept`, as `{"id":"g0","tolerance_mm":"0.02","approver":"Ana"}`. Coverage is one planar AP214 body whose repaired faces are straight, strictly convex polygons with one boundary. Curved repairs and nonconvex or holed faces show Coming soon.
 
 The focused rollout check is `CARGO_BUILD_JOBS=3 cargo test -p soliddraft-app --test step_import_rollout -- --test-threads=1`. Set `SOLIDDRAFT_STEP_IMPORT_PROOF_DIR` to keep its source files, saved parts, display screenshots, measured f32 mesh bounds and checked export reports outside the checkout. The test uses the real import dialog and renderer. It also takes an approved seam through the dialog, renderer, save, reopen and export. It does not independently validate the export in another CAD application; the `import-repair` scenario does.
+
+## IGES import
+
+File > Import IGES reads `.igs` and `.iges` files into the same repair review as
+STEP. Accept imports a supported closed solid and saves the unchanged source,
+its format, digest, repair decisions and record. Cancel leaves the part unchanged.
+The command is hidden while a sketch is open in both internal frame choices.
+
+Reopening uses the saved format even if the source filename has a different
+extension. Older import features without a format field keep using STEP.
+Catallax refusals appear as plain messages. For example, an unsupported transform
+explains that importing it would change the shape. Files that need repair records
+the app cannot retain are refused before their certificates can be lost.
+
+MCP clients call `preview_import {"path":"source.igs","format":"iges"}`, then
+`import_iges {"path":"source.igs","preview_token":"<token>"}`. The token binds
+the source format as well as its bytes and questions. The same `accept` and
+`decline` arrays as STEP apply.
+
+The `iges-import` scenario uses unchanged OpenCASCADE fixtures from Catallax's
+corpus. It checks the box's 30 mm³ volume, saved repair record and fresh-process
+reopen, and a sphere refused for its transform. The `iges_import` app test drives
+Cancel and Accept, renders the imported body, reopens it, checks refusal leaves
+the part unchanged, and checks the command is hidden while sketching in both
+frames. This coverage does not promise all IGES surface and transform types.
 
 ## Scene import
 

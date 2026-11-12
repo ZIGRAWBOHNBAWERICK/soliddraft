@@ -379,7 +379,8 @@ fn property_page_builds_a_chain_and_offers_only_what_works() {
     harness.run_steps(4);
     harness.get_by_label("Sweep").click();
     harness.run_steps(4);
-    assert!(harness.query_by_label("Spline · Coming soon").is_some());
+    assert!(harness.query_by_label("Spline · Coming soon").is_none());
+    assert!(harness.query_by_label("Use spline path").is_some());
     assert!(harness.query_by_label("Helix · Coming soon").is_some());
     assert!(harness.query_by_label("Keep direction").is_some());
     // The property page scrolls; bring the control into view as a user would.
@@ -438,6 +439,15 @@ fn sweeps_saved_before_chains_read_back_with_their_names() {
     assert_eq!(serde_json::from_value::<soliddraft_model::Generator>(text).unwrap(), name);
 }
 
+fn check_spline(doc: &Document, volume: f64) {
+    selectable(doc, volume);
+    assert_eq!((doc.faces.len(), doc.edges.len()), (6, 12));
+    assert!(!doc.meshes[&doc.display_body().unwrap()].indices.is_empty());
+    for edge in &doc.edges {
+        assert!(doc.edge_ref(edge.id).is_some(), "edge {} has no saved name", edge.id);
+    }
+}
+
 fn spline_controls(end_z: f64) -> Value {
     json!([{"kind":"spline", "id":"rail", "degree":3,
         "control_points":[[0,0,0],[1,0,1],[1,1,2],[0,1,end_z]],
@@ -452,24 +462,24 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         "sweep",
         json!({"sketch":"Sketch1", "start":[0,0,0], "orientation":"fixed", "segments":spline_controls(3.0)}),
     );
-    check(&doc, 24.0);
+    check_spline(&doc, 24.0);
     let names = |doc: &Document| {
         doc.faces
             .iter()
             .map(|f| {
-                let reference = doc.face_ref(f.id).unwrap();
+                let reference = doc.any_face_ref(f.id).unwrap();
                 (reference.feature, reference.generator, reference.ordinal, reference.label)
             })
             .collect::<Vec<_>>()
     };
     let before_names = names(&doc);
     call(&mut doc, "edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "segments":spline_controls(6.0)}));
-    check(&doc, 48.0);
+    check_spline(&doc, 48.0);
     assert_eq!(before_names, names(&doc));
     call(&mut doc, "undo", json!({}));
-    check(&doc, 24.0);
+    check_spline(&doc, 24.0);
     call(&mut doc, "redo", json!({}));
-    check(&doc, 48.0);
+    check_spline(&doc, 48.0);
     let before = doc.features[1].kind.clone();
     let refused =
         CommandTools { doc: &mut doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }.call(
@@ -483,12 +493,12 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         assert!(!refused.content.contains(internal), "{}", refused.content);
     }
     assert_eq!(doc.features[1].kind, before);
-    check(&doc, 48.0);
+    check_spline(&doc, 48.0);
     let path = std::env::temp_dir().join(format!("soliddraft-spline-sweep-{}.dwprt", std::process::id()));
     call(&mut doc, "save", json!({"path":path}));
     let mut reopened = Document::new("Reopened spline", soliddraft_app::kernel());
     call(&mut reopened, "open", json!({"path":path}));
-    check(&reopened, 48.0);
+    check_spline(&reopened, 48.0);
     assert_eq!(reopened.features[1].kind, before);
     let step = reopened.kernel().export_step(reopened.display_body().unwrap(), &Default::default()).unwrap();
     assert!(step.text.contains("B_SPLINE_SURFACE"));
@@ -519,7 +529,7 @@ fn spline_controls_build_through_the_registry_in_both_frames() {
         app.get_by_label("OK (Enter)").click();
         app.run_steps(6);
         assert!(app.state().state.editor.is_none());
-        check(&app.state().state.doc, 240.0);
+        check_spline(&app.state().state.doc, 240.0);
         case.frame(&mut app, &format!("{layout:?}-result"));
         assert!(!commands::get("sweep").unwrap().available(commands::Context { sketch: true, ..Default::default() }));
     }

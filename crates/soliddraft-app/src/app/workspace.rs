@@ -471,6 +471,9 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
+            if palette {
+                crate::options_bar::panel(root, &mut self.state);
+            }
             egui::Panel::top("ribbon")
                 .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
                 .frame(panel_frame)

@@ -1,0 +1,158 @@
+//! Options bar acceptance through the real app, pointer, command dispatcher and renderer.
+
+#[path = "support/ribbon.rs"]
+mod ribbon;
+#[path = "support/ux_tools.rs"]
+mod ux_tools;
+
+use egui::{Key, Rect, vec2};
+use egui_kittest::kittest::Queryable;
+use ribbon::App;
+use soliddraft_app::document::{PlaneKind, Reference, Selection};
+use soliddraft_app::settings::FrameLayout;
+use soliddraft_app::state::{EditorParams, Tool};
+use soliddraft_app::theme::{self, Mode};
+use soliddraft_app::viewport::DisplayMode;
+use ux_tools::{Case, Look, STANDARD, launch, settle};
+
+fn bar(app: &App) -> Rect {
+    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).expect("the options bar is laid out").outer_rect
+}
+
+fn click(app: &mut App, label: &str) {
+    let button = ribbon::control(app, label, bar(app));
+    assert!(button.enabled, "{label} is enabled");
+    ribbon::click_at(app, button.rect.center());
+    settle(app);
+}
+
+fn text(app: &App, expected: &str) {
+    let painted = ribbon::painted_in(app, bar(app));
+    assert!(painted.iter().any(|p| p.text == expected), "{expected} is visible: {painted:?}");
+}
+
+fn edit_suite(app: &mut App) {
+    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.state_mut().state.doc.selection = None;
+    settle(app);
+}
+
+#[test]
+fn empty_selection_controls_change_the_real_display_and_camera() {
+    let mut case = Case::new("options-bar-views");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    case.run(&mut app, |case, app| {
+        assert!(app.query_all_by_label("Active tool: Select").next().is_none(), "classic has no options bar");
+        case.frame(app, "classic");
+        edit_suite(app);
+        text(app, "Select");
+        assert_eq!(bar(app).top(), theme::MENU_HEIGHT, "the bar follows the title");
+        assert_eq!(bar(app).height(), soliddraft_app::options_bar::HEIGHT);
+        let before = ribbon::fingerprint(app);
+        for (label, display) in [
+            ("Wireframe", DisplayMode::Wireframe),
+            ("Shaded", DisplayMode::Shaded),
+            ("Shaded, edges", DisplayMode::ShadedWithEdges),
+        ] {
+            click(app, label);
+            assert_eq!(app.state().state.viewport.display, display);
+            assert!(ribbon::control(app, label, bar(app)).selected);
+        }
+        click(app, "Front");
+        let front = ribbon::fingerprint(app).camera;
+        click(app, "Top");
+        assert_ne!(ribbon::fingerprint(app).camera, front, "view controls move the camera");
+        click(app, "Isometric");
+        click(app, "Fit");
+        let after = ribbon::fingerprint(app);
+        assert_eq!(before.features, after.features);
+        assert_eq!(before.undo_depth, after.undo_depth);
+        assert_eq!(before.dirty, after.dirty);
+        assert_eq!(after.selection, None);
+        case.frame(app, "no-selection");
+    });
+}
+
+#[test]
+fn picked_geometry_shows_dimensions_and_starts_rounding_with_the_pick() {
+    let mut case = Case::new("options-bar-selection");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    edit_suite(&mut app);
+    case.run(&mut app, |case, app| {
+        ribbon::run_command(app, "zoom_fit");
+        settle(app);
+        ribbon::click_world(app, glam::Vec3::new(0.0, 0.0, 20.0));
+        settle(app);
+        assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))));
+        for expected in ["Width", "60 mm", "Height", "40 mm", "Depth", "20 mm", "Area"] {
+            text(app, expected);
+        }
+        assert!(ribbon::buttons_in(app, bar(app)).iter().all(|(name, _)| name != "Wireframe"));
+        case.frame(app, "face");
+
+        let edge = app.state().state.doc.edges.iter().find(|e| (e.midpoint.z - 20.0).abs() < 1e-9).unwrap().clone();
+        ribbon::click_world(app, edge.midpoint);
+        settle(app);
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Edge(edge.id)));
+        text(app, "Length");
+        text(app, &format!("{:.2} mm", edge.length));
+        case.frame(app, "edge");
+        click(app, "Fillet");
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Fillet(p)) if p.edges.len() == 1));
+        assert!(app.query_all_by_label("Active tool: Fillet").next().is_some());
+        case.frame(app, "fillet");
+        app.key_press(Key::Escape);
+        settle(app);
+        ribbon::click_world(app, edge.midpoint);
+        settle(app);
+        click(app, "Chamfer");
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Chamfer(p)) if p.edges.len() == 1));
+        assert!(app.query_all_by_label("Active tool: Chamfer").next().is_some());
+        app.key_press(Key::Escape);
+        settle(app);
+
+        app.state_mut().state.doc.selection = Some(Selection::Body);
+        settle(app);
+        for expected in ["Solid body", "60 mm", "40 mm", "20 mm"] {
+            text(app, expected);
+        }
+        case.frame(app, "body");
+        app.state_mut().state.doc.selection = None;
+        settle(app);
+        text(app, "Display");
+        assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == "60 mm"), "selection values clear");
+    });
+}
+
+#[test]
+fn sketch_tools_follow_the_palette_and_the_bar_fits_small_windows() {
+    let mut case = Case::new("options-bar-sketch");
+    for mode in [Mode::Light, Mode::Dark] {
+        let look = Look { size: vec2(960.0, 600.0), pixels_per_point: 2.0, theme: Some(mode) };
+        let mut app = launch(ribbon::blank(), look);
+        edit_suite(&mut app);
+        case.run(&mut app, |case, app| {
+            assert!(ribbon::window(app).contains_rect(bar(app)));
+            assert!(bar(app).bottom() < app.state().state.viewport.rect.top());
+            case.frame(app, &format!("small-{mode:?}"));
+            app.state_mut().state.doc.selection = Some(Selection::Reference(Reference::Plane(PlaneKind::Top)));
+            ribbon::run_command(app, "sketch");
+            settle(app);
+            for (id, label, tool) in [
+                ("sketch_line", "Line", Tool::Line),
+                ("sketch_move", "Move entities", Tool::Move),
+                ("smart_dimension", "Smart Dimension", Tool::Dimension),
+            ] {
+                ribbon::run_command(app, id);
+                settle(app);
+                assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, tool);
+                assert!(app.query_all_by_label(&format!("Active tool: {label}")).next().is_some());
+                text(app, label);
+                for forbidden in ["Fillet", "Chamfer", "Display", "Close sketch"] {
+                    assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == forbidden));
+                }
+            }
+            case.frame(app, &format!("dimension-{mode:?}"));
+        });
+    }
+}

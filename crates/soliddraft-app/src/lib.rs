@@ -35,6 +35,7 @@ pub mod locations;
 pub mod mates;
 pub mod measure;
 pub mod navigation;
+pub mod options_bar;
 pub mod palette;
 pub mod panels;
 pub mod platform;

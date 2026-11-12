@@ -3120,7 +3120,7 @@ mod tests {
     fn sketch_features_are_not_offered_while_a_sketch_is_open() {
         let mut history = History::default();
         let sketch = Context { sketch: true, ..Default::default() };
-        for id in ["extrude", "revolve", "sweep", "cut"] {
+        for id in ["extrude", "revolve", "sweep", "loft", "cut"] {
             let command = get(id).unwrap();
             assert!(command.available(Context::default()), "{id} is offered after closing");
             assert!(!command.available(sketch), "{id} stays out of sketch mode");

@@ -17,7 +17,7 @@ use soliddraft_app::document::{Document, FeatureKind, Selection};
 use soliddraft_app::state::{EditorParams, Tool};
 use soliddraft_app::viewport::camera::StandardView;
 
-const TABS: [&str; 7] = ["Solid", "Sketch", "Assembly", "Inspect", "View", "Surface", "Point cloud"];
+const TABS: [&str; 5] = ["Solid", "Sketch", "Assembly", "Inspect", "View"];
 
 const SOLID: [(&str, &[&str]); 6] = [
     ("Sketch", &["Sketch"]),
@@ -88,23 +88,29 @@ fn properties_below(app: &App, tree: &str) {
     assert!(view.right() >= ribbon::window(app).right() - TOLERANCE, "nothing is right of the viewport: {view:?}");
 }
 
-/// The unfinished tabs say Coming soon and leave the part, editor and ribbon unchanged.
-fn placeholders_change_nothing(app: &mut App) {
+/// Changing tabs preserves the part, selection and any open editor.
+fn tabs_preserve_the_part(app: &mut App) {
     let before = ribbon::fingerprint(app);
     let captions = ribbon::caption_names(app);
+    let window = ribbon::window(app);
+    let tab = ribbon::tab(app, "Solid").rect;
+    let strip = Rect::from_min_max(pos2(window.left(), tab.top()), pos2(window.right(), tab.bottom()));
+    let painted = ribbon::painted_in(app, strip);
     for name in ["Surface", "Point cloud"] {
-        let tab = ribbon::tab(app, name);
-        assert!(!tab.enabled, "{name} is disabled");
-        let said = ribbon::tooltip(app, tab.rect);
-        assert_eq!(said, "Coming soon", "{name}");
-        ribbon::click_at(app, tab.rect.center());
-        let rest = ribbon::window(app).center();
-        app.hover_at(rest);
-        app.run_steps(6);
-        assert_eq!(ribbon::fingerprint(app), before, "clicking {name} changes nothing");
-        assert_eq!(selected_tabs(app), ["Solid"], "clicking {name} leaves Solid open");
-        assert_eq!(ribbon::caption_names(app), captions, "clicking {name} leaves the ribbon as it was");
+        let label = format!("{name} tab");
+        assert!(app.query_by_label(label.as_str()).is_none(), "{name} is absent from the controls");
+        assert!(!painted.iter().any(|p| p.text == name), "{name} is not painted");
     }
+    for name in TABS {
+        assert!(ribbon::tab(app, name).enabled, "{name} is enabled");
+        ribbon::click_tab(app, name);
+        assert_eq!(selected_tabs(app), [name], "clicking {name} selects only that tab");
+        assert_eq!(ribbon::fingerprint(app), before, "browsing {name} changes no part or editor state");
+    }
+    ribbon::click_tab(app, "Solid");
+    assert_eq!(selected_tabs(app), ["Solid"]);
+    assert_eq!(ribbon::fingerprint(app), before, "returning to Solid changes no part or editor state");
+    assert_eq!(ribbon::caption_names(app), captions, "returning to Solid restores its ribbon");
 }
 
 /// The volume of the shown body from its tessellation. A box's triangles sum to it exactly,
@@ -133,7 +139,7 @@ fn settled_camera_is(app: &App, view: StandardView) {
 }
 
 #[test]
-fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
+fn solid_groups_and_tabs_are_visible_and_honest() {
     let case = ribbon::case("r1");
     let mut blank = ribbon::app(ribbon::blank());
     case.run(&mut blank, |app| {
@@ -175,8 +181,8 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
             assert!(said.contains(says), "{label} says {says}: {said:?}");
         }
 
-        // The tabs that are not there yet.
-        placeholders_change_nothing(app);
+        // Browse the available tabs without running their commands.
+        tabs_preserve_the_part(app);
     });
 
     let mut plate = ribbon::app(ribbon::plate());
@@ -187,7 +193,7 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
         // With a face selected, then with a Fillet collecting.
         ribbon::click_world(app, glam::Vec3::new(0.0, 0.0, 20.0));
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "the pick selects the top face");
-        placeholders_change_nothing(app);
+        tabs_preserve_the_part(app);
         ribbon::click_ribbon(app, "Fillet");
         settle(app);
         let edge = app.state().state.doc.edges.iter().find(|e| (e.midpoint.z - 20.0).abs() < 1e-9).unwrap().midpoint;
@@ -198,7 +204,7 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
             Some(EditorParams::Fillet(f)) if !f.edges.is_empty()
         );
         assert!(collected, "the Fillet collects the picked edge");
-        placeholders_change_nothing(app);
+        tabs_preserve_the_part(app);
         let cancel = ribbon::button_rect(app, "Cancel (Esc)", left_column(app));
         ribbon::click_at(app, cancel.center());
         settle(app);

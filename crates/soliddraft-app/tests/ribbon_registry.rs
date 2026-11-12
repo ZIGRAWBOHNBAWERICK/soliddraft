@@ -680,19 +680,8 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     }
 
     // The tabs by their stable names, whatever they read.
-    let tabs: Vec<(&str, bool)> = RibbonTab::ALL.iter().map(|t| (t.id(), t.planned().is_none())).collect();
-    assert_eq!(
-        tabs,
-        [
-            ("solid", true),
-            ("sketch", true),
-            ("assembly", true),
-            ("inspect", true),
-            ("view", true),
-            ("surface", false),
-            ("point_cloud", false),
-        ]
-    );
+    let tabs: Vec<&str> = RibbonTab::ALL.iter().map(|t| t.id()).collect();
+    assert_eq!(tabs, ["solid", "sketch", "assembly", "inspect", "view"]);
 
     // Every command as main left it.
     let (frozen, now) = (baseline(), observed());

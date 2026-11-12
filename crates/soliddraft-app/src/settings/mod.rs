@@ -23,6 +23,7 @@ use crate::navigation::SaveError;
 use crate::panels::Layout;
 pub use crate::viewport::grid::GridStyle;
 use crate::viewport::look::Preset;
+use crate::viewport::scenes::Scene;
 use serde_json::Value;
 use soliddraft_assistant::AssistantSettings;
 use soliddraft_document::{AutosavePolicy, Backups, FileLocations};
@@ -221,6 +222,7 @@ impl Default for ReferenceDisplay {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ViewSettings {
     pub preset: Preset,
+    pub scene: Scene,
     pub references: ReferenceDisplay,
     pub grid: GridStyle,
 }
@@ -245,6 +247,11 @@ pub fn save_reference_display(references: &ReferenceDisplay) -> Result<(), NotKe
     save_view_keys(references)
 }
 
+/// Saves the named background without changing the other view settings.
+pub fn save_scene(scene: Scene) -> Result<(), NotKept> {
+    save_view_keys(serde_json::json!({ "scene": scene }))
+}
+
 /// Saves how the grid looks.
 pub fn save_grid_style(style: &GridStyle) -> Result<(), NotKept> {
     save_view_keys(serde_json::json!({ "grid": style.to_json() }))
@@ -256,6 +263,7 @@ fn view_from(all: &Value) -> ViewSettings {
     let flag = |key: &str, default| view[key].as_bool().unwrap_or(default);
     ViewSettings {
         preset: serde_json::from_value(view["preset"].clone()).unwrap_or_default(),
+        scene: serde_json::from_value(view["scene"].clone()).unwrap_or_default(),
         references: ReferenceDisplay {
             show_grid: flag("show_grid", shown.show_grid),
             show_origin_planes: flag("show_origin_planes", shown.show_origin_planes),
@@ -460,6 +468,20 @@ mod tests {
 
     fn file_store(file: &Path) -> Store {
         Store::File(file.to_owned())
+    }
+
+    #[test]
+    fn scenes_fall_back_without_costing_other_view_settings() {
+        for scene in [serde_json::json!(null), serde_json::json!("future"), serde_json::json!(7)] {
+            let view = view_from(&serde_json::json!({"view": {"scene": scene, "preset": "fast", "show_grid": false}}));
+            assert_eq!(view.scene, Scene::White);
+            assert_eq!(view.preset, Preset::Fast);
+            assert!(!view.references.show_grid);
+        }
+        for scene in Scene::ALL {
+            let view = view_from(&serde_json::json!({"view": {"scene": scene}}));
+            assert_eq!(view.scene, scene);
+        }
     }
 
     #[test]

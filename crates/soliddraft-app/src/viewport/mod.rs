@@ -13,6 +13,7 @@ pub mod offscreen;
 pub mod pick;
 pub mod planes;
 pub mod render;
+pub mod scenes;
 
 use crate::dimension_edit::DimensionAction;
 use crate::document::{AxisKind, DisplayMesh, Document, Reference, Selection};
@@ -110,6 +111,8 @@ pub struct ViewportState {
     pub camera: Camera,
     pub display: DisplayMode,
     pub preset: Preset,
+    /// Named background in Edit Suite; classic keeps the theme fade.
+    pub scene: Option<scenes::Scene>,
     /// What the viewport shows of the part's reference geometry without being asked.
     pub references: ReferenceDisplay,
     /// How the grid looks, as the user chose.
@@ -134,6 +137,7 @@ impl Default for ViewportState {
             camera: Camera::default(),
             display: DisplayMode::default(),
             preset: Preset::default(),
+            scene: None,
             references: ReferenceDisplay::default(),
             grid_style: GridStyle::default(),
             hover: None,
@@ -512,7 +516,7 @@ impl ViewportState {
             pixels_per_point: ppp,
             display: self.display,
             preset: self.preset,
-            backdrop: theme::viewport_backdrop(),
+            backdrop: self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop),
             hover_id: 0,
             selected_id: 0,
             selected_feature: 0,

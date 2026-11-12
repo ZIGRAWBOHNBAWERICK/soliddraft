@@ -101,6 +101,7 @@ pub enum AppAction {
     SetDisplay(DisplayMode),
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
+    SetScene(crate::viewport::scenes::Scene),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
     ToggleProjection,

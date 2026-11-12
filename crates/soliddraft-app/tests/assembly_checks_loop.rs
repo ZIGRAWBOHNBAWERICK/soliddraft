@@ -9,6 +9,28 @@ fn call(state: &mut AppState, name: &str, args: Value) -> (bool, Value) {
     (out.is_error, serde_json::from_str(&out.content).unwrap())
 }
 
+fn decimal_clearance() -> Value {
+    let mut spec: Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/exact-body-relations.json")).unwrap();
+    spec["name"] = json!("exact-decimal-clearance");
+    let steps = spec["steps"].as_array_mut().unwrap();
+    steps.truncate(11);
+    steps[1]["arguments"]["depth"] = json!(0.7);
+    steps[10]["arguments"]["placement"]["translation"] = json!([3, 7, 1]);
+    // The part ends at exactly 0.7 mm; the second starts at exactly 1 mm.
+    for (clearance, below, met) in [("0.3 mm", 1, 0), ("0.299 mm", 0, 1), ("0.301 mm", 1, 0)] {
+        steps.push(json!({
+            "tool": "assembly_check_clearance", "arguments": {"clearance": clearance},
+            "checks": [
+                {"pointer":"/result/report/below", "equals": below},
+                {"pointer":"/result/report/met", "equals": met},
+                {"pointer":"/result/report/undecided", "equals": 0}
+            ]
+        }));
+    }
+    spec
+}
+
 #[test]
 fn interference_clearance_and_hole_alignment_application_loops() {
     for source in [
@@ -16,8 +38,11 @@ fn interference_clearance_and_hole_alignment_application_loops() {
         include_str!("../../../ci/scenarios/exact-body-relations.json"),
         include_str!("../../../ci/scenarios/clearance-verification.json"),
         include_str!("../../../ci/scenarios/hole-alignment.json"),
-    ] {
-        let spec: Value = serde_json::from_str(source).unwrap();
+    ]
+    .into_iter()
+    .map(|source| serde_json::from_str::<Value>(source).unwrap())
+    .chain([decimal_clearance()])
+    {
         let name = spec["name"].as_str().unwrap();
         let dir = std::env::temp_dir().join(format!("soliddraft-{name}-loop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

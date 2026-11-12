@@ -167,6 +167,8 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
     ux_tools::settle(&mut app);
     assert_eq!(app.state().state.editor.as_ref().unwrap().target, Some(id));
     assert_eq!(app.state().state.doc.rollback, Some(3));
+    app.get_all_by_label("Remove").last().unwrap().click();
+    ux_tools::settle(&mut app);
     app.get_by_label("Add profile").click();
     ux_tools::settle(&mut app);
     app.get_all_by_label("Sketch3").last().unwrap().click();
@@ -175,7 +177,7 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
     ux_tools::settle(&mut app);
     let editor = app.state().state.editor.as_ref().unwrap();
     assert!(matches!(&editor.params, EditorParams::Loft(l)
-        if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+        if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
     assert!(editor.error.is_none(), "existing Loft edit preview: {:?}", editor.error);
     assert!(editor.preview.result.is_some());
     assert_eq!(app.state().state.doc.rollback, Some(3));
@@ -188,7 +190,7 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
     assert!(app.state().state.editor.is_none());
     assert_eq!(app.state().state.doc.rollback, None);
     assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
-        if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
-    assert!((volume(&app.state().state.doc) - 4596.0 / 70.0).abs() < 1e-7);
+        if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+    assert!((volume(&app.state().state.doc) - 24.0).abs() < 1e-7);
     case.frame(&mut app, "edited-committed");
 }

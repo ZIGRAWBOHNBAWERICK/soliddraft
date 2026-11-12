@@ -173,6 +173,31 @@ impl TabViewer for Panels<'_> {
                 };
                 let events = st.viewport.show(ui, &st.doc, overlay, selection, hover_label.as_deref(), &st.navigation);
                 st.after_viewport(ui, &events);
+                if st.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && let Some(response) = &events.context_response
+                {
+                    let selection =
+                        events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p));
+                    let target = if let Some(session) = st.sketch.as_mut() {
+                        if response.secondary_clicked()
+                            && let Some(pos) = response.interact_pointer_pos()
+                        {
+                            let picked =
+                                crate::sketcher::context_pick(session, &st.viewport.camera, st.viewport.rect, pos);
+                            if !picked.is_some_and(|p| session.selection.contains(&p)) {
+                                session.selection = picked.into_iter().collect();
+                            }
+                        }
+                        if session.selection.is_empty() {
+                            crate::context_menu::Target::EmptySketch
+                        } else {
+                            crate::context_menu::Target::SketchLine
+                        }
+                    } else {
+                        crate::context_menu::Target::of(selection)
+                    };
+                    crate::context_menu::show(st, response, target, selection);
+                }
                 let (dt, ppp) = ui.input(|i| (i.stable_dt.min(0.1), i.pixels_per_point));
                 if st.doc.update_display(&st.viewport.projection(ppp), dt) {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));

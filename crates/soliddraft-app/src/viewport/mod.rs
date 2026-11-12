@@ -38,6 +38,10 @@ use std::sync::{Arc, Mutex};
 pub struct ViewportEvents {
     /// A primary click happened; the payload is what was under the cursor.
     pub clicked: Option<Option<Picked>>,
+    /// The viewport response when a right-click is free to open a menu.
+    pub context_response: Option<egui::Response>,
+    /// The model under a secondary click, independent of primary-click gestures.
+    pub secondary_clicked: Option<Option<Picked>>,
     /// With a click on no model: the reference it found.
     pub clicked_reference: Option<Reference>,
     pub set_view: Option<StandardView>,
@@ -251,6 +255,7 @@ impl ViewportState {
         let preview = preview.filter(|shown| visible.body || !is_provisional(shown));
         let preview_pickable = preview.as_ref().is_some_and(is_provisional);
         let sketching = sketch.is_some();
+        let menu_ready = sketch.as_ref().is_none_or(|s| s.tool == crate::state::Tool::Select);
         let mut events = ViewportEvents::default();
         let rect = ui.available_rect_before_wrap();
         self.rect = rect;
@@ -303,6 +308,13 @@ impl ViewportState {
         if response.clicked_by(egui::PointerButton::Primary) && !sketching {
             events.clicked = Some(self.hover);
             events.clicked_reference = self.hover_reference;
+        }
+
+        if menu_ready {
+            if response.secondary_clicked() && !sketching {
+                events.secondary_clicked = Some(self.hover);
+            }
+            events.context_response = Some(response.clone());
         }
 
         // Hand the frame to the GPU.

@@ -709,6 +709,11 @@ fn build_error(op: OpKind, error: Error) -> KernelError {
 }
 
 fn query_error(query: &str, error: catallax_numbers::Refusal) -> KernelError {
+    if error.code == "mesh.vertex-limit" {
+        return KernelError::InvalidInput(
+            "This shape needs too much detail to display accurately. Try a smoother path or a simpler profile.".into(),
+        );
+    }
     KernelError::QueryFailed { query: query.into(), code: 0, message: format!("{}: {}", error.code, error.detail) }
 }
 

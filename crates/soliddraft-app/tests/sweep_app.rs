@@ -450,7 +450,7 @@ fn check_spline(doc: &Document, volume: f64) {
 
 fn spline_controls(end_z: f64) -> Value {
     json!([{"kind":"spline", "id":"rail", "degree":3,
-        "control_points":[[0,0,0],[1,0,1],[1,1,2],[0,1,end_z]],
+        "control_points":[[0,0,0],[1,0,end_z / 3.0],[1,1,end_z * 2.0 / 3.0],[0,1,end_z]],
         "weights":[1,1,1,1], "knots":[0,0,0,0,1,1,1,1]}])
 }
 
@@ -481,19 +481,28 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     call(&mut doc, "redo", json!({}));
     check_spline(&doc, 48.0);
     let before = doc.features[1].kind.clone();
-    let refused =
-        CommandTools { doc: &mut doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }.call(
-            "edit_sweep",
-            json!({"feature":"Sweep1", "start":[0,0,0], "segments":spline_controls(0.0)}),
-            &Caller::Mcp { client: "spline sweep regression".into() },
-        );
-    assert!(refused.is_error, "{}", refused.content);
-    assert!(refused.content.contains("path may turn back or cross itself"), "{}", refused.content);
-    for internal in ["sweep.spline", "Catallax", "stack", "kernel"] {
-        assert!(!refused.content.contains(internal), "{}", refused.content);
+    let mut returning = spline_controls(3.0);
+    returning[0]["control_points"][3] = json!([0, 0, 0]);
+    let mut detailed = spline_controls(3.0);
+    detailed[0]["control_points"][3] = json!([0, 1, 6]);
+    for (segments, message) in
+        [(returning, "path may turn back or cross itself"), (detailed, "too much detail to display accurately")]
+    {
+        let refused =
+            CommandTools { doc: &mut doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }
+                .call(
+                    "edit_sweep",
+                    json!({"feature":"Sweep1", "start":[0,0,0], "segments":segments}),
+                    &Caller::Mcp { client: "spline sweep regression".into() },
+                );
+        assert!(refused.is_error, "{}", refused.content);
+        assert!(refused.content.contains(message), "{}", refused.content);
+        for internal in ["sweep.spline", "mesh.vertex-limit", "Catallax", "stack", "kernel", "tessellate", "status 0"] {
+            assert!(!refused.content.contains(internal), "{}", refused.content);
+        }
+        assert_eq!(doc.features[1].kind, before);
+        check_spline(&doc, 48.0);
     }
-    assert_eq!(doc.features[1].kind, before);
-    check_spline(&doc, 48.0);
     let path = std::env::temp_dir().join(format!("soliddraft-spline-sweep-{}.dwprt", std::process::id()));
     call(&mut doc, "save", json!({"path":path}));
     let mut reopened = Document::new("Reopened spline", soliddraft_app::kernel());

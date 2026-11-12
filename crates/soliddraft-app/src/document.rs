@@ -2578,7 +2578,7 @@ impl Document {
                             self.quality.made(body, mesh);
                             self.shown = next;
                         }
-                        Err(error) => self.display_failure = Some(display_unavailable(error.to_string())),
+                        Err(error) => self.display_failure = Some(display_unavailable(error)),
                     }
                 }
             }
@@ -3653,8 +3653,12 @@ fn view_status(
 
 /// The display mesh of a body that is only previewed: no picks, so nothing in it can be
 /// selected or confused with the document's own body.
-fn display_unavailable(reason: String) -> String {
-    format!("Display unavailable: {reason}")
+fn display_unavailable(reason: soliddraft_kernel_api::KernelError) -> String {
+    match reason {
+        soliddraft_kernel_api::KernelError::InvalidInput(message)
+        | soliddraft_kernel_api::KernelError::Unsupported(message) => message,
+        other => format!("Display unavailable: {other}"),
+    }
 }
 
 pub(crate) fn preview_mesh(

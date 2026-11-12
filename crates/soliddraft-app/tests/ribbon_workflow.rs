@@ -222,6 +222,50 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
 }
 
 #[test]
+fn pinned_feature_chips_hide_during_sketch_and_return_after_close() {
+    let case = ribbon::case("sketch-command-bar");
+    let mut pins = soliddraft_app::command_line::BarSettings::default();
+    pins.tools = ["select", "extrude", "zoom_fit", "revolve", "normal_to", "sweep", "cut"].map(str::to_owned).to_vec();
+    soliddraft_app::settings::save_command_line(&pins).unwrap();
+    let mut app = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, 1.0);
+    case.run(&mut app, |app| {
+        let features = ["Extrude", "Revolve", "Sweep", "Cut"];
+        for label in features {
+            app.get_by_label(&format!("{label} on the command bar"));
+        }
+        let name = app.state().state.doc.features[0].name.clone();
+        let row = ribbon::button_rect(app, &name, left_column(app));
+        ribbon::double_click_at(app, row.center());
+        settle(app);
+        assert!(app.state().state.sketch.is_some());
+        case.frame(app, "open-sketch-with-pins");
+        for label in features {
+            assert!(
+                app.query_all_by_label(&format!("{label} on the command bar")).next().is_none(),
+                "{label} must be hidden on the command bar while a sketch is open"
+            );
+        }
+        for label in ["Select", "Fit", "Normal to"] {
+            app.get_by_label(&format!("{label} on the command bar"));
+        }
+        assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+        assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+        ribbon::click_ribbon(app, "Exit");
+        settle(app);
+        assert!(app.state().state.sketch.is_none() && app.state().state.editor.is_none());
+        assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+        assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+        for label in features {
+            app.get_by_label(&format!("{label} on the command bar"));
+        }
+        case.frame(app, "closed-sketch-with-pins");
+        app.get_by_label("Extrude on the command bar").click();
+        settle(app);
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Extrude(_))));
+    });
+}
+
+#[test]
 fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
     let case = ribbon::case("r2");
     let mut app = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, 1.0);

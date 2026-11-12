@@ -599,7 +599,7 @@ fn legacy_preset_reproduces_current_navigation() {
     });
     assert!(!sketch.0, "no orbit in a sketch");
     // A click selects.
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(5);
     app.state_mut().state.doc.selection = None;
     let top = {

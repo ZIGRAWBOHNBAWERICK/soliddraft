@@ -296,10 +296,12 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         assert!((area - expected_area()).abs() < 0.2, "area {area}, expected {}", expected_area());
         case.frame(app, "08-profile");
 
-        // Escape puts Trim down; Extrude leaves the sketch into the boss, Enter builds it.
+        // Put Trim down, close the sketch, then start the boss and build it.
         escape(app);
         assert_eq!(session(app).tool, Tool::Select);
         assert!(app.state().state.sketch.is_some());
+        ribbon::run_command(app, "exit_sketch");
+        assert!(app.state().state.editor.is_none());
         ribbon::run_command(app, "extrude");
         settle(app);
         assert!(app.state().state.sketch.is_none(), "the sketch is left");

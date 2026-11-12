@@ -43,6 +43,7 @@ pub mod properties;
 pub mod recent;
 pub mod recovery;
 pub mod ribbon;
+pub mod tool_palette;
 pub mod scene_import;
 pub mod settings;
 pub mod sketch_diagnostics;

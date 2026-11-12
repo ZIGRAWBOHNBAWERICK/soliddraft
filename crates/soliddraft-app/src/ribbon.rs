@@ -80,6 +80,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         show_assembly(ui, state);
         return;
     }
+    tabs(ui, state);
+    body(ui, state, state.ribbon_tab.into());
+}
+
+/// The part workspace strip, shared while the Edit Suite title bar is built.
+pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
     // Tab strip.
     let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme::RIBBON_TABS_HEIGHT), Sense::hover());
     ui.painter().rect_filled(strip, CornerRadius::ZERO, theme::chrome());
@@ -132,8 +138,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
         x += w + 2.0;
     }
-
-    body(ui, state, state.ribbon_tab.into());
 }
 
 /// The ribbon while an assembly is the active document: its one tab, in the part
@@ -200,22 +204,26 @@ pub fn body(ui: &mut egui::Ui, state: &mut AppState, tab: commands::Tab) {
     if let Some(c) = pending {
         state.run_command(c);
     }
+    relations(ui, state, tab, relations_anchor);
+}
+
+/// Opens relations beside the command in either frame.
+pub(crate) fn relations(ui: &egui::Ui, state: &mut AppState, tab: commands::Tab, anchor: Rect) {
     if let Some(s) = state.sketch.as_mut() {
         if tab != commands::Tab::Part(RibbonTab::Sketch) {
             s.relations_open = false;
             return;
         }
         let mut open = s.relations_open;
-        let action =
-            egui::Popup::new(ui.id().with("sketch_relations"), ui.ctx().clone(), relations_anchor, ui.layer_id())
-                .kind(egui::PopupKind::Menu)
-                .open_bool(&mut open)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .layout(egui::Layout::top_down_justified(Align::Min))
-                .width(220.0)
-                .gap(ROW_GAP)
-                .show(|ui| crate::sketcher::relations_menu(ui, s))
-                .and_then(|shown| shown.inner);
+        let action = egui::Popup::new(ui.id().with("sketch_relations"), ui.ctx().clone(), anchor, ui.layer_id())
+            .kind(egui::PopupKind::Menu)
+            .open_bool(&mut open)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .layout(egui::Layout::top_down_justified(Align::Min))
+            .width(220.0)
+            .gap(ROW_GAP)
+            .show(|ui| crate::sketcher::relations_menu(ui, s))
+            .and_then(|shown| shown.inner);
         s.relations_open = open;
         if let Some(action) = action {
             state.push(action);

@@ -96,6 +96,13 @@ jobs:
                         "work": policy["FULL_WORK"]}
               with open(sys.argv[1], "w") as selection:
                   json.dump(result, selection)
+          # Apply after accepted/candidate selection so PRs never require macOS jobs.
+          if os.environ.get("EVENT") == "pull_request":
+              macos = {"test-macos", "interactive-macos", "package-macos"}
+              result["selected"] = [u for u in result["selected"] if u not in macos]
+              result["reasons"] = {u: why for u, why in result["reasons"].items() if u not in macos}
+              with open(sys.argv[1], "w") as selection:
+                  json.dump(result, selection)
           with open(sys.argv[2], "a") as output:
               output.write("selected=" + json.dumps(result["selected"]) + "\n")
               output.write("packaging=" + str(any(u.startswith("package-") for u in result["selected"])).lower() + "\n")

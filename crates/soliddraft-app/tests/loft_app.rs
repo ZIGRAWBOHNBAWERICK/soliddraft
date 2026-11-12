@@ -130,8 +130,8 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
     case.frame(&mut app, "preview");
     app.get_by_label("OK (Enter)").click();
-    ux_tools::rebuilt(&mut app);
     ux_tools::settle(&mut app);
+    ux_tools::rebuilt(&mut app);
     assert!(matches!(app.state().state.doc.features[3].kind, FeatureKind::Loft(_)));
     assert!((volume(&app.state().state.doc) - 28.0).abs() < 1e-7);
     case.frame(&mut app, "built");

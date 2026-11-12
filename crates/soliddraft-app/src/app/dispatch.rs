@@ -545,6 +545,16 @@ impl SolidDraftApp {
                     self.state.note(format!("Not applied: {why}"), NoteKind::Error);
                     return;
                 }
+                if let Some(why) = self
+                    .state
+                    .editor
+                    .as_ref()
+                    .filter(|e| matches!(e.params, EditorParams::Loft(_)))
+                    .and_then(|e| e.error.clone())
+                {
+                    self.state.note(why, NoteKind::Error);
+                    return;
+                }
                 let Some(e) = self.close_editor() else { return };
                 let cmd = match (e.target, e.params) {
                     (target, EditorParams::Loft(l)) => match target {

@@ -140,16 +140,33 @@ fn check_interference_and_clearance_from_the_panel() {
     let st = &h.state().state.assembly.interference;
     assert!(st.error.is_none(), "{:?}", st.error);
     let (report, _) = st.report.clone().expect("a report");
-    assert_eq!((report.pairs, report.interferes, report.touching_or_undecided, report.clear), (3, 1, 1, 1));
-    assert!(has(&h, "3 pairs: 1 interfering, 1 touching or undecided, 1 clear"), "{:?}", texts(&h));
+    assert_eq!(
+        (report.pairs, report.interferes, report.touching, report.touching_or_undecided, report.clear),
+        (3, 1, 1, 0, 1)
+    );
+    assert!(has(&h, "3 pairs: 1 interfering, 1 touching, 0 undecided, 1 clear"), "{:?}", texts(&h));
     assert!(has(&h, "Interferes: b<5> and a<2>") || has(&h, "Interferes: a<2> and b<5>"), "{:?}", texts(&h));
-    assert!(has(&h, "Exactly touching: mate Seat holds"), "{:?}", texts(&h));
+    assert!(has(&h, "The exact solids touch and have no overlap volume."), "{:?}", texts(&h));
     snapshot(&mut h, "1-interference");
 
     // The tools give the same report.
     let tools = tool(&mut h.state_mut().state, "assembly_check_interference", json!({}));
     assert_eq!(tools["report"]["interferes"], 1);
-    assert_eq!(tools["report"]["touching_or_undecided"], 1);
+    assert_eq!(tools["report"]["touching_or_undecided"], 0);
+    assert_eq!(tools["report"]["touching"], 1);
+
+    let (_, work) = soliddraft_kernel_catallax::with_request_allowance(0, || {
+        soliddraft_app::interference::apply(
+            &mut h.state_mut().state,
+            soliddraft_app::interference::InterferenceAction::Check,
+        );
+    });
+    assert!(work.exhausted);
+    settle(&mut h);
+    assert!(has(&h, "The exact body comparison reached its calculation limit."), "{:?}", texts(&h));
+    snapshot(&mut h, "1-exact-refused");
+    button(&mut h, "Check");
+    settle(&mut h);
 
     // A result's row chooses its two parts.
     let interfering = texts(&h).into_iter().find(|t| t.starts_with("Interferes: ")).unwrap();

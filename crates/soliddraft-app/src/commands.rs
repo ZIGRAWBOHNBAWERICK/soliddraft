@@ -534,7 +534,7 @@ impl CommandSpec {
         self
     }
 
-    fn shown(mut self, shown: fn(&AppState) -> bool) -> Self {
+    pub(crate) fn shown(mut self, shown: fn(&AppState) -> bool) -> Self {
         self.shown = shown;
         self
     }

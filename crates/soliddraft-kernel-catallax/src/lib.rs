@@ -5,6 +5,7 @@
 //! origin sets; display estimates never decide topology or operation success.
 
 mod assembly_measure;
+mod body_relation;
 mod construction;
 mod convert;
 mod diagnostics;
@@ -749,6 +750,10 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
 }
 
 impl Kernel for CatallaxKernel {
+    fn body_relation(&self, a: PlacedBody, b: PlacedBody, clearance: Option<f64>) -> KernelResult<BodyRelation> {
+        self.observe("body_relation", || body_relation::relation(self, a, b, clearance))
+    }
+
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
         self.observe("propose_import", || import::propose(source, options))
     }

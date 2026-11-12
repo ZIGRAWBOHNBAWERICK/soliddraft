@@ -160,7 +160,7 @@ fn parts_apart_are_clear_on_their_pinned_revisions() {
     let mut rig = rig("apart", 10.0);
     let before = rig.doc.assembly().clone();
     let report = rig.check(None);
-    assert_eq!((report.kind, report.tier), ("interference", "certified_mesh"));
+    assert_eq!((report.kind, report.tier), ("interference", "exact_and_certified_mesh"));
     assert_eq!((report.pairs, report.clear, report.interferes, report.touching_or_undecided), (1, 1, 0, 0));
     assert!(report.results.is_empty() && report.complete && report.skipped.is_empty());
     assert_eq!(report.parts.len(), 2);
@@ -172,7 +172,7 @@ fn parts_apart_are_clear_on_their_pinned_revisions() {
     }
     assert!(rig.doc.parts_rebuilt_for_proofs() >= 2, "the parts are rebuilt from their pinned bytes");
     assert_eq!(rig.doc.assembly(), &before, "a check changes nothing");
-    assert!(report.refused.iter().any(|r| r.starts_with("volume")));
+    assert!(report.refused.is_empty());
 }
 
 #[test]
@@ -180,9 +180,9 @@ fn an_exact_coincident_mate_is_exact_touching() {
     let mut rig = rig("touching", 10.0);
     rig.seat();
     let report = rig.check(None);
-    assert_eq!((report.interferes, report.touching_or_undecided), (0, 1));
+    assert_eq!((report.interferes, report.touching, report.touching_or_undecided), (0, 1, 0));
     let r = &report.results[0];
-    assert_eq!(r.outcome, Outcome::TouchingOrUndecided);
+    assert_eq!(r.outcome, Outcome::Touching);
     assert_eq!((r.a.clone(), r.b.clone()), (path(rig.a), path(rig.b)));
     assert_eq!(r.contact.len(), 1, "{r:#?}");
     let contact = &r.contact[0];
@@ -192,7 +192,10 @@ fn an_exact_coincident_mate_is_exact_touching() {
     // underside [-7, 13] x [2, 12].
     assert!((-7.0..=13.0).contains(&contact.point[0]) && (2.0..=12.0).contains(&contact.point[1]));
     assert_eq!((r.distance.lo, r.distance.hi), (0.0, Some(0.0)));
-    assert!(r.why.starts_with("Exactly touching"), "{}", r.why);
+    assert!(r.why.contains("exact solids touch"), "{}", r.why);
+    assert_eq!(r.overlap_mm3.unwrap().hi, 0.0);
+    assert!(!r.contact_faces.as_ref().unwrap().a.is_empty());
+    assert!(r.exact_refused.is_empty());
     assert!(!r.faces.is_empty());
     // Exact touching is at or under any clearance.
     let report = rig.check(Some(0.5));
@@ -228,9 +231,11 @@ fn clearances_are_proven_met_below_or_left_undecided() {
     let met = rig.check(Some(15.0));
     assert_eq!((met.met, met.below), (Some(1), Some(0)));
     assert!(met.results.is_empty());
-    let undecided = rig.check(Some(20.0));
-    assert_eq!(undecided.undecided, Some(1));
-    assert_eq!(undecided.results[0].clearance, Some(ClearanceOutcome::Undecided));
+    let exact = rig.check(Some(20.0));
+    assert_eq!(exact.undecided, Some(0));
+    assert_eq!(exact.results[0].clearance, Some(ClearanceOutcome::Below));
+    assert_eq!(exact.results[0].distance.lo, 20.0);
+    assert_eq!(exact.results[0].distance.hi, Some(20.0));
 }
 
 #[test]
@@ -352,7 +357,7 @@ fn an_edit_after_the_pin_changes_nothing_until_update() {
     // still rests on it, touching, and does not sink into the new A.
     set_height(&rig.a_file, 14.0);
     let report = rig.check(None);
-    assert_eq!((report.interferes, report.touching_or_undecided), (0, 1));
+    assert_eq!((report.interferes, report.touching, report.touching_or_undecided), (0, 1, 0));
     assert_eq!(report.results[0].contact.len(), 1);
 }
 

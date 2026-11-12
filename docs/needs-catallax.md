@@ -58,35 +58,14 @@ A full symmetric union of equal crossing cylinders can stop at an ambiguous appl
 
 ## Two-body intersection and distance
 
-Assembly Interference Detection and Clearance Verification ([interference.md](interference.md))
-run on certified meshes today. That tier proves a pair clear, proves it interferes with a
-point inside both parts, or leaves it touching or undecided within the meshes' chord bounds.
-It cannot report an overlap's volume, prove two parts touch without a mate, or measure a gap
-smaller than the bounds. The exact tier needs one Catallax query, called with two parts that
-were built separately, each from its own pinned revision:
+Interference Detection and Clearance Verification now combine certified meshes with exact
+body queries. [Catallax's body-relation queries](https://github.com/BohnBawerick/catallax/pull/537)
+provide overlap-volume enclosures, successful empty intersections and clipped contact faces.
+The adapter combines both retained construction chains in one private model and places them
+with exact isometries derived from the accepted quaternion and translation components.
+Trimmed-face distance queries refine gaps and clearances. See [interference.md](interference.md).
 
-- **Inputs.** Two built bodies, each in its own model and checkpoint, and two rigid motions
-  that place them in one frame. A motion is an exact rotation and a rational translation in
-  millimetres. Rational quaternions cover identity, half-turn and quarter-turn placements
-  and the rational rotations of `docs/RECIPE.md`; a turn by typed degrees needs the algebraic
-  form `Isometry::around_axis` already holds. The caller's allowance bounds the work.
-- **Classification.** Disjoint, touching or overlapping, decided exactly: touching means the
-  regularised intersection is empty and the boundaries meet. An undecided case is a typed
-  refusal, never a guess.
-- **Volume.** The regularised intersection's volume as an enclosure, with an empty result
-  allowed. Today an empty boolean result has no `BodyKind` and the adapter returns
-  `Unsupported` (see the empty-result gap above), so this needs that fix or a query that
-  never makes a body.
-- **Distance.** A proven enclosure of the least distance between the two placed bodies, with
-  a closest point on each and the faces they lie on. `catallax-shapes` already bounds the
-  distance between trimmed analytic surfaces; this needs it between whole placed bodies,
-  and zero when one is inside the other.
-- **Contact.** For touching bodies, the face pairs in contact, so the application can name
-  them as it names mate faces.
-
-The application side is ready for it: each part is rebuilt at its pinned revision already,
-and the mesh tier's results keep their shape, so an exact answer replaces `touching_or_undecided`
-with `clear`, `interferes` or exact touching, and adds the volume. SolidDraft's placements are
-binary64 quaternions, so the exact tier also needs the exact rational placements the general
-rotation batch adds to `assembly.json`; until then it can run exactly on identity and half-turn
-placements, whose quaternions are exact.
+Unsupported intersections, marked geometry and unresolved trimmed-face distance bounds still
+refuse per quantity. The application keeps successful independent proofs and shows a plain
+reason for each refused quantity. Certified-mesh eligibility remains required. Closest-point
+witnesses and clipped-patch geometry are not yet exposed in the report.

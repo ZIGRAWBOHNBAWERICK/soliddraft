@@ -22,6 +22,7 @@ fn active_tool(state: &AppState) -> (Icon, String, String) {
     if let Some(sketch) = &state.sketch {
         let command = commands::all()
             .iter()
+            .filter(|c| (c.active)(state))
             .find(|c| matches!(c.action_now(state), Some(AppAction::SketchTool(tool)) if tool == sketch.tool));
         if let Some(command) = command {
             let label =
@@ -86,26 +87,29 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}")));
         response.on_hover_text(&label);
 
-        egui::ScrollArea::horizontal().id_salt("options_contents").auto_shrink([false, true]).show(ui, |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if state.in_sketch() || state.editor.is_some() || state.measure.open {
-                    ui.label(egui::RichText::new(prompt).color(theme::muted()));
-                } else if let Some(selection) = state.doc.selection {
-                    selection_options(ui, state, selection);
-                } else {
-                    ui.label(egui::RichText::new("Display").color(theme::muted()));
-                    for id in ["display_shaded_edges", "display_shaded", "display_wireframe"] {
-                        command(ui, state, id, true);
+        egui::ScrollArea::horizontal()
+            .id_salt(("options_contents", label, format!("{:?}", state.doc.selection)))
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if state.in_sketch() || state.editor.is_some() || state.measure.open {
+                        ui.label(egui::RichText::new(prompt).color(theme::muted()));
+                    } else if let Some(selection) = state.doc.selection {
+                        selection_options(ui, state, selection);
+                    } else {
+                        ui.label(egui::RichText::new("Display").color(theme::muted()));
+                        for id in ["display_shaded_edges", "display_shaded", "display_wireframe"] {
+                            command(ui, state, id, true);
+                        }
+                        ui.separator();
+                        ui.label(egui::RichText::new("View").color(theme::muted()));
+                        for id in ["view_isometric", "zoom_fit", "view_front", "view_top", "view_right", "normal_to"] {
+                            command(ui, state, id, false);
+                        }
                     }
-                    ui.separator();
-                    ui.label(egui::RichText::new("View").color(theme::muted()));
-                    for id in ["view_isometric", "zoom_fit", "view_front", "view_top", "view_right", "normal_to"] {
-                        command(ui, state, id, false);
-                    }
-                }
+                });
             });
-        });
     });
 }
 

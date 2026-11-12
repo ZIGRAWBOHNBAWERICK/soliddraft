@@ -47,7 +47,9 @@ fn refusal(error: catallax_import::ImportRefusal) -> KernelError {
         ValidationFailed { detail, .. } if detail.contains("convex planar cover") || detail.contains("not be bounded") => {
             return KernelError::Unsupported(format!("STEP import repair: {detail}"));
         }
-        ValidationFailed { .. } => "This STEP file could not be imported without an unverified repair.".into(),
+        ValidationFailed { .. } | IncidenceGap { .. } | PlanarRepairNotVerified { .. } => {
+            "This STEP file could not be imported without an unverified repair.".into()
+        }
         SelfIntersecting { faces, .. } => {
             format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
         }
@@ -61,13 +63,26 @@ fn refusal(error: catallax_import::ImportRefusal) -> KernelError {
 
 pub(super) fn propose(source: &[u8], input: &ImportOptions) -> KernelResult<ProposalSet> {
     let proposals = catallax_import::propose(source, &options(input)?).map_err(refusal)?;
+    if proposals.format != PROPOSALS_FORMAT {
+        return Err(KernelError::Unsupported(format!("STEP import proposal format {}", proposals.format)));
+    }
     wire(proposals)
+}
+
+fn require_repair_format(format: &str) -> KernelResult<()> {
+    match format {
+        REPAIR_FORMAT | LEGACY_REPAIR_FORMAT => Ok(()),
+        _ => Err(KernelError::Unsupported(format!("STEP import repair format {format}"))),
+    }
 }
 
 impl CatallaxKernel {
     pub(super) fn import_body(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
         if catallax_import::sha256_hex(request.source) != request.sha256 {
             return Err(KernelError::InvalidInput("the imported file does not match its sha256".into()));
+        }
+        if let Some(saved) = request.record {
+            require_repair_format(&saved.format)?;
         }
         let decisions: Vec<catallax_import::Decision> = wire(request.decisions)?;
         let mut model = catallax_topology::Model::new();
@@ -80,6 +95,8 @@ impl CatallaxKernel {
             None,
         )
         .map_err(refusal)?;
+        // Newer records carry source certificates the application's wire type cannot retain.
+        require_repair_format(&imported.record.format)?;
         let mismatch =
             || KernelError::InvalidInput("the saved import record does not match this file and its decisions".into());
         match request.record {

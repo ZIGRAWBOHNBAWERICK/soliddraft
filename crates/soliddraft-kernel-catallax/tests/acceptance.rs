@@ -156,7 +156,7 @@ fn step_export_holds_the_application_limit_inside_a_larger_allowance() {
 
 #[test]
 fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
-    let k = CatallaxKernel::new();
+    let k = CatallaxKernel::with_operation_log();
     let p = k
         .create_body_from_profile(&OpTag::new("profile"), &Profile::circle(Plane::XY, Point2::new(0.0, 0.0), 2.0))
         .unwrap()
@@ -173,12 +173,42 @@ fn refused_extrusion_does_not_change_its_profile_and_handles_stay_owned() {
     assert_eq!(before, summarize(&k, b).unwrap());
     assert!(k.validate(b).unwrap().valid);
     assert!(matches!(k.chamfer(&OpTag::new("bevel"), b, &[], 1.0), Err(KernelError::InvalidInput(_))));
-    // This extruded circular profile still has an unsupported axial domain; the
-    // supported open-top planar shell and its export are exercised in shell.rs.
-    assert!(matches!(
-        k.shell(&OpTag::new("shell"), b, &[], 1.0),
-        Err(KernelError::Failed { op: OpKind::Shell, message, .. }) if message.starts_with("distance.cylinder-domain:")
-    ));
+    // Catallax's sewn analytic shell proof covers the extrusion's reversed planar cap.
+    let shell = k.shell(&OpTag::new("shell"), b, &[], 1.0).unwrap().body;
+    let validity = k.validate(shell).unwrap();
+    assert!(validity.valid && validity.manifold_solid, "{validity:?}");
+    assert_eq!(validity.kind, BodyKind::Solid);
+    let topology = k.topology(shell).unwrap();
+    assert_eq!(topology.faces.len(), 6);
+    assert!(topology.edges.iter().all(|edge| edge.faces.len() == 2));
+    let evidence = k.take_diagnostics().unwrap();
+    let problem = &evidence["questions"].as_array().unwrap().last().unwrap()["problem"];
+    let recipe = catallax_recipe::Recipe::parse(&problem.to_string()).unwrap();
+    let mut dec = catallax_numbers::Decider::default();
+    let mut native = catallax_features::evaluate(&recipe, &mut dec).unwrap();
+    assert!(native.model.body(native.result).marks.is_empty());
+    assert!(native.model.check(native.result).is_empty());
+    let lump = native.model.body(native.result).lumps[0];
+    assert_eq!(native.model.lump(lump).shells.len(), 2, "outer boundary and reversed cavity");
+    for coordinates in [[1, 0, 2], [2, 0, 2], [0, 0, 0], [0, 0, 1], [0, 0, 4], [0, 0, 5]] {
+        let [x, y, z] = coordinates.map(catallax_numbers::Rational::from_i64);
+        let point = catallax_shapes::RPoint3::new(x, y, z);
+        let result = catallax_boolean::classify_point(&mut native.model, native.result, &point, &mut dec);
+        assert!(result.is_coincident(), "exact wall at {coordinates:?}: {result:?}");
+    }
+    for (coordinates, expected) in [
+        (["1.5", "0", "2.5"], catallax_boolean::Containment::Inside),
+        (["0", "0", "0.5"], catallax_boolean::Containment::Inside),
+        (["0", "0", "4.5"], catallax_boolean::Containment::Inside),
+        (["0", "0", "2.5"], catallax_boolean::Containment::Outside),
+    ] {
+        let [x, y, z] = coordinates.map(|value| catallax_numbers::Rational::parse(value).unwrap());
+        let point = catallax_shapes::RPoint3::new(x, y, z);
+        let result = catallax_boolean::classify_point(&mut native.model, native.result, &point, &mut dec);
+        assert_eq!(result.proven(), Some(&expected), "material at {coordinates:?}: {result:?}");
+    }
+    assert!((k.mass_properties(shell).unwrap().volume - 17.0 * std::f64::consts::PI).abs() < 1e-8);
+    k.release(shell).unwrap();
     assert_eq!(before, summarize(&k, b).unwrap());
 }
 

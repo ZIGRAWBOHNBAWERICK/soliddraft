@@ -278,7 +278,6 @@ pub fn switch_workspace(app: &mut App, id: &str) {
     } else {
         let tab =
             RibbonTab::ALL.into_iter().find(|tab| tab.id() == id).unwrap_or_else(|| panic!("unknown workspace {id}"));
-        assert!(tab.planned().is_none(), "workspace {id} is unavailable");
         state.ribbon_tab = tab;
     }
     settle_command(app);

@@ -453,6 +453,45 @@ impl SolidDraftApp {
         }
     }
 
+    fn classic_frame(&mut self, root: &mut egui::Ui) {
+        // The menu bar is chrome; the ribbon paints its own strip and body.
+        let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
+        let panel_frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);
+        egui::Panel::top("menu")
+            .exact_size(theme::MENU_HEIGHT)
+            .frame(chrome_frame)
+            .show_separator_line(true)
+            .show(root, |ui| self.menu_bar(ui));
+        self.leave_start_page();
+        let start = self.state.start.is_some();
+        if !start {
+            egui::Panel::top("ribbon")
+                .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
+                .frame(panel_frame)
+                .show_separator_line(false)
+                .show(root, |ui| ribbon::show(ui, &mut self.state));
+        }
+        let status = self.status();
+        crate::command_line::panel(root, &mut self.state, &status);
+        let window_width = root.available_width();
+        if !start {
+            self.side_panel(root, Side::Tree, window_width);
+        }
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
+            if start {
+                crate::start_page::show(ui, &mut self.state);
+            } else {
+                let mut panels = Panels { state: &mut self.state };
+                show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
+            }
+        });
+    }
+
+    fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
+        // Keep the working controls until the Edit Suite component tickets replace them.
+        self.classic_frame(root);
+    }
+
     /// Closes the start page once a document was opened, made or edited.
     fn leave_start_page(&mut self) {
         if self.state.start.as_ref().is_some_and(|page| !page.still_wanted(&self.state)) {
@@ -538,37 +577,10 @@ impl eframe::App for SolidDraftApp {
             .and_then(|sel| self.state.doc.describe(sel));
         self.state.hover_point = self.state.viewport.hover_point;
 
-        // The menu bar is chrome; the ribbon paints its own strip and body.
-        let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
-        let panel_frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);
-        egui::Panel::top("menu")
-            .exact_size(theme::MENU_HEIGHT)
-            .frame(chrome_frame)
-            .show_separator_line(true)
-            .show(root, |ui| self.menu_bar(ui));
-        self.leave_start_page();
-        let start = self.state.start.is_some();
-        if !start {
-            egui::Panel::top("ribbon")
-                .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
-                .frame(panel_frame)
-                .show_separator_line(false)
-                .show(root, |ui| ribbon::show(ui, &mut self.state));
+        match self.state.frame_layout {
+            crate::settings::FrameLayout::Classic => self.classic_frame(root),
+            crate::settings::FrameLayout::EditSuite => self.edit_suite_frame(root),
         }
-        let status = self.status();
-        crate::command_line::panel(root, &mut self.state, &status);
-        let window_width = root.available_width();
-        if !start {
-            self.side_panel(root, Side::Tree, window_width);
-        }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
-            if start {
-                crate::start_page::show(ui, &mut self.state);
-            } else {
-                let mut panels = Panels { state: &mut self.state };
-                show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
-            }
-        });
         self.dialogs(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);
         self.apply_actions(ctx);

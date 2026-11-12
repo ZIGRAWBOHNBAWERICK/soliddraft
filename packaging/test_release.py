@@ -213,6 +213,26 @@ class DeferredWindowsTests(unittest.TestCase):
                 self.assertIn("macOS Gatekeeper", text)
                 self.assertIn("[SolidDraft website](https://zigrawbohnbawerick.github.io/soliddraft/)", text)
 
+    def test_pr_inventory_omits_only_macos_and_still_rejects_incomplete_packages(self):
+        pr_names = tuple(name for name in self.NAMES if name != 'macos-universal.dmg')
+        for windows in (False, True):
+            expected = pr_names + (self.WINDOWS if windows else ())
+            for names, macos, error in ((expected, False, None), (expected, True, 'missing'),
+                                        (expected + ('macos-universal.dmg',), False, 'extra'),
+                                        (expected[1:], False, 'missing')):
+                with self.subTest(windows=windows, names=names, macos=macos):
+                    root = self.inventory(names)
+                    with patch.object(release, 'ROOT', root):
+                        if error:
+                            with self.assertRaisesRegex(ValueError, error):
+                                release.checksums(windows, macos)
+                            self.assertFalse((root / 'dist/SHA256SUMS').exists())
+                        else:
+                            release.checksums(windows, macos)
+                            sums = (root / 'dist/SHA256SUMS').read_text()
+                            self.assertNotIn('macos', sums)
+                            self.assertEqual('windows' in sums, windows)
+
 
 class KnownGapNotesTests(unittest.TestCase):
     def test_lists_every_known_gap_by_scenario(self):

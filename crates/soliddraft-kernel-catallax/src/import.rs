@@ -105,14 +105,23 @@ pub(super) fn propose(format: ImportFormat, source: &[u8], input: &ImportOptions
     let proposals = catallax_import::propose_source(source_format(format), source, &options(input)?)
         .map_err(|error| refusal(format, error))?;
     if proposals.format != PROPOSALS_FORMAT {
-        return Err(KernelError::Unsupported(format!("STEP import proposal format {}", proposals.format)));
+        return Err(match format {
+            ImportFormat::Step => KernelError::Unsupported(format!("STEP import proposal format {}", proposals.format)),
+            ImportFormat::Iges => KernelError::InvalidInput(
+                "This IGES file needs a repair that cannot be reviewed yet. Try exporting it as a STEP solid.".into(),
+            ),
+        });
     }
     wire(proposals)
 }
 
-fn require_repair_format(format: &str) -> KernelResult<()> {
+fn require_repair_format(source: ImportFormat, format: &str) -> KernelResult<()> {
     match format {
         REPAIR_FORMAT | LEGACY_REPAIR_FORMAT => Ok(()),
+        _ if source == ImportFormat::Iges => Err(KernelError::InvalidInput(
+            "This IGES file needs a repair record that cannot be replayed yet. Try exporting it as a STEP solid."
+                .into(),
+        )),
         _ => Err(KernelError::Unsupported(format!("STEP import repair format {format}"))),
     }
 }
@@ -128,7 +137,7 @@ impl CatallaxKernel {
             return Err(KernelError::InvalidInput("the imported file does not match its sha256".into()));
         }
         if let Some(saved) = request.record {
-            require_repair_format(&saved.format)?;
+            require_repair_format(format, &saved.format)?;
         }
         let decisions: Vec<catallax_import::Decision> = wire(request.decisions)?;
         let mut model = catallax_topology::Model::new();
@@ -143,7 +152,7 @@ impl CatallaxKernel {
         )
         .map_err(|error| refusal(format, error))?;
         // Newer records carry source certificates the application's wire type cannot retain.
-        require_repair_format(&imported.record.format)?;
+        require_repair_format(format, &imported.record.format)?;
         let mismatch =
             || KernelError::InvalidInput("the saved import record does not match this file and its decisions".into());
         match request.record {

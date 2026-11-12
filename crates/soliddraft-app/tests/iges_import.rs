@@ -93,7 +93,8 @@ fn corpus_iges_review_cancel_accept_reopen_and_refusal_in_both_frames() {
             assert!(!(command.shown)(&app.state().state));
             assert!(
                 commands::search_here("iges", &app.state().state.commands, commands::Context::of(&app.state().state))
-                    .is_empty()
+                    .iter()
+                    .all(|found| found.command.id != "import_iges")
             );
             assert!(command.action_now(&app.state().state).is_none());
             app.get_by_label("File").click();

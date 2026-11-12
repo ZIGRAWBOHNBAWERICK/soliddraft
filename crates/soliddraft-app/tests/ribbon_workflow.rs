@@ -225,7 +225,9 @@ fn solid_groups_and_placeholder_tabs_are_visible_and_honest() {
 fn pinned_feature_chips_hide_during_sketch_and_return_after_close() {
     let case = ribbon::case("sketch-command-bar");
     let pins = soliddraft_app::command_line::BarSettings {
-        tools: ["select", "extrude", "zoom_fit", "revolve", "normal_to", "sweep", "cut"].map(str::to_owned).to_vec(),
+        tools: ["sketch_select", "extrude", "zoom_fit", "revolve", "normal_to", "sweep", "cut"]
+            .map(str::to_owned)
+            .to_vec(),
         ..Default::default()
     };
     soliddraft_app::settings::save_command_line(&pins).unwrap();

@@ -868,6 +868,11 @@ impl Kernel for CatallaxKernel {
         })
         .map_err(|error| match error {
             KernelError::Unavailable(_) => sweep::refusal(""),
+            KernelError::Unsupported(message) if message.ends_with(" is coming soon.")
+                && params.segments.iter().any(|s| matches!(s, PathSegment::Spline { .. })) =>
+            {
+                KernelError::InvalidInput("This spline sweep was refused because it needs one spline segment and a profile that keeps its direction".into())
+            }
             other => other,
         })
     }

@@ -1,4 +1,4 @@
-//! Sweep paths: chains of straight lines and circular arcs, in model millimetres.
+//! Sweep paths in model millimetres: lines, circular arcs and rational splines.
 //!
 //! An arc is saved as its centre, axis and turn, so its end is never a rounded number
 //! and a turn outside the three supported ones cannot be saved. The backend derives
@@ -69,13 +69,26 @@ pub enum PathSegment {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         corner_axis: Option<[f64; 3]>,
     },
+    /// A clamped rational B-spline. Its first control point is the path's previous end.
+    Spline {
+        /// Stable saved identity.
+        id: String,
+        /// Polynomial degree.
+        degree: usize,
+        /// Control points in model millimetres, including both ends.
+        control_points: Vec<[f64; 3]>,
+        /// Positive weight for each control point.
+        weights: Vec<f64>,
+        /// Nondecreasing knot vector.
+        knots: Vec<f64>,
+    },
 }
 
 impl PathSegment {
     /// The stable saved identity.
     pub fn id(&self) -> &str {
         match self {
-            PathSegment::Line { id, .. } | PathSegment::Arc { id, .. } => id,
+            PathSegment::Line { id, .. } | PathSegment::Arc { id, .. } | PathSegment::Spline { id, .. } => id,
         }
     }
 
@@ -83,6 +96,7 @@ impl PathSegment {
     pub fn corner_axis(&self) -> Option<[f64; 3]> {
         match self {
             PathSegment::Line { corner_axis, .. } | PathSegment::Arc { corner_axis, .. } => *corner_axis,
+            PathSegment::Spline { .. } => None,
         }
     }
 
@@ -90,11 +104,12 @@ impl PathSegment {
     pub fn set_corner_axis(&mut self, axis: Option<[f64; 3]>) {
         match self {
             PathSegment::Line { corner_axis, .. } | PathSegment::Arc { corner_axis, .. } => *corner_axis = axis,
+            PathSegment::Spline { .. } => {}
         }
     }
 }
 
-/// A chain of lines and arcs. The profile stays at its authored placement.
+/// A saved path. The profile stays at its authored placement.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(from = "SavedSweep")]
 pub struct Sweep {
@@ -183,6 +198,47 @@ impl Sweep {
                         let delta = sub(*to, previous);
                         Span { end: *to, incoming: delta, outgoing: delta, length: length(delta) }
                     }
+                    PathSegment::Spline { degree, control_points, weights, knots, .. } => {
+                        let end = control_points.last().copied().unwrap_or(previous);
+                        let incoming = control_points.get(1).map(|p| sub(*p, previous)).unwrap_or([0.0; 3]);
+                        let outgoing = control_points.iter().rev().nth(1).map(|p| sub(end, *p)).unwrap_or([0.0; 3]);
+                        let mut length_mm = 0.0;
+                        let mut last = previous;
+                        if *degree > 0
+                            && *degree < control_points.len()
+                            && weights.len() == control_points.len()
+                            && knots.len() == control_points.len() + degree + 1
+                        {
+                            let lo = knots[*degree];
+                            let hi = knots[control_points.len()];
+                            for i in 1..=64 {
+                                let t = lo + (hi - lo) * i as f64 / 64.0;
+                                let span =
+                                    (*degree..control_points.len()).rev().find(|&j| knots[j] <= t).unwrap_or(*degree);
+                                let mut row: Vec<[f64; 4]> = (span - degree..=span)
+                                    .map(|j| {
+                                        let p = control_points[j];
+                                        [p[0] * weights[j], p[1] * weights[j], p[2] * weights[j], weights[j]]
+                                    })
+                                    .collect();
+                                for r in 1..=*degree {
+                                    for j in (r..=*degree).rev() {
+                                        let k = span - degree + j;
+                                        let width = knots[k + degree + 1 - r] - knots[k];
+                                        let a = if width > 0.0 { (t - knots[k]) / width } else { 0.0 };
+                                        row[j] = std::array::from_fn(|c| (1.0 - a) * row[j - 1][c] + a * row[j][c]);
+                                    }
+                                }
+                                let h = row[*degree];
+                                if h[3] > 0.0 {
+                                    let point = [h[0] / h[3], h[1] / h[3], h[2] / h[3]];
+                                    length_mm += length(sub(point, last));
+                                    last = point;
+                                }
+                            }
+                        }
+                        Span { end, incoming, outgoing, length: length_mm }
+                    }
                     PathSegment::Arc { centre, axis, turn, .. } => {
                         let a = sub(previous, *centre);
                         let unit = scale(*axis, 1.0 / length(*axis));
@@ -258,6 +314,27 @@ mod tests {
 
     fn close(a: P, b: P) -> bool {
         length(sub(a, b)) < 1e-9
+    }
+
+    #[test]
+    fn rational_spline_display_and_saved_parameters_keep_the_path() {
+        let path = Sweep {
+            start: [0.0; 3],
+            orientation: SweepOrientation::Fixed,
+            segments: vec![PathSegment::Spline {
+                id: "rail".into(),
+                degree: 3,
+                control_points: vec![[0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 2.0], [0.0, 0.0, 3.0]],
+                weights: vec![1.0, 2.0, 2.0, 1.0],
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }],
+        };
+        assert_eq!(path.end(), [0.0, 0.0, 3.0]);
+        assert!((path.length() - 3.0).abs() < 1e-9);
+        assert_eq!(path.start_tangent(0), Some([0.0, 0.0, 1.0]));
+        assert_eq!(path.end_tangent(), Some([0.0, 0.0, 1.0]));
+        assert_eq!(path.segments[0].id(), "rail");
+        assert_eq!(serde_json::from_value::<Sweep>(serde_json::to_value(&path).unwrap()).unwrap(), path);
     }
 
     #[test]

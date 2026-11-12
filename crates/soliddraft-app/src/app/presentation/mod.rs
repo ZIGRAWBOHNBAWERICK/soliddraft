@@ -125,6 +125,7 @@ impl SolidDraftApp {
                 menu_command(ui, st, "new_part", "New part");
                 menu_command(ui, st, "open", "Open…");
                 menu_command(ui, st, "import_step", "Import STEP…");
+                menu_command(ui, st, "import_iges", "Import IGES…");
                 menu_command(ui, st, "make_drawing", "New drawing from part…");
                 menu_command(ui, st, "new_assembly", "New assembly");
                 menu_command(ui, st, "make_assembly", "Make assembly from part");
@@ -593,6 +594,9 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
         debug_assert!(false, "no command {id}");
         return;
     };
+    if !(command.shown)(st) {
+        return;
+    }
     let mut button = egui::Button::new(label);
     if let Some(shortcut) = st.shortcuts.shortcut_text(command.id) {
         button = button.shortcut_text(shortcut);

@@ -466,6 +466,21 @@
       "evidence": "result.json, bracket.igs, bracket.dwprt, commands/0022/{part.iges,iges-report.json,check-iges.stdout,check-iges.stderr}"
     },
     {
+      "id": "iges-import",
+      "file": "ci/scenarios/iges-import.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP import review -> exact IGES import -> save and fresh-process reopen",
+      "supported_limits": "One supported closed solid; unchanged Catallax corpus box with volume 30 mm3; unsupported transform and stale review token refusals preserve the part.",
+      "evidence": "result.json, imported.dwprt and command evidence for preview, acceptance, undo, reopen and refusal with an existing body."
+    },
+    {
       "id": "import-block",
       "file": "ci/scenarios/import-block.json",
       "acceptance": true,

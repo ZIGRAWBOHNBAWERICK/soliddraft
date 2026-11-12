@@ -90,7 +90,7 @@ impl Offscreen {
             preset: Default::default(),
             // Pictures are kept in files and shown in previews, so they take the
             // light backdrop whatever mode the window is in.
-            backdrop: [crate::theme::LIGHT.viewport_top, crate::theme::LIGHT.viewport_bottom],
+            backdrop: [crate::theme::LIGHT.viewport_top, crate::theme::LIGHT.viewport_bottom].into(),
             hover_id: 0,
             selected_id: 0,
             selected_feature: 0,

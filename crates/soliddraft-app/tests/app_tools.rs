@@ -625,6 +625,21 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("undo", json!({}));
     s.call("redo", json!({}));
 
+    s.call("new_part", json!({}));
+    std::fs::write(s.dir.join("source.igs"), include_bytes!("../../../ci/fixtures/import/occt-box.igs")).unwrap();
+    let source = s.path("source.igs");
+    let preview = s.call("preview_import", json!({"path": source, "format": "iges"}));
+    let imported = s.call("import_iges", json!({"path": source, "preview_token": preview["token"]}));
+    assert_eq!(imported["features"][0]["type"], "import_iges");
+    assert_eq!(imported["features"][0]["record"]["source"]["sha256"], preview["source_sha256"]);
+    let mass = s.call("mass_properties", json!({"name": "Import1"}));
+    assert_eq!(mass["volume_mm3"], 30.0);
+    s.call("undo", json!({}));
+    assert!(s.state.doc.features.is_empty());
+    s.call("redo", json!({}));
+    let redone = s.call("model_summary", json!({}));
+    assert_eq!(redone["features"], imported["features"]);
+
     let tools: BTreeSet<String> = tool_specs(Surface::Mcp).into_iter().map(|t| t.name).collect();
     let missed: Vec<_> = tools.difference(&s.ran).collect();
     assert!(missed.is_empty(), "this test calls no {missed:?}; add each to it");

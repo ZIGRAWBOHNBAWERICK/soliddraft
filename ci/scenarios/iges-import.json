@@ -1,0 +1,170 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "iges-import",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/occt-sphere.igs",
+        "format": "iges"
+      },
+      "refused": "transform that changes lengths or angles",
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/occt-box.igs",
+        "format": "iges"
+      },
+      "checks": [
+        {
+          "pointer": "/result/source_sha256",
+          "equals": "e96ef5fee3823c917e0b504586ea4c9598323207b86c9697081bb76b28408996"
+        },
+        {
+          "pointer": "/result/proposals",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "import_iges",
+      "arguments": {
+        "path": "ci/fixtures/import/occt-box.igs",
+        "preview_token": "unreviewed"
+      },
+      "refused": "changed since review",
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "import_iges",
+      "arguments": {
+        "path": "ci/fixtures/import/occt-box.igs"
+      },
+      "arguments_from": {
+        "preview_token": {
+          "step": 2,
+          "pointer": "/result/token"
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features/0/type",
+          "equals": "import_iges"
+        },
+        {
+          "pointer": "/summary/features/0/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/features/0/sha256",
+          "equals": "e96ef5fee3823c917e0b504586ea4c9598323207b86c9697081bb76b28408996"
+        },
+        {
+          "pointer": "/summary/features/0/record/source/sha256",
+          "equals": "e96ef5fee3823c917e0b504586ea4c9598323207b86c9697081bb76b28408996"
+        },
+        {
+          "pointer": "/summary/features/0/record/format",
+          "equals": "catallax-import-repair/2"
+        },
+        {
+          "pointer": "/summary/features/0/record/changes",
+          "equals": []
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        },
+        {
+          "pointer": "/summary/body/edges",
+          "equals": 12
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 30,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/imported.dwprt"
+      },
+      "checks": []
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/imported.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/summary/features/0/type",
+          "equals": "import_iges"
+        },
+        {
+          "pointer": "/summary/features/0/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 30,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/occt-sphere.igs",
+        "format": "iges"
+      },
+      "refused": "transform that changes lengths or angles",
+      "checks": [
+        {
+          "pointer": "/summary/features/0/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 30,
+          "tolerance": 1e-06
+        }
+      ]
+    }
+  ]
+}

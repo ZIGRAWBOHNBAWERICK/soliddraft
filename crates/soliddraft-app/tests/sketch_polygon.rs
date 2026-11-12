@@ -103,7 +103,7 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     for mode in [PolygonMode::Inscribed, PolygonMode::Circumscribed] {
-        ribbon::click_ribbon(&mut app, "Polygon");
+        ribbon::run_command(&mut app, "sketch_polygon");
         control(&mut app, if mode == PolygonMode::Inscribed { "Inscribed" } else { "Circumscribed" });
         number(&mut app, 0, "5");
         let before = session(&app).sketch.clone();
@@ -114,7 +114,7 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
         app.run_steps(5);
         assert_eq!(session(&app).tool, Tool::Select);
         assert_eq!(session(&app).sketch, before);
-        ribbon::click_ribbon(&mut app, "Polygon");
+        ribbon::run_command(&mut app, "sketch_polygon");
         pick(&mut app, center);
         preview(&mut app, center + P2::new(24.0, 12.0));
         assert_eq!(session(&app).sketch, before);

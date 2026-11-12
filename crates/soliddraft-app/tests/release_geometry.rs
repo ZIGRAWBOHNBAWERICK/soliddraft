@@ -415,8 +415,8 @@ fn rendered_real_use_rounds_an_earlier_round_then_shells_an_l_tray() {
     let mut app = ribbon::app(state.doc);
     app.key_press(Key::Z);
     app.run_steps(30);
-    ribbon::click_tab(&mut app, "Solid");
-    ribbon::click_ribbon(&mut app, "Fillet");
+    ribbon::switch_workspace(&mut app, "solid");
+    ribbon::run_command(&mut app, "fillet");
     ribbon::click_world(&mut app, glam::Vec3::new(0.0, 0.0, 12.0));
     ribbon::type_field(&mut app, "Radius value", "3");
     wait_for(&mut app, |a| a.state().state.editor.as_ref().is_some_and(|e| e.error.is_some()));
@@ -447,8 +447,8 @@ fn rendered_real_use_rounds_an_earlier_round_then_shells_an_l_tray() {
     let mut app = ribbon::app(state.doc);
     app.key_press(Key::Z);
     app.run_steps(30);
-    ribbon::click_tab(&mut app, "Solid");
-    ribbon::click_ribbon(&mut app, "Shell");
+    ribbon::switch_workspace(&mut app, "solid");
+    ribbon::run_command(&mut app, "shell");
     ribbon::click_world(&mut app, glam::Vec3::new(1.5, 1.5, 4.0));
     ribbon::type_field(&mut app, "Wall thickness value", "1");
     wait_for(&mut app, |a| {

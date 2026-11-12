@@ -83,6 +83,25 @@ impl Kernel for Counting {
         self.inner.import_step(tag, request)
     }
 
+    fn propose_import_source(
+        &self,
+        format: crate::ImportFormat,
+        source: &[u8],
+        options: &crate::ImportOptions,
+    ) -> KernelResult<crate::ProposalSet> {
+        self.inner.propose_import_source(format, source, options)
+    }
+
+    fn import_source(
+        &self,
+        format: crate::ImportFormat,
+        tag: &OpTag,
+        request: &crate::ImportStepRequest<'_>,
+    ) -> KernelResult<crate::ImportStepResult> {
+        self.op(tag);
+        self.inner.import_source(format, tag, request)
+    }
+
     fn backend(&self) -> BackendInfo {
         self.inner.backend()
     }

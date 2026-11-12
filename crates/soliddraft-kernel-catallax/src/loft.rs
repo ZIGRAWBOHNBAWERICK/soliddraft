@@ -1,5 +1,6 @@
 //! Exact loft recipes and plain messages for Catallax's typed refusals.
 
+use catallax_numbers::Rational;
 use catallax_recipe::{Number, Operation};
 use catallax_shapes::{Curve, PointDef, Surface};
 use catallax_topology::{Loop, Sense};
@@ -18,7 +19,7 @@ pub(super) fn refusal(code: &str) -> KernelError {
             "Loft could not verify that these profiles form a solid without crossing or folding. Try simpler profiles or change their order"
         }
         "loft.legacy-parameterization" => "This loft uses an older definition. Create the loft again",
-        "app.resource-limit" | "numbers.resource-limit" => {
+        "application.work-limit" | "numbers.resource-limit" => {
             "Loft could not finish checking these profiles. Try fewer or simpler profiles"
         }
         _ => "Loft could not build a checked solid from these profiles. Try simpler profiles or change their order",
@@ -53,7 +54,9 @@ pub(super) fn operation(
 pub(super) fn face_profile(solid: &Solid, body: BodyId, face: FaceId) -> KernelResult<Value> {
     let unsupported = || {
         KernelError::InvalidInput(
-        "Loft needs a planar face with an exact polygon or circle boundary parallel to a reference plane. Use a closed sketch for this profile".into())
+            "Loft cannot read an exact polygon or circle profile from this face. Use a closed sketch for this profile"
+                .into(),
+        )
     };
     let id = solid
         .ids
@@ -64,29 +67,29 @@ pub(super) fn face_profile(solid: &Solid, body: BodyId, face: FaceId) -> KernelR
     let model = &solid.app.checkpoint.built().model;
     let f = model.face(id);
     let Surface::Plane(plane) = model.geom().surface(f.surface) else { return Err(unsupported()) };
-    let normal = [&plane.normal.x, &plane.normal.y, &plane.normal.z];
-    let axis = (0..3)
-        .find(|i| {
-            normal[*i].rational_ref().is_some_and(|v| !v.is_zero())
-                && (0..3).all(|j| j == *i || normal[j].rational_ref().is_some_and(|v| v.is_zero()))
-        })
-        .ok_or_else(unsupported)?;
-    let origins = [&plane.origin.x, &plane.origin.y, &plane.origin.z];
-    let offset = Number::new(origins[axis].rational_ref().ok_or_else(unsupported)?.clone());
-    let (rotation, translation) = match axis {
-        0 => (json!(["1", "0", "1", "0"]), json!([offset, "0", "0"])),
-        1 => (json!(["1", "-1", "0", "0"]), json!(["0", offset, "0"])),
-        _ => (json!(["1", "0", "0", "0"]), json!(["0", "0", offset])),
+    let normal = &plane.normal;
+    let length = normal.dot(normal).sqrt();
+    let length = length.rational_ref().ok_or_else(unsupported)?;
+    let [nx, ny, nz] = normal.rational_components().ok_or_else(unsupported)?;
+    let quaternion = if nx.is_zero() && ny.is_zero() && nz.sign() == catallax_numbers::Sign::Negative {
+        [Rational::zero(), Rational::one(), Rational::zero(), Rational::zero()]
+    } else {
+        [length + nz, -ny.clone(), nx.clone(), Rational::zero()]
     };
+    let [w, x, y, z] = quaternion.clone();
+    let rotation = catallax_shapes::Rotation::from_quaternion(w, x, y, z).map_err(|_| unsupported())?;
+    let inverse = rotation.inverse();
+    let translation = [&plane.origin.x, &plane.origin.y, &plane.origin.z].map(|v| v.rational_ref().cloned());
+    let [Some(tx), Some(ty), Some(tz)] = translation else { return Err(unsupported()) };
+    let translation = [tx, ty, tz].map(Number::new);
+    let rotation = quaternion.map(Number::new);
     let project = |p: &catallax_shapes::Point3| -> KernelResult<Value> {
-        let q = [&p.x, &p.y, &p.z].map(|v| v.rational_ref().cloned());
-        let [Some(x), Some(y), Some(z)] = q else { return Err(unsupported()) };
-        let xy = match axis {
-            0 => [-z, y],
-            1 => [x, -z],
-            _ => [x, y],
-        };
-        Ok(json!(xy.map(Number::new)))
+        let local = inverse.apply(&p.minus(&plane.origin));
+        let [x, y, z] = local.rational_components().ok_or_else(unsupported)?;
+        if !z.is_zero() {
+            return Err(unsupported());
+        }
+        Ok(json!([Number::new(x.clone()), Number::new(y.clone())]))
     };
     let mut loops = Vec::new();
     for (li, boundary) in f.loops.iter().enumerate() {
@@ -98,7 +101,7 @@ pub(super) fn face_profile(solid: &Solid, body: BodyId, face: FaceId) -> KernelR
             let name = format!("l{li}s{si}");
             match model.geom().curve(e.curve) {
                 Curve::Line(_) => {
-                    let end = if c.sense == Sense::Forward { e.end } else { e.start }.ok_or_else(unsupported)?;
+                    let end = if c.sense == Sense::Same { e.end } else { e.start }.ok_or_else(unsupported)?;
                     let PointDef::Explicit(point) = model.geom().point(model.vertex(end).point) else {
                         return Err(unsupported());
                     };

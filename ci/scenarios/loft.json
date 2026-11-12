@@ -162,7 +162,9 @@
           "tolerance": 1e-05
         }
       ],
-      "same_geometry_as_step": 5
+      "same_geometry_as_step": 5,
+      "checked_step_export": "{bundle}/loft.dwprt",
+      "checked_step_max_work": 20000000
     }
   ]
 }

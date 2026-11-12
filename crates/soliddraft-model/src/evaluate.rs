@@ -851,7 +851,7 @@ impl Document {
         &self,
         result: KernelResult<OpResult>,
         current: Option<BodyId>,
-        name: impl Fn(&OpResult) -> Vec<NamedFace>,
+        name: impl FnOnce(&OpResult) -> Vec<NamedFace>,
     ) -> Built {
         match result {
             Ok(r) => Built {

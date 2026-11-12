@@ -248,5 +248,10 @@ fn weight(key: &StepKey, built: &Built) -> u64 {
     };
     // Regions hold about as many points as the sketch they come from.
     let regions = if built.sketch.is_some() { definition } else { 0 };
-    (std::mem::size_of::<Entry>() + std::mem::size_of::<StepKey>() + definition + names + regions) as u64
+    (std::mem::size_of::<Entry>()
+        + std::mem::size_of::<StepKey>()
+        + definition
+        + names
+        + regions
+        + key.profiles.len() * std::mem::size_of::<u64>()) as u64
 }

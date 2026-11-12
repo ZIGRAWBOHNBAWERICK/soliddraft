@@ -293,6 +293,17 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 EndCondition::UpToFace { face } => vec![(ReferenceSlot::Limit, origin(face), vec![face])],
                 _ => Vec::new(),
             },
+            FeatureKind::Loft(l) => l
+                .profiles
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| match p {
+                    soliddraft_model::LoftProfile::Face { face } => {
+                        Some((ReferenceSlot::Face { index: i as u32 }, origin(face), vec![face]))
+                    }
+                    _ => None,
+                })
+                .collect(),
             FeatureKind::Hole(h) => vec![(ReferenceSlot::Plane, origin(&h.face), vec![&h.face])],
             FeatureKind::Mirror(m) => plane(&m.plane).into_iter().collect(),
             FeatureKind::Shell(s) => s
@@ -311,7 +322,6 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 .collect(),
             FeatureKind::Pattern(_)
             | FeatureKind::Revolve(_)
-            | FeatureKind::Loft(_)
             | FeatureKind::Sweep(_)
             | FeatureKind::ImportStep(_)
             | FeatureKind::Lattice(_)

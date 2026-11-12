@@ -106,7 +106,7 @@ mod ux_tools;
 
 #[test]
 fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal() {
-    use egui_kittest::kittest::{By, Queryable};
+    use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;
     let mut case = ux_tools::Case::new("loft");
     let mut doc = profiles();
@@ -115,7 +115,7 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     ribbon::click_ribbon(&mut app, "Loft");
     ux_tools::settle(&mut app);
     assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
-    assert!(app.query_all(By::label("Loft needs at least two profiles in order")).next().is_some());
+    assert!(app.query_by_label("Loft needs at least two profiles in order").is_ok());
     app.query_by_label("Add profile").unwrap().click();
     ux_tools::settle(&mut app);
     app.query_by_label("Sketch2").unwrap().click();
@@ -129,4 +129,15 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     assert!(matches!(app.state().state.doc.features[3].kind, FeatureKind::Loft(_)));
     assert!((volume(&app.state().state.doc) - 28.0).abs() < 1e-7);
     case.frame(&mut app, "built");
+    app.state_mut().state.push(soliddraft_app::state::AppAction::StartSketchOn(
+        soliddraft_app::document::SketchPlane::Reference {
+            plane: soliddraft_app::document::PlaneKind::Top,
+            offset: 9.0,
+        },
+    ));
+    ux_tools::settle(&mut app);
+    let loft = soliddraft_app::commands::get("loft").unwrap();
+    assert!(app.state().state.in_sketch());
+    assert!(!(loft.shown)(&app.state().state));
+    assert!(loft.action_now(&app.state().state).is_none());
 }

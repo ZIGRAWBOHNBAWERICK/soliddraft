@@ -845,7 +845,7 @@ impl Kernel for CatallaxKernel {
 
     fn create_profile_from_face(&self, tag: &OpTag, body: BodyId, face: FaceId) -> KernelResult<OpResult> {
         self.observe("create_profile_from_face", || {
-            let native = loft::face_profile(&self.solid(body)?, body, face)?;
+            let native = loft::face_profile(self.solid(body)?.as_ref(), body, face)?;
             let mut state = self.state()?;
             let seq = state.id();
             let result = format!("op_{seq}");

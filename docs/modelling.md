@@ -15,7 +15,7 @@ uses the same exact build as Apply. Loft is hidden while a sketch is open.
 
 Each sketch must contain one closed region, including any holes. Corresponding holes
 must have the same nesting. Face profiles currently accept exact polygon and full-circle
-boundaries parallel to a reference plane. Other faces need a closed sketch instead.
+boundaries with an exact frame. Other faces need a closed sketch instead.
 Catallax refuses profiles it cannot verify as a solid without crossing or folding.
 The editor explains the refusal and keeps the existing part.
 

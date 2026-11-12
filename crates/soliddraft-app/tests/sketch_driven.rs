@@ -208,7 +208,7 @@ fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
     assert_eq!(read(&app), [16.0, 20.0]);
     let saved = session(&app).sketch.clone();
     let path = dir().join("linked-dimensions.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(8);
@@ -313,7 +313,7 @@ fn the_values_tab_refuses_non_positive_sketch_lengths_without_mutation() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (sketch, dimension) = circle();
     let (mut app, feature) = launch(sketch);
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(12);
     ribbon::document_tab(&mut app, "Values");
     app.run_steps(6);
@@ -549,7 +549,7 @@ fn the_values_tab_drives_a_sketch_dimension_from_a_global_and_reopens_it() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (sketch, dimension) = circle();
     let (mut app, feature) = launch(sketch);
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(12);
     ribbon::document_tab(&mut app, "Values");
     app.run_steps(6);
@@ -759,7 +759,7 @@ fn reference_creation_is_read_only_updates_with_driving_edits_and_survives_reope
     app.run_steps(12);
     frame(&mut app, "reference-created-small-dark");
     let before = session(&app).sketch.clone();
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     let path = dir().join("reference.dwprt");
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));

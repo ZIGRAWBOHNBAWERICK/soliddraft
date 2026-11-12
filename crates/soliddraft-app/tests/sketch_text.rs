@@ -136,7 +136,7 @@ fn text_command_places_and_edits_one_retained_entity() {
     app.key_press(Key::Escape);
     app.run_steps(4);
     for action in [
-        AppAction::ExitSketch(None),
+        AppAction::ExitSketch,
         AppAction::SaveAs(Some(dir.join("text.dwprt"))),
         AppAction::Open(Some(dir.join("text.dwprt"))),
     ] {

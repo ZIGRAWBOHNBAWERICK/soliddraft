@@ -84,7 +84,7 @@ fn dynamic_mirror_completes_spline_pairs_in_one_undo_step() {
                 app.run_steps(6);
                 assert_eq!(session(app).sketch, saved);
                 let path = case.path("mirrored-splines.dwprt");
-                app.state_mut().state.push(AppAction::ExitSketch(None));
+                app.state_mut().state.push(AppAction::ExitSketch);
                 app.run_steps(6);
                 app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
                 app.run_steps(6);
@@ -223,7 +223,7 @@ fn spline_tools_place_finish_close_undo_and_reopen_through_the_pointer() {
             case.frame(app, "closed-profiles");
             let saved = session(app).sketch.clone();
             let path = case.path("splines.dwprt");
-            app.state_mut().state.push(AppAction::ExitSketch(None));
+            app.state_mut().state.push(AppAction::ExitSketch);
             app.run_steps(6);
             app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
             app.run_steps(6);

@@ -231,7 +231,7 @@ fn dangling_filter_recovers_missing_entities_and_points_after_reopen() {
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "2 of 3 shown"));
     frame(&mut app, "filter-dangling");
     let path = proof_dir().join("dangling.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);
@@ -521,7 +521,7 @@ fn relation_inspection_includes_selected_points_and_the_origin() {
     app.run_steps(8);
     let saved = session(&app).sketch.clone();
     let path = proof_dir().join("point-inspection.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

@@ -110,7 +110,7 @@ fn intersection_filter_is_one_shot_and_keeps_two_point_on_relations() {
     assert_eq!(session(&app).sketch.entities, after.entities);
     let id = session(&app).feature;
     let path = std::env::temp_dir().join(format!("soliddraft-snaps-{}.dwprt", std::process::id()));
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

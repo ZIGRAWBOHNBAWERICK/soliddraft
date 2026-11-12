@@ -251,7 +251,7 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
 
     app.render().unwrap().save(dir.join("04-applied.png")).unwrap();
     let path = dir.join("transforms.dwprt");
-    app.state_mut().state.push(soliddraft_app::state::AppAction::ExitSketch(None));
+    app.state_mut().state.push(soliddraft_app::state::AppAction::ExitSketch);
     settle(&mut app);
     app.state_mut().state.push(soliddraft_app::state::AppAction::SaveAs(Some(path.clone())));
     settle(&mut app);

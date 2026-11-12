@@ -144,7 +144,8 @@ fn minimum_gap(
         }),
     )?;
     let exceeds_clearance = clearance.and_then(|c| {
-        let c = Rational::from_f64_exact(c)?;
+        // Match the decimal conversion used to build authored dimensions.
+        let c = crate::native::number(c, "clearance").ok()?.value().clone();
         if enclosure.lo > c {
             Some(true)
         } else if enclosure.hi <= c {

@@ -794,6 +794,7 @@ pub type KernelResult<T> = Result<T, KernelError>;
 pub trait Kernel: Send + Sync {
     /// Compares two solids at their accepted assembly placements without changing either.
     /// Refused quantities remain independent of successful answers.
+    /// Clearance uses its shortest round-trip decimal, like authored lengths.
     fn body_relation(&self, _a: PlacedBody, _b: PlacedBody, _clearance: Option<f64>) -> KernelResult<BodyRelation> {
         Err(KernelError::Unsupported("Exact checks between placed parts are unavailable".into()))
     }

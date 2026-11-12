@@ -45,7 +45,9 @@ fn menu_command(app: &mut App, id: &str) {
     if let Some(shortcut) = state.shortcuts.shortcut_text(id) {
         label = format!("{label} {shortcut}");
     }
-    let point = app.get_by_label(&label).rect().center();
+    // The popup follows same-named property buttons in the accessibility tree.
+    let point =
+        app.query_all_by_label(&label).last().unwrap_or_else(|| panic!("missing menu command {label}")).rect().center();
     ribbon::click_at(app, point);
 }
 

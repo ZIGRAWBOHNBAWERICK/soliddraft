@@ -47,7 +47,9 @@ fn refusal(error: catallax_import::ImportRefusal) -> KernelError {
         ValidationFailed { detail, .. } if detail.contains("convex planar cover") || detail.contains("not be bounded") => {
             return KernelError::Unsupported(format!("STEP import repair: {detail}"));
         }
-        ValidationFailed { .. } => "This STEP file could not be imported without an unverified repair.".into(),
+        ValidationFailed { .. } | IncidenceGap { .. } | PlanarRepairNotVerified { .. } => {
+            "This STEP file could not be imported without an unverified repair.".into()
+        }
         SelfIntersecting { faces, .. } => {
             format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
         }

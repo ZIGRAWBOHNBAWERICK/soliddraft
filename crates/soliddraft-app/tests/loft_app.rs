@@ -115,7 +115,7 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     ribbon::click_ribbon(&mut app, "Loft");
     ux_tools::settle(&mut app);
     assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
-    assert!(app.query_by_label("Loft needs at least two profiles in order").is_ok());
+    assert!(app.query_by_label("Loft needs at least two profiles in order").is_some());
     app.query_by_label("Add profile").unwrap().click();
     ux_tools::settle(&mut app);
     app.query_by_label("Sketch2").unwrap().click();

@@ -57,6 +57,9 @@ fn interference_clearance_and_hole_alignment_application_loops() {
             let tool = step["tool"].as_str().unwrap();
             let args = serde_json::to_string(&step["arguments"]).unwrap().replace("{bundle}", dir.to_str().unwrap());
             let (error, result) = call(&mut state, tool, serde_json::from_str(&args).unwrap());
+            if name == "exact-decimal-clearance" && tool == "assembly_check_clearance" {
+                eprintln!("[DEBUG-sd-f13] app_request={args} app_response={result}");
+            }
             assert_eq!(error, step.get("refused").is_some(), "{name} step {} {tool}: {result}", index + 1);
             let (error, summary) = call(&mut state, "model_summary", json!({}));
             assert!(!error, "{summary}");

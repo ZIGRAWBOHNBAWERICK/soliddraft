@@ -146,6 +146,19 @@ fn minimum_gap(
     let exceeds_clearance = clearance.and_then(|c| {
         // Match the decimal conversion used to build authored dimensions.
         let c = crate::native::number(c, "clearance").ok()?.value().clone();
+        if std::env::var_os("SOLIDDRAFT_F13_TRACE").is_some() {
+            eprintln!(
+                "[DEBUG-sd-f13] gap_lo={}/{} gap_hi={}/{} threshold={}/{} lower_gt={} upper_le={}",
+                enclosure.lo.numerator(),
+                enclosure.lo.denominator(),
+                enclosure.hi.numerator(),
+                enclosure.hi.denominator(),
+                c.numerator(),
+                c.denominator(),
+                enclosure.lo > c,
+                enclosure.hi <= c,
+            );
+        }
         if enclosure.lo > c {
             Some(true)
         } else if enclosure.hi <= c {
@@ -168,6 +181,26 @@ pub(super) fn relation(
     }
     if clearance.is_some_and(|c| !c.is_finite() || c < 0.0) {
         return Err(KernelError::InvalidInput("A clearance must be a finite length of zero or more".into()));
+    }
+    if std::env::var_os("SOLIDDRAFT_F13_TRACE").is_some() && clearance.is_some_and(|c| (0.29..0.31).contains(&c)) {
+        let c = clearance.unwrap();
+        let binary = Rational::from_f64_exact(c).unwrap();
+        let exact = |v: f64| {
+            let r = Rational::from_f64_exact(v).unwrap();
+            format!("{}/{}", r.numerator(), r.denominator())
+        };
+        eprintln!(
+            "[DEBUG-sd-f13] input_clearance_short={c} binary_threshold={}/{}",
+            binary.numerator(),
+            binary.denominator()
+        );
+        eprintln!(
+            "[DEBUG-sd-f13] placement_a_t={:?} placement_b_t={:?}",
+            a.translation.map(exact),
+            b.translation.map(exact)
+        );
+        eprintln!("[DEBUG-sd-f13] recipe_a={}", k.body_recipe(a.body)?);
+        eprintln!("[DEBUG-sd-f13] recipe_b={}", k.body_recipe(b.body)?);
     }
     let (first, second) = (k.solid(a.body)?, k.solid(b.body)?);
     let (mut model, bodies) = operands(k, a.body, b.body)?;

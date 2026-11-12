@@ -772,7 +772,10 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
             .filter(|f| f.surface == soliddraft_kernel_api::SurfaceKind::Plane)
             .filter(|f| state.doc.index_of(f.feature).is_some_and(|i| i < target))
             .filter_map(|f| {
-                state.doc.face_ref(f.id).map(|face| (soliddraft_model::LoftProfile::Face { face }, f.label.clone()))
+                state.doc.face_ref(f.id).map(|face| {
+                    let label = face.label.clone();
+                    (soliddraft_model::LoftProfile::Face { face }, label)
+                })
             }),
     );
     let sweep_radius = match state.editor.as_ref().map(|e| &e.params) {

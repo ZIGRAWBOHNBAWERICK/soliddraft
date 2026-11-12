@@ -92,8 +92,8 @@ fn loft_uses_an_exact_face_boundary_and_joins_to_the_existing_part() {
         .iter()
         .find(|f| f.centroid.z > 0.99 && f.surface == soliddraft_kernel_api::SurfaceKind::Plane)
         .unwrap()
-        .label
-        .clone();
+        .id;
+    let top = doc.any_face_ref(top).unwrap().label;
     call(&mut doc, "loft", json!({"profiles":[top,"Sketch2"],"shape":"ruled"}));
     assert!((volume(&doc) - (4.0 + 56.0 / 3.0)).abs() < 1e-7, "{}", volume(&doc));
     assert!(doc.faces.iter().all(|f| doc.any_face_ref(f.id).is_some()));

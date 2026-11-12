@@ -621,6 +621,9 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
         debug_assert!(false, "no command {id}");
         return;
     };
+    if !(command.shown)(st) {
+        return;
+    }
     let mut button = egui::Button::new(label);
     if let Some(shortcut) = st.shortcuts.shortcut_text(command.id) {
         button = button.shortcut_text(shortcut);
@@ -704,7 +707,8 @@ fn search_popup(ui: &mut egui::Ui, st: &mut AppState, anchor: &egui::Response) {
     if query.is_empty() {
         return;
     }
-    let mut entries: Vec<(String, String, bool, Pick)> = commands::search(&query, &st.commands)
+    let context = commands::Context::of(st);
+    let mut entries: Vec<(String, String, bool, Pick)> = commands::search_here(&query, &st.commands, context)
         .into_iter()
         .map(|m| {
             let c = m.command;

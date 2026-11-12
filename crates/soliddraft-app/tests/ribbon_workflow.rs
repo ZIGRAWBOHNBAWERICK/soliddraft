@@ -252,6 +252,20 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
             }
             assert!(!ribbon::painted(app).iter().any(|p| matches!(p.text.as_str(), "Use sketch" | "Use the sketch")));
         }
+        app.get_by_label("Insert").click();
+        app.run_steps(3);
+        for label in ["Boss extrude", "Cut extrude"] {
+            assert!(app.query_all_by_label(label).next().is_none(), "{label} is hidden in Insert");
+        }
+        app.key_press(Key::Escape);
+        app.run_steps(3);
+        app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands and features").click();
+        app.run_steps(3);
+        app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands and features")
+            .type_text("extrude");
+        app.run_steps(3);
+        assert!(app.query_all_by_label("Extrude").next().is_none(), "title-bar search hides sketch features");
+        app.state_mut().state.search.clear();
         for id in ["extrude", "revolve", "sweep", "cut"] {
             let command = soliddraft_app::commands::get(id).unwrap();
             assert!(!command.is_enabled(&app.state().state));

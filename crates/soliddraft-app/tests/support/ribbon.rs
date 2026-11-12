@@ -312,10 +312,8 @@ pub fn reveal_ribbon_command(app: &mut App, id: &str) -> Control {
     };
     // Clipped property buttons still have accessibility bounds.
     let visible_label = |app: &App| {
-        let buttons: Vec<_> = app
-            .query_all(By::new().role(egui::accesskit::Role::Button).label(&label))
-            .map(|n| n.rect())
-            .collect();
+        let buttons: Vec<_> =
+            app.query_all(By::new().role(egui::accesskit::Role::Button).label(&label)).map(|n| n.rect()).collect();
         painted_in(app, ribbon_command_region(app))
             .into_iter()
             .find(|p| p.text == label && buttons.iter().any(|r| r.expand(TOLERANCE).contains_rect(p.rect)))

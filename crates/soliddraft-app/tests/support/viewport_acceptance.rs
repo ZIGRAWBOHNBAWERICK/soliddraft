@@ -318,10 +318,9 @@ pub fn click_button(app: &mut App, label: &str) {
     settle(app);
 }
 
-/// Clicks a registered ribbon command after revealing its collapsed group.
-pub fn click_ribbon_command(app: &mut App, id: &str) {
-    let point = ribbon::reveal_ribbon_command(app, id).rect.center();
-    click(app, point);
+/// Runs a registry command independently of its current UI location.
+pub fn run_command(app: &mut App, id: &str) {
+    ribbon::run_command(app, id);
 }
 
 /// Two clicks on a row, close enough to be a double click.

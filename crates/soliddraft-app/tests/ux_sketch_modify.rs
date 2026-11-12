@@ -172,7 +172,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         case.frame(app, "01-sketch-tab");
 
         // Polygon: the centre on the origin, the vertex under the pointer, previewed live.
-        ribbon::click_ribbon(app, "Polygon");
+        ribbon::run_command(app, "sketch_polygon");
         assert_eq!(session(app).tool, Tool::Polygon);
         assert!(ribbon::reveal_ribbon_command(app, "sketch_polygon").selected, "the tile is lit");
         ribbon::dismiss_ribbon_popup(app);
@@ -200,7 +200,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         assert_eq!(drawn(app), 0, "a cancelled polygon adds nothing");
         assert!(app.state().state.sketch.is_some(), "the sketch stays open");
 
-        ribbon::click_ribbon(app, "Polygon");
+        ribbon::run_command(app, "sketch_polygon");
         sketch_click(app, P2::ZERO);
         sketch_click(app, P2::new(R, 0.0));
         assert_eq!(drawn(app), 7, "six sides and their construction circle");
@@ -215,7 +215,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         settle(app);
 
         // A chord inside the hexagon, by the Line tool; the right-click ends the chain.
-        ribbon::click_ribbon(app, "Line");
+        ribbon::run_command(app, "sketch_line");
         sketch_click(app, P2::new(-10.0, CHORD_V));
         sketch_click(app, P2::new(10.0, CHORD_V));
         right_click(app, P2::new(10.0, CHORD_V));
@@ -225,7 +225,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         assert!(near(a, P2::new(-10.0, CHORD_V), 0.05) && near(b, P2::new(10.0, CHORD_V), 0.05), "{a:?} {b:?}");
 
         // Extend: the end nearer the pointer reaches the slanted edge, previewed first.
-        ribbon::click_ribbon(app, "Extend");
+        ribbon::run_command(app, "sketch_extend");
         hover_sketch(app, P2::new(-9.0, CHORD_V));
         let preview = session(app).preview.clone().expect("a preview at the chord");
         assert_eq!(preview.operation, Some(Operation::Extend { entity: 8, end: End::Start, boundary: 3 }));
@@ -251,7 +251,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         assert_eq!(session(app).tool, Tool::Select, "V picks Select");
         sketch_click(app, P2::new(3.0, CHORD_V));
         assert_eq!(session(app).selected_entities(), vec![8], "the chord is selected");
-        ribbon::click_ribbon(app, "Linear pattern");
+        ribbon::run_command(app, "sketch_linear_pattern");
         assert_eq!(session(app).selected_entities(), vec![8], "a copy tool keeps the selection");
         app.run_steps(2);
         let preview = session(app).preview.clone().expect("a pattern preview");
@@ -265,7 +265,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         assert_eq!(drawn(app), 8, "a cancelled pattern adds nothing");
 
         // Trim: the piece under the pointer is shown before it goes.
-        ribbon::click_ribbon(app, "Trim");
+        ribbon::run_command(app, "sketch_trim");
         let apothem = R * 0.75f64.sqrt();
         hover_sketch(app, P2::new(0.0, apothem));
         let preview = session(app).preview.clone().expect("a trim preview on the top side");
@@ -300,9 +300,9 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         escape(app);
         assert_eq!(session(app).tool, Tool::Select);
         assert!(app.state().state.sketch.is_some());
-        ribbon::click_ribbon(app, "Exit");
+        ribbon::run_command(app, "exit_sketch");
         assert!(app.state().state.editor.is_none());
-        ribbon::click_ribbon(app, "Extrude");
+        ribbon::run_command(app, "extrude");
         settle(app);
         assert!(app.state().state.sketch.is_none(), "the sketch is left");
         assert!(app.state().state.editor.is_some(), "the extrude editor is open");

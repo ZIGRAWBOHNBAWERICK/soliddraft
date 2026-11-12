@@ -31,7 +31,7 @@ fn launch(name: &str) -> App {
     let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
-    ribbon::click_ribbon(&mut app, "Line");
+    ribbon::run_command(&mut app, "sketch_line");
     assert_eq!(session(&app).tool, Tool::Line);
     app
 }

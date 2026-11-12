@@ -198,7 +198,7 @@ fn grid_skips_retained_edits_cancel_history_and_reopen() {
     let (mut app, dir, id) = setup("grid");
     let before = session(&app).sketch.clone();
     pick(&mut app, p(12.0, 10.0));
-    ribbon::click_ribbon(&mut app, "Linear pattern");
+    ribbon::run_command(&mut app, "sketch_linear_pattern");
     number(&mut app, "First step u", 12.0);
     number(&mut app, "First step v", 0.0);
     number(&mut app, "First count", 3.0);
@@ -274,7 +274,7 @@ fn circular_total_spans_skips_and_reopen() {
     let omitted_background = pixel(&mut app, p(-9.3, 10.7));
     let omitted_centre_background = pixel(&mut app, p(-10.0, 10.0));
     pick(&mut app, p(12.0, 10.0));
-    ribbon::click_ribbon(&mut app, "Circular pattern");
+    ribbon::run_command(&mut app, "sketch_circular_pattern");
     number(&mut app, "Centre u", 0.0);
     number(&mut app, "Centre v", 10.0);
     text(&mut app, "Total angle");
@@ -468,7 +468,7 @@ fn power_trim_retrace_restores_pattern_without_a_document_edit() {
     let st = &mut app.state_mut().state;
     st.viewport.camera.zoom(10.0, None, st.viewport.rect.aspect_ratio());
     app.run_steps(6);
-    ribbon::click_ribbon(&mut app, "Trim");
+    ribbon::run_command(&mut app, "sketch_trim");
     let before = session(&app).sketch.clone();
     let revision = app.state().state.doc.revision();
     hover(&mut app, p(1.0, 29.0));

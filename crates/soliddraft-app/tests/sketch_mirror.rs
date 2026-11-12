@@ -131,7 +131,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     pick(&mut app, p(4.0, -6.0), false);
     pick(&mut app, p(8.0, 0.0), true);
     pick(&mut app, p(4.0, 6.0), true);
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     control(&mut app, "Two points");
     control(&mut app, "Line 1");
     assert_eq!(session(&app).modify.mirror_axis, Some(1));
@@ -146,7 +146,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     app.key_press(Key::Escape);
     app.run_steps(6);
     assert_eq!(session(&app).sketch, before);
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     control(&mut app, "Apply");
     assert_eq!(session(&app).sketch.entities, expected.entities);
     assert!((session(&app).sketch.regions().unwrap()[0].area() - 192.0).abs() < 1e-6);
@@ -163,7 +163,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     guide.add(EntityKind::Circle { center: p(12.0, 0.0), radius: 3.0 }, true);
     let (mut app, id) = launch(guide);
     pick(&mut app, p(15.0, 0.0), false);
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     control(&mut app, "Two points");
     control(&mut app, "Line 1");
     assert_eq!(session(&app).preview.as_ref().unwrap().added.len(), 1);
@@ -188,7 +188,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     axis(&mut sketch);
     let (mut app, id) = launch(sketch);
     let before = session(&app).sketch.clone();
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     control(&mut app, "Two points");
     control(&mut app, "Line 1");
     control(&mut app, "Start dynamic mirror");
@@ -208,7 +208,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     app.run_steps(6);
     assert_eq!(session(&app).dynamic_mirror, None);
     assert_eq!(session(&app).sketch, before);
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     control(&mut app, "Start dynamic mirror");
     pick(&mut app, p(5.0, -8.0), false);
     pick(&mut app, p(12.0, -8.0), false);
@@ -218,7 +218,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     assert_eq!(session(&app).sketch, before);
     redo(&mut app);
     assert_eq!(session(&app).sketch, line);
-    ribbon::click_ribbon(&mut app, "Circle");
+    ribbon::run_command(&mut app, "sketch_circle");
     assert_eq!(session(&app).dynamic_mirror, Some(1));
     pick(&mut app, p(8.0, 4.0), false);
     hover(&mut app, p(11.0, 4.0));
@@ -231,7 +231,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     undo(&mut app);
     assert_eq!(session(&app).sketch, line);
     redo(&mut app);
-    ribbon::click_ribbon(&mut app, "Arc");
+    ribbon::run_command(&mut app, "sketch_arc");
     pick(&mut app, p(8.0, 10.0), false);
     pick(&mut app, p(11.0, 10.0), false);
     hover(&mut app, p(8.0, 13.0));
@@ -239,20 +239,20 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     assert_eq!(preview.len(), 1);
     pick(&mut app, p(8.0, 13.0), false);
     assert_eq!(session(&app).sketch.drawn().last().unwrap().kind, preview[0].0);
-    ribbon::click_ribbon(&mut app, "Rectangle");
+    ribbon::run_command(&mut app, "sketch_rectangle");
     pick(&mut app, p(16.0, -2.0), false);
     hover(&mut app, p(22.0, 4.0));
     assert_eq!(session(&app).dynamic_preview.len(), 4);
     pick(&mut app, p(22.0, 4.0), false);
     assert_eq!(session(&app).sketch.drawn().count(), 15);
     proof(&mut app, "dynamic-pairs-applied");
-    ribbon::click_ribbon(&mut app, "Point");
+    ribbon::run_command(&mut app, "sketch_point");
     hover(&mut app, p(15.0, -15.0));
     assert_eq!(session(&app).dynamic_preview.len(), 1);
     pick(&mut app, p(15.0, -15.0), false);
     assert_eq!(session(&app).sketch.drawn().count(), 17);
     let before_slot = session(&app).sketch.clone();
-    ribbon::click_ribbon(&mut app, "Slot");
+    ribbon::run_command(&mut app, "sketch_slot");
     pick(&mut app, p(6.0, -16.0), false);
     pick(&mut app, p(12.0, -16.0), false);
     hover(&mut app, p(6.0, -14.0));
@@ -264,7 +264,7 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
     assert_eq!(session(&app).sketch, before_slot);
     redo(&mut app);
     assert_eq!(session(&app).sketch, slot);
-    ribbon::click_ribbon(&mut app, "Polygon");
+    ribbon::run_command(&mut app, "sketch_polygon");
     control(&mut app, "Draw construction");
     pick(&mut app, p(20.0, -12.0), false);
     hover(&mut app, p(23.0, -12.0));
@@ -296,7 +296,7 @@ fn review_launch(sketch: Sketch, name: &str) -> (App, u64) {
     launch(sketch)
 }
 fn choose_axis(app: &mut App) {
-    ribbon::click_ribbon(app, "Mirror entities");
+    ribbon::run_command(app, "sketch_mirror");
     control(app, "Two points");
     control(app, "Line 1");
 }
@@ -388,7 +388,7 @@ fn repeated_retained_mirror_is_refused_as_a_noop_without_another_relation() {
     let (mut app, _id) = launch(sketch);
     pick(&mut app, p(5.0, 0.0), false);
     pick(&mut app, p(-5.0, 0.0), true);
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     control(&mut app, "Two points");
     control(&mut app, "Line 1");
     control(&mut app, "Apply");
@@ -398,7 +398,7 @@ fn repeated_retained_mirror_is_refused_as_a_noop_without_another_relation() {
     app.run_steps(6);
     pick(&mut app, p(5.0, 0.0), false);
     pick(&mut app, p(-5.0, 0.0), true);
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     proof(&mut app, "repeated-mirror-noop");
     let preview = session(&app).preview.as_ref().unwrap();
     assert!(preview.operation.is_none(), "a retained pair cannot add the same symmetry again");

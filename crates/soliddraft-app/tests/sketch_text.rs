@@ -53,15 +53,15 @@ fn text_command_places_and_edits_one_retained_entity() {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(15);
     assert!(command.is_enabled(&app.state().state));
-    ribbon::click_tab(&mut app, "Sketch");
-    ribbon::click_ribbon(&mut app, command.label);
+    ribbon::switch_workspace(&mut app, "sketch");
+    ribbon::run_command(&mut app, command.id);
     assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, Tool::Text);
     let empty = app.state().state.sketch.as_ref().unwrap().sketch.clone();
     app.key_press(Key::Escape);
     app.run_steps(4);
     assert_eq!(app.state().state.sketch.as_ref().unwrap().sketch, empty);
     assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, Tool::Select);
-    ribbon::click_ribbon(&mut app, command.label);
+    ribbon::run_command(&mut app, command.id);
     {
         let s = app.state_mut().state.sketch.as_mut().unwrap();
         s.text.content = "oae".into();

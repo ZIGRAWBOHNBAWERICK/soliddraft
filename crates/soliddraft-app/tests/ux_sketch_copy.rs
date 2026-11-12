@@ -154,7 +154,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
 
     // Select the chain in order. Dragging its reversed member keeps the signed side.
     click(&mut app, P2::new(-12.0, -10.0), Modifiers::default());
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     click(&mut app, P2::new(0.0, 3.0), Modifiers::CTRL);
     assert_eq!(soliddraft_app::sketch_tools::selected_in_order(session(&app)), vec![1, 2]);
     drag(&mut app, P2::new(0.0, 3.0), P2::new(-4.0, 3.0));
@@ -185,7 +185,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
 
     // A circle's offset is inward positive. An excessive numeric distance refuses without editing.
     select(&mut app, P2::new(25.0, 10.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     drag(&mut app, P2::new(25.0, 10.0), P2::new(27.0, 10.0));
     let preview = session(&app).preview.as_ref().unwrap();
     assert!(matches!(preview.added[0], EntityKind::Circle { radius, .. } if (radius - 7.0).abs() < 0.08));
@@ -207,7 +207,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     let radial = 0.5f64.sqrt();
     let arc_at = |r| P2::new(15.0 + r * radial, -12.0 + r * radial);
     select(&mut app, arc_at(5.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     drag(&mut app, arc_at(5.0), arc_at(7.0));
     assert!((session(&app).modify.distance + 2.0).abs() < 0.08);
     match session(&app).preview.as_ref().unwrap().added[0] {
@@ -223,7 +223,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
 
     // Two mirror points, with the second point previewed before it is clicked.
     select(&mut app, P2::new(-12.0, -10.0));
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     click(&mut app, P2::new(-5.0, -15.0), Modifiers::default());
     hover(&mut app, P2::new(-5.0, 15.0));
     assert_eq!(count(&app), 4);
@@ -247,7 +247,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
 
     // Place a translation between two arbitrary points, snapping its start to the centre.
     select(&mut app, P2::new(25.0, 10.0));
-    ribbon::click_ribbon(&mut app, "Linear pattern");
+    ribbon::run_command(&mut app, "sketch_linear_pattern");
     click(&mut app, P2::new(20.0, 10.0), Modifiers::default());
     hover(&mut app, P2::new(28.0, 15.0));
     near(session(&app).modify.step, P2::new(8.0, 5.0));
@@ -267,7 +267,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
 
     // A circular pattern follows the centre, freezes on click, and cancels without edits.
     select(&mut app, P2::new(25.0, 10.0));
-    ribbon::click_ribbon(&mut app, "Circular pattern");
+    ribbon::run_command(&mut app, "sketch_circular_pattern");
     hover(&mut app, P2::new(5.0, 0.0));
     let preview = session(&app).preview.as_ref().unwrap().added.clone();
     if let EntityKind::Circle { center, .. } = preview[0] {
@@ -282,7 +282,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     button(&mut app, "Cancel");
     assert_eq!(session(&app).tool, Tool::Select);
     assert_eq!(session(&app).sketch, source);
-    ribbon::click_ribbon(&mut app, "Circular pattern");
+    ribbon::run_command(&mut app, "sketch_circular_pattern");
     click(&mut app, P2::new(5.0, 0.0), Modifiers::default());
     button(&mut app, "Apply");
     assert_eq!(count(&app), 6);
@@ -291,7 +291,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
 
     // Escape drops a half-placed axis and keeps the sketch open.
     select(&mut app, P2::new(-12.0, -10.0));
-    ribbon::click_ribbon(&mut app, "Mirror entities");
+    ribbon::run_command(&mut app, "sketch_mirror");
     click(&mut app, P2::new(-5.0, -15.0), Modifiers::default());
     app.key_press(Key::Escape);
     settle(&mut app);

@@ -127,7 +127,7 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
     app.run_steps(30);
     let before = session(&app).sketch.clone();
     pick(&mut app, p(-10.0, 0.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     distance(&mut app, 4.0);
     assert!(session(&app).modify.offset.chain);
     assert_eq!(session(&app).preview.as_ref().unwrap().added.len(), 2);
@@ -171,7 +171,7 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
     app.run_steps(6);
     assert_eq!(session(&app).tool, Tool::Select);
     assert_eq!(session(&app).sketch, after);
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     assert_eq!(session(&app).modify.offset_group, None, "a new command does not resume a cancelled edit");
     assert!(matches!(
         soliddraft_app::sketch_tools::operation_for(session(&app)),
@@ -219,7 +219,7 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     pick(&mut app, p(-10.0, 0.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     distance(&mut app, 2.0);
     text(&mut app, "None");
     text(&mut app, "Lines");
@@ -312,7 +312,7 @@ fn auto_chain_drag_uses_the_reversed_nonadjacent_selected_member() {
     let mut app = review_app(sketch, "direction");
     let before = session(&app).sketch.clone();
     pick(&mut app, p(-5.0, -6.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     ctrl_pick(&mut app, p(5.0, 6.0));
     assert_eq!(soliddraft_app::sketch_tools::selected_in_order(session(&app)), vec![1, 3]);
     assert!(session(&app).modify.offset.chain);
@@ -342,7 +342,7 @@ fn collinear_offset_join_cannot_be_dragged_beyond_its_neighbor() {
     fixed_segment(&mut sketch, p(10.0, 0.0), p(20.0, 0.0));
     let mut app = review_app(sketch, "join");
     pick(&mut app, p(5.0, 0.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     distance(&mut app, 2.0);
     button(&mut app, "Apply");
     app.key_press(Key::Escape);
@@ -366,7 +366,7 @@ fn a_collinear_offset_accepts_a_constraint_driven_source_corner() {
     fixed_segment(&mut sketch, p(10.0, 0.0), p(20.0, 0.0));
     let mut app = review_app(sketch, "source-corner");
     pick(&mut app, p(5.0, 0.0));
-    ribbon::click_ribbon(&mut app, "Offset");
+    ribbon::run_command(&mut app, "sketch_offset");
     distance(&mut app, 2.0);
     button(&mut app, "Apply");
     app.key_press(Key::Escape);

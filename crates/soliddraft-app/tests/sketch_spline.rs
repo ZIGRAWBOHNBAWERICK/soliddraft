@@ -28,7 +28,9 @@ fn pick(app: &mut App, point: P2) {
 
 #[test]
 fn dynamic_mirror_completes_spline_pairs_in_one_undo_step() {
-    for label in ["Fit-point spline", "Control-point spline"] {
+    for (command, label) in
+        [("sketch_fit_spline", "Fit-point spline"), ("sketch_control_spline", "Control-point spline")]
+    {
         for enter in [true, false] {
             let case = ribbon::case(&format!("spline-dynamic-{label}-{enter}"));
             let mut document = ribbon::blank();
@@ -46,7 +48,7 @@ fn dynamic_mirror_completes_spline_pairs_in_one_undo_step() {
                 app.state_mut().state.push(AppAction::EditSketch(id));
                 app.run_steps(15);
                 app.state_mut().state.sketch.as_mut().unwrap().dynamic_mirror = Some(axis);
-                ribbon::click_ribbon(app, label);
+                ribbon::run_command(app, command);
                 let before = session(app).sketch.clone();
                 let points = [P2::new(20.0, -10.0), P2::new(30.0, 20.0), P2::new(40.0, 0.0)];
                 for point in &points[..if enter { 3 } else { 2 }] {
@@ -96,18 +98,18 @@ fn dynamic_mirror_completes_spline_pairs_in_one_undo_step() {
 
 #[test]
 fn spline_tools_place_finish_close_undo_and_reopen_through_the_pointer() {
-    for (mode, tool, label, name, points) in [
+    for (mode, tool, command, name, points) in [
         (
             SplineMode::Fit,
             Tool::FitSpline,
-            "Fit-point spline",
+            "sketch_fit_spline",
             "spline-fit-pointer",
             vec![P2::ZERO, P2::new(20.0, 30.0), P2::new(40.0, 0.0)],
         ),
         (
             SplineMode::Control,
             Tool::ControlSpline,
-            "Control-point spline",
+            "sketch_control_spline",
             "spline-control-pointer",
             vec![P2::ZERO, P2::new(0.0, 40.0), P2::new(40.0, 40.0), P2::new(40.0, 0.0)],
         ),
@@ -122,8 +124,8 @@ fn spline_tools_place_finish_close_undo_and_reopen_through_the_pointer() {
         case.run(&mut app, |app| {
             app.state_mut().state.push(AppAction::EditSketch(id));
             app.run_steps(15);
-            ribbon::click_tab(app, "Sketch");
-            ribbon::click_ribbon(app, label);
+            ribbon::switch_workspace(app, "sketch");
+            ribbon::run_command(app, command);
             assert_eq!(session(app).tool, tool);
             let before = session(app).sketch.clone();
             pick(app, P2::ZERO);
@@ -139,7 +141,7 @@ fn spline_tools_place_finish_close_undo_and_reopen_through_the_pointer() {
             assert_eq!(session(app).tool, Tool::Select);
             assert_eq!(session(app).sketch, before);
 
-            ribbon::click_ribbon(app, label);
+            ribbon::run_command(app, command);
             let count = if mode == SplineMode::Control { points.len() - 1 } else { points.len() };
             for point in &points[..count] {
                 pick(app, *point);
@@ -198,13 +200,13 @@ fn spline_tools_place_finish_close_undo_and_reopen_through_the_pointer() {
             app.run_steps(6);
             assert_eq!(session(app).sketch, saved);
 
-            ribbon::click_ribbon(app, "Line");
+            ribbon::run_command(app, "sketch_line");
             let end = session(app).sketch.entity(curve).unwrap().point(points.len() - 1).unwrap();
             pick(app, end);
             pick(app, P2::ZERO);
             assert_eq!(session(app).sketch.regions().unwrap().len(), 1);
 
-            ribbon::click_ribbon(app, label);
+            ribbon::run_command(app, command);
             let close =
                 [P2::new(60.0, 0.0), P2::new(80.0, 0.0), P2::new(80.0, 20.0), P2::new(60.0, 20.0), P2::new(60.0, 0.0)];
             for point in close {

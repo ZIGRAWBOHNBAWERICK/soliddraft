@@ -39,8 +39,8 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     let mut app = ribbon::app(doc);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(15);
-    ribbon::click_tab(&mut app, "Sketch");
-    ribbon::click_ribbon(&mut app, "Ellipse");
+    ribbon::switch_workspace(&mut app, "sketch");
+    ribbon::run_command(&mut app, "sketch_ellipse");
     assert_eq!(session(&app).tool, Tool::Ellipse);
     let before = session(&app).sketch.clone();
     pick(&mut app, P2::ZERO);
@@ -52,7 +52,7 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     assert!(session(&app).pending.is_empty());
     assert_eq!(session(&app).sketch, before);
 
-    ribbon::click_ribbon(&mut app, "Ellipse");
+    ribbon::run_command(&mut app, "sketch_ellipse");
     for p in [P2::ZERO, P2::new(30.0, 0.0), P2::new(0.0, -12.0)] {
         pick(&mut app, p);
     }
@@ -78,7 +78,7 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     assert_eq!(session(&app).sketch.status, soliddraft_app::sketch::SolveStatus::FullyDefined);
     assert!(session(&app).sketch.drawn().next().unwrap().point(2).unwrap().v < 0.0);
 
-    ribbon::click_ribbon(&mut app, "Partial ellipse");
+    ribbon::run_command(&mut app, "sketch_partial_ellipse");
     for p in [P2::new(60.0, 0.0), P2::new(80.0, 0.0), P2::new(60.0, 10.0), P2::new(80.0, 0.0), P2::new(40.0, 0.0)] {
         pick(&mut app, p);
     }

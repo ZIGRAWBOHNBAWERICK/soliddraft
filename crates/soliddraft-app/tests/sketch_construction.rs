@@ -157,7 +157,7 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     let (mut app, id, dir) = launch(Sketch::new(), "centreline");
     let before = session(&app).sketch.clone();
     let revision = app.state().state.doc.revision();
-    ribbon::click_ribbon(&mut app, "Centreline");
+    ribbon::run_command(&mut app, "sketch_centreline");
     assert_eq!(session(&app).tool, Tool::Centreline);
     assert!(!session(&app).construction);
     assert!((commands::get("sketch_centreline").unwrap().active)(&app.state().state));
@@ -182,7 +182,7 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     history(&mut app, &before, &one);
 
     // Continue the shared line chain, then close onto its existing start.
-    ribbon::click_ribbon(&mut app, "Centreline");
+    ribbon::run_command(&mut app, "sketch_centreline");
     pick(&mut app, P2::new(30.0, 0.0));
     pick(&mut app, P2::new(30.0, 20.0));
     assert!(session(&app).chain_from.is_some());
@@ -202,7 +202,7 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     assert_eq!(session(&app).tool, Tool::Select);
     assert!(session(&app).pending.is_empty());
     assert_eq!(session(&app).sketch, guides);
-    ribbon::click_ribbon(&mut app, "Centreline");
+    ribbon::run_command(&mut app, "sketch_centreline");
     pick(&mut app, P2::new(-30.0, -20.0));
     let pos = screen(&app, P2::new(-15.0, -20.0));
     for pressed in [true, false] {
@@ -238,7 +238,7 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     ribbon::click_at(&mut app, checkbox.center());
     assert!(session(&app).construction);
     let revision = app.state().state.doc.revision();
-    ribbon::click_ribbon(&mut app, "Centreline");
+    ribbon::run_command(&mut app, "sketch_centreline");
     app.key_press(Key::C);
     app.run_steps(6);
     assert_eq!(session(&app).tool, Tool::Circle);

@@ -113,6 +113,24 @@
       "lint",
       "application-loop"
     ],
+    "ci/fixtures/import/iges-provenance.md": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/import/occt-box.igs": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
+    "ci/fixtures/import/occt-sphere.igs": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
     "ci/fixtures/import/block-seam-4um.step": [
       "lint",
       "kernel",

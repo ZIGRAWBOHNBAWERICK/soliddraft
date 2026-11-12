@@ -455,9 +455,9 @@ fn checked_cut_profiles_still_use_the_existing_editor_and_catallax_path() {
     assert_eq!(app.state().state.doc.revision(), revision);
     assert_eq!(app.state().state.doc.features.len(), features);
     frame(&mut app, "preflight-cut");
-    ribbon::click_ribbon(&mut app, "Exit");
+    ribbon::run_command(&mut app, "exit_sketch");
     assert!(app.state().state.editor.is_none());
-    ribbon::click_ribbon(&mut app, "Cut");
+    ribbon::run_command(&mut app, "cut");
     assert!(app.state().state.sketch.is_none());
     assert!(matches!(
         app.state().state.editor.as_ref().map(|e| &e.params),

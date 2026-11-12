@@ -46,9 +46,10 @@ pub fn preview_params() -> Vec<(&'static str, Value)> {
 }
 
 pub fn source_format(input: &Value) -> Result<ImportFormat, String> {
-    match input["format"].as_str().unwrap_or("step") {
-        "step" => Ok(ImportFormat::Step),
-        "iges" => Ok(ImportFormat::Iges),
+    match input.get("format") {
+        None => Ok(ImportFormat::Step),
+        Some(Value::String(format)) if format == "step" => Ok(ImportFormat::Step),
+        Some(Value::String(format)) if format == "iges" => Ok(ImportFormat::Iges),
         _ => Err("Choose step or iges as the import format.".into()),
     }
 }

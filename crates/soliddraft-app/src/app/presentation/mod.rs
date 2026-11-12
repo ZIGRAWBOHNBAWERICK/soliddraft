@@ -710,6 +710,7 @@ fn search_popup(ui: &mut egui::Ui, st: &mut AppState, anchor: &egui::Response) {
     }
     let mut entries: Vec<(String, String, bool, Pick)> = commands::search(&query, &st.commands)
         .into_iter()
+        .filter(|m| (m.command.shown)(st))
         .map(|m| {
             let c = m.command;
             (

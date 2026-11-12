@@ -413,6 +413,8 @@ pub struct CommandSpec {
     /// on". The ribbon shows it; search and the CLI use `label`.
     pub label_now: fn(&AppState) -> Option<String>,
     pub workspace: Workspace,
+    /// Hidden from command searches while a sketch is open.
+    pub outside_sketch: bool,
     /// One line on what it does: the tooltip, the search result and the CLI listing.
     pub doc: &'static str,
     /// More for agents, after `doc`: how the parameters work, what to call first.
@@ -466,6 +468,7 @@ impl CommandSpec {
             label,
             label_now: |_| None,
             workspace: Workspace::Part,
+            outside_sketch: false,
             doc,
             details: "",
             icon,
@@ -496,6 +499,12 @@ impl CommandSpec {
     /// A plain key that fires even while a text field has focus.
     fn key_anytime(mut self, scope: Scope, modifiers: Modifiers, key: Key) -> Self {
         self.keys.push(Shortcut { scope, modifiers, key, while_typing: true });
+        self
+    }
+
+    fn outside_sketch(mut self) -> Self {
+        self.outside_sketch = true;
+        self.shown = |s| !s.in_sketch();
         self
     }
 
@@ -579,7 +588,7 @@ impl CommandSpec {
 
     /// Whether the app offers it in a context: in the app, and in the context's workspace.
     pub fn available(&self, context: Context) -> bool {
-        self.in_app() && self.workspace.applies(context)
+        self.in_app() && self.workspace.applies(context) && !(self.outside_sketch && context.sketch)
     }
 
     /// The label as the ribbon shows it now.
@@ -634,7 +643,10 @@ impl CommandSpec {
     }
 
     pub fn is_enabled(&self, state: &AppState) -> bool {
-        self.catallax_wait().is_none() && self.action.is_some() && (self.enabled)(state)
+        self.catallax_wait().is_none()
+            && self.action.is_some()
+            && !(self.outside_sketch && state.in_sketch())
+            && (self.enabled)(state)
     }
 
     /// The action to run now, or `None` when the command is disabled.
@@ -2227,8 +2239,8 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("import_iges", "Import IGES", Icon::Import, "Import one IGES body after reviewing its repairs")
             .run(|_| AppAction::ImportIges(None))
-            .shown(|s| !s.in_sketch())
-            .when(|s| !s.in_sketch() && !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
+            .outside_sketch()
+            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
             .agents(Agents::Mcp, "Review with preview_import using format iges first. Repairs and the unchanged source are saved with the part.", crate::import::params)
             .undo(Undo::Step),
         cmd(

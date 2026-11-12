@@ -1772,8 +1772,8 @@ fn place<'a>(
     scaled: Scaled,
 ) -> Result<[BTreeMap<&'a Body, BigRational>; 3], MateRefusal> {
     let mut trees = Vec::with_capacity(3);
-    for axis in 0..3 {
-        trees.push(walk(bodies, &asks.edges[axis], axis)?);
+    for (axis, edges) in asks.edges.iter().enumerate() {
+        trees.push(walk(bodies, edges, axis)?);
     }
     let coordinates = |trees: &[Tree<'a>], values: &dyn Fn(usize, Node<'a>) -> Option<BigRational>| {
         std::array::from_fn(|axis| {

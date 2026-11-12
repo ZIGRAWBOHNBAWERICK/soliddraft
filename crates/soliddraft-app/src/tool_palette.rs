@@ -19,10 +19,6 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
         .show(root, |ui| show(ui, state));
 }
 
-fn active_tab(state: &AppState) -> Tab {
-    if state.assembly.is_active() { Tab::Assembly } else { state.ribbon_tab.into() }
-}
-
 fn group_label(label: &str, tab: Tab) -> &str {
     match label {
         "Modify" if tab == Tab::Part(RibbonTab::Sketch) => "Edit entities",
@@ -41,7 +37,7 @@ fn label(command: &CommandSpec, state: &AppState) -> String {
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
-    let tab = active_tab(state);
+    let tab = state.ribbon_tab.into();
     let mut pending = None;
     let mut relations_anchor = ui.max_rect();
     egui::ScrollArea::vertical().id_salt(("palette", tab.label())).auto_shrink([false; 2]).show(ui, |ui| {
@@ -122,7 +118,7 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     } else {
         theme::panel()
     };
-    let focus = response.has_focus().then(|| Stroke::new(1.0, theme::accent())).unwrap_or(Stroke::NONE);
+    let focus = if response.has_focus() { Stroke::new(1.0, theme::accent()) } else { Stroke::NONE };
     ui.painter().rect(rect, CornerRadius::same(theme::RADIUS), fill, focus, StrokeKind::Inside);
     let galley = text(ui, state, command, width);
     let x = if wide { rect.center().x - (ICON + PADDING + galley.size().x) / 2.0 } else { rect.left() + PADDING };

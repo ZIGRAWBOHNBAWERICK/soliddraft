@@ -81,11 +81,15 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
         }
         click(app, "Relations");
         assert!(app.state().state.sketch.as_ref().unwrap().relations_open);
-        assert!(egui::Popup::is_any_open(&app.ctx));
+        assert!(app.query_all_by_label("Show all relations").next().is_some(), "the Relations menu is visible");
         case.frame(app, "relations");
         app.key_press(Key::Escape);
         app.run_steps(8);
         assert!(!app.state().state.sketch.as_ref().unwrap().relations_open);
+        assert!(app.query_all_by_label("Show all relations").next().is_none());
+        app.set_size(vec2(1440.0, 900.0));
+        app.run_steps(8);
+        case.frame(app, "sketch-palette");
     });
 }
 
@@ -133,6 +137,7 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
             case.run(&mut app, |app| {
                 start_sketch(app);
                 assert!(app.state().state.viewport.rect.width() >= 300.0);
+                case.frame(app, &format!("{mode:?}-{scale}x-top"));
                 let mut seen = std::collections::BTreeSet::new();
                 for _ in 0..20 {
                     for text in ribbon::painted_in(app, palette(app)) {

@@ -458,7 +458,7 @@ impl SolidDraftApp {
     }
 
     fn frame_with_tools(&mut self, root: &mut egui::Ui, palette: bool) {
-        let palette = palette && !self.state.drawing.is_active();
+        let palette = palette && !self.state.drawing.is_active() && !self.state.assembly.is_active();
         // The menu bar is chrome; the ribbon paints its own strip and body.
         let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
         let panel_frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);

@@ -259,11 +259,11 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         }
         app.key_press(Key::Escape);
         app.run_steps(3);
-        app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands and features").click();
+        let search = ribbon::title_rect(app, "Search commands and features");
+        ribbon::click_at(app, search.center());
+        app.event(egui::Event::Text("extrude".to_owned()));
         app.run_steps(3);
-        app.get_by_role_and_label(egui::accesskit::Role::TextInput, "Search commands and features")
-            .type_text("extrude");
-        app.run_steps(3);
+        assert_eq!(app.state().state.search, "extrude", "the title search received the text");
         assert!(app.query_all_by_label("Extrude").next().is_none(), "title-bar search hides sketch features");
         app.state_mut().state.search.clear();
         for id in ["extrude", "revolve", "sweep", "cut"] {

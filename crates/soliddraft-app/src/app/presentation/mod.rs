@@ -697,7 +697,7 @@ fn shortcuts_grid(ui: &mut egui::Ui, shortcuts: &commands::Shortcuts) {
 }
 
 /// The command search under the menu bar: registry commands through
-/// [`commands::search`], then features by name.
+/// [`commands::search_here`], then features by name.
 fn search_popup(ui: &mut egui::Ui, st: &mut AppState, anchor: &egui::Response) {
     enum Pick {
         Command(&'static commands::CommandSpec),

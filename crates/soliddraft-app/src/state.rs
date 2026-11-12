@@ -103,6 +103,7 @@ pub enum AppAction {
     SetDisplay(DisplayMode),
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
+    SetScene(crate::viewport::scenes::Scene),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
     ToggleProjection,
@@ -139,6 +140,7 @@ pub enum AppAction {
     /// Shows the start page.
     ShowStartPage,
     ImportStep(Option<PathBuf>),
+    ImportIges(Option<PathBuf>),
     /// Imports an OpenUSD, glTF, URDF, OBJ or STL file as an assembly of mesh bodies and
     /// opens it. `None` asks for the file and where to write the assembly.
     ImportScene(Option<PathBuf>),

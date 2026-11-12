@@ -2725,7 +2725,7 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             "display": "unproved preview",
         }),
         FeatureKind::ImportStep(i) => json!({
-            "type": "import_step", "source_name": i.source_name, "sha256": i.sha256,
+            "type": if i.format == soliddraft_kernel_api::ImportFormat::Iges { "import_iges" } else { "import_step" }, "source_name": i.source_name, "sha256": i.sha256,
             "bytes": i.source.len(), "decisions": i.decisions,
         }),
     }
@@ -2949,18 +2949,22 @@ impl ToolHost for CommandTools<'_> {
                 Ok(json!({"status":"applied"}))
             })(),
             "preview_import" if mcp => (|| {
-                let preview = crate::import::Preview::read(self.doc, &crate::import::source_path(&input)?)?;
+                let preview = crate::import::Preview::read_source(self.doc, &crate::import::source_path(&input)?, crate::import::source_format(&input)?)?;
                 Ok(preview.summary())
             })(),
-            "import_step" if mcp => (|| {
+            "import_step" | "import_iges" if mcp => (|| {
                 let expected = input["preview_token"]
                     .as_str()
                     .filter(|token| !token.is_empty())
                     .ok_or("preview_token is required; review the source with preview_import first")?;
-                let preview = crate::import::Preview::read(self.doc, &crate::import::source_path(&input)?)?;
+                let format = if name == "import_iges" { soliddraft_kernel_api::ImportFormat::Iges } else { soliddraft_kernel_api::ImportFormat::Step };
+                if input.get("format").is_some() && crate::import::source_format(&input)? != format {
+                    return Err("The source format does not match the import command. Review the correct format first.".into());
+                }
+                let preview = crate::import::Preview::read_source(self.doc, &crate::import::source_path(&input)?, format)?;
                 if preview.token() != expected {
                     return Err(
-                        "the STEP source or repair questions changed since review; run preview_import again".into()
+                        "the source or repair questions changed since review; run preview_import again".into()
                     );
                 }
                 let decline = serde_json::from_value(input.get("decline").cloned().unwrap_or(json!([])))

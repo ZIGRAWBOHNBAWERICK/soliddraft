@@ -1,4 +1,4 @@
-//! Bounded repair of an imported STEP body: what the app asks of the kernel and what it
+//! Bounded repair of an imported STEP or IGES body: what the app asks of the kernel and what it
 //! gets back, as the JSON shapes of `catallax-import-proposals/1` and
 //! `catallax-import-repair/2`.
 //!
@@ -9,6 +9,32 @@
 use serde::{Deserialize, Serialize};
 
 use crate::OpResult;
+
+/// The parser used for an immutable imported source, also saved with the feature.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportFormat {
+    /// ISO 10303 Part 21. The default for saved imports without a format field.
+    #[default]
+    Step,
+    /// IGES 5.3 manifold solids.
+    Iges,
+}
+
+impl ImportFormat {
+    /// The source format as shown in the import dialog.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Step => "STEP",
+            Self::Iges => "IGES",
+        }
+    }
+
+    /// Whether the legacy STEP default may be omitted from a saved feature.
+    pub fn is_step(&self) -> bool {
+        *self == Self::Step
+    }
+}
 
 /// The format tag of a change record.
 pub const REPAIR_FORMAT: &str = "catallax-import-repair/2";

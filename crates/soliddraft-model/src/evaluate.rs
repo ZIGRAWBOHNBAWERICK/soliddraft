@@ -1124,7 +1124,7 @@ impl Document {
             decisions: &decisions,
             record: i.record.as_ref(),
         };
-        match self.kernel.import_step(&OpTag::new(format!("{}.import", f.id)), &request) {
+        match self.kernel.import_source(i.format, &OpTag::new(format!("{}.import", f.id)), &request) {
             Ok(mut r) => {
                 let release = |r: &ImportStepResult| {
                     for b in &r.bodies {

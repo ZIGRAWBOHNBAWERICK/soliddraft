@@ -1079,6 +1079,14 @@ impl SolidDraftApp {
                 }
                 viewport.preset = p;
             }
+            AppAction::SetScene(scene) => {
+                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                    self.state.viewport.scene = Some(scene);
+                    if let Err(e) = crate::settings::save_scene(scene) {
+                        self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
+                    }
+                }
+            }
             AppAction::SetTheme(mode) => {
                 theme::set_mode(ctx, mode);
                 if let Err(e) = crate::settings::save_appearance(&crate::settings::Appearance { theme: mode }) {
@@ -1142,6 +1150,22 @@ impl SolidDraftApp {
                 let path = path.or_else(|| crate::platform::open_path("Import STEP", "STEP", &["step", "stp"]));
                 if let Some(path) = path {
                     match crate::import::Preview::read(&self.state.doc, &path) {
+                        Ok(preview) => self.state.import_dialog = Some(preview),
+                        Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
+            AppAction::ImportIges(path) => {
+                if self.state.in_sketch() || self.state.doc.proof_pending() {
+                    return;
+                }
+                let path = path.or_else(|| crate::platform::open_path("Import IGES", "IGES", &["iges", "igs"]));
+                if let Some(path) = path {
+                    match crate::import::Preview::read_source(
+                        &self.state.doc,
+                        &path,
+                        soliddraft_kernel_api::ImportFormat::Iges,
+                    ) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
                         Err(message) => self.state.note(message, NoteKind::Error),
                     }

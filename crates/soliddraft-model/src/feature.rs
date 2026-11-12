@@ -685,6 +685,9 @@ impl Default for GyroidFeature {
 /// its proposed repairs. The body is derived from the two and rebuilds from them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportStepFeature {
+    /// Older files omit this field and always use STEP.
+    #[serde(default, skip_serializing_if = "soliddraft_kernel_api::ImportFormat::is_step")]
+    pub format: soliddraft_kernel_api::ImportFormat,
     /// The file name as imported, for display. It is never used as a path.
     pub source_name: String,
     /// The sha256 of `source`, in lowercase hex.
@@ -705,6 +708,7 @@ impl ImportStepFeature {
     /// An import of `source`, hashed, with no decisions.
     pub fn new(source_name: impl Into<String>, source: Vec<u8>) -> ImportStepFeature {
         ImportStepFeature {
+            format: soliddraft_kernel_api::ImportFormat::Step,
             source_name: source_name.into(),
             sha256: sha256_hex(&source),
             source,

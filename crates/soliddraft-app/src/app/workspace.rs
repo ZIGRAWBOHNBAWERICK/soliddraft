@@ -100,6 +100,7 @@ impl SolidDraftApp {
         state.viewport.preset = preset;
         state.viewport.references = view.references;
         state.viewport.grid_style = view.grid;
+        state.viewport.scene = (state.frame_layout == crate::settings::FrameLayout::EditSuite).then_some(view.scene);
         if !preset.shows_edges() {
             state.viewport.display = DisplayMode::Shaded;
         }

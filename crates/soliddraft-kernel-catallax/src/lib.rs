@@ -205,7 +205,7 @@ impl State {
     fn sources(&self, steps: &BTreeMap<u64, Value>) -> KernelResult<BTreeMap<String, Arc<[u8]>>> {
         steps
             .values()
-            .filter(|step| step["op"] == "import_step")
+            .filter(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges")))
             .map(|step| {
                 let sha = step["file"]["sha256"].as_str().unwrap_or_default();
                 let bytes = self.files.get(sha).ok_or_else(|| {
@@ -273,7 +273,7 @@ impl CatallaxKernel {
             || stored
                 .steps
                 .values()
-                .any(|s| matches!(s["op"].as_str(), Some("import_step" | "loft" | "native_profile")))
+                .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "loft" | "native_profile")))
         {
             let op = if swept { OpKind::Sweep } else { OpKind::ImportStep };
             return serde_json::to_value(converted_recipe(&recipe, op)?.recipe)
@@ -536,7 +536,7 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     let mut imports = Vec::new();
     let steps = legacy["steps"].as_array_mut().expect("generated recipe steps");
     for index in (0..steps.len()).rev() {
-        if steps[index]["op"] != "import_step" {
+        if !matches!(steps[index]["op"].as_str(), Some("import_step" | "import_iges")) {
             continue;
         }
         let mut native = steps[index].clone();
@@ -787,11 +787,33 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
 
 impl Kernel for CatallaxKernel {
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
-        self.observe("propose_import", || import::propose(source, options))
+        self.observe("propose_import", || import::propose(ImportFormat::Step, source, options))
     }
 
     fn import_step(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
-        self.observe("import_step", || self.import_body(tag, request))
+        self.observe("import_step", || self.import_body(ImportFormat::Step, tag, request))
+    }
+
+    fn propose_import_source(
+        &self,
+        format: ImportFormat,
+        source: &[u8],
+        options: &ImportOptions,
+    ) -> KernelResult<ProposalSet> {
+        self.observe("propose_import", || import::propose(format, source, options))
+    }
+
+    fn import_source(
+        &self,
+        format: ImportFormat,
+        tag: &OpTag,
+        request: &ImportStepRequest<'_>,
+    ) -> KernelResult<ImportStepResult> {
+        let op = match format {
+            ImportFormat::Step => "import_step",
+            ImportFormat::Iges => "import_iges",
+        };
+        self.observe(op, || self.import_body(format, tag, request))
     }
 
     fn backend(&self) -> BackendInfo {

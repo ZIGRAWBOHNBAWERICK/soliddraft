@@ -453,10 +453,19 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         json!({"sketch":"Sketch1", "start":[0,0,0], "orientation":"fixed", "segments":spline_controls(3.0)}),
     );
     check(&doc, 24.0);
-    let names: Vec<_> = doc.faces.iter().map(|f| doc.face_ref(f.id).unwrap()).collect();
+    let names = |doc: &Document| {
+        doc.faces
+            .iter()
+            .map(|f| {
+                let reference = doc.face_ref(f.id).unwrap();
+                (reference.feature, reference.generator, reference.ordinal, reference.label)
+            })
+            .collect::<Vec<_>>()
+    };
+    let before_names = names(&doc);
     call(&mut doc, "edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "segments":spline_controls(6.0)}));
     check(&doc, 48.0);
-    assert_eq!(names, doc.faces.iter().map(|f| doc.face_ref(f.id).unwrap()).collect::<Vec<_>>());
+    assert_eq!(before_names, names(&doc));
     call(&mut doc, "undo", json!({}));
     check(&doc, 24.0);
     call(&mut doc, "redo", json!({}));

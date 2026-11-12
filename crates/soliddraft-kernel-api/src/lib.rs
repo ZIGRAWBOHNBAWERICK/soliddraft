@@ -808,7 +808,7 @@ pub trait Kernel: Send + Sync {
 
     /// Turns a profile body about an axis into a solid.
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult>;
-    /// Sweeps a polygon profile along a chain of lines and arcs.
+    /// Sweeps a polygon profile along lines and arcs, or one fixed rational spline.
     fn sweep(&self, _tag: &OpTag, _profile: BodyId, _params: &Sweep) -> KernelResult<OpResult> {
         Err(KernelError::Unsupported("Sweep is coming soon.".into()))
     }

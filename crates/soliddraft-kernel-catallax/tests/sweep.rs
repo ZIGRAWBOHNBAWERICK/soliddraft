@@ -1,4 +1,4 @@
-//! Line and arc sweeps through the exact application entry, properties, display and STEP.
+//! Path sweeps through the exact application entry, properties, display and STEP.
 
 use soliddraft_kernel_api::*;
 use soliddraft_kernel_catallax::CatallaxKernel;

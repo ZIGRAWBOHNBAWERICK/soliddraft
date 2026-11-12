@@ -1,4 +1,4 @@
-//! Catallax `path` and `sweep` steps for the application's line and arc chains.
+//! Catallax `path` and `sweep` steps for line, arc and spline paths.
 //!
 //! The chain is checked here so a refusal reads plainly. Catallax still decides the
 //! supported domain: its refusal codes, never its wording, reach the application.

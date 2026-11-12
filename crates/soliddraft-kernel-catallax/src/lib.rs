@@ -652,7 +652,17 @@ fn build(
     } else {
         build_with_files(&converted.recipe, prefix, files)
     }
-    .map_err(|e| build_error(op, e))?;
+    .map_err(|e| {
+        let spline = input["steps"].as_array()
+            .and_then(|steps| steps.iter().find(|step| step["id"] == input["result"]))
+            .and_then(|step| step["path"]["segments"].as_array())
+            .is_some_and(|segments| segments.iter().any(|s| s["kind"] == "spline"));
+        if op == OpKind::Sweep && spline && e.code() == "features.unsupported-path" {
+            KernelError::InvalidInput("This spline sweep was refused because it needs one spline segment and a profile that keeps its direction".into())
+        } else {
+            build_error(op, e)
+        }
+    })?;
     Ok((app, converted.steps))
 }
 
@@ -868,11 +878,6 @@ impl Kernel for CatallaxKernel {
         })
         .map_err(|error| match error {
             KernelError::Unavailable(_) => sweep::refusal(""),
-            KernelError::Unsupported(message) if message.ends_with(" is coming soon.")
-                && params.segments.iter().any(|s| matches!(s, PathSegment::Spline { .. })) =>
-            {
-                KernelError::InvalidInput("This spline sweep was refused because it needs one spline segment and a profile that keeps its direction".into())
-            }
             other => other,
         })
     }

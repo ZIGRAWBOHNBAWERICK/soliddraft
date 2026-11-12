@@ -52,3 +52,23 @@ fn coplanar_loft_is_refused_plainly_and_retained_lofts_export_as_native_recipes(
         k.release(body).unwrap();
     }
 }
+
+#[test]
+fn incompatible_holes_report_the_typed_refusal_in_plain_words() {
+    let k = CatallaxKernel::new();
+    let lower = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 4.0, 4.0);
+    let plane = Plane { origin: Vec3::new(0.0, 0.0, 3.0), ..Plane::XY };
+    let mut upper = Profile::rectangle(plane, Point2::new(0.0, 0.0), 4.0, 4.0);
+    upper.holes.push(Profile::rectangle(plane, Point2::new(0.0, 0.0), 2.0, 2.0).outer);
+    let a = k.create_body_from_profile(&OpTag::new("lower"), &lower).unwrap();
+    let b = k.create_body_from_profile(&OpTag::new("upper"), &upper).unwrap();
+    let error = k.loft(&OpTag::new("loft"), &[a.body, b.body], LoftShape::Ruled).unwrap_err();
+    assert!(
+        matches!(error, KernelError::InvalidInput(ref message)
+        if message == "Loft profiles need matching closed regions and holes in the same order"),
+        "{error}"
+    );
+    for body in [a.body, b.body] {
+        k.release(body).unwrap();
+    }
+}

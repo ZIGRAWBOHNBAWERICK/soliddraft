@@ -104,7 +104,11 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
     app.run_steps(20);
     for mode in [PolygonMode::Inscribed, PolygonMode::Circumscribed] {
         ribbon::click_ribbon(&mut app, "Polygon");
+        eprintln!("[DEBUG-sd-l04-polygon] after ribbon mode={mode:?} tool={:?}", session(&app).tool);
+        app.render().unwrap().save(dir.join(format!("{mode:?}-after-tool.png"))).unwrap();
         control(&mut app, if mode == PolygonMode::Inscribed { "Inscribed" } else { "Circumscribed" });
+        eprintln!("[DEBUG-sd-l04-polygon] after mode mode={mode:?} tool={:?}", session(&app).tool);
+        app.render().unwrap().save(dir.join(format!("{mode:?}-after-mode.png"))).unwrap();
         number(&mut app, 0, "5");
         let before = session(&app).sketch.clone();
         let center = if mode == PolygonMode::Inscribed { P2::ZERO } else { P2::new(-50.0, -35.0) };

@@ -68,13 +68,13 @@ pub(super) fn face_profile(solid: &Solid, body: BodyId, face: FaceId) -> KernelR
     let f = model.face(id);
     let Surface::Plane(plane) = model.geom().surface(f.surface) else { return Err(unsupported()) };
     let normal = &plane.normal;
-    let length = normal.dot(normal).sqrt();
-    let length = length.rational_ref().ok_or_else(unsupported)?;
+    let squared = normal.dot(normal);
+    let length = crate::native::sqrt(squared.rational_ref().ok_or_else(unsupported)?).ok_or_else(unsupported)?;
     let [nx, ny, nz] = normal.rational_components().ok_or_else(unsupported)?;
     let quaternion = if nx.is_zero() && ny.is_zero() && nz.sign() == catallax_numbers::Sign::Negative {
         [Rational::zero(), Rational::one(), Rational::zero(), Rational::zero()]
     } else {
-        [length + nz, -ny.clone(), nx.clone(), Rational::zero()]
+        [&length + nz, -ny.clone(), nx.clone(), Rational::zero()]
     };
     let [w, x, y, z] = quaternion.clone();
     let rotation = catallax_shapes::Rotation::from_quaternion(w, x, y, z).map_err(|_| unsupported())?;
@@ -108,8 +108,9 @@ pub(super) fn face_profile(solid: &Solid, body: BodyId, face: FaceId) -> KernelR
                     segments.push(json!({"kind":"line","id":name,"to":project(point)?}));
                 }
                 Curve::Circle(circle) if e.start.is_none() && e.end.is_none() => {
-                    let radius = circle.radius_sq.sqrt();
-                    let radius = Number::new(radius.rational_ref().ok_or_else(unsupported)?.clone());
+                    let radius = crate::native::sqrt(circle.radius_sq.rational_ref().ok_or_else(unsupported)?)
+                        .ok_or_else(unsupported)?;
+                    let radius = Number::new(radius);
                     segments.push(json!({"kind":"circle","id":name,"centre":project(&circle.center)?,"radius":radius}));
                 }
                 _ => return Err(unsupported()),

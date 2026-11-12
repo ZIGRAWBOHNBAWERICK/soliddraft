@@ -1807,10 +1807,10 @@ fn registry() -> Vec<CommandSpec> {
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Loft(_))))
             .hint(after_field)
             .agents(Agents::Verb, "Loft through two or more closed sketches or planar faces in the supplied order, with ruled or smooth sides.", tools::loft_params)
-            .undo(Undo::Document),
+            .undo(Undo::Step),
         cmd("edit_loft", "Edit loft", Icon::Loft, "Change loft profiles or side shape")
             .agents(Agents::Verb, "Change the ordered profiles and side shape of an existing loft.", tools::edit_loft_params)
-            .undo(Undo::Document),
+            .undo(Undo::Step),
         // Cut.
         cmd("cut", "Cut", Icon::Cad("cut"), "Remove material: cut a sketch into the part")
             .on(Solid, "Remove", Large)

@@ -160,6 +160,14 @@ fn whole_root(n: &Integer) -> Option<Integer> {
     }
 }
 
+/// The exact square root when it is rational, without constructing a symbolic root.
+pub(super) fn sqrt(n: &Rational) -> Option<Rational> {
+    if n.sign() == catallax_numbers::Sign::Negative {
+        return None;
+    }
+    Rational::new(whole_root(n.numerator())?, whole_root(n.denominator())?)
+}
+
 /// `v` scaled to unit length, when that length is rational.
 fn unit(v: &Exact) -> Option<Exact> {
     let square = dot(v, v);

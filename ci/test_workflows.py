@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import re
+import runpy
 import subprocess
 import tempfile
 import textwrap
@@ -241,6 +242,63 @@ class BaselineRefresh(unittest.TestCase):
                 self.assertEqual(set(result['selected']), {'kernel'} if refresh == 'true' else full)
                 self.assertIn('packaging=' + ('false' if refresh == 'true' else 'true'),
                               (temporary / 'output').read_text())
+
+
+class MacOSQualification(unittest.TestCase):
+    def test_pr_exclusion_preserves_other_units_work_and_gate_requirements(self):
+        root = pathlib.Path(__file__).resolve().parent.parent
+        text = (root / '.github/workflows/hosted.yml').read_text()
+        script = textwrap.dedent(text.split("<<'PYTHON'\n", 1)[1].split('          PYTHON\n', 1)[0])
+        registry = json.loads((root / 'ci/check-registry.json').read_text())['jobs']
+        full = set(registry) - {'select'}
+        macos = {'test-macos', 'interactive-macos', 'package-macos'}
+        verdict = runpy.run_path(str(root / 'ci/check-gate.py'))['verdict']
+        for event, ref in [('pull_request', 'refs/pull/7/merge'), ('push', MAIN),
+                           ('schedule', MAIN), ('workflow_dispatch', 'refs/heads/feature'),
+                           ('push', 'refs/heads/release/0.1.0')]:
+            with self.subTest(event=event, ref=ref), tempfile.TemporaryDirectory() as directory:
+                temporary = pathlib.Path(directory)
+                selection, output, summary = (temporary / p for p in ('selection.json', 'output', 'summary'))
+                original = {'selected': sorted(full), 'reasons': {u: ['base: required'] for u in full},
+                            'work': {'packages': ['soliddraft-app'], 'test_targets': None, 'scenarios': None}}
+                selection.write_text(json.dumps(original))
+                env = dict(os.environ, EVENT=event, REF=ref, BENCHMARK_LINUX_ONLY='false',
+                           REFRESH_CATALLAX_VIEWS='false', WINDOWS='false')
+                subprocess.run(['python3', '-c', script, str(selection), str(output), str(summary)],
+                               cwd=root, env=env, check=True, capture_output=True, text=True)
+                result = json.loads(selection.read_text())
+                expected = full - macos if event == 'pull_request' else full
+                self.assertEqual(set(result['selected']), expected)
+                self.assertEqual(set(result['reasons']), expected)
+                self.assertEqual(result['work'], original['work'])
+                values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                self.assertEqual(set(json.loads(values['selected'])), expected)
+                self.assertEqual(values['packaging'], 'true')
+                results = dict.fromkeys(registry, 'success')
+                if event == 'pull_request':
+                    results.update(dict.fromkeys(macos, 'skipped'))
+                self.assertTrue(verdict(registry, registry, [], result['selected'], results)['pass'])
+                for required in ('test-linux', 'test-windows', 'package-linux', 'package-windows', 'package-web'):
+                    with self.subTest(required=required):
+                        self.assertFalse(verdict(registry, registry, [], result['selected'],
+                                                 dict(results, **{required: 'skipped'}))['pass'])
+
+    def test_package_matrix_and_inventory_use_the_same_event_policy(self):
+        root = pathlib.Path(__file__).resolve().parent.parent
+        text = (root / '.github/workflows/packages.yml').read_text()
+        desktop = re.search(r'python3 packaging/release.py desktop (.*?)\)"', text)[1]
+        checksums = re.search(r'python3 packaging/release.py checksums (.*)', text)[1]
+        for event in ('pull_request', 'push', 'schedule', 'workflow_dispatch'):
+            for windows in (False, True):
+                with self.subTest(event=event, windows=windows):
+                    values = dict(event_name=event, inputs={'windows': windows})
+                    options = render(desktop, **values).split()
+                    self.assertEqual(options, render(checksums, **values).split())
+                    result = subprocess.run(['python3', 'packaging/release.py', 'desktop', *options],
+                                            cwd=root, check=True, capture_output=True, text=True)
+                    platforms = {cell['platform'] for cell in json.loads(result.stdout)}
+                    self.assertEqual(platforms, {'linux'} | ({'windows'} if windows else set())
+                                     | ({'macos'} if event != 'pull_request' else set()))
 
 
 class NightlyQualification(unittest.TestCase):

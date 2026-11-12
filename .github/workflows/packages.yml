@@ -43,7 +43,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - id: desktop
         name: Choose the desktop packages
-        run: echo "matrix=$(python3 packaging/release.py desktop ${{ inputs.windows && '--windows' || '' }})" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(python3 packaging/release.py desktop ${{ inputs.windows && '--windows' || '' }} ${{ github.event_name == 'pull_request' && '--no-macos' || '' }})" >> "$GITHUB_OUTPUT"
 
   desktop:
     name: Package ${{ matrix.platform }}
@@ -327,7 +327,7 @@ jobs:
           syft scan dir:. -o spdx-json > "$RUNNER_TEMP/sbom.json"
           mv "$RUNNER_TEMP/sbom.json" "dist/soliddraft-$VERSION.spdx.json"
       - name: Require the complete artifact set and hash every download
-        run: python3 packaging/release.py checksums ${{ inputs.windows && '--windows' || '' }}
+        run: python3 packaging/release.py checksums ${{ inputs.windows && '--windows' || '' }} ${{ github.event_name == 'pull_request' && '--no-macos' || '' }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-dry-run

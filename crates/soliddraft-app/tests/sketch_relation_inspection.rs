@@ -135,7 +135,7 @@ fn whole_sketch_relations_can_be_inspected_without_selecting_geometry() {
     filter(&mut app, "Selected");
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "1 of 2 shown"));
     filter(&mut app, "All");
-    ribbon::click_ribbon(&mut app, "Relations");
+    ribbon::run_command(&mut app, "relations");
     app.get_by_label("Show all relations").click();
     app.run_steps(6);
     app.key_press(Key::Escape);

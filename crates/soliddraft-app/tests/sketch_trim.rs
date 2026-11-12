@@ -37,7 +37,7 @@ fn launch(sketch: Sketch) -> (App, FeatureId) {
     let mut app = ribbon::app(doc);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
-    ribbon::click_ribbon(&mut app, "Trim");
+    ribbon::run_command(&mut app, "sketch_trim");
     (app, id)
 }
 
@@ -470,7 +470,7 @@ fn live_trim_undo_works_in_a_reopened_part_without_document_history() {
     assert!(!app.state().state.doc.can_undo(), "reopening clears document history");
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(10);
-    ribbon::click_ribbon(&mut app, "Trim");
+    ribbon::run_command(&mut app, "sketch_trim");
     press(&mut app, P2::new(0.0, -20.0));
     move_to(&mut app, P2::new(0.0, 20.0));
     assert_eq!(session(&app).sketch.drawn().count(), 6);

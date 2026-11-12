@@ -143,7 +143,7 @@ fn sketch_relations_are_accessible_from_the_ribbon() {
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let (doc, id, [a, b, c, d, p]) = fixture();
     let mut app = ribbon::app(doc);
-    ribbon::click_tab(&mut app, "Sketch");
+    ribbon::switch_workspace(&mut app, "sketch");
     assert!(!relations_control(&mut app).enabled, "unavailable outside a sketch");
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);

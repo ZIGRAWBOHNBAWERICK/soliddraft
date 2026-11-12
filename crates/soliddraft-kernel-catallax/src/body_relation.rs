@@ -2,7 +2,7 @@
 
 use catallax_app::queries;
 use catallax_measure::{Accuracy, Enclosure, distance::PreparedFace};
-use catallax_numbers::{Answer, Rational, Refusal};
+use catallax_numbers::{Answer, Outcome, Rational, Real, Refusal, StrictSign};
 use catallax_shapes::{Isometry, Pose, RVector3, Rotation, distance::Options};
 use catallax_topology::{Model, transformed_body};
 use serde_json::json;
@@ -113,6 +113,9 @@ fn minimum_gap(
     if [a, b].iter().any(|body| !model.body(*body).marks.is_empty()) {
         return Err(refused("Minimum distance", "body-relation.marked"));
     }
+    // Match the decimal conversion used to build authored dimensions.
+    let threshold = clearance.and_then(|c| crate::native::number(c, "clearance").ok().map(|n| n.value().clone()));
+    let mut within = false;
     let enclosure = answer(
         "Minimum distance",
         numerical("body_minimum_distance", |dec| {
@@ -131,27 +134,21 @@ fn minimum_gap(
             for a in &first {
                 for b in &second {
                     let bounds = a.face_to_face(b, model, &options, dec)?;
-                    if std::env::var_os("SOLIDDRAFT_F13_TRACE").is_some()
-                        && clearance.is_some_and(|c| (0.29..0.31).contains(&c))
+                    if !within
+                        && let Some(c) = &threshold
+                        && &bounds.lower <= c
                     {
-                        let c = crate::native::number(clearance.unwrap(), "clearance").unwrap().value().clone();
-                        if bounds.lower <= c
-                            && bounds.upper.as_ref().is_some_and(|hi| hi > &c)
-                            && let Some([p, q]) = &bounds.witnesses
-                        {
-                            use catallax_numbers::{Outcome, Real, StrictSign};
-                            let squared = p.minus(q).norm_squared();
-                            let exact = squared.as_rational().map(|r| format!("{}/{}", r.numerator(), r.denominator()));
-                            let sign = match dec.sign(&(&squared - &Real::from(&c * &c))) {
-                                Outcome::Proven(StrictSign::Negative) => "proven_negative",
-                                Outcome::Proven(StrictSign::Positive) => "proven_positive",
-                                Outcome::ProvenCoincident(_) => "proven_zero",
-                                Outcome::NotExact(_) => "not_exact",
-                                Outcome::Refused(_) => "refused",
+                        if bounds.upper.as_ref().is_some_and(|hi| hi <= c) {
+                            within = true;
+                        } else if let Some([p, q]) = &bounds.witnesses {
+                            // A ball may straddle exact equality; its admitted witness can settle it.
+                            let delta = &p.minus(q).norm_squared() - &Real::from(c * c);
+                            within = match dec.sign(&delta) {
+                                Outcome::Proven(StrictSign::Negative) | Outcome::ProvenCoincident(_) => true,
+                                Outcome::Proven(StrictSign::Positive) => false,
+                                Outcome::NotExact(n) => return Err(Refusal::from(n)),
+                                Outcome::Refused(r) => return Err(r),
                             };
-                            eprintln!(
-                                "[DEBUG-sd-f13] admitted_witness_squared={exact:?} squared_minus_threshold_squared={sign}"
-                            );
                         }
                     }
                     lower = Some(lower.map_or(bounds.lower.clone(), |lo| lo.min(bounds.lower)));
@@ -166,25 +163,10 @@ fn minimum_gap(
             Ok(Answer::exact(Enclosure { lo, hi }))
         }),
     )?;
-    let exceeds_clearance = clearance.and_then(|c| {
-        // Match the decimal conversion used to build authored dimensions.
-        let c = crate::native::number(c, "clearance").ok()?.value().clone();
-        if std::env::var_os("SOLIDDRAFT_F13_TRACE").is_some() {
-            eprintln!(
-                "[DEBUG-sd-f13] gap_lo={}/{} gap_hi={}/{} threshold={}/{} lower_gt={} upper_le={}",
-                enclosure.lo.numerator(),
-                enclosure.lo.denominator(),
-                enclosure.hi.numerator(),
-                enclosure.hi.denominator(),
-                c.numerator(),
-                c.denominator(),
-                enclosure.lo > c,
-                enclosure.hi <= c,
-            );
-        }
-        if enclosure.lo > c {
+    let exceeds_clearance = threshold.as_ref().and_then(|c| {
+        if &enclosure.lo > c {
             Some(true)
-        } else if enclosure.hi <= c {
+        } else if within || &enclosure.hi <= c {
             Some(false)
         } else {
             None
@@ -204,26 +186,6 @@ pub(super) fn relation(
     }
     if clearance.is_some_and(|c| !c.is_finite() || c < 0.0) {
         return Err(KernelError::InvalidInput("A clearance must be a finite length of zero or more".into()));
-    }
-    if std::env::var_os("SOLIDDRAFT_F13_TRACE").is_some() && clearance.is_some_and(|c| (0.29..0.31).contains(&c)) {
-        let c = clearance.unwrap();
-        let binary = Rational::from_f64_exact(c).unwrap();
-        let exact = |v: f64| {
-            let r = Rational::from_f64_exact(v).unwrap();
-            format!("{}/{}", r.numerator(), r.denominator())
-        };
-        eprintln!(
-            "[DEBUG-sd-f13] input_clearance_short={c} binary_threshold={}/{}",
-            binary.numerator(),
-            binary.denominator()
-        );
-        eprintln!(
-            "[DEBUG-sd-f13] placement_a_t={:?} placement_b_t={:?}",
-            a.translation.map(exact),
-            b.translation.map(exact)
-        );
-        eprintln!("[DEBUG-sd-f13] recipe_a={}", k.body_recipe(a.body)?);
-        eprintln!("[DEBUG-sd-f13] recipe_b={}", k.body_recipe(b.body)?);
     }
     let (first, second) = (k.solid(a.body)?, k.solid(b.body)?);
     let (mut model, bodies) = operands(k, a.body, b.body)?;

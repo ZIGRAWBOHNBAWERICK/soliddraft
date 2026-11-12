@@ -175,7 +175,9 @@ proof to settle touching.
 The minimum boundary distance takes the minimum of Catallax's trimmed-face distance bounds
 over every face pair. A positive boundary distance proves separation only after a no-overlap
 proof, so containment is never mistaken for a gap. Clearance decisions compare the rational
-bounds with the requested length's shortest round-trip decimal, matching authored dimensions. Display
+bounds with the requested length's shortest round-trip decimal, matching authored dimensions.
+When an interval crosses the threshold, a native exact predicate on an admitted witness's
+squared distance can prove at-or-under clearance, including equality. Display
 bounds round outward, including zero-width rational intervals between two doubles.
 
 `overlap_mm3` records the volume enclosure; `contact_faces` records the two lists of source

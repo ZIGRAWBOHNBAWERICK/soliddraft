@@ -44,7 +44,7 @@ pub struct BodyContactFaces {
     pub second: Vec<FaceId>,
 }
 
-/// Minimum distance and decisions made against the rational bounds.
+/// Minimum distance and decisions made against exact bounds and admitted witnesses.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BodyDistance {
     /// Millimetres, with outward-rounded endpoints.

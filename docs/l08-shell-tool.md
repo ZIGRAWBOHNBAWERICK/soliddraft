@@ -30,7 +30,7 @@ and a fresh process.
 | Script/MCP command registration | Shell window action had no tool declaration, failing the workspace entry-point contract | `shell` and `edit_shell` expose the existing model operation through checked schemas and the standard command handler |
 | Inner-wall history | `Other` role | `Role::Inner` maps to `FaceRole::Offset` |
 | Planar tray | No application shell tool | Kernel checks and rendered create/edit/save/reopen/select/export path pass |
-| Circular-extrusion shell | Generic stage-3 refusal | Exact `distance.cylinder-domain` refusal retained; unsupported in this slice |
+| Circular-extrusion shell | Generic stage-3 refusal, then `distance.cylinder-domain` | R2 x 5 closed shell at wall 1 passes exact wall, material, volume and manifold checks through [Catallax's sewn analytic-shell proof](https://github.com/BohnBawerick/catallax/pull/496) |
 | Nonconvex planar shell | `distance.unsupported-envelope` refusal | L-shaped tray builds with rounded inner corners; build, edit, display, reopen and raw-valid STEP are covered by `release_geometry` |
 | Full P4 intersection/edit | Outside this tool's completed evidence | Not run or claimed complete |
 

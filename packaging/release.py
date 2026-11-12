@@ -97,16 +97,19 @@ def collect(platform):
         archive(platform, ROOT / "target" / TARGETS[platform][0] / "release")
 
 
-def desktop(windows):
-    return [cell for cell in DESKTOP if windows or cell["platform"] != "windows"]
+def desktop(windows, macos=True):
+    return [cell for cell in DESKTOP if (windows or cell["platform"] != "windows")
+            and (macos or cell["platform"] != "macos")]
 
 
-def checksums(windows):
+def checksums(windows, macos=True):
     output = ROOT / "dist"
     expected = {
         f"{prefix('linux')}.AppImage", f"{prefix('linux')}.deb", f"{prefix('linux')}.tar.gz",
-        f"{prefix('macos')}.dmg", f"{prefix('web')}.zip", "release-notes.md", f"soliddraft-{version()}.spdx.json",
+        f"{prefix('web')}.zip", "release-notes.md", f"soliddraft-{version()}.spdx.json",
     }
+    if macos:
+        expected.add(f"{prefix('macos')}.dmg")
     if windows:
         expected |= {f"{prefix('windows')}.msi", f"{prefix('windows')}.zip"}
     actual = {p.name for p in output.iterdir() if p.is_file()}
@@ -235,8 +238,10 @@ def main():
     for name in ("configure", "collect"):
         commands.add_parser(name).add_argument("platform", choices=TARGETS)
     commands.add_parser("web").add_argument("source", type=Path)
-    commands.add_parser("desktop").add_argument("--windows", action="store_true")
-    commands.add_parser("checksums").add_argument("--windows", action="store_true")
+    for name in ("desktop", "checksums"):
+        command = commands.add_parser(name)
+        command.add_argument("--windows", action="store_true")
+        command.add_argument("--no-macos", dest="macos", action="store_false")
     note = commands.add_parser("notes")
     note.add_argument("pulls", type=Path)
     note.add_argument("--previous")
@@ -255,9 +260,9 @@ def main():
     elif args.command == "web":
         archive("web", args.source)
     elif args.command == "desktop":
-        print(json.dumps(desktop(args.windows), separators=(",", ":")))
+        print(json.dumps(desktop(args.windows, args.macos), separators=(",", ":")))
     elif args.command == "checksums":
-        checksums(args.windows)
+        checksums(args.windows, args.macos)
     elif args.command == "notes":
         notes(args.pulls, args.previous, args.windows)
 

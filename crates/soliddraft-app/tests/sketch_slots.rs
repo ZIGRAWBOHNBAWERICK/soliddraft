@@ -150,7 +150,7 @@ fn exercise(label: &str, tool: Tool, picks: &[P2], area: f64) {
     assert_eq!(session(&app).sketch, saved);
 
     let path = dir.join("slot.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

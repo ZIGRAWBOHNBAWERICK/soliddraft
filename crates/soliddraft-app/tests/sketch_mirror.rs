@@ -107,7 +107,7 @@ fn axis(s: &mut Sketch) {
 fn reopen(app: &mut App, id: u64, name: &str) -> Sketch {
     let expected = session(app).sketch.clone();
     let path = std::env::temp_dir().join(format!("mirror-{}-{name}.dwprt", std::process::id()));
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

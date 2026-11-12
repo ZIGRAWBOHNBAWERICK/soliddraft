@@ -200,7 +200,7 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
     assert_eq!(session(&app).sketch, edited);
     proof(&mut app, "linked-distance-applied");
     let path = dir.join("offsets.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

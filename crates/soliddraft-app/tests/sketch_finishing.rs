@@ -157,7 +157,7 @@ fn native_finishing_keeps_analytic_previews_and_one_undo_step() {
     let after = session(&app).sketch.clone();
     assert_eq!(after.drawn().filter(|e| matches!(e.kind, EntityKind::Arc { .. }) && e.construction).count(), 2);
     let path = dir.join("finishing.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);
@@ -278,7 +278,7 @@ fn fixed_midpoint_treatments_match_preview_undo_redo_and_reopen() {
                 app.run_steps(8);
                 assert_eq!(session(&app).sketch.constraints, after.constraints, "{name}: one redo");
                 let path = dir.join("midpoints.dwprt");
-                app.state_mut().state.push(AppAction::ExitSketch(None));
+                app.state_mut().state.push(AppAction::ExitSketch);
                 app.run_steps(6);
                 app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
                 app.run_steps(6);
@@ -370,7 +370,7 @@ fn split_retargets_symmetry_and_keeps_it_through_undo_redo_and_reopen() {
             app.run_steps(8);
             assert_eq!(session(&app).sketch, after);
             let path = dir.join(format!("split-{arc}-{swapped}.dwprt"));
-            app.state_mut().state.push(AppAction::ExitSketch(None));
+            app.state_mut().state.push(AppAction::ExitSketch);
             app.run_steps(6);
             app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
             app.run_steps(6);

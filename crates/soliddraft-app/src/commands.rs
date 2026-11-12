@@ -25,7 +25,7 @@ use crate::document::{Command, Selection};
 use crate::drawing::{DrawingAction, DrawingSel, DrawingSession, DrawingTab, DrawingTool, LinkState, PlaceKind};
 use crate::icons::Icon;
 use crate::panels::Side;
-use crate::state::{AppAction, AppState, DragStep, EditorParams, ExitInto, RibbonTab, Tool};
+use crate::state::{AppAction, AppState, DragStep, EditorParams, RibbonTab, Tool};
 use crate::viewport::camera::StandardView;
 use crate::viewport::look::Preset;
 use crate::viewport::render::DisplayMode;
@@ -93,9 +93,7 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
     use DrawingTab as D;
     match tab {
         Tab::Part(RibbonTab::Solid) => &["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"],
-        Tab::Part(RibbonTab::Sketch) => {
-            &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"]
-        }
+        Tab::Part(RibbonTab::Sketch) => &["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "View"],
         Tab::Part(RibbonTab::Inspect) => &["Measure", "Check", "Surface quality"],
         Tab::Part(RibbonTab::View) => &["Orientation", "Display", "Projection", "Panels"],
         Tab::Part(RibbonTab::Assembly | RibbonTab::Surface | RibbonTab::PointCloud) => &[],
@@ -577,9 +575,11 @@ impl CommandSpec {
         self.action.is_some() || !self.ribbon.is_empty()
     }
 
-    /// Whether the app offers it in a context: in the app, and in the context's workspace.
+    /// Whether the app offers it in the current workspace and sketch mode.
     pub fn available(&self, context: Context) -> bool {
-        self.in_app() && self.workspace.applies(context)
+        self.in_app()
+            && self.workspace.applies(context)
+            && !(context.sketch && matches!(self.id, "extrude" | "revolve" | "sweep" | "cut"))
     }
 
     /// The label as the ribbon shows it now.
@@ -1449,7 +1449,7 @@ fn registry() -> Vec<CommandSpec> {
             .on(Solid, "Sketch", Large)
             .on(Sketch, "Sketch", Large)
             .key(Scope::Model, none, Key::S)
-            .run(|s| if s.in_sketch() { AppAction::ExitSketch(None) } else { AppAction::StartSketch })
+            .run(|s| if s.in_sketch() { AppAction::ExitSketch } else { AppAction::StartSketch })
             .when(|s| s.in_sketch() || field_open(s))
             .lit(AppState::in_sketch)
             .hint(|s| if s.in_sketch() { Some(format!("Exit the sketch ({})", key_of("confirm"))) } else { after_field(s) })
@@ -1472,7 +1472,7 @@ fn registry() -> Vec<CommandSpec> {
 .undo(Undo::Step),
         cmd("exit_sketch", "Exit", Icon::Cad("exit_sketch"), "Exit the sketch")
             .on(Sketch, "Sketch", Large)
-            .run(|_| AppAction::ExitSketch(None))
+            .run(|_| AppAction::ExitSketch)
             .when(AppState::in_sketch)
 .app_only(EDITOR),
         cmd("sketch_line", "Line", Icon::Cad("line"), "Line: click points; right-click ends the chain")
@@ -1763,27 +1763,23 @@ fn registry() -> Vec<CommandSpec> {
         // Boss.
         cmd("extrude", "Extrude", Icon::Cad("extrude"), "Add material: extrude a sketch and join it to the part")
             .on(Solid, "Create", Large)
-            .on(Sketch, "Use sketch", Large)
             .key(Scope::Model, none, Key::E)
-            .run(
-                |s| {
-                    if s.in_sketch() { AppAction::ExitSketch(Some(ExitInto::Extrude)) } else { AppAction::StartExtrude }
-                },
-            )
-            .when(field_open)
+            .run(|_| AppAction::StartExtrude)
+            .shown(|s| !s.in_sketch())
+            .when(|s| !s.in_sketch() && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Extrude(_))))
             .hint(after_field)
             .agents(Agents::Verb, "Every profile of the sketch extrudes along its normal.", tools::extrude_params)
 .undo(Undo::Step),
         cmd("revolve", "Revolve", Icon::Cad("revolve"), "Add material: revolve a sketch about an axis")
             .on(Solid, "Create", Large)
-            .on(Sketch, "Use sketch", Large)
-            .run(|s| if s.in_sketch() { AppAction::ExitSketch(Some(ExitInto::Revolve)) } else { AppAction::StartRevolve })
-            .when(|s| field_open(s) && (s.in_sketch() || s.selected_sketch().is_some()))
+            .run(|_| AppAction::StartRevolve)
+            .shown(|s| !s.in_sketch())
+            .when(|s| !s.in_sketch() && field_open(s) && s.selected_sketch().is_some())
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Revolve(_))))
             .hint(|s| {
                 after_field(s).or_else(|| {
-                    (!s.in_sketch() && s.selected_sketch().is_none()).then(|| "Select a sketch to revolve".into())
+                    s.selected_sketch().is_none().then(|| "Select a sketch to revolve".into())
                 })
             })
             .agents(Agents::Verb, "Revolve a closed meridian sketch about a model-space axis.", tools::revolve_params)
@@ -1793,10 +1789,11 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along lines and arcs")
             .on(Solid, "Create", Small)
-            .run(|s| if s.in_sketch() { AppAction::ExitSketch(Some(ExitInto::Sweep)) } else { AppAction::StartSweep })
-            .when(|s| field_open(s) && (s.in_sketch() || s.selected_sketch().is_some()))
+            .run(|_| AppAction::StartSweep)
+            .shown(|s| !s.in_sketch())
+            .when(|s| !s.in_sketch() && field_open(s) && s.selected_sketch().is_some())
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_))))
-            .hint(|s| after_field(s).or_else(|| (!s.in_sketch() && s.selected_sketch().is_none()).then(|| "Select a closed polygon sketch to sweep".into())))
+            .hint(|s| after_field(s).or_else(|| s.selected_sketch().is_none().then(|| "Select a closed polygon sketch to sweep".into())))
             .agents(Agents::Verb, "Sweep a closed polygon sketch along a chain of lines and quarter, half or three-quarter arcs. The profile keeps its placement. `end` is a shorthand for one line.", tools::sweep_params)
             .undo(Undo::Step),
         cmd("edit_sweep", "Edit sweep", Icon::Sweep, "Change a sweep path")
@@ -1806,15 +1803,15 @@ fn registry() -> Vec<CommandSpec> {
         // Cut.
         cmd("cut", "Cut", Icon::Cad("cut"), "Remove material: cut a sketch into the part")
             .on(Solid, "Remove", Large)
-            .on(Sketch, "Use sketch", Large)
             .key(Scope::Model, none, Key::X)
-            .run(|s| if s.in_sketch() { AppAction::ExitSketch(Some(ExitInto::Cut)) } else { AppAction::StartCut })
-            .when(|s| field_open(s) && (s.in_sketch() || (has_body(s) && s.selected_sketch().is_some())))
+            .run(|_| AppAction::StartCut)
+            .shown(|s| !s.in_sketch())
+            .when(|s| !s.in_sketch() && field_open(s) && has_body(s) && s.selected_sketch().is_some())
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Cut(_))))
             .hint(|s| {
                 if let Some(why) = after_field(s) {
                     Some(why)
-                } else if s.in_sketch() || (has_body(s) && s.selected_sketch().is_some()) {
+                } else if has_body(s) && s.selected_sketch().is_some() {
                     None
                 } else if has_body(s) {
                     Some("Select a sketch to cut with, or sketch on a face first".into())
@@ -2437,7 +2434,7 @@ fn registry() -> Vec<CommandSpec> {
             } else if s.sketch.as_ref().is_some_and(|s| s.diagnostics.is_some()) {
                 AppAction::SketchDiagnostics(false)
             } else if s.in_sketch() {
-                AppAction::ExitSketch(None)
+                AppAction::ExitSketch
             } else if s.drag_preview.is_some() {
                 AppAction::DragDimension(DragStep::Cancel)
             } else {
@@ -2455,7 +2452,7 @@ fn registry() -> Vec<CommandSpec> {
                 } else if s.sketch.as_ref().is_some_and(|s| s.tool.spline_mode().is_some() && !s.pending.is_empty()) {
                     AppAction::FinishSpline
                 } else {
-                    AppAction::ExitSketch(None)
+                    AppAction::ExitSketch
                 }
             })
             .when(|s| s.drawing.new.is_some() || s.editor.is_some() || (s.in_sketch() && s.sketch.as_ref().is_some_and(|s|s.link_values.is_none())))
@@ -3041,7 +3038,7 @@ mod tests {
         assert_eq!(panels(RibbonTab::Solid), ["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"]);
         assert_eq!(
             panels(RibbonTab::Sketch),
-            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "Use sketch", "View"]
+            ["Sketch", "Draw", "Modify", "Transform", "Constrain", "Display", "View"]
         );
         assert_eq!(panels(RibbonTab::Assembly), ["Edit", "Component", "File", "View"]);
         assert_eq!(panels(RibbonTab::Inspect), ["Measure", "Check", "Surface quality"]);
@@ -3089,6 +3086,23 @@ mod tests {
         assert!(ids(drawing, "extrude").is_empty());
         assert!(ids(drawing, "undo").contains(&"undo"), "undo works in both workspaces");
         assert!(!ids(part, "zoom in").contains(&"drawing_zoom_in"));
+    }
+
+    #[test]
+    fn sketch_features_are_not_offered_while_a_sketch_is_open() {
+        let mut history = History::default();
+        let sketch = Context { sketch: true, ..Default::default() };
+        for id in ["extrude", "revolve", "sweep", "cut"] {
+            let command = get(id).unwrap();
+            assert!(command.available(Context::default()), "{id} is offered after closing");
+            assert!(!command.available(sketch), "{id} stays out of sketch mode");
+            assert!(!command.ribbon.iter().any(|p| p.tab == Tab::Part(RibbonTab::Sketch)));
+            history.pin(id);
+            history.record(id);
+            assert!(!search_here(id, &history, sketch).iter().any(|m| m.command.id == id));
+            assert!(!crate::command_line::completions(id, sketch, false).contains(&id));
+        }
+        assert!(crate::palette::find("", &history, sketch).is_empty(), "pins and recents stay hidden too");
     }
 
     #[test]

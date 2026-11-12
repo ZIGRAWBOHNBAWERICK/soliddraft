@@ -86,7 +86,7 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     assert!(session(&app).sketch.drawn().any(|e| matches!(e.kind, EntityKind::EllipticArc { .. })));
     let saved = session(&app).sketch.clone();
     let path = dir.join("ellipses.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

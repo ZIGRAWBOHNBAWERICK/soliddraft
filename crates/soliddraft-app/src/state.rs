@@ -24,15 +24,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use web_time::Instant;
 
-/// What to open when a sketch is left.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExitInto {
-    Extrude,
-    Revolve,
-    Sweep,
-    Cut,
-}
-
 // A drawing action can carry a placed view; actions are made one at a time by a click.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
@@ -49,7 +40,8 @@ pub enum AppAction {
     StartSketchOn(SketchPlane),
     /// Opens the sketch feature for editing.
     EditSketch(FeatureId),
-    ExitSketch(Option<ExitInto>),
+    /// Closes the sketch and returns to the part without starting a feature.
+    ExitSketch,
     StartExtrude,
     StartRevolve,
     StartSweep,

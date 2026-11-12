@@ -99,7 +99,7 @@ fn launch(sketch: Sketch, name: &str) -> (App, FeatureId, PathBuf) {
 }
 fn reopen(app: &mut App, id: FeatureId, dir: &std::path::Path, expected: &Sketch) {
     let path = dir.join("reopen.sdraft");
-    for action in [AppAction::ExitSketch(None), AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
+    for action in [AppAction::ExitSketch, AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
         app.state_mut().state.push(action);
         app.run_steps(10);
     }
@@ -268,7 +268,7 @@ fn geometry_and_quick_snaps_override_grid_and_closed_sketch_visibility_is_retain
     pick(&mut app, p(23.1, -9.1));
     near(last_point(&app), p(25.0, -10.0));
     let original = session(&app).sketch.clone();
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(10);
     app.state_mut().state.push(AppAction::Select(None));
     app.run_steps(4);

@@ -155,7 +155,7 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
     }
     let expected = session(&app).sketch.clone();
     let path = dir.join("polygon.sldraft");
-    for action in [AppAction::ExitSketch(None), AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
+    for action in [AppAction::ExitSketch, AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
         app.state_mut().state.push(action);
         app.run_steps(12);
     }

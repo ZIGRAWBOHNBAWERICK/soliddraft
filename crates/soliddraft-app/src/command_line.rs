@@ -405,6 +405,15 @@ fn run(state: &mut AppState, command: &'static CommandSpec, rest: &str) -> Strin
         let why = command.hint_now(state).unwrap_or_else(|| "not available here".to_owned());
         return format!("{label}: {why}");
     }
+    if command.id == "scene" {
+        return match crate::viewport::scenes::Scene::parse(rest) {
+            Some(scene) => {
+                state.push(AppAction::SetScene(scene));
+                format!("Scene: {}", scene.label())
+            }
+            None => format!("Choose a scene: {}", crate::viewport::scenes::Scene::ALL.map(|s| s.id()).join(", ")),
+        };
+    }
     state.run_command(command);
     if rest.is_empty() {
         label
@@ -458,7 +467,7 @@ fn submit_session(state: &mut AppState, line: String) {
     match resolve(&line, Context::of(state), true) {
         Typed::Nothing => {}
         Typed::Close => state.command_line.close_session(),
-        Typed::Command(c, rest) if slash || rest.is_empty() => {
+        Typed::Command(c, rest) if slash || rest.is_empty() || c.id == "scene" => {
             if c.id == AI_COMMAND {
                 state.command_line.close_session();
                 return;

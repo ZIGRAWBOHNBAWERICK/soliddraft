@@ -141,8 +141,8 @@ pub struct FrameInput {
     pub pixels_per_point: f32,
     pub display: DisplayMode,
     pub preset: Preset,
-    /// The backdrop the scene is composited over: top and bottom of the fade, sRGB.
-    pub backdrop: [egui::Color32; 2],
+    /// The gradient and optional screen grid composited behind the model.
+    pub backdrop: super::scenes::Backdrop,
     pub hover_id: u32,
     pub selected_id: u32,
     pub selected_feature: u32,
@@ -235,21 +235,25 @@ struct Globals {
     _pad: u32,
 }
 
-/// Mirrors `Backdrop` in scene.wgsl: the top and bottom of the fade, linear.
+/// Mirrors `Backdrop` in scene.wgsl. Stop RGB is linear; w is the stop position.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Backdrop {
-    top: [f32; 4],
-    bottom: [f32; 4],
+    stops: [[f32; 4]; 5],
+    radial: [f32; 4],
+    grid: [f32; 4],
 }
 
 impl Backdrop {
-    fn from_srgb([top, bottom]: [egui::Color32; 2]) -> Backdrop {
-        let linear = |c: egui::Color32| {
-            let [r, g, b, _] = egui::Rgba::from(c).to_array();
-            [r, g, b, 1.0]
-        };
-        Backdrop { top: linear(top), bottom: linear(bottom) }
+    fn from_srgb(bg: super::scenes::Backdrop, size: [u32; 2], ppp: f32) -> Self {
+        Self {
+            stops: bg.stops.map(|(color, at)| {
+                let [r, g, b, _] = egui::Rgba::from(color).to_array();
+                [r, g, b, at]
+            }),
+            radial: bg.radial,
+            grid: [bg.grid[0], bg.grid[1], size[0] as f32 / ppp, size[1] as f32 / ppp],
+        }
     }
 }
 
@@ -1142,7 +1146,11 @@ impl ViewportRenderer {
             texel: 1.0,
         });
         let toward_sun = environment::softbox_direction();
-        queue.write_buffer(&self.backdrop, 0, bytemuck::bytes_of(&Backdrop::from_srgb(input.backdrop)));
+        queue.write_buffer(
+            &self.backdrop,
+            0,
+            bytemuck::bytes_of(&Backdrop::from_srgb(input.backdrop, input.size_px, input.pixels_per_point)),
+        );
         let model_radius = bounds.map_or(100.0, |(lo, hi)| ((hi - lo).length() / 2.0).max(1.0));
         let grid = input.grid.unwrap_or(GridFrame {
             anchor: Vec3::ZERO,
@@ -1607,6 +1615,7 @@ mod tests {
     fn globals_match_the_shader_layout() {
         // Five matrices, nineteen vectors, nine harmonics and four ids.
         assert_eq!(std::mem::size_of::<Globals>(), 5 * 64 + 19 * 16 + 9 * 16 + 16);
+        assert_eq!(std::mem::size_of::<Backdrop>(), 7 * 16);
         assert_eq!(std::mem::size_of::<LineInstance>(), 28);
         assert_eq!(std::mem::size_of::<BodyUniform>(), 32 + 48 * MAX_APPEARANCES);
     }

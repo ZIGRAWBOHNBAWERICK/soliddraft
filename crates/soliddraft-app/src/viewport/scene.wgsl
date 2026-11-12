@@ -711,12 +711,11 @@ fn fs_ao_blur(in: BlitOut) -> @location(0) vec4<f32> {
 
 @group(0) @binding(0) var scene_tex: texture_2d<f32>;
 @group(0) @binding(1) var scene_sampler: sampler;
-// The modelling space behind the scene: a vertical fade, linear colour, from the
-// theme's viewport tokens (theme.rs). The ground disc darkens whatever lies behind it,
-// so the shadow lands on the bottom tone.
+// Fixed-size uniform data works on WebGL2 as well as WebGPU.
 struct Backdrop {
-    top: vec4<f32>,
-    bottom: vec4<f32>,
+    stops: array<vec4<f32>, 5>,
+    radial: vec4<f32>,
+    grid: vec4<f32>,
 };
 @group(0) @binding(2) var<uniform> backdrop: Backdrop;
 
@@ -737,7 +736,24 @@ fn vs_blit(@builtin(vertex_index) i: u32) -> BlitOut {
 
 fn composite(uv: vec2<f32>) -> vec3<f32> {
     let scene = textureSample(scene_tex, scene_sampler, uv);
-    let bg = mix(backdrop.top.rgb, backdrop.bottom.rgb, uv.y);
+    var t = uv.y;
+    if backdrop.radial.z > 0.0 {
+        t = length((uv - backdrop.radial.xy) / backdrop.radial.zw);
+    }
+    var bg = backdrop.stops[0].rgb;
+    for (var i = 1u; i < 5u; i += 1u) {
+        let a = backdrop.stops[i - 1u];
+        let b = backdrop.stops[i];
+        if b.w > a.w {
+            bg = mix(bg, b.rgb, clamp((t - a.w) / (b.w - a.w), 0.0, 1.0));
+        }
+    }
+    if backdrop.grid.x > 0.0 {
+        let pixel = uv * backdrop.grid.zw;
+        let cell = fract(pixel / backdrop.grid.x) * backdrop.grid.x;
+        let line = 1.0 - smoothstep(0.5, 1.0, min(cell.x, cell.y));
+        bg = mix(bg, vec3<f32>(1.0), line * backdrop.grid.y);
+    }
     return scene.rgb + bg * (1.0 - scene.a);
 }
 

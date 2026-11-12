@@ -1018,6 +1018,14 @@ impl SolidDraftApp {
                 }
                 viewport.preset = p;
             }
+            AppAction::SetScene(scene) => {
+                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                    self.state.viewport.scene = Some(scene);
+                    if let Err(e) = crate::settings::save_scene(scene) {
+                        self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
+                    }
+                }
+            }
             AppAction::SetTheme(mode) => {
                 theme::set_mode(ctx, mode);
                 if let Err(e) = crate::settings::save_appearance(&crate::settings::Appearance { theme: mode }) {

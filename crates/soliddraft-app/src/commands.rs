@@ -2146,6 +2146,11 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::SetDisplay(DisplayMode::Wireframe))
             .lit(|s| s.viewport.display == DisplayMode::Wireframe)
 .app_only(LOOK),
+        cmd("scene", "Scene", Icon::Display, "Choose a background: scene white, scene studio, scene graphite")
+            .run(|s| AppAction::SetScene(s.viewport.scene.unwrap_or_default()))
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+.app_only(LOOK),
         cmd("look_fast", "Fast look", Icon::Display, "Colour, lighting and edges, without shadows or occlusion")
             .run(|_| AppAction::SetPreset(Preset::Fast))
             .lit(|s| s.viewport.preset == Preset::Fast)

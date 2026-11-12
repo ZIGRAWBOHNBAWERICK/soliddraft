@@ -699,7 +699,7 @@ fn sweep_segment_schema() -> Value {
         object(&[
             ("kind", constant("spline")),
             ("id", id()),
-            ("degree", number("Polynomial degree, a positive integer")),
+            ("degree", integer("Polynomial degree, greater than zero")),
             (
                 "control_points",
                 non_empty_array(

@@ -53,8 +53,7 @@ const NEEDS_A_BODY: [(&str, &str); 9] = [
 ];
 
 /// What has no action yet, whatever the part holds, and what it says.
-const NOT_YET: [(&str, &str); 4] =
-    [("Loft", "Coming soon"), ("Slot", "Coming soon"), ("Axis", "Coming soon"), ("Point", "Coming soon")];
+const NOT_YET: [(&str, &str); 3] = [("Slot", "Coming soon"), ("Axis", "Coming soon"), ("Point", "Coming soon")];
 
 fn settle(app: &mut App) {
     app.run_steps(30);

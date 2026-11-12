@@ -319,3 +319,45 @@ fn spline_scenario_profiles_extrude_and_measure_over_stdio() {
         }
     }
 }
+
+#[test]
+fn loft_scenario_builds_edits_refuses_and_reopens_over_stdio() {
+    let bundle = std::env::temp_dir().join(format!("loft-scenario-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&bundle).unwrap();
+    let source = include_str!("../../../ci/scenarios/loft.json").replace("{bundle}", bundle.to_str().unwrap());
+    let scenario: Value = serde_json::from_str(&source).unwrap();
+    let start = || {
+        let mut client = Client::start(&["mcp"]);
+        client.request(
+            "initialize",
+            json!({"protocolVersion":"2025-06-18","capabilities":{},
+            "clientInfo":{"name":"loft-scenario","version":"1"}}),
+        );
+        client
+    };
+    let mut client = start();
+    for step in scenario["steps"].as_array().unwrap() {
+        if step["fresh_process"] == true {
+            client = start();
+        }
+        let name = step["tool"].as_str().unwrap();
+        let reply = client.call(name, step["arguments"].clone());
+        if let Some(reason) = step["refused"].as_str() {
+            assert_eq!(reply["isError"], true, "{name}: {reply}");
+            assert!(reply.to_string().contains(reason), "{reply}");
+        } else {
+            assert_eq!(reply["isError"], false, "{name}: {reply}");
+        }
+        if let Some(checks) = step["checks"].as_array() {
+            let measured = client.call("mass_properties", json!({"name":"Loft1"}));
+            assert_eq!(measured["isError"], false, "{measured}");
+            let actual = measured["structuredContent"]["volume_mm3"].as_f64().unwrap();
+            for check in checks {
+                let expected = check["approx"].as_f64().unwrap();
+                assert!((actual - expected).abs() <= check["tolerance"].as_f64().unwrap(), "{actual} != {expected}");
+            }
+        }
+    }
+    drop(client);
+    std::fs::remove_dir_all(bundle).unwrap();
+}

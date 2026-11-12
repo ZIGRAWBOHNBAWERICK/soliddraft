@@ -239,7 +239,19 @@ impl Document {
             }
             _ => named_plane.and_then(|(id, _)| self.built_index(id).map(|i| self.built[i].version)),
         };
-        let key = cache.key(f, current, profile);
+        let mut profiles: Vec<_> = profile.into_iter().collect();
+        if let FeatureKind::Loft(l) = &f.kind {
+            for source in &l.profiles {
+                let Some(index) = self.built_index(source.feature()) else {
+                    return Built::failed(current, "A loft profile is missing. Select it again");
+                };
+                if !self.built[index].status.is_ok() {
+                    return Built::pass(FeatureStatus::Blocked(source.feature()), current);
+                }
+                profiles.push(self.built[index].version);
+            }
+        }
+        let key = cache.key(f, current, profiles);
         if let Some(built) = cache.get(&key) {
             return built;
         }
@@ -265,6 +277,7 @@ impl Document {
             FeatureKind::Sweep(s) => {
                 self.build_profile_tool(f, s.sketch, current, |tag, profile| self.kernel.sweep(tag, profile, &s.path))
             }
+            FeatureKind::Loft(l) => self.build_loft(f, l, current),
             FeatureKind::Fillet(b) => self.build_blend(f, b, false, current),
             FeatureKind::Chamfer(b) => self.build_blend(f, b, true, current),
             FeatureKind::Hole(h) => self.build_hole(f, h, current),
@@ -500,6 +513,78 @@ impl Document {
                 };
                 Built::failed(current, message)
             }
+        }
+    }
+
+    fn build_loft(&self, f: &Feature, loft: &crate::LoftFeature, current: Option<BodyId>) -> Built {
+        if loft.profiles.len() < 2 {
+            return Built::failed(current, "Loft needs at least two profiles in order");
+        }
+        let mut made = Vec::new();
+        let mut names = Vec::new();
+        let run = (|| -> KernelResult<OpResult> {
+            for (index, source) in loft.profiles.iter().enumerate() {
+                let tag = OpTag::new(format!("{}.profile{index}", f.id));
+                let profile = match source {
+                    crate::LoftProfile::Sketch { feature } => {
+                        let input = self.profile_input(*feature, current).map_err(|_| {
+                            KernelError::InvalidInput("Each loft sketch needs one closed region".into())
+                        })?;
+                        let sk = input.sketch.as_ref().expect("profile input");
+                        let regions = sk.regions.as_ref().expect("checked profile");
+                        if regions.len() != 1 {
+                            return Err(KernelError::InvalidInput("Each loft sketch needs one closed region".into()));
+                        }
+                        self.kernel.create_body_from_profile(&tag, &regions[0].to_profile(sk.plane))?
+                    }
+                    crate::LoftProfile::Face { face } => {
+                        let body = current
+                            .ok_or_else(|| KernelError::InvalidInput("Select a planar face of the part".into()))?;
+                        let selected = self.resolve_face(face, body).map_err(|_| {
+                            KernelError::InvalidInput("A loft face is missing or split. Select it again".into())
+                        })?;
+                        self.kernel.create_profile_from_face(&tag, body, selected)?
+                    }
+                };
+                made.push(profile.body);
+            }
+            let tool = self.kernel.loft(&OpTag::new(format!("{}.loft", f.id)), &made, loft.shape)?;
+            names = number(
+                tool.record
+                    .face_roles
+                    .iter()
+                    .enumerate()
+                    .map(|(i, face)| {
+                        let generator = match face.role {
+                            FaceRole::StartCap => Generator::StartCap,
+                            FaceRole::EndCap => Generator::EndCap,
+                            _ => Generator::Other,
+                        };
+                        (Origin { tag: tool.record.tag.clone(), role: face.role.clone() }, generator, i)
+                    })
+                    .collect(),
+            );
+            if let Some(body) = current {
+                made.push(tool.body);
+                self.kernel.boolean(&OpTag::new(format!("{}.union", f.id)), BooleanOp::Union, body, tool.body)
+            } else {
+                Ok(tool)
+            }
+        })();
+        for body in made {
+            let _ = self.kernel.release(body);
+        }
+        match run {
+            Ok(result) => self.finish(Ok(result), current, |_| names),
+            Err(error) => Built::failed(
+                current,
+                match error {
+                    KernelError::InvalidInput(message) | KernelError::Unsupported(message) => message,
+                    _ => {
+                        "Loft could not join these profiles to the part. Try simpler profiles that meet the part".into()
+                    }
+                },
+            ),
         }
     }
 

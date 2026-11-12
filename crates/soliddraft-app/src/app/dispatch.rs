@@ -277,6 +277,30 @@ impl SolidDraftApp {
                 };
                 self.open_editor(None, EditorParams::Extrude(params));
             }
+            AppAction::StartLoft => {
+                if self.state.in_sketch() {
+                    return;
+                }
+                let profiles = match self.state.doc.selection {
+                    Some(Selection::Feature(id)) if self.state.doc.sketch_of(id).is_some() => {
+                        vec![soliddraft_model::LoftProfile::Sketch { feature: soliddraft_model::FeatureId(id as u32) }]
+                    }
+                    Some(Selection::Face(face)) => self
+                        .state
+                        .doc
+                        .any_face_ref(face)
+                        .map(|face| vec![soliddraft_model::LoftProfile::Face { face }])
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                self.open_editor(
+                    None,
+                    EditorParams::Loft(soliddraft_model::LoftFeature {
+                        profiles,
+                        shape: soliddraft_kernel_api::LoftShape::Ruled,
+                    }),
+                );
+            }
             AppAction::StartSweep => {
                 if self.state.in_sketch() {
                     self.apply(ctx, AppAction::ExitSketch(Some(ExitInto::Sweep)));
@@ -479,6 +503,7 @@ impl SolidDraftApp {
                     FeatureKind::Extrude(p) => EditorParams::Extrude(p.clone()),
                     FeatureKind::Revolve(r) => EditorParams::Revolve(r.clone()),
                     FeatureKind::Sweep(s) => EditorParams::Sweep(s.clone()),
+                    FeatureKind::Loft(l) => EditorParams::Loft(l.clone()),
                     FeatureKind::Cut(p) => EditorParams::Cut(p.clone()),
                     FeatureKind::Fillet(p) => EditorParams::Fillet(p.clone()),
                     FeatureKind::Chamfer(p) => EditorParams::Chamfer(p.clone()),
@@ -522,6 +547,10 @@ impl SolidDraftApp {
                 }
                 let Some(e) = self.close_editor() else { return };
                 let cmd = match (e.target, e.params) {
+                    (target, EditorParams::Loft(l)) => match target {
+                        Some(id) => Command::EditFeature { id, kind: FeatureKind::Loft(l) },
+                        None => Command::AddFeature(FeatureKind::Loft(l)),
+                    },
                     (target, EditorParams::Sweep(s)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Sweep(s) },
                         None => Command::AddFeature(FeatureKind::Sweep(s)),
@@ -700,6 +729,28 @@ impl SolidDraftApp {
                                 ctx,
                                 AppAction::StartSketchOn(SketchPlane::Feature { feature: id, offset: 0.0 }),
                             );
+                        }
+                        (EditorParams::Loft(l), Some(Selection::Feature(id)))
+                            if self.state.doc.sketch_of(id).is_some() =>
+                        {
+                            let source = soliddraft_model::LoftProfile::Sketch {
+                                feature: soliddraft_model::FeatureId(id as u32),
+                            };
+                            if !l.profiles.contains(&source) {
+                                l.profiles.push(source);
+                            }
+                            return;
+                        }
+                        (EditorParams::Loft(l), Some(Selection::Face(f))) => {
+                            if let Some(face) = self.state.doc.face_ref(f) {
+                                let source = soliddraft_model::LoftProfile::Face { face };
+                                if !l.profiles.contains(&source) {
+                                    l.profiles.push(source);
+                                }
+                            } else {
+                                e.error = Some("Loft needs a planar face or a closed sketch".into());
+                            }
+                            return;
                         }
                         (EditorParams::Mirror(m), Some(Selection::Face(f))) => {
                             match self.state.doc.face_ref(f) {

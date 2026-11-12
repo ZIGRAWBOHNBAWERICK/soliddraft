@@ -37,8 +37,8 @@ pub(crate) struct StepKey {
     definition: Definition,
     /// The part body the feature starts from.
     input: Option<BodyId>,
-    /// The version of the sketch build an extrusion sweeps.
-    profile: Option<u64>,
+    /// Versions of the sketches or reusable planes this feature reads.
+    profiles: Vec<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -88,9 +88,9 @@ impl Default for BuildCache {
 }
 
 impl BuildCache {
-    /// The key of `feature` built on `input`. `profile` is the version of its sketch
-    /// or reusable plane input, which can change without changing the body.
-    pub(crate) fn key(&mut self, feature: &Feature, input: Option<BodyId>, profile: Option<u64>) -> StepKey {
+    /// The key of `feature` built on `input` and its sketch or plane versions.
+    /// These inputs can change without changing the part body.
+    pub(crate) fn key(&mut self, feature: &Feature, input: Option<BodyId>, profiles: Vec<u64>) -> StepKey {
         let definition = match crate::exact::bytes(&feature.kind) {
             Some(bytes) => Definition::Exact(bytes),
             None => {
@@ -98,7 +98,7 @@ impl BuildCache {
                 Definition::Unmatched(self.next_version)
             }
         };
-        StepKey { feature: feature.id, definition, input, profile }
+        StepKey { feature: feature.id, definition, input, profiles }
     }
 
     /// The budget, in bytes.
@@ -162,10 +162,8 @@ impl BuildCache {
                 continue;
             }
             let mut key = source_key.clone();
-            if let Some(profile) = key.profile {
-                let Some(&version) = versions.get(&profile) else { continue };
-                key.profile = Some(version);
-            }
+            let Some(profiles) = key.profiles.iter().map(|v| versions.get(v).copied()).collect() else { continue };
+            key.profiles = profiles;
             if let Some(existing) = self.entries.get(&key) {
                 // Never replace a live body's owner with a separately rebuilt body.
                 if existing.built.output == source_entry.built.output {
@@ -219,7 +217,7 @@ impl BuildCache {
                 .filter(|(k, e)| {
                     !pinned.contains(&e.built.version)
                         && (k.input.is_some_and(|b| !bodies.contains(&b))
-                            || k.profile.is_some_and(|v| !versions.contains(&v)))
+                            || k.profiles.iter().any(|v| !versions.contains(v)))
                 })
                 .map(|(k, _)| k.clone())
                 .collect();

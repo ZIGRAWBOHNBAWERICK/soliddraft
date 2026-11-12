@@ -1,12 +1,50 @@
 //! A1: the independent V9 contract on the real adapter and exact fixture bytes.
 
-use soliddraft_kernel_api::{Approval, Decision, Disposition, ImportOptions, ImportStepRequest, Kernel, OpTag};
+use soliddraft_kernel_api::{
+    Approval, Decision, Disposition, ImportOptions, ImportStepRequest, Kernel, KernelError, OpTag, RepairRecord,
+};
 use soliddraft_kernel_catallax::CatallaxKernel;
 use soliddraft_model::ImportStepFeature;
 
 const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
 const WIDE: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
 const TWO: &[u8] = include_bytes!("../../../ci/fixtures/import/two-blocks-5um.step");
+
+#[test]
+fn source_incidence_formats_are_refused_before_their_certificates_can_be_lost() {
+    // Catallax planar_incidence::a_small_carrier_discrepancy_is_repaired_with_a_face_record.
+    let source = include_bytes!("fixtures/planar-source-incidence.step");
+    let native = catallax_import::apply(
+        &mut catallax_topology::Model::new(),
+        source,
+        "incidence.step",
+        &catallax_import::ImportOptions::default(),
+        &[],
+        None,
+    )
+    .unwrap();
+    assert_eq!(native.record.format, catallax_import::INCIDENCE_REPAIR_FORMAT);
+    assert_eq!(native.record.source_incidence.len(), 1);
+    let saved: RepairRecord = serde_json::from_value(serde_json::to_value(&native.record).unwrap()).unwrap();
+    let kernel = CatallaxKernel::new();
+    let options = ImportOptions::default();
+    let request = ImportStepRequest {
+        name: "incidence.step",
+        source,
+        sha256: &saved.source.sha256,
+        options: &options,
+        decisions: &[],
+        record: None,
+    };
+    let results = [
+        kernel.propose_import(source, &options).map(|_| ()),
+        kernel.import_step(&OpTag::new("incidence"), &request).map(|_| ()),
+        kernel.import_step(&OpTag::new("reopened"), &ImportStepRequest { record: Some(&saved), ..request }).map(|_| ()),
+    ];
+    for result in &results {
+        assert!(matches!(result, Err(KernelError::Unsupported(message)) if message.contains("format")), "{results:?}");
+    }
+}
 
 #[test]
 fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {

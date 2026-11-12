@@ -283,10 +283,11 @@ fn long_parts_a_hair_off_parallel_never_prove_a_clearance_they_miss() {
             })
             .unwrap()
         };
-        // The margin is twice 0.001 mm plus rounding, so 0.011 mm cannot be told apart.
+        // The meshes leave 0.011 mm open; the exact distance settles it below clearance.
         let report = check(&mut doc, 0.011);
-        assert_eq!(report.undecided, Some(1), "angle {angle}: {report:#?}");
+        assert_eq!((report.below, report.undecided), (Some(1), Some(0)), "angle {angle}: {report:#?}");
         let r = &report.results[0];
+        assert!(r.exact_refused.is_empty(), "angle {angle}: {r:#?}");
         assert!(r.distance.lo <= 0.01 && r.distance.hi.is_some_and(|hi| hi >= 0.01), "angle {angle}: {r:#?}");
         assert_eq!(check(&mut doc, 0.007).met, Some(1), "angle {angle}");
     }

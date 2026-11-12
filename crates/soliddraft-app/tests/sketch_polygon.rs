@@ -108,7 +108,29 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
         number(&mut app, 0, "5");
         let before = session(&app).sketch.clone();
         let center = if mode == PolygonMode::Inscribed { P2::ZERO } else { P2::new(-50.0, -35.0) };
+        let point = Frame {
+            plane: session(&app).plane,
+            camera: &app.state().state.viewport.camera,
+            rect: app.state().state.viewport.rect,
+        }
+        .screen(center);
+        eprintln!(
+            "[DEBUG-sd-l04-polygon] before mode={mode:?} tool={:?} sides={} pending={:?} point={point:?} rect={:?} keyboard={}",
+            session(&app).tool,
+            session(&app).modify.sides,
+            session(&app).pending,
+            app.state().state.viewport.rect,
+            app.ctx.egui_wants_keyboard_input()
+        );
+        app.render().unwrap().save(dir.join(format!("{mode:?}-before-first-point.png"))).unwrap();
         pick(&mut app, center);
+        eprintln!(
+            "[DEBUG-sd-l04-polygon] after mode={mode:?} tool={:?} sides={} pending={:?}",
+            session(&app).tool,
+            session(&app).modify.sides,
+            session(&app).pending
+        );
+        app.render().unwrap().save(dir.join(format!("{mode:?}-after-first-point.png"))).unwrap();
         assert_eq!(session(&app).pending.len(), 1);
         app.key_press(Key::Escape);
         app.run_steps(5);

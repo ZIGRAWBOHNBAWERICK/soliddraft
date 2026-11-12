@@ -329,14 +329,22 @@ pub fn reveal_ribbon_command(app: &mut App, id: &str) -> Control {
             .unwrap_or_else(|| panic!("{id} is not shown on the current tab"));
         (command.label_in(state), group)
     };
-    let region = ribbon_command_region(app);
-    if !app.query_all(By::new().role(egui::accesskit::Role::Button).label(&label)).any(|n| region.intersects(n.rect()))
-    {
+    // Clipped property buttons still have accessibility bounds.
+    let visible_label = |app: &App| {
+        let buttons: Vec<_> =
+            app.query_all(By::new().role(egui::accesskit::Role::Button).label(&label)).map(|n| n.rect()).collect();
+        painted_in(app, ribbon_command_region(app))
+            .into_iter()
+            .find(|p| p.text == label && buttons.iter().any(|r| r.expand(TOLERANCE).contains_rect(p.rect)))
+            .map(|p| p.rect)
+    };
+    if visible_label(app).is_none() {
         let band = ribbon_region(app);
         click_button(app, &format!("{group} group"), band);
         app.run_steps(4);
     }
-    control(app, &label, ribbon_command_region(app))
+    let label_rect = visible_label(app).unwrap_or_else(|| panic!("ribbon command {label} must be painted"));
+    control(app, &label, label_rect)
 }
 
 /// Closes an inspected ribbon row without cancelling the current sketch tool.

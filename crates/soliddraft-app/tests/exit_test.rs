@@ -221,6 +221,13 @@ fn open_sketch_on_face(harness: &mut App<'_>, on_face: Vec3) {
     assert!(harness.state().state.in_sketch(), "a sketch should be open on the face");
 }
 
+/// Closes the sketch before starting a feature from the part.
+fn close_sketch(harness: &mut App<'_>) {
+    click_button(harness, "Exit");
+    assert!(!harness.state().state.in_sketch(), "closing returns to the part");
+    assert!(harness.state().state.editor.is_none(), "closing does not start a feature");
+}
+
 /// The GPU harnesses share one adapter; one test at a time keeps a panic in one
 /// from tearing down a device another is drawing with.
 static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -506,6 +513,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         assert!((hi.u - lo.u - 120.0).abs() < 1e-6 && (hi.v - lo.v - 90.0).abs() < 1e-6, "{lo:?} {hi:?}");
         assert_exact_plate_profile(&s.sketch);
     }
+    close_sketch(&mut harness);
     click_button(&mut harness, "Extrude");
     assert!(!harness.state().state.in_sketch());
     assert!(matches!(
@@ -535,6 +543,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     sketch_click(&mut harness, P2::new(120.0, 60.0));
     dimension_line(&mut harness, P2::new(40.0, 60.0), P2::new(60.0, 72.0), "120");
     dimension_line(&mut harness, P2::new(120.0, 20.0), P2::new(134.0, 30.0), "60");
+    close_sketch(&mut harness);
     click_button(&mut harness, "Extrude");
     set_field(&mut harness, "Depth", "10");
     harness.get_by_label("Flip direction").click();
@@ -566,6 +575,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         let circle = s.sketch.drawn().next().unwrap();
         assert!((circle.radius().unwrap() - 12.0).abs() < 1e-6, "radius {}", circle.radius().unwrap());
     }
+    close_sketch(&mut harness);
     click_button(&mut harness, "Extrude");
     set_field(&mut harness, "Depth", "24");
     harness.key_press(Key::Enter);
@@ -585,6 +595,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
     sketch_click(&mut harness, P2::new(85.0 + 6.0 * diag, 55.0 + 6.0 * diag));
     sketch_click(&mut harness, P2::new(100.0, 70.0));
     type_dimension(&mut harness, "12");
+    close_sketch(&mut harness);
     click_button(&mut harness, "Cut");
     harness.run_steps(2);
     assert!(matches!(
@@ -630,6 +641,7 @@ fn bracket_by_hand_saved_reopened_rebuilt_and_repaired() {
         .map(|region| region.area())
         .sum();
     save(&mut harness, "16-slot-sketch");
+    close_sketch(&mut harness);
     click_button(&mut harness, "Cut");
     harness.key_press(Key::Enter);
     settle(&mut harness);

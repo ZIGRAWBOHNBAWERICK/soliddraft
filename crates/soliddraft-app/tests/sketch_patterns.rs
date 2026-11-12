@@ -162,7 +162,7 @@ fn apply(app: &mut App) {
 fn reopen(app: &mut App, dir: &std::path::Path, id: soliddraft_app::document::FeatureId) {
     let expected = session(app).sketch.clone();
     let path = dir.join("patterns.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

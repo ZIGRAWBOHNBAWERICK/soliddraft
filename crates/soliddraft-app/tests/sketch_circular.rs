@@ -81,7 +81,7 @@ fn assert_geometry_eq(actual: &Sketch, expected: &Sketch) {
 }
 
 fn reopen(app: &mut App, id: FeatureId, path: PathBuf, expected: &Sketch) {
-    for action in [AppAction::ExitSketch(None), AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
+    for action in [AppAction::ExitSketch, AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
         app.state_mut().state.push(action);
         app.run_steps(10);
     }

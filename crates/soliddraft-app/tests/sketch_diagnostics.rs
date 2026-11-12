@@ -189,7 +189,7 @@ fn overlap_diagnostics_are_read_only_and_reports_do_not_persist_after_reopen() {
     control(&mut app, "Close diagnostics");
     assert!(session(&app).diagnostics.is_none());
     let path = dir().join("diagnostics.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);
@@ -257,7 +257,7 @@ fn wrong_kind_relations_are_reported_after_reopen_without_silently_repairing_the
     let (mut app, id) = launch(sketch);
     let authored = session(&app).sketch.clone();
     let path = dir().join("wrong-kind.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);
@@ -400,7 +400,7 @@ fn feature_checks_refresh_after_native_edits_undo_redo_and_reset_after_reopen() 
     control(&mut app, "Refresh diagnostics");
     assert_eq!(session(&app).sketch, closed);
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude: 1 closed region"));
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     let path = dir().join("preflight.dwprt");
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
@@ -455,7 +455,9 @@ fn checked_cut_profiles_still_use_the_existing_editor_and_catallax_path() {
     assert_eq!(app.state().state.doc.revision(), revision);
     assert_eq!(app.state().state.doc.features.len(), features);
     frame(&mut app, "preflight-cut");
-    control(&mut app, "Cut");
+    ribbon::run_command(&mut app, "exit_sketch");
+    assert!(app.state().state.editor.is_none());
+    ribbon::run_command(&mut app, "cut");
     assert!(app.state().state.sketch.is_none());
     assert!(matches!(
         app.state().state.editor.as_ref().map(|e| &e.params),

@@ -14,7 +14,7 @@ use egui::{Key, Modifiers, Rect, pos2};
 use egui_kittest::kittest::Queryable;
 use ribbon::{App, TOLERANCE};
 use soliddraft_app::document::{Document, FeatureKind, Selection};
-use soliddraft_app::state::{EditorParams, RibbonTab, Tool};
+use soliddraft_app::state::{AppAction, EditorParams, RibbonTab, Tool};
 use soliddraft_app::viewport::camera::StandardView;
 
 const TABS: [&str; 5] = ["Solid", "Sketch", "Assembly", "Inspect", "View"];
@@ -28,14 +28,13 @@ const SOLID: [(&str, &[&str]); 6] = [
     ("Reference", &["Plane", "Axis", "Point"]),
 ];
 
-const SKETCH: [(&str, &[&str]); 8] = [
+const SKETCH: [(&str, &[&str]); 7] = [
     ("Sketch", &["Sketch", "Exit"]),
     ("Draw", &["Line", "Circle", "Rectangle", "Arc", "Slot", "Point"]),
     ("Modify", &["Polygon", "Trim", "Extend", "Offset", "Mirror entities", "Linear pattern", "Circular pattern"]),
     ("Transform", &["Move entities", "Copy entities", "Rotate entities", "Scale entities"]),
     ("Constrain", &["Smart dim", "Construction", "Relations"]),
     ("Display", &["Contour shading", "Sketch dimensions", "Snap to grid"]),
-    ("Use sketch", &["Extrude", "Revolve", "Cut"]),
     ("View", &["Normal to"]),
 ];
 
@@ -230,6 +229,54 @@ fn solid_groups_and_tabs_are_visible_and_honest() {
 }
 
 #[test]
+fn pinned_feature_chips_hide_during_sketch_and_return_after_close() {
+    let case = ribbon::case("sketch-command-bar");
+    let pins = soliddraft_app::command_line::BarSettings {
+        tools: ["sketch_select", "extrude", "zoom_fit", "revolve", "normal_to", "sweep", "cut"]
+            .map(str::to_owned)
+            .to_vec(),
+        ..Default::default()
+    };
+    soliddraft_app::settings::save_command_line(&pins).unwrap();
+    let mut app = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, 1.0);
+    case.run(&mut app, |app| {
+        let features = ["Extrude", "Revolve", "Sweep", "Cut"];
+        for label in features {
+            app.get_by_label(&format!("{label} on the command bar"));
+        }
+        let name = app.state().state.doc.features[0].name.clone();
+        let row = ribbon::button_rect(app, &name, left_column(app));
+        ribbon::double_click_at(app, row.center());
+        settle(app);
+        assert!(app.state().state.sketch.is_some());
+        case.frame(app, "open-sketch-with-pins");
+        for label in features {
+            assert!(
+                app.query_all_by_label(&format!("{label} on the command bar")).next().is_none(),
+                "{label} must be hidden on the command bar while a sketch is open"
+            );
+        }
+        for label in ["Select", "Fit", "Normal to"] {
+            app.get_by_label(&format!("{label} on the command bar"));
+        }
+        assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+        assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+        ribbon::run_command(app, "exit_sketch");
+        settle(app);
+        assert!(app.state().state.sketch.is_none() && app.state().state.editor.is_none());
+        assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+        assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+        for label in features {
+            app.get_by_label(&format!("{label} on the command bar"));
+        }
+        case.frame(app, "closed-sketch-with-pins");
+        app.get_by_label("Extrude on the command bar").click();
+        settle(app);
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Extrude(_))));
+    });
+}
+
+#[test]
 fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
     let case = ribbon::case("r2");
     let mut app = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, 1.0);
@@ -253,14 +300,66 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         ribbon::run_command(app, "sketch_line");
         assert_eq!(app.state().state.sketch.as_ref().map(|s| s.tool), Some(Tool::Line));
 
-        // Extrude from Use sketch ends the sketch and opens the editor in Solid.
+        for (id, tab) in [("solid", "Solid"), ("sketch", "Sketch")] {
+            ribbon::switch_workspace(app, id);
+            for label in ["Extrude", "Revolve", "Sweep", "Cut"] {
+                assert!(app.query_all_by_label(label).next().is_none(), "{label} is hidden on {tab}");
+            }
+            assert!(!ribbon::painted(app).iter().any(|p| matches!(p.text.as_str(), "Use sketch" | "Use the sketch")));
+        }
+        app.get_by_label("Insert").click();
+        app.run_steps(3);
+        for label in ["Boss extrude", "Cut extrude"] {
+            assert!(app.query_all_by_label(label).next().is_none(), "{label} is hidden in Insert");
+        }
+        app.key_press(Key::Escape);
+        app.run_steps(3);
+        assert!(
+            !ribbon::painted(app).iter().any(|p| p.text == "Search commands and features"),
+            "the removed title search stays absent while sketching"
+        );
+        for id in ["extrude", "revolve", "sweep", "cut"] {
+            let command = soliddraft_app::commands::get(id).unwrap();
+            assert!(!command.is_enabled(&app.state().state));
+            assert!(command.action_now(&app.state().state).is_none());
+            app.state_mut().state.commands.pin(id);
+            app.state_mut().state.commands.record(id);
+            app.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
+            app.run_steps(3);
+            app.event(egui::Event::Text(id.to_owned()));
+            app.run_steps(3);
+            let state = &app.state().state;
+            let palette = state.palette.as_ref().expect("the command palette opened");
+            assert!(!palette.results(state).iter().any(|m| m.command.id == id), "{id} is hidden in the palette");
+            app.key_press(Key::Escape);
+            app.run_steps(3);
+        }
+        let revision = app.state().state.doc.revision();
+        for action in [AppAction::StartExtrude, AppAction::StartRevolve, AppAction::StartSweep, AppAction::StartCut] {
+            app.state_mut().state.push(action);
+            app.run_steps(3);
+            let state = &app.state().state;
+            assert_eq!(state.sketch.as_ref().map(|s| s.feature), Some(sketch));
+            assert!(state.editor.is_none(), "a direct feature action cannot exit the sketch");
+            assert_eq!(state.doc.revision(), revision);
+        }
+        case.frame(app, "sketch-only");
+
         let before = viewport(app);
-        let extrude = ribbon::reveal_ribbon_command(app, "extrude");
-        assert!(extrude.enabled, "Extrude is available for the sketch profile");
-        ribbon::click_at(app, extrude.rect.center());
+        ribbon::run_command(app, "exit_sketch");
         settle(app);
         let state = &app.state().state;
         assert!(state.sketch.is_none(), "the sketch session ended");
+        assert!(state.editor.is_none(), "closing a sketch never starts a feature");
+        assert_eq!(state.doc.selection, Some(Selection::Feature(sketch)));
+        assert_eq!(state.doc.features.len(), 1, "the sketch remains available for a later feature");
+        assert_eq!(selected_tabs(app), ["Solid"]);
+        case.frame(app, "closed-sketch");
+        let extrude = ribbon::reveal_ribbon_command(app, "extrude");
+        assert!(extrude.enabled, "Extrude is available after closing the sketch");
+        ribbon::click_at(app, extrude.rect.center());
+        settle(app);
+        let state = &app.state().state;
         let extruding = matches!(
             state.editor.as_ref().map(|e| &e.params),
             Some(EditorParams::Extrude(p)) if p.sketch == Some(sketch)

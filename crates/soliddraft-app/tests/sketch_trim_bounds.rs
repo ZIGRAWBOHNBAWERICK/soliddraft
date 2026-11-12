@@ -193,7 +193,7 @@ fn bounded_modes_keep_the_bounds_across_edits_and_share_atomic_history() {
     app.run_steps(6);
     assert_eq!(session(&app).sketch, after);
     let path = dir().join("bounded.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

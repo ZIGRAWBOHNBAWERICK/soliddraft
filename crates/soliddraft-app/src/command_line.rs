@@ -749,6 +749,9 @@ fn chips(ui: &mut egui::Ui, state: &mut AppState) {
     let mut reset = false;
     for (i, id) in tools.iter().enumerate() {
         let Some(command) = commands::get(id) else { continue };
+        if !(command.shown)(state) {
+            continue;
+        }
         let resp = chip(ui, state, command, dragging.as_ref().is_some_and(|d| d.id == command.id));
         resp.dnd_set_drag_payload(ToolDrag { id: command.id });
         let pointer_x = ui.ctx().pointer_interact_pos().map_or(resp.rect.center().x, |p| p.x);

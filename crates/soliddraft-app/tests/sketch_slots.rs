@@ -43,7 +43,7 @@ fn edit_width(sketch: &Sketch, circular: bool) {
     }
 }
 
-fn exercise(label: &str, tool: Tool, picks: &[P2], area: f64) {
+fn exercise(command: &str, tool: Tool, picks: &[P2], area: f64) {
     let dir = std::env::var_os("SOLIDDRAFT_SLOT_PROOF_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-slots-{}", std::process::id())))
@@ -59,12 +59,12 @@ fn exercise(label: &str, tool: Tool, picks: &[P2], area: f64) {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(15);
     app.state_mut().state.sketch.as_mut().unwrap().auto_relations = false;
-    ribbon::click_tab(&mut app, "Sketch");
+    ribbon::switch_workspace(&mut app, "sketch");
     let original = session(&app).sketch.clone();
 
     // Every partially collected path cancels without document geometry or history.
     for count in 1..picks.len() {
-        ribbon::click_ribbon(&mut app, label);
+        ribbon::run_command(&mut app, command);
         assert_eq!(session(&app).tool, tool);
         for &p in &picks[..count] {
             pick(&mut app, p);
@@ -103,7 +103,7 @@ fn exercise(label: &str, tool: Tool, picks: &[P2], area: f64) {
         assert_eq!(session(&app).sketch, original);
     }
 
-    ribbon::click_ribbon(&mut app, label);
+    ribbon::run_command(&mut app, command);
     for &p in &picks[..picks.len() - 1] {
         pick(&mut app, p);
     }
@@ -145,7 +145,7 @@ fn exercise(label: &str, tool: Tool, picks: &[P2], area: f64) {
 
     // A tool change discards a pending slot as well.
     pick(&mut app, picks[0]);
-    ribbon::click_ribbon(&mut app, "Point");
+    ribbon::run_command(&mut app, "sketch_point");
     assert!(session(&app).pending.is_empty());
     assert_eq!(session(&app).sketch, saved);
 
@@ -164,27 +164,32 @@ fn exercise(label: &str, tool: Tool, picks: &[P2], area: f64) {
 #[test]
 fn slot_variants_create_preview_cancel_undo_and_reopen() {
     let pi = std::f64::consts::PI;
-    for (label, tool, picks, area) in [
-        ("Slot", Tool::Slot, vec![P2::new(-20.0, 0.0), P2::new(20.0, 0.0), P2::new(0.0, 4.0)], 320.0 + 16.0 * pi),
+    for (command, tool, picks, area) in [
         (
-            "Centrepoint slot",
+            "sketch_slot",
+            Tool::Slot,
+            vec![P2::new(-20.0, 0.0), P2::new(20.0, 0.0), P2::new(0.0, 4.0)],
+            320.0 + 16.0 * pi,
+        ),
+        (
+            "sketch_centrepoint_slot",
             Tool::CentrepointSlot,
             vec![P2::ZERO, P2::new(20.0, 0.0), P2::new(0.0, -4.0)],
             320.0 + 16.0 * pi,
         ),
         (
-            "Three-point arc slot",
+            "sketch_three_point_arc_slot",
             Tool::ThreePointArcSlot,
             vec![P2::new(20.0, 0.0), P2::new(0.0, 20.0), P2::new(12.0, 16.0), P2::new(22.0, 0.0)],
             44.0 * pi,
         ),
         (
-            "Centrepoint arc slot",
+            "sketch_centrepoint_arc_slot",
             Tool::CentrepointArcSlot,
             vec![P2::ZERO, P2::new(20.0, 0.0), P2::new(0.0, 20.0), P2::new(0.0, 18.0)],
             44.0 * pi,
         ),
     ] {
-        exercise(label, tool, &picks, area);
+        exercise(command, tool, &picks, area);
     }
 }

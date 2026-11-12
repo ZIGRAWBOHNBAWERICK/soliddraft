@@ -1,6 +1,6 @@
 //! Input and observation shared by the ribbon acceptance tests: the real app on the real
-//! wgpu pipeline and the real kernel, driven with pointer and keyboard events, and read
-//! back from the frame it painted. Layout expectations stay in the tests; nothing here
+//! wgpu pipeline and the real kernel, driven with registry commands, pointer and keyboard
+//! events, and read back from the frame it painted. Layout expectations stay in the tests; nothing here
 //! repeats how the app lays itself out.
 //!
 //! A test file brings this in with `#[path = "support/ribbon.rs"] mod ribbon;`.
@@ -257,11 +257,30 @@ pub fn tab(app: &App, name: &str) -> Control {
     control(app, &format!("{name} tab"), window(app))
 }
 
-/// Clicks a ribbon tab.
-pub fn click_tab(app: &mut App, name: &str) {
-    let rect = tab(app, name).rect;
-    click_at(app, rect.center());
-    app.run_steps(4);
+/// Selects a workspace by its stable id, independently of the tab strip.
+pub fn switch_workspace(app: &mut App, id: &str) {
+    use soliddraft_app::drawing::{DrawingAction, DrawingTab};
+    use soliddraft_app::state::{AppAction, RibbonTab};
+
+    let state = &mut app.state_mut().state;
+    if state.drawing.is_active() {
+        let tab = match id {
+            "views" => DrawingTab::Views,
+            "annotate" => DrawingTab::Annotate,
+            "sheet" => DrawingTab::Sheet,
+            "view" => DrawingTab::View,
+            "assistant" => DrawingTab::Assistant,
+            _ => panic!("unknown drawing workspace {id}"),
+        };
+        state.push(AppAction::Drawing(DrawingAction::SetTab(tab)));
+    } else if state.assembly.is_active() {
+        assert_eq!(id, "assembly", "the active assembly has one workspace");
+    } else {
+        let tab =
+            RibbonTab::ALL.into_iter().find(|tab| tab.id() == id).unwrap_or_else(|| panic!("unknown workspace {id}"));
+        state.ribbon_tab = tab;
+    }
+    settle_command(app);
 }
 
 /// Everything above the side panels: the menus, the tabs and the ribbon.
@@ -339,12 +358,30 @@ pub fn ribbon_command_id(app: &App, label: &str) -> &'static str {
         .unwrap_or_else(|| panic!("ribbon command {label}"))
 }
 
-/// Clicks a ribbon command, opening its collapsed group when needed.
-pub fn click_ribbon(app: &mut App, label: &str) {
-    let id = ribbon_command_id(app, label);
-    let rect = reveal_ribbon_command(app, id).rect;
-    click_at(app, rect.center());
+/// Runs a registry command by id, then waits for the resulting view to settle.
+pub fn run_command(app: &mut App, id: &str) {
+    let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
+    app.state_mut().state.run_command(command);
+    settle_command(app);
+}
+
+// Projection-based clicks must use the camera pose that will receive them.
+fn settle_command(app: &mut App) {
     app.run_steps(4);
+    let pose = |app: &App| {
+        let camera = &app.state().state.viewport.camera;
+        [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch]
+    };
+    let mut last = pose(app);
+    let mut quiet = 0;
+    let start = Instant::now();
+    while quiet < 4 {
+        assert!(start.elapsed() < HANG_GUARD, "the command's view transition never settles");
+        app.step();
+        let now = pose(app);
+        quiet = if now == last { quiet + 1 } else { 0 };
+        last = now;
+    }
 }
 
 /// Clicks a quick-access command above the ribbon tabs.

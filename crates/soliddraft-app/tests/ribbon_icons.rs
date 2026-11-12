@@ -377,7 +377,7 @@ fn fillet_stays_a_fillet(app: &mut App, ppp: f32) {
     app.run_steps(3);
     let hovered = crop(&app.render().expect("the frame renders"), button.rect, ppp);
     assert!(difference(&resting, &hovered) > 0.2, "hovering Fillet shows");
-    ribbon::click_ribbon(app, "Fillet");
+    ribbon::run_command(app, "fillet");
     let rest = ribbon::window(app).center();
     app.hover_at(rest);
     app.run_steps(4);

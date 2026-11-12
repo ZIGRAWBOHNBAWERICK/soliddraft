@@ -134,7 +134,7 @@ fn contour_and_dimension_switches_change_raster_and_picking_without_history() {
     let pixel = |image: &image::RgbaImage| image.get_pixel(sample.x as u32, sample.y as u32).0;
     let filled = app.render().unwrap();
     filled.save(dir.join("shading-on.png")).unwrap();
-    ribbon::click_ribbon(&mut app, "Contour shading");
+    ribbon::run_command(&mut app, "sketch_shading");
     assert!(!session(&app).show_regions);
     let unfilled = app.render().unwrap();
     unfilled.save(dir.join("shading-off.png")).unwrap();
@@ -171,9 +171,9 @@ fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history(
     let (mut app, id, dir) = launch(sketch, "placement");
     app.state_mut().state.viewport.grid_style = GridStyle { follow_zoom: false, fixed_mm: 2.5, ..Default::default() };
     app.run_steps(4);
-    ribbon::click_ribbon(&mut app, "Point");
+    ribbon::run_command(&mut app, "sketch_point");
     text_click(&mut app, "Auto relations");
-    ribbon::click_ribbon(&mut app, "Snap to grid");
+    ribbon::run_command(&mut app, "sketch_grid_snap");
     assert!(session(&app).grid_snap);
     let before = session(&app).sketch.clone();
     let target = p(13.1, -9.1);
@@ -208,7 +208,7 @@ fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history(
     pick(&mut app, p(-13.1, -9.1));
     near(last_point(&app), p(-12.5, -10.0));
     let revision = app.state().state.doc.revision();
-    ribbon::click_ribbon(&mut app, "Rectangle");
+    ribbon::run_command(&mut app, "sketch_rectangle");
     pick(&mut app, p(-8.9, 12.1));
     assert_eq!(session(&app).pending.len(), 1);
     app.key_press(Key::Escape);
@@ -217,7 +217,7 @@ fn grid_placement_uses_fixed_and_adaptive_spacing_with_cancellation_and_history(
     assert_eq!(app.state().state.doc.revision(), revision);
     assert!(session(&app).grid_snap);
 
-    ribbon::click_ribbon(&mut app, "Point");
+    ribbon::run_command(&mut app, "sketch_point");
     app.state_mut().state.viewport.references.show_grid = true;
     app.state_mut().state.viewport.grid_style.follow_zoom = true;
     let mut steps = Vec::new();
@@ -249,7 +249,7 @@ fn geometry_and_quick_snaps_override_grid_and_closed_sketch_visibility_is_retain
     let (mut app, id, dir) = launch(sketch, "precedence");
     app.state_mut().state.viewport.grid_style = GridStyle { follow_zoom: false, fixed_mm: 5.0, ..Default::default() };
     app.run_steps(4);
-    ribbon::click_ribbon(&mut app, "Point");
+    ribbon::run_command(&mut app, "sketch_point");
     text_click(&mut app, "Snap to grid");
     assert!(session(&app).auto_relations);
     assert_eq!(session(&app).sketch.point(PointRef::new(seed, 0)), Some(p(1.29, 0.79)));

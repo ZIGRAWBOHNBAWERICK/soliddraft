@@ -394,7 +394,7 @@ fn grid_off_keeps_sketch_drawing_and_a_line_lands_where_it_was_clicked() {
     assert_eq!(readout(&app), None, "no readout with the grid off");
     let entities = app.state().state.sketch.as_ref().unwrap().sketch.entities.len();
 
-    click_ribbon_command(&mut app, "sketch_line");
+    run_command(&mut app, "sketch_line");
     let rect = viewport(&app);
     let (a, b) = (pos2(rect.center().x + 150.0, rect.center().y + 120.0), rect.center() + vec2(230.0, 170.0));
     let on_plane = |app: &App, p| {

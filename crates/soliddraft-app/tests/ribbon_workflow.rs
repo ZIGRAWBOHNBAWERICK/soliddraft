@@ -14,7 +14,7 @@ use egui::{Key, Modifiers, Rect, pos2};
 use egui_kittest::kittest::Queryable;
 use ribbon::{App, TOLERANCE};
 use soliddraft_app::document::{Document, FeatureKind, Selection};
-use soliddraft_app::state::{EditorParams, Tool};
+use soliddraft_app::state::{EditorParams, RibbonTab, Tool};
 use soliddraft_app::viewport::camera::StandardView;
 
 const TABS: [&str; 5] = ["Solid", "Sketch", "Assembly", "Inspect", "View"];
@@ -101,13 +101,14 @@ fn tabs_preserve_the_part(app: &mut App) {
         assert!(app.query_by_label(label.as_str()).is_none(), "{name} is absent from the controls");
         assert!(!painted.iter().any(|p| p.text == name), "{name} is not painted");
     }
-    for name in TABS {
+    for tab in RibbonTab::ALL {
+        let name = tab.label();
         assert!(ribbon::tab(app, name).enabled, "{name} is enabled");
-        ribbon::click_tab(app, name);
-        assert_eq!(selected_tabs(app), [name], "clicking {name} selects only that tab");
+        ribbon::switch_workspace(app, tab.id());
+        assert_eq!(selected_tabs(app), [name], "selecting {name} selects only that tab");
         assert_eq!(ribbon::fingerprint(app), before, "browsing {name} changes no part or editor state");
     }
-    ribbon::click_tab(app, "Solid");
+    ribbon::switch_workspace(app, "solid");
     assert_eq!(selected_tabs(app), ["Solid"]);
     assert_eq!(ribbon::fingerprint(app), before, "returning to Solid changes no part or editor state");
     assert_eq!(ribbon::caption_names(app), captions, "returning to Solid restores its ribbon");
@@ -194,7 +195,7 @@ fn solid_groups_and_tabs_are_visible_and_honest() {
         ribbon::click_world(app, glam::Vec3::new(0.0, 0.0, 20.0));
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "the pick selects the top face");
         tabs_preserve_the_part(app);
-        ribbon::click_ribbon(app, "Fillet");
+        ribbon::run_command(app, "fillet");
         settle(app);
         let edge = app.state().state.doc.edges.iter().find(|e| (e.midpoint.z - 20.0).abs() < 1e-9).unwrap().midpoint;
         ribbon::click_world(app, edge);
@@ -246,9 +247,9 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         assert_eq!(selected_tabs(app), ["Sketch"]);
         case.frame(app, "sketch-session");
         ribbon::groups_in_order(app, &SKETCH);
-        ribbon::click_ribbon(app, "Rectangle");
+        ribbon::run_command(app, "sketch_rectangle");
         assert_eq!(app.state().state.sketch.as_ref().map(|s| s.tool), Some(Tool::Rectangle));
-        ribbon::click_ribbon(app, "Line");
+        ribbon::run_command(app, "sketch_line");
         assert_eq!(app.state().state.sketch.as_ref().map(|s| s.tool), Some(Tool::Line));
 
         // Extrude from Use sketch ends the sketch and opens the editor in Solid.
@@ -311,11 +312,11 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         plate_is_whole(&app.state().state.doc);
 
         // The view commands.
-        ribbon::click_tab(app, "View");
-        ribbon::click_ribbon(app, "Top");
+        ribbon::switch_workspace(app, "view");
+        ribbon::run_command(app, "view_top");
         settle(app);
         settled_camera_is(app, StandardView::Top);
-        ribbon::click_ribbon(app, "Isometric");
+        ribbon::run_command(app, "view_isometric");
         settle(app);
         settled_camera_is(app, StandardView::Isometric);
 
@@ -324,11 +325,11 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
         ribbon::click_at(app, row.center());
         settle(app);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(extrude)));
-        ribbon::click_tab(app, "Inspect");
+        ribbon::switch_workspace(app, "inspect");
         case.frame(app, "inspect");
         let body = app.state().state.doc.display_body().unwrap();
         assert!(app.state().state.doc.kernel().cached_mass_properties(body).is_none(), "nothing has measured it yet");
-        ribbon::click_ribbon(app, "Mass props");
+        ribbon::run_command(app, "mass_properties");
         ribbon::until(app, "the mass properties", |a| {
             a.state().state.doc.kernel().cached_mass_properties(body).is_some()
         });
@@ -350,7 +351,7 @@ fn assembly_is_discoverable_without_applying_part_commands_to_it() {
         let start = ribbon::fingerprint(app);
 
         // The entry shows the commands and creates nothing.
-        ribbon::click_tab(app, "Assembly");
+        ribbon::switch_workspace(app, "assembly");
         settle(app);
         assert_eq!(ribbon::fingerprint(app), start, "the entry changes nothing");
         assert_eq!(selected_tabs(app), ["Assembly"]);
@@ -382,7 +383,7 @@ fn assembly_is_discoverable_without_applying_part_commands_to_it() {
         ribbon::document_tab(app, "Ribbon acceptance");
         settle(app);
         assert!(!app.state().state.assembly.is_active());
-        ribbon::click_tab(app, "Solid");
+        ribbon::switch_workspace(app, "solid");
         settle(app);
         assert_eq!(selected_tabs(app), ["Solid"]);
         assert_eq!(
@@ -404,7 +405,7 @@ fn reference_plane_editor_creates_a_plane_and_attaches_a_sketch() {
     case.run(&mut app, |app| {
         settle(app);
         assert!(ribbon::ribbon_button(app, "Plane").enabled);
-        ribbon::click_ribbon(app, "Plane");
+        ribbon::run_command(app, "reference_plane");
         settle(app);
         assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::ReferencePlane(_))));
         ribbon::type_field(app, "Offset value", "-6");
@@ -430,7 +431,7 @@ fn reference_plane_editor_creates_a_plane_and_attaches_a_sketch() {
         settle(app);
         let row = ribbon::button_rect(app, "Plane1", left_column(app));
         ribbon::click_at(app, row.center());
-        ribbon::click_ribbon(app, "Sketch");
+        ribbon::run_command(app, "sketch");
         ribbon::until(app, "the attached sketch", |a| a.state().state.sketch.is_some());
         let session = app.state().state.sketch.as_ref().unwrap();
         assert_eq!(session.plane.origin.z, -6.0);
@@ -460,7 +461,7 @@ fn reference_plane_on_a_translated_part_is_visible() {
         settle(app);
         app.key_press(Key::Z);
         settle(app);
-        ribbon::click_ribbon(app, "Plane");
+        ribbon::run_command(app, "reference_plane");
         settle(app);
         ribbon::type_field(app, "Offset value", "-6");
         let ok = ribbon::button_rect(app, "OK (Enter)", left_column(app));

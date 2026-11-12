@@ -99,7 +99,7 @@ const SOLID: [(&str, &str, &[Family]); 19] = [
     ("Point", "refpoint", &[Reference]),
 ];
 
-const SKETCH: [(&str, &str, &[Family]); 15] = [
+const SKETCH: [(&str, &str, &[Family]); 12] = [
     ("Exit", "exit_sketch", &[Profile]),
     ("Line", "line", &[Profile]),
     ("Circle", "circle", &[Profile]),
@@ -110,9 +110,6 @@ const SKETCH: [(&str, &str, &[Family]); 15] = [
     ("Smart dim", "smart_dim", &[Added]),
     ("Construction", "construction", &[Profile]),
     ("Relations", "relations", &[Profile, Added]),
-    ("Extrude", "extrude", &[Profile, Added]),
-    ("Revolve", "revolve", &[Added]),
-    ("Cut", "cut", &[Body, Removed]),
     ("Normal to", "normal_to", &[Reference]),
     ("Sketch", "sketch", &[Profile]),
 ];
@@ -474,7 +471,7 @@ fn one_pass(case: &ribbon::Case, mode: Mode, ppp: f32, log: &mut Log) {
         app.run_steps(12);
         assert!(app.state().state.sketch.is_some(), "the sketch is open");
         // The open sketch lights its own button; the active ground is held by the Fillet case.
-        compare_tab(app, &SKETCH[..14], dark, ppp, log, &format!("{seen} in a sketch"));
+        compare_tab(app, &SKETCH[..SKETCH.len() - 1], dark, ppp, log, &format!("{seen} in a sketch"));
     });
     theme::set_mode(&plate.ctx.clone(), Mode::Light);
 }

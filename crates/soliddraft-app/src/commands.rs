@@ -429,7 +429,7 @@ pub struct CommandSpec {
     pub action: Option<fn(&AppState) -> AppAction>,
     /// Whether the action can run now.
     pub enabled: fn(&AppState) -> bool,
-    /// Whether its ribbon button is there at all, for a button that appears only when
+    /// Whether its button is there at all, for a button that appears only when
     /// it applies, such as Repair reference.
     pub shown: fn(&AppState) -> bool,
     /// Whether its ribbon button shows as on: the open tool, the shown panel.

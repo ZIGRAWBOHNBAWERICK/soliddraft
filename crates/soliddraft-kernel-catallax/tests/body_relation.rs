@@ -1,3 +1,5 @@
+//! Body-pair proofs preserve their sources and refuse exhausted requests.
+
 use soliddraft_kernel_api::{BodyId, Kernel, PlacedBody, contract};
 use soliddraft_kernel_catallax::{CatallaxKernel, with_request_allowance};
 

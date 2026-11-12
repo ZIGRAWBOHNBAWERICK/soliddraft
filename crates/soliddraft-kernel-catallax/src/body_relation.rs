@@ -110,6 +110,9 @@ fn minimum_gap(
     [a, b]: [catallax_topology::BodyId; 2],
     clearance: Option<f64>,
 ) -> Result<BodyDistance, BodyQueryRefusal> {
+    if [a, b].iter().any(|body| !model.body(*body).marks.is_empty()) {
+        return Err(refused("Minimum distance", "body-relation.marked"));
+    }
     let enclosure = answer(
         "Minimum distance",
         numerical("body_minimum_distance", |dec| {

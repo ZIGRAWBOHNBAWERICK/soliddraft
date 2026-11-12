@@ -32,13 +32,15 @@ impl AssemblyDocument {
             let mut part = |(entry, source): (&Entry, &DocRef)| {
                 let document =
                     self.proof_part(source).map_err(|_| unavailable(KernelError::Unavailable(String::new())))?;
-                let document = document.lock().expect("the part lock");
-                let body = document.body().ok_or_else(|| unavailable(KernelError::Unavailable(String::new())))?;
+                let part = document.lock().expect("the part lock");
+                let body = part.body().ok_or_else(|| unavailable(KernelError::Unavailable(String::new())))?;
+                let kernel = part.kernel().clone();
+                drop(part);
                 let at = self.table.world(entry.row);
                 Ok::<_, BodyQueryRefusal>((
-                    document.kernel().clone(),
+                    kernel,
                     PlacedBody { body, translation: at.translation.to_array(), rotation: at.rotation.to_array() },
-                    source.clone(),
+                    document,
                 ))
             };
             let (ka, pa, ra) = part(a)?;
@@ -81,10 +83,8 @@ impl AssemblyDocument {
                         .map(|f| doc.face_label(f).map(|l| l.text).unwrap_or_else(|| "Face".into()))
                         .collect()
                 };
-                let first = self.proof_part(&a).expect("the queried part remains loaded");
-                let second = self.proof_part(&b).expect("the queried part remains loaded");
-                let a = labels(&first.lock().expect("the part lock"), faces.first);
-                let b = labels(&second.lock().expect("the part lock"), faces.second);
+                let a = labels(&a.lock().expect("the part lock"), faces.first);
+                let b = labels(&b.lock().expect("the part lock"), faces.second);
                 let contact = ExactContactFaces { a, b };
                 let found = !contact.a.is_empty() || !contact.b.is_empty();
                 result.contact_faces = Some(contact);

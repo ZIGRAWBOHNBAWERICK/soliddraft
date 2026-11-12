@@ -2914,6 +2914,10 @@ impl Document {
         let mut fork = self.model.fork();
         let command = match target {
             Some(id) => {
+                let index = fork.index_of(model_id(id)).ok_or("Select an existing loft to edit")?;
+                let after = fork.features().get(index + 1).map(|feature| feature.id);
+                // The editor rolls the real document back before this feature.
+                fork.execute_deferred(model::Command::RollTo { before: after }).map_err(|e| e.to_string())?;
                 model::Command::EditFeature { id: model_id(id), kind: model::FeatureKind::Loft(params.clone()) }
             }
             None => model::Command::AddFeature {

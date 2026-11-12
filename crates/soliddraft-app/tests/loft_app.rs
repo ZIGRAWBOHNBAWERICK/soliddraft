@@ -179,6 +179,8 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
     assert!(editor.error.is_none(), "existing Loft edit preview: {:?}", editor.error);
     assert!(editor.preview.result.is_some());
     assert_eq!(app.state().state.doc.rollback, Some(3));
+    assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
+        if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Ruled));
     case.frame(&mut app, "edited-preview");
     app.get_by_label("OK (Enter)").click();
     ux_tools::settle(&mut app);

@@ -179,11 +179,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label("Exact internal cylinder axes at pinned revisions. Checks parallel axes within the maximum deviation, not diameter or fit.");
     } else {
         ui.label(
-            egui::RichText::new(
-                "Proven on certified meshes of each part at its pinned revision. Pairs closer than the meshes' bounds \
-             stay touching or undecided.",
-            )
-            .color(theme::muted()),
+            egui::RichText::new("Exact geometry and certified mesh bounds at each part's pinned revision.")
+                .color(theme::muted()),
         );
     }
     if let Some(e) = &d.error {
@@ -200,7 +197,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.colored_label(theme::warn(), "The assembly changed since this check; check again");
         }
         ui.label(summary(report));
-        ui.label(egui::RichText::new(format!("Chord bound {} mm per part", report.chord_mm)).color(theme::muted()));
+        ui.label(egui::RichText::new(format!("Mesh chord bound {} mm per part", report.chord_mm)).color(theme::muted()));
         for part in &report.skipped {
             ui.colored_label(theme::error(), format!("Not checked: {}. {}", part.label, part.message));
         }
@@ -222,6 +219,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if head.clicked() {
                 actions.push(InterferenceAction::Show(r.a.clone(), r.b.clone()));
             }
+            for refused in &r.exact_refused {
+                ui.colored_label(theme::warn(), &refused.message);
+            }
             ui.label(egui::RichText::new(&r.why).color(theme::muted()));
             if let Some(v) = r.overlap_mm3 {
                 ui.label(format!("Overlap volume: {} to {} mm³", v.lo, v.hi));
@@ -234,9 +234,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             {
                 ui.label(format!("Contact faces on {}: {}", r.a_label, faces.a.join(", ")));
                 ui.label(format!("Contact faces on {}: {}", r.b_label, faces.b.join(", ")));
-            }
-            for refused in &r.exact_refused {
-                ui.colored_label(theme::warn(), &refused.message);
             }
             if let Some(f) = r.faces.first() {
                 ui.label(egui::RichText::new(format!("Nearest faces: {} and {}", f.a, f.b)).color(theme::muted()));

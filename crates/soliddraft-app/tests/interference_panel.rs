@@ -140,6 +140,7 @@ fn check_interference_and_clearance_from_the_panel() {
     let st = &h.state().state.assembly.interference;
     assert!(st.error.is_none(), "{:?}", st.error);
     let (report, _) = st.report.clone().expect("a report");
+    assert!(has(&h, "Exact geometry and certified mesh bounds at each part's pinned revision."));
     assert_eq!(
         (report.pairs, report.interferes, report.touching, report.touching_or_undecided, report.clear),
         (3, 1, 1, 0, 1)

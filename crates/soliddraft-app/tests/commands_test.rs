@@ -133,6 +133,22 @@ fn every_ribbon_button_is_a_registry_command() {
 }
 
 #[test]
+fn command_helpers_work_outside_the_commands_ribbon_tab() {
+    let _turn = gpu_turn();
+    assert!(gpu_available(), "command helper acceptance requires a renderer");
+    let mut harness = harness();
+    harness.run_steps(4);
+    ribbon::switch_workspace(&mut harness, "inspect");
+    assert_eq!(harness.state().state.ribbon_tab, RibbonTab::Inspect);
+    ribbon::run_command(&mut harness, "extrude");
+    assert!(matches!(
+        harness.state().state.editor.as_ref().unwrap().params,
+        soliddraft_app::state::EditorParams::Extrude(_)
+    ));
+    assert_eq!(harness.state().state.commands.recent.first().map(String::as_str), Some("extrude"));
+}
+
+#[test]
 fn a_disabled_command_says_why_instead_of_running() {
     let _turn = gpu_turn();
     if !gpu_available() {

@@ -199,14 +199,16 @@ fn centrepoint_circle_retains_history_cancellation_construction_and_reopen() {
 #[test]
 fn perimeter_and_three_point_tools_preview_refuse_cancel_and_commit_once() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    for (label, tool, picks, on_curve) in [
+    for (command, label, tool, picks, on_curve) in [
         (
+            "sketch_perimeter_circle",
             "Perimeter circle",
             Tool::PerimeterCircle,
             [P2::new(20.0, 0.0), P2::new(0.0, -20.0), P2::new(-20.0, 0.0)],
             P2::new(0.0, 20.0),
         ),
         (
+            "sketch_three_point_arc",
             "Three-point arc",
             Tool::ThreePointArc,
             [P2::new(20.0, 0.0), P2::new(0.0, -20.0), P2::new(-20.0, 0.0)],
@@ -216,7 +218,7 @@ fn perimeter_and_three_point_tools_preview_refuse_cancel_and_commit_once() {
         let (mut app, id, dir) = launch(Sketch::new(), label);
         disable_inference(&mut app);
         assert!(commands::search(label, &Default::default()).iter().any(|m| m.command.label == label));
-        ribbon::click_ribbon(&mut app, label);
+        ribbon::run_command(&mut app, command);
         assert_eq!(session(&app).tool, tool);
         let _ = property_button(&app, label);
         let before = session(&app).sketch.clone();
@@ -264,7 +266,7 @@ fn tangent_endpoint_pick_overrides_origin_and_keeps_persistent_relations() {
     app.state_mut().state.viewport.camera.zoom(0.25, None, 1.0);
     app.run_steps(5);
     disable_inference(&mut app);
-    ribbon::click_ribbon(&mut app, "Tangent arc");
+    ribbon::run_command(&mut app, "sketch_tangent_arc");
     pick(&mut app, P2::new(-10.0, 0.0));
     assert!(session(&app).pending.is_empty(), "curve interiors are not endpoints");
     pick(&mut app, P2::ZERO);
@@ -300,7 +302,7 @@ fn perimeter_picks_keep_point_on_relations_to_existing_points() {
         sketch.add(EntityKind::Point { p }, false);
     }
     let (mut app, _, _) = launch(sketch, "snapped-circle");
-    ribbon::click_ribbon(&mut app, "Perimeter circle");
+    ribbon::run_command(&mut app, "sketch_perimeter_circle");
     for p in picks {
         pick(&mut app, p);
     }

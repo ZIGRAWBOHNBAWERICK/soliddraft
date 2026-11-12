@@ -49,11 +49,11 @@ fn ok(app: &mut App) {
 
 /// The isometric view, fitted, from the View tab, then back to the Solid tab.
 fn isometric(app: &mut App) {
-    ribbon::click_tab(app, "View");
-    ribbon::click_ribbon(app, "Isometric");
-    ribbon::click_ribbon(app, "Fit");
+    ribbon::switch_workspace(app, "view");
+    ribbon::run_command(app, "view_isometric");
+    ribbon::run_command(app, "zoom_fit");
     settle(app);
-    ribbon::click_tab(app, "Solid");
+    ribbon::switch_workspace(app, "solid");
     pointer_off_model(app);
 }
 
@@ -133,7 +133,7 @@ fn fillet_and_chamfer_an_imported_block_in_the_app() {
         app.run_steps(4);
 
         // A 3 mm round on the front top edge removes (9 - 9 pi / 4) * 40.
-        ribbon::click_ribbon(app, "Fillet");
+        ribbon::run_command(app, "fillet");
         pick(app, Vec3::new(20.0, 0.0, TOP));
         ribbon::type_field(app, "Radius value", "3");
         settle(app);
@@ -146,7 +146,7 @@ fn fillet_and_chamfer_an_imported_block_in_the_app() {
         assert!((rounded - expected).abs() < 1e-3, "{rounded} vs {expected}");
 
         // A 2 mm chamfer on the back top edge removes 2 * 2 / 2 * 40 = 80 mm3.
-        ribbon::click_ribbon(app, "Chamfer");
+        ribbon::run_command(app, "chamfer");
         pick(app, Vec3::new(20.0, 25.0, TOP));
         ribbon::type_field(app, "Distance value", "2");
         settle(app);
@@ -168,7 +168,7 @@ fn shell_an_imported_block_in_the_app() {
     let mut app = ribbon::app(Document::new("Imported block", soliddraft_app::kernel()));
     case.run(&mut app, |app| {
         import(&case, app);
-        ribbon::click_ribbon(app, "Shell");
+        ribbon::run_command(app, "shell");
         pick(app, Vec3::new(30.0, 20.0, TOP));
         ribbon::type_field(app, "Wall thickness value", "1");
         settle(app);

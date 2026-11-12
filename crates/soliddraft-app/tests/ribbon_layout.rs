@@ -31,6 +31,14 @@ const PART_TABS: [(&str, RibbonTab); 5] = [
     ("View", RibbonTab::View),
 ];
 
+const DRAWING_TABS: [(&str, DrawingTab); 5] = [
+    ("views", DrawingTab::Views),
+    ("annotate", DrawingTab::Annotate),
+    ("sheet", DrawingTab::Sheet),
+    ("view", DrawingTab::View),
+    ("assistant", DrawingTab::Assistant),
+];
+
 const SOLID_CAPTIONS: [&str; 6] = ["Sketch", "Create", "Remove", "Modify", "Pattern", "Reference"];
 
 /// WCAG's floor for text, and its floor for large or incidental text, which a label that
@@ -346,7 +354,7 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
         settle(app);
         let start = ribbon::fingerprint(app);
         for (name, tab) in PART_TABS {
-            ribbon::click_tab(app, name);
+            ribbon::switch_workspace(app, tab.id());
             settle(app);
             assert_eq!(ribbon::fingerprint(app), start, "opening {name} changes no state");
             every_tile(app, tab.into(), name);
@@ -365,8 +373,8 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
     case.run(&mut drawing, |app| {
         settle(app);
         open_drawing(app);
-        for tab in DrawingTab::ALL {
-            ribbon::click_tab(app, tab.label());
+        for (id, tab) in DRAWING_TABS {
+            ribbon::switch_workspace(app, id);
             settle(app);
             every_tile(app, tab.into(), &format!("drawing {}", tab.label()));
             case.frame(app, &format!("drawing-{}", tab.label()));
@@ -390,7 +398,7 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
                 assert!(!point.control.enabled, "reference Point is unavailable");
                 label_below(&point, body, &what);
                 for (name, tab) in PART_TABS {
-                    ribbon::click_tab(app, name);
+                    ribbon::switch_workspace(app, tab.id());
                     settle(app);
                     every_tile(app, tab.into(), &format!("{what} {name}"));
                 }
@@ -401,8 +409,8 @@ fn every_ribbon_command_has_a_visible_label_below_its_icon() {
                 theme::set_mode(&app.ctx.clone(), mode);
                 settle(app);
                 open_sketch(app);
-                ribbon::click_tab(app, "Sketch");
-                ribbon::click_ribbon(app, "Line");
+                ribbon::switch_workspace(app, "sketch");
+                ribbon::run_command(app, "sketch_line");
                 settle(app);
                 let line = tile(app, "Line", body(app));
                 assert!(line.control.selected, "the Line tool is lit");
@@ -490,10 +498,10 @@ fn layout_holds(app: &App, tree: &str, what: &str) {
 
 /// Reveals every command of a tab. Disabled ones are clicked and do nothing, and the ones
 /// the walk may run are run and leave no row behind.
-fn walk(app: &mut App, tab_name: Option<&str>, tab: Tab, runs: &[&str], tree: &str, what: &str) {
+fn walk(app: &mut App, workspace: Option<&str>, tab: Tab, runs: &[&str], tree: &str, what: &str) {
     for entry in entries(app, tab) {
-        if let Some(name) = tab_name {
-            ribbon::click_tab(app, name);
+        if let Some(id) = workspace {
+            ribbon::switch_workspace(app, id);
         }
         layout_holds(app, tree, what);
         let name = format!("{what}, {}", entry.label);
@@ -582,9 +590,9 @@ fn same_commands_after_another_tab(app: &mut App, what: &str) {
         let expected: Vec<&str> = entries(app, tab).iter().filter(|e| e.group == group).map(|e| e.command.id).collect();
         assert_eq!(first, expected, "{what}: {group} shows its commands");
         dismiss(app);
-        ribbon::click_tab(app, "View");
+        ribbon::switch_workspace(app, "view");
         settle(app);
-        ribbon::click_tab(app, "Solid");
+        ribbon::switch_workspace(app, "solid");
         settle(app);
         open_group(app, group, what);
         assert_eq!(ids(app), first, "{what}: {group} shows the same commands again");
@@ -652,15 +660,15 @@ fn narrow_window(case: &Case, size: Vec2, ppp: f32) {
         if size.x <= 960.0 {
             the_band_holds(app, &what);
         }
-        walk(app, Some("Solid"), RibbonTab::Solid.into(), &[], "Tree", &format!("{what} solid"));
-        walk(app, Some("Assembly"), RibbonTab::Assembly.into(), &[], "Tree", &format!("{what} assembly tab"));
-        walk(app, Some("Inspect"), RibbonTab::Inspect.into(), &INSPECT_RUNS, "Tree", &format!("{what} inspect"));
+        walk(app, Some("solid"), RibbonTab::Solid.into(), &[], "Tree", &format!("{what} solid"));
+        walk(app, Some("assembly"), RibbonTab::Assembly.into(), &[], "Tree", &format!("{what} assembly tab"));
+        walk(app, Some("inspect"), RibbonTab::Inspect.into(), &INSPECT_RUNS, "Tree", &format!("{what} inspect"));
     });
     drop(plate);
     let mut plate = ribbon::app_unrendered(ribbon::plate(), size, ppp);
     case.run(&mut plate, |app| {
         settle(app);
-        walk(app, Some("View"), RibbonTab::View.into(), &VIEW_RUNS, "Tree", &format!("{what} view"));
+        walk(app, Some("view"), RibbonTab::View.into(), &VIEW_RUNS, "Tree", &format!("{what} view"));
     });
     drop(plate);
 
@@ -679,10 +687,10 @@ fn narrow_window(case: &Case, size: Vec2, ppp: f32) {
     case.run(&mut sketch, |app| {
         settle(app);
         open_sketch(app);
-        ribbon::click_tab(app, "Sketch");
+        ribbon::switch_workspace(app, "sketch");
         settle(app);
         let tree = "Tree";
-        walk(app, Some("Sketch"), RibbonTab::Sketch.into(), &SKETCH_RUNS, tree, &format!("{what} sketch"));
+        walk(app, Some("sketch"), RibbonTab::Sketch.into(), &SKETCH_RUNS, tree, &format!("{what} sketch"));
     });
     drop(sketch);
 
@@ -715,11 +723,11 @@ fn the_drawing_ribbon_narrows_the_same_way() {
     case.run(&mut drawing, |app| {
         settle(app);
         open_drawing(app);
-        for tab in DrawingTab::ALL {
+        for (id, tab) in DRAWING_TABS {
             let what = format!("drawing {}", tab.label());
             let body = body(app);
             for entry in entries(app, tab.into()) {
-                ribbon::click_tab(app, tab.label());
+                ribbon::switch_workspace(app, id);
                 reveal(app, &entry, &what);
                 dismiss(app);
                 for (name, rect) in ribbon::buttons_in(app, body) {

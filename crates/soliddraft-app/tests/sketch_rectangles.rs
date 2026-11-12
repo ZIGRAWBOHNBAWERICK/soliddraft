@@ -60,7 +60,7 @@ fn start() -> App {
     let mut app = ribbon::app(doc);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(15);
-    ribbon::click_tab(&mut app, "Sketch");
+    ribbon::switch_workspace(&mut app, "sketch");
     app
 }
 
@@ -68,7 +68,7 @@ fn start() -> App {
 fn accepted_corner_rectangle_retains_axis_relations_and_refuses_zero_area() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = start();
-    ribbon::click_ribbon(&mut app, "Rectangle");
+    ribbon::run_command(&mut app, "sketch_rectangle");
     assert_eq!(session(&app).tool, Tool::Rectangle);
     let before = session(&app).sketch.clone();
     pick(&mut app, P2::new(-30.0, -20.0));
@@ -154,7 +154,7 @@ fn all_rectangle_tools_preview_cancel_retain_relations_undo_and_reopen() {
         let mut app = start();
         let id = session(&app).feature;
         let before = session(&app).sketch.clone();
-        ribbon::click_ribbon(&mut app, tool.label());
+        ribbon::run_command(&mut app, command);
         assert_eq!(session(&app).tool, tool);
         assert!((commands::get(command).unwrap().active)(&app.state().state));
         for p in &points[..points.len() - 1] {
@@ -171,7 +171,7 @@ fn all_rectangle_tools_preview_cancel_retain_relations_undo_and_reopen() {
         assert!(session(&app).pending.is_empty());
         assert_eq!(session(&app).sketch, before);
 
-        ribbon::click_ribbon(&mut app, tool.label());
+        ribbon::run_command(&mut app, command);
         for p in &points {
             pick(&mut app, *p);
         }
@@ -210,7 +210,7 @@ fn all_rectangle_tools_preview_cancel_retain_relations_undo_and_reopen() {
         assert_eq!(app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, saved);
         app.state_mut().state.push(AppAction::EditSketch(id));
         app.run_steps(15);
-        ribbon::click_ribbon(&mut app, tool.label());
+        ribbon::run_command(&mut app, command);
         // Construction preference applies to every side and stays outside profiles.
         app.state_mut().state.sketch.as_mut().unwrap().construction = true;
         for p in &points {

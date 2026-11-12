@@ -277,9 +277,9 @@ fn pick(case: &Case, app: &mut App, what: &str, world: Vec3) {
 }
 
 fn click_fillet(case: &Case, app: &mut App) {
-    case.note("click ribbon Fillet");
-    ribbon::click_tab(app, "Solid");
-    ribbon::click_ribbon(app, "Fillet");
+    case.note("run fillet command");
+    ribbon::switch_workspace(app, "solid");
+    ribbon::run_command(app, "fillet");
 }
 
 fn type_radius(case: &Case, app: &mut App, value: &str) {
@@ -328,14 +328,14 @@ fn camera_rests(app: &mut App) {
 }
 
 /// A standard view from the View tab, fitted, then back to the Solid tab.
-fn view(case: &Case, app: &mut App, name: &str) {
-    case.note(format!("View tab: {name}, Fit"));
-    ribbon::click_tab(app, "View");
-    ribbon::click_ribbon(app, name);
+fn view(case: &Case, app: &mut App, id: &str) {
+    case.note(format!("View command: {id}, Fit"));
+    ribbon::switch_workspace(app, "view");
+    ribbon::run_command(app, id);
     camera_rests(app);
-    ribbon::click_ribbon(app, "Fit");
+    ribbon::run_command(app, "zoom_fit");
     camera_rests(app);
-    ribbon::click_tab(app, "Solid");
+    ribbon::switch_workspace(app, "solid");
     pointer_off_model(app);
 }
 
@@ -721,12 +721,12 @@ fn edge_radius_changes_the_visible_preview_before_commit() {
         case.note(format!("committed before: undo {} redo {}", before.undo, before.redo));
 
         // The plain end profile, seen along X, for the frames to differ from.
-        view(&case, app, "Right");
+        view(&case, app, "view_right");
         let right = app.state().state.viewport.camera.clone();
         let plain = case.frame(app, "b20-right");
         corner_crop(&case, app, &plain, "b20-right-corner");
         assert!(distinguishing(app, &plain), "the plain corner covers the distinguishing point");
-        view(&case, app, "Isometric");
+        view(&case, app, "view_isometric");
 
         // (1) Fillet, then the 60 mm top edge at its midpoint.
         click_fillet(&case, app);
@@ -746,7 +746,7 @@ fn edge_radius_changes_the_visible_preview_before_commit() {
         assert_mesh_volume(&case, mesh_volume(&mesh), original, r2, "R2 preview");
 
         // (2) The drawn profile is the R2 arc, in place of the plain corner.
-        view(&case, app, "Right");
+        view(&case, app, "view_right");
         assert_eq!(app.state().state.viewport.camera.target, right.target, "the same camera as the plain frame");
         assert_eq!(app.state().state.viewport.camera.distance, right.distance, "the same camera as the plain frame");
         let frame2 = case.frame(app, "r2-preview-right");
@@ -834,7 +834,7 @@ fn edge_radius_changes_the_visible_preview_before_commit() {
         assert_eq!(committed(app), before, "Escape commits nothing");
         assert_b20(&case, app, "after Escape");
         assert_eq!(app.state().state.doc.triangle_count(), triangles, "the original display");
-        view(&case, app, "Right");
+        view(&case, app, "view_right");
         let image = case.frame(app, "escape-right");
         corner_crop(&case, app, &image, "escape-right-corner");
         assert!(distinguishing(app, &image), "the plain corner is drawn again");

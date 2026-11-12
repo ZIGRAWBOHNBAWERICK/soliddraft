@@ -142,7 +142,7 @@ fn corner_preview_cancel_undo_and_reopen_use_one_geometry_edit() {
     app.run_steps(6);
     assert_eq!(session(&app).sketch, after);
     let path = dir().join("corner.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

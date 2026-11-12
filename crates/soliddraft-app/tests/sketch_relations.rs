@@ -282,7 +282,7 @@ fn sketch_relations_are_accessible_from_the_ribbon() {
     app.run_steps(6);
     let saved = session(&app).sketch.clone();
     let path = dir.join("relations.dwprt");
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

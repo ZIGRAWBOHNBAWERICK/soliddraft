@@ -86,7 +86,7 @@ fn midpoint_guide_toggle_commits_the_seen_relation() {
     window::click_at(&mut h, at);
     h.key_press(Key::Escape);
     h.run_steps(3);
-    h.state_mut().state.push(AppAction::ExitSketch(None));
+    h.state_mut().state.push(AppAction::ExitSketch);
     window::settle(&mut h);
 
     let after = sketch(&h, id);

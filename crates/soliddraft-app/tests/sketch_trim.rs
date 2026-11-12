@@ -111,7 +111,7 @@ fn trim_can_keep_removed_pieces_as_non_profile_guides() {
     app.run_steps(6);
     assert_eq!(session(&app).sketch, after);
     let path = std::env::temp_dir().join(format!("soliddraft-keep-{}.dwprt", std::process::id()));
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);
@@ -461,7 +461,7 @@ fn live_trim_undo_works_in_a_reopened_part_without_document_history() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (mut app, id) = launch(lines());
     let path = std::env::temp_dir().join(format!("soliddraft-trim-loaded-{}.dwprt", std::process::id()));
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);
@@ -600,7 +600,7 @@ fn power_trim_crosses_entities_between_pointer_samples() {
     app.run_steps(6);
     assert_eq!(session(&app).sketch, after);
     let path = std::env::temp_dir().join(format!("soliddraft-trim-{}.dwprt", std::process::id()));
-    app.state_mut().state.push(AppAction::ExitSketch(None));
+    app.state_mut().state.push(AppAction::ExitSketch);
     app.run_steps(6);
     app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
     app.run_steps(6);

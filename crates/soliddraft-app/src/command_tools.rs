@@ -727,13 +727,19 @@ pub fn edit_sweep_params() -> Vec<(&'static str, Value)> {
     params
 }
 
+fn loft_profiles_param() -> (&'static str, Value) {
+    let mut profiles = non_empty_array(
+        string("Closed sketch name or full face label, such as Boss-Extrude1 · End cap"),
+        "Two or more profiles in order",
+    );
+    profiles["minItems"] = json!(2);
+    ("profiles", profiles)
+}
+
 /// The `loft` verb's parameters.
 pub fn loft_params() -> Vec<(&'static str, Value)> {
     vec![
-        (
-            "profiles",
-            non_empty_array(string("Closed sketch name or planar face label"), "Two or more profiles in order"),
-        ),
+        loft_profiles_param(),
         ("shape", optional(one_of(&["ruled", "smooth"], "How the sides pass between profiles; defaults to ruled"))),
     ]
 }
@@ -742,10 +748,7 @@ pub fn loft_params() -> Vec<(&'static str, Value)> {
 pub fn edit_loft_params() -> Vec<(&'static str, Value)> {
     vec![
         feature_param(),
-        (
-            "profiles",
-            non_empty_array(string("Closed sketch name or planar face label"), "Two or more profiles in order"),
-        ),
+        loft_profiles_param(),
         ("shape", one_of(&["ruled", "smooth"], "How the sides pass between profiles")),
     ]
 }

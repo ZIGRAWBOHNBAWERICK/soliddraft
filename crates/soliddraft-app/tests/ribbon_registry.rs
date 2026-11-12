@@ -721,6 +721,30 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                 current[field] = row[field].clone();
             }
         }
+        if id == "loft" {
+            assert_eq!(current["agents"], "verb");
+            assert_eq!(current["undo"], "step");
+            assert_eq!(
+                current["tool"],
+                json!({
+                    "name":"loft", "input":{
+                        "type":"object", "additionalProperties":false, "required":["profiles"],
+                        "properties":{
+                            "profiles":{"type":"array","items":{"type":"string"},"minItems":2},
+                            "shape":{"type":"string","enum":["ruled","smooth"]}
+                        }
+                    }
+                })
+            );
+            // Loft gained a tool, document history and an enabled profile editor.
+            for field in ["agents", "undo", "tool"] {
+                current[field] = row[field].clone();
+            }
+            for fixture in ["blank", "sketch", "plate", "assembly"] {
+                assert_eq!(current["availability"][fixture]["enabled"], true);
+                current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
         assert_eq!(&current, row, "{id} changed");
     }
     for list in ["agent_tools", "verbs"] {

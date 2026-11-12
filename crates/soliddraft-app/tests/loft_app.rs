@@ -105,7 +105,7 @@ mod ribbon;
 mod ux_tools;
 
 #[test]
-fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal() {
+fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal() {
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;
     let mut case = ux_tools::Case::new("loft");
@@ -114,7 +114,7 @@ fn loft_registry_button_opens_the_real_editor_builds_and_shows_a_plain_refusal()
     let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
     app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
     ux_tools::settle(&mut app);
-    ribbon::click_ribbon(&mut app, "Loft");
+    ribbon::run_command(&mut app, "loft");
     ux_tools::settle(&mut app);
     assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
     assert!(app.query_by_label("Loft needs at least two profiles in order").is_some());

@@ -12,7 +12,7 @@ use soliddraft_app::document::{PlaneKind, Reference, Selection};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::{EditorParams, Tool};
 use soliddraft_app::theme::{self, Mode};
-use soliddraft_app::viewport::DisplayMode;
+use soliddraft_app::viewport::render::DisplayMode;
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {

@@ -149,3 +149,44 @@ fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal(
     assert!(!(loft.shown)(&app.state().state));
     assert!(loft.action_now(&app.state().state).is_none());
 }
+
+#[test]
+fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::state::EditorParams;
+    let mut case = ux_tools::Case::new("loft-edit");
+    let mut doc = profiles();
+    call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
+    let id = doc.features.last().unwrap().id;
+    doc.selection = Some(Selection::Feature(id));
+    let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
+    app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+    ux_tools::settle(&mut app);
+    assert_eq!(app.state().state.doc.rollback, None);
+    app.get_by_label("Edit feature").click();
+    ux_tools::settle(&mut app);
+    assert_eq!(app.state().state.editor.as_ref().unwrap().target, Some(id));
+    assert_eq!(app.state().state.doc.rollback, Some(3));
+    app.get_by_label("Add profile").click();
+    ux_tools::settle(&mut app);
+    app.get_all_by_label("Sketch3").last().unwrap().click();
+    ux_tools::settle(&mut app);
+    app.get_by_label("Smooth").click();
+    ux_tools::settle(&mut app);
+    let editor = app.state().state.editor.as_ref().unwrap();
+    assert!(matches!(&editor.params, EditorParams::Loft(l)
+        if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+    assert!(editor.error.is_none(), "existing Loft edit preview: {:?}", editor.error);
+    assert!(editor.preview.result.is_some());
+    assert_eq!(app.state().state.doc.rollback, Some(3));
+    case.frame(&mut app, "edited-preview");
+    app.get_by_label("OK (Enter)").click();
+    ux_tools::settle(&mut app);
+    ux_tools::rebuilt(&mut app);
+    assert!(app.state().state.editor.is_none());
+    assert_eq!(app.state().state.doc.rollback, None);
+    assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
+        if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+    assert!((volume(&app.state().state.doc) - 4596.0 / 70.0).abs() < 1e-7);
+    case.frame(&mut app, "edited-committed");
+}

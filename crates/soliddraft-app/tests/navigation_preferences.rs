@@ -236,6 +236,38 @@ fn practice_label(w: &Window) -> String {
 }
 
 #[test]
+fn saved_custom_sketch_keys_survive_the_new_defaults_in_every_preset() {
+    use soliddraft_app::commands::ShortcutPreset;
+
+    let (_guard, dir) = config_dir("sketch-key-migration");
+    let mut lost = Vec::new();
+    for preset in ShortcutPreset::ALL {
+        for (custom, key, added_default) in [
+            ("sketch_line", "T", "sketch_trim"),
+            ("sketch_circle", "O", "sketch_offset"),
+            ("smart_dimension", "M", "sketch_move"),
+        ] {
+            write(&dir, &serde_json::json!({
+                "shortcuts": {"preset": preset.id(), "overrides": {custom: key}}
+            }).to_string());
+            let before = bytes(&dir);
+            let mut w = window();
+            w.run_steps(2);
+            let loaded = &w.state().shortcuts;
+            if loaded.shortcut_text(custom).as_deref() != Some(key) {
+                lost.push(format!("{}: {custom} -> {key}", preset.id()));
+                continue;
+            }
+            assert!(loaded.keys_of(added_default).is_empty(), "the custom assignment owns {key}");
+            assert_eq!(bytes(&dir), before, "opening Preferences does not write settings");
+            settings::save_shortcuts(loaded).unwrap();
+            assert_eq!(settings::shortcuts(), *loaded, "migration survives save and reopen");
+        }
+    }
+    assert!(lost.is_empty(), "lost saved mappings: {lost:?}");
+}
+
+#[test]
 fn mouse_page_preset_switch_updates_list_practice_and_settings() {
     let (_guard, dir) = config_dir("mouse");
     write(&dir, r#"{"theme":"dark"}"#);

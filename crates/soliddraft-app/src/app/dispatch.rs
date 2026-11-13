@@ -548,6 +548,9 @@ impl SolidDraftApp {
                     // An import has no editor; its repair questions have their own dialog.
                     FeatureKind::ImportStep(_) => return,
                     FeatureKind::Scan(_) => {
+                        if !crate::scan::part_active(&self.state) {
+                            return;
+                        }
                         if self.state.in_sketch() {
                             self.apply(ctx, AppAction::ExitSketch);
                         }
@@ -947,6 +950,9 @@ impl SolidDraftApp {
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);
                 self.state.layout.tree.shown = true;
+                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                    self.state.options_details = true;
+                }
             }
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));
@@ -1273,11 +1279,13 @@ impl SolidDraftApp {
                 }
             }
             AppAction::ShowScan => {
-                self.state.scan.open = true;
+                if crate::scan::part_active(&self.state) {
+                    self.state.scan.open = true;
+                }
             }
             AppAction::FitScan => crate::scan::start_fit(&mut self.state),
             AppAction::ImportScan(path) => {
-                if self.state.in_sketch() || self.state.doc.proof_pending() {
+                if !crate::scan::can_import(&self.state) {
                     return;
                 }
                 let path =

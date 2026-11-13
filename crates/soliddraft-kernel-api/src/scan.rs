@@ -54,7 +54,7 @@ pub struct ScanMapPoint {
     pub distance_mm: f64,
 }
 
-/// A fitted part and the complete sampled evidence returned with it.
+/// A fitted part, directed statistics, input-point map and part-sample map.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScanFit {
     /// Ordinary native recipe. Reopening rebuilds these definitions, not the fit.
@@ -63,7 +63,8 @@ pub struct ScanFit {
     pub scan_to_part: ScanDeviationSide,
     /// Samples from the part to the scan.
     pub part_to_scan: ScanDeviationSide,
-    /// Scan-to-part map at every fitting sample.
+    /// Scan-to-part map at every input fitting sample. Triangle-interior probes
+    /// contribute to statistics but are not retained in this map.
     pub scan_map: Vec<ScanMapPoint>,
     /// Part-to-scan map at every part sample.
     pub part_map: Vec<ScanMapPoint>,

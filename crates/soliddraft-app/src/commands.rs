@@ -2451,12 +2451,15 @@ fn registry() -> Vec<CommandSpec> {
             .undo(Undo::Step),
         cmd("import_scan", "Import scan reference", Icon::Import, "Import an STL or OBJ scan as reference data in millimetres")
             .run(|_| AppAction::ImportScan(None)).outside_sketch()
-            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
+            .shown(crate::scan::part_active).when(crate::scan::can_import)
             .undo(Undo::Step),
         cmd("fit_scan", "Fit scan to part", Icon::Import, "Fit a scan and review both sampled deviation maps")
-            .run(|_| AppAction::FitScan).outside_sketch().when(crate::scan::can_fit).undo(Undo::Step),
+            .run(|_| AppAction::FitScan).outside_sketch()
+            .shown(|s| crate::scan::part_active(s) && !cfg!(target_arch = "wasm32"))
+            .when(crate::scan::can_fit).undo(Undo::Step),
         cmd("scan_workspace", "Scan workspace", Icon::Import, "Show the scan reference and its deviation maps")
-            .run(|_| AppAction::ShowScan).outside_sketch().when(|s| crate::scan::selected(&s.doc).is_some()),
+            .run(|_| AppAction::ShowScan).outside_sketch().shown(crate::scan::part_active)
+            .when(|s| crate::scan::part_active(s) && crate::scan::selected(&s.doc).is_some()),
         cmd("replace_import", "Replace imported file", Icon::Import, "Replace the file behind an imported feature after reviewing it")
             .run(|s| AppAction::ReplaceImport { feature: s.doc.selection.and_then(|s| match s { crate::document::Selection::Feature(id) => Some(id), _ => None }).unwrap_or_default(), path: None })
             .outside_sketch()

@@ -209,7 +209,9 @@ boundary. Part to scan also exposes gaps in the scan. Switch between their
 colour maps in the viewport; the legend is in millimetres. These are sampled
 distances, not bounds on the whole scanned surface. The display mesh's chord
 bound is shown separately. The viewport draws up to 30,000 evenly spaced map
-points; every measured value stays in the saved part.
+points from the selected map. Both complete maps stay in the saved part.
+Scan-to-part statistics also include triangle-interior probes. The scan map
+contains the input fitting points and does not retain those additional probes.
 
 Accept fitted part keeps the scan and its maps and rebuilds the saved native
 recipe as a solid. Later solid features and checked exports use that solid.

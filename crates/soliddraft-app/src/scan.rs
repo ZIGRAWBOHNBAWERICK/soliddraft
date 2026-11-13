@@ -69,8 +69,18 @@ pub fn selected(doc: &Document) -> Option<FeatureId> {
     doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Scan(_)) && !f.suppressed).map(|f| f.id)
 }
 
+pub fn part_active(state: &AppState) -> bool {
+    state.start.is_none() && !state.assembly.is_active() && !state.drawing.is_active() && state.drawing.new.is_none()
+}
+
+pub fn can_import(state: &AppState) -> bool {
+    part_active(state) && !cfg!(target_arch = "wasm32") && !state.in_sketch() && !state.doc.proof_pending()
+}
+
 pub fn can_fit(state: &AppState) -> bool {
-    !state.in_sketch()
+    part_active(state)
+        && !cfg!(target_arch = "wasm32")
+        && !state.in_sketch()
         && !state.doc.proof_pending()
         && state.scan.fitting.is_none()
         && selected(&state.doc).is_some_and(|id| {
@@ -80,6 +90,14 @@ pub fn can_fit(state: &AppState) -> bool {
 }
 
 pub fn review(state: &mut AppState, name: String, bytes: Vec<u8>) -> Result<(), String> {
+    if !can_import(state) {
+        return Err(if cfg!(target_arch = "wasm32") {
+            "Coming soon"
+        } else {
+            "Open a part with no active sketch or pending edit to import a scan."
+        }
+        .into());
+    }
     let source = ScanSource { name, sha256: soliddraft_model::sha256_hex(&bytes), bytes };
     let reference = Arc::new(state.doc.kernel().scan_reference(&source).map_err(plain)?);
     state.scan.review = Some(Review { source, reference, version: version(&state.doc) });
@@ -121,6 +139,9 @@ pub fn start_fit(state: &mut AppState) {
 }
 
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
+    if !part_active(state) {
+        return;
+    }
     if let Some(pending) = &state.scan.fitting {
         match pending.result.try_recv() {
             Ok(result) => {
@@ -172,7 +193,8 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                 if let Some(fit) = &scan.fit { report(ui, fit, &mut state.scan.direction); }
                 else {
                     ui.label("Fits block stock, bosses, bores and convex stock-edge rounds. At least 100 points; up to 1,000,000 points.");
-                    fit_now = ui.add_enabled(can_fit(state), egui::Button::new("Fit scan to part")).clicked();
+                    if cfg!(target_arch = "wasm32") { ui.label("Coming soon"); }
+                    else { fit_now = ui.add_enabled(can_fit(state), egui::Button::new("Fit scan to part")).clicked(); }
                 }
             }
             if state.scan.fitting.is_some() { ui.spinner(); ui.label("Fitting scan…"); }
@@ -189,7 +211,10 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         state.scan.review = None;
         state.scan.fitted = None;
     }
-    if accept_reference && let Some(review) = state.scan.review.take() {
+    if accept_reference
+        && part_active(state)
+        && let Some(review) = state.scan.review.take()
+    {
         if review.version != version(&state.doc) {
             state.scan.error = Some("The part changed during review. Import the scan again.".into());
         } else {
@@ -219,7 +244,10 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
     if fit_now {
         start_fit(state);
     }
-    if accept_fit && let Some(fitted) = state.scan.fitted.take() {
+    if accept_fit
+        && part_active(state)
+        && let Some(fitted) = state.scan.fitted.take()
+    {
         if fitted.version != version(&state.doc) {
             state.scan.error = Some("The part changed during review. Fit the scan again.".into());
         } else if let Some(feature) = state.doc.feature(fitted.feature)
@@ -289,7 +317,10 @@ fn report(ui: &mut egui::Ui, fit: &ScanFit, direction: &mut Direction) {
         ui.colored_label(colour(0.5), format!("{:.4} mm", max * 0.5));
         ui.colored_label(colour(1.0), format!("{max:.4} mm"));
     });
-    ui.label("The viewport shows up to 30,000 evenly spaced map points. The part retains every measured value.");
+    ui.label(format!("Scan statistics include {} triangle-interior probes. The scan map contains {} input points and excludes those probes.", fit.scan_to_part.samples.saturating_sub(fit.scan_map.len()), fit.scan_map.len()));
+    ui.label(
+        "The viewport shows up to 30,000 evenly spaced points from the selected map. Both complete maps are saved.",
+    );
 }
 
 pub fn document_bounds(doc: &Document) -> Option<(Vec3, Vec3)> {
@@ -325,6 +356,9 @@ fn colour(t: f64) -> Color32 {
 
 /// Draws the reference or colour deviation samples in the part's camera frame.
 pub fn paint(ui: &egui::Ui, state: &mut AppState) {
+    if !part_active(state) {
+        return;
+    }
     let Some(id) = selected(&state.doc) else { return };
     let Some(feature) = state.doc.feature(id) else { return };
     if feature.suppressed || feature.status != crate::document::FeatureStatus::Ok {

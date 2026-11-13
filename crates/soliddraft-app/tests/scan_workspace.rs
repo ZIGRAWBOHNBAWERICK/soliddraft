@@ -212,9 +212,8 @@ fn reference_review_on_other_document(assembly: bool) {
         accept.click();
     }
     app.run_steps(3);
-    assert_eq!(
-        app.state().state.doc.model().to_bytes().unwrap(),
-        before,
+    assert!(
+        app.state().state.doc.model().to_bytes().unwrap() == before,
         "accepting a scan must not edit an inactive part"
     );
     assert!(app.query_all_by_label("Accept reference").next().is_none());
@@ -269,7 +268,7 @@ fn review_fitted_part_cannot_be_accepted_from_a_drawing() {
         accept.click();
     }
     app.run_steps(3);
-    assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before, "a fit must not replace an inactive part");
+    assert!(app.state().state.doc.model().to_bytes().unwrap() == before, "a fit must not replace an inactive part");
     assert!(app.query_all_by_label("Accept fitted part").next().is_none());
     return_to_part(&mut app, false);
     app.get_by_label("Accept fitted part").click();

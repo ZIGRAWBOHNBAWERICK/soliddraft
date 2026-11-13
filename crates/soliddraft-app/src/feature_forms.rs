@@ -23,6 +23,8 @@ pub enum Key {
     Edges,
     Radius,
     Distance,
+    ChamferMode,
+    ChamferDistance2,
     HoleFace,
     Positions,
     PositionList,
@@ -146,11 +148,17 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
             Icon::Fillet,
             vec![field(Edges, "Edges", "Picks", 220.0), field(Radius, "Radius", "Size", 160.0)],
         ),
-        EditorParams::Chamfer(_) => (
-            "chamfer",
-            Icon::Chamfer,
-            vec![field(Edges, "Edges", "Picks", 220.0), field(Distance, "Distance", "Size", 170.0)],
-        ),
+        EditorParams::Chamfer(p) => {
+            let mut fields = vec![
+                field(Edges, "Edges", "Picks", 220.0),
+                field(ChamferMode, "", "Size", 140.0),
+                field(Distance, "Distance", "Size", 170.0),
+            ];
+            if p.other_distance.is_some() {
+                fields.push(field(ChamferDistance2, "Distance 2", "Size", 170.0));
+            }
+            ("chamfer", Icon::Chamfer, fields)
+        }
         EditorParams::Hole(h) => {
             let mut fields = vec![
                 field(HoleFace, "Face", "Placement", 190.0),
@@ -345,6 +353,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
         .feedback
         .size
         .as_ref()
+        .or(editor.feedback.second_size.as_ref())
         .or(editor.feedback.pick.as_ref())
         .or(editor.error.as_ref())
         .map(|s| crate::geometry_message::for_user(s));
@@ -639,6 +648,26 @@ fn render(
                 rect,
                 egui::Id::new(("feature_size", editor.target, key)),
             );
+        }
+        (EditorParams::Chamfer(p), Key::ChamferMode) => {
+            let mut unequal = p.other_distance.is_some();
+            if ui.checkbox(&mut unequal, "Two distances").changed() {
+                p.other_distance = unequal.then_some(p.distance);
+                editor.feedback.second_size = None;
+            }
+        }
+        (EditorParams::Chamfer(p), Key::ChamferDistance2) => {
+            if let Some(other) = &mut p.other_distance {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+                properties::size_input(
+                    ui,
+                    "Distance 2",
+                    other,
+                    &mut editor.feedback.second_size,
+                    rect,
+                    egui::Id::new(("feature_size", editor.target, key)),
+                );
+            }
         }
         (EditorParams::Chamfer(p), Key::Distance) => {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());

@@ -1183,20 +1183,26 @@ pub fn opaque_points(app: &App) -> Vec<Pos2> {
     points
 }
 
-/// Whether an outline of one world edge kept its ink: the darkest pixel near each sample
-/// stands about where it did. The share of samples that did.
+/// The share of edge samples that retain visible contrast over the tinted background.
 pub fn edge_kept(on: &image::RgbaImage, off: &image::RgbaImage, app: &App, samples: &[Vec3]) -> f32 {
     let ppp = app.ctx.pixels_per_point();
-    let darkest = |image: &image::RgbaImage, p: Pos2| {
+    let contrast = |image: &image::RgbaImage, p: Pos2| {
         let (x, y) = ((p.x * ppp) as i32, (p.y * ppp) as i32);
-        (-1..=1)
-            .flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
+        let values: Vec<u32> = (-2..=2)
+            .flat_map(|dy| (-2..=2).map(move |dx| (x + dx, y + dy)))
             .map(|(x, y)| image.get_pixel(x as u32, y as u32).0.iter().take(3).map(|c| u32::from(*c)).sum::<u32>() / 3)
-            .min()
-            .unwrap()
+            .collect();
+        values.iter().max().unwrap() - values.iter().min().unwrap()
     };
     let points: Vec<Pos2> = samples.iter().filter_map(|w| projected(app, *w)).collect();
-    let kept = points.iter().filter(|p| darkest(on, **p).abs_diff(darkest(off, **p)) <= 16).count();
+    // Plane tint changes antialiased edge pixels along with their background.
+    let kept = points
+        .iter()
+        .filter(|p| {
+            let ink = contrast(on, **p);
+            ink >= 16 && ink * 2 >= contrast(off, **p)
+        })
+        .count();
     kept as f32 / points.len().max(1) as f32
 }
 

@@ -176,6 +176,11 @@ fn bottom_navigation_gallery_and_favourites_work_and_reopen() {
     app.run_steps(4);
     app.get_by_label("Scene").click();
     app.run_steps(4);
+    let preview = ribbon::button_rect(&app, "Night grid", ribbon::window(&app));
+    let image = app.render().unwrap();
+    let grid = image.get_pixel((preview.left() + 8.0) as u32, (preview.top() + 10.0) as u32).0;
+    let cell = image.get_pixel((preview.left() + 12.0) as u32, (preview.top() + 10.0) as u32).0;
+    assert!(grid[0] > cell[0], "the Night thumbnail shows its grid");
     app.get_by_label("Night grid").click();
     app.run_steps(4);
     assert_eq!(app.state().state.viewport.scene, Some(Scene::Night));
@@ -284,6 +289,12 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
         session.show_regions = false;
         session.selection.clear();
     }
+    app.get_by_label("All dimensions").click();
+    app.run_steps(4);
+    assert!(!app.state().state.sketch.as_ref().unwrap().show_dimensions);
+    app.get_by_label("All dimensions").click();
+    app.run_steps(4);
+    assert!(app.state().state.sketch.as_ref().unwrap().show_dimensions);
     let before = app.state().state.sketch.as_ref().unwrap().sketch.clone();
     assert!(before.free.contains(&blue));
     assert!(!before.free.contains(&black));

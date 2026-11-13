@@ -257,6 +257,7 @@ impl ViewportState {
         let preview = preview.filter(|shown| visible.body || !is_provisional(shown));
         let preview_pickable = preview.as_ref().is_some_and(is_provisional);
         let sketching = sketch.is_some();
+        let sketch_dimensions = sketch.as_ref().map(|s| s.show_dimensions);
         let mut events = ViewportEvents::default();
         let rect = ui.available_rect_before_wrap();
         self.rect = rect;
@@ -437,7 +438,7 @@ impl ViewportState {
             }
         }
         self.dimensions = dims;
-        self.paint_hud(ui, rect, &mut events);
+        self.paint_hud(ui, rect, &mut events, sketch_dimensions, true);
         self.paint_view_cube(ui, rect, &mut events);
         self.paint_pills(ui, rect, hover_label);
         events
@@ -482,7 +483,7 @@ impl ViewportState {
             let painter = ui.painter().with_clip_rect(rect);
             self.paint_origin_axes(&painter, self.camera.distance * 0.25, rect, [true; 3]);
         }
-        self.paint_hud(ui, rect, &mut events);
+        self.paint_hud(ui, rect, &mut events, None, false);
         self.paint_view_cube(ui, rect, &mut events);
         let label = hover_label.unwrap_or("Hover a component");
         self.paint_pills(ui, rect, Some(label));
@@ -783,7 +784,14 @@ impl ViewportState {
         }
     }
 
-    fn paint_hud(&mut self, ui: &mut egui::Ui, rect: Rect, events: &mut ViewportEvents) {
+    fn paint_hud(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        events: &mut ViewportEvents,
+        sketch_dimensions: Option<bool>,
+        allow_dimensions: bool,
+    ) {
         if theme::is_edit_suite() {
             self.navigation_bar.show(
                 ui,
@@ -793,6 +801,8 @@ impl ViewportState {
                 self.scene.unwrap_or_default(),
                 &mut self.references,
                 &mut self.all_dimensions,
+                sketch_dimensions,
+                allow_dimensions,
                 events,
             );
             return;

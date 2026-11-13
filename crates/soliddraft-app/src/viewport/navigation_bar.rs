@@ -40,6 +40,7 @@ impl NavigationBar {
         all_dimensions: &mut bool,
         sketch_dimensions: Option<bool>,
         allow_dimensions: bool,
+        section_active: bool,
         events: &mut ViewportEvents,
     ) {
         let compact = viewport.width() < 350.0;
@@ -48,7 +49,7 @@ impl NavigationBar {
             .pivot(Align2::CENTER_BOTTOM)
             .fixed_pos(pos2(viewport.center().x, viewport.bottom() - 12.0))
             .show(parent.ctx(), |ui| {
-                ui.set_max_width(if compact { 292.0 } else { 336.0 });
+                ui.set_max_width(if compact { 324.0 } else { 368.0 });
                 egui::Frame::new()
                     .fill(theme::hud_bg())
                     .stroke(Stroke::new(1.0, theme::line_strong()))
@@ -94,6 +95,11 @@ impl NavigationBar {
                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                 .show(|ui| self.gallery(ui, scene, events));
                             ui.separator();
+                            if button(ui, "Section view", Icon::Section, section_active, false, allow_dimensions)
+                                .clicked()
+                            {
+                                events.actions.push(AppAction::ToggleSection);
+                            }
                             if button(ui, "Origin axes", Icon::Origin, references.always_show_origin_axes, false, true)
                                 .clicked()
                             {

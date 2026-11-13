@@ -50,6 +50,7 @@ pub mod recovery;
 pub mod ribbon;
 mod ring_menu;
 pub mod scene_import;
+pub mod section;
 pub mod settings;
 pub mod sketch_diagnostics;
 pub mod sketch_tools;

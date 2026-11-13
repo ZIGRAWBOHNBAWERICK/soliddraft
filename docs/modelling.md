@@ -5,6 +5,26 @@ add or cut material, fillets and chamfers, persistent references that survive ed
 undo and redo, and a native file. This page covers the crates that do it. The screens on
 top of them are described in [DESIGN.md](DESIGN.md).
 
+## Loft
+
+Loft joins two or more closed sketch regions or planar faces, in the order shown in
+its profile list. Add profiles from the list or select sketches and faces while the
+Loft editor is open. Use Up and Down to change their order. Ruled uses straight sides
+between each pair; Smooth passes a smooth curve through all profiles. The preview
+uses the same exact build as Apply. Loft is hidden while a sketch is open.
+
+Each sketch must contain one closed region, including any holes. Corresponding holes
+must have the same nesting. Face profiles currently accept exact polygon and full-circle
+boundaries with an exact frame. Other faces need a closed sketch instead.
+Catallax refuses profiles it cannot verify as a solid without crossing or folding.
+The editor explains the refusal and keeps the existing part.
+
+The `loft` and `edit_loft` commands accept `profiles` as an ordered list of sketch names
+or face labels, and `shape` as `ruled` or `smooth`. For example,
+`{"op":"loft","profiles":["Sketch1","Sketch2"],"shape":"ruled"}`.
+Profile sources, order, and shape are saved in the part and restored by undo and redo.
+`ci/scenarios/loft.json` covers ruled and smooth builds, a refused edit, and reopening.
+
 ## Crates
 
 | Crate | What it holds |

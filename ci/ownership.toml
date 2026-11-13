@@ -43,6 +43,13 @@ paths = ["crates/soliddraft-app/src/commands.rs"]
 module = ["commands"]
 
 [[areas]]
+name = "app.context_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/context_menu.rs"]
+module = ["context_menu"]
+
+[[areas]]
 name = "app.dimension_edit"
 owner = "core"
 crate = "soliddraft-app"
@@ -218,6 +225,13 @@ paths = ["crates/soliddraft-app/src/scene_import.rs"]
 module = ["scene_import"]
 
 [[areas]]
+name = "app.ring_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/ring_menu.rs"]
+module = ["ring_menu"]
+
+[[areas]]
 name = "app.settings"
 owner = "core"
 crate = "soliddraft-app"
@@ -260,6 +274,13 @@ paths = ["crates/soliddraft-app/src/start_page.rs"]
 module = ["start_page"]
 
 [[areas]]
+name = "app.loft_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/loft_panel.rs"]
+module = ["loft_panel"]
+
+[[areas]]
 name = "app.sweep_panel"
 owner = "core"
 crate = "soliddraft-app"
@@ -279,6 +300,20 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/theme.rs"]
 module = ["theme"]
+
+[[areas]]
+name = "app.options_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/options_bar.rs"]
+module = ["options_bar"]
+
+[[areas]]
+name = "app.timeline"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/timeline.rs"]
+module = ["timeline"]
 
 [[areas]]
 name = "app.tool_palette"
@@ -563,3 +598,10 @@ owner = "core"
 crate = "soliddraft-kernel-catallax"
 paths = ["crates/soliddraft-kernel-catallax/src/field_preview.rs"]
 module = ["field_preview"]
+
+[[areas]]
+name = "app.canonical_parts"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/tests/canonical_parts.rs"]
+module = []

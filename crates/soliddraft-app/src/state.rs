@@ -45,6 +45,8 @@ pub enum AppAction {
     StartExtrude,
     StartRevolve,
     StartSweep,
+    /// Opens a loft between ordered sketch or face profiles.
+    StartLoft,
     StartCut,
     StartFillet,
     StartChamfer,
@@ -66,6 +68,8 @@ pub enum AppAction {
     FinishSpline,
     /// Opens or closes the sketch relation list.
     SketchRelations(bool),
+    /// Apply a relation offered by the sketch selection's existing relation list.
+    SketchRelationSet(Vec<crate::sketch::ConstraintKind>),
     /// Show closed-region fills in the active sketch.
     SketchShading(bool),
     /// Show and pick dimension annotations in the active sketch.
@@ -95,6 +99,8 @@ pub enum AppAction {
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
+    SetBodyVisible(bool),
+    SetReferenceDisplay(crate::settings::ReferenceDisplay),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
     ToggleProjection,
@@ -225,6 +231,8 @@ impl RibbonTab {
 pub struct FeatureEditor {
     pub target: Option<FeatureId>,
     pub params: EditorParams,
+    /// The sketch tool to arm after this plane picker completes. Closing it drops the tool.
+    pub pending_sketch_tool: Option<Tool>,
     pub preview: Preview,
     pub error: Option<String>,
     /// The document's rollback before the editor rolled the display back to the
@@ -245,6 +253,8 @@ pub enum EditorParams {
     Extrude(ExtrudeParams),
     Revolve(soliddraft_model::RevolveFeature),
     Sweep(soliddraft_model::SweepFeature),
+    /// Ordered profiles and the loft side shape.
+    Loft(soliddraft_model::LoftFeature),
     Cut(CutParams),
     Fillet(FilletParams),
     Chamfer(ChamferParams),
@@ -271,6 +281,7 @@ impl FeatureEditor {
         Self {
             target,
             params,
+            pending_sketch_tool: None,
             preview: Preview::default(),
             error: None,
             saved_rollback,
@@ -287,6 +298,7 @@ impl FeatureEditor {
             EditorParams::Extrude(_) => format!("{edit}Boss-Extrude"),
             EditorParams::Revolve(_) => format!("{edit}Revolve"),
             EditorParams::Sweep(_) => format!("{edit}Sweep"),
+            EditorParams::Loft(_) => format!("{edit}Loft"),
             EditorParams::Cut(_) => format!("{edit}Cut-Extrude"),
             EditorParams::Fillet(_) => format!("{edit}Fillet"),
             EditorParams::Chamfer(_) => format!("{edit}Chamfer"),
@@ -348,6 +360,7 @@ impl FeatureEditor {
             EditorParams::Extrude(p) => doc.preview_extrude(p),
             EditorParams::Revolve(r) => doc.preview_revolve(r),
             EditorParams::Sweep(s) => doc.preview_sweep(s),
+            EditorParams::Loft(l) => doc.preview_loft(l, self.target),
             EditorParams::Cut(p) => doc.preview_cut(p, before),
             EditorParams::Fillet(f) => doc.preview_rounding(&f.blend(), false, before),
             EditorParams::Chamfer(c) => doc.preview_rounding(&c.blend(), true, before),
@@ -1024,6 +1037,7 @@ pub struct AppState {
     pub measure: crate::measure::panel::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
+    pub pick_filter: crate::viewport::PickFilter,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1045,6 +1059,7 @@ pub struct AppState {
     /// Bumped when File locations are saved, so cached lookups refresh.
     pub locations_epoch: u64,
     pub rename: Option<Rename>,
+    pub timeline: crate::timeline::State,
     /// The tree row being dragged for reordering.
     pub drag_feature: Option<FeatureId>,
     /// The feature dimension being dragged, with its previews.
@@ -1099,6 +1114,7 @@ impl AppState {
             measure: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
+            pick_filter: Default::default(),
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,
@@ -1116,6 +1132,7 @@ impl AppState {
             locations_dialog: None,
             locations_epoch: 0,
             rename: None,
+            timeline: Default::default(),
             drag_feature: None,
             drag_preview: None,
             dimension_edit: None,
@@ -1139,6 +1156,18 @@ impl AppState {
             start: None,
             drawing_after_open: false,
             actions: Vec::new(),
+        }
+    }
+
+    pub fn selection_filter(&self) -> crate::viewport::PickFilter {
+        if self.frame_layout == crate::settings::FrameLayout::EditSuite
+            && self.editor.is_none()
+            && self.sketch.is_none()
+            && !self.measure.open
+        {
+            self.pick_filter
+        } else {
+            Default::default()
         }
     }
 

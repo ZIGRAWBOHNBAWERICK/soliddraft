@@ -38,9 +38,14 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
     let choice = doc.view_choice(item);
     let references = &state.viewport.references;
     match item {
-        ViewItem::Plane(plane) => choice.unwrap_or(
-            references.show_origin_planes || doc.selection == Some(Selection::Reference(Reference::Plane(plane))),
-        ),
+        ViewItem::Plane(plane) => {
+            state.frame_layout == crate::settings::FrameLayout::EditSuite
+                && state.editor.as_ref().is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane))
+                || choice.unwrap_or(
+                    references.show_origin_planes
+                        || doc.selection == Some(Selection::Reference(Reference::Plane(plane))),
+                )
+        }
         ViewItem::Axis(_) => choice.unwrap_or(
             references.always_show_origin_axes
                 || matches!(doc.selection, Some(Selection::Reference(_)))

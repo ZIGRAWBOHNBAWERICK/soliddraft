@@ -62,6 +62,8 @@ pub enum Icon {
     Check,
     Chat,
     Search,
+    Orbit,
+    Pan,
     Tree,
     Props,
     Config,
@@ -185,7 +187,7 @@ impl Raster {
 fn paint_raster(painter: &Painter, key: &'static str, glyph: bool, rect: Rect, tint: Color32, treatment: Treatment) {
     let ppp = painter.pixels_per_point();
     let px = (rect.width().min(rect.height()) * ppp).round().max(1.0);
-    let dark = crate::theme::mode().is_dark();
+    let dark = crate::theme::dark_chrome();
     let raster = Raster { key, glyph, px: px as u32, dark, treatment };
     let Some(source) = raster.source() else {
         debug_assert!(false, "no icon {key}");
@@ -415,6 +417,22 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Chat => {
             g.line(p, &[(3.0, 12.0), (3.0, 3.0), (13.5, 3.0), (13.5, 10.5), (7.0, 10.5), (3.0, 13.5)]);
             g.line(p, &[(3.0, 13.5), (3.0, 12.0)]);
+        }
+        Icon::Orbit => {
+            g.line(
+                p,
+                &[(2.0, 9.0), (3.0, 5.0), (7.0, 3.0), (11.0, 4.0), (14.0, 8.0), (12.0, 12.0), (7.0, 13.0), (3.0, 11.0)],
+            );
+            g.line(p, &[(2.0, 5.0), (2.0, 9.0), (6.0, 8.0)]);
+            g.line(p, &[(6.0, 5.0), (10.0, 11.0)]);
+        }
+        Icon::Pan => {
+            g.line(p, &[(8.0, 2.0), (8.0, 14.0)]);
+            g.line(p, &[(2.0, 8.0), (14.0, 8.0)]);
+            g.line(p, &[(5.0, 5.0), (8.0, 2.0), (11.0, 5.0)]);
+            g.line(p, &[(5.0, 11.0), (8.0, 14.0), (11.0, 11.0)]);
+            g.line(p, &[(5.0, 5.0), (2.0, 8.0), (5.0, 11.0)]);
+            g.line(p, &[(11.0, 5.0), (14.0, 8.0), (11.0, 11.0)]);
         }
         Icon::Search => {
             g.circle(p, 7.0, 7.0, 4.2);

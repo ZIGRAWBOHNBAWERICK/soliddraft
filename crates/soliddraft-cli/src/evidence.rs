@@ -193,7 +193,16 @@ impl<'a> Evidence<'a> {
         let root = self.directory.as_ref().ok_or("scenario measurement requires --bundle")?;
         let dir = root.join(format!("{:04}", self.sequence));
         let doc = &self.host.state.doc;
-        let mass = doc.display_body().map(|body| doc.kernel().mass_properties(body)).transpose()?;
+        let (mass, work) =
+            soliddraft_kernel_catallax::with_request_allowance(soliddraft_app::measure::MASS_WORK_LIMIT, || {
+                doc.display_body().map(|body| doc.kernel().mass_properties(body)).transpose()
+            });
+        if work.exhausted {
+            return Err(
+                format!("mass_properties: numbers.operation-budget: {} work units exhausted", work.limit).into()
+            );
+        }
+        let mass = mass?;
         let result = json!({
             "backend":doc.kernel().backend(), "live_document":true,
             "request":self.sequence, "revision":doc.revision(),
@@ -293,6 +302,17 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 EndCondition::UpToFace { face } => vec![(ReferenceSlot::Limit, origin(face), vec![face])],
                 _ => Vec::new(),
             },
+            FeatureKind::Loft(l) => l
+                .profiles
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| match p {
+                    soliddraft_model::LoftProfile::Face { face } => {
+                        Some((ReferenceSlot::Face { index: i as u32 }, origin(face), vec![face]))
+                    }
+                    _ => None,
+                })
+                .collect(),
             FeatureKind::Hole(h) => vec![(ReferenceSlot::Plane, origin(&h.face), vec![&h.face])],
             FeatureKind::Mirror(m) => plane(&m.plane).into_iter().collect(),
             FeatureKind::Shell(s) => s

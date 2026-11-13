@@ -45,6 +45,9 @@ impl SolidDraftApp {
             let _ = self.state.doc.rebuild();
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
+        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+            self.state.layout.tree.shown = true;
+        }
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
     }
 
@@ -208,14 +211,26 @@ impl SolidDraftApp {
                     None => {
                         self.open_editor(None, EditorParams::PickPlane);
                         self.state.origin_open = true;
-                        self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
+                        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                            self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                            self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
+                        } else {
+                            self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
+                        }
                     }
                 }
             }
             AppAction::StartSketchOn(plane) => {
-                self.close_editor();
+                let tool = self.close_editor().and_then(|editor| editor.pending_sketch_tool);
                 match self.state.doc.apply(Command::AddSketch { plane }) {
-                    Ok(Some(id)) => self.open_sketch(id),
+                    Ok(Some(id)) => {
+                        self.open_sketch(id);
+                        if let Some(tool) = tool
+                            && let Some(session) = &mut self.state.sketch
+                        {
+                            session.set_tool(tool);
+                        }
+                    }
                     Ok(None) => {}
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }
@@ -251,6 +266,30 @@ impl SolidDraftApp {
                     None => ExtrudeParams::default(),
                 };
                 self.open_editor(None, EditorParams::Extrude(params));
+            }
+            AppAction::StartLoft => {
+                if self.state.in_sketch() {
+                    return;
+                }
+                let profiles = match self.state.doc.selection {
+                    Some(Selection::Feature(id)) if self.state.doc.sketch_of(id).is_some() => {
+                        vec![soliddraft_model::LoftProfile::Sketch { feature: soliddraft_model::FeatureId(id as u32) }]
+                    }
+                    Some(Selection::Face(face)) => self
+                        .state
+                        .doc
+                        .any_face_ref(face)
+                        .map(|face| vec![soliddraft_model::LoftProfile::Face { face }])
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                self.open_editor(
+                    None,
+                    EditorParams::Loft(soliddraft_model::LoftFeature {
+                        profiles,
+                        shape: soliddraft_kernel_api::LoftShape::Ruled,
+                    }),
+                );
             }
             AppAction::StartSweep => {
                 if self.state.in_sketch() {
@@ -451,6 +490,7 @@ impl SolidDraftApp {
                     FeatureKind::Extrude(p) => EditorParams::Extrude(p.clone()),
                     FeatureKind::Revolve(r) => EditorParams::Revolve(r.clone()),
                     FeatureKind::Sweep(s) => EditorParams::Sweep(s.clone()),
+                    FeatureKind::Loft(l) => EditorParams::Loft(l.clone()),
                     FeatureKind::Cut(p) => EditorParams::Cut(p.clone()),
                     FeatureKind::Fillet(p) => EditorParams::Fillet(p.clone()),
                     FeatureKind::Chamfer(p) => EditorParams::Chamfer(p.clone()),
@@ -496,8 +536,22 @@ impl SolidDraftApp {
                 {
                     return;
                 }
+                if let Some(why) = self
+                    .state
+                    .editor
+                    .as_ref()
+                    .filter(|e| matches!(e.params, EditorParams::Loft(_)))
+                    .and_then(|e| e.error.clone())
+                {
+                    self.state.note(why, NoteKind::Error);
+                    return;
+                }
                 let Some(e) = self.close_editor() else { return };
                 let cmd = match (e.target, e.params) {
+                    (target, EditorParams::Loft(l)) => match target {
+                        Some(id) => Command::EditFeature { id, kind: FeatureKind::Loft(l) },
+                        None => Command::AddFeature(FeatureKind::Loft(l)),
+                    },
                     (target, EditorParams::Sweep(s)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Sweep(s) },
                         None => Command::AddFeature(FeatureKind::Sweep(s)),
@@ -677,6 +731,28 @@ impl SolidDraftApp {
                                 AppAction::StartSketchOn(SketchPlane::Feature { feature: id, offset: 0.0 }),
                             );
                         }
+                        (EditorParams::Loft(l), Some(Selection::Feature(id)))
+                            if self.state.doc.sketch_of(id).is_some() =>
+                        {
+                            let source = soliddraft_model::LoftProfile::Sketch {
+                                feature: soliddraft_model::FeatureId(id as u32),
+                            };
+                            if !l.profiles.contains(&source) {
+                                l.profiles.push(source);
+                            }
+                            return;
+                        }
+                        (EditorParams::Loft(l), Some(Selection::Face(f))) => {
+                            if let Some(face) = self.state.doc.face_ref(f) {
+                                let source = soliddraft_model::LoftProfile::Face { face };
+                                if !l.profiles.contains(&source) {
+                                    l.profiles.push(source);
+                                }
+                            } else {
+                                e.error = Some("Loft needs a planar face or a closed sketch".into());
+                            }
+                            return;
+                        }
                         (EditorParams::Mirror(m), Some(Selection::Face(f))) => {
                             match self.state.doc.face_ref(f) {
                                 Some(face) => m.plane = soliddraft_model::PlaneRef::Face { face },
@@ -834,6 +910,17 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SketchTool(tool) => {
+                if !self.state.in_sketch()
+                    && self.state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && crate::commands::Context::of(&self.state).part()
+                {
+                    self.apply(ctx, AppAction::StartSketch);
+                    if let Some(editor) = &mut self.state.editor
+                        && matches!(editor.params, EditorParams::PickPlane)
+                    {
+                        editor.pending_sketch_tool = Some(tool);
+                    }
+                }
                 if let Some(s) = self.state.sketch.as_mut() {
                     s.set_tool(tool);
                 }
@@ -965,7 +1052,15 @@ impl SolidDraftApp {
                 if let Some(id) = self.state.selected_feature()
                     && let Some(f) = self.state.doc.feature(id)
                 {
-                    self.state.rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
+                    let rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
+                    if self.state.frame_layout == crate::settings::FrameLayout::EditSuite
+                        && !self.state.drawing.is_active()
+                        && !self.state.assembly.is_active()
+                    {
+                        self.state.timeline.rename = rename;
+                    } else {
+                        self.state.rename = rename;
+                    }
                 }
             }
             AppAction::SetView(v) => self.state.viewport.camera.set_view(v),
@@ -997,6 +1092,29 @@ impl SolidDraftApp {
                     viewport.display = if p.shows_edges() { DisplayMode::ShadedWithEdges } else { DisplayMode::Shaded };
                 }
                 viewport.preset = p;
+            }
+            AppAction::SetBodyVisible(show) => {
+                if crate::tree_visibility::visible(&self.state).body != show {
+                    let feature = self
+                        .state
+                        .doc
+                        .features
+                        .iter()
+                        .find(|feature| !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_)))
+                        .map(|feature| feature.id);
+                    if let Some(feature) = feature {
+                        crate::tree_visibility::toggle(&mut self.state, crate::document::ViewItem::Feature(feature));
+                    }
+                }
+            }
+            AppAction::SetReferenceDisplay(display) => {
+                let _ = self.state.set_reference_display(display);
+            }
+            AppAction::SketchRelationSet(kinds) => {
+                if let Some(sketch) = self.state.sketch.as_mut() {
+                    let action = crate::sketcher::add_relations(sketch, &kinds);
+                    self.apply(ctx, action);
+                }
             }
             AppAction::SetScene(scene) => {
                 if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
@@ -1352,9 +1470,5 @@ fn use_axis(params: &mut EditorParams, axis: AxisKind) {
 
 /// Maps an id-buffer pick to the document entity it stands for.
 pub(super) fn selection_of(doc: &Document, picked: Picked) -> Option<Selection> {
-    match doc.pick(picked.pick())? {
-        crate::document::PickEntry::Face(_, f) => Some(Selection::Face(f)),
-        crate::document::PickEntry::Edge(_, e) => Some(Selection::Edge(e)),
-        crate::document::PickEntry::Vertex(k, _) => Some(Selection::Vertex(k)),
-    }
+    crate::viewport::pick::selection(doc, picked)
 }

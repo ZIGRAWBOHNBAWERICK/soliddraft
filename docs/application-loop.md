@@ -56,6 +56,11 @@ edits the run, undoes and redoes, refuses an oblique join, a zero-length line an
 reversal with no turn axis without changing the body, measures a face by name, saves,
 reopens in a fresh process and exports checked STEP.
 
+`spline-sweep.json` sweeps a polygon along a spatial cubic spline with fixed
+orientation. It edits the controls, undoes and redoes, refuses a returning path
+without changing the part, then saves and reopens in a fresh process. The spline
+control points, weights, knots and segment identity stay in the saved feature.
+
 `sphere-revolve.json` and `torus-revolve.json` retain their construction, drawing
 and independent STEP checks, then edit the sphere's angle or the torus's tube
 diameter. They check undo, redo, rename, suppress and restore, reuse of the exact
@@ -551,6 +556,8 @@ still recorded. Missing timing or feature-count evidence fails closed.
 
 Timing, rebuild reports and reference-survival assertions remain in the opt-in
 command bundle, scenario runner and CI, not in the model build or normal edit path.
+
+Canonical P1 to P5 scenarios and their parameter edits are described in [canonical target parts](canonical-parts.md).
 
 ## Configuration commands
 

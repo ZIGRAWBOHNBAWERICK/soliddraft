@@ -133,6 +133,13 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
     best.map(|(_, id)| SketchSel::Entity(id))
 }
 
+/// Picks the right-click target without drawing or committing a tool preview.
+pub fn context_pick(s: &SketchSession, camera: &Camera, rect: Rect, pos: Pos2) -> Option<SketchSel> {
+    let frame = Frame { plane: s.plane, camera, rect };
+    let glyphs = if s.show_relations { glyph_rects(&frame, &s.sketch) } else { Vec::new() };
+    hit_test(&frame, &s.sketch, pos, &glyphs)
+}
+
 /// The curve under the pointer, ignoring points and relation glyphs.
 fn ignore_guide_targets(s: &SketchSession) -> bool {
     s.trim_options.ignore_construction && (s.tool == Tool::Trim || (s.tool.bounded_trim() && s.trim_bounds.len() == 2))
@@ -167,6 +174,7 @@ pub fn run(
     rect: Rect,
     resp: &egui::Response,
     grid: Option<crate::viewport::grid::Spacing>,
+    light_sheet: bool,
 ) -> Vec<AppAction> {
     let mut actions = Vec::new();
     let frame = Frame { plane: s.plane, camera, rect };
@@ -352,7 +360,7 @@ pub fn run(
     s.dynamic_preview = dynamic_preview(s, snapped);
 
     // Drawing.
-    paint_plane(&painter, &frame, doc, &s.sketch);
+    paint_plane(&painter, &frame, doc, &s.sketch, light_sheet);
     paint_regions(&painter, &frame, s);
     paint_entities(&painter, &frame, s);
     paint_glyphs(&painter, s, &glyphs);
@@ -1311,17 +1319,19 @@ fn entity_color(s: &SketchSession, e: &Entity) -> Color32 {
     };
     let in_conflict = s.sketch.constraints_of(e.id).any(|c| conflicting.contains(&c.id));
     if in_conflict {
-        theme::error()
+        if theme::is_edit_suite() { theme::edit_suite::DANGER } else { theme::error() }
     } else if e.construction {
-        theme::muted()
+        if theme::is_edit_suite() { theme::edit_suite::CONSTRUCTION } else { theme::muted() }
     } else if s.sketch.free.contains(&e.id) {
-        theme::accent()
+        if theme::is_edit_suite() { theme::edit_suite::UNDER_DEFINED } else { theme::accent() }
+    } else if theme::is_edit_suite() {
+        theme::edit_suite::FULLY_DEFINED
     } else {
         theme::ink()
     }
 }
 
-fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketch: &Sketch) {
+fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketch: &Sketch, light_sheet: bool) {
     let mut half = 100.0_f64;
     if let Some((lo, hi)) = doc.bounds() {
         half = half.max(((hi - lo).length() as f64) * 0.65);
@@ -1334,8 +1344,8 @@ fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketc
     if pts.len() == 4 {
         painter.add(egui::Shape::convex_polygon(
             pts.clone(),
-            theme::accent_alpha(10),
-            Stroke::new(1.0, theme::accent().gamma_multiply(0.35)),
+            if light_sheet { theme::edit_suite::SKETCH_SHEET } else { theme::accent_alpha(10) },
+            if light_sheet { Stroke::NONE } else { Stroke::new(1.0, theme::accent().gamma_multiply(0.35)) },
         ));
     }
     // Axes of the sketch frame through the origin.
@@ -1730,6 +1740,8 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
             theme::error()
         } else if sel {
             theme::accent()
+        } else if theme::is_edit_suite() {
+            theme::edit_suite::DIMENSION
         } else {
             theme::muted().gamma_multiply(1.15)
         };

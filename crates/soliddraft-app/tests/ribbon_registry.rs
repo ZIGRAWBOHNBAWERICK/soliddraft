@@ -565,6 +565,72 @@ fn before_retained_polygons(id: &str, current: &mut Value) {
     }
 }
 
+fn before_loft_verbs(id: &str, current: &mut Value) {
+    if id != "propose" {
+        return;
+    }
+    let variants = current
+        .pointer_mut("/tool/input/properties/commands/items/anyOf")
+        .and_then(Value::as_array_mut)
+        .expect("proposal variants");
+    let profiles = json!({"type":"array","items":{"type":"string"},"minItems":1});
+    let shape = json!({"type":"string","enum":["ruled","smooth"]});
+    for (op, required) in
+        [("loft", json!(["op", "profiles"])), ("edit_loft", json!(["op", "feature", "profiles", "shape"]))]
+    {
+        let mut properties = json!({"op":{"type":"string","const":op},"profiles":profiles,"shape":shape});
+        if op == "edit_loft" {
+            properties["feature"] = json!({"type":"string"});
+        }
+        let index = variants.iter().position(|v| v["properties"]["op"]["const"] == op).expect(op);
+        assert_eq!(
+            variants.remove(index),
+            json!({
+                "type":"object", "additionalProperties":false, "properties":properties, "required":required
+            }),
+            "the documented Loft verbs extend the frozen proposal schema"
+        );
+    }
+}
+
+// Check the added inputs before comparing the rest of the frozen command contract.
+fn before_ridealong_inputs(id: &str, current: &mut Value) {
+    fn restore(op: &str, schema: &mut Value) {
+        if !matches!(op, "chamfer" | "edit_chamfer" | "lattice" | "edit_lattice") {
+            return;
+        }
+        let required = schema["required"].as_array().expect("required inputs");
+        let added = if op.contains("chamfer") { "other_distance" } else { "cell" };
+        if op != "lattice" {
+            assert!(!required.contains(&json!(added)), "{op}: {added} stays optional");
+        }
+        let properties = schema["properties"].as_object_mut().expect("input properties");
+        if op.contains("chamfer") {
+            assert_eq!(properties.remove(added), Some(json!({"type":"number"})));
+        } else {
+            assert_eq!(
+                properties.remove(added),
+                Some(json!({"type":"string","enum":["cubic","body_centred","face_centred","octet"]}))
+            );
+            if op == "lattice" {
+                properties.insert("cell".into(), json!({"type":"string","const":"cubic"}));
+            }
+        }
+    }
+    if id == "propose" {
+        let variants = current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .expect("proposal variants");
+        for schema in variants {
+            let op = schema["properties"]["op"]["const"].as_str().expect("operation").to_owned();
+            restore(&op, schema);
+        }
+    } else if let Some(schema) = current.pointer_mut("/tool/input") {
+        restore(id, schema);
+    }
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -664,7 +730,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     holds(
         "Inspect",
         &[
-            ("Measure", &["measure", "mass_properties"]),
+            ("Measure", &["measure", "mass_properties", "material"]),
             ("Check", &["check", "section"]),
             ("Surface quality", &["draft_check"]),
         ],
@@ -707,9 +773,20 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_retained_patterns(id, &mut current);
         before_retained_polygons(id, &mut current);
         before_circular_placement(id, &mut current);
+        before_loft_verbs(id, &mut current);
+        before_ridealong_inputs(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();
+        }
+        if let Some(key) = match id.as_str() {
+            "sketch_trim" => Some("T"),
+            "sketch_offset" => Some("O"),
+            "sketch_move" => Some("M"),
+            _ => None,
+        } {
+            assert_eq!(current["keys"], json!([{"scope": "Sketch", "chord": key, "while_typing": false}]));
+            current["keys"] = row["keys"].clone();
         }
         if id == "sweep" {
             assert_eq!(current["agents"], "verb");
@@ -718,6 +795,30 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             // Sweep gained a tool and history; its other ribbon contracts stay frozen.
             for field in ["agents", "undo", "tool"] {
                 current[field] = row[field].clone();
+            }
+        }
+        if id == "loft" {
+            assert_eq!(current["agents"], "verb");
+            assert_eq!(current["undo"], "step");
+            assert_eq!(
+                current["tool"],
+                json!({
+                    "name":"loft", "input":{
+                        "type":"object", "additionalProperties":false, "required":["profiles"],
+                        "properties":{
+                            "profiles":{"type":"array","items":{"type":"string"},"minItems":1},
+                            "shape":{"type":"string","enum":["ruled","smooth"]}
+                        }
+                    }
+                })
+            );
+            // Loft gained a tool, document history and an enabled profile editor.
+            for field in ["agents", "undo", "tool"] {
+                current[field] = row[field].clone();
+            }
+            for fixture in ["blank", "sketch", "plate", "assembly"] {
+                assert_eq!(current["availability"][fixture]["enabled"], true);
+                current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }
         assert_eq!(&current, row, "{id} changed");

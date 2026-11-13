@@ -185,6 +185,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if r.clicked() {
                 actions.push(AppAction::Select(Some(Selection::Body)));
             }
+            if !state.in_sketch() {
+                crate::context_menu::show(state, &r, crate::context_menu::Target::Body, Some(Selection::Body));
+            }
         }
 
         // Flatten features: absorbed sketches sit under their consumer.
@@ -194,26 +197,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if f.is_sketch() && absorbed.contains(&f.id) {
                 continue;
             }
-            let icon = match &f.kind {
-                FeatureKind::ReferencePlane(_) => Icon::Plane,
-                FeatureKind::Sketch(_) => Icon::Sketch,
-                FeatureKind::Extrude(_) => Icon::Extrude,
-                FeatureKind::Revolve(_) => Icon::Revolve,
-                FeatureKind::Sweep(_) => Icon::Sweep,
-                FeatureKind::Cut(_) => Icon::Cut,
-                FeatureKind::Fillet(_) => Icon::Fillet,
-                FeatureKind::Chamfer(_) => Icon::Chamfer,
-                FeatureKind::Hole(_) => Icon::Hole,
-                FeatureKind::Pattern(p) => match p.layout {
-                    soliddraft_model::PatternSpec::Linear { .. } => Icon::LinearPattern,
-                    soliddraft_model::PatternSpec::Circular { .. } => Icon::CircularPattern,
-                },
-                FeatureKind::Mirror(_) => Icon::Mirror,
-                FeatureKind::Draft(_) => Icon::Draft,
-                FeatureKind::Shell(_) => Icon::Shell,
-                FeatureKind::ImportStep(_) => Icon::Import,
-                FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Cad("lattice"),
-            };
+            let icon = feature_icon(&f.kind);
             let child = f.kind.sketch().and_then(|s| state.doc.feature(s));
             let (sub, status) = match &state.drag_preview {
                 Some(drag) if drag.feature() == f.id => {
@@ -415,45 +399,56 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let (is_sketch, suppressed, index) = (item.is_sketch, item.suppressed, item.index);
             let needs_repair = matches!(item.status, FeatureStatus::NeedsRepair(_));
             let name = item.name.clone();
-            resp.context_menu(|ui| {
-                if ui.button(if is_sketch { "Edit sketch" } else { "Edit feature" }).clicked() {
-                    actions.push(if is_sketch { AppAction::EditSketch(id) } else { AppAction::EditFeature(id) });
-                    ui.close();
+            if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                if !state.in_sketch() {
+                    crate::context_menu::show(
+                        state,
+                        &resp,
+                        crate::context_menu::Target::Feature,
+                        Some(Selection::Feature(id)),
+                    );
                 }
-                if needs_repair && ui.button("Repair references…").clicked() {
-                    actions.push(AppAction::StartRepair(id));
-                    ui.close();
-                }
-                let rename_key = state.shortcuts.shortcut_text("rename").unwrap_or_default();
-                if ui.add(egui::Button::new("Rename").shortcut_text(rename_key)).clicked() {
-                    state.rename = Some(Rename { feature: id, text: name.clone(), focus: true });
-                    ui.close();
-                }
-                if ui.button(if suppressed { "Unsuppress" } else { "Suppress" }).clicked() {
-                    actions.push(AppAction::Command(Command::Suppress { id, suppressed: !suppressed }));
-                    ui.close();
-                }
-                if ui.button("Roll back to here").clicked() {
-                    actions.push(AppAction::Command(Command::Rollback(Some(index + 1))));
-                    ui.close();
-                }
-                if ui.button("Zoom to fit").clicked() {
-                    actions.push(AppAction::ZoomFit);
-                    ui.close();
-                }
-                ui.separator();
-                let delete_key = state.shortcuts.shortcut_text("delete").unwrap_or_default();
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("Delete").color(theme::error()))
-                            .shortcut_text(delete_key),
-                    )
-                    .clicked()
-                {
-                    actions.push(AppAction::Command(Command::DeleteFeature(id)));
-                    ui.close();
-                }
-            });
+            } else {
+                resp.context_menu(|ui| {
+                    if ui.button(if is_sketch { "Edit sketch" } else { "Edit feature" }).clicked() {
+                        actions.push(if is_sketch { AppAction::EditSketch(id) } else { AppAction::EditFeature(id) });
+                        ui.close();
+                    }
+                    if needs_repair && ui.button("Repair references…").clicked() {
+                        actions.push(AppAction::StartRepair(id));
+                        ui.close();
+                    }
+                    let rename_key = state.shortcuts.shortcut_text("rename").unwrap_or_default();
+                    if ui.add(egui::Button::new("Rename").shortcut_text(rename_key)).clicked() {
+                        state.rename = Some(Rename { feature: id, text: name.clone(), focus: true });
+                        ui.close();
+                    }
+                    if ui.button(if suppressed { "Unsuppress" } else { "Suppress" }).clicked() {
+                        actions.push(AppAction::Command(Command::Suppress { id, suppressed: !suppressed }));
+                        ui.close();
+                    }
+                    if ui.button("Roll back to here").clicked() {
+                        actions.push(AppAction::Command(Command::Rollback(Some(index + 1))));
+                        ui.close();
+                    }
+                    if ui.button("Zoom to fit").clicked() {
+                        actions.push(AppAction::ZoomFit);
+                        ui.close();
+                    }
+                    ui.separator();
+                    let delete_key = state.shortcuts.shortcut_text("delete").unwrap_or_default();
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("Delete").color(theme::error()))
+                                .shortcut_text(delete_key),
+                        )
+                        .clicked()
+                    {
+                        actions.push(AppAction::Command(Command::DeleteFeature(id)));
+                        ui.close();
+                    }
+                });
+            }
         }
         if !bar_drawn && !items.is_empty() {
             rollback_bar(ui, state, bar_at, feature_count, &mut actions, &mut bar_target, pointer_released);
@@ -706,4 +701,29 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
         return resp.on_hover_text(egui::RichText::new(w).color(theme::ink()));
     }
     resp
+}
+
+/// The same feature icon in the tree and timeline.
+pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {
+    match kind {
+        FeatureKind::ReferencePlane(_) => Icon::Plane,
+        FeatureKind::Sketch(_) => Icon::Sketch,
+        FeatureKind::Extrude(_) => Icon::Extrude,
+        FeatureKind::Revolve(_) => Icon::Revolve,
+        FeatureKind::Sweep(_) => Icon::Sweep,
+        FeatureKind::Loft(_) => Icon::Loft,
+        FeatureKind::Cut(_) => Icon::Cut,
+        FeatureKind::Fillet(_) => Icon::Fillet,
+        FeatureKind::Chamfer(_) => Icon::Chamfer,
+        FeatureKind::Hole(_) => Icon::Hole,
+        FeatureKind::Pattern(p) => match p.layout {
+            soliddraft_model::PatternSpec::Linear { .. } => Icon::LinearPattern,
+            soliddraft_model::PatternSpec::Circular { .. } => Icon::CircularPattern,
+        },
+        FeatureKind::Mirror(_) => Icon::Mirror,
+        FeatureKind::Draft(_) => Icon::Draft,
+        FeatureKind::Shell(_) => Icon::Shell,
+        FeatureKind::ImportStep(_) => Icon::Import,
+        FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Cad("lattice"),
+    }
 }

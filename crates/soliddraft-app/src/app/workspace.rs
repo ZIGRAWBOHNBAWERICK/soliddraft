@@ -84,7 +84,11 @@ impl SolidDraftApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
-        theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
+        theme::install_for_layout(
+            &cc.egui_ctx,
+            automation.theme.unwrap_or_else(|| crate::settings::appearance().theme),
+            crate::settings::frame_layout(),
+        );
         if let Some(rs) = cc.wgpu_render_state.as_ref() {
             let tier = Tier::of(rs.adapter.get_info().backend);
             let renderer = ViewportRenderer::new(&rs.device, &rs.queue, rs.target_format, tier);
@@ -471,6 +475,9 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
+            if palette {
+                crate::options_bar::panel(root, &mut self.state);
+            }
             egui::Panel::top("ribbon")
                 .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
                 .frame(panel_frame)
@@ -488,9 +495,13 @@ impl SolidDraftApp {
         let window_width = root.available_width();
         if !start {
             if palette {
+                crate::tool_palette::plane_picker_panel(root, &mut self.state);
                 crate::tool_palette::panel(root, &mut self.state);
+                crate::timeline::panel(root, &mut self.state);
             }
-            self.side_panel(root, Side::Tree, window_width);
+            if !palette || self.state.layout.tree.shown {
+                self.side_panel(root, Side::Tree, window_width);
+            }
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {
@@ -543,11 +554,13 @@ impl eframe::App for SolidDraftApp {
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        theme::set_layout(ctx, self.state.frame_layout);
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
         self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
         self.state.frame_ms = if self.state.frame_ms == 0.0 { dt } else { self.state.frame_ms * 0.9 + dt * 0.1 };
+        self.state.viewport.overlay_input(ctx);
         self.shortcuts(ctx);
         crate::drawing::frame(&mut self.state, &mut self.dock);
         crate::assembly::frame(&mut self.state, &mut self.dock, ctx);
@@ -588,6 +601,7 @@ impl eframe::App for SolidDraftApp {
             .hover
             .and_then(|p| selection_of(&self.state.doc, p))
             .or(viewport.hover_reference.map(Selection::Reference))
+            .and_then(|sel| self.state.selection_filter().selection(Some(sel)))
             .and_then(|sel| self.state.doc.describe(sel));
         self.state.hover_point = self.state.viewport.hover_point;
 

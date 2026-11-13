@@ -187,13 +187,15 @@ fn background_edits_and_failures_keep_the_whole_scene_and_its_picks() {
 fn suppressing_the_first_body_removes_it_when_the_last_body_is_unchanged() {
     let mut doc = pair();
     let id = doc.features[0].id;
-    doc.apply(Command::Suppress { id, suppressed: true }).unwrap();
-    assert_eq!(doc.model().live_bodies().len(), 1);
-    assert_eq!(doc.meshes.len(), 1);
-    assert_eq!(doc.faces.len(), 6);
-    doc.undo().unwrap();
-    assert_eq!(doc.meshes.len(), 2);
-    assert_picks(&doc);
+    for _ in 0..2 {
+        doc.apply(Command::Suppress { id, suppressed: true }).unwrap();
+        assert_eq!(doc.model().live_bodies().len(), 1);
+        assert_eq!(doc.meshes.len(), 1);
+        assert_eq!(doc.faces.len(), 6);
+        doc.undo().unwrap();
+        assert_eq!(doc.meshes.len(), 2);
+        assert_picks(&doc);
+    }
 }
 
 #[test]

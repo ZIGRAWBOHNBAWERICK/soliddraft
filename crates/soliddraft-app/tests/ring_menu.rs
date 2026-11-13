@@ -12,7 +12,7 @@ use soliddraft_app::{
     settings::FrameLayout,
     sketch::{ConstraintKind, P2},
     sketcher::Frame,
-    state::{AppAction, Tool},
+    state::{AppAction, SketchSel, Tool},
 };
 
 fn edit_suite(case: &ribbon::Case) {
@@ -116,7 +116,9 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
                     assert!(window.contains_rect(node.rect()), "{name}: quick command stays inside");
                 }
                 for group in ["View", "Scene", "Display", "Show"] {
-                    assert!(window.contains_rect(app.get_by_label(group).rect()));
+                    assert!(
+                        window.contains_rect(app.get(By::new().role(egui::accesskit::Role::Label).label(group)).rect())
+                    );
                 }
                 case.frame(app, &format!("{}-{name}", size.x));
                 app.key_press(Key::Escape);
@@ -152,8 +154,14 @@ fn sketch_ring_applies_a_relation_as_one_edit_and_keeps_solid_commands_hidden() 
         assert!(app.query_all_by_label("Quick commands").next().is_none());
         secondary(app, empty, false);
         assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, Tool::Select);
-        let at = sketch_point(app, P2::new(0.0, 2.5));
+        let line = app.state().state.sketch.as_ref().unwrap().sketch.entities.iter().find(|e| e.is_line()).unwrap();
+        let id = line.id;
+        let a = line.point(0).unwrap();
+        let b = line.point(1).unwrap();
+        let at = sketch_point(app, P2::new(0.75 * a.u + 0.25 * b.u, 0.75 * a.v + 0.25 * b.v));
         secondary(app, at, false);
+        assert_eq!(app.state().state.sketch.as_ref().unwrap().selection, [SketchSel::Entity(id)]);
+        assert!(soliddraft_app::commands::get("sketch_vertical").unwrap().is_enabled(&app.state().state));
         assert_eq!(quick_count(app), 8);
         for hidden in ["Extrude", "Cut", "Edit feature", "Delete feature", "Face", "Feature", "Body"] {
             assert!(app.query_all_by_label(hidden).next().is_none(), "{hidden} stays hidden in sketch mode");

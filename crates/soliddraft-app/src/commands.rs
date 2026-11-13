@@ -2393,13 +2393,13 @@ fn registry() -> Vec<CommandSpec> {
             .when(|s| menu_relation(s, "Fix").is_some())
             .hint(|s| menu_relation(s, "Fix").is_none().then(|| "Select one point or entity other than the origin; an existing relation is already applied".into()))
             .app_only(SKETCHER),
-        cmd("select_other", "Select other", Icon::Views, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
-        cmd("select_tangent_chain", "Select tangent chain", Icon::Views, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
-        cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
-        cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
-        cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
-        cmd("appearance", "Appearance", Icon::Display, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
-        cmd("material", "Material", Icon::Material, COMING_SOON).in_menu().outside_sketch().app_only(LOOK),
+        cmd("select_other", "Select other", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
+        cmd("select_tangent_chain", "Select tangent chain", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
+        cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
+        cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch(),
+        cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch(),
+        cmd("appearance", "Appearance", Icon::Display, COMING_SOON).in_menu().outside_sketch(),
+        cmd("material", "Material", Icon::Material, COMING_SOON).in_menu().outside_sketch(),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
             .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))

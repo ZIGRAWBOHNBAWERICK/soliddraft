@@ -96,7 +96,8 @@ class RunnerHealth(unittest.TestCase):
 
     def test_blade_uses_the_same_health_and_trust_gate(self):
         self.assertEqual(self.select()['blade'], ['self-hosted', 'blade-sd'])
-        for stamp in (None, '0', '1002', 'bad', '101'):
+        self.assertEqual(self.select(boat_enabled='false')['blade'], ['self-hosted', 'blade-sd'])
+        for stamp in (None, '', '0', '1002', 'bad', '101'):
             self.assertEqual(self.select(blade_at=stamp)['blade'], ['ubuntu-latest'])
 
     def test_health_expires_and_future_or_malformed_values_fail_closed(self):

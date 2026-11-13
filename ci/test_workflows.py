@@ -356,6 +356,26 @@ class BoatRunners(unittest.TestCase):
         self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
 
 
+class BladeCleanup(unittest.TestCase):
+    def test_cleanup_removes_only_this_jobs_build_output(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        blocks = text.split('      - name: Clean Blade build output\n')[1:]
+        self.assertTrue(blocks)
+        for block in blocks:
+            condition = block.splitlines()[0]
+            self.assertIn("always() && startsWith(runner.name, 'blade-sd-')", condition)
+            script = block.split('        run: ', 1)[1].split('\n', 1)[0]
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / 'target').mkdir()
+                (root / 'target/large-build').write_text('build output')
+                (root / 'keep').write_text('source')
+                subprocess.run(['bash', '-e', '-c', script], check=True,
+                               env=dict(os.environ, GITHUB_WORKSPACE=str(root)))
+                self.assertFalse((root / 'target').exists())
+                self.assertEqual((root / 'keep').read_text(), 'source')
+
+
 class BrowserStartup(unittest.TestCase):
     def test_only_a_lost_bridge_retries_open_once(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()

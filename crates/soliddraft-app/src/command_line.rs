@@ -994,11 +994,17 @@ fn session(ui: &mut egui::Ui, state: &mut AppState) {
     visuals.selection.bg_fill = theme::terminal_accent().gamma_multiply(0.35);
     let header = Rect::from_min_size(full.min, vec2(full.width(), 26.0));
     ui.painter().hline(full.x_range(), header.bottom(), Stroke::new(1.0, theme::terminal_line()));
-    ui.painter().text(
-        pos2(header.left() + 12.0, header.center().y),
-        Align2::LEFT_CENTER,
-        format!("assistant session · {}", state.chat.status),
+    let reserve = if state.frame_layout == crate::settings::FrameLayout::EditSuite { 280.0 } else { 44.0 };
+    let title = status_text(
+        ui,
+        &format!("assistant session · {}", state.chat.status),
         theme::mono(11.0),
+        theme::terminal_muted(),
+        (header.width() - reserve).max(0.0),
+    );
+    ui.painter().galley(
+        pos2(header.left() + 12.0, header.center().y - title.size().y / 2.0),
+        title,
         theme::terminal_muted(),
     );
     if state.frame_layout == crate::settings::FrameLayout::EditSuite {

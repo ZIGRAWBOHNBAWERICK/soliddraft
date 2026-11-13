@@ -65,6 +65,10 @@ fn ai_overlays_history_counts_turns_and_collapses_after_thirty_idle_seconds() {
         app.run_steps(8);
         assert!(app.state().state.command_line.session_open);
         assert!(app.state().state.chat.messages.iter().any(|m| m.text == "The plate is ready."));
+        app.set_size(vec2(640.0, 640.0));
+        app.run_steps(8);
+        assert!(ribbon::window(app).contains_rect(app.get_by_label("AI session").rect()));
+        case.frame(app, "640-session");
         app.key_press(Key::Escape);
         app.run_steps(8);
         assert!(!app.state().state.command_line.session_open);
@@ -152,14 +156,18 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
         let caller = Caller::Mcp { client: "proof-light-test".into() };
         let path = case.path("part.step");
         std::fs::write(&path, b"existing export").unwrap();
-        let output = call_checked(
-            &mut AppTools { state: &mut app.state_mut().state },
-            "export_step",
-            json!({"path": path}),
-            &caller,
-        );
-        assert!(output.is_error, "pending geometry cannot export");
-        assert_eq!(std::fs::read(&path).unwrap(), b"existing export");
+        for (tool, extension) in [("export_step", "step"), ("export_iges", "iges"), ("export_stl", "stl")] {
+            let destination = case.path(&format!("part.{extension}"));
+            std::fs::write(&destination, b"existing export").unwrap();
+            let output = call_checked(
+                &mut AppTools { state: &mut app.state_mut().state },
+                tool,
+                json!({"path": destination}),
+                &caller,
+            );
+            assert!(output.is_error && output.content.contains("proof"), "{tool}: {}", output.content);
+            assert_eq!(std::fs::read(destination).unwrap(), b"existing export");
+        }
         case.frame(app, "pending");
         kernel.rules.lock().unwrap().hold = None;
         kernel.changed.notify_all();
@@ -173,14 +181,18 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
         app.run_steps(4);
         assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
         assert!(app.query_all_by_label("Boss-Extrude2 proof: Refused").next().is_some());
-        let output = call_checked(
-            &mut AppTools { state: &mut app.state_mut().state },
-            "export_step",
-            json!({"path": path}),
-            &caller,
-        );
-        assert!(output.is_error, "refused geometry cannot export");
-        assert_eq!(std::fs::read(&path).unwrap(), b"existing export");
+        for (tool, extension) in [("export_step", "step"), ("export_iges", "iges"), ("export_stl", "stl")] {
+            let destination = case.path(&format!("part.{extension}"));
+            std::fs::write(&destination, b"existing export").unwrap();
+            let output = call_checked(
+                &mut AppTools { state: &mut app.state_mut().state },
+                tool,
+                json!({"path": destination}),
+                &caller,
+            );
+            assert!(output.is_error && output.content.contains("proof"), "{tool}: {}", output.content);
+            assert_eq!(std::fs::read(destination).unwrap(), b"existing export");
+        }
         case.frame(app, "refused-on-edited-feature");
         app.state_mut().state.push(AppAction::Undo);
         app.run_steps(8);

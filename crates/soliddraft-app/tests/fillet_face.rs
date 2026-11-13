@@ -848,6 +848,7 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     app.run_steps(4);
     click_world(&mut app, glam::Vec3::new(0.0, -20.0, 20.0));
     button(&mut app, "Chamfer");
+    assert!(!soliddraft_app::commands::get("material").unwrap().is_enabled(&app.state().state));
     app.get_by_label("Two distances").click();
     app.run_steps(4);
     type_field(&mut app, "Distance value", "1");

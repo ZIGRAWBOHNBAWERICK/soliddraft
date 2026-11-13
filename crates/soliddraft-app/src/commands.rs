@@ -2085,7 +2085,12 @@ fn registry() -> Vec<CommandSpec> {
         cmd("material", "Material", Icon::Material, "Assign a part material and calculate mass from its density")
             .on(Inspect, "Measure", Small)
             .run(|_| AppAction::ShowMaterial)
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite && s.doc.display_body().is_some())
+            .when(|s| {
+                s.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && s.doc.display_body().is_some()
+                    && s.editor.is_none()
+                    && !s.in_sketch()
+            })
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Check the body for geometry faults").on(Inspect, "Check", Large),

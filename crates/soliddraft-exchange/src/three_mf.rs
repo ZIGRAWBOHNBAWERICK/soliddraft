@@ -55,7 +55,13 @@ fn model(mesh: &Welded, name: &str) -> String {
     s += " <metadata name=\"Application\">SolidDraft</metadata>\n";
     let _ = writeln!(s, " <resources>\n  <object id=\"1\" type=\"model\" name=\"{name}\">\n   <mesh>\n    <vertices>");
     for p in &mesh.positions {
-        let _ = writeln!(s, "     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>", p[0], p[1], p[2]);
+        let _ = writeln!(
+            s,
+            "     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>",
+            crate::coordinate(p[0]),
+            crate::coordinate(p[1]),
+            crate::coordinate(p[2])
+        );
     }
     s += "    </vertices>\n    <triangles>\n";
     for t in &mesh.triangles {
@@ -89,9 +95,9 @@ mod tests {
     #[test]
     fn names_are_escaped() {
         assert_eq!(escape("a<b & \"c\"\u{1}"), "a&lt;b &amp; &quot;c&quot;");
-        let mesh = Welded { positions: vec![[0.5, -0.0, 1e-7]], triangles: vec![] };
+        let mesh = Welded { positions: vec![[0.5, -0.0, 0.1]], triangles: vec![] };
         let xml = model(&mesh, "R&D");
         assert!(xml.contains("<metadata name=\"Title\">R&amp;D</metadata>"));
-        assert!(xml.contains("<vertex x=\"0.5\" y=\"-0\" z=\"0.0000001\"/>"), "{xml}");
+        assert!(xml.contains("<vertex x=\"0.5\" y=\"-0\" z=\"0.100000001490116119384765625\"/>"), "{xml}");
     }
 }

@@ -93,6 +93,8 @@ pub enum AppAction {
     /// Computes mass properties only after the user requests them.
     MeasureMassProperties,
     MeasureEntity,
+    /// Run independent construction checks on the current part.
+    CheckPart,
     ToggleSection,
     SetView(StandardView),
     /// Look straight at the active sketch plane, or the selected planar face.
@@ -1054,6 +1056,8 @@ pub struct Rename {
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
+    pub part_check: Option<crate::part_check::Inspection>,
+    pub print_check: Option<crate::print_check::Dialog>,
     pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
@@ -1224,6 +1228,8 @@ impl AppState {
         Self {
             doc,
             measure: Default::default(),
+            part_check: None,
+            print_check: None,
             section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
@@ -1451,6 +1457,24 @@ impl AppState {
     /// Exports only the committed revision. A live dimension edit cannot export
     /// the preceding body as if it represented the value currently requested.
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
+        self.export_part_at(format, None)
+    }
+
+    /// Exports at an explicitly chosen accuracy, retaining the current revision guards.
+    pub fn export_part_at(
+        &self,
+        format: soliddraft_exchange::Format,
+        accuracy_mm: Option<f64>,
+    ) -> Result<soliddraft_exchange::Export, String> {
+        self.export_ready()?;
+        let mut out = self.doc.model().export_at(format, accuracy_mm)?;
+        if out.proof.is_some() {
+            out.proof = Some(self.doc.proof_report());
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn export_ready(&self) -> Result<(), String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
         }
@@ -1485,11 +1509,7 @@ impl AppState {
         if !proof.current_proved_model() {
             return Err("The current result has not been proved. Wait for proof before exporting.".into());
         }
-        let mut out = self.doc.model().export(format)?;
-        if out.proof.is_some() {
-            out.proof = Some(self.doc.proof_report());
-        }
-        Ok(out)
+        Ok(())
     }
 
     /// Runs one step of a dimension drag. Only the final value reaches the document, as

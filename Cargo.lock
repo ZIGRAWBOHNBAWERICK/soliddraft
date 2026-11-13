@@ -782,6 +782,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "catallax-compare"
+version = "0.1.5"
+source = "git+https://github.com/BohnBawerick/catallax?rev=45b0a37f483d0acf3b3525a4961d54a80a056efd#45b0a37f483d0acf3b3525a4961d54a80a056efd"
+dependencies = [
+ "catallax-boolean",
+ "catallax-features",
+ "catallax-field",
+ "catallax-measure",
+ "catallax-mesh",
+ "catallax-numbers",
+ "catallax-recipe",
+ "catallax-shapes",
+ "catallax-topology",
+]
+
+[[package]]
 name = "catallax-features"
 version = "0.1.5"
 source = "git+https://github.com/BohnBawerick/catallax?rev=45b0a37f483d0acf3b3525a4961d54a80a056efd#45b0a37f483d0acf3b3525a4961d54a80a056efd"
@@ -5466,6 +5482,7 @@ version = "0.4.0"
 dependencies = [
  "catallax-app",
  "catallax-boolean",
+ "catallax-compare",
  "catallax-features",
  "catallax-field",
  "catallax-iges",

@@ -210,26 +210,50 @@ pub fn replay(kernel: &dyn Kernel, recipe: &Recipe) -> Result<ReplayReport, Reci
 /// Replays a recipe like [`replay`] but keeps the result body, which the caller then
 /// owns and releases. Every other body the replay creates is released.
 pub fn build(kernel: &dyn Kernel, recipe: &Recipe) -> Result<(ReplayReport, BodyId), RecipeError> {
+    let (report, body, _) = build_with_report(kernel, recipe, true)?;
+    Ok((report.expect("replay report requested"), body))
+}
+
+/// Builds and retains only the result body, without unrequested display or mass summaries.
+/// Expected refusals still check that their inputs remain unchanged.
+pub fn build_body(kernel: &dyn Kernel, recipe: &Recipe) -> Result<BodyId, RecipeError> {
+    build_with_report(kernel, recipe, false).map(|(_, body, _)| body)
+}
+
+/// Measured build work per recipe step. `None` means the kernel did not provide a counter.
+pub type StepWork = BTreeMap<String, Option<u64>>;
+
+/// Builds the result and retains step work for export evidence, without summary queries.
+pub fn build_body_with_work(kernel: &dyn Kernel, recipe: &Recipe) -> Result<(BodyId, StepWork), RecipeError> {
+    build_with_report(kernel, recipe, false).map(|(_, body, work)| (body, work))
+}
+
+fn build_with_report(
+    kernel: &dyn Kernel,
+    recipe: &Recipe,
+    summaries: bool,
+) -> Result<(Option<ReplayReport>, BodyId, StepWork), RecipeError> {
     check(recipe)?;
-    let mut run = Run { kernel, bodies: BTreeMap::new(), profiles: BTreeMap::new() };
-    let result = run.all(recipe).map(|report| (report, run.body(&recipe.result)));
+    let mut run = Run { kernel, bodies: BTreeMap::new(), profiles: BTreeMap::new(), step_work: BTreeMap::new() };
+    let result = run.all(recipe, summaries).map(|report| (report, run.body(&recipe.result)));
     let keep = result.as_ref().ok().map(|(_, body)| *body);
     for body in run.bodies.values() {
         if Some(*body) != keep {
             let _ = kernel.release(*body);
         }
     }
-    result
+    result.map(|(report, body)| (report, body, run.step_work))
 }
 
 struct Run<'k> {
     kernel: &'k dyn Kernel,
     bodies: BTreeMap<String, BodyId>,
     profiles: BTreeMap<String, (OpTag, Profile)>,
+    step_work: StepWork,
 }
 
 impl Run<'_> {
-    fn all(&mut self, recipe: &Recipe) -> Result<ReplayReport, RecipeError> {
+    fn all(&mut self, recipe: &Recipe, summaries: bool) -> Result<Option<ReplayReport>, RecipeError> {
         if matches!(
             recipe.steps.iter().find(|s| s.id == recipe.result).map(|s| &s.command),
             Some(Command::Profile { .. })
@@ -265,6 +289,7 @@ impl Run<'_> {
                         return Err(RecipeError::StepFailed { step: step.id.clone(), error: error.into() });
                     }
                 };
+                self.step_work.insert(step.id.clone(), Some(0));
                 steps.push(StepReport { id: step.id.clone(), op: OpKind::Profile, outcome, work_used: Some(0) });
                 continue;
             }
@@ -283,9 +308,13 @@ impl Run<'_> {
                 .measure_work(&mut || outcome = Some(self.run(&step.id, &tag, &step.command)))
                 .map_err(|error| RecipeError::StepFailed { step: step.id.clone(), error })?;
             let outcome = outcome.expect("work observation runs the step");
+            self.step_work.insert(step.id.clone(), work_used);
             let report = match (step.expect, outcome) {
                 (Outcome::Ok, Ok((op, result))) => {
                     self.bodies.insert(step.id.clone(), result.body);
+                    if !summaries {
+                        continue;
+                    }
                     let body = self.summary(&step.id)?;
                     StepReport {
                         id: step.id.clone(),
@@ -324,14 +353,17 @@ impl Run<'_> {
             };
             steps.push(report);
         }
+        if !summaries {
+            return Ok(None);
+        }
         let result = self.summary(&recipe.result)?;
-        Ok(ReplayReport {
+        Ok(Some(ReplayReport {
             recipe: recipe.name.clone(),
             backend: self.kernel.backend(),
             steps,
             result_step: recipe.result.clone(),
             result,
-        })
+        }))
     }
 
     fn snapshot(&self, id: &str) -> Result<String, RecipeError> {

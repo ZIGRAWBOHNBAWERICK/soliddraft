@@ -73,42 +73,15 @@ fn mass(state: &AppState) -> soliddraft_kernel_api::MassProperties {
     result.unwrap()
 }
 
-fn exports(state: &mut AppState, dir: &Path, label: &str, allow_mesh_refusal: bool) {
+fn exports(state: &mut AppState, dir: &Path, label: &str, mesh_accuracy_mm: Option<f64>) {
     for format in [Format::Step, Format::Stl] {
-        let output = match state.doc.model().export(format) {
-            Ok(output) => output,
-            Err(error)
-                if allow_mesh_refusal
-                    && format == Format::Stl
-                    && error.to_string().contains("mesh.precision-or-budget") =>
-            {
-                let path = dir.join(format!("{label}.stl"));
-                let sentinel = b"previous accepted destination";
-                std::fs::write(&path, sentinel).unwrap();
-                let before = state.doc.model().part_json();
-                let revision = state.doc.revision();
-                let out = call_checked(
-                    &mut AppTools { state },
-                    "export_stl",
-                    json!({"path":path}),
-                    &Caller::Mcp { client: "canonical-refusal".into() },
-                );
-                assert!(out.is_error && out.content.contains("mesh.precision-or-budget"), "{}", out.content);
-                assert_eq!(std::fs::read(&path).unwrap(), sentinel);
-                assert_eq!(state.doc.model().part_json(), before);
-                assert_eq!(state.doc.revision(), revision);
-                std::fs::remove_file(path).unwrap();
-                let refusal = json!({"format":"stl","code":"mesh.precision-or-budget",
-                    "reason":out.content,"public_refused":true,"destination_preserved":true,"revision_preserved":true});
-                std::fs::write(
-                    dir.join(format!("{label}.stl-refusal.json")),
-                    serde_json::to_vec_pretty(&refusal).unwrap(),
-                )
-                .unwrap();
-                continue;
-            }
-            Err(error) => panic!("{label} {}: {error}", format.name()),
-        };
+        let accuracy = (format == Format::Stl).then_some(mesh_accuracy_mm).flatten();
+        let settings = state.doc.model().settings().clone();
+        let output = state
+            .doc
+            .model()
+            .export_at(format, accuracy)
+            .unwrap_or_else(|error| panic!("{label} {}: {error}", format.name()));
         match &output.report {
             Report::Step(r) => {
                 assert!(r.within_tolerance, "{r:?}");
@@ -116,20 +89,26 @@ fn exports(state: &mut AppState, dir: &Path, label: &str, allow_mesh_refusal: bo
             }
             Report::Mesh(r) => {
                 assert!(r.closed && r.triangles > 0, "{r:?}");
-                assert!(r.chord_height.is_finite() && r.chord_height > 0.0);
+                let requested = accuracy.unwrap_or(settings.export.chord_height);
+                let proof = r.print_check.as_ref().expect("native print certificate");
+                assert_eq!(r.chord_height, requested);
+                assert_eq!(proof.requested_accuracy_mm, requested);
+                assert!(proof.certified_accuracy_mm.is_finite());
+                assert!(0.0 <= proof.certified_accuracy_mm && proof.certified_accuracy_mm <= requested);
             }
             other => panic!("unexpected report: {other:?}"),
         }
         assert!(!output.bytes.is_empty());
         let path = dir.join(format!("{label}.{}", format.extension()));
         let tool = if format == Format::Step { "export_step" } else { "export_stl" };
-        let out = call_checked(
-            &mut AppTools { state },
-            tool,
-            json!({"path": path}),
-            &Caller::Mcp { client: "canonical-exports".into() },
-        );
+        let mut arguments = json!({"path": path});
+        if let Some(mm) = accuracy {
+            arguments["accuracy_mm"] = json!(mm);
+        }
+        let out =
+            call_checked(&mut AppTools { state }, tool, arguments, &Caller::Mcp { client: "canonical-exports".into() });
         assert!(!out.is_error, "{tool}: {}", out.content);
+        assert_eq!(state.doc.model().settings(), &settings, "export changed saved settings");
         assert_eq!(std::fs::read(&path).unwrap(), output.bytes, "public export differs from the model export");
         if let Report::Step(report) = &output.report {
             let doc = state.doc.model();
@@ -180,6 +159,7 @@ fn exercise(index: usize) {
     let mut kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
     let mut state = AppState::new(soliddraft_app::document::Document::new(name, kernel.clone()));
     let mut names = None;
+    let mut mesh_accuracy_mm = None;
     for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
         let tool = step["tool"].as_str().unwrap();
         let mut arguments = step["arguments"].clone();
@@ -234,7 +214,13 @@ fn exercise(index: usize) {
         assert_eq!(state.doc.displayed_revision(), state.doc.revision(), "{label}: stale display");
         assert!(state.doc.triangle_count() > 0, "{label}: empty display");
         assert!(!state.doc.proof_pending(), "{label}: proof is still pending");
-        exports(&mut state, &dir, label, index == 4);
+        // Repeat the scenario's explicit print choice through the history checks.
+        if let Some(export) = step["exports"].as_array().and_then(|exports| {
+            exports.iter().find(|export| export["format"] == "stl" && export.get("refused").is_none())
+        }) {
+            mesh_accuracy_mm = export["accuracy_mm"].as_f64();
+        }
+        exports(&mut state, &dir, label, mesh_accuracy_mm);
         let mut app = ribbon::app(state.doc);
 
         app.key_press(egui::Key::Z);

@@ -2214,7 +2214,10 @@ fn registry() -> Vec<CommandSpec> {
                     && !s.in_sketch()
             })
             .app_only("Part material"),
-        cmd("check", "Check", Icon::Cad("check"), "Check the body for geometry faults").on(Inspect, "Check", Large),
+        cmd("check", "Check", Icon::Cad("check"), "Build the part independently with the distance-field model")
+            .run(|_| AppAction::CheckPart)
+            .on(Inspect, "Check", Large)
+            .app_only("Part check report"),
         cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane")
             .on(Inspect, "Check", Small)
             .run(|_| AppAction::ToggleSection)

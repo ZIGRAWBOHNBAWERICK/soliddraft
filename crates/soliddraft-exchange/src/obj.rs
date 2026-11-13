@@ -1,4 +1,4 @@
-//! Wavefront OBJ from the display mesh, retaining face groups and sharp-face normals.
+//! Wavefront OBJ retaining face groups and sharp-face normals.
 
 use std::io::Write;
 
@@ -6,7 +6,7 @@ use soliddraft_kernel_api::Mesh;
 
 pub(super) fn write(mesh: &Mesh, name: &str, chord_height: f64) -> Vec<u8> {
     let mut out = Vec::new();
-    writeln!(out, "# SolidDraft display mesh; millimetres").unwrap();
+    writeln!(out, "# SolidDraft mesh; millimetres").unwrap();
     writeln!(out, "# chord_height_mm {chord_height}").unwrap();
     write!(out, "o ").unwrap();
     // An object name is one line, never another OBJ record.
@@ -15,7 +15,7 @@ pub(super) fn write(mesh: &Mesh, name: &str, chord_height: f64) -> Vec<u8> {
     }
     writeln!(out).unwrap();
     for p in &mesh.positions {
-        writeln!(out, "v {} {} {}", p[0], p[1], p[2]).unwrap();
+        writeln!(out, "v {} {} {}", crate::coordinate(p[0]), crate::coordinate(p[1]), crate::coordinate(p[2])).unwrap();
     }
     for n in &mesh.normals {
         writeln!(out, "vn {} {} {}", n[0], n[1], n[2]).unwrap();

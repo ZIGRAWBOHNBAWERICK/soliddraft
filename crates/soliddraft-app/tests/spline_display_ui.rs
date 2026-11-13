@@ -51,24 +51,7 @@ fn check_display(name: &str, source: &str, bounded: bool) {
                 )
             });
             eprintln!("{layout:?}: {work:?}; {}", out.content);
-            let probe = |app: &ribbon::App, stage: &str| {
-                let state = &app.state().state;
-                eprintln!(
-                    "[DEBUG-f04-ui] {stage}: meshes={}, faces={}, failure={:?}, note={:?}, topology={:?}",
-                    state.doc.meshes.len(),
-                    state.doc.faces.len(),
-                    state.doc.display_failure(),
-                    state.note.as_ref().map(|n| &n.text),
-                    state.doc.display_body().map(|body| state
-                        .doc
-                        .kernel()
-                        .topology(body)
-                        .map(|t| (t.faces.len(), t.edges.len())))
-                );
-            };
-            probe(app, "before frames");
             app.run_steps(8);
-            probe(app, "after frames");
             if bounded {
                 assert!(!out.is_error && !work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
                 assert_ne!(app.state().state.doc.model().to_bytes().unwrap(), before);

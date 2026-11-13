@@ -83,6 +83,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
     if !bounded {
         assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
         assert_eq!(work.used, 19_999_956);
+        assert_eq!(state.doc.display_failure(), Some(out.content.as_str()));
         for expected in ["SD-DISPLAY-01", "0.01 mm", "19999956 work units", "20000000"] {
             assert!(out.content.contains(expected), "missing {expected}: {}", out.content);
         }
@@ -100,6 +101,9 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
         let feature = state.doc.features.last().unwrap().id;
         assert_eq!(state.doc.features.last().unwrap().name, "Fillet1");
         let body = state.doc.display_body().unwrap();
+        assert!(!state.doc.meshes[&body].indices.is_empty(), "the app retains the selectable bounded mesh");
+        assert_eq!(state.doc.faces.len(), 7);
+        assert!(state.doc.kernel().topology(body).unwrap().display_chord_height.is_some());
         let mesh = state.doc.kernel().rendering(body, &soliddraft_kernel_api::TessellationParams::default()).unwrap();
         let bound = mesh.bounded.as_ref().expect("native F04 is a bounded display answer");
         bound.validate().unwrap();

@@ -122,6 +122,47 @@ mod ribbon;
 mod ux_tools;
 
 #[test]
+fn warmed_loft_completion_disappears_when_a_sketch_opens_in_both_frames() {
+    use egui::Key;
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::settings::FrameLayout;
+    let mut case = ux_tools::Case::new("loft-completion");
+    let loft = format!("{:<24}{}", "loft", "Loft");
+    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+        let mut doc = ribbon::sketch();
+        doc.selection = Some(Selection::Feature(doc.features[0].id));
+        let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
+        app.state_mut().state.frame_layout = layout;
+        ux_tools::settle(&mut app);
+        app.get_by_label("Command line").click();
+        app.run_steps(2);
+        app.get_by_label("Command line").type_text("lo");
+        app.run_steps(2);
+        app.key_press(Key::Tab);
+        app.run_steps(4);
+        assert!(app.query_by_label(&loft).is_some(), "Loft is offered before sketch entry");
+        let history = app.state().state.command_line.history.clone();
+        case.frame(&mut app, &format!("{layout:?}-model-completions"));
+        app.get_by_label("Edit sketch").click();
+        ux_tools::settle(&mut app);
+        case.frame(&mut app, &format!("{layout:?}-sketch-completions"));
+        assert!(app.state().state.in_sketch());
+        assert_eq!(app.state().state.command_line.input, "lo");
+        assert_eq!(app.state().state.command_line.history, history);
+        assert!(app.query_by_label(&loft).is_none(), "cached Loft must be hidden in {layout:?}");
+        app.get_by_label("Command line").click();
+        app.run_steps(2);
+        for _ in 0..12 {
+            app.key_press(Key::Tab);
+            app.run_steps(2);
+            assert!(app.state().state.command_line.input.starts_with("look_"));
+            assert!(app.query_by_label(&loft).is_none());
+        }
+        assert_eq!(app.state().state.command_line.history, history);
+    }
+}
+
+#[test]
 fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal() {
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;

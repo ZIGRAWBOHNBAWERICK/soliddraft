@@ -41,6 +41,10 @@ pub enum OpKind {
     Chamfer,
     /// `shell`.
     Shell,
+    /// `offset`.
+    Offset,
+    /// `thicken`.
+    Thicken,
     /// `hole`.
     Hole,
     /// `pattern`.
@@ -74,6 +78,8 @@ impl OpKind {
             OpKind::Fillet => "fillet",
             OpKind::Chamfer => "chamfer",
             OpKind::Shell => "shell",
+            OpKind::Offset => "offset",
+            OpKind::Thicken => "thicken",
             OpKind::Hole => "hole",
             OpKind::Pattern => "pattern",
             OpKind::Mirror => "mirror",
@@ -237,6 +243,18 @@ pub enum FaceRole {
         instance: u32,
         /// The input face it copies.
         face: FaceId,
+    },
+    /// A face of an expanded feature instance, including previously hidden tool faces.
+    FeatureCopy {
+        /// Instance index, starting at one.
+        instance: u32,
+        /// Stable generating operation and role, independent of geometry handles.
+        source: String,
+    },
+    /// A closing wall at a selected thickened face's boundary.
+    Rim {
+        /// The source boundary edge.
+        edge: EdgeId,
     },
     /// A face of an imported STEP body.
     Imported {

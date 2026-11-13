@@ -274,8 +274,16 @@ fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option
                 _ => None,
             }
         }
+        Role::Rim { edge } => {
+            let name = serde_json::to_string(edge).expect("edge name serializes");
+            let candidates: BTreeSet<_> = parents
+                .iter()
+                .flat_map(|p| p.edge_names.iter().filter_map(|(id, n)| (*n == name).then_some(*id)))
+                .collect();
+            (candidates.len() == 1).then(|| FaceRole::Rim { edge: *candidates.first().unwrap() })
+        }
         Role::RoundCorner { vertex } => parent_vertex(vertex, parents).map(|vertex| FaceRole::ShellCorner { vertex }),
-        Role::Inner { of } => parents
+        Role::Inner { of } | Role::Offset { of } => parents
             .iter()
             .find_map(|p| p.origins.iter().find_map(|(id, os)| os.contains(of).then_some(*id)))
             .map(|face| FaceRole::Offset { face }),

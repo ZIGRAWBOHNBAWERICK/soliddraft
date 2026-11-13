@@ -8,6 +8,7 @@ mod assembly_measure;
 mod construction;
 mod convert;
 mod diagnostics;
+mod distance;
 mod drawing_queries;
 mod edge_control;
 mod frames;
@@ -691,6 +692,9 @@ fn build_error(op: OpKind, error: Error) -> KernelError {
     if op == OpKind::Sweep {
         return sweep::refusal(error.code());
     }
+    if matches!(op, OpKind::Offset | OpKind::Thicken) {
+        return distance::refusal(op, error.code());
+    }
     let code = error.code();
     if matches!(error, Error::Conversion(catallax_app::soliddraft::ConversionError::NotYet { .. })) {
         return gap(&format!("{op:?}"));
@@ -1010,6 +1014,32 @@ impl Kernel for CatallaxKernel {
             let solid = state.solid(body)?;
             let native = native::hole(state.step(body)?, &solid, body, params)?;
             self.native(state, tag, OpKind::Hole, body, &[body], native, None, &[])
+        })
+    }
+
+    fn offset(&self, tag: &OpTag, body: BodyId, distance: f64) -> KernelResult<OpResult> {
+        self.observe("offset", || {
+            let state = self.state()?;
+            state.solid(body)?;
+            let operation = distance::offset(state.step(body)?, distance)?;
+            self.native(state, tag, OpKind::Offset, body, &[body], operation, None, &[])
+        })
+        .map_err(|error| match error {
+            KernelError::Unavailable(_) => distance::refusal(OpKind::Offset, ""),
+            other => other,
+        })
+    }
+
+    fn thicken(&self, tag: &OpTag, body: BodyId, params: &Thicken) -> KernelResult<OpResult> {
+        self.observe("thicken", || {
+            let state = self.state()?;
+            let solid = state.solid(body)?;
+            let operation = distance::thicken(state.step(body)?, params, |face| solid.face_ref(face, body))?;
+            self.native(state, tag, OpKind::Thicken, body, &[body], operation, None, &[])
+        })
+        .map_err(|error| match error {
+            KernelError::Unavailable(_) => distance::refusal(OpKind::Thicken, ""),
+            other => other,
         })
     }
 

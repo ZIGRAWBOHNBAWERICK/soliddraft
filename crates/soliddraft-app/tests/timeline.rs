@@ -140,6 +140,7 @@ fn context_actions_rename_suppress_rollback_edit_and_delete() {
         assert!(!app.state().state.doc.features[1].suppressed);
         menu(app, "Sketch1", "Roll back to here");
         assert_eq!(app.state().state.doc.rollback, Some(1));
+        app.run_steps(60);
         let bar = app.get_by_label("History rollback bar").rect();
         ribbon::double_click_at(app, bar.center());
         app.run_steps(8);

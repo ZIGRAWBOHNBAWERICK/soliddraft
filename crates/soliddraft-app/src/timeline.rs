@@ -127,7 +127,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         rename(ui, state, text, &mut actions);
                     } else {
                         if response.clicked() {
-                            response.request_focus();
                             actions.push(AppAction::Select(Some(Selection::Feature(id))));
                         }
                         if response.double_clicked() && can_change {

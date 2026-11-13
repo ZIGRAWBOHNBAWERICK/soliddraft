@@ -130,6 +130,7 @@ fn patterns_and_mirrors_build_edit_and_keep_later_references() {
     let pattern = add(
         &mut d,
         FeatureKind::Pattern(PatternFeature {
+            source: None,
             layout: PatternSpec::Linear { direction: Vec3::X, spacing: 20.0, count: 3 },
         }),
     );

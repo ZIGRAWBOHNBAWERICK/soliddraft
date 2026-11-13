@@ -223,6 +223,7 @@ fn multi_value_document(hole: bool) -> (Document, FeatureId, usize) {
         })
     } else {
         FeatureKind::Pattern(soliddraft_model::PatternFeature {
+            source: None,
             layout: soliddraft_model::PatternSpec::Linear {
                 direction: soliddraft_kernel_api::Vec3::X,
                 spacing: 80.0,

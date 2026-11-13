@@ -31,6 +31,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt and work/rig.dwasm"
     },
     {
+      "id": "body-offset",
+      "file": "ci/scenarios/body-offset.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Inward offsets on a 10 x 8 x 6 mm block: -1 mm and -0.5 mm; zero distance refused. Exact volume within 1e-6 mm³. No work allowance increase.",
+      "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
+    },
+    {
       "id": "bored-tray-shell",
       "file": "ci/scenarios/bored-tray-shell.json",
       "acceptance": true,
@@ -362,6 +376,34 @@
       "route": "MCP assembly checks -> pinned solids -> exact overlap volume and contact faces -> per-pair results",
       "supported_limits": "Exact touching without mates, zero overlap volume, named contact faces, zero-clearance comparison and negative-clearance refusal. Unsupported exact quantities keep typed refusals and plain reasons.",
       "evidence": "result.json, protocol.json and per-command reports; saved parts and assembly"
+    },
+    {
+      "id": "face-thicken",
+      "file": "ci/scenarios/face-thicken.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "A planar top face of a 10 x 8 x 6 mm block, front and back thickness; empty selection refused. Exact volume within 1e-6 mm³. No work allowance increase.",
+      "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
+    },
+    {
+      "id": "feature-pattern",
+      "file": "ci/scenarios/feature-pattern.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Repeat a 2 x 2 mm through cut in a 20 x 20 x 2 mm plate at quarter turns; 45-degree saved placement refused. Stock remains fixed. Exact volume within 1e-6 mm³. No work allowance increase.",
+      "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
     },
     {
       "id": "fillet",
@@ -1559,6 +1601,17 @@
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "Canonical radius-22 flange and radius-12 housing with radius-8 bore, four diameter-4 holes with diameter-8 90-degree countersinks. B-rep junction radius 2 edited to 2.5. This does not claim field support at radius 2 or freeform Boolean support. STL may refuse mesh.precision-or-budget on fitted patches; the application test records that refusal and checks destination preservation. The lattice attempt refuses at source bounding-box measurement with measure.unsupported-surface before field compilation.",
       "evidence": "Build, parameter edit, undo, redo, fresh reopen and proven STEP. STL is either closed or has a recorded mesh.precision-or-budget refusal with the destination and accepted part preserved. Stored references and Edit Suite frames are checked by canonical_parts."
+    }
+  ],
+  "native_ui_scenarios": [
+    {
+      "id": "edit-suite-document-workspaces",
+      "file": "crates/soliddraft-app/tests/frame_layout.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest pointer and command line -> document workspace switch -> registry palette -> assembly and drawing actions -> software Vulkan renderer",
+      "evidence": "target/ribbon-acceptance/assembly-workspaces and drawing-workspaces; per-document workspaces, assembly camera and scenes, Mate bar, drawing sheet edits and AI session routing"
     }
   ]
 }

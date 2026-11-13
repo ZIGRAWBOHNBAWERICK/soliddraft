@@ -621,6 +621,15 @@ impl Document {
                 }
                 _ => Ok(()),
             },
+            FeatureKind::Offset(o) if !o.distance.is_finite() || o.distance == 0.0 => {
+                Err(CommandError::Invalid("offset distance must be finite and nonzero".into()))
+            }
+            FeatureKind::Thicken(t) if t.faces.is_empty() => {
+                Err(CommandError::Invalid("select at least one face to thicken".into()))
+            }
+            FeatureKind::Thicken(t) if !t.thickness.is_finite() || t.thickness <= 0.0 => {
+                Err(CommandError::Invalid("thickness must be finite and positive".into()))
+            }
             FeatureKind::Shell(s) if !(s.thickness.is_finite() && s.thickness > 0.0) => {
                 Err(CommandError::Invalid("shell thickness must be finite and positive".into()))
             }
@@ -947,8 +956,7 @@ impl Document {
                     }
                 }
                 let old = std::mem::replace(&mut self.features[i].name, name.clone());
-                // Messages that name the feature are made again; every build is reused.
-                self.touch(i);
+                self.refresh_names();
                 Ok(Applied {
                     inverse: Command::RenameFeature { id, name: old.clone() },
                     redo: Command::RenameFeature { id, name: name.clone() },

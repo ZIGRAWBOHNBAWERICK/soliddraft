@@ -1,0 +1,180 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "feature-pattern",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 20
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 2,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "Boss-Extrude1 \u00b7 End cap",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              6,
+              0,
+              2
+            ],
+            "width": 2,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 2,
+        "through_all": true,
+        "flip": false
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 792,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "circular_pattern",
+      "arguments": {
+        "source": "Cut-Extrude1",
+        "axis_origin": [
+          0,
+          0,
+          0
+        ],
+        "axis_direction": [
+          0,
+          0,
+          1
+        ],
+        "count": 4,
+        "angle": 45
+      },
+      "refused": "cannot be saved exactly",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 792,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "circular_pattern",
+      "arguments": {
+        "source": "Cut-Extrude1",
+        "axis_origin": [
+          0,
+          0,
+          0
+        ],
+        "axis_direction": [
+          0,
+          0,
+          1
+        ],
+        "count": 4,
+        "angle": 90
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 768,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "edit_pattern",
+      "arguments": {
+        "feature": "CirPattern1",
+        "count": 3,
+        "step": 90
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 776,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 768,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 776,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/feature-pattern.dwprt"
+      },
+      "files": [
+        "{bundle}/feature-pattern.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/feature-pattern.dwprt"
+      },
+      "export": [
+        "step"
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 776,
+          "tolerance": 1e-06
+        }
+      ]
+    }
+  ]
+}

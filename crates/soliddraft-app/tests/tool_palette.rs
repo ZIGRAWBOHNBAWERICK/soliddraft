@@ -62,10 +62,9 @@ fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
 }
 
 fn plane_bar(app: &App) -> Rect {
-    Rect::from_min_max(
-        pos2(0.0, theme::MENU_HEIGHT + theme::RIBBON_TABS_HEIGHT),
-        pos2(ribbon::window(app).right(), theme::MENU_HEIGHT + theme::RIBBON_TABS_HEIGHT + 44.0),
-    )
+    egui::PanelState::load(&app.ctx, egui::Id::new("sketch_plane_picker"))
+        .expect("the plane picker is laid out")
+        .outer_rect
 }
 
 #[test]
@@ -310,7 +309,7 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
     let case = ribbon::case("tool-palette-short");
     for mode in [Mode::Light, Mode::Dark] {
         for scale in [1.0, 2.0] {
-            let mut app = ribbon::app_at(ribbon::blank(), vec2(960.0, 600.0), scale);
+            let mut app = ribbon::app_at(ribbon::blank(), vec2(1280.0, 600.0), scale);
             theme::set_mode(&app.ctx, mode);
             app.state_mut().state.frame_layout = FrameLayout::EditSuite;
             app.run_steps(8);

@@ -58,6 +58,8 @@ pub enum AppAction {
     StartReferencePlane,
     StartDraft,
     StartShell,
+    StartOffset,
+    StartThicken,
     StartLattice,
     StartGyroid,
     StartRepair(FeatureId),
@@ -263,6 +265,8 @@ pub enum EditorParams {
     ReferencePlane(soliddraft_model::SketchPlane),
     Draft(DraftParams),
     Shell(soliddraft_model::ShellFeature),
+    Offset(soliddraft_model::OffsetFeature),
+    Thicken(soliddraft_model::ThickenFeature),
     Lattice(soliddraft_model::LatticeFeature),
     Gyroid(soliddraft_model::GyroidFeature),
     /// Picking a plane or planar face for a new sketch.
@@ -310,6 +314,8 @@ impl FeatureEditor {
             EditorParams::ReferencePlane(_) => format!("{edit}Reference Plane"),
             EditorParams::Draft(_) => format!("{edit}Draft"),
             EditorParams::Shell(_) => format!("{edit}Shell"),
+            EditorParams::Offset(_) => format!("{edit}Offset"),
+            EditorParams::Thicken(_) => format!("{edit}Thicken"),
             EditorParams::Lattice(_) => format!("{edit}Lattice"),
             EditorParams::Gyroid(_) => format!("{edit}Gyroid"),
             EditorParams::PickPlane => "Sketch".to_owned(),
@@ -364,6 +370,8 @@ impl FeatureEditor {
             EditorParams::Fillet(f) => doc.preview_rounding(&f.blend(), false, before),
             EditorParams::Chamfer(c) => doc.preview_rounding(&c.blend(), true, before),
             EditorParams::Shell(s) => doc.preview_shell(s, before),
+            EditorParams::Offset(s) => doc.preview_offset(s, before),
+            EditorParams::Thicken(s) => doc.preview_thicken(s, before),
             // These preview once applied; the interface half adds ghosts for them.
             EditorParams::Lattice(_)
             | EditorParams::Gyroid(_)
@@ -1037,6 +1045,8 @@ pub struct AppState {
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
+    pub form_bar: crate::form_bar::State,
+    pub options_details: bool,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1107,6 +1117,100 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn tree_shown(&self) -> bool {
+        if self.frame_layout == crate::settings::FrameLayout::Classic {
+            return self.layout.tree.shown;
+        }
+        if self.assembly.is_active() {
+            !self.assembly.tree_hidden
+        } else if self.drawing.is_active() {
+            !self.drawing.tree_hidden
+        } else {
+            self.layout.tree.shown
+        }
+    }
+
+    pub fn show_tree(&mut self, shown: bool) {
+        if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.assembly.is_active() {
+            self.assembly.tree_hidden = !shown;
+        } else if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.drawing.is_active() {
+            self.drawing.tree_hidden = !shown;
+        } else {
+            self.layout.tree.shown = shown;
+        }
+    }
+
+    /// The workspaces offered by the active document in Edit Suite.
+    pub fn workspaces(&self) -> Vec<crate::commands::Tab> {
+        if self.drawing.is_active() {
+            crate::drawing::DrawingTab::EDIT_SUITE.into_iter().map(Into::into).collect()
+        } else if self.assembly.is_active() {
+            crate::assembly::Workspace::ALL.into_iter().map(Into::into).collect()
+        } else {
+            RibbonTab::ALL.into_iter().map(Into::into).collect()
+        }
+    }
+
+    pub fn workspace(&self) -> crate::commands::Tab {
+        if let Some(session) = self.drawing.session.as_ref().filter(|_| self.drawing.is_active()) {
+            if session.tab == crate::drawing::DrawingTab::Assistant {
+                crate::drawing::DrawingTab::Views.into()
+            } else {
+                session.tab.into()
+            }
+        } else if self.assembly.is_active() {
+            self.assembly.workspace.into()
+        } else if self.in_sketch() {
+            RibbonTab::Sketch.into()
+        } else {
+            self.ribbon_tab.into()
+        }
+    }
+
+    pub fn select_workspace(&mut self, tab: crate::commands::Tab) {
+        if self.in_sketch() && !self.drawing.is_active() && !self.assembly.is_active() {
+            return;
+        }
+        if !self.workspaces().contains(&tab) {
+            return;
+        }
+        self.options_details = false;
+        self.form_bar.expanded = false;
+        if self.drawing.is_active() {
+            if let crate::commands::Tab::Drawing(tab) = tab {
+                self.push(AppAction::Drawing(crate::drawing::DrawingAction::SetTab(tab)));
+            }
+        } else if self.assembly.is_active() {
+            self.assembly.workspace = match tab {
+                crate::commands::Tab::Assembly => crate::assembly::Workspace::Assembly,
+                crate::commands::Tab::AssemblyInspect => crate::assembly::Workspace::Inspect,
+                crate::commands::Tab::AssemblyView => crate::assembly::Workspace::View,
+                _ => return,
+            };
+        } else {
+            self.ribbon_tab = match tab {
+                crate::commands::Tab::Part(tab) => tab,
+                crate::commands::Tab::Assembly => RibbonTab::Assembly,
+                _ => return,
+            };
+        }
+    }
+
+    pub fn active_viewport(&self) -> &ViewportState {
+        match self.assembly.session.as_ref().filter(|_| self.assembly.is_active()) {
+            Some(session) => &session.viewport,
+            None => &self.viewport,
+        }
+    }
+
+    pub fn active_viewport_mut(&mut self) -> &mut ViewportState {
+        if self.assembly.is_active() {
+            &mut self.assembly.session.as_mut().expect("active assembly").viewport
+        } else {
+            &mut self.viewport
+        }
+    }
+
     pub fn new(doc: Document) -> Self {
         Self {
             doc,
@@ -1114,6 +1218,8 @@ impl AppState {
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),
+            form_bar: Default::default(),
+            options_details: false,
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,
@@ -1330,7 +1436,10 @@ impl AppState {
                 ("Preview", NoteKind::Info)
             });
         }
-        self.doc.proof_pending().then_some(("Proof pending", NoteKind::Info))
+        if self.doc.proof_pending() {
+            return Some(("Proof pending", NoteKind::Info));
+        }
+        self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
     }
 
     /// Exports only the committed revision. A live dimension edit cannot export
@@ -1338,6 +1447,9 @@ impl AppState {
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
+        }
+        if self.doc.proof_state().answered_within_bound {
+            return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
         if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {
             return Err("The requested revision has not passed proof".into());

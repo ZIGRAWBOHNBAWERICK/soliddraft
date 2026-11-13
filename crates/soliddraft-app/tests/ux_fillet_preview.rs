@@ -524,9 +524,8 @@ fn assert_valid_drawn(app: &App, what: &str) {
     assert_eq!(doc.error_count(), 0, "{what}: no errors");
 }
 
-/// Error text painted by the active form or its details sheet.
 fn panel_text(app: &App) -> Vec<ribbon::Painted> {
-    ribbon::painted(app).into_iter().filter(|p| p.color == soliddraft_app::theme::error()).collect()
+    ribbon::painted(app)
 }
 
 /// A message painted in the panel between two heights: beside the control it is about.
@@ -556,6 +555,7 @@ fn radius_band(app: &App) -> (f32, f32) {
 fn band_text(app: &App, (top, bottom): (f32, f32), field: Option<Rect>) -> Vec<String> {
     panel_text(app)
         .into_iter()
+        .filter(|p| p.color == soliddraft_app::theme::error())
         .filter(|p| p.rect.top() >= top - ribbon::TOLERANCE && p.rect.bottom() <= bottom + ribbon::TOLERANCE)
         .filter(|p| field.is_none_or(|f| !f.expand(ribbon::TOLERANCE).contains_rect(p.rect)))
         .map(|p| p.text)
@@ -837,7 +837,7 @@ fn faces_collect_complete_boundaries_and_the_slot_stays_drawable() {
     let top = point("/expected/box_top_face/interior");
     let edge_at = point("/expected/box_single_edge/edge_midpoint");
 
-    let assert_top_boundary = |app: &App, what: &str| {
+    let assert_top_boundary = |app: &mut App, what: &str| {
         let edges = held(app);
         case.note(format!("{what}: held {edges:?}"));
         assert_eq!(edges.len(), count("/expected/box_top_face/boundary_edges"), "{what}: the top boundary: {edges:?}");
@@ -856,11 +856,16 @@ fn faces_collect_complete_boundaries_and_the_slot_stays_drawable() {
             .map(|v| v.as_f64().unwrap())
             .collect();
         assert!(lengths.iter().zip(&want).all(|(a, b)| (a - b).abs() < 1e-6), "{what}: lengths {lengths:?}");
+        let label = format!("{} edges", edges.len());
+        app.get_by_label(&label).click();
+        app.run_steps(8);
         let painted: Vec<String> = panel_text(app).into_iter().map(|p| p.text).collect();
         for e in &edges {
             assert!(!e.label.trim().is_empty(), "{what}: a usable name");
             assert!(painted.contains(&e.label), "{what}: the panel shows {:?}: {painted:?}", e.label);
         }
+        app.get_by_label(&label).click();
+        app.run_steps(8);
     };
 
     // (1) and (2) Command first: an edge, then the face it bounds.

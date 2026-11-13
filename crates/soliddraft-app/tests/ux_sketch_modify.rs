@@ -106,6 +106,7 @@ fn escape(app: &mut App) {
 
 fn open_sketch(app: &mut App) {
     let name = app.state().state.doc.features[0].name.clone();
+    ribbon::open_tree(app);
     let view = app.state().state.viewport.rect;
     let left = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
     let row = ribbon::button_rect(app, &name, left);

@@ -142,6 +142,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     );
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = launch(doc, STANDARD);
+    ribbon::open_tree(&mut app);
     let view = app.state().state.viewport.rect;
     let left = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
     let row = ribbon::button_rect(&app, &name, left);

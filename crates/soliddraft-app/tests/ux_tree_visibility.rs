@@ -218,6 +218,10 @@ fn launch(case: &mut Case, doc: Document, window: &str) -> App {
         .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     settle(&mut app);
+    if !app.state().state.tree_shown() {
+        app.key_press(egui::Key::F9);
+        settle(&mut app);
+    }
     app
 }
 

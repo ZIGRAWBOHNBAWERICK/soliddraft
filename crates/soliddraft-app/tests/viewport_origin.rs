@@ -51,8 +51,7 @@ fn saved_preference_hides_origin_axes_in_fresh_and_old_parts() {
         assert_eq!(corner, 0, "no resting triad in the assembly viewport");
 
         // Back on the part tab, whose title sits at the left of the bar over the viewport.
-        let rect = viewport(&app);
-        click(&mut app, pos2(rect.left() + 24.0, rect.top() - 14.0));
+        part_tab(&mut app);
         assert!(!app.state().state.assembly.is_active(), "the part tab is active again");
 
         // The disclosure control is not a selection.

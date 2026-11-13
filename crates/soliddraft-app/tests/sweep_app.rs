@@ -110,8 +110,10 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
     assert!(matches!(harness.state().state.doc.features[1].kind, FeatureKind::Sweep(_)));
     harness.key_press(egui::Key::Z);
     harness.run_steps(4);
-    harness.key_press(egui::Key::F9);
-    harness.run_steps(8);
+    if !harness.state().state.tree_shown() {
+        harness.key_press(egui::Key::F9);
+        harness.run_steps(8);
+    }
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Sweep1").next().unwrap().click();
     harness.run_steps(4);
     harness.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
@@ -382,6 +384,7 @@ fn property_page_builds_a_chain_and_offers_only_what_works() {
     harness.get_by_label("Sweep").click();
     harness.run_steps(4);
     assert!(harness.query_by_label("Spline · Coming soon").is_none());
+    ribbon::open_options(&mut harness);
     assert!(harness.query_by_label("Use spline path").is_some());
     assert!(harness.query_by_label("Helix · Coming soon").is_some());
     assert!(harness.query_by_label("Keep direction").is_some());

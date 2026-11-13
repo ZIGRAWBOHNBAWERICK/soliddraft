@@ -302,6 +302,7 @@ fn edit_in_place(case: &mut Case, look: Look) {
         let before = facts(app);
         let (feature, _) = the_extrude(app);
         let name = app.state().state.doc.feature(feature).expect("the feature").name.clone();
+        ribbon::open_tree(app);
         let row = ribbon::button_rect(app, &name, left_column(app));
         case.note(format!("fresh app, double-click the row at {row:?}"));
         settle(app);

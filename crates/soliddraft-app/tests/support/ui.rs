@@ -477,8 +477,18 @@ pub fn menu(app: &mut App, name: &str, entry: &str) {
     app.run_steps(4);
 }
 
+pub fn open_tree(app: &mut App) {
+    if !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        app.run_steps(8);
+    }
+}
+
 /// Clicks a document tab.
 pub fn document_tab(app: &mut App, title: &str) {
+    if matches!(title, "Tree" | "Values") {
+        open_tree(app);
+    }
     let rect = title_rect(app, title);
     click_at(app, rect.center());
     app.run_steps(4);

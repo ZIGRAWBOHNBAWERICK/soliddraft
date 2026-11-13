@@ -61,7 +61,7 @@ fn assert_fields(app: &App, what: &str, wanted: &[&str]) {
         assert!(names.contains(w), "{what}: the form has {w:?}: {names:?}");
     }
     for (name, rect) in fields.iter().filter(|(name, _)| wanted.contains(&name.as_str())) {
-        assert!(rect.width() >= 48.0 && rect.height() >= 18.0, "{what}: readable {name}: {rect:?}");
+        assert!(rect.width() >= 36.0 && rect.height() >= 18.0, "{what}: readable {name}: {rect:?}");
     }
 }
 

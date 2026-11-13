@@ -1051,6 +1051,29 @@ impl SolidDraftApp {
                 }
                 viewport.preset = p;
             }
+            AppAction::SetBodyVisible(show) => {
+                if crate::tree_visibility::visible(&self.state).body != show {
+                    let feature = self
+                        .state
+                        .doc
+                        .features
+                        .iter()
+                        .find(|feature| !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_)))
+                        .map(|feature| feature.id);
+                    if let Some(feature) = feature {
+                        crate::tree_visibility::toggle(&mut self.state, crate::document::ViewItem::Feature(feature));
+                    }
+                }
+            }
+            AppAction::SetReferenceDisplay(display) => {
+                let _ = self.state.set_reference_display(display);
+            }
+            AppAction::SketchRelationSet(kinds) => {
+                if let Some(sketch) = self.state.sketch.as_mut() {
+                    let action = crate::sketcher::add_relations(sketch, &kinds);
+                    self.apply(ctx, action);
+                }
+            }
             AppAction::SetScene(scene) => {
                 if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
                     self.state.viewport.scene = Some(scene);

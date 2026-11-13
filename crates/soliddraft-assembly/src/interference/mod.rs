@@ -1,18 +1,12 @@
-//! Interference Detection and Clearance Verification, static, on certified meshes.
+//! Interference and clearance checks on pinned part revisions.
 //!
-//! Each part is rebuilt at the revision its assembly pins, as mate proofs are, and the
-//! kernel tessellates it with a proven chord bound. The display copy never takes part.
-//! [`geometry`] turns two placed meshes into one of three outcomes: clear, interferes, or
-//! touching or undecided. An exact face mate adds what the meshes cannot: two opposed
-//! faces it holds on one plane, sharing a point, touch exactly.
-//!
-//! Volumes of overlap, exact touching without a mate, and distances closer than the
-//! meshes' bounds need an exact two-body query from the kernel; see
-//! `docs/needs-catallax.md`. They are refused by name, never estimated.
-//!
-//! The rules are in `docs/interference.md`.
+//! Certified meshes provide broad-phase separation and containment proofs. Exact
+//! body-relation queries refine remaining pairs with overlap volume, contact faces and
+//! distance bounds. Refused quantities retain their codes and plain explanations.
+//! See `docs/interference.md`.
 
 mod certified;
+mod exact;
 mod holes;
 pub(crate) mod motion;
 
@@ -25,7 +19,7 @@ use std::sync::Arc;
 use glam::DVec3;
 use serde::Serialize;
 use soliddraft_document::{ContentHash, DocKind, DocRef, DocumentId};
-use soliddraft_kernel_api::{Certainty, FaceId, KernelError, TessellationParams};
+use soliddraft_kernel_api::{BodyQueryRefusal, Certainty, FaceId, KernelError, Measurement, TessellationParams};
 
 use crate::document::AssemblyDocument;
 use crate::mates::bodies::Scope;
@@ -136,6 +130,8 @@ pub enum Outcome {
     Clear,
     /// Proven to share a point inside both.
     Interferes,
+    /// Zero overlap volume and a proved shared boundary point or face.
+    Touching,
     /// Neither proven: the meshes come within their bounds of each other.
     TouchingOrUndecided,
 }
@@ -146,7 +142,8 @@ impl Outcome {
         match self {
             Outcome::Clear => "Clear",
             Outcome::Interferes => "Interferes",
-            Outcome::TouchingOrUndecided => "Touching or undecided",
+            Outcome::Touching => "Touching",
+            Outcome::TouchingOrUndecided => "Undecided",
         }
     }
 }
@@ -207,6 +204,15 @@ pub struct Contact {
     pub point: [f64; 3],
 }
 
+/// Source faces with exact shared area patches, without assuming one-to-one pairing.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ExactContactFaces {
+    /// Labels of the first part's source faces.
+    pub a: Vec<String>,
+    /// Labels of the second part's source faces.
+    pub b: Vec<String>,
+}
+
 /// One pair of parts.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PairResult {
@@ -233,6 +239,15 @@ pub struct PairResult {
     /// Faces that exactly touch, from exact mates.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub contact: Vec<Contact>,
+    /// Exact overlap-volume enclosure, in cubic millimetres.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_mm3: Option<Measurement>,
+    /// Source faces carrying exact shared boundary patches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_faces: Option<ExactContactFaces>,
+    /// Quantities the exact check refused, with plain reasons.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exact_refused: Vec<BodyQueryRefusal>,
     /// What was proven, in a sentence.
     pub why: String,
 }
@@ -270,7 +285,7 @@ pub struct SkippedPart {
 pub struct CheckReport {
     /// `interference` or `clearance`.
     pub kind: &'static str,
-    /// How it was proven: `certified_mesh`.
+    /// How it was proven: `exact_and_certified_mesh`.
     pub tier: &'static str,
     /// The clearance verified, for a clearance check.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -292,7 +307,9 @@ pub struct CheckReport {
     pub clear: usize,
     /// Pairs proven to interfere.
     pub interferes: usize,
-    /// Pairs neither proven clear nor proven to interfere.
+    /// Pairs proved to touch without overlapping.
+    pub touching: usize,
+    /// Pairs whose separation, touching or overlap remains undecided.
     pub touching_or_undecided: usize,
     /// For a clearance check: pairs at or under the clearance, met, and undecided.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -306,15 +323,9 @@ pub struct CheckReport {
     /// Every pair not proven clear (or, for a clearance check, not proven to meet it),
     /// interfering pairs first.
     pub results: Vec<PairResult>,
-    /// What this tier does not report, and why.
+    /// Legacy report-wide refusals. Exact refusals are attached to each pair.
     pub refused: Vec<&'static str>,
 }
-
-/// What this tier refuses to report, by name.
-const REFUSED: [&str; 2] = [
-    "volume: an overlap's volume needs Catallax's exact two-body intersection",
-    "exact_touching: touching without an exact mate needs Catallax's exact two-body distance",
-];
 
 /// A part's certified mesh in its own frame, with its faces.
 pub(crate) struct LocalMesh {
@@ -368,8 +379,8 @@ fn seed(path: &OccurrencePath) -> OccurrencePath {
 
 impl AssemblyDocument {
     /// Checks interference, or with `request.clearance` verifies a clearance, between
-    /// every pair of parts in scope. Proves on certified meshes of the parts rebuilt at
-    /// their pinned revisions and changes nothing.
+    /// every pair of parts in scope. Refines certified meshes with exact queries on
+    /// solids rebuilt at their pinned revisions and changes nothing.
     pub fn check_interference(&mut self, request: &CheckRequest) -> Result<CheckReport, CheckRefusal> {
         let (lo, hi) = CHORD_RANGE_MM;
         if !(request.chord.is_finite() && (lo..=hi).contains(&request.chord)) {
@@ -419,7 +430,7 @@ impl AssemblyDocument {
         }
         let contacts = self.contacts();
         let mut results = Vec::new();
-        let (mut clear, mut interferes, mut open) = (0, 0, 0);
+        let (mut clear, mut interferes, mut touching, mut open) = (0, 0, 0, 0);
         let (mut below, mut met, mut undecided) = (0, 0, 0);
         let mut pairs = 0;
         for i in 0..solids.len() {
@@ -444,9 +455,13 @@ impl AssemblyDocument {
                 if result.outcome != Outcome::Clear {
                     self.add_contacts(&mut result, &contacts, (&a.1, &a.2, &a.3), (&b.1, &b.2, &b.3));
                 }
+                if result.outcome != Outcome::Clear || result.clearance == Some(ClearanceOutcome::Undecided) {
+                    self.exact_pair(&mut result, (&a.0, &a.3), (&b.0, &b.3), request.clearance);
+                }
                 match result.outcome {
                     Outcome::Clear => clear += 1,
                     Outcome::Interferes => interferes += 1,
+                    Outcome::Touching => touching += 1,
                     Outcome::TouchingOrUndecided => open += 1,
                 }
                 match result.clearance {
@@ -459,7 +474,7 @@ impl AssemblyDocument {
                     Some(c) => c != ClearanceOutcome::Met,
                     None => result.outcome != Outcome::Clear,
                 };
-                if listed {
+                if listed || !result.exact_refused.is_empty() {
                     results.push(result);
                 }
             }
@@ -473,7 +488,7 @@ impl AssemblyDocument {
         let clearance = request.clearance.is_some();
         Ok(CheckReport {
             kind: if clearance { "clearance" } else { "interference" },
-            tier: "certified_mesh",
+            tier: "exact_and_certified_mesh",
             clearance_mm: request.clearance,
             chord_mm: request.chord,
             rounding_mm: solids.iter().map(|s| s.1.rounding).fold(0.0, f64::max),
@@ -483,12 +498,13 @@ impl AssemblyDocument {
             pairs,
             clear,
             interferes,
+            touching,
             touching_or_undecided: open,
             below: clearance.then_some(below),
             met: clearance.then_some(met),
             undecided: clearance.then_some(undecided),
             results,
-            refused: REFUSED.to_vec(),
+            refused: Vec::new(),
         })
     }
 
@@ -816,6 +832,9 @@ fn compare(a: &Solid, b: &Solid, clearance: Option<f64>) -> (PairResult, Vec<(u3
         witness: None,
         faces: Vec::new(),
         contact: Vec::new(),
+        overlap_mm3: None,
+        contact_faces: None,
+        exact_refused: Vec::new(),
         why: String::new(),
     };
     if gap > cutoff {

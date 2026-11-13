@@ -5,6 +5,7 @@
 //! origin sets; display estimates never decide topology or operation success.
 
 mod assembly_measure;
+mod body_relation;
 mod construction;
 mod convert;
 mod diagnostics;
@@ -37,7 +38,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "9aed0777184353a5f52d1b660f9d2411b97f0fc9";
+pub const CATALLAX_REVISION: &str = "e4e6df4b2c400481068f35fd08ce7a739a2c3b4a";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -822,6 +823,10 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
 }
 
 impl Kernel for CatallaxKernel {
+    fn body_relation(&self, a: PlacedBody, b: PlacedBody, clearance: Option<f64>) -> KernelResult<BodyRelation> {
+        self.observe("body_relation", || body_relation::relation(self, a, b, clearance))
+    }
+
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
         self.observe("propose_import", || import::propose(ImportFormat::Step, source, options))
     }

@@ -362,6 +362,22 @@
       ]
     },
     {
+      "id": "exact-body-relations",
+      "file": "ci/scenarios/exact-body-relations.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-assembly",
+        "soliddraft-model",
+        "soliddraft-kernel-api",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "e4e6df4b2c400481068f35fd08ce7a739a2c3b4a",
+      "route": "MCP assembly checks -> pinned solids -> exact overlap volume and contact faces -> per-pair results",
+      "supported_limits": "Exact touching without mates, zero overlap volume, named contact faces, zero-clearance comparison and negative-clearance refusal. Unsupported exact quantities keep typed refusals and plain reasons.",
+      "evidence": "result.json, protocol.json and per-command reports; saved parts and assembly"
+    },
+    {
       "id": "face-thicken",
       "file": "ci/scenarios/face-thicken.json",
       "acceptance": true,

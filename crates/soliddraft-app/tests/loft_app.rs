@@ -129,8 +129,8 @@ fn warmed_loft_completion_disappears_when_a_sketch_opens_in_both_frames() {
     let mut case = ux_tools::Case::new("loft-completion");
     let loft = format!("{:<24}{}", "loft", "Loft");
     for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
-        let doc = ribbon::sketch();
-        let name = doc.features[0].name.clone();
+        let mut doc = ribbon::sketch();
+        doc.selection = Some(Selection::Feature(doc.features[0].id));
         let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
         app.state_mut().state.frame_layout = layout;
         ux_tools::settle(&mut app);
@@ -143,13 +143,12 @@ fn warmed_loft_completion_disappears_when_a_sketch_opens_in_both_frames() {
         assert!(app.query_by_label(&loft).is_some(), "Loft is offered before sketch entry");
         let history = app.state().state.command_line.history.clone();
         case.frame(&mut app, &format!("{layout:?}-model-completions"));
-        let row = app.get_by_label(&name).rect();
-        ribbon::double_click_at(&mut app, row.center());
+        app.get_by_label("Edit sketch").click();
         ux_tools::settle(&mut app);
+        case.frame(&mut app, &format!("{layout:?}-sketch-completions"));
         assert!(app.state().state.in_sketch());
         assert_eq!(app.state().state.command_line.input, "lo");
         assert_eq!(app.state().state.command_line.history, history);
-        case.frame(&mut app, &format!("{layout:?}-sketch-completions"));
         assert!(app.query_by_label(&loft).is_none(), "cached Loft must be hidden in {layout:?}");
         app.get_by_label("Command line").click();
         app.run_steps(2);

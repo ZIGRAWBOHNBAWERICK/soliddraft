@@ -31,6 +31,15 @@ fn volume(s: &AppState, expected: f64) {
     let actual = s.doc.kernel().mass_properties(s.doc.display_body().unwrap()).unwrap().volume;
     assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
 }
+fn plane_limits(s: &AppState, axis: soliddraft_kernel_api::Vec3) -> (f64, f64) {
+    let planes = s.doc.kernel().face_carriers(s.doc.display_body().unwrap()).unwrap();
+    let values = planes
+        .iter()
+        .filter(|f| f.normal == Some(axis) || f.normal == Some(-axis))
+        .map(|f| f.on_plane.expect("planar carrier").dot(axis))
+        .collect::<Vec<_>>();
+    (*values.iter().min_by(|a, b| a.total_cmp(b)).unwrap(), *values.iter().max_by(|a, b| a.total_cmp(b)).unwrap())
+}
 fn reopen(s: &mut AppState, file: &str) {
     let dir = std::env::temp_dir().join(format!("soliddraft-distance-pattern-{}-{file}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -38,7 +47,7 @@ fn reopen(s: &mut AppState, file: &str) {
     accept(s, "save", json!({"path":part}));
     accept(s, "open", json!({"path":part}));
     let step = dir.join("part.step");
-    accept(s, "export", json!({"format":"step","path":step}));
+    accept(s, "export_step", json!({"path":step}));
     assert!(std::fs::read_to_string(step).unwrap().contains("MANIFOLD_SOLID_BREP"));
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -86,16 +95,14 @@ fn thicken_sides_and_persistent_rims_survive_edit_and_reopen() {
     assert!(references.iter().any(|f| f.generator == soliddraft_model::Generator::ThickenRim));
     accept(&mut s, "edit_thicken", json!({"feature":"Thicken1","thickness":1,"side":"front"}));
     volume(&s, 80.0);
-    let bounds = s.doc.kernel().topology(s.doc.display_body().unwrap()).unwrap().bbox;
-    assert_eq!((bounds.min.z, bounds.max.z), (6.0, 7.0));
+    assert_eq!(plane_limits(&s, soliddraft_kernel_api::Vec3::Z), (6.0, 7.0));
     reopen(&mut s, "thicken");
     volume(&s, 80.0);
     for r in references {
         assert!(s.doc.model().resolve_face(&r, s.doc.display_body().unwrap()).is_ok(), "{}", r.label);
     }
     accept(&mut s, "edit_thicken", json!({"feature":"Thicken1","thickness":1,"side":"back"}));
-    let bounds = s.doc.kernel().topology(s.doc.display_body().unwrap()).unwrap().bbox;
-    assert_eq!((bounds.min.z, bounds.max.z), (5.0, 6.0));
+    assert_eq!(plane_limits(&s, soliddraft_kernel_api::Vec3::Z), (5.0, 6.0));
     let body = s.doc.display_body();
     let undo = s.doc.undo_depth();
     for args in
@@ -107,14 +114,21 @@ fn thicken_sides_and_persistent_rims_survive_edit_and_reopen() {
     }
 }
 fn cut(s: &mut AppState, center: [f64; 3], name: &str) {
-    accept(s, "sketch", json!({"plane":"top","shapes":[{"shape":"rectangle","center":center,"width":2,"height":2}]}));
+    let center = [center[0], center[1], 2.0];
+    accept(
+        s,
+        "sketch",
+        json!({"plane":"Boss-Extrude1 · End cap","shapes":[{"shape":"rectangle","center":center,"width":2,"height":2}]}),
+    );
     accept(s, "cut", json!({"sketch":name,"depth":2,"through_all":true,"flip":false}));
 }
 #[test]
 fn feature_pattern_repeats_only_selected_cut_through_edit_undo_and_reopen() {
     let mut s = blank(30.0, 10.0, 2.0);
     cut(&mut s, [-10.0, 0.0, 0.0], "Sketch1");
+    volume(&s, 592.0);
     cut(&mut s, [12.0, 0.0, 0.0], "Sketch2");
+    volume(&s, 584.0);
     accept(&mut s, "linear_pattern", json!({"source":"Cut-Extrude1","direction":[1,0,0],"spacing":6,"count":3}));
     volume(&s, 568.0);
     let reference = {
@@ -126,8 +140,7 @@ fn feature_pattern_repeats_only_selected_cut_through_edit_undo_and_reopen() {
             .find(|r| matches!(r.generator, soliddraft_model::Generator::Copy { instance: 1 }))
             .unwrap()
     };
-    let bounds = s.doc.kernel().topology(s.doc.display_body().unwrap()).unwrap().bbox;
-    assert_eq!((bounds.min.x, bounds.max.x), (-15.0, 15.0));
+    assert_eq!(plane_limits(&s, soliddraft_kernel_api::Vec3::X), (-15.0, 15.0));
     accept(&mut s, "edit_pattern", json!({"feature":"LPattern1","count":4,"step":6}));
     volume(&s, 560.0);
     s.doc.undo().unwrap();
@@ -148,6 +161,7 @@ fn feature_pattern_repeats_only_selected_cut_through_edit_undo_and_reopen() {
 fn circular_cut_uses_quarter_turns_and_preserves_the_part_on_exact_parameter_refusal() {
     let mut s = blank(20.0, 20.0, 2.0);
     cut(&mut s, [6.0, 0.0, 0.0], "Sketch1");
+    volume(&s, 792.0);
     let body = s.doc.display_body();
     let undo = s.doc.undo_depth();
     let args =

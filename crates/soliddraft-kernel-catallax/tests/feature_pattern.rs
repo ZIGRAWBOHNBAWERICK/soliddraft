@@ -26,8 +26,16 @@ fn linear_boss_copies_preserve_stock_and_later_cut() {
     let layout = PatternLayout::Linear { step: Vec3::new(6.0, 0.0, 0.0), count: 3 };
     let result = k.pattern_feature(&OpTag::new("row"), later, boss, Some(stock), &layout).unwrap();
     volume(&k, result.body, 628.0);
-    let bounds = k.topology(result.body).unwrap().bbox;
-    assert_eq!((bounds.min.x, bounds.max.x), (-15.0, 15.0));
+    let carriers = k.face_carriers(result.body).unwrap();
+    let x = carriers
+        .iter()
+        .filter(|f| f.normal == Some(Vec3::X) || f.normal == Some(-Vec3::X))
+        .map(|f| f.on_plane.unwrap().x)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        (*x.iter().min_by(|a, b| a.total_cmp(b)).unwrap(), *x.iter().max_by(|a, b| a.total_cmp(b)).unwrap()),
+        (-15.0, 15.0)
+    );
     assert!(result.record.face_roles.iter().any(|f| matches!(f.role, FaceRole::FeatureCopy { instance: 1, .. })));
     assert!(result.record.face_roles.iter().any(|f| matches!(f.role, FaceRole::FeatureCopy { instance: 2, .. })));
     assert!(k.export_step(result.body, &StepOptions::default()).is_ok());

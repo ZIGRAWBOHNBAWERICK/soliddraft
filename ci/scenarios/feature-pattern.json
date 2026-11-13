@@ -32,14 +32,14 @@
     {
       "tool": "sketch",
       "arguments": {
-        "plane": "top",
+        "plane": "Boss-Extrude1 \u00b7 End cap",
         "shapes": [
           {
             "shape": "rectangle",
             "center": [
               6,
               0,
-              0
+              2
             ],
             "width": 2,
             "height": 2
@@ -54,7 +54,14 @@
         "depth": 2,
         "through_all": true,
         "flip": false
-      }
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 792,
+          "tolerance": 1e-06
+        }
+      ]
     },
     {
       "tool": "circular_pattern",

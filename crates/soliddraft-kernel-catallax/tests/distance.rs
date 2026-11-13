@@ -38,8 +38,11 @@ fn planar_thickening_builds_the_requested_side_and_names_its_rims() {
         assert_eq!(result.record.op, OpKind::Thicken);
         assert!((k.mass_properties(result.body).unwrap().volume - 160.0).abs() < 1e-8);
         let topology = k.topology(result.body).unwrap();
-        assert!((topology.bbox.min.z - min).abs() < 1e-8);
-        assert!((topology.bbox.max.z - max).abs() < 1e-8);
+        let carriers = k.face_carriers(result.body).unwrap();
+        let low = carriers.iter().find(|f| f.normal == Some(-Vec3::Z)).unwrap().on_plane.unwrap().z;
+        let high = carriers.iter().find(|f| f.normal == Some(Vec3::Z)).unwrap().on_plane.unwrap().z;
+        assert!((low - min).abs() < 1e-8);
+        assert!((high - max).abs() < 1e-8);
         assert!(topology.faces.iter().all(|f| !f.origins.is_empty()), "{topology:?}");
         assert!(result.record.face_roles.iter().any(|f| matches!(f.role, FaceRole::Rim { .. })));
         assert!(k.export_step(result.body, &StepOptions::default()).is_ok());

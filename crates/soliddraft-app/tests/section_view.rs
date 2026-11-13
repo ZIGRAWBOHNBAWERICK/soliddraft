@@ -1,10 +1,10 @@
-//! Section inspection through the ribbon and navigation bar on the real application.
+//! Section inspection through Inspect and navigation on the real application.
 
 #[path = "support/ribbon.rs"]
 mod ribbon;
 
 use egui::{accesskit::Role, pos2};
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::{document::DisplayMesh, section::SectionPlane};
 
 fn ready(app: &mut ribbon::App) {
@@ -43,10 +43,8 @@ fn inspect_and_navigation_section_drag_flip_face_and_close() {
         let dirty = app.state().state.doc.dirty;
         let export_before = app.state().state.export_part(soliddraft_exchange::Format::Stl).unwrap().bytes;
 
-        app.get_by_label("Inspect").click();
-        app.run_steps(4);
-        let section = ribbon::reveal_ribbon_command(app, "section");
-        ribbon::click_at(app, section.rect.center());
+        click(app, "Inspect tab");
+        click(app, "Section");
         ready(app);
         assert!(app.state().state.section.enabled);
         let mesh = app.state().state.section.mesh(&app.state().state.doc).unwrap();

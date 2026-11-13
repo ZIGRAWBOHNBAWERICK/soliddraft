@@ -162,6 +162,7 @@ struct ContextPick {
 pub struct ViewportState {
     pub camera: Camera,
     pub display: DisplayMode,
+    pub section_active: bool,
     pub preset: Preset,
     /// Named background in Edit Suite; classic keeps the theme fade.
     pub scene: Option<scenes::Scene>,
@@ -193,6 +194,7 @@ impl Default for ViewportState {
         Self {
             camera: Camera::default(),
             display: DisplayMode::default(),
+            section_active: false,
             preset: Preset::default(),
             scene: None,
             context_menus: false,
@@ -330,7 +332,7 @@ impl ViewportState {
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "3D viewport"));
         let ppp = ui.ctx().pixels_per_point();
-        let annotation_gesture = if !sketching && dimension_edit.is_none() {
+        let annotation_gesture = if !self.section_active && !sketching && dimension_edit.is_none() {
             annotation_drag::input(
                 &mut self.annotation_drag,
                 &self.dimensions,
@@ -484,7 +486,7 @@ impl ViewportState {
         if !sketching {
             self.paint_reference_planes(ui, doc, rect, can_pick_references, &response, &mut events);
         }
-        if visible.body {
+        if visible.body && !self.section_active {
             self.paint_highlights(&painter, doc, selection, rect, pick_filter);
         }
         if let Some(rounding) = &rounding {
@@ -492,7 +494,7 @@ impl ViewportState {
         }
         // Label gestures take precedence over body picking and camera navigation.
         let pointer = ui.input(|i| i.pointer.interact_pos()).filter(|p| rect.contains(*p));
-        let dims = if !sketching {
+        let dims = if !sketching && !self.section_active {
             dimensions::paint(
                 &painter,
                 &self.camera,
@@ -921,6 +923,7 @@ impl ViewportState {
                 &mut self.all_dimensions,
                 sketch_dimensions,
                 allow_dimensions,
+                self.section_active,
                 events,
             );
             return;
@@ -934,7 +937,7 @@ impl ViewportState {
             HudItem::Text("R", "Right view (R)"),
             HudItem::Sep,
             HudItem::Icon(Icon::Display, "Display style"),
-            HudItem::Icon(Icon::Section, "Coming soon"),
+            HudItem::Icon(Icon::Section, "Section view"),
             HudItem::Icon(Icon::Measure, "Coming soon"),
         ];
         let width: f32 = items.iter().map(|i| i.width()).sum::<f32>() + 10.0;
@@ -957,12 +960,13 @@ impl ViewportState {
                     continue;
                 }
                 HudItem::Icon(icon, tip) | HudItem::IconText(icon, tip) => {
-                    let enabled = !matches!(icon, Icon::Section | Icon::Measure);
+                    let enabled = !matches!(icon, Icon::Measure) && (*icon != Icon::Section || allow_dimensions);
                     let resp = hud_button(ui, r, idx, enabled, tip, |p, c| icons::paint(p, *icon, r.shrink(5.0), c));
                     if resp.clicked() {
                         match idx {
                             0 => events.set_view = Some(StandardView::Isometric),
                             1 => events.fit = true,
+                            7 => events.actions.push(AppAction::ToggleSection),
                             6 => {
                                 let i = DisplayMode::ALL.iter().position(|m| *m == self.display).unwrap_or(0);
                                 events.set_display = Some(DisplayMode::ALL[(i + 1) % DisplayMode::ALL.len()]);

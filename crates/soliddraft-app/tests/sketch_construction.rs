@@ -226,7 +226,12 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     app.key_press(Key::Escape);
     app.run_steps(6);
     app.render().unwrap().save(dir.join("guides.png")).unwrap();
-    assert_dashed(&mut app, P2::new(5.0, 0.0), P2::new(25.0, 0.0), soliddraft_app::theme::muted());
+    assert_dashed(
+        &mut app,
+        P2::new(5.0, 0.0),
+        P2::new(25.0, 0.0),
+        soliddraft_app::theme::edit_suite::CONSTRUCTION,
+    );
 
     // The ordinary Line shortcut and other drawing tools retain their previous mode.
     app.key_press(Key::L);

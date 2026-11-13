@@ -31,6 +31,41 @@ fn volume(doc: &Document, key: u32) -> f64 {
     doc.kernel().mass_properties(body).unwrap().volume
 }
 
+#[test]
+fn editing_combine_refuses_export_until_the_dialog_is_finished() {
+    use soliddraft_app::state::AppAction;
+    use soliddraft_exchange::Format;
+
+    let case = ribbon::case("combine-export-gate");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let mut doc = pair();
+    let id = doc.combine(0, 1, BooleanOp::Union).unwrap().unwrap();
+    let name = doc.feature(id).unwrap().name.clone();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        assert!(!app.state().state.export_part(Format::Stl).unwrap().bytes.is_empty());
+        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.run_steps(8);
+        assert!(app.state().state.editor.is_none());
+        assert!(app.state().state.doc.combine_form.is_some());
+        app.render().unwrap();
+        let error = app.state().state.export_part(Format::Stl).err().expect("the live Combine dialog gates export");
+        assert!(error.contains("Finish or cancel"), "{error}");
+        assert!(app.query_all_by_label(format!("{name} proof: Pending")).next().is_some());
+        let path = case.path("part.stl");
+        std::fs::write(&path, b"previous export").unwrap();
+        app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+        app.run_steps(8);
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
+        assert!(app.state().state.note.as_ref().unwrap().text.contains("Finish or cancel"));
+        app.get_by_role_and_label(egui::accesskit::Role::Button, "Combine").click();
+        app.run_steps(8);
+        assert!(app.state().state.doc.combine_form.is_none());
+        assert!(!app.state().state.export_part(Format::Stl).unwrap().bytes.is_empty());
+        assert!(app.query_all_by_label(format!("{name} proof: Proved")).next().is_some());
+    });
+}
+
 fn assert_picks(doc: &Document) {
     for face in &doc.faces {
         let pick = doc.pick_of_face(face.id).expect("each visible face can be picked");

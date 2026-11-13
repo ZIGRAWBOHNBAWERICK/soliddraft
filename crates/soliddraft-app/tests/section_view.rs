@@ -7,13 +7,10 @@ use egui::{accesskit::Role, pos2};
 use egui_kittest::kittest::Queryable;
 use soliddraft_app::{document::DisplayMesh, section::SectionPlane};
 
-#[test]
-fn section_keeps_every_body_when_the_active_body_changes() {
+fn separated_bodies() -> soliddraft_app::document::Document {
     use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, SketchPlane};
     use soliddraft_sketch::{P2, Sketch};
 
-    let case = ribbon::case("section-multibody");
-    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
     let mut doc = Document::new("Section both bodies", soliddraft_app::kernel());
     for (x, depth) in [(-30.0, 10.0), (30.0, 20.0)] {
         if x > 0.0 {
@@ -32,6 +29,14 @@ fn section_keeps_every_body_when_the_active_body_changes() {
         })
         .unwrap();
     }
+    doc
+}
+
+#[test]
+fn section_keeps_every_body_when_the_active_body_changes() {
+    let case = ribbon::case("section-multibody");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let doc = separated_bodies();
     let mut app = ribbon::app(doc);
     case.run(&mut app, |app| {
         let before = app.state().state.doc.model().to_bytes().unwrap();
@@ -73,6 +78,40 @@ fn section_keeps_every_body_when_the_active_body_changes() {
         click(app, "Close section");
         assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
         assert_eq!(app.state().state.doc.meshes, meshes);
+    });
+}
+
+#[test]
+fn a_face_section_keeps_its_plane_when_another_or_empty_body_is_active() {
+    let case = ribbon::case("section-face-multibody");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let mut doc = separated_bodies();
+    doc.select_body(0);
+    let face = doc.faces.iter().find(|f| f.centroid.x < 0.0 && (f.centroid.z - 10.0).abs() < 1e-5).unwrap();
+    let (face, label) = (face.id, face.label.clone());
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        click(app, "Inspect tab");
+        click(app, "Section");
+        ready(app);
+        app.get_by_label("Face plane").click();
+        app.run_steps(3);
+        app.get_by_label(&label).click();
+        app.run_steps(3);
+        ready(app);
+        assert_eq!(app.state().state.section.plane, SectionPlane::Face(face));
+        let version = app.state().state.doc.mesh_version;
+        let mesh = app.state().state.section.mesh(&app.state().state.doc).unwrap();
+        app.state_mut().state.doc.select_body(1);
+        app.run_steps(3);
+        assert_eq!(app.state().state.doc.mesh_version, version);
+        assert!(app.state().state.doc.face_plane(face).is_some(), "the selected face still belongs to the scene");
+        assert_eq!(app.state().state.section.mesh(&app.state().state.doc).as_deref(), Some(mesh.as_ref()));
+        app.state_mut().state.doc.new_body();
+        app.run_steps(3);
+        assert!(app.state().state.doc.face_plane(face).is_some(), "an empty active body does not lose the face");
+        assert_eq!(app.state().state.section.mesh(&app.state().state.doc).as_deref(), Some(mesh.as_ref()));
+        case.frame(app, "face-section-with-empty-active-body");
     });
 }
 

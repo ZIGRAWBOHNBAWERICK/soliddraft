@@ -12,7 +12,7 @@ use soliddraft_app::theme::{self, Mode};
 
 fn bounds(app: &App) -> Rect {
     let view = app.state().state.viewport.rect;
-    Rect::from_min_max(pos2(view.left(), view.bottom()), ribbon::window(app).max - vec2(0.0, 32.0))
+    Rect::from_min_max(pos2(0.0, view.bottom()), ribbon::window(app).max - vec2(0.0, 32.0))
 }
 
 fn chip(app: &App, name: &str) -> Rect {
@@ -91,7 +91,9 @@ fn tree_button_toggles_the_shared_pane_and_remembers_the_choice() {
         ribbon::click_at(app, tree.rect.center());
         app.run_steps(12);
         assert!(app.state().state.layout.tree.shown);
-        assert!(ribbon::control(app, "Tree", bounds(app)).selected);
+        let open_tree = ribbon::control(app, "Tree", bounds(app));
+        assert!(open_tree.selected);
+        assert!((open_tree.rect.left() - tree.rect.left()).abs() < 1.0, "the toggle stays beside the timeline");
         assert!(app.state().state.viewport.rect.width() < wide - 200.0);
         assert!(ribbon::painted(app).iter().any(|p| p.text == "Values"));
         case.frame(app, "tree-and-values");

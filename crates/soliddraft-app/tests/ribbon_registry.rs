@@ -565,6 +565,64 @@ fn before_retained_polygons(id: &str, current: &mut Value) {
     }
 }
 
+fn before_distance_verbs(id: &str, current: &mut Value) {
+    if id != "propose" {
+        return;
+    }
+    let variants = current
+        .pointer_mut("/tool/input/properties/commands/items/anyOf")
+        .and_then(Value::as_array_mut)
+        .expect("proposal variants");
+    for (op, properties, required) in [
+        ("offset", json!({"distance":{"type":"number"}}), json!(["op", "distance"])),
+        (
+            "edit_offset",
+            json!({"feature":{"type":"string"},"distance":{"type":"number"}}),
+            json!(["op", "feature", "distance"]),
+        ),
+        (
+            "thicken",
+            json!({"faces":{"type":"array","items":{"type":"string"}},"thickness":{"type":"number"},"side":{"type":"string"}}),
+            json!(["op", "faces", "thickness", "side"]),
+        ),
+        (
+            "edit_thicken",
+            json!({"feature":{"type":"string"},"thickness":{"type":"number"},"side":{"type":"string"}}),
+            json!(["op", "feature", "thickness", "side"]),
+        ),
+    ] {
+        let mut properties = properties.as_object().unwrap().clone();
+        properties.insert("op".into(), json!({"type":"string","const":op}));
+        let index = variants.iter().position(|v| v["properties"]["op"]["const"] == op).expect(op);
+        assert_eq!(
+            variants.remove(index),
+            json!({"type":"object","additionalProperties":false,"properties":properties,"required":required}),
+            "the documented distance verbs extend the frozen proposal schema"
+        );
+    }
+}
+
+fn before_feature_pattern_source(id: &str, current: &mut Value) {
+    fn remove_source(schema: &mut Value) {
+        assert_eq!(schema["properties"].as_object_mut().unwrap().remove("source"), Some(json!({"type":"string"})));
+        assert!(!schema["required"].as_array().unwrap().contains(&json!("source")), "body patterns need no source");
+    }
+    match id {
+        "linear_pattern" | "circular_pattern" | "edit_pattern" => remove_source(&mut current["tool"]["input"]),
+        "propose" => {
+            let variants = current
+                .pointer_mut("/tool/input/properties/commands/items/anyOf")
+                .and_then(Value::as_array_mut)
+                .expect("proposal variants");
+            for op in ["linear_pattern", "circular_pattern", "edit_pattern"] {
+                let schema = variants.iter_mut().find(|v| v["properties"]["op"]["const"] == op).expect(op);
+                remove_source(schema);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn before_loft_verbs(id: &str, current: &mut Value) {
     if id != "propose" {
         return;
@@ -632,7 +690,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             ("Sketch", &["sketch"]),
             ("Create", &["extrude", "revolve", "sweep", "loft"]),
             ("Remove", &["cut", "hole", "slot"]),
-            ("Modify", &["fillet", "chamfer", "shell", "draft", "lattice", "gyroid"]),
+            ("Modify", &["fillet", "chamfer", "shell", "draft", "lattice", "gyroid", "offset", "thicken"]),
             ("Pattern", &["linear_pattern", "circular_pattern", "mirror"]),
             ("Reference", &["reference_plane", "reference_axis", "reference_point"]),
         ],
@@ -736,6 +794,8 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_retained_polygons(id, &mut current);
         before_circular_placement(id, &mut current);
         before_loft_verbs(id, &mut current);
+        before_distance_verbs(id, &mut current);
+        before_feature_pattern_source(id, &mut current);
         if [
             "view_isometric",
             "view_front",
@@ -835,6 +895,8 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         "chamfer",
         "shell",
         "draft",
+        "offset",
+        "thicken",
         "linear_pattern",
         "circular_pattern",
         "mirror",

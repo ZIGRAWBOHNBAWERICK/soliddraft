@@ -35,8 +35,8 @@ const AT = {
   // The start page's New part tile; tests/documents_start.rs checks it is there.
   newPart: [124, 143],
 };
-// Floor with nothing but the grid on it, right of the origin planes, in the first view.
-const FLOOR = { x: 1200, y: 520, width: 190, height: 220 };
+// Floor right of the origin planes and above the feedback launcher.
+const FLOOR = { x: 1200, y: 400, width: 190, height: 200 };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function check(value, message) { if (!value) throw new Error(message); }

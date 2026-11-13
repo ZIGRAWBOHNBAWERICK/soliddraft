@@ -673,7 +673,10 @@ impl CommandSpec {
             .iter()
             .filter(|c| c.in_app() && c.id != self.id && c.label == self.label)
             .any(|c| c.is_working() == self.is_working());
-        if shared && !matches!(self.workspace, Workspace::Part | Workspace::Model | Workspace::Both) {
+        if shared
+            && (!matches!(self.workspace, Workspace::Part | Workspace::Model | Workspace::Both)
+                || self.default_scope() == Scope::Sketch)
+        {
             format!("{} ({})", self.label, self.default_scope().label())
         } else {
             self.label.to_owned()
@@ -2014,6 +2017,24 @@ fn registry() -> Vec<CommandSpec> {
                  0.1 mm⁵. Never computed from the preview or a mesh, and only when asked for.",
                 Vec::new,
             ),
+        cmd("offset", "Offset", Icon::Cad("srf_offset"), "Grow or shrink the body by a signed distance")
+            .on(Solid, "Modify", Small).outside_sketch()
+            .run(|_| AppAction::StartOffset)
+            .when(|s| !s.in_sketch() && has_body(s) && field_open(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Offset(_))))
+            .agents(Agents::Verb, "Positive grows the body; negative shrinks it.", tools::offset_params)
+            .undo(Undo::Step),
+        cmd("thicken", "Thicken", Icon::Shell, "Create a solid from selected faces")
+            .on(Solid, "Modify", Small).outside_sketch()
+            .run(|_| AppAction::StartThicken)
+            .when(|s| !s.in_sketch() && has_body(s) && field_open(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Thicken(_))))
+            .agents(Agents::Verb, "Choose faces, thickness and front or back side.", tools::thicken_params)
+            .undo(Undo::Step),
+        cmd("edit_offset", "Edit offset", Icon::Cad("srf_offset"), "Change an offset distance").outside_sketch()
+            .agents(Agents::Verb, "Everything after it rebuilds.", tools::edit_offset_params).undo(Undo::Step),
+        cmd("edit_thicken", "Edit thicken", Icon::Shell, "Change thickness and side").outside_sketch()
+            .agents(Agents::Verb, "Selected faces stay the same; everything after it rebuilds.", tools::edit_thicken_params).undo(Undo::Step),
         cmd("shell", "Shell", Icon::Cad("shell"), "Hollow the part, leaving walls of one thickness")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartShell)
@@ -2036,21 +2057,21 @@ fn registry() -> Vec<CommandSpec> {
             )
             .undo(Undo::Step),
         // Pattern.
-        cmd("linear_pattern", "Linear", Icon::Cad("linear"), "Copy the part's body along a direction")
+        cmd("linear_pattern", "Linear", Icon::Cad("linear"), "Repeat a feature or body along a direction").outside_sketch()
             .on(Solid, "Pattern", Large)
             .run(|_| AppAction::StartPattern { circular: false })
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Pattern(f) if matches!(f.layout, soliddraft_model::PatternSpec::Linear { .. }))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Pattern needs a body".into())))
-            .agents(Agents::Verb, "The copies unite with the body.", tools::linear_pattern_params)
+            .agents(Agents::Verb, "Repeat the named source feature, or omit source to copy the body.", tools::linear_pattern_params)
             .undo(Undo::Step),
-        cmd("circular_pattern", "Circular", Icon::Cad("circular"), "Copy the part's body around an axis")
+        cmd("circular_pattern", "Circular", Icon::Cad("circular"), "Repeat a feature or body around an axis").outside_sketch()
             .on(Solid, "Pattern", Large)
             .run(|_| AppAction::StartPattern { circular: true })
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Pattern(f) if matches!(f.layout, soliddraft_model::PatternSpec::Circular { .. }))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Pattern needs a body".into())))
-            .agents(Agents::Verb, "The copies unite with the body.", tools::circular_pattern_params)
+            .agents(Agents::Verb, "Repeat the named source feature, or omit source to copy the body.", tools::circular_pattern_params)
             .undo(Undo::Step),
         cmd("mirror", "Mirror", Icon::Cad("mirror"), "Mirror the part's body in a plane")
             .on(Solid, "Pattern", Large)

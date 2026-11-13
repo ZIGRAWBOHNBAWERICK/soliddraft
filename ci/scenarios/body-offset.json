@@ -1,0 +1,137 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "body-offset",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 10,
+            "height": 8
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      }
+    },
+    {
+      "tool": "offset",
+      "arguments": {
+        "distance": -1
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 192,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "edit_offset",
+      "arguments": {
+        "feature": "Offset1",
+        "distance": -0.5
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 315,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 192,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 315,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "edit_offset",
+      "arguments": {
+        "feature": "Offset1",
+        "distance": 0
+      },
+      "refused": "finite and nonzero",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 315,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "edit_offset",
+      "arguments": {
+        "feature": "Offset1",
+        "distance": -10
+      },
+      "refused": "remove the whole body",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 315,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/body-offset.dwprt"
+      },
+      "files": [
+        "{bundle}/body-offset.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/body-offset.dwprt"
+      },
+      "export": [
+        "step"
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 315,
+          "tolerance": 1e-06
+        }
+      ]
+    }
+  ]
+}

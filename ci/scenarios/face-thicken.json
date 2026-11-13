@@ -1,0 +1,128 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "face-thicken",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 10,
+            "height": 8
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      }
+    },
+    {
+      "tool": "thicken",
+      "arguments": {
+        "faces": [
+          "Boss-Extrude1 \u00b7 End cap"
+        ],
+        "thickness": 2,
+        "side": "front"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 160,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "edit_thicken",
+      "arguments": {
+        "feature": "Thicken1",
+        "thickness": 1,
+        "side": "back"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 80,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 160,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 80,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "thicken",
+      "arguments": {
+        "faces": [],
+        "thickness": 2,
+        "side": "front"
+      },
+      "refused": "select at least one face",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 80,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/face-thicken.dwprt"
+      },
+      "files": [
+        "{bundle}/face-thicken.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/face-thicken.dwprt"
+      },
+      "export": [
+        "step"
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 80,
+          "tolerance": 1e-06
+        }
+      ]
+    }
+  ]
+}

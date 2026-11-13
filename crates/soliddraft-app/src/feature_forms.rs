@@ -42,6 +42,9 @@ pub enum Key {
     Offset,
     KeepOriginal,
     Body,
+    PatternSource,
+    ThickenFaces,
+    ThickenSide,
     Cell,
     CellSize,
     BeamRadius,
@@ -180,7 +183,7 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
         }
         EditorParams::Pattern(p) => {
             let mut fields = vec![
-                field(Body, "Body", "Seed", 170.0),
+                field(PatternSource, "Source", "Seed", 220.0),
                 field(Layout, "Layout", "Layout", 165.0),
                 field(Count, "Copies", "Layout", 135.0),
             ];
@@ -222,6 +225,18 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
             "shell",
             Icon::Shell,
             vec![field(OpenFaces, "Open faces", "Picks", 210.0), field(Thickness, "Thickness", "Wall", 180.0)],
+        ),
+        EditorParams::Offset(_) => {
+            ("offset", Icon::Cad("srf_offset"), vec![field(Offset, "Offset", "Distance", 170.0)])
+        }
+        EditorParams::Thicken(_) => (
+            "thicken",
+            Icon::Shell,
+            vec![
+                field(ThickenFaces, "Faces", "Picks", 220.0),
+                field(Thickness, "Thickness", "Size", 180.0),
+                field(ThickenSide, "Side", "Size", 160.0),
+            ],
         ),
         EditorParams::Lattice(l) => (
             "lattice",
@@ -287,6 +302,7 @@ struct Context {
     datums: Vec<(crate::document::PlaneKind, String)>,
     sweep_radius: f64,
     loft_choices: Vec<(soliddraft_model::LoftProfile, String)>,
+    pattern_choices: Vec<(soliddraft_model::FeatureId, String)>,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
@@ -294,6 +310,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
     let Some(editor) = &state.editor else { return };
     let target = editor.target.and_then(|id| state.doc.index_of(id)).unwrap_or(state.doc.features.len());
     let context = Context {
+        pattern_choices: if matches!(editor.params, EditorParams::Pattern(_)) {
+            crate::properties::pattern_sources(&state.doc, target)
+        } else {
+            Vec::new()
+        },
         loft_choices: if matches!(editor.params, EditorParams::Loft(_)) {
             crate::loft_panel::choices(&state.doc, target)
         } else {
@@ -467,6 +488,29 @@ fn render(
     let sketch_name =
         |id| context.sketches.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()).unwrap_or("Missing sketch");
     match (&mut editor.params, key) {
+        (EditorParams::Offset(p), Key::Offset) => {
+            number(ui, "Offset", "mm", egui::DragValue::new(&mut p.distance).speed(0.1));
+        }
+        (EditorParams::Thicken(p), Key::Thickness) => {
+            number(ui, "Thickness", "mm", egui::DragValue::new(&mut p.thickness).speed(0.1));
+        }
+        (EditorParams::Thicken(p), Key::ThickenSide) => properties::thicken_side(ui, &mut p.side),
+        (EditorParams::Thicken(p), Key::ThickenFaces) => {
+            let count = p.faces.len();
+            let text = if count == 0 { "Click faces to thicken".into() } else { format!("{count} faces") };
+            ui.menu_button(text, |ui| {
+                ui.set_min_width(240.0);
+                if let Some(index) = properties::pick_list(
+                    ui,
+                    "Click faces to thicken",
+                    Icon::Plane,
+                    p.faces.iter().map(|f| f.label.as_str()),
+                ) {
+                    p.faces.remove(index);
+                }
+            });
+        }
+        (EditorParams::Pattern(p), Key::PatternSource) => properties::pattern_source(ui, p, &context.pattern_choices),
         (EditorParams::Loft(l), Key::LoftProfiles) => {
             let count = l.profiles.len();
             readout(ui, format!("{count} {}", if count == 1 { "profile" } else { "profiles" }));
@@ -690,9 +734,7 @@ fn render(
                 number(ui, "Head angle", "°", egui::DragValue::new(angle_deg).speed(0.5).range(1.0..=179.0));
             }
         }
-        (EditorParams::Pattern(_), Key::Body)
-        | (EditorParams::Lattice(_), Key::Body)
-        | (EditorParams::Gyroid(_), Key::Body) => readout(ui, "Part body"),
+        (EditorParams::Lattice(_), Key::Body) | (EditorParams::Gyroid(_), Key::Body) => readout(ui, "Part body"),
         (EditorParams::Pattern(p), Key::Layout) => readout(
             ui,
             match p.layout {

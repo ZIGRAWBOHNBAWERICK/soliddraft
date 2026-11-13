@@ -59,6 +59,8 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
         ("mirror", false, false),
         ("draft", false, false),
         ("shell", false, false),
+        ("offset", false, false),
+        ("thicken", false, false),
         ("lattice", false, true),
         ("gyroid", false, true),
     ] {

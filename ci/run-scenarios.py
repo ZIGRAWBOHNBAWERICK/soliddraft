@@ -474,7 +474,7 @@ def rebuilds(features, repair, failed=None):
         "missing_failures": missing_failed, "pass": not broken and not missing and not missing_failed}
 
 
-def references_kept(known, references, repair, deleted, *, replaced=False, reopened=False):
+def references_kept(known, references, repair, deleted, *, replaced=False, reopened=False, removed=()):
     """Each reference names the origin it named before, and resolves or raises the repair prompt.
 
     An opened file replaces the document: a reference it does not hold left with the old
@@ -491,10 +491,10 @@ def references_kept(known, references, repair, deleted, *, replaced=False, reope
             or (all(o is not None for o in now[key]["kernel_origins"])
                 and now[key]["kernel_origins"] != identity["kernel"]))]
     lost = [list(key) for key, identity in known.items()
-        if key not in now and not deleted and not identity.get("deleted")]
-    # A delete took these on purpose. They stay known so an undo must bring back the same origin.
+        if key not in now and not deleted and key[0] not in removed and not identity.get("deleted")]
+    # Removed features keep their reference identities so undo/redo must restore the same origin.
     for key, identity in known.items():
-        identity["deleted"] = key not in now and (deleted or identity.get("deleted", False))
+        identity["deleted"] = key not in now and (deleted or key[0] in removed or identity.get("deleted", False))
     wrong = [r for r in references
         if (r["resolved"] is not None and r["resolved"] != (r["feature"] not in repair))
         or (r["resolved"] is True and r["matches_origin"] is not True)]
@@ -1030,7 +1030,10 @@ def run(args):
             checks.append(references_kept(known, command["references"], repair,
                 step["tool"] == "delete_feature" and not result.get("isError"),
                 replaced=step["tool"] == "new_part" and not result.get("isError"),
-                reopened=step["tool"] == "open" and not result.get("isError")))
+                reopened=step["tool"] == "open" and not result.get("isError"),
+                removed=({key[0] for key in known}
+                         - {f"F{feature['id']}" for feature in command["summary"]["features"]})
+                    if step["tool"] == "undo" and not result.get("isError") else ()))
             if step.get("refusal"):
                 code = step["refusal"]
                 checks.append({"check": "application refusal", "actual": command["output"], "pass": code in command["output"]})

@@ -253,7 +253,7 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
             let s = &app.state().state;
             s.viewport.camera.project(glam::Vec3::new(0.0, 0.0, 6.0), s.viewport.rect).unwrap()
         };
-        ribbon::click_at(app, screen);
+        ribbon::pick_at(app, screen);
         app.run_steps(6);
         let editor = app.state().state.editor.as_ref().unwrap();
         let EditorParams::Thicken(s) = &editor.params else { panic!("Thicken editor") };

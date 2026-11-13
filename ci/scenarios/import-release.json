@@ -115,7 +115,10 @@
           "step": 9,
           "pointer": "/result/token"
         }
-      }
+      },
+      "repair": [
+        "Fillet1"
+      ]
     },
     {
       "tool": "undo",

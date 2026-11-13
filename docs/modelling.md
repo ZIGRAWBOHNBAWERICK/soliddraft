@@ -274,7 +274,7 @@ The document tests also reopen a part containing a chamfer and check that it reb
 ## Chamfer setbacks and face accuracy
 
 In the internal Edit Suite layout, the Chamfer editor offers Two distances. Enable it
-and enter the Second distance to set independent setbacks on the adjacent faces.
+and enter Distance 2 to set independent setbacks on the adjacent faces.
 Disable it to use the first distance on both faces. Both distances must be positive
 and finite. The `chamfer` and `edit_chamfer` verbs accept `other_distance`; omitting it
 uses equal distances. Saved parts, previews, undo/redo and the values table retain

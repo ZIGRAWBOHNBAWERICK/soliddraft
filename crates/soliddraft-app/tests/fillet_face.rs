@@ -852,11 +852,12 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     app.get_by_label("Two distances").click();
     app.run_steps(4);
     type_field(&mut app, "Distance value", "1");
-    type_field(&mut app, "Second distance value", "-1");
+    type_field(&mut app, "Distance 2 value", "-1");
     ok(&mut app);
     assert!(app.state().state.editor.is_some(), "a refused second distance keeps the editor open");
     assert_eq!(app.state().state.doc.features.len(), 1);
-    type_field(&mut app, "Second distance value", "3");
+    type_field(&mut app, "Distance 2 value", "3");
+    assert!(app.state().state.note.as_ref().is_none_or(|note| note.kind != NoteKind::Error));
     app.render().unwrap().save(proof_folder().join("ridealong-chamfer-editor.png")).unwrap();
     ok(&mut app);
     let state = &app.state().state;
@@ -864,6 +865,9 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     let FeatureKind::Chamfer(chamfer) = &state.doc.features.last().unwrap().kind else { panic!("chamfer") };
     assert_eq!(chamfer.other_distance, Some(3.0));
     assert!((volume(&state.doc) - (48000.0 - 90.0)).abs() < 1e-6);
+    button(&mut app, "Material");
+    assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
+    app.get_by_label("Part material");
     app.state_mut().state.ribbon_tab = RibbonTab::Inspect;
     app.run_steps(4);
     button(&mut app, "Material");
@@ -953,4 +957,62 @@ fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
     app.get_by_label("Approved import limit");
     app.get_by_label("0.03 mm");
     app.render().unwrap().save(proof_folder().join("ridealong-imported-face.png")).unwrap();
+}
+
+#[test]
+fn ridealong_material_uses_the_visible_configuration() {
+    use soliddraft_app::state::AppAction;
+    use soliddraft_document::ConfigScope;
+    use soliddraft_model::Command as ModelCommand;
+    let _gpu = gpu();
+    let mut model =
+        soliddraft_model::Document::from_bytes(&box_document().model().to_bytes().unwrap(), soliddraft_app::kernel())
+            .unwrap();
+    let mut base = soliddraft_materials::Material::new("fixture-base", "Base material");
+    base.density_kg_m3 = Some(1000.0);
+    model
+        .execute(ModelCommand::SetMaterial {
+            material: Some(base.clone()),
+            default_appearance: None,
+            scope: ConfigScope::All,
+        })
+        .unwrap();
+    model.execute(ModelCommand::AddConfiguration { name: "Variant".into() }).unwrap();
+    model.execute(ModelCommand::ActivateConfiguration { name: "Variant".into() }).unwrap();
+    let configuration = model.active_configuration().unwrap().clone();
+    let mut variant = soliddraft_materials::Material::new("fixture-variant", "Variant material");
+    variant.density_kg_m3 = Some(2000.0);
+    model
+        .execute(ModelCommand::SetMaterial {
+            material: Some(variant),
+            default_appearance: None,
+            scope: ConfigScope::Only(vec![configuration.clone()]),
+        })
+        .unwrap();
+    let mut app = harness(Document::from_model(model));
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::ShowMaterial);
+    app.run_steps(4);
+    app.render().unwrap().save(proof_folder().join("ridealong-configuration-material.png")).unwrap();
+    app.get_by_label("Density: 2000 kg/m³");
+    button(&mut app, "Calculate mass");
+    let start = std::time::Instant::now();
+    while app.state().state.doc.kernel().cached_mass_properties(app.state().state.doc.display_body().unwrap()).is_none()
+    {
+        assert!(start.elapsed().as_secs() < 60);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
+    app.run_steps(4);
+    app.get_by_label("Mass: 0.096000 kg");
+    app.get_by_label("Part material").click();
+    app.run_steps(3);
+    app.get_by_label("Steel, generic").click();
+    app.run_steps(4);
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.model().material(Some(&configuration)).unwrap().id.0, "steel-generic");
+    assert_eq!(doc.model().material(None).unwrap().id, base.id);
+    let expected = doc.model().part_appearance(Some(&configuration)).shading();
+    assert_eq!(doc.meshes[&doc.display_body().unwrap()].appearances[0], expected);
+    app.get_by_label("Mass: 0.379200 kg");
 }

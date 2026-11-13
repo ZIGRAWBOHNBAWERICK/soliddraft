@@ -488,13 +488,12 @@ impl SolidDraftApp {
             AppAction::CommitEditor => {
                 // A refused size stays open for correction: OK cannot apply the last
                 // accepted one in its place.
-                if let Some(why) = self
+                if self
                     .state
                     .editor
                     .as_ref()
-                    .and_then(|e| e.feedback.size.clone().or_else(|| e.feedback.second_size.clone()))
+                    .is_some_and(|e| e.feedback.size.is_some() || e.feedback.second_size.is_some())
                 {
-                    self.state.note(format!("Not applied: {why}"), NoteKind::Error);
                     return;
                 }
                 let Some(e) = self.close_editor() else { return };

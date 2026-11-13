@@ -902,7 +902,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                                     editor.feedback.second_size = None;
                                 }
                                 if let Some(other) = &mut c.other_distance {
-                                    size_field(ui, "Second distance", other, &mut editor.feedback.second_size);
+                                    size_field(ui, "Distance 2", other, &mut editor.feedback.second_size);
                                 }
                             }
                         }
@@ -1780,9 +1780,6 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
 
 fn selection(ui: &mut egui::Ui, state: &mut AppState) {
     crate::measure::panel::show(ui, state);
-    if state.frame_layout == crate::settings::FrameLayout::EditSuite && state.doc.selection == Some(Selection::Body) {
-        material_panel(ui, state);
-    }
     let Some(sel) = state.doc.selection else {
         ui.add_space(30.0);
         ui.vertical_centered(|ui| {
@@ -1864,6 +1861,10 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             }
         });
+        if state.frame_layout == crate::settings::FrameLayout::EditSuite && sel == Selection::Body {
+            ui.add_space(8.0);
+            material_panel(ui, state);
+        }
         if let (Selection::Feature(id), Some(f)) = (sel, feature)
             && f.status != FeatureStatus::Inactive
         {
@@ -1966,6 +1967,7 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let current = state.doc.model().material(None);
     let mut selected = current.map(|m| m.id.clone());
     let before = selected.clone();
+    let mut error = None;
     section(ui, "Material", |ui| {
         egui::ComboBox::from_label("Part material")
             .selected_text(current.map_or("Unassigned", |m| m.name.as_str()))
@@ -1985,32 +1987,32 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
         }
-    });
-    if let Some(index) = state.doc.display_index() {
-        let feature = &state.doc.features[index];
-        let id = feature.id;
-        if ui.button("Calculate mass").clicked()
-            && let Err(error) = state.mass.request(&state.doc, id, ui.ctx())
-        {
-            state.note(error, crate::state::NoteKind::Error);
-        }
-        if state.doc.proof_state().current_proved_display()
-            && let Some(body) = state.doc.display_body()
-            && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
-        {
-            ui.label(format!("Volume: {:.3} mm³", properties.volume));
-            match soliddraft_materials::mass::of_body(&properties, state.doc.model().material(None)) {
-                Ok(mass) => {
-                    ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
-                }
-                Err(why) => {
-                    ui.label(format!("Mass: {why}"));
+        if let Some(index) = state.doc.display_index() {
+            let id = state.doc.features[index].id;
+            if ui.button("Calculate mass").clicked() {
+                error = state.mass.request(&state.doc, id, ui.ctx()).err();
+            }
+            if state.doc.proof_state().current_proved_display()
+                && let Some(body) = state.doc.display_body()
+                && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
+            {
+                ui.label(format!("Volume: {:.3} mm³", properties.volume));
+                match soliddraft_materials::mass::of_body(&properties, state.doc.model().material(None)) {
+                    Ok(mass) => {
+                        ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
+                    }
+                    Err(why) => {
+                        ui.label(format!("Mass: {why}"));
+                    }
                 }
             }
+            if let Some(message) = state.mass.message(&state.doc, id) {
+                hint(ui, &crate::geometry_message::for_user(message));
+            }
         }
-        if let Some(message) = state.mass.message(&state.doc, id) {
-            hint(ui, &crate::geometry_message::for_user(message));
-        }
+    });
+    if let Some(error) = error {
+        state.note(error, crate::state::NoteKind::Error);
     }
     if selected != before {
         let material = selected.as_ref().and_then(|id| catalog.material(id)).map(|(_, m)| m.clone());

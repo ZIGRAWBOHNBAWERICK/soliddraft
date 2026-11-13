@@ -3069,6 +3069,13 @@ pub fn board_bracket() -> Document {
     doc
 }
 
+fn chamfer_size(distance: f64, other: Option<f64>) -> String {
+    match other {
+        Some(other) => format!("{} × {}", fmt_mm(distance), fmt_mm(other)),
+        None => fmt_mm(distance),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3485,12 +3492,5 @@ mod tests {
             &mcp,
         );
         assert!(!out.is_error, "{}", out.content);
-    }
-}
-
-fn chamfer_size(distance: f64, other: Option<f64>) -> String {
-    match other {
-        Some(other) => format!("{} × {}", fmt_mm(distance), fmt_mm(other)),
-        None => fmt_mm(distance),
     }
 }

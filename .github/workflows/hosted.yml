@@ -36,11 +36,11 @@ env:
 permissions:
   contents: read
 
-# Superseded feature runs cancel. Main and release branch runs retain their exact-commit
-# evidence even while development continues on main.
+# Superseded main and feature runs cancel. Release branch runs retain their
+# exact-commit evidence even while development continues.
 concurrency:
-  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}${{ inputs.benchmark_linux_only && '-linux-benchmark' || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
+  group: ${{ github.workflow }}-${{ startsWith(github.ref, 'refs/heads/release/') && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}${{ inputs.benchmark_linux_only && '-linux-benchmark' || '' }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
 
 # Health records expire after 15 minutes. Archive consumers stay on GitHub.
 # NixOS handles only plain Cargo jobs; macOS and Windows retain their hosted runners.

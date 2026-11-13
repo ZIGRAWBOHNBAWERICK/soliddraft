@@ -1,4 +1,4 @@
-"""Every workflow cancels its branch's superseded runs and never cancels a run on main."""
+"""Workflow concurrency cancels superseded runs while preserving release evidence."""
 
 import json
 import os
@@ -151,12 +151,13 @@ class Concurrency(unittest.TestCase):
         self.assertNotEqual(render(group, **values, inputs={'benchmark_boat': True}),
                             render(group, **values, inputs={'benchmark_boat': True, 'benchmark_linux_only': True}))
 
-    def test_a_run_on_main_is_never_cancelled_nor_shares_a_group(self):
+    def test_main_runs_supersede_only_in_hosted_ci(self):
         for path in WORKFLOWS:
             group, cancel, _ = settings(path)
             pushes = [render(group, ref=MAIN, run_id=str(n)) for n in (200, 201, 202)]
-            self.assertEqual(len(set(pushes)), 3, f"{path.name}: main pushes share a group, so a waiting one is replaced")
-            self.assertEqual(render(cancel, ref=MAIN, run_id="200"), "false", path.name)
+            hosted = path.name == "hosted.yml"
+            self.assertEqual(len(set(pushes)), 1 if hosted else 3, path.name)
+            self.assertEqual(render(cancel, ref=MAIN, run_id="200"), str(hosted).lower(), path.name)
 
     def test_a_pull_request_from_a_branch_called_main_cannot_reach_main_runs(self):
         for path in WORKFLOWS:

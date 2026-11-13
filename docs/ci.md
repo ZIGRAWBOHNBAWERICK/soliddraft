@@ -155,7 +155,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 
 ## Superseded runs
 
-Hosted CI has a concurrency group keyed on the pull request's head branch (the pushed ref for a manual run), so a new push cancels that branch's older runs. A run on main is never cancelled: its group is its own run id, so no later push shares it and GitHub's replacement of a waiting run in a shared group cannot drop a main result. `ci/test_workflows.py`, run in the lint job, evaluates the group and cancel expressions for pull request, manual and main runs, and for a pull request from a branch that is itself called `main`.
+Hosted CI groups pull request runs by their head branch and main runs by the main ref, so a new push cancels older runs in the same group, including queued runs. Release branch runs each use their own run id and never cancel one another. Manual runs use the pushed ref, and the benchmark input suffixes keep benchmark runs separate from normal runs. `ci/test_workflows.py`, run in the lint job, checks these groups and cancellation settings, including a pull request from a branch called `main`. Other workflows retain independent main runs.
 
 ## Reliability tests
 

@@ -380,6 +380,9 @@ impl Document {
 
     /// Current solid for each stable body identity, in body order.
     pub fn live_bodies(&self) -> Vec<(u32, BodyId)> {
+        if self.next_body == 1 {
+            return self.body().map(|body| vec![(0, body)]).unwrap_or_default();
+        }
         self.body_states(self.built.len()).into_iter().collect()
     }
 
@@ -413,6 +416,12 @@ impl Document {
     }
 
     pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {
+        if self.next_body == 1 {
+            if key != 0 {
+                return None;
+            }
+            return end.checked_sub(1).and_then(|i| self.built.get(i)).and_then(|built| built.output);
+        }
         self.body_states(end).get(&key).copied()
     }
 

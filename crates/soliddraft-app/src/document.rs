@@ -2296,6 +2296,14 @@ impl Document {
     /// The viewport body. A failed edit displays the last proved model, never
     /// the successful prefix of the failed request as if it were its result.
     pub fn display_body(&self) -> Option<BodyId> {
+        if self.model.next_body() == 1 && self.active_body == 0 {
+            if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
+                && let Some(proved) = &self.last_proved
+            {
+                return proved.model.body();
+            }
+            return self.model.body();
+        }
         if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
             && let Some(proved) = &self.last_proved
         {
@@ -2756,17 +2764,19 @@ impl Document {
 
     /// Mirrors the model and refreshes the display, keeping the selection by name.
     fn after_change(&mut self) {
-        let bodies = self.model.live_bodies();
-        let authored = self.model.features().iter().any(|f| f.body == self.active_body);
-        let consumed = self.model.features().iter().any(|f| {
-            matches!(f.kind, model::FeatureKind::Combine { tool, .. } if tool == self.active_body)
-                && self.model.status(f.id) == Some(&model::FeatureStatus::Ok)
-        });
-        if !bodies.iter().any(|(key, _)| *key == self.active_body)
-            && (!authored || consumed)
-            && let Some((key, _)) = bodies.first()
-        {
-            self.active_body = *key;
+        if self.model.next_body() > 1 || self.active_body != 0 {
+            let bodies = self.model.live_bodies();
+            let authored = self.model.features().iter().any(|f| f.body == self.active_body);
+            let consumed = self.model.features().iter().any(|f| {
+                matches!(f.kind, model::FeatureKind::Combine { tool, .. } if tool == self.active_body)
+                    && self.model.status(f.id) == Some(&model::FeatureStatus::Ok)
+            });
+            if !bodies.iter().any(|(key, _)| *key == self.active_body)
+                && (!authored || consumed)
+                && let Some((key, _)) = bodies.first()
+            {
+                self.active_body = *key;
+            }
         }
         if self.model.geometry_hash() == self.geometry {
             self.after_metadata_change();
@@ -2899,6 +2909,7 @@ impl Document {
     fn refresh_display(&mut self) {
         if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
             && let Some(proved) = &self.last_proved
+            && proved.model.next_body() > 1
             && proved.model.live_bodies().len() > 1
         {
             match ready_display(&proved.model, soliddraft_tessellation::Level::Standard) {
@@ -2917,11 +2928,19 @@ impl Document {
             }
             return;
         }
-        if self.model.live_bodies().len() > 1 && !self.model.is_dirty() && !self.has_model_failure() {
+        if self.model.next_body() > 1
+            && self.model.live_bodies().len() > 1
+            && !self.model.is_dirty()
+            && !self.has_model_failure()
+        {
             self.refresh_bodies();
             return;
         }
-        let next = self.display_body().or_else(|| self.model.live_bodies().first().map(|(_, body)| *body));
+        let next = self.display_body().or_else(|| {
+            (self.model.next_body() > 1 || self.active_body != 0)
+                .then(|| self.model.live_bodies().first().map(|(_, body)| *body))
+                .flatten()
+        });
         if let Some(body) = next
             && let Err(message) = self.capture_display_bound(body)
         {

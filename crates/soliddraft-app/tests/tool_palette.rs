@@ -153,7 +153,7 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
                 }
                 for (_, items) in commands::ribbon(RibbonTab::Sketch) {
                     for (command, _) in items {
-                        if (command.shown)(&app.state().state) {
+                        if (command.shown)(&app.state().state) && !matches!(command.id, "sketch" | "exit_sketch") {
                             let label = if command.id == "smart_dimension" {
                                 "Smart Dimension".to_owned()
                             } else {

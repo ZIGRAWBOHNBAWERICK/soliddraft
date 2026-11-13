@@ -13,7 +13,7 @@ pub enum Source {
     /// Length of an edge.
     Edge {
         /// Persistent reference.
-        reference: Box<EdgeRef>,
+        reference: EdgeRef,
     },
     /// Area of a face.
     Face {

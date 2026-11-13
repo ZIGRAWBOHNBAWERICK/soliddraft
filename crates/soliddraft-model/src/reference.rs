@@ -73,7 +73,7 @@ pub enum Generator {
     /// A face from one immutable imported source. A replacement needs new references.
     Imported {
         /// Hash of the source that generated this face.
-        sha256: String,
+        sha256: Box<str>,
     },
     /// An inset wall of a shell, ranked by its source face name.
     ShellWall,

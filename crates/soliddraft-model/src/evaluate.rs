@@ -1167,7 +1167,7 @@ fn imported_names(record: &HistoryRecord, import: &ImportStepFeature) -> Vec<Nam
         .map(|(ordinal, (_, _, role))| NamedFace {
             origin: Origin { tag: record.tag.clone(), role: role.clone() },
             generator: if import.source_bound_names {
-                Generator::Imported { sha256: import.sha256.clone() }
+                Generator::Imported { sha256: import.sha256.clone().into_boxed_str() }
             } else {
                 Generator::Other
             },

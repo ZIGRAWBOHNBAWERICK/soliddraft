@@ -9,6 +9,9 @@ use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureKind, Pr
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
 
+#[path = "support/ribbon.rs"]
+mod ribbon;
+
 type App = Harness<'static, SolidDraftApp>;
 
 fn button(app: &mut App, label: &str) {
@@ -176,7 +179,7 @@ fn ridealong_edit_suite_exposes_all_lattice_cells() {
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc.take().unwrap(), Automation::default()));
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.run_steps(5);
-    button(&mut app, "Lattice");
+    ribbon::run_command(&mut app, "lattice");
     for choice in [
         soliddraft_kernel_api::LatticeCell::BodyCentred,
         soliddraft_kernel_api::LatticeCell::FaceCentred,
@@ -195,7 +198,7 @@ fn ridealong_edit_suite_exposes_all_lattice_cells() {
     let folder = std::env::var_os("SOLIDDRAFT_TEST_OUT").map(std::path::PathBuf::from).unwrap_or(temporary);
     std::fs::create_dir_all(&folder).unwrap();
     app.render().unwrap().save(folder.join("ridealong-lattice-editor.png")).unwrap();
-    button(&mut app, "OK (Enter)");
+    ribbon::run_command(&mut app, "confirm");
     app.run_steps(30);
     let start = std::time::Instant::now();
     while app.state().state.doc.features.last().unwrap().status == soliddraft_app::document::FeatureStatus::Pending {

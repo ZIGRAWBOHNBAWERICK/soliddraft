@@ -6,6 +6,7 @@ use crate::document::{
     fmt_mm, plane_ref_label,
 };
 use crate::drag::Dimension;
+use crate::form_bar::value_cell;
 use crate::icons::{self, Icon};
 use crate::sketch::{ConstraintKind, EntityKind, fmt_value, solve};
 use crate::sketcher;
@@ -84,8 +85,6 @@ fn ok_cancel(ui: &mut egui::Ui, head: Rect, ok_tip: &str, cancel_tip: &str) -> (
 const LABEL_WIDTH: f32 = 96.0;
 /// The height of one row of a form table.
 const ROW_HEIGHT: f32 = 24.0;
-/// The room a value cell keeps at its right for the unit.
-const UNIT_WIDTH: f32 = 30.0;
 /// The space between the cards of a form.
 const CARD_GAP: f32 = 6.0;
 /// The height of a pick's chip, inside its margin.
@@ -171,56 +170,6 @@ fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, Rect) 
     add(ui, cell)
 }
 
-/// A framed value cell: the widget fills it, the unit sits at its right. The frame
-/// follows the widget: the accent while it has the keyboard, a stronger line on hover.
-fn value_cell(
-    ui: &mut egui::Ui,
-    cell: Rect,
-    unit: &str,
-    add: impl FnOnce(&mut egui::Ui, Rect) -> egui::Response,
-) -> egui::Response {
-    let frame = ui.painter().add(egui::Shape::Noop);
-    // Every value keeps the unit's room, with a unit or without, so the column stays one width.
-    let inner = Rect::from_min_max(
-        pos2(cell.left() + 2.0, cell.top() + 1.0),
-        pos2(cell.right() - UNIT_WIDTH, cell.bottom() - 1.0),
-    );
-    let response = ui
-        .scope(|ui| {
-            let v = ui.visuals_mut();
-            for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active] {
-                w.bg_fill = egui::Color32::TRANSPARENT;
-                w.weak_bg_fill = egui::Color32::TRANSPARENT;
-                w.bg_stroke = Stroke::NONE;
-                w.expansion = 0.0;
-            }
-            v.selection.stroke = Stroke::NONE;
-            ui.spacing_mut().interact_size = inner.size();
-            ui.spacing_mut().button_padding = vec2(6.0, 2.0);
-            add(ui, inner)
-        })
-        .inner;
-    let (fill, stroke) = if response.has_focus() {
-        (theme::chip(), Stroke::new(1.5, theme::accent()))
-    } else if response.hovered() {
-        (theme::field_bg(), Stroke::new(1.0, theme::line_strong()))
-    } else {
-        (theme::field_bg(), Stroke::new(1.0, theme::line()))
-    };
-    ui.painter()
-        .set(frame, egui::epaint::RectShape::new(cell, CornerRadius::same(6), fill, stroke, egui::StrokeKind::Inside));
-    if !unit.is_empty() {
-        ui.painter().text(
-            pos2(cell.right() - 8.0, cell.center().y),
-            Align2::RIGHT_CENTER,
-            unit,
-            theme::font(11.0),
-            theme::muted(),
-        );
-    }
-    response
-}
-
 /// A row whose cell holds a number widget, named "<label> value" for automation.
 fn number_row(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) -> egui::Response {
     number_row_named(ui, label, label, unit, widget)
@@ -282,6 +231,13 @@ fn unit_value(
 /// positive number of millimetres is the new size at once; anything else is refused
 /// beside the field and keeps the text, so nothing is silently clamped to another size.
 fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Option<String>) {
+    row(ui, label, |ui, cell| size_input(ui, label, value, refused, cell, ui.make_persistent_id(("size", label))));
+    if let Some(why) = refused {
+        error_row(ui, why);
+    }
+}
+
+pub(crate) fn size_input(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Option<String>, cell: Rect) {
     let what = label.to_lowercase();
     let id = ui.make_persistent_id(("size", label));
     // The typed text outlives the frame; it restarts from the size when it no longer
@@ -290,17 +246,15 @@ fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Opt
     let mut text = kept
         .filter(|t| refused.is_some() || crate::fillet_collect::parse_size(t, &what) == Ok(*value))
         .unwrap_or_else(|| crate::document::fmt_mm(*value));
-    let r = row(ui, label, |ui, cell| {
-        value_cell(ui, cell, "mm", |ui, inner| {
-            ui.put(
-                inner,
-                egui::TextEdit::singleline(&mut text)
-                    .font(theme::font(12.5))
-                    .frame(egui::Frame::NONE)
-                    .horizontal_align(egui::Align::Center)
-                    .vertical_align(egui::Align::Center),
-            )
-        })
+    let r = value_cell(ui, cell, "mm", |ui, inner| {
+        ui.put(
+            inner,
+            egui::TextEdit::singleline(&mut text)
+                .font(theme::font(12.5))
+                .frame(egui::Frame::NONE)
+                .horizontal_align(egui::Align::Center)
+                .vertical_align(egui::Align::Center),
+        )
     });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{label} value")));
     if r.changed() {
@@ -313,9 +267,6 @@ fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Opt
         }
     }
     ui.data_mut(|d| d.insert_temp(id, text));
-    if let Some(why) = refused {
-        error_row(ui, why);
-    }
 }
 
 /// The selected feature's dimension. Dragging it previews the part off the interface
@@ -452,7 +403,12 @@ fn picked_chip(ui: &mut egui::Ui, icon: Icon, label: &str, remove: bool) -> bool
 
 /// The picks a form holds, as chips, or the prompt for the first one. Returns the index
 /// whose remove button was clicked.
-fn pick_list<'a>(ui: &mut egui::Ui, prompt: &str, icon: Icon, picks: impl Iterator<Item = &'a str>) -> Option<usize> {
+pub(crate) fn pick_list<'a>(
+    ui: &mut egui::Ui,
+    prompt: &str,
+    icon: Icon,
+    picks: impl Iterator<Item = &'a str>,
+) -> Option<usize> {
     let picks: Vec<&str> = picks.collect();
     if picks.is_empty() {
         pick_prompt(ui, prompt);
@@ -540,7 +496,7 @@ fn segmented(ui: &mut egui::Ui, id: &str, options: &[&str], selected: usize) -> 
     clicked
 }
 
-fn coord(ui: &mut egui::Ui, id: &str, label: &str, value: &mut f64) {
+pub(crate) fn coord(ui: &mut egui::Ui, id: &str, label: &str, value: &mut f64) {
     ui.label(egui::RichText::new(label).size(11.0).color(theme::muted()));
     let r = ui.add_sized(
         vec2(64.0, 22.0),
@@ -588,7 +544,12 @@ fn axis_combo(ui: &mut egui::Ui, id: &str, label: &str, direction: &mut Vec3) {
 }
 
 /// A reference plane choice; a picked face shows by its label.
-fn plane_combo(ui: &mut egui::Ui, id: &str, plane: &mut PlaneRef, choices: &[(soliddraft_model::FeatureId, String)]) {
+pub(crate) fn plane_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    plane: &mut PlaneRef,
+    choices: &[(soliddraft_model::FeatureId, String)],
+) {
     egui::ComboBox::from_id_salt(id)
         .width(ui.available_width() - 4.0)
         .selected_text(match plane {
@@ -658,7 +619,13 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
 
 /// A field parameter: one value, or a linear grade between two anchors on a part axis.
 /// `unit` names the values, such as "mm"; the anchors are always millimetres.
-fn grade_field(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_kernel_api::Grade, unit: &str, speed: f64) {
+pub(crate) fn grade_field(
+    ui: &mut egui::Ui,
+    label: &str,
+    grade: &mut soliddraft_kernel_api::Grade,
+    unit: &str,
+    speed: f64,
+) {
     use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
     let linear = matches!(grade, Grade::Linear(_));
@@ -1258,10 +1225,12 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         .and_then(|f| f.sketch())
         .map(|s| s.plane.label())
         .unwrap_or_default();
-    let head = header(ui, Icon::Sketch, &name);
-    let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
-    if ok || cancel {
-        state.push(AppAction::ExitSketch);
+    if state.frame_layout == crate::settings::FrameLayout::Classic {
+        let head = header(ui, Icon::Sketch, &name);
+        let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
+        if ok || cancel {
+            state.push(AppAction::ExitSketch);
+        }
     }
     let mut actions = Vec::new();
     let has_body = state.doc.model().body().is_some();

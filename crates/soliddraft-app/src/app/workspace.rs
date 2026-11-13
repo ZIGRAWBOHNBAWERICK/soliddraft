@@ -46,6 +46,7 @@ pub struct SolidDraftApp {
     /// The middle dock: the part and the drawing.
     pub(super) dock: DockState<Tab>,
     pub(super) tree_dock: DockState<Tab>,
+    pub(super) suite_tree_dock: DockState<Tab>,
     /// The panel layout as last written to disk.
     saved_layout: Layout,
     /// The command line's chips and session height as last written to disk.
@@ -134,6 +135,7 @@ impl SolidDraftApp {
             state,
             dock: center_dock(),
             tree_dock: tree_dock(),
+            suite_tree_dock: DockState::new(vec![Tab::Tree, Tab::Values]),
             automation,
             frame: 0,
             bench,
@@ -471,7 +473,7 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
-            if palette {
+            if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
                 crate::options_bar::panel(root, &mut self.state);
             }
             egui::Panel::top("ribbon")

@@ -94,6 +94,7 @@ const NO_PART: u64 = u64::MAX - 1;
 /// What the viewport draws besides the document this frame.
 pub struct Overlay<'a> {
     pub pick_filter: PickFilter,
+    pub dimensions_on_geometry: bool,
     /// Material a feature adds or removes, with whether it removes.
     pub ghost: Option<(Arc<DisplayMesh>, bool)>,
     /// A body drawn in place of the document's while a feature is previewed.
@@ -278,8 +279,17 @@ impl ViewportState {
         hover_label: Option<&str>,
         nav: &NavigationSettings,
     ) -> ViewportEvents {
-        let Overlay { pick_filter, ghost, preview, sketch, passive_sketches, dimension_edit, visible, rounding } =
-            overlay;
+        let Overlay {
+            pick_filter,
+            dimensions_on_geometry,
+            ghost,
+            preview,
+            sketch,
+            passive_sketches,
+            dimension_edit,
+            visible,
+            rounding,
+        } = overlay;
         let pick_revision = Some((doc.model().id(), doc.mesh_version, doc.display_body()));
         let provisional = doc.provisional_mesh();
         let is_provisional = |shown: &Arc<DisplayMesh>| provisional.as_ref().is_some_and(|b| Arc::ptr_eq(shown, b));
@@ -420,7 +430,9 @@ impl ViewportState {
                 rect,
                 doc,
                 pointer,
-                selection == Some(Selection::Body) && visible.body,
+                (selection == Some(Selection::Body)
+                    || dimensions_on_geometry && matches!(selection, Some(Selection::Face(_) | Selection::Edge(_))))
+                    && visible.body,
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
             )

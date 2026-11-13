@@ -165,6 +165,7 @@ impl TabViewer for Panels<'_> {
                 let pick_filter = st.selection_filter();
                 let overlay = Overlay {
                     pick_filter,
+                    dimensions_on_geometry: st.frame_layout == crate::settings::FrameLayout::EditSuite,
                     ghost,
                     preview,
                     sketch: st.sketch.as_mut(),

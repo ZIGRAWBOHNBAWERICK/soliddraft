@@ -251,7 +251,7 @@ pub fn open(state: &mut AppState) {
         focus: true,
         error: None,
     });
-    state.layout.tree.shown = true;
+    state.show_tree(true);
 }
 
 /// Escape dismisses the name list before it dismisses the form.

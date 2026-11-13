@@ -248,8 +248,20 @@ impl SolidDraftApp {
                     }
                 }
                 ui.separator();
+                if st.frame_layout == crate::settings::FrameLayout::EditSuite {
+                    if ui.button("Tree").clicked() {
+                        st.show_tree(true);
+                        st.values.tree_focus = true;
+                        ui.close();
+                    }
+                    if ui.button("Values").clicked() {
+                        st.show_tree(true);
+                        st.values.focus = true;
+                        ui.close();
+                    }
+                }
                 for side in Side::ALL {
-                    let shown = st.layout.panel(side).shown;
+                    let shown = st.tree_shown();
                     let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
                     if ui.add(egui::Button::selectable(shown, side.title()).shortcut_text(key)).clicked() {
                         st.push(AppAction::TogglePanel(side));
@@ -355,11 +367,19 @@ impl SolidDraftApp {
             Side::Tree if self.state.drawing.is_active() => "Drawing tree",
             _ => side.title(),
         };
-        let mut shown = self.state.layout.panel(side).shown;
+        let mut shown = self.state.tree_shown();
         let mut open_requested = false;
         let dock = match side {
+            Side::Tree if self.state.frame_layout == crate::settings::FrameLayout::EditSuite => {
+                &mut self.suite_tree_dock
+            }
             Side::Tree => &mut self.tree_dock,
         };
+        if std::mem::take(&mut self.state.values.tree_focus)
+            && let Some(at) = dock.find_tab(&docks::Tab::Tree)
+        {
+            let _ = dock.set_active_tab(at);
+        }
         if std::mem::take(&mut self.state.values.focus)
             && let Some(at) = dock.find_tab(&docks::Tab::Values)
         {
@@ -373,8 +393,8 @@ impl SolidDraftApp {
                 open_requested = true;
             }
         });
+        self.state.show_tree(shown || open_requested);
         let panel = self.state.layout.panel_mut(side);
-        panel.shown = shown || open_requested;
         if let Some(s) = egui::PanelState::load(root.ctx(), side.panel_id()) {
             panel.width = s.outer_rect.width();
         }

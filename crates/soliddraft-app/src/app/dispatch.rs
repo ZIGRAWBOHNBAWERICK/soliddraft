@@ -1219,6 +1219,7 @@ impl SolidDraftApp {
                     self.dock.push_to_focused_leaf(Tab::Assembly);
                 }
                 self.tree_dock = tree_dock();
+                self.suite_tree_dock = egui_dock::DockState::new(vec![Tab::Tree, Tab::Values]);
                 self.state.layout = Layout::default();
                 self.state.command_line.settings.session_height = crate::command_line::SESSION_DEFAULT_HEIGHT;
                 // Forget the sizes egui kept, so the defaults apply again.
@@ -1229,7 +1230,14 @@ impl SolidDraftApp {
                     d.remove::<egui::PanelState>(crate::command_line::session_id());
                 });
             }
-            AppAction::TogglePanel(side) => self.state.layout.toggle(side),
+            AppAction::ShowValues => {
+                self.state.show_tree(true);
+                self.state.values.focus = true;
+            }
+            AppAction::TogglePanel(_) => {
+                let shown = self.state.tree_shown();
+                self.state.show_tree(!shown);
+            }
             AppAction::ShowFileLocations(kind) => {
                 self.state.locations_dialog = Some(crate::locations::LocationsDialog::new(kind));
             }

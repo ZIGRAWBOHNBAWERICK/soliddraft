@@ -281,6 +281,20 @@ paths = ["crates/soliddraft-app/src/theme.rs"]
 module = ["theme"]
 
 [[areas]]
+name = "app.feature_forms"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/feature_forms.rs"]
+module = ["feature_forms"]
+
+[[areas]]
+name = "app.form_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/form_bar.rs"]
+module = ["form_bar"]
+
+[[areas]]
 name = "app.options_bar"
 owner = "core"
 crate = "soliddraft-app"

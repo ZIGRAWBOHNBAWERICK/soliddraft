@@ -43,7 +43,7 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
         let mut columns = Vec::new();
         for (_, items) in commands::ribbon(RibbonTab::Sketch) {
             for (command, _) in items {
-                if !(command.shown)(&app.state().state) {
+                if !(command.shown)(&app.state().state) || command.id == "sketch" {
                     continue;
                 }
                 let label = if command.id == "smart_dimension" {

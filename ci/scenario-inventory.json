@@ -1277,7 +1277,11 @@
       "id": "sketch-fillet-chamfer-split",
       "file": "ci/scenarios/sketch-fillet-chamfer-split.json",
       "acceptance": false,
-      "owners": ["soliddraft-app", "soliddraft-model", "soliddraft-kernel-catallax"]
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
     },
     {
       "id": "sketch-linked-offsets",
@@ -1441,6 +1445,35 @@
       "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
       "supported_limits": "R3/r1 torus, circle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    }
+  ],
+  "native_ui_scenarios": [
+    {
+      "id": "edit-suite-feature-forms",
+      "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest pointer and keyboard -> application dispatcher -> existing feature editor -> software Vulkan renderer",
+      "evidence": "target/ux-tools/feature-forms, feature-form-edits and feature-form-hole; primary fields, grouped drop sheets, fixed OK/Cancel, commit/undo, refused size text and resizing"
+    },
+    {
+      "id": "edit-suite-panes-and-sketch-close",
+      "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest -> View commands and Close sketch -> application dispatcher",
+      "evidence": "target/ux-tools/edit-suite-panes-sketch; hidden part pane, Tree/Values tabs, document defaults, red Close sketch and retained classic dock"
+    },
+    {
+      "id": "edit-suite-all-dimensions",
+      "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "rendered viewport face/edge picks -> dimension annotations for every built feature",
+      "evidence": "target/ux-tools/edit-suite-all-dimensions; two-feature face and edge picks, current dimension targets; viewport_settings checks the axes default and saved override"
     }
   ]
 }

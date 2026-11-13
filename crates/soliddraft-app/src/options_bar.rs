@@ -55,6 +55,73 @@ fn command(ui: &mut egui::Ui, state: &mut AppState, id: &str) {
 }
 
 fn show(ui: &mut egui::Ui, state: &mut AppState) {
+    if state.editor.is_some() && !state.in_sketch() {
+        crate::feature_forms::show(ui, state);
+        return;
+    }
+    state.form_bar.reset();
+    let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
+    ui.data_mut(|data| {
+        let id = egui::Id::new("options_details_context");
+        if data.get_temp::<(bool, bool, bool)>(id) != Some(context) {
+            state.options_details = false;
+            data.insert_temp(id, context);
+        }
+    });
+    let mut sheet_anchor = ui.available_rect_before_wrap();
+    if state.in_sketch() {
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), 30.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if ui
+                    .add_sized(
+                        vec2(116.0, 30.0),
+                        egui::Button::new(egui::RichText::new("Close sketch").color(egui::Color32::WHITE))
+                            .fill(theme::error()),
+                    )
+                    .on_hover_text("Close sketch (Enter or Esc)")
+                    .clicked()
+                {
+                    state.push(AppAction::ExitSketch);
+                }
+                if let Some(sketch) = &state.sketch {
+                    let (text, color) = match &sketch.sketch.status {
+                        crate::sketch::SolveStatus::Empty => ("Empty", theme::muted()),
+                        crate::sketch::SolveStatus::UnderDefined => ("Under defined", theme::accent()),
+                        crate::sketch::SolveStatus::FullyDefined => ("Fully defined", theme::ink()),
+                        crate::sketch::SolveStatus::OverDefined { .. } => ("Over defined", theme::error()),
+                        crate::sketch::SolveStatus::Failed(_) => ("Solver failed", theme::error()),
+                    };
+                    ui.colored_label(color, text);
+                }
+                let more = ui.button("Sketch options");
+                sheet_anchor = more.rect;
+                if more.clicked() {
+                    state.options_details = !state.options_details;
+                }
+                let (icon, label, _) = active_tool(state);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let (rect, response) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                    icons::paint(ui.painter(), icon, rect, theme::accent());
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}"))
+                    });
+                    ui.add(egui::Label::new(label).truncate());
+                });
+            },
+        );
+        details_sheet(ui, state, sheet_anchor);
+        return;
+    }
+    if state.assembly.is_active() || state.drawing.is_active() || state.drawing.new.is_some() {
+        let response = ui.button(if state.assembly.is_active() { "Assembly options" } else { "Drawing options" });
+        if response.clicked() {
+            state.options_details = !state.options_details;
+        }
+        details_sheet(ui, state, response.rect);
+        return;
+    }
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (icon, label, prompt) = active_tool(state);
@@ -77,6 +144,13 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}")));
         response.on_hover_text(&label);
 
+        if state.doc.selection.is_some() || state.measure.open {
+            let response = ui.button("Details");
+            sheet_anchor = response.rect;
+            if response.clicked() {
+                state.options_details = !state.options_details;
+            }
+        }
         egui::ScrollArea::horizontal()
             .id_salt(("options_contents", label, format!("{:?}", state.doc.selection)))
             .auto_shrink([false, true])
@@ -102,6 +176,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 });
             });
     });
+    details_sheet(ui, state, sheet_anchor);
 }
 
 fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selection) {
@@ -121,7 +196,7 @@ fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selecti
             value_label(ui, label, value);
         }
     }
-    let features: Vec<_> = if selection == Selection::Body {
+    let features: Vec<_> = if matches!(selection, Selection::Body | Selection::Face(_) | Selection::Edge(_)) {
         let end = state.doc.rollback.unwrap_or(state.doc.features.len()).min(state.doc.features.len());
         state.doc.features[..end]
             .iter()
@@ -132,7 +207,12 @@ fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selecti
         info.feature.into_iter().collect()
     };
     for id in features {
-        feature_dimensions(ui, state, id, selection == Selection::Body);
+        feature_dimensions(
+            ui,
+            state,
+            id,
+            matches!(selection, Selection::Body | Selection::Face(_) | Selection::Edge(_)),
+        );
     }
 }
 
@@ -185,4 +265,39 @@ fn feature_dimensions(ui: &mut egui::Ui, state: &AppState, id: FeatureId, named:
         let label = if named { format!("{} · {label}", feature.name) } else { label };
         value_label(ui, &label, &value);
     }
+}
+
+fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
+    if !state.options_details {
+        return;
+    }
+    let screen = ui.ctx().input(|i| i.content_rect());
+    let width = 380.0_f32.min(screen.width() - 16.0);
+    let left = anchor.left().clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
+    egui::Area::new(egui::Id::new("options_details"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(egui::pos2(left, anchor.bottom() + 8.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(theme::panel())
+                .stroke(egui::Stroke::new(1.0, theme::line()))
+                .corner_radius(theme::RADIUS)
+                .inner_margin(8)
+                .show(ui, |ui| {
+                    ui.set_width(width - 16.0);
+                    ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
+                    if ui.button("Close options").clicked() {
+                        state.options_details = false;
+                    }
+                    if state.assembly.is_active() {
+                        crate::assembly::properties(ui, state);
+                    } else if state.drawing.new.is_some() && !state.drawing.is_active() {
+                        crate::drawing::properties_drawing::new_drawing(ui, state);
+                    } else if state.drawing.is_active() {
+                        crate::drawing::properties_drawing::show(ui, state);
+                    } else {
+                        crate::properties::show(ui, state);
+                    }
+                });
+        });
 }

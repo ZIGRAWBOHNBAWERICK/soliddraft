@@ -55,7 +55,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let commands: Vec<_> = commands
                 .into_iter()
                 .map(|(command, _)| command)
-                .filter(|command| (command.shown)(state) && !(start && command.id == "sketch"))
+                .filter(|command| {
+                    (command.shown)(state)
+                        && !(start && command.id == "sketch")
+                        && !(state.in_sketch() && command.id == "sketch")
+                })
                 .collect();
             if commands.is_empty() {
                 continue;

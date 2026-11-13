@@ -145,6 +145,7 @@ pub enum AppAction {
     ResetLayout,
     /// Show or hide the side area.
     TogglePanel(crate::panels::Side),
+    ShowValues,
     ShowPreferences,
     ShowShortcuts,
     /// Opens the command palette, or closes it when it is open.
@@ -1024,6 +1025,8 @@ pub struct AppState {
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
+    pub form_bar: crate::form_bar::State,
+    pub options_details: bool,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1093,6 +1096,30 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn tree_shown(&self) -> bool {
+        if self.frame_layout == crate::settings::FrameLayout::Classic {
+            self.layout.tree.shown
+        } else if self.assembly.is_active() {
+            self.layout.suite.assembly
+        } else if self.drawing.is_active() || self.drawing.new.is_some() {
+            self.layout.suite.drawing
+        } else {
+            self.layout.suite.part
+        }
+    }
+
+    pub fn show_tree(&mut self, shown: bool) {
+        if self.frame_layout == crate::settings::FrameLayout::Classic {
+            self.layout.tree.shown = shown;
+        } else if self.assembly.is_active() {
+            self.layout.suite.assembly = shown;
+        } else if self.drawing.is_active() || self.drawing.new.is_some() {
+            self.layout.suite.drawing = shown;
+        } else {
+            self.layout.suite.part = shown;
+        }
+    }
+
     pub fn new(doc: Document) -> Self {
         Self {
             doc,
@@ -1100,6 +1127,8 @@ impl AppState {
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),
+            form_bar: Default::default(),
+            options_details: false,
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,

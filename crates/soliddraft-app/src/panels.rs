@@ -79,11 +79,26 @@ pub struct SidePanel {
 #[serde(default)]
 pub struct Layout {
     pub tree: SidePanel,
+    pub suite: SuitePanes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SuitePanes {
+    pub part: bool,
+    pub assembly: bool,
+    pub drawing: bool,
+}
+
+impl Default for SuitePanes {
+    fn default() -> Self {
+        Self { part: false, assembly: true, drawing: true }
+    }
 }
 
 impl Default for Layout {
     fn default() -> Self {
-        Self { tree: SidePanel { shown: true, width: Side::Tree.default_width() } }
+        Self { tree: SidePanel { shown: true, width: Side::Tree.default_width() }, suite: SuitePanes::default() }
     }
 }
 
@@ -183,7 +198,7 @@ mod tests {
         assert_eq!(back.tree.width, Side::Tree.min_width());
         std::fs::write(&file, r#"{"layout":{"tree":{"shown":true,"width":99999.0}}}"#).unwrap();
         assert_eq!(layout_in(&file).tree.width, MAX_WIDTH);
-        let nan = Layout { tree: SidePanel { shown: true, width: f32::NAN } }.clamped();
+        let nan = Layout { tree: SidePanel { shown: true, width: f32::NAN }, ..Layout::default() }.clamped();
         assert_eq!(nan.tree.width, Side::Tree.default_width());
         let _ = std::fs::remove_file(file);
     }

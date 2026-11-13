@@ -1,6 +1,6 @@
 //! The canonical target parts through the application's commands, naming and exchange.
 
-use std::{collections::BTreeSet, path::Path};
+use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use serde_json::{Value, json};
 use soliddraft_app::{app_tools::AppTools, document::FeatureStatus, state::AppState};
@@ -140,7 +140,8 @@ fn exercise(index: usize) {
     let case = ribbon::case(&format!("canonical-parts/{name}"));
     let dir = case.path("");
     std::fs::create_dir_all(&dir).unwrap();
-    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+    let mut state = AppState::new(soliddraft_app::document::Document::new(name, kernel.clone()));
     let mut names = None;
     for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
         let tool = step["tool"].as_str().unwrap();
@@ -150,20 +151,25 @@ fn exercise(index: usize) {
         }
         if step["fresh_process"] == true {
             drop(state);
-            state = AppState::new(soliddraft_app::new_document());
+            kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_diagnostics(20_000_000));
+            state = AppState::new(soliddraft_app::document::Document::new(name, kernel.clone()));
         }
         eprintln!("{name} step {} {tool}", i + 1);
         let before = state.doc.model().part_json();
         let revision = state.doc.revision();
-        let (out, work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
-            call_checked(
-                &mut AppTools { state: &mut state },
-                tool,
-                arguments,
-                &Caller::Mcp { client: "canonical-parts".into() },
-            )
-        });
-        assert!(!work.exhausted, "{name} step {} exceeded application allowance: {work:?}", i + 1);
+        // Match MCP's per-kernel-call allowance; an export has its own whole-request check.
+        kernel.take_diagnostics().unwrap();
+        let out = call_checked(
+            &mut AppTools { state: &mut state },
+            tool,
+            arguments,
+            &Caller::Mcp { client: "canonical-parts".into() },
+        );
+        std::fs::write(
+            dir.join(format!("{:04}-kernel.json", i + 1)),
+            serde_json::to_vec_pretty(&kernel.take_diagnostics().unwrap()).unwrap(),
+        )
+        .unwrap();
         if let Some(reason) = step["refused"].as_str() {
             assert!(out.is_error && out.content.contains(reason), "{name}: {}", out.content);
             assert_eq!(state.doc.model().part_json(), before, "refused edit changed the part");

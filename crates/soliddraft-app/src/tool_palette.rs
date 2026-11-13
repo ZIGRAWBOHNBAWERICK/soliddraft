@@ -127,7 +127,11 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     } else {
         theme::panel()
     };
-    let focus = if response.has_focus() { Stroke::new(1.0, theme::accent()) } else { Stroke::NONE };
+    let focus = if response.has_focus() {
+        Stroke::new(if wide { 2.0 } else { 1.0 }, if wide { theme::on_accent() } else { theme::accent() })
+    } else {
+        Stroke::NONE
+    };
     ui.painter().rect(rect, CornerRadius::same(tokens::TOOL_RADIUS), fill, focus, StrokeKind::Inside);
     let galley = text(ui, state, command, width);
     let x = if wide {

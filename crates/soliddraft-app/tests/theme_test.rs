@@ -6,8 +6,9 @@
 //!
 //! Skips itself when no GPU adapter is available (plain CI runners).
 
-use egui::{Key, vec2};
+use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::AppAction;
@@ -76,6 +77,32 @@ fn the_bracket_in_light_and_dark() {
         let path = out_dir().join(format!("edit-suite-{}.png", mode.label().to_lowercase()));
         image.save(&path).expect("save Edit Suite png");
         eprintln!("wrote {}", path.display());
+        harness.get_by_label("Start sketch").focus();
+        harness.run_steps(2);
+        harness.key_press(Key::Tab);
+        harness.run_steps(2);
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run_steps(2);
+        assert!(harness.get_by_label("Start sketch").is_focused(), "keyboard navigation returns to Start sketch");
+        let rect = harness.get_by_label("Start sketch").rect();
+        let focused = harness.render().expect("focused Start sketch renders");
+        focused.save(out_dir().join(format!("focus-{}.png", mode.label().to_lowercase()))).unwrap();
+        let ring = focused.get_pixel((rect.left() + 1.0) as u32, rect.center().y as u32).0;
+        let fill = focused.get_pixel((rect.left() + 8.0) as u32, rect.center().y as u32).0;
+        let luminance = |pixel: [u8; 4]| -> f64 {
+            pixel[..3]
+                .iter()
+                .zip([0.2126, 0.7152, 0.0722])
+                .map(|(c, w)| {
+                    let v = f64::from(*c) / 255.0;
+                    w * if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+                })
+                .sum()
+        };
+        let (a, b) = (luminance(ring), luminance(fill));
+        let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+        eprintln!("{} keyboard focus contrast: {contrast:.2}:1", mode.label());
+        assert!(contrast >= 3.0, "{}: keyboard focus contrast is {contrast:.2}:1 ({ring:?} / {fill:?})", mode.label());
     }
     harness.state_mut().state.frame_layout = FrameLayout::Classic;
     harness.run_steps(6);

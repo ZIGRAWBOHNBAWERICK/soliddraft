@@ -230,6 +230,7 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
         app.run_steps(8);
         assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
         assert!(app.query_all_by_label("Boss-Extrude2 proof: Pending").next().is_some());
+        assert_eq!(app.state().state.edit_status().unwrap().0, "Proof pending");
         let caller = Caller::Mcp { client: "proof-light-test".into() };
         let path = case.path("part.step");
         std::fs::write(&path, b"existing export").unwrap();

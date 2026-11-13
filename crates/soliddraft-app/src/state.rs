@@ -1303,10 +1303,10 @@ impl AppState {
                 ("Preview", NoteKind::Info)
             });
         }
-        if self.doc.proof_state().answered_within_bound {
-            return Some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info));
+        if self.doc.proof_pending() {
+            return Some(("Proof pending", NoteKind::Info));
         }
-        self.doc.proof_pending().then_some(("Proof pending", NoteKind::Info))
+        self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
     }
 
     /// Exports only the committed revision. A live dimension edit cannot export

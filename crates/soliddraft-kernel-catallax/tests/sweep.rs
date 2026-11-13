@@ -1,4 +1,4 @@
-//! Line and arc sweeps through the exact application entry, properties, display and STEP.
+//! Path sweeps through the exact application entry, properties, display and STEP.
 
 use soliddraft_kernel_api::*;
 use soliddraft_kernel_catallax::CatallaxKernel;
@@ -242,4 +242,53 @@ fn unfinished_motions_say_only_that_they_are_coming_soon() {
         let refused = k.sweep(&OpTag::new("later"), sheet, &path).unwrap_err().to_string();
         assert!(refused.contains("This sweep path is coming soon."), "{path:?}: {refused}");
     }
+}
+
+fn spline() -> Sweep {
+    Sweep {
+        start: [0.0; 3],
+        orientation: SweepOrientation::Fixed,
+        segments: vec![PathSegment::Spline {
+            id: "rail".into(),
+            degree: 3,
+            control_points: vec![[0.0; 3], [1.0, 0.0, 1.0], [1.0, 1.0, 2.0], [0.0, 1.0, 3.0]],
+            weights: vec![1.0; 4],
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        }],
+    }
+}
+
+#[test]
+fn spline_path_keeps_exact_controls_and_plain_typed_refusals() {
+    let k = CatallaxKernel::new();
+    let sheet = k
+        .create_body_from_profile(&OpTag::new("profile"), &Profile::rectangle(Plane::XY, [0.0, 0.0].into(), 4.0, 2.0))
+        .unwrap()
+        .body;
+    let path = spline();
+    let swept = k.sweep(&OpTag::new("spline"), sheet, &path).unwrap();
+    assert!((k.mass_properties(swept.body).unwrap().volume - 24.0).abs() < 1e-8);
+    let recipe = k.body_recipe(swept.body).unwrap();
+    let rail = recipe["steps"].as_array().unwrap().iter().find(|s| s["op"] == "path").unwrap();
+    assert_eq!(rail["segments"][0]["control_points"][2], serde_json::json!(["1", "1", "2"]));
+    assert_eq!(rail["segments"][0]["id"], "rail");
+    assert!(k.export_step(swept.body, &StepOptions::default()).unwrap().text.contains("B_SPLINE_SURFACE"));
+    let mut returning = path.clone();
+    let PathSegment::Spline { control_points, .. } = &mut returning.segments[0] else { unreachable!() };
+    *control_points.last_mut().unwrap() = [0.0; 3];
+    let refused = k.sweep(&OpTag::new("return"), sheet, &returning).unwrap_err();
+    assert!(
+        matches!(refused, KernelError::InvalidInput(ref m) if m.contains("path may turn back or cross itself")),
+        "{refused}"
+    );
+    let mut turning = path.clone();
+    turning.orientation = SweepOrientation::FollowPath;
+    assert!(k.sweep(&OpTag::new("turn"), sheet, &turning).unwrap_err().to_string().contains("one spline segment"));
+    let mut invalid = path;
+    let PathSegment::Spline { weights, .. } = &mut invalid.segments[0] else { unreachable!() };
+    weights[1] = 0.0;
+    assert!(
+        k.sweep(&OpTag::new("weight"), sheet, &invalid).unwrap_err().to_string().contains("positive finite weight")
+    );
+    assert!(k.sweep(&OpTag::new("after"), sheet, &spline()).is_ok());
 }

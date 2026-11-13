@@ -379,7 +379,8 @@ fn property_page_builds_a_chain_and_offers_only_what_works() {
     harness.run_steps(4);
     harness.get_by_label("Sweep").click();
     harness.run_steps(4);
-    assert!(harness.query_by_label("Spline · Coming soon").is_some());
+    assert!(harness.query_by_label("Spline · Coming soon").is_none());
+    assert!(harness.query_by_label("Use spline path").is_some());
     assert!(harness.query_by_label("Helix · Coming soon").is_some());
     assert!(harness.query_by_label("Keep direction").is_some());
     // The property page scrolls; bring the control into view as a user would.
@@ -436,4 +437,152 @@ fn sweeps_saved_before_chains_read_back_with_their_names() {
     let text = serde_json::to_value(&name).unwrap();
     assert_eq!(text, json!({"kind":"side","entity":2}), "a one-piece path keeps the saved name");
     assert_eq!(serde_json::from_value::<soliddraft_model::Generator>(text).unwrap(), name);
+}
+
+fn check_spline(doc: &Document, volume: f64) {
+    selectable(doc, volume);
+    assert_eq!((doc.faces.len(), doc.edges.len()), (6, 12));
+    assert!(!doc.meshes[&doc.display_body().unwrap()].indices.is_empty());
+    for edge in &doc.edges {
+        assert!(doc.edge_ref(edge.id).is_some(), "edge {} has no saved name", edge.id);
+    }
+}
+
+fn spline_controls(end_z: f64) -> Value {
+    json!([{"kind":"spline", "id":"rail", "degree":3,
+        "control_points":[[0,0,0],[1,0,end_z / 3.0],[1,1,end_z * 2.0 / 3.0],[0,1,end_z]],
+        "weights":[1,1,1,1], "knots":[0,0,0,0,1,1,1,1]}])
+}
+
+#[test]
+fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
+    let mut doc = profile();
+    call(
+        &mut doc,
+        "sweep",
+        json!({"sketch":"Sketch1", "start":[0,0,0], "orientation":"fixed", "segments":spline_controls(3.0)}),
+    );
+    check_spline(&doc, 24.0);
+    let names = |doc: &Document| {
+        doc.faces
+            .iter()
+            .map(|f| {
+                let reference = doc.any_face_ref(f.id).unwrap();
+                (reference.feature, reference.generator, reference.ordinal, reference.label)
+            })
+            .collect::<Vec<_>>()
+    };
+    let before_names = names(&doc);
+    call(&mut doc, "edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "segments":spline_controls(6.0)}));
+    check_spline(&doc, 48.0);
+    assert_eq!(before_names, names(&doc));
+    call(&mut doc, "undo", json!({}));
+    check_spline(&doc, 24.0);
+    call(&mut doc, "redo", json!({}));
+    check_spline(&doc, 48.0);
+    let before = doc.features[1].kind.clone();
+    let mut returning = spline_controls(3.0);
+    returning[0]["control_points"][3] = json!([0, 0, 0]);
+    let mut detailed = spline_controls(3.0);
+    detailed[0]["control_points"][3] = json!([0, 1, 6]);
+    for (segments, message) in
+        [(returning, "path may turn back or cross itself"), (detailed, "too much detail to display accurately")]
+    {
+        let refused =
+            CommandTools { doc: &mut doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }
+                .call(
+                    "edit_sweep",
+                    json!({"feature":"Sweep1", "start":[0,0,0], "segments":segments}),
+                    &Caller::Mcp { client: "spline sweep regression".into() },
+                );
+        assert!(refused.is_error, "{}", refused.content);
+        assert!(refused.content.contains(message), "{}", refused.content);
+        for internal in ["sweep.spline", "mesh.vertex-limit", "Catallax", "stack", "kernel", "tessellate", "status 0"] {
+            assert!(!refused.content.contains(internal), "{}", refused.content);
+        }
+        assert_eq!(doc.features[1].kind, before);
+        check_spline(&doc, 48.0);
+    }
+    let path = std::env::temp_dir().join(format!("soliddraft-spline-sweep-{}.dwprt", std::process::id()));
+    call(&mut doc, "save", json!({"path":path}));
+    let mut reopened = Document::new("Reopened spline", soliddraft_app::kernel());
+    call(&mut reopened, "open", json!({"path":path}));
+    check_spline(&reopened, 48.0);
+    assert_eq!(reopened.features[1].kind, before);
+    let step = reopened.kernel().export_step(reopened.display_body().unwrap(), &Default::default()).unwrap();
+    assert!(step.text.contains("B_SPLINE_SURFACE"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[path = "support/ribbon.rs"]
+mod ribbon;
+
+#[test]
+fn spline_controls_build_through_the_registry_in_both_frames() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::{commands, settings::FrameLayout};
+    let case = ribbon::case("spline-sweep");
+    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+        let mut doc = profile();
+        doc.selection = Some(Selection::Feature(doc.features[0].id));
+        let mut app = ribbon::app(doc);
+        app.state_mut().state.frame_layout = layout;
+        app.run_steps(4);
+        ribbon::run_command(&mut app, "sweep");
+        app.get_by_label("Use spline path").scroll_to_me();
+        app.run_steps(24);
+        app.get_by_label("Use spline path").click();
+        app.run_steps(6);
+        assert!(app.query_by_label("Turn with the path · Coming soon").is_some());
+        case.frame(&mut app, &format!("{layout:?}-controls"));
+        app.get_by_label("OK (Enter)").click();
+        app.run_steps(6);
+        assert!(app.state().state.editor.is_none());
+        check_spline(&app.state().state.doc, 240.0);
+        case.frame(&mut app, &format!("{layout:?}-result"));
+        assert!(!commands::get("sweep").unwrap().available(commands::Context { sketch: true, ..Default::default() }));
+    }
+}
+
+#[test]
+fn pinned_sweep_hides_during_sketch_and_returns_in_both_frames() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::{command_line::BarSettings, settings::FrameLayout};
+    let case = ribbon::case("pinned-sweep-sketch");
+    let pins = BarSettings { tools: vec!["sweep".into(), "zoom_fit".into()], ..Default::default() };
+    soliddraft_app::settings::save_command_line(&pins).unwrap();
+    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+        let mut doc = ribbon::sketch();
+        doc.selection = Some(Selection::Feature(doc.features[0].id));
+        let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
+        app.state_mut().state.frame_layout = layout;
+        app.run_steps(4);
+        case.run(&mut app, |app| {
+            app.get_by_label("Sweep on the command bar");
+            ribbon::run_command(app, "edit_feature");
+            assert!(app.state().state.sketch.is_some());
+            assert!(
+                app.query_all_by_label("Sweep on the command bar").next().is_none(),
+                "pinned Sweep must be hidden while a sketch is open in {layout:?}"
+            );
+            app.get_by_label("Fit on the command bar");
+            assert!(!soliddraft_app::commands::get("sweep").unwrap().is_enabled(&app.state().state));
+            assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+            assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+            case.frame(app, &format!("{layout:?}-open-sketch"));
+
+            ribbon::run_command(app, "exit_sketch");
+            assert!(app.state().state.sketch.is_none() && app.state().state.editor.is_none());
+            assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+            assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+            app.get_by_label("Sweep on the command bar").click();
+            app.run_steps(6);
+            assert!(matches!(
+                app.state().state.editor.as_ref().map(|e| &e.params),
+                Some(soliddraft_app::state::EditorParams::Sweep(_))
+            ));
+            assert_eq!(app.state().state.doc.features.len(), 1);
+            case.frame(app, &format!("{layout:?}-sweep-after-close"));
+        });
+    }
 }

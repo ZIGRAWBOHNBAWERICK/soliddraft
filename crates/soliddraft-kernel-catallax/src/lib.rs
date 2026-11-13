@@ -686,7 +686,17 @@ fn build(
     } else {
         build_with_files(&converted.recipe, prefix, files)
     }
-    .map_err(|e| build_error(op, e))?;
+    .map_err(|e| {
+        let spline = input["steps"].as_array()
+            .and_then(|steps| steps.iter().find(|step| step["id"] == input["result"]))
+            .and_then(|step| step["path"]["segments"].as_array())
+            .is_some_and(|segments| segments.iter().any(|s| s["kind"] == "spline"));
+        if op == OpKind::Sweep && spline && e.code() == "features.unsupported-path" {
+            KernelError::InvalidInput("This spline sweep was refused because it needs one spline segment and a profile that keeps its direction".into())
+        } else {
+            build_error(op, e)
+        }
+    })?;
     Ok((app, converted.steps))
 }
 
@@ -753,6 +763,11 @@ fn build_error(op: OpKind, error: Error) -> KernelError {
 }
 
 fn query_error(query: &str, error: catallax_numbers::Refusal) -> KernelError {
+    if error.code == "mesh.vertex-limit" {
+        return KernelError::InvalidInput(
+            "This shape needs too much detail to display accurately. Try a smoother path or a simpler profile.".into(),
+        );
+    }
     KernelError::QueryFailed { query: query.into(), code: 0, message: format!("{}: {}", error.code, error.detail) }
 }
 

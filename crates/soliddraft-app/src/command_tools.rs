@@ -344,7 +344,7 @@ pub enum Line {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         countersink: Option<Countersink>,
     },
-    /// Copies the part's body along a direction.
+    /// Repeats a feature or copies the body along a direction.
     LinearPattern {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
@@ -355,7 +355,7 @@ pub enum Line {
         /// Copies, including the original.
         count: u32,
     },
-    /// Copies the part's body around an axis.
+    /// Repeats a feature or copies the body around an axis.
     CircularPattern {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
@@ -1935,6 +1935,8 @@ impl Line {
 
     /// The line as people read it, for the card and the command log.
     pub fn describe(&self) -> (String, String) {
+        let source_prefix =
+            |source: &Option<String>| source.as_ref().map_or_else(String::new, |name| format!("{name}, "));
         let pt = |p: &Point| format!("({}, {}, {})", fmt_mm(p[0]), fmt_mm(p[1]), fmt_mm(p[2]));
         let end = |through: bool, depth: f64, flip: bool| {
             let mut s = if through { "through all".to_owned() } else { format!("{} mm", fmt_mm(depth)) };
@@ -2021,12 +2023,14 @@ impl Line {
                 };
                 ("Hole".into(), format!("{} × Ø{} {depth}{head} on {face}", points.len(), fmt_mm(*diameter)))
             }
-            Line::LinearPattern { direction, spacing, count, source: _ } => {
-                ("Linear pattern".into(), format!("{count} × {} mm along {}", fmt_mm(*spacing), pt(direction)))
-            }
-            Line::CircularPattern { axis_direction, count, angle, .. } => {
-                ("Circular pattern".into(), format!("{count} × {}° about {}", fmt_mm(*angle), pt(axis_direction)))
-            }
+            Line::LinearPattern { direction, spacing, count, source } => (
+                "Linear pattern".into(),
+                format!("{}{count} × {} mm along {}", source_prefix(source), fmt_mm(*spacing), pt(direction)),
+            ),
+            Line::CircularPattern { axis_direction, count, angle, source, .. } => (
+                "Circular pattern".into(),
+                format!("{}{count} × {}° about {}", source_prefix(source), fmt_mm(*angle), pt(axis_direction)),
+            ),
             Line::Mirror { plane, keep_original } => {
                 ("Mirror".into(), format!("in {plane}{}", if *keep_original { ", keeping the original" } else { "" }))
             }
@@ -2086,8 +2090,8 @@ impl Line {
                     ))
                 ),
             ),
-            Line::EditPattern { feature, count, step, source: _ } => {
-                (format!("Edit {feature}"), format!("{count} × {}", fmt_mm(*step)))
+            Line::EditPattern { feature, count, step, source } => {
+                (format!("Edit {feature}"), format!("{}{count} × {}", source_prefix(source), fmt_mm(*step)))
             }
             Line::EditMirror { feature, keep_original } => {
                 (format!("Edit {feature}"), if *keep_original { "keep the original" } else { "reflection only" }.into())

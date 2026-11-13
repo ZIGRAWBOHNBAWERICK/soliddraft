@@ -66,7 +66,7 @@ pub enum FeatureKind {
     Chamfer(BlendFeature),
     /// Drills holes into a planar face of the part.
     Hole(HoleFeature),
-    /// Copies the part's body along a line or around an axis.
+    /// Repeats a feature or copies the body along a line or around an axis.
     Pattern(PatternFeature),
     /// Reflects the part's body in a plane.
     Mirror(MirrorFeature),
@@ -450,7 +450,7 @@ pub enum PatternSpec {
     },
 }
 
-/// Copies of the part's body, united with it.
+/// A repeated feature operation, or copies of the whole body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PatternFeature {
     /// Where the copies go.

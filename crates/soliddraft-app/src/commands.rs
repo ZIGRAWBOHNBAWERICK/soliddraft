@@ -1956,7 +1956,7 @@ fn registry() -> Vec<CommandSpec> {
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Pattern(f) if matches!(f.layout, soliddraft_model::PatternSpec::Linear { .. }))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Pattern needs a body".into())))
-            .agents(Agents::Verb, "The copies unite with the body.", tools::linear_pattern_params)
+            .agents(Agents::Verb, "Repeat the named source feature, or omit source to copy the body.", tools::linear_pattern_params)
             .undo(Undo::Step),
         cmd("circular_pattern", "Circular", Icon::Cad("circular"), "Repeat a feature or body around an axis").outside_sketch()
             .on(Solid, "Pattern", Large)
@@ -1964,7 +1964,7 @@ fn registry() -> Vec<CommandSpec> {
             .when(|s| has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Pattern(f) if matches!(f.layout, soliddraft_model::PatternSpec::Circular { .. }))))
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Pattern needs a body".into())))
-            .agents(Agents::Verb, "The copies unite with the body.", tools::circular_pattern_params)
+            .agents(Agents::Verb, "Repeat the named source feature, or omit source to copy the body.", tools::circular_pattern_params)
             .undo(Undo::Step),
         cmd("mirror", "Mirror", Icon::Cad("mirror"), "Mirror the part's body in a plane")
             .on(Solid, "Pattern", Large)

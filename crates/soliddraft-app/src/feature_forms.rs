@@ -441,7 +441,7 @@ fn render(
         properties,
         state::AppAction,
     };
-    use soliddraft_kernel_api::{HoleDepth, LatticeCell, SweepOrientation};
+    use soliddraft_kernel_api::{HoleDepth, LatticeCell};
     if key == Key::Edges {
         picked_edges(ui, editor);
         return false;
@@ -542,12 +542,13 @@ fn render(
             }
         }
         (EditorParams::Sweep(p), Key::Orientation) => {
-            choice(
-                ui,
-                "orientation",
-                &mut p.path.orientation,
-                &[(SweepOrientation::FollowPath, "Follow path"), (SweepOrientation::Fixed, "Fixed")],
-            );
+            egui::ComboBox::from_id_salt("orientation")
+                .width(ui.available_width())
+                .selected_text(match p.path.orientation {
+                    soliddraft_kernel_api::SweepOrientation::Fixed => "Keep direction",
+                    soliddraft_kernel_api::SweepOrientation::FollowPath => "Turn with the path",
+                })
+                .show_ui(ui, |ui| crate::sweep_panel::orientation(ui, &mut p.path));
             crate::sweep_panel::keep_valid(&mut p.path);
         }
         (EditorParams::Sweep(p), Key::SweepPath) => {

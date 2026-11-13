@@ -124,15 +124,9 @@ pub fn keep_valid(path: &mut Sweep) {
 }
 
 /// The path controls. `radius` is the default for a new arc.
-pub fn page(
-    ui: &mut egui::Ui,
-    path: &mut Sweep,
-    radius: f64,
-    coord: impl Fn(&mut egui::Ui, &str, &str, &mut f64) + Copy,
-) {
+pub fn orientation(ui: &mut egui::Ui, path: &mut Sweep) {
     let spline = path.segments.iter().any(|s| matches!(s, PathSegment::Spline { .. }));
     let arcs = path.segments.iter().any(|s| matches!(s, PathSegment::Arc { .. }));
-    theme::section_label(ui, "Profile orientation");
     if arcs {
         ui.add_enabled(false, egui::RadioButton::new(false, "Keep direction · Coming soon"));
     } else {
@@ -143,6 +137,17 @@ pub fn page(
     } else {
         ui.radio_value(&mut path.orientation, SweepOrientation::FollowPath, "Turn with the path");
     }
+}
+
+pub fn page(
+    ui: &mut egui::Ui,
+    path: &mut Sweep,
+    radius: f64,
+    coord: impl Fn(&mut egui::Ui, &str, &str, &mut f64) + Copy,
+) {
+    let spline = path.segments.iter().any(|s| matches!(s, PathSegment::Spline { .. }));
+    theme::section_label(ui, "Profile orientation");
+    orientation(ui, path);
     coords(ui, "sweep start", "Path start", &mut path.start, coord);
     let mut removed = None;
     let many = path.segments.len() > 1;

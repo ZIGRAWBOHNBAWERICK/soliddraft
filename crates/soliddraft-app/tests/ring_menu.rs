@@ -115,7 +115,7 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
                 {
                     assert!(window.contains_rect(node.rect()), "{name}: quick command stays inside");
                 }
-                let mut column_top = None;
+                let mut column_top: Option<f32> = None;
                 for group in ["View", "Scene", "Display", "Show"] {
                     // Popup headings follow the main-window labels in the accessibility tree.
                     let heading = app

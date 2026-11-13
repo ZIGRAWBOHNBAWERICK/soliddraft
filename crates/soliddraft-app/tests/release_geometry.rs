@@ -564,8 +564,7 @@ fn ridealong_material_mass_and_face_accuracy_survive_reopen() {
 fn ridealong_fitted_faces_keep_their_own_bounds() {
     use soliddraft_kernel_api::FaceAccuracy;
     let mut state = fresh();
-    let scenario: Value =
-        serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/ring-fillet.json")).unwrap();
     for step in scenario["steps"].as_array().unwrap().iter().take(5) {
         accepted(&mut state, step["tool"].as_str().unwrap(), step["arguments"].clone());
     }

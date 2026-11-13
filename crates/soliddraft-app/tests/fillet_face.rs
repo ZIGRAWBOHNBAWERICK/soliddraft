@@ -902,7 +902,7 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
     use soliddraft_kernel_api::FaceAccuracy;
     let _gpu = gpu();
     let scenario: serde_json::Value =
-        serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
+        serde_json::from_str(include_str!("../../../ci/scenarios/ring-fillet.json")).unwrap();
     let mut state = AppState::new(Document::new("Fitted face", soliddraft_app::kernel()));
     for step in scenario["steps"].as_array().unwrap().iter().take(5) {
         let out = call_checked(
@@ -921,7 +921,7 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
             FaceAccuracy::Fitted { max_deviation_mm } => Some((face.id, max_deviation_mm)),
             _ => None,
         })
-        .expect("the rolling envelope has a fit bound");
+        .expect("the ring fillet has a fit bound");
     let mut app = harness(state.doc);
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));

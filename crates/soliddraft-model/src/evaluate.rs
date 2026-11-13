@@ -326,25 +326,25 @@ impl Document {
         let mut result = None;
         let work_used = self.kernel.measure_work(&mut || {
             result = Some(match &f.kind {
-            FeatureKind::Combine { operation, tool } => {
-                let end = self.index_of(f.id).unwrap_or(self.built.len());
-                match (current, self.body_at(*tool, end)) {
-                    _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
-                    (Some(target), Some(tool)) => {
-                        let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
-                            let message = match error {
-                                KernelError::InvalidInput(message) => message,
-                                KernelError::Unsupported(message) if message == "this would leave nothing of the part" => "This combine would leave no solid body.".into(),
-                                KernelError::Unsupported(_) => "Combine for these bodies is coming soon.".into(),
-                                _ => "These bodies cannot be combined with this operation. Check that their boundaries are closed and overlap.".into(),
-                            };
-                            KernelError::InvalidInput(message)
-                        });
-                        self.finish(result, current, |_| Vec::new())
+                FeatureKind::Combine { operation, tool } => {
+                    let end = self.index_of(f.id).unwrap_or(self.built.len());
+                    match (current, self.body_at(*tool, end)) {
+                        _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
+                        (Some(target), Some(tool)) => {
+                            let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
+                                let message = match error {
+                                    KernelError::InvalidInput(message) => message,
+                                    KernelError::Unsupported(message) if message == "this would leave nothing of the part" => "This combine would leave no solid body.".into(),
+                                    KernelError::Unsupported(_) => "Combine for these bodies is coming soon.".into(),
+                                    _ => "These bodies cannot be combined with this operation. Check that their boundaries are closed and overlap.".into(),
+                                };
+                                KernelError::InvalidInput(message)
+                            });
+                            self.finish(result, current, |_| Vec::new())
+                        }
+                        _ => Built::failed(current, "Combine needs two available solid bodies."),
                     }
-                    _ => Built::failed(current, "Combine needs two available solid bodies."),
                 }
-            }
                 FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
                     Ok((plane, _)) => {
                         let mut built = Built::pass(FeatureStatus::Ok, current);

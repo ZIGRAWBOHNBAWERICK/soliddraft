@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use catallax_field::{Plan, Workspace, printing, workers};
+use catallax_field::{Plan, Workspace, printing};
 use catallax_numbers::{Decider, Rational, Refusal};
 use soliddraft_kernel_api::{Aabb, Vec3};
 
@@ -44,12 +44,11 @@ pub(super) fn sample(plan: &Plan, bounds: Aabb, radius: f64, dec: &mut Decider) 
         }
     }
     let mut values = Vec::with_capacity(total);
-    for chunk in points.chunks(8192) {
+    let mut storage = Workspace::default();
+    for chunk in points.chunks(1024) {
         dec.check_deadline()?;
-        for value in
-            workers::map_init(chunk, Workspace::default, |storage, &point| plan.unproved_preview(point, storage))
-        {
-            values.push(value?.value);
+        for &point in chunk {
+            values.push(plan.unproved_preview(point, &mut storage)?.value);
         }
     }
     let mut surface = Surface::new(&points, &values);

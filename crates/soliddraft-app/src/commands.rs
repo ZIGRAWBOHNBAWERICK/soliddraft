@@ -1924,9 +1924,9 @@ fn registry() -> Vec<CommandSpec> {
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Thicken(_))))
             .agents(Agents::Verb, "Choose faces, thickness and front or back side.", tools::thicken_params)
             .undo(Undo::Step),
-        cmd("edit_offset", "Edit offset", Icon::Shell, "Change an offset distance")
+        cmd("edit_offset", "Edit offset", Icon::Shell, "Change an offset distance").outside_sketch()
             .agents(Agents::Verb, "Everything after it rebuilds.", tools::edit_offset_params).undo(Undo::Step),
-        cmd("edit_thicken", "Edit thicken", Icon::Shell, "Change thickness and side")
+        cmd("edit_thicken", "Edit thicken", Icon::Shell, "Change thickness and side").outside_sketch()
             .agents(Agents::Verb, "Selected faces stay the same; everything after it rebuilds.", tools::edit_thicken_params).undo(Undo::Step),
         cmd("shell", "Shell", Icon::Cad("shell"), "Hollow the part, leaving walls of one thickness")
             .on(Solid, "Modify", Small)

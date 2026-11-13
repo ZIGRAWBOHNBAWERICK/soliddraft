@@ -1,7 +1,6 @@
 //! Exact body offsets and selected-face thickening through native recipe operations.
 
 use catallax_recipe::{FaceRef, Operation, StepId};
-use serde_json::json;
 use soliddraft_kernel_api::{FaceId, KernelError, KernelResult, OpKind, Thicken};
 
 pub(super) fn offset(body: StepId, distance: f64) -> KernelResult<Operation> {
@@ -23,9 +22,11 @@ pub(super) fn thicken(
         return Err(KernelError::InvalidInput("Thicken needs a finite, positive thickness".into()));
     }
     let faces = params.faces.iter().map(|id| face(*id)).collect::<KernelResult<Vec<_>>>()?;
-    serde_json::from_value(json!({"op":"thicken", "body":body, "faces":faces,
-        "thickness":crate::native::number(params.thickness, "thickness")?, "side":params.side}))
-    .map_err(|_| KernelError::InvalidInput("These thickening parameters are not supported".into()))
+    let side=match params.side {
+        soliddraft_kernel_api::ThickenSide::Front => catallax_recipe::ThickenSide::Front,
+        soliddraft_kernel_api::ThickenSide::Back => catallax_recipe::ThickenSide::Back,
+    };
+    Ok(Operation::Thicken { body, faces, thickness:crate::native::number(params.thickness,"thickness")?, side })
 }
 
 pub(super) fn refusal(op: OpKind, code: &str) -> KernelError {

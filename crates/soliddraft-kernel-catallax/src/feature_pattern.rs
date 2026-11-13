@@ -37,7 +37,7 @@ fn placement(layout: &PatternLayout, index: u32, dec: &mut Decider) -> KernelRes
     Ok(match *layout {
         PatternLayout::Linear { step, .. } => {
             let [x, y, z] = crate::native::vector(step, "pattern step")?.0.map(|v| v.value().clone());
-            Isometry::translation(RVector3::new(x * &n, y * &n, z * &n))
+            Isometry::translation(RVector3::new(&x * &n, &y * &n, &z * &n))
         }
         PatternLayout::Circular { axis_origin, axis_direction, angle_deg, .. } => {
             let [x, y, z] = crate::native::point(axis_origin, "pattern axis")?.0.map(|v| v.value().clone());

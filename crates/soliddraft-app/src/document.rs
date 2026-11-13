@@ -2655,7 +2655,7 @@ impl Document {
     }
 
     /// Fills each display mesh's appearance table and per-vertex index from the part's
-    /// appearance assignments, resolved by the model for its default configuration.
+    /// appearance assignments, resolved for the visible configuration.
     fn apply_appearances(&mut self) {
         self.shading = (self.model.materials().clone(), self.model.active_configuration().cloned());
         let resolved = self.model.appearance_table(self.model.active_configuration());

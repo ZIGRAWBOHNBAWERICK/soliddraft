@@ -345,11 +345,10 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
                 })
                 .min_by_key(|p| p.iter().zip(expected).map(|(a, b)| u32::from(a.abs_diff(b))).sum::<u32>())
                 .unwrap();
-            assert!(
-                ink.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 6),
-                "{}: {ink:?} keeps {expected:?}",
-                scene.label()
-            );
+            assert_eq!(ink, expected, "{} keeps its geometry colour", scene.label());
+            // Read the background beside the stroke, including on gradient scenes.
+            let pixel = image.get_pixel((center.x.round() + 6.0) as u32, (center.y.round() + 6.0) as u32).0;
+            let background = [pixel[0], pixel[1], pixel[2]];
             let (a, b) = (luminance(ink), luminance(background));
             let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
             assert!(contrast >= 4.5, "{}: {ink:?} against {background:?} is {contrast}:1", scene.label());

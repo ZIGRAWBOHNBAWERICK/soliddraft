@@ -8,10 +8,34 @@ use egui_kittest::kittest::Queryable;
 use soliddraft_app::{document::DisplayMesh, section::SectionPlane};
 
 fn ready(app: &mut ribbon::App) {
-    ribbon::until(app, "the section is tessellated", |app| {
+    let state = &app.state().state;
+    eprintln!(
+        "[DEBUG-section-wait] request: enabled={} plane={:?} offset={} flip={} display={}",
+        state.section.enabled, state.section.plane, state.section.offset, state.section.flip, state.doc.mesh_version
+    );
+    let start = std::time::Instant::now();
+    loop {
         let state = &app.state().state;
-        state.section.mesh(&state.doc).is_some()
-    });
+        if state.section.mesh(&state.doc).is_some() {
+            break;
+        }
+        assert!(state.section.enabled, "the section stayed open while its mesh was requested");
+        assert!(
+            app.query_by_label("Could not cut this part on that plane. Try another plane or offset.").is_none(),
+            "the requested cut succeeded"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(60),
+            "section did not settle: enabled={} plane={:?} offset={} flip={} display={} proved={}",
+            state.section.enabled,
+            state.section.plane,
+            state.section.offset,
+            state.section.flip,
+            state.doc.mesh_version,
+            state.doc.proof_state().current_proved_display()
+        );
+        app.step();
+    }
     app.run_steps(3);
 }
 

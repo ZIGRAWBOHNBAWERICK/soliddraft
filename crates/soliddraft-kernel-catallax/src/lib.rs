@@ -1445,6 +1445,10 @@ impl Kernel for CatallaxKernel {
             run();
             let after = catallax_numbers::current_operation_work();
             (after.used.saturating_sub(before), after.exhausted)
+        } else if let Some(diagnostics) = &self.diagnostics {
+            let before = diagnostics.work_used();
+            run();
+            return Ok(before.zip(diagnostics.work_used()).map(|(before, after)| after.saturating_sub(before)));
         } else {
             let (_, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
             (work.used, work.exhausted)

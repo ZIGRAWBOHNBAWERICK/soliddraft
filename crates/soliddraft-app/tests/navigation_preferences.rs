@@ -236,6 +236,47 @@ fn practice_label(w: &Window) -> String {
 }
 
 #[test]
+fn saved_custom_sketch_keys_survive_the_new_defaults_in_every_preset() {
+    use soliddraft_app::commands::ShortcutPreset;
+
+    let (_guard, dir) = config_dir("sketch-key-migration");
+    let mut lost = Vec::new();
+    for preset in ShortcutPreset::ALL {
+        for (custom, key, added_default) in [
+            ("sketch_line", "T", "sketch_trim"),
+            ("sketch_circle", "O", "sketch_offset"),
+            ("smart_dimension", "M", "sketch_move"),
+        ] {
+            write(
+                &dir,
+                &serde_json::json!({
+                    "shortcuts": {"preset": preset.id(), "overrides": {custom: key}}
+                })
+                .to_string(),
+            );
+            let before = bytes(&dir);
+            let mut w = window();
+            w.run_steps(2);
+            let loaded = &w.state().shortcuts;
+            if loaded.shortcut_text(custom).as_deref() != Some(key) {
+                lost.push(format!("{}: {custom} -> {key}", preset.id()));
+                continue;
+            }
+            assert!(loaded.keys_of(added_default).is_empty(), "the custom assignment owns {key}");
+            for (other, default_key) in [("sketch_trim", "T"), ("sketch_offset", "O"), ("sketch_move", "M")] {
+                if other != added_default {
+                    assert_eq!(loaded.shortcut_text(other).as_deref(), Some(default_key));
+                }
+            }
+            assert_eq!(bytes(&dir), before, "opening Preferences does not write settings");
+            settings::save_shortcuts(loaded).unwrap();
+            assert_eq!(settings::shortcuts(), *loaded, "migration survives save and reopen");
+        }
+    }
+    assert!(lost.is_empty(), "lost saved mappings: {lost:?}");
+}
+
+#[test]
 fn mouse_page_preset_switch_updates_list_practice_and_settings() {
     let (_guard, dir) = config_dir("mouse");
     write(&dir, r#"{"theme":"dark"}"#);
@@ -657,6 +698,21 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     w.get_by_role_and_label(Role::RadioButton, "SolidWorks").click();
     w.run_steps(3);
     let shortcut = |w: &Window, id| w.state().shortcuts.shortcut_text(id).unwrap();
+    let sketch_keys = |w: &Window| {
+        for (id, key) in [
+            ("sketch_line", "L"),
+            ("sketch_rectangle", "R"),
+            ("sketch_circle", "C"),
+            ("sketch_arc", "A"),
+            ("smart_dimension", "D"),
+            ("sketch_trim", "T"),
+            ("sketch_offset", "O"),
+            ("sketch_move", "M"),
+        ] {
+            assert_eq!(shortcut(w, id), key);
+        }
+    };
+    sketch_keys(&w);
     assert_eq!(shortcut(&w, "zoom_fit"), "F");
     assert_eq!(shortcut(&w, "view_front"), "Ctrl+1");
     assert_eq!(shortcut(&w, "view_isometric"), "Ctrl+7");
@@ -669,6 +725,7 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(shortcut(&w, "zoom_fit"), "F6");
     assert_eq!(shortcut(&w, "view_front"), "F");
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "fusion");
+    sketch_keys(&w);
 
     click(&mut w, "Clear search");
     w.get_by_role_and_label(Role::TextInput, "Search commands").click();
@@ -686,6 +743,7 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(shortcut(&w, "view_front"), "F");
     assert_eq!(shortcut(&w, "normal_to"), "N");
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "soliddraft");
+    sketch_keys(&w);
     assert_eq!(file_json(&dir)["theme"], "dark", "other settings keys stay");
 }
 

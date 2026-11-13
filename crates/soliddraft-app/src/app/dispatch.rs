@@ -208,14 +208,26 @@ impl SolidDraftApp {
                     None => {
                         self.open_editor(None, EditorParams::PickPlane);
                         self.state.origin_open = true;
-                        self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
+                        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                            self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                            self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
+                        } else {
+                            self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
+                        }
                     }
                 }
             }
             AppAction::StartSketchOn(plane) => {
-                self.close_editor();
+                let tool = self.close_editor().and_then(|editor| editor.pending_sketch_tool);
                 match self.state.doc.apply(Command::AddSketch { plane }) {
-                    Ok(Some(id)) => self.open_sketch(id),
+                    Ok(Some(id)) => {
+                        self.open_sketch(id);
+                        if let Some(tool) = tool
+                            && let Some(session) = &mut self.state.sketch
+                        {
+                            session.set_tool(tool);
+                        }
+                    }
                     Ok(None) => {}
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }
@@ -887,6 +899,17 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SketchTool(tool) => {
+                if !self.state.in_sketch()
+                    && self.state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && crate::commands::Context::of(&self.state).part()
+                {
+                    self.apply(ctx, AppAction::StartSketch);
+                    if let Some(editor) = &mut self.state.editor
+                        && matches!(editor.params, EditorParams::PickPlane)
+                    {
+                        editor.pending_sketch_tool = Some(tool);
+                    }
+                }
                 if let Some(s) = self.state.sketch.as_mut() {
                     s.set_tool(tool);
                 }

@@ -60,6 +60,8 @@ pub enum FeatureKind {
     Revolve(RevolveFeature),
     /// A polygon sketch swept along a chain of lines and arcs.
     Sweep(SweepFeature),
+    /// Joins two or more ordered sketch or face profiles.
+    Loft(LoftFeature),
     /// Rounds edges.
     Fillet(BlendFeature),
     /// Bevels edges.
@@ -94,6 +96,7 @@ impl FeatureKind {
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Revolve(_) => "Revolve",
             FeatureKind::Sweep(_) => "Sweep",
+            FeatureKind::Loft(_) => "Loft",
             FeatureKind::Extrude(e) if e.operation == ExtrudeOp::Cut => "Cut-Extrude",
             FeatureKind::Extrude(_) => "Boss-Extrude",
             FeatureKind::Fillet(_) => "Fillet",
@@ -149,6 +152,7 @@ impl FeatureKind {
             FeatureKind::ReferencePlane(p) => out.extend(p.dependencies()),
             FeatureKind::Revolve(r) => out.push(r.sketch),
             FeatureKind::Sweep(s) => out.push(s.sketch),
+            FeatureKind::Loft(l) => out.extend(l.profiles.iter().map(LoftProfile::feature)),
             FeatureKind::Extrude(e) => {
                 if let ProfileSource::Sketch { feature } = e.profile {
                     out.push(feature);
@@ -200,6 +204,42 @@ pub struct SweepFeature {
     pub sketch: FeatureId,
     /// The saved path, including its segment identity.
     pub path: soliddraft_kernel_api::Sweep,
+}
+
+/// A persistent source for one loft profile.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LoftProfile {
+    /// One closed sketch region, including its holes.
+    Sketch {
+        /// The sketch's stable identity.
+        feature: FeatureId,
+    },
+    /// The exact boundary of a planar face.
+    Face {
+        /// The persistent face name.
+        face: FaceRef,
+    },
+}
+
+impl LoftProfile {
+    /// The feature read by this profile.
+    pub fn feature(&self) -> FeatureId {
+        match self {
+            Self::Sketch { feature } => *feature,
+            Self::Face { face } => face.feature,
+        }
+    }
+}
+
+/// An ordered loft through sketches or planar faces.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoftFeature {
+    /// Profiles in the order the loft follows.
+    pub profiles: Vec<LoftProfile>,
+    /// Straight or smooth sides between profiles.
+    pub shape: soliddraft_kernel_api::LoftShape,
 }
 
 /// A sketch and the plane it is drawn on.

@@ -111,6 +111,16 @@ impl Kernel for Counting {
         self.inner.extrude(tag, profile, params)
     }
 
+    fn create_profile_from_face(&self, tag: &OpTag, body: BodyId, face: FaceId) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.create_profile_from_face(tag, body, face)
+    }
+
+    fn loft(&self, tag: &OpTag, profiles: &[BodyId], shape: crate::LoftShape) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.loft(tag, profiles, shape)
+    }
+
     fn sweep(&self, tag: &OpTag, profile: BodyId, params: &crate::Sweep) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.sweep(tag, profile, params)

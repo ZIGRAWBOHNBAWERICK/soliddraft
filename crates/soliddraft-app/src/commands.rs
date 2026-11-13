@@ -596,10 +596,7 @@ impl CommandSpec {
 
     /// Commands whose geometry is waiting for Catallax, in roadmap section 6 order.
     pub fn catallax_wait(&self) -> Option<&'static str> {
-        match self.id {
-            "loft" => Some(COMING_SOON),
-            _ => None,
-        }
+        None
     }
 
     /// Whether the command works in the app now, rather than waiting as Coming soon.
@@ -1797,19 +1794,30 @@ fn registry() -> Vec<CommandSpec> {
         cmd("edit_revolve", "Edit revolve", Icon::Revolve, "Change a revolution angle")
             .agents(Agents::Verb, "Preserves the sketch and axis.", tools::edit_revolve_params)
             .undo(Undo::Step),
-        cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along lines and arcs")
+        cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along lines, arcs or a spline")
             .on(Solid, "Create", Small)
             .run(|_| AppAction::StartSweep)
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s) && s.selected_sketch().is_some())
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_))))
             .hint(|s| after_field(s).or_else(|| s.selected_sketch().is_none().then(|| "Select a closed polygon sketch to sweep".into())))
-            .agents(Agents::Verb, "Sweep a closed polygon sketch along a chain of lines and quarter, half or three-quarter arcs. The profile keeps its placement. `end` is a shorthand for one line.", tools::sweep_params)
+            .agents(Agents::Verb, "Sweep a closed polygon sketch along lines and arcs, or one rational spline with fixed orientation. The profile keeps its placement. `end` is a shorthand for one line.", tools::sweep_params)
             .undo(Undo::Step),
         cmd("edit_sweep", "Edit sweep", Icon::Sweep, "Change a sweep path")
             .agents(Agents::Verb, "Preserves the profile. Segments without an `id` keep the saved identity at their position.", tools::edit_sweep_params)
             .undo(Undo::Step),
-        cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft between profiles").on(Solid, "Create", Small),
+        cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft through ordered sketch or face profiles")
+            .on(Solid, "Create", Small)
+            .run(|_| AppAction::StartLoft)
+            .outside_sketch()
+            .when(|s| !s.in_sketch() && field_open(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Loft(_))))
+            .hint(after_field)
+            .agents(Agents::Verb, "Loft through two or more closed sketches or planar faces in the supplied order, with ruled or smooth sides.", tools::loft_params)
+            .undo(Undo::Step),
+        cmd("edit_loft", "Edit loft", Icon::Loft, "Change loft profiles or side shape")
+            .agents(Agents::Verb, "Change the ordered profiles and side shape of an existing loft.", tools::edit_loft_params)
+            .undo(Undo::Step),
         // Cut.
         cmd("cut", "Cut", Icon::Cad("cut"), "Remove material: cut a sketch into the part")
             .on(Solid, "Remove", Large)
@@ -2171,6 +2179,31 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::SetDisplay(DisplayMode::Wireframe))
             .lit(|s| s.viewport.display == DisplayMode::Wireframe)
 .app_only(LOOK),
+        cmd("scene_white", "Plain white", Icon::Display, "Set the viewport background to Plain white")
+            .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::White))
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+.app_only(LOOK),
+        cmd("scene_studio", "Studio fade", Icon::Display, "Set the viewport background to Studio fade")
+            .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Studio))
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+.app_only(LOOK),
+        cmd("scene_faded", "3 point faded", Icon::Display, "Set the viewport background to 3 point faded")
+            .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Faded))
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+.app_only(LOOK),
+        cmd("scene_spot", "Soft spotlight", Icon::Display, "Set the viewport background to Soft spotlight")
+            .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Spot))
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+.app_only(LOOK),
+        cmd("scene_graphite", "Graphite", Icon::Display, "Set the viewport background to Graphite")
+            .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Graphite))
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+.app_only(LOOK),
         cmd("scene", "Scene", Icon::Display, "Choose a background: scene white, scene studio, scene graphite")
             .run(|s| AppAction::SetScene(s.viewport.scene.unwrap_or_default()))
             .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
@@ -2323,6 +2356,7 @@ fn registry() -> Vec<CommandSpec> {
 .app_only("It closes the window"),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
+            .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))
             .run(|s| {
                 let id = s.selected_feature().expect("enabled with a selected feature");
                 if selected_feature_is(s, |f| f.is_sketch()) {
@@ -2333,6 +2367,22 @@ fn registry() -> Vec<CommandSpec> {
             })
             .when(|s| s.selected_feature().is_some())
 .app_only("It opens the feature's PropertyManager; agents and scripts change a feature with edit_extrude, edit_revolve, edit_sweep, edit_cut, edit_fillet, edit_chamfer and edit_dimension"),
+        cmd("repair_feature", "Repair references…", Icon::Repair, "Repair the selected feature's references")
+            .run(|s| AppAction::StartRepair(s.selected_feature().expect("enabled with a selected feature")))
+            .outside_sketch()
+            .when(|s| selected_feature_is(s, |f| matches!(f.status, crate::document::FeatureStatus::NeedsRepair(_))))
+            .shown(|s| selected_feature_is(s, |f| matches!(f.status, crate::document::FeatureStatus::NeedsRepair(_))))
+.app_only(EDITOR),
+        cmd("rollback_here", "Roll back to here", Icon::Rollback, "Build the part through the selected feature")
+            .run(|s| {
+                let id = s.selected_feature().expect("enabled with a selected feature");
+                let index = s.doc.features.iter().position(|f| f.id == id).expect("the selected feature exists");
+                AppAction::Command(Command::Rollback(Some(index + 1)))
+            })
+            .outside_sketch()
+            .when(|s| s.selected_feature().is_some())
+.app_only("It uses the feature selected in the window")
+.undo(Undo::Step),
         cmd("rename", "Rename", Icon::Props, "Rename the selected feature")
             .key(Scope::Part, none, Key::F2)
             .run(|_| AppAction::RenameSelected)
@@ -2371,6 +2421,7 @@ fn registry() -> Vec<CommandSpec> {
             AppAction::Command(Command::Suppress { id, suppressed: !suppressed })
         })
         .when(|s| s.selected_feature().is_some())
+        .label_now(|s| Some(if selected_feature_is(s, |f| f.suppressed) { "Unsuppress" } else { "Suppress" }.into()))
         .hint(|s| s.selected_feature().is_none().then(|| "Select a feature first".into()))
         .agents(Agents::Verb, "", tools::suppress_params)
 .undo(Undo::Step),
@@ -3130,7 +3181,7 @@ mod tests {
     fn sketch_features_are_not_offered_while_a_sketch_is_open() {
         let mut history = History::default();
         let sketch = Context { sketch: true, ..Default::default() };
-        for id in ["extrude", "revolve", "sweep", "cut"] {
+        for id in ["extrude", "revolve", "sweep", "loft", "cut"] {
             let command = get(id).unwrap();
             assert!(command.available(Context::default()), "{id} is offered after closing");
             assert!(!command.available(sketch), "{id} stays out of sketch mode");

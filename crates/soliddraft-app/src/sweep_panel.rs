@@ -1,4 +1,4 @@
-//! The sweep property page: a chain of lines and arcs, and the edits that keep it valid.
+//! Sweep path controls and edits that keep saved path identities.
 
 use soliddraft_kernel_api::{ArcTurn, PathSegment, Sweep, SweepOrientation};
 
@@ -80,6 +80,26 @@ pub fn add_arc(path: &mut Sweep, radius: f64) {
     keep_valid(path);
 }
 
+/// Replaces the path with a cubic spline, keeping its first segment identity.
+pub fn use_spline(path: &mut Sweep) {
+    let start = path.start;
+    let id = path.segments.first().map(|s| s.id().to_owned()).unwrap_or_else(|| path.next_segment_id());
+    let direction = path.end_tangent().and_then(unit).unwrap_or([0.0, 0.0, 1.0]);
+    let across = unit(square_to(direction)).unwrap_or([1.0, 0.0, 0.0]);
+    let sideways = cross(direction, across);
+    let control_points = [[0.0, 0.0, 0.0], [2.0, 0.0, 10.0], [2.0, 2.0, 20.0], [0.0, 2.0, 30.0]]
+        .map(|p| clean(std::array::from_fn(|i| start[i] + across[i] * p[0] + sideways[i] * p[1] + direction[i] * p[2])))
+        .to_vec();
+    path.segments = vec![PathSegment::Spline {
+        id,
+        degree: 3,
+        control_points,
+        weights: vec![1.0; 4],
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    }];
+    path.orientation = SweepOrientation::Fixed;
+}
+
 /// Removes a piece. A path keeps at least one.
 pub fn remove(path: &mut Sweep, index: usize) {
     if path.segments.len() > 1 && index < path.segments.len() {
@@ -110,6 +130,7 @@ pub fn page(
     radius: f64,
     coord: impl Fn(&mut egui::Ui, &str, &str, &mut f64) + Copy,
 ) {
+    let spline = path.segments.iter().any(|s| matches!(s, PathSegment::Spline { .. }));
     let arcs = path.segments.iter().any(|s| matches!(s, PathSegment::Arc { .. }));
     theme::section_label(ui, "Profile orientation");
     if arcs {
@@ -117,7 +138,11 @@ pub fn page(
     } else {
         ui.radio_value(&mut path.orientation, SweepOrientation::Fixed, "Keep direction");
     }
-    ui.radio_value(&mut path.orientation, SweepOrientation::FollowPath, "Turn with the path");
+    if spline {
+        ui.add_enabled(false, egui::RadioButton::new(false, "Turn with the path · Coming soon"));
+    } else {
+        ui.radio_value(&mut path.orientation, SweepOrientation::FollowPath, "Turn with the path");
+    }
     coords(ui, "sweep start", "Path start", &mut path.start, coord);
     let mut removed = None;
     let many = path.segments.len() > 1;
@@ -127,7 +152,11 @@ pub fn page(
     for (index, segment) in path.segments.iter_mut().enumerate() {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            let kind = if matches!(segment, PathSegment::Line { .. }) { "line" } else { "arc" };
+            let kind = match segment {
+                PathSegment::Line { .. } => "line",
+                PathSegment::Arc { .. } => "arc",
+                PathSegment::Spline { .. } => "spline",
+            };
             ui.label(egui::RichText::new(format!("Segment {}: {kind}", index + 1)).size(12.0));
             if many && ui.small_button(format!("Remove segment {}", index + 1)).clicked() {
                 removed = Some(index);
@@ -135,6 +164,23 @@ pub fn page(
         });
         match segment {
             PathSegment::Line { to, .. } => coords(ui, &field(index, "end"), "End", to, coord),
+            PathSegment::Spline { control_points, weights, .. } => {
+                if let Some(first) = control_points.first_mut() {
+                    *first = path.start;
+                }
+                for (i, point) in control_points.iter_mut().enumerate().skip(1) {
+                    coords(
+                        ui,
+                        &field(index, &format!("control {}", i + 1)),
+                        &format!("Control point {}", i + 1),
+                        point,
+                        coord,
+                    );
+                }
+                for (i, weight) in weights.iter_mut().enumerate() {
+                    coord(ui, &field(index, &format!("weight {}", i + 1)), &format!("Weight {}", i + 1), weight);
+                }
+            }
             PathSegment::Arc { centre, axis, turn, .. } => {
                 coords(ui, &field(index, "centre"), "Centre", centre, coord);
                 coords(ui, &field(index, "axis"), "Axis", axis, coord);
@@ -159,13 +205,19 @@ pub fn page(
     }
     ui.add_space(6.0);
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Add line").clicked() {
+        if ui.add_enabled(!spline, egui::Button::new("Add line")).clicked() {
             add_line(path);
         }
-        if ui.button("Add arc").clicked() {
+        if ui.add_enabled(!spline, egui::Button::new("Add arc")).clicked() {
             add_arc(path, radius);
         }
-        ui.add_enabled(false, egui::Button::new("Spline · Coming soon"));
+        if !spline && ui.button("Use spline path").clicked() {
+            use_spline(path);
+        }
+        if spline && ui.button("Use line path").clicked() {
+            let id = path.segments[0].id().to_owned();
+            *path = Sweep::line(path.start, path.end(), id);
+        }
         ui.add_enabled(false, egui::Button::new("Helix · Coming soon"));
     });
     keep_valid(path);

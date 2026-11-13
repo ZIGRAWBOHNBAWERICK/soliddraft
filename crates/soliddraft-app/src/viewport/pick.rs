@@ -2,9 +2,18 @@
 //! hit; these give the exact 3D point for the status bar and for later
 //! features such as placing a sketch on a face.
 
-use crate::document::{DisplayMesh, Document};
+use crate::document::{DisplayMesh, Document, PickEntry, Selection};
 use crate::viewport::render::Picked;
 use glam::Vec3;
+
+/// Resolve an id-buffer pick for either primary or secondary selection.
+pub fn selection(doc: &Document, picked: Picked) -> Option<Selection> {
+    match doc.pick(picked.pick())? {
+        PickEntry::Face(_, face) => Some(Selection::Face(face)),
+        PickEntry::Edge(_, edge) => Some(Selection::Edge(edge)),
+        PickEntry::Vertex(key, _) => Some(Selection::Vertex(key)),
+    }
+}
 
 pub fn hit_point(doc: &Document, picked: Picked, origin: Vec3, dir: Vec3) -> Option<Vec3> {
     if let Some(mesh) = doc.provisional_mesh() {

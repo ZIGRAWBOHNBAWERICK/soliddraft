@@ -1050,6 +1050,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png}; 38-step T1-T13 pair/stale/reopen scenario; measure-pairs-current.dwprt and measure-pairs-stale.dwprt; measure_pairs, measure_panel and measure_guides tests"
     },
     {
+      "id": "loft",
+      "file": "ci/scenarios/loft.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Two-profile ruled square prism edited into a taller two-profile Smooth square prism, with ordered closed sketch regions. Coplanar profiles refuse without changing the part.",
+      "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export; live viewport PNG and kernel view records for every solid state."
+    },
+    {
       "id": "mirror",
       "file": "ci/scenarios/mirror.json",
       "acceptance": false,
@@ -1319,7 +1333,11 @@
       "id": "sketch-fillet-chamfer-split",
       "file": "ci/scenarios/sketch-fillet-chamfer-split.json",
       "acceptance": false,
-      "owners": ["soliddraft-app", "soliddraft-model", "soliddraft-kernel-catallax"]
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
     },
     {
       "id": "sketch-linked-offsets",
@@ -1440,6 +1458,20 @@
       "route": "MCP document commands -> real document rebuild -> pinned Catallax -> drawing and checked STEP export",
       "supported_limits": "R1 sphere, semicircle revolved 360 degrees about Y; volume and area tolerance 0.005, box tolerance 0.001 mm; save, fresh-process reopen and a refused zero-angle or zero-depth edit preserve the body; 20M work per request; edit/history, rename, suppress/restore, exact prior-value reuse and fresh reopen count foreground mesh requests and GPU placements",
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg,drawing.dwdrw,drawing.svg}; saved part; checked STEP export and independent surface, volume and material-point oracle after reopen"
+    },
+    {
+      "id": "spline-sweep",
+      "file": "ci/scenarios/spline-sweep.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP sweep and edit_sweep -> document rebuild -> native rational spline path and sweep -> viewport, SVG and measured geometry",
+      "supported_limits": "One fixed polygon profile along one clamped cubic spline; control edits, undo/redo, save and fresh-process reopen; a returning path refuses without changing the part. Spline chains and turning spline transport remain unavailable.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; saved part and fresh-process reopen"
     },
     {
       "id": "straight-sweep",

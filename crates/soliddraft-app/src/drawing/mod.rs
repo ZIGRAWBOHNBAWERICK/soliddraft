@@ -58,6 +58,18 @@ pub enum DrawingTab {
 }
 
 impl DrawingTab {
+    pub const EDIT_SUITE: [Self; 4] = [Self::Views, Self::Annotate, Self::Sheet, Self::View];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Views => "views",
+            Self::Annotate => "annotate",
+            Self::Sheet => "sheet",
+            Self::View => "view",
+            Self::Assistant => "assistant",
+        }
+    }
+
     pub const ALL: [DrawingTab; 5] =
         [DrawingTab::Views, DrawingTab::Annotate, DrawingTab::Sheet, DrawingTab::View, DrawingTab::Assistant];
 
@@ -746,6 +758,8 @@ impl DrawingSession {
 /// The drawing side of the application state.
 #[derive(Default)]
 pub struct DrawingState {
+    /// A per-document choice; the Edit Suite tree starts open.
+    pub tree_hidden: bool,
     pub session: Option<DrawingSession>,
     pub new: Option<NewDrawing>,
     /// The open repair (or Replace model) dialog.
@@ -769,6 +783,8 @@ pub enum DrawingAction {
     MakeDrawing,
     CancelNewDrawing,
     CreateDrawing,
+    /// Opens the active sheet's properties in the current frame.
+    SheetProperties,
     CloseDrawing,
     Command(Command),
     Undo,
@@ -1213,6 +1229,7 @@ pub(crate) fn put_opened(state: &mut AppState, doc: DrawingDoc) -> String {
     session.seen_version = u64::MAX;
     let views: usize = session.doc.drawing.sheets.iter().map(|s| s.views.len()).sum();
     let title = session.title();
+    state.drawing.tree_hidden = false;
     state.drawing.session = Some(session);
     state.drawing.repair = None;
     state.drawing.active = true;
@@ -1310,6 +1327,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             match create_drawing(state, &new) {
                 Ok(session) => {
                     let n = session.doc.drawing.sheets[0].views.len();
+                    state.drawing.tree_hidden = false;
                     state.drawing.session = Some(session);
                     state.drawing.new = None;
                     state.drawing.active = true;
@@ -1367,6 +1385,15 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                     Some(l) => s.say(format!("Redid {l}")),
                     None => s.say("Nothing to redo"),
                 }
+            }
+        }
+        DrawingAction::SheetProperties => {
+            if let Some(session) = state.drawing.session.as_mut() {
+                session.selection = None;
+                session.set_tool(DrawingTool::Select);
+            }
+            if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                state.options_details = true;
             }
         }
         DrawingAction::SetTab(t) => {

@@ -75,6 +75,7 @@ fn to_json(c: &CommandSpec) -> Value {
         "app": c.in_app(),
         "workspace": match c.workspace {
             Workspace::Part => "part",
+            Workspace::Model => "model",
             Workspace::Drawing => "drawing",
             Workspace::Assembly => "assembly",
             Workspace::Both => "both",

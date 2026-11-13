@@ -61,6 +61,15 @@ impl Counting {
 }
 
 impl Kernel for Counting {
+    fn body_relation(
+        &self,
+        a: crate::PlacedBody,
+        b: crate::PlacedBody,
+        clearance: Option<f64>,
+    ) -> KernelResult<crate::BodyRelation> {
+        self.inner.body_relation(a, b, clearance)
+    }
+
     fn propose_import(&self, source: &[u8], options: &crate::ImportOptions) -> KernelResult<crate::ProposalSet> {
         self.inner.propose_import(source, options)
     }

@@ -140,10 +140,16 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
         ))
         .is_some()
     );
+    let expected = dialog.result.as_ref().unwrap().as_ref().unwrap().bytes.clone();
     case.frame(&mut app, "coarser-confirmed");
     assert_eq!(app.state().state.doc.model().settings, settings);
+    click(&mut app, "Save checked export");
+    assert_eq!(std::fs::read(&path).unwrap(), expected);
+    app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+    settle(&mut app);
+    assert!(app.state().state.print_check.as_ref().unwrap().result.as_ref().unwrap().is_err());
     click(&mut app, "Cancel");
-    assert_eq!(std::fs::read(&path).unwrap(), b"previous file");
+    assert_eq!(std::fs::read(&path).unwrap(), expected);
     assert!(app.state().state.print_check.is_none());
 }
 
@@ -177,4 +183,32 @@ fn an_unconfirmed_field_step_reports_partial_coverage_without_claiming_agreement
     assert!(field.unconfirmed.iter().any(|reason| reason.contains("Boundary model")));
     assert!(app.query_by_label("Coverage: 1 of 2 solid steps confirmed independently (50%).").is_some());
     case.frame(&mut app, "partial-coverage");
+}
+
+#[test]
+fn a_field_export_reviews_its_native_route_and_verdict_before_saving() {
+    let case = ribbon::case("print-check-field");
+    let mut app = ribbon::app(ribbon::blank());
+    tool(
+        &mut app,
+        "sketch",
+        json!({"plane":"top","offset":20,"shapes":[{"shape":"rectangle","center":[0,0,20],"width":6,"height":6}]}),
+    );
+    tool(&mut app, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
+    tool(&mut app, "lattice", json!({"cell":"cubic","cell_size":100,"radius":1,"accuracy":0.5,"min_detail":0.1}));
+    let path = case.path("field.stl");
+    app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+    settle(&mut app);
+    let dialog = app.state().state.print_check.as_ref().unwrap();
+    let output = dialog.result.as_ref().unwrap().as_ref().unwrap();
+    let Report::FieldMesh(report) = &output.report else { panic!("field report") };
+    assert_eq!(report.route, "field");
+    assert_eq!(dialog.requested_mm, 0.5);
+    assert!(report.closed && report.connected && report.non_self_intersecting);
+    assert!(app.query_by_label("Print route: distance field").is_some());
+    assert!(!path.exists());
+    let expected = output.bytes.clone();
+    case.frame(&mut app, "certified-field");
+    click(&mut app, "Save checked export");
+    assert_eq!(std::fs::read(path).unwrap(), expected);
 }

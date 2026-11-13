@@ -22,7 +22,12 @@ pub fn start(state: &mut AppState, ctx: &egui::Context) {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = ctx;
-        state.note("Coming soon", NoteKind::Info);
+        state.part_check = Some(Inspection {
+            document: state.doc.instance(),
+            revision: state.doc.revision(),
+            pending: None,
+            result: Some(state.doc.model().independent_check()),
+        });
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -98,7 +103,15 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                         };
                         ui.label(format!("{} ({}) - {outcome}", step.step, step.operation));
                         for reason in &step.unconfirmed {
-                            ui.label(reason);
+                            let (model, detail) = reason.split_once(": ").unwrap_or(("Unconfirmed", reason));
+                            let message = if detail.contains("compare.envelope-only") {
+                                "This field has no independent boundary construction.".to_owned()
+                            } else if detail.contains("unsupported") {
+                                "Coming soon".to_owned()
+                            } else {
+                                crate::geometry_message::for_user(detail)
+                            };
+                            ui.label(format!("{model}: {message}"));
                         }
                     }
                 });

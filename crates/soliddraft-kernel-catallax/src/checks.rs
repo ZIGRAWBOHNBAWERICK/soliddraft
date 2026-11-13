@@ -9,6 +9,9 @@ impl CatallaxKernel {
         let state = self.state()?;
         let stored = state.get(body)?;
         let sources = state.sources(&stored.steps)?;
+        let tags: BTreeMap<_, _> =
+            stored.history.iter().map(|record| (format!("op_{}", record.seq), record.tag.clone())).collect();
+        let field_tag = state.fields.get(&body).and_then(|_| stored.history.last()).map(|record| record.tag.clone());
         let recipe = if let Some(field) = state.fields.get(&body) {
             catallax_recipe::Recipe::parse(&field.recipe().to_string())
                 .map_err(|e| KernelError::InvalidInput(e.to_string()))?
@@ -18,8 +21,8 @@ impl CatallaxKernel {
         drop(state);
         let files = sources.iter().map(|(sha, bytes)| (sha.clone(), bytes.as_ref())).collect();
         // Each prefix gets the same bounded allowance on a fresh kernel thread.
-        let rows = catallax_compare::independent_steps(&recipe, &files, APP_REQUEST_WORK)
-            .map_err(|e| query_error("independent_check", e))?;
+        let rows =
+            independent_steps(&recipe, &files, APP_REQUEST_WORK).map_err(|e| query_error("independent_check", e))?;
         Ok(IndependentCheck {
             steps: rows
                 .into_iter()
@@ -35,6 +38,9 @@ impl CatallaxKernel {
                         }
                     }
                     IndependentStep {
+                        feature_tag: tags.get(row.step.as_str()).cloned().or_else(|| {
+                            (row.step == recipe.result && field_tag.is_some()).then(|| field_tag.clone()).flatten()
+                        }),
                         step: row.step.to_string(),
                         operation: row.operation,
                         reference,
@@ -134,5 +140,128 @@ impl CatallaxKernel {
             mesh.unavailable_controls.push("Angle controls are not certified by the print route".into());
         }
         Ok(PrintMesh { mesh, stl, report })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use catallax_compare::independent_steps;
+
+#[cfg(target_arch = "wasm32")]
+use browser_independent_steps as independent_steps;
+
+// The browser has no OS threads. Each prefix still gets separate evaluations and allowances.
+#[cfg(any(target_arch = "wasm32", test))]
+fn browser_independent_steps(
+    recipe: &catallax_recipe::Recipe,
+    files: &catallax_features::ImportFiles<'_>,
+    max_work: u64,
+) -> Result<Vec<catallax_compare::IndependentStep>, catallax_numbers::Refusal> {
+    use catallax_compare::{IndependentStep, KernelBuild};
+    use catallax_features::BuildError;
+    use catallax_numbers::{Refusal, with_operation_budget, with_operation_log};
+    recipe.check().map_err(|error| Refusal::new("compare.recipe", error.to_string()))?;
+    let mut rows = Vec::new();
+    for (index, step) in recipe.steps.iter().enumerate() {
+        let build = |field: bool| {
+            if step.op.kind() != catallax_recipe::ValueKind::Body {
+                return KernelBuild { construction: Construction::Reference, work: 0, limit: max_work };
+            }
+            let mut prefix = recipe.clone();
+            prefix.steps.truncate(index + 1);
+            prefix.result = step.id.clone();
+            prefix.materials.retain(|material| prefix.steps.iter().any(|step| step.id == material.region));
+            let ((result, work), log) = with_operation_log(|| {
+                with_operation_budget(max_work, || {
+                    let mut dec = Decider::default();
+                    if field {
+                        catallax_field::Plan::compile_with_files_checked(&prefix, files, &mut dec)
+                            .map(|plan| Construction::Built {
+                                faces: plan
+                                    .faces()
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| plan.result_face(*i).is_some())
+                                    .count(),
+                                empty: plan.is_proven_empty(),
+                            })
+                            .map_err(|refusal| (None, refusal))
+                    } else {
+                        catallax_features::evaluate_with_files(&prefix, files, &mut dec)
+                            .and_then(|built| {
+                                if let Some(stand_in) = built.stand_ins.first() {
+                                    return Err(BuildError::Geometry {
+                                        step: stand_in.step.clone(),
+                                        refusal: Refusal::new(
+                                            "compare.envelope-only",
+                                            "region stand-in is not an independent construction of the field feature",
+                                        ),
+                                    });
+                                }
+                                Ok(Construction::Built {
+                                    faces: built.model.faces_of_body(built.result).len(),
+                                    empty: built.model.body(built.result).kind == catallax_topology::BodyKind::Empty,
+                                })
+                            })
+                            .map_err(|error| match error {
+                                BuildError::Geometry { step, refusal } => (Some(step.to_string()), refusal),
+                                BuildError::Recipe(error) => (None, Refusal::new("compare.recipe", error.to_string())),
+                            })
+                    }
+                })
+            });
+            let construction = match result {
+                Ok(construction) if !work.exhausted => construction,
+                result => {
+                    let (blocked_at, refusal) = result.err().unwrap_or_else(|| {
+                        (None, Refusal::new("compare.work-exhausted", "The construction reached its calculation limit"))
+                    });
+                    Construction::Refused {
+                        blocked_at: blocked_at
+                            .or_else(|| log.iter().find(|entry| entry.refusal.is_some()).map(|entry| entry.id.clone())),
+                        refusal,
+                    }
+                }
+            };
+            KernelBuild { construction, work: work.used, limit: max_work }
+        };
+        rows.push(IndependentStep {
+            step: step.id.clone(),
+            operation: step.op.name().into(),
+            brep: build(false),
+            field: build(true),
+        });
+    }
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_and_desktop_construct_the_same_prefixes_and_refuse_exhausted_work() {
+        let kernel = CatallaxKernel::new();
+        let profile = kernel
+            .create_body_from_profile(
+                &OpTag::new("profile"),
+                &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 6.0, 6.0),
+            )
+            .unwrap();
+        let body = kernel
+            .extrude(&OpTag::new("block"), profile.body, &Extrude { distance: 10.0, direction: None })
+            .unwrap()
+            .body;
+        let recipe = kernel.solid(body).unwrap().app.checkpoint.built().recipe().clone();
+        let files = catallax_features::ImportFiles::new();
+        for limit in [0, APP_REQUEST_WORK] {
+            let browser = browser_independent_steps(&recipe, &files, limit).unwrap();
+            let desktop = catallax_compare::independent_steps(&recipe, &files, limit).unwrap();
+            assert_eq!(browser.len(), desktop.len());
+            for (browser, desktop) in browser.iter().zip(&desktop) {
+                assert_eq!(browser.step, desktop.step);
+                assert_eq!(browser.brep.construction, desktop.brep.construction);
+                assert_eq!(browser.field.construction, desktop.field.construction);
+            }
+        }
     }
 }

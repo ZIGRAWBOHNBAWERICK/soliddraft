@@ -265,7 +265,7 @@ pub fn export(
 ///
 /// The rounding works on the bound's exact decimal value, so a binary64 that sits just above
 /// a step, such as `0.01` itself, reads as the next step rather than as the step below it.
-fn bound_mm(bound: f64) -> String {
+pub fn bound_mm(bound: f64) -> String {
     const DECIMALS: usize = 6;
     if !bound.is_finite() || bound <= 0.0 {
         return if bound == 0.0 { "0".into() } else { bound.to_string() };

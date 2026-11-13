@@ -322,7 +322,15 @@ impl Document {
         if self.is_dirty() {
             return Err("Wait for the part to rebuild before checking it".into());
         }
-        self.kernel.independent_check(self.built_body()?).map_err(|e| e.to_string())
+        let mut report = self.kernel.independent_check(self.built_body()?).map_err(|e| e.to_string())?;
+        for step in &mut report.steps {
+            if let Some(feature) =
+                step.feature_tag.as_ref().and_then(|tag| feature_of_tag(tag.as_str())).and_then(|id| self.feature(id))
+            {
+                step.step = feature.name.clone();
+            }
+        }
+        Ok(report)
     }
 
     /// The kernel the document builds on.

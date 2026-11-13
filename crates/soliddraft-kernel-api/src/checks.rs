@@ -17,6 +17,9 @@ pub struct IndependentStep {
     pub step: String,
     /// Operation name.
     pub operation: String,
+    /// Application feature responsible for this step, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_tag: Option<crate::OpTag>,
     /// A sketch, path or other reference rather than a solid.
     pub reference: bool,
     /// Whether the boundary representation built this prefix.

@@ -12,6 +12,7 @@ pub struct Dialog {
     format: Format,
     pub requested_mm: f64,
     pub accuracy_mm: f64,
+    field_route: bool,
     pending: Option<mpsc::Receiver<Result<Export, String>>>,
     pub result: Option<Result<Export, String>>,
     write_error: Option<String>,
@@ -42,6 +43,7 @@ pub fn start(state: &mut AppState, format: Format, path: PathBuf, ctx: &egui::Co
         format,
         requested_mm,
         accuracy_mm: requested_mm,
+        field_route: model.active_field().is_some(),
         pending: None,
         result: None,
         write_error: None,
@@ -59,8 +61,8 @@ impl Dialog {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = (state, accuracy, ctx);
-            self.result = Some(Err("Coming soon".into()));
+            let _ = ctx;
+            self.result = Some(state.export_part_at(self.format, accuracy));
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -106,6 +108,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             ui.label("The part changed. Close this report and export again.");
             return;
         }
+        ui.label(format!("Print route: {}", if dialog.field_route { "distance field" } else { "boundary model" }));
         ui.label(format!("Requested accuracy: {} mm", dialog.requested_mm));
         if dialog.accuracy_mm != dialog.requested_mm {
             ui.label(format!("Coarser choice: {} mm. This allows more deviation from the part.", dialog.accuracy_mm));
@@ -116,7 +119,8 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                 ui.label("Checking print accuracy...");
             }
             Some(Err(error)) => {
-                ui.label(format!("Export refused: {error}"));
+                ui.label(format!("Export refused: {}", refusal_message(error)));
+                ui.label("Print accuracy and final qualification remain unconfirmed. No file has been written.");
                 // Only accuracy and refinement refusals may offer a coarser request.
                 if can_coarsen(error) {
                     let mm = dialog.accuracy_mm * 2.0;
@@ -137,13 +141,14 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     Report::Mesh(report) => {
                         if let Some(check) = &report.print_check {
                             ui.label(format!(
-                                "Print route: {}",
-                                if check.route == "brep" { "boundary model" } else { "distance field" }
+                                "Certified accuracy: {} mm",
+                                soliddraft_exchange::bound_mm(check.certified_accuracy_mm)
                             ));
-                            ui.label(format!("Certified accuracy: {} mm", check.certified_accuracy_mm));
                             ui.label(format!(
                                 "Model: {} mm; meshing: {} mm; file rounding: {} mm",
-                                check.model_bound_mm, check.tessellation_bound_mm, check.rounding_bound_mm
+                                soliddraft_exchange::bound_mm(check.model_bound_mm),
+                                soliddraft_exchange::bound_mm(check.tessellation_bound_mm),
+                                soliddraft_exchange::bound_mm(check.rounding_bound_mm)
                             ));
                             for stage in &check.stages {
                                 ui.label(stage);
@@ -153,8 +158,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                         }
                     }
                     Report::FieldMesh(report) => {
-                        ui.label("Print route: distance field");
-                        ui.label(format!("Certified accuracy: {} mm", report.deviation_bound_mm));
+                        ui.label(format!(
+                            "Certified accuracy: {} mm",
+                            soliddraft_exchange::bound_mm(report.deviation_bound_mm)
+                        ));
                         ui.label(format!("Minimum detail kept: {} mm", report.minimum_detail_mm));
                         ui.label(format!(
                             "Closed surface: {}. Self-intersection excluded: {}. Connected: {}.",
@@ -183,13 +190,17 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         let result = state.export_ready().and_then(|()| {
             let output =
                 dialog.result.as_ref().and_then(|result| result.as_ref().ok()).ok_or("No checked export to save")?;
-            crate::platform::write_file(&dialog.path, &output.bytes)
+            crate::platform::write_file(&dialog.path, &output.bytes).map(|()| output.report.summary())
         });
         match result {
-            Ok(()) => {
+            Ok(summary) => {
                 state.note(
-                    format!("Exported {} at {} mm requested accuracy", dialog.path.display(), dialog.accuracy_mm),
-                    NoteKind::Info,
+                    format!(
+                        "Exported {} at {} mm requested accuracy; {summary}",
+                        dialog.path.display(),
+                        dialog.accuracy_mm
+                    ),
+                    NoteKind::Ok,
                 );
                 return;
             }
@@ -204,17 +215,30 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
 pub(crate) fn can_coarsen(error: &str) -> bool {
     [
         "print.brep-accuracy",
+        "print.brep-encoding-topology",
         "numbers.operation-budget",
-        "mesh.vertex-budget",
-        "mesh.refinement-budget",
-        "print.brep-encoding",
+        "mesh.precision-or-budget",
         "field.print-unresolved",
         "field.print-budget",
         "field.print-grid",
         "field.print-vertices",
-        "mesh.vertex-limit",
-        "mesh.chord",
     ]
     .iter()
     .any(|code| error.contains(code))
+}
+
+fn refusal_message(error: &str) -> String {
+    if can_coarsen(error) {
+        "The requested accuracy could not be certified within the calculation limits.".into()
+    } else if error.contains("print.brep-topology") || error.contains("field.print-topology") {
+        "A closed, sound print surface could not be confirmed.".into()
+    } else if error.contains("orientation") {
+        "The print surface's outward orientation could not be confirmed.".into()
+    } else if error.contains("field.print-disconnected") {
+        "The print output has disconnected pieces. Edit the part before exporting.".into()
+    } else if error.contains("unsupported") {
+        "Coming soon".into()
+    } else {
+        crate::geometry_message::for_user(error)
+    }
 }

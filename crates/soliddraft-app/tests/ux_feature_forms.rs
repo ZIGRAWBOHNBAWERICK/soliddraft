@@ -193,6 +193,14 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         assert!(!ribbon::painted_in(app, palette).iter().any(|p| p.text == "Exit"));
         let actions = ribbon::buttons_in(app, bar(app));
         assert!(!actions.iter().any(|(label, _)| matches!(label.as_str(), "OK" | "Cancel")));
+        ribbon::run_command(app, "sketch_line");
+        for point in [glam::Vec3::new(5.0, 5.0, 0.0), glam::Vec3::new(10.0, 5.0, 0.0)] {
+            let at = ux_tools::screen(app, point);
+            ribbon::click_at(app, at);
+        }
+        settle(app);
+        assert!(app.state().state.sketch.as_ref().unwrap().sketch.drawn().count() > 0);
+        assert!(ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == "Under defined"));
         case.frame(app, "close-sketch");
         click_bar(app, "Close sketch");
         assert!(!app.state().state.in_sketch());

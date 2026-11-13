@@ -382,13 +382,25 @@ pub fn options_region(app: &App) -> Rect {
 }
 
 pub fn click_option(app: &mut App, label: &str) {
-    if app.query_by_label(label).is_none() {
+    if app.query_all_by_label(label).next().is_none() && app.query_by_value(label).is_none() {
         open_options(app);
     }
-    app.get_by_label(label).scroll_to_me();
-    app.run_steps(24);
-    app.get_by_label(label).click();
-    app.run_steps(8);
+    for scroll in [true, false] {
+        {
+            let node = app
+                .query_all_by_role_and_label(egui::accesskit::Role::CheckBox, label)
+                .next()
+                .or_else(|| app.query_all_by_label(label).next())
+                .or_else(|| app.query_by_value(label))
+                .unwrap_or_else(|| panic!("missing option {label}"));
+            if scroll {
+                node.scroll_to_me();
+            } else {
+                node.click();
+            }
+        }
+        app.run_steps(if scroll { 24 } else { 8 });
+    }
 }
 
 pub fn run_command(app: &mut App, id: &str) {

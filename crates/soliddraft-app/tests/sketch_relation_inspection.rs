@@ -576,7 +576,9 @@ fn relation_owner_highlight_keeps_definition_and_conflict_colours() {
     assert_eq!(session(&app).selection, vec![SketchSel::Constraint(fixed)]);
     assert!(halo(&app, line));
     assert!(
-        curve_strokes(&app, line).iter().any(|(width, color)| (*width - 1.8).abs() < 0.01 && *color == theme::ink()),
+        curve_strokes(&app, line)
+            .iter()
+            .any(|(width, color)| (*width - 1.8).abs() < 0.01 && *color == theme::edit_suite::FULLY_DEFINED),
         "inspection must not recolour fully defined geometry"
     );
     frame(&mut app, "fully-defined-owner");

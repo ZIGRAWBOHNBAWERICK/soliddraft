@@ -154,6 +154,7 @@ fn disable_inference(app: &mut App) {
 }
 
 fn preview(app: &mut App, at: P2, on_curve: P2, path: &std::path::Path) {
+    ribbon::close_options(app);
     let before = session(app).sketch.clone();
     app.hover_at(screen(app, at));
     app.run_steps(5);

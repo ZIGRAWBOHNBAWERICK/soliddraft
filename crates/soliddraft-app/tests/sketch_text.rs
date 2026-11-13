@@ -99,6 +99,7 @@ fn text_command_places_and_edits_one_retained_entity() {
     app.run_steps(5);
     assert_eq!(app.state().state.sketch.as_ref().unwrap().sketch, placed);
     ribbon::click_at(&mut app, at);
+    ribbon::open_options(&mut app);
     {
         let s = app.state_mut().state.sketch.as_mut().unwrap();
         let text = &mut s.text_edit.as_mut().expect("text editor for selected entity").draft;

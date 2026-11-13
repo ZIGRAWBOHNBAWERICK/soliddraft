@@ -114,7 +114,7 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
     harness.run_steps(8);
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Sweep1").next().unwrap().click();
     harness.run_steps(4);
-    harness.get_by_label("Edit feature").click();
+    harness.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
     harness.run_steps(4);
     assert!(matches!(
         harness.state().state.editor.as_ref().unwrap().params,

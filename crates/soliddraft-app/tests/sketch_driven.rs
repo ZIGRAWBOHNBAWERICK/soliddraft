@@ -38,6 +38,9 @@ fn launch_at(mut doc: soliddraft_app::document::Document, mut sketch: Sketch, of
     let mut app = ribbon::app(doc);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
+    let st = &mut app.state_mut().state;
+    st.viewport.camera.zoom(0.65, None, st.viewport.rect.aspect_ratio());
+    app.run_steps(8);
     (app, id)
 }
 

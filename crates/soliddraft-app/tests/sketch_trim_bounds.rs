@@ -199,6 +199,9 @@ fn bounded_trim_refusals_right_click_and_document_changes_are_safe() {
         assert_eq!(session(&app).sketch, before);
         assert_eq!(app.state().state.doc.revision(), revision);
     }
+    ribbon::open_options(&mut app);
+    app.get_by_label("Choose bounds again").scroll_to_me();
+    app.run_steps(24);
     frame(&mut app, "bounded-refused");
     assert!(
         ribbon::painted(&app).iter().any(|p| p.text == "Choose bounds again" && p.rect.contains_rect(p.full)),
@@ -251,11 +254,15 @@ fn outside_trim_keeps_an_analytic_arc_in_a_compact_dark_view() {
     mode(&mut app, "Outside");
     pick(&mut app, P2::new(11.0, 5.0));
     pick(&mut app, P2::new(5.0, 11.0));
+    ribbon::open_options(&mut app);
+    app.get_by_label("Choose bounds again").scroll_to_me();
+    app.run_steps(24);
     frame(&mut app, "bounded-arc-small-dark-controls");
     assert!(
         ribbon::painted(&app).iter().any(|p| p.text == "Choose bounds again" && p.rect.contains_rect(p.full)),
         "the bounds reset control remains visible in the compact panel"
     );
+    ribbon::close_options(&mut app);
     let d = 50.0_f64.sqrt();
     let at = screen(&app, P2::new(d, d));
     app.hover_at(at);

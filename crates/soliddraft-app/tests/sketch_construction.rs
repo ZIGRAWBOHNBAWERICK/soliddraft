@@ -48,6 +48,7 @@ fn launch(sketch: Sketch, name: &str) -> (App, FeatureId, PathBuf) {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
+    app.state_mut().state.viewport.references.always_show_origin_axes = false;
     assert!(commands::get("sketch_centreline").unwrap().is_enabled(&app.state().state));
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);

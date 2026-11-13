@@ -256,8 +256,10 @@ fn geometry_and_quick_snaps_override_grid_and_closed_sketch_visibility_is_retain
     app.run_steps(4);
     let name = app.state().state.doc.feature(id).unwrap().name.clone();
     // The existing eye control operates independently of sketch editing.
-    app.key_press(Key::F9);
-    app.run_steps(8);
+    if !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        app.run_steps(8);
+    }
     let show = app.get_by_label(&format!("Show {name}")).rect();
     ribbon::click_at(&mut app, show.center());
     assert!(soliddraft_app::tree_visibility::visible(&app.state().state).sketches.contains(&id));

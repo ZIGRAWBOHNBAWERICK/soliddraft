@@ -144,6 +144,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -191,6 +193,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -263,6 +267,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -343,6 +349,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -430,6 +438,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -508,6 +518,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -769,6 +781,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
@@ -908,6 +922,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
           {
             echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
             echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"

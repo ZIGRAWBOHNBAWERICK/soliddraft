@@ -400,6 +400,44 @@ class BladeRouting(unittest.TestCase):
 
 
 
+class BladeOwnership(unittest.TestCase):
+    def test_mounted_checkout_and_local_clone_work_with_different_owners(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        scripts = [textwrap.dedent(block.split('        run: |\n', 1)[1].split('      - ', 1)[0])
+                   for block in text.split('      - name: Prepare Blade Ubuntu container\n')[1:]]
+        self.assertEqual(len(set(scripts)), 1)
+        git_setup = '\n'.join(line for line in scripts[0].splitlines()
+                              if line.startswith('git config --system '))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source, target, unrelated = (root / name for name in ('checkout', 'clone', 'other'))
+            for repo in (source, unrelated):
+                subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+                (repo / 'fixture').write_text('source')
+                subprocess.run(['git', '-C', str(repo), 'add', 'fixture'], check=True)
+                subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c',
+                                'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            config = root / 'system.gitconfig'
+            config.touch()
+            env = dict(os.environ, GIT_CONFIG_SYSTEM=str(config), GIT_CONFIG_GLOBAL='/dev/null',
+                       GIT_TEST_ASSUME_DIFFERENT_OWNER='1', GITHUB_WORKSPACE=str(source))
+            probe = ['git', '-C', str(source), 'rev-parse', '--show-toplevel']
+            before = subprocess.run(probe, env=env, capture_output=True, text=True)
+            self.assertNotEqual(before.returncode, 0)
+            self.assertIn('dubious ownership', before.stderr)
+            subprocess.run(['bash', '-e', '-c', git_setup], env=env, check=True)
+            checked = subprocess.run(probe, env=env, capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            cloned = subprocess.run(['git', 'clone', '--quiet', '--no-local', str(source), str(target)],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(cloned.returncode, 0, cloned.stderr)
+            self.assertEqual((target / 'fixture').read_text(), 'source')
+            refused = subprocess.run(['git', '-C', str(unrelated), 'rev-parse', '--show-toplevel'],
+                                     env=env, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn('dubious ownership', refused.stderr)
+
+
 class BladeCleanup(unittest.TestCase):
     def test_cleanup_removes_only_this_jobs_build_output(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()

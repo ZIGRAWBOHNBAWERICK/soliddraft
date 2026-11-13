@@ -1,0 +1,242 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "exact-body-relations",
+  "folders": [
+    "work"
+  ],
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 10,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/a.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/a.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/a.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "make_assembly",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/0/path",
+          "equals": "2"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_save",
+      "arguments": {
+        "path": "{bundle}/work/rig.dwasm"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/rig.dwasm"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/rig.dwasm",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "new_part",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 20,
+            "height": 10
+          }
+        ]
+      },
+      "checks": []
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 6,
+        "flip": false
+      },
+      "checks": []
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/work/b.dwprt"
+      },
+      "checks": [],
+      "files": [
+        "{bundle}/work/b.dwprt"
+      ],
+      "inspect": {
+        "info": [
+          "doc",
+          "info",
+          "{bundle}/work/b.dwprt",
+          "--json"
+        ]
+      }
+    },
+    {
+      "tool": "show_assembly",
+      "arguments": {},
+      "checks": []
+    },
+    {
+      "tool": "insert_component",
+      "arguments": {
+        "paths": [
+          "{bundle}/work/b.dwprt"
+        ],
+        "placement": {
+          "translation": [
+            3,
+            7,
+            10
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      "checks": [
+        {
+          "pointer": "/summary/assembly/components/1/path",
+          "equals": "4"
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_interference",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/result/report/interferes",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/touching",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/touching_or_undecided",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/results/0/outcome",
+          "equals": "touching"
+        },
+        {
+          "pointer": "/result/report/results/0/overlap_mm3/hi",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/results/0/contact_faces/a/0",
+          "equals": "Boss-Extrude1 \u00b7 End cap"
+        },
+        {
+          "pointer": "/result/report/results/0/contact_faces/b/0",
+          "equals": "Boss-Extrude1 \u00b7 Start cap"
+        },
+        {
+          "pointer": "/summary/assembly/mates",
+          "equals": []
+        },
+        {
+          "pointer": "/result/report/results/0/distance/hi",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "0 mm"
+      },
+      "checks": [
+        {
+          "pointer": "/result/report/below",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/undecided",
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "tool": "assembly_check_clearance",
+      "arguments": {
+        "clearance": "-1 mm"
+      },
+      "refused": "invalid",
+      "checks": [
+        {
+          "pointer": "/result/refused",
+          "equals": "invalid"
+        },
+        {
+          "pointer": "/result/message",
+          "equals": "a clearance is a length of zero or more"
+        }
+      ]
+    }
+  ]
+}

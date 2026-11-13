@@ -48,9 +48,10 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "assembly_interference",
             "Interference",
             Icon::Cad("interference"),
-            "Check parts for interference or a clearance, proven on certified meshes",
+            "Check parts for interference, touching faces or a clearance",
         )
         .on(Tab::Assembly, "Component", Size::Large)
+        .shown(|s| !s.in_sketch())
         .run(|_| AppAction::Assembly(AssemblyAction::Interference(InterferenceAction::Toggle)))
         .lit(|s| s.assembly.interference.open)
         .app_only("It opens the Interference panel; the assembly_check tools run the same checks without it"),
@@ -58,11 +59,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "assembly_check_interference",
             "Check interference",
             Icon::Cad("interference"),
-            "Prove each pair of parts clear, interfering, or touching or undecided",
+            "Check each pair of parts for overlap volume, touching faces or a proven gap",
         )
         .agents(
             Agents::Mcp,
-            "Rebuilds each part at its pinned revision and proves on its certified mesh; changes nothing.",
+            "Rebuilds pinned parts. Uses exact body queries to refine certified-mesh results and lists refused quantities with their reasons; changes nothing.",
             scope_params,
         ),
         row(

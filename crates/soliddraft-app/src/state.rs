@@ -1029,6 +1029,7 @@ pub struct AppState {
     pub measure: crate::measure::panel::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
+    pub pick_filter: crate::viewport::PickFilter,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1105,6 +1106,7 @@ impl AppState {
             measure: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
+            pick_filter: Default::default(),
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,
@@ -1146,6 +1148,18 @@ impl AppState {
             start: None,
             drawing_after_open: false,
             actions: Vec::new(),
+        }
+    }
+
+    pub fn selection_filter(&self) -> crate::viewport::PickFilter {
+        if self.frame_layout == crate::settings::FrameLayout::EditSuite
+            && self.editor.is_none()
+            && self.sketch.is_none()
+            && !self.measure.open
+        {
+            self.pick_filter
+        } else {
+            Default::default()
         }
     }
 

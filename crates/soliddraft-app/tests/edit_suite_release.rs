@@ -30,6 +30,38 @@ fn bounded_fixture() -> serde_json::Value {
 }
 
 #[test]
+fn identical_mcp_edits_and_their_history_keep_the_current_proof() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Identical edit", kernel);
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams { depth: 25.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let geometry = doc.model().geometry_hash();
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_ok());
+    let caller = Caller::Mcp { client: "identical-edit-regression".into() };
+    for (tool, args) in [
+        ("edit_extrude", json!({"feature":"Boss-Extrude1", "depth":25, "flip":false})),
+        ("undo", json!({})),
+        ("redo", json!({})),
+    ] {
+        let result = call_checked(&mut AppTools { state: &mut state }, tool, args, &caller);
+        assert!(!result.is_error, "{tool}: {}", result.content);
+        assert_eq!(state.doc.model().geometry_hash(), geometry);
+        assert!(!state.doc.proof_pending(), "{tool} stranded the unchanged geometry pending");
+        assert!(state.doc.proof_state().current_proved_model(), "{tool}: {:?}", state.doc.proof_state());
+        assert!(state.export_part(soliddraft_exchange::Format::Step).is_ok(), "{tool} blocked export");
+    }
+    state.doc.undo_interactive().unwrap();
+    assert!(state.doc.proof_state().current_proved_model());
+    state.doc.redo_interactive().unwrap();
+    assert!(state.doc.proof_state().current_proved_model());
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_ok());
+}
+
+#[test]
 fn rename_cannot_upgrade_a_bounded_answer_or_unlock_export() {
     let kernel = Arc::new(gated::Gated::default());
     let mut doc = Document::new("Bounded rename", kernel.clone());

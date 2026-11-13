@@ -866,7 +866,8 @@ pub fn edit_offset_params() -> Vec<(&'static str, Value)> {
 }
 pub fn thicken_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("faces", non_empty_array(string("Face name"), "Selected faces")),
+        // The model refuses empty selections so the command journal records the refusal.
+        ("faces", array(string("Face name"), "Select at least one face")),
         ("thickness", number("Thickness in mm, greater than zero")),
         ("side", string("front or back")),
     ]

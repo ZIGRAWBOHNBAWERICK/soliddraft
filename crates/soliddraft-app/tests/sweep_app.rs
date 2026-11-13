@@ -543,3 +543,46 @@ fn spline_controls_build_through_the_registry_in_both_frames() {
         assert!(!commands::get("sweep").unwrap().available(commands::Context { sketch: true, ..Default::default() }));
     }
 }
+
+#[test]
+fn pinned_sweep_hides_during_sketch_and_returns_in_both_frames() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::{command_line::BarSettings, settings::FrameLayout};
+    let case = ribbon::case("pinned-sweep-sketch");
+    let pins = BarSettings { tools: vec!["sweep".into(), "zoom_fit".into()], ..Default::default() };
+    soliddraft_app::settings::save_command_line(&pins).unwrap();
+    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+        let mut doc = ribbon::sketch();
+        doc.selection = Some(Selection::Feature(doc.features[0].id));
+        let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
+        app.state_mut().state.frame_layout = layout;
+        app.run_steps(4);
+        case.run(&mut app, |app| {
+            app.get_by_label("Sweep on the command bar");
+            ribbon::run_command(app, "edit_feature");
+            assert!(app.state().state.sketch.is_some());
+            assert!(
+                app.query_all_by_label("Sweep on the command bar").next().is_none(),
+                "pinned Sweep must be hidden while a sketch is open in {layout:?}"
+            );
+            app.get_by_label("Fit on the command bar");
+            assert!(!soliddraft_app::commands::get("sweep").unwrap().is_enabled(&app.state().state));
+            assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+            assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+            case.frame(app, &format!("{layout:?}-open-sketch"));
+
+            ribbon::run_command(app, "exit_sketch");
+            assert!(app.state().state.sketch.is_none() && app.state().state.editor.is_none());
+            assert_eq!(app.state().state.command_line.settings.tools, pins.tools);
+            assert_eq!(soliddraft_app::settings::command_line().tools, pins.tools);
+            app.get_by_label("Sweep on the command bar").click();
+            app.run_steps(6);
+            assert!(matches!(
+                app.state().state.editor.as_ref().map(|e| &e.params),
+                Some(soliddraft_app::state::EditorParams::Sweep(_))
+            ));
+            assert_eq!(app.state().state.doc.features.len(), 1);
+            case.frame(app, &format!("{layout:?}-sweep-after-close"));
+        });
+    }
+}

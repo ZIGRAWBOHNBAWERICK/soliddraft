@@ -3,6 +3,8 @@
 #[path = "support/ui.rs"]
 mod ribbon;
 
+use egui_kittest::kittest::Queryable;
+
 use egui::{Key, Modifiers, Pos2, vec2};
 use ribbon::App;
 use soliddraft_app::{

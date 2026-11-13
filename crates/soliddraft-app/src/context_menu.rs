@@ -115,24 +115,57 @@ fn group_selection(doc: &Document, group: &Group, clicked: Option<Selection>) ->
     }
 }
 
+#[derive(Clone, Copy)]
+struct OpenMenu {
+    target: Target,
+    selection: Option<Selection>,
+    at: egui::Pos2,
+    open: bool,
+}
+
 /// Opens on a secondary click and retains the clicked target while the pointer moves.
 pub fn show(state: &mut AppState, response: &egui::Response, target: Target, selection: Option<Selection>) {
+    let at = response.secondary_clicked().then(|| response.interact_pointer_pos()).flatten();
+    show_at(state, response, target, selection, at);
+}
+
+/// Opens at a resolved pick, which may arrive after the secondary-click frame.
+pub fn show_at(
+    state: &mut AppState,
+    response: &egui::Response,
+    target: Target,
+    selection: Option<Selection>,
+    at: Option<egui::Pos2>,
+) {
     if state.frame_layout != FrameLayout::EditSuite {
         return;
     }
     let key = response.id.with("context_target");
-    if response.secondary_clicked() {
-        response.ctx.data_mut(|data| data.insert_temp(key, (target, selection)));
-        if !state.in_sketch() {
-            // Secondary selection must not feed an editor's primary-click pick collector.
-            state.doc.selection = selection;
-        }
-    }
-    let Some((target, selection)) = response.ctx.data(|data| data.get_temp::<(Target, Option<Selection>)>(key)) else {
+    let menu = at
+        .map(|at| OpenMenu { target, selection, at, open: true })
+        .or_else(|| response.ctx.data(|data| data.get_temp::<OpenMenu>(key)));
+    let Some(mut menu) = menu else { return };
+    if !menu.open {
         return;
-    };
+    }
+    if at.is_some() && !state.in_sketch() {
+        // Secondary selection must not feed an editor's primary-click pick collector.
+        state.doc.selection = selection;
+    }
+    let OpenMenu { target, selection, at, .. } = menu;
     let mut chosen = None;
-    response.context_menu(|ui| {
+    egui::Popup::new(
+        response.id.with("context_menu"),
+        response.ctx.clone(),
+        egui::Rect::from_min_size(at, egui::Vec2::ZERO),
+        response.layer_id,
+    )
+    .kind(egui::PopupKind::Menu)
+    .open_bool(&mut menu.open)
+    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+    .gap(0.0)
+    .show(|ui| {
         let original = state.doc.selection;
         for group in groups(target) {
             state.doc.selection = group_selection(&state.doc, group, selection);
@@ -167,11 +200,13 @@ pub fn show(state: &mut AppState, response: &egui::Response, target: Target, sel
         state.doc.selection = original;
     });
     if let Some((command, selection)) = chosen {
+        menu.open = false;
         if !state.in_sketch() {
             state.doc.selection = selection;
         }
         state.run_command(command);
     }
+    response.ctx.data_mut(|data| data.insert_temp(key, menu));
 }
 
 #[cfg(test)]

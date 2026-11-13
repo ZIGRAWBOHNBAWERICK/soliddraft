@@ -2020,13 +2020,15 @@ fn registry() -> Vec<CommandSpec> {
         cmd("new_body", "New body", Icon::Extrude, "Create the next feature in a separate solid body")
             .on(Solid, "Create", Small).outside_sketch()
             .run(|_| AppAction::NewBody)
-            .when(|s| !s.in_sketch() && s.editor.is_none() && field_open(s)),
+            .when(|s| !s.in_sketch() && s.editor.is_none() && field_open(s))
+            .app_only("Choose the next feature's body in the modelling window"),
         cmd("combine", "Combine", Icon::Extrude, "Union, subtract or intersect two solid bodies")
             .on(Solid, "Modify", Small).outside_sketch()
             .run(|_| AppAction::StartCombine)
             .when(|s| !s.in_sketch() && s.editor.is_none() && s.doc.model().live_bodies().len() >= 2 && field_open(s))
             .hint(|s| (s.doc.model().live_bodies().len() < 2).then(|| "Combine needs two solid bodies".into()))
-            .undo(Undo::Step),
+            .undo(Undo::Step)
+            .app_only("Choose target and tool bodies in the Combine window"),
         cmd("offset", "Offset", Icon::Cad("srf_offset"), "Grow or shrink the body by a signed distance")
             .on(Solid, "Modify", Small).outside_sketch()
             .run(|_| AppAction::StartOffset)

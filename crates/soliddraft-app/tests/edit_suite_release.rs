@@ -41,7 +41,7 @@ fn rename_cannot_upgrade_a_bounded_answer_or_unlock_export() {
         .unwrap()
         .unwrap();
     let bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();
-    doc.features[0].status = FeatureStatus::AnsweredWithinBound(bound.clone());
+    doc.record_answer_within_bound(id, bound.clone()).unwrap();
     let mut state = soliddraft_app::state::AppState::new(doc);
     assert!(state.doc.proof_state().answered_within_bound);
     assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
@@ -62,6 +62,108 @@ fn rename_cannot_upgrade_a_bounded_answer_or_unlock_export() {
         state.doc.proof_state()
     );
     assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(bound));
+    state.doc.undo_interactive().unwrap();
+    assert!(state.doc.proof_state().answered_within_bound);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+    state.doc.redo_interactive().unwrap();
+    assert!(state.doc.proof_state().answered_within_bound);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+    state.doc.features[0].status = FeatureStatus::Ok;
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err(), "the row is not the proof authority");
+    state.doc.rebuild().unwrap();
+    assert!(matches!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(_)));
+}
+
+fn settle(doc: &mut Document) {
+    let start = std::time::Instant::now();
+    while doc.proof_pending() {
+        assert!(start.elapsed() < std::time::Duration::from_secs(600), "proof did not settle");
+        doc.poll_proof();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn rename_keeps_a_refused_result_and_cannot_enable_export() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Refused rename", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    kernel.rules.lock().unwrap().refuse = vec![30.0];
+    doc.apply_interactive(Command::EditExtrude { id, params: ExtrudeParams { depth: 30.0, ..Default::default() } })
+        .unwrap();
+    settle(&mut doc);
+    let refused = doc.feature(id).unwrap().status.clone();
+    assert!(matches!(refused, FeatureStatus::Error(_)));
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    kernel.rules.lock().unwrap().refuse.clear();
+    let caller = Caller::Mcp { client: "refused-rename-regression".into() };
+    let renamed = call_checked(
+        &mut AppTools { state: &mut state },
+        "rename",
+        json!({"feature": "Boss-Extrude1", "name": "Rejected plate"}),
+        &caller,
+    );
+    assert!(!renamed.is_error, "{}", renamed.content);
+    assert_eq!(state.doc.feature(id).unwrap().status, refused);
+    assert!(state.doc.proof_state().failed);
+    assert!(!state.doc.proof_state().current_proved_model());
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+    state.doc.undo_interactive().unwrap();
+    state.doc.redo_interactive().unwrap();
+    assert_eq!(state.doc.feature(id).unwrap().status, refused);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+}
+
+#[test]
+fn geometry_changes_need_their_own_proof_and_undo_recovers_the_kept_bound() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Scoped bound", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();
+    doc.record_answer_within_bound(id, bound.clone()).unwrap();
+    let kept = doc.model().geometry_hash();
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    let release = Release(kernel.clone());
+    kernel.rules.lock().unwrap().hold = Some(30.0);
+    state
+        .doc
+        .apply_interactive(Command::EditExtrude { id, params: ExtrudeParams { depth: 30.0, ..Default::default() } })
+        .unwrap();
+    assert_ne!(state.doc.model().geometry_hash(), kept);
+    assert!(state.doc.proof_state().pending);
+    assert!(!state.doc.proof_state().answered_within_bound);
+    let caller = Caller::Mcp { client: "pending-rename-regression".into() };
+    let renamed = call_checked(
+        &mut AppTools { state: &mut state },
+        "rename",
+        json!({"feature": "Boss-Extrude1", "name": "New plate"}),
+        &caller,
+    );
+    assert!(!renamed.is_error, "{}", renamed.content);
+    assert!(state.doc.proof_state().pending);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+    drop(release);
+    settle(&mut state.doc);
+    assert!(state.doc.proof_state().current_proved_model());
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_ok());
+    state.doc.undo_interactive().unwrap();
+    state.doc.undo_interactive().unwrap();
+    settle(&mut state.doc);
+    assert_eq!(state.doc.model().geometry_hash(), kept);
+    assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(bound));
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
 }
 
 #[test]
@@ -72,7 +174,8 @@ fn a_bounded_answer_is_distinct_from_proof_and_keeps_its_definition_and_limit() 
     for mode in [soliddraft_app::theme::Mode::Light, soliddraft_app::theme::Mode::Dark] {
         let mut app = suite(ribbon::plate());
         soliddraft_app::theme::set_mode(&app.ctx, mode);
-        app.state_mut().state.doc.features[0].status = FeatureStatus::AnsweredWithinBound(bound.clone());
+        let id = app.state().state.doc.features[0].id;
+        app.state_mut().state.doc.record_answer_within_bound(id, bound.clone()).unwrap();
         app.run_steps(8);
         let state = &app.state().state;
         let proof = state.doc.proof_state();

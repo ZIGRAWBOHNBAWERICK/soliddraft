@@ -95,13 +95,15 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3) {
         assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
     };
     check(&state);
-    let (certified, work) = with_request_allowance(0, || {
-        state
-            .doc
-            .kernel()
-            .tessellate(body, &soliddraft_kernel_api::TessellationParams { chord_height: 0.005, ..Default::default() })
-    });
-    assert!(certified.is_err() && work.exhausted, "display evidence cannot answer an independent export request");
+    for chord_height in [0.01, 0.005] {
+        let (certified, work) = with_request_allowance(0, || {
+            state
+                .doc
+                .kernel()
+                .tessellate(body, &soliddraft_kernel_api::TessellationParams { chord_height, ..Default::default() })
+        });
+        assert!(certified.is_err() && work.exhausted, "display evidence cannot answer an independent export request");
+    }
     for (tool, arguments) in [
         ("undo", json!({})),
         ("redo", json!({})),

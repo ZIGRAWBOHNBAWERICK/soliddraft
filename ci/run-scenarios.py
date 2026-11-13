@@ -607,12 +607,13 @@ def export_check(args, directory, spec, previous):
     # one allowance and reports what it used. A step may only lower the application's limit.
     ceiling = spec.get("max_work", APP_REQUEST_WORK)
     lowered = ["--max-work", spec["max_work"]] if "max_work" in spec else []
+    accuracy = ["--accuracy-mm", spec["accuracy_mm"]] if "accuracy_mm" in spec else []
     # A refused export must leave an existing destination as it found it.
     sentinel = spec["sentinel"].encode() if "sentinel" in spec else None
     if sentinel is not None:
         path.write_bytes(sentinel)
     exported = cli(args.soliddraft, ["export", directory / "part.dwprt", "--json",
-                                     "--stand-in" if stand_in else "--out", path, *lowered],
+                                     "--stand-in" if stand_in else "--out", path, *lowered, *accuracy],
                    directory, label, args.timeout)
     if attempt is not None:
         exported["attempt"] = attempt
@@ -630,6 +631,13 @@ def export_check(args, directory, spec, previous):
         value = json.loads((directory / f"{label}.stdout").read_text())
         exported["report"] = value["report"]
         exported["checks"] = [check(value, rule) for rule in spec.get("checks", [])]
+        if "accuracy_mm" in spec:
+            proof = value["report"].get("print_check", {})
+            requested = spec["accuracy_mm"]
+            bound = proof.get("certified_accuracy_mm")
+            exported["checks"].append({"check": "explicit print accuracy certified", "requested_mm": requested,
+                "proof": proof, "pass": proof.get("requested_accuracy_mm") == requested
+                    and isinstance(bound, (int, float)) and 0 <= bound <= requested})
         exported["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
         # A B-rep report states no work of its own; its request's allowance is the evidence.
         if value["report"].get("kind") not in ("step", "mesh"):

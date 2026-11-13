@@ -212,7 +212,8 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
-pub(crate) fn can_coarsen(error: &str) -> bool {
+/// Whether another explicit accuracy request can address this print refusal.
+pub fn can_coarsen(error: &str) -> bool {
     [
         "print.brep-accuracy",
         "print.brep-encoding-topology",

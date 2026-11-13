@@ -520,7 +520,8 @@
               "minimum": 4
             }
           ],
-          "attempt": "accepted"
+          "attempt": "accepted",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [
@@ -597,7 +598,8 @@
               "minimum": 4
             }
           ],
-          "attempt": "accepted"
+          "attempt": "accepted",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [
@@ -706,7 +708,8 @@
               "minimum": 4
             }
           ],
-          "attempt": "accepted"
+          "attempt": "accepted",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [

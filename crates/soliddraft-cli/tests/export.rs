@@ -100,6 +100,57 @@ fn obj_from_recipe_and_saved_part_records_the_mesh_and_export_tolerance() {
         text.lines().filter(|l| l.starts_with("vn ")).count() as u64,
         report["report"]["vertices"].as_u64().unwrap()
     );
+    let saved = std::fs::read(&part).unwrap();
+    let coarser = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .arg("export")
+        .arg(&part)
+        .arg("--out")
+        .arg(&obj)
+        .args(["--accuracy-mm", "0.02", "--json"])
+        .output()
+        .unwrap();
+    assert!(coarser.status.success(), "{}", String::from_utf8_lossy(&coarser.stderr));
+    let report: Value = serde_json::from_slice(&coarser.stdout).unwrap();
+    assert_eq!(report["report"]["print_check"]["requested_accuracy_mm"], 0.02);
+    assert!(report["report"]["print_check"]["certified_accuracy_mm"].as_f64().unwrap() <= 0.02);
+    assert_eq!(std::fs::read(&part).unwrap(), saved);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_refused_print_offers_an_explicit_coarser_cli_request() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-cli-coarser-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut recipe: Value = serde_json::from_str(include_str!("../../../recipes/box.json")).unwrap();
+    recipe["steps"][0]["rectangle"]["center"][0] = serde_json::json!(99900.1);
+    let input = dir.join("offset.json");
+    let source = serde_json::to_vec(&recipe).unwrap();
+    std::fs::write(&input, &source).unwrap();
+    let destination = dir.join("offset.stl");
+    let sentinel = b"previous export";
+    std::fs::write(&destination, sentinel).unwrap();
+    let export = |accuracy: &str| {
+        Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+            .arg("export")
+            .arg(&input)
+            .arg("--out")
+            .arg(&destination)
+            .args(["--accuracy-mm", accuracy, "--json"])
+            .output()
+            .unwrap()
+    };
+    let refused = export("0.00001");
+    assert!(!refused.status.success());
+    let message = String::from_utf8_lossy(&refused.stderr);
+    assert!(message.contains("coarser") && message.contains("--accuracy-mm"), "{message}");
+    assert_eq!(std::fs::read(&destination).unwrap(), sentinel);
+    let accepted = export("0.01");
+    assert!(accepted.status.success(), "{}", String::from_utf8_lossy(&accepted.stderr));
+    let report: Value = serde_json::from_slice(&accepted.stdout).unwrap();
+    assert_eq!(report["report"]["print_check"]["requested_accuracy_mm"], 0.01);
+    assert!(report["report"]["print_check"]["certified_accuracy_mm"].as_f64().unwrap() <= 0.01);
+    assert!(std::fs::read(&destination).unwrap().starts_with(b"CXPRINT1"));
+    assert_eq!(std::fs::read(input).unwrap(), source);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

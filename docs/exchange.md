@@ -51,6 +51,10 @@ Save checked export writes only the accepted bytes. Cancel and refusals leave an
 file alone. Changing or reopening the part invalidates the report. MCP mesh exports accept
 an optional `accuracy_mm` for the same explicit choice and return structured `evidence`
 beside the summary. They never retry with a coarser accuracy automatically.
+The CLI offers the same choice with `soliddraft export part.dwprt --out part.stl
+--accuracy-mm 0.04`. It reports the newly certified accuracy, keeps saved settings
+unchanged and leaves exact-geometry export tolerances unchanged. A refused mesh
+request suggests the flag and writes none of the requested files.
 
 Inspect > Check independently builds every solid-valued recipe prefix in the boundary
 model and distance field. Its report counts confirmed solid steps, identifies reference

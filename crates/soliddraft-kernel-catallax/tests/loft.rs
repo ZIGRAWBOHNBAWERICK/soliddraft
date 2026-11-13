@@ -140,7 +140,7 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
 
     assert_eq!(APP_REQUEST_WORK, 20_000_000);
-    let k = CatallaxKernel::new();
+    let k = CatallaxKernel::with_operation_log();
     let profiles: Vec<_> = [(2.0, 0.0), (4.0, 3.0), (2.0, 6.0)]
         .into_iter()
         .map(|(size, z)| {
@@ -159,6 +159,8 @@ fn three_section_smooth_display_fits_the_application_allowance() {
         Ok((body, mesh))
     });
     eprintln!("three-section Smooth display: {work:?}; refusal: {:?}", answer.as_ref().err());
+    let evidence = k.take_diagnostics().unwrap();
+    eprintln!("three-section Smooth operations: {}", evidence["calls"]);
     assert!(!work.exhausted, "{work:?}; {:?}", answer.as_ref().err());
     let (body, mesh) = answer.unwrap();
     assert!(!mesh.unproved);

@@ -555,6 +555,7 @@ fn bracket_drawing_dimensioned_exported_updated_and_repaired() {
     }
     open_drawings(&mut harness);
     settle(&mut harness);
+    open_options(&mut harness);
     assert!(harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Reattach…").count() >= 2, "two cards");
     save(&mut harness, "d05-dangling");
 

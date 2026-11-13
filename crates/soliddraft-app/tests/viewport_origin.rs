@@ -207,7 +207,7 @@ fn always_on_is_persisted_and_selection_still_overrides_off() {
     // On through the window: with nothing selected the axes show.
     open_grid_and_planes(&mut app);
     assert!(!checked(&app, ALWAYS_SHOW_AXES), "unchecked on a new install");
-    click_label(&mut app, ALWAYS_SHOW_AXES);
+    press_label(&mut app, ALWAYS_SHOW_AXES);
     assert!(checked(&app, ALWAYS_SHOW_AXES));
     close_preferences(&mut app);
     assert_eq!(reference(&app), None);

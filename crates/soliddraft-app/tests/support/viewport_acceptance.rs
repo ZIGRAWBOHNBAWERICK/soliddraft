@@ -1194,7 +1194,10 @@ pub fn edge_kept(on: &image::RgbaImage, off: &image::RgbaImage, app: &App, sampl
             .collect();
         values.iter().max().unwrap() - values.iter().min().unwrap()
     };
-    let points: Vec<Pos2> = samples.iter().filter_map(|w| projected(app, *w)).collect();
+    // Topology also includes edges hidden behind an opaque face in this view.
+    let points: Vec<Pos2> =
+        samples.iter().filter_map(|w| projected(app, *w)).filter(|p| contrast(off, *p) >= 16).collect();
+    assert!(!points.is_empty(), "visible model edges to sample");
     // Plane tint changes antialiased edge pixels along with their background.
     let kept = points
         .iter()

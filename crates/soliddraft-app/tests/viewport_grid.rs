@@ -173,6 +173,7 @@ fn grid_visibility_is_a_persistent_display_preference() {
 /// The zoom sweep, with the numbers the design holds it to at any size and scale.
 fn sweep(case_name: &str, size: egui::Vec2, ppp: f32) {
     let mut case = Case::gpu(case_name);
+    seed_gpu_settings(&case, r#"{"view":{}}"#);
     let mut app = launch_for_frames(empty(), size, ppp);
     let before = model(&app);
     to_top_orthographic(&mut app);
@@ -487,7 +488,10 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
 
 fn seed_gpu_settings(case: &Case, json: &str) {
     let mut settings: serde_json::Value = serde_json::from_str(json).unwrap();
-    settings["view"]["scene"] = serde_json::json!("graphite");
+    settings["view"]["scene"] = serde_json::json!("white");
+    if settings["view"]["grid"]["color"].is_null() {
+        settings["view"]["grid"]["color"] = serde_json::json!("#0c1420");
+    }
     settings["view"]["always_show_origin_axes"] = serde_json::json!(false);
     if settings.get("navigation").is_none() {
         settings["navigation"] = serde_json::json!({"preset_id":"fusion"});

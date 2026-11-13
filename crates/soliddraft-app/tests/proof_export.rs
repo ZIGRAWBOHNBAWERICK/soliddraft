@@ -150,13 +150,24 @@ fn a_first_feature_waiting_for_proof_explains_why_no_export_is_written() {
     }
     let release = Release(kernel.clone());
     kernel.rules.lock().unwrap().hold = Some(10.0);
-    let mut doc = Document::new("First feature proof", kernel);
-    doc.apply_interactive(Command::AddExtrude {
-        params: ExtrudeParams { depth: 10.0, ..Default::default() },
-        via_assistant: false,
-    })
-    .unwrap();
-    let mut state = AppState::new(doc);
+    let mut model = soliddraft_model::Document::new("First feature proof", kernel);
+    model
+        .execute_deferred(soliddraft_model::Command::AddFeature {
+            kind: soliddraft_model::FeatureKind::Extrude(soliddraft_model::ExtrudeFeature {
+                profile: soliddraft_model::ProfileSource::Shape {
+                    datum: soliddraft_model::DatumPlane::Top,
+                    shape: soliddraft_model::BuiltinShape::Rectangle { width: 6.0, height: 6.0 },
+                },
+                operation: soliddraft_model::ExtrudeOp::Boss,
+                end: soliddraft_model::EndCondition::Blind { depth: 10.0 },
+                reverse: false,
+            }),
+            name: None,
+            position: None,
+            via_assistant: false,
+        })
+        .unwrap();
+    let mut state = AppState::new(Document::from_model(model));
     assert!(state.doc.proof_pending());
     let path = dir.join("pending.step");
     let out = call(&mut state, "export_step", json!({"path":path}));

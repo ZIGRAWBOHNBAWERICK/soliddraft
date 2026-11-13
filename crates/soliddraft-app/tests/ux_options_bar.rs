@@ -62,9 +62,14 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
         ribbon::click_at(app, navigation_display.center());
         settle(app);
         assert_eq!(app.state().state.viewport.display, display, "opening the menu preserves the display");
-        app.get_by_label("Wireframe").click();
+        let wireframe = app.get_by_label("Wireframe").rect();
+        ribbon::click_at(app, wireframe.center());
         settle(app);
-        assert_ne!(app.state().state.viewport.display, display, "navigation keeps the working display control");
+        assert_eq!(
+            app.state().state.viewport.display,
+            soliddraft_app::viewport::render::DisplayMode::Wireframe,
+            "navigation applies the selected display style"
+        );
         click(app, "Front");
         let front = ribbon::fingerprint(app).camera;
         click(app, "Top");

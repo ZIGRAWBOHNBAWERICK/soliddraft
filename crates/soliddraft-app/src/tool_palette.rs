@@ -30,77 +30,90 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
-    let tab: Tab = if state.in_sketch() { RibbonTab::Sketch.into() } else { state.ribbon_tab.into() };
+    let tab = state.workspace();
     let mut pending = None;
     let mut relations_anchor = ui.max_rect();
-    egui::ScrollArea::vertical().id_salt(("palette", tab.label())).auto_shrink([false; 2]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(tokens::COLUMN_GAP, tokens::COLUMN_GAP);
-        let start = matches!(tab, Tab::Part(RibbonTab::Solid | RibbonTab::Sketch)) && !state.in_sketch();
-        if start {
-            let command = commands::get("sketch").expect("the registry has Start sketch");
-            let width = ui.available_width();
-            let response = tile(ui, state, command, width, 30.0, compact);
-            if response.clicked() {
-                pending = Some(command);
+    egui::ScrollArea::vertical()
+        .id_salt(("palette", state.drawing.is_active(), state.assembly.is_active(), tab.id()))
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(tokens::COLUMN_GAP, tokens::COLUMN_GAP);
+            let start = matches!(tab, Tab::Part(RibbonTab::Solid | RibbonTab::Sketch)) && !state.in_sketch();
+            if start {
+                let command = commands::get("sketch").expect("the registry has Start sketch");
+                let width = ui.available_width();
+                let response = tile(ui, state, command, width, 30.0, compact);
+                if response.clicked() {
+                    pending = Some(command);
+                }
             }
-        }
-        if tab == Tab::Part(RibbonTab::Sketch) {
-            let command = commands::get("smart_dimension").expect("the registry has Smart Dimension");
-            let response = tile(ui, state, command, ui.available_width(), 30.0, compact);
-            if response.clicked() {
-                pending = Some(command);
+            if tab == Tab::Part(RibbonTab::Sketch) {
+                let command = commands::get("smart_dimension").expect("the registry has Smart Dimension");
+                let response = tile(ui, state, command, ui.available_width(), 30.0, compact);
+                if response.clicked() {
+                    pending = Some(command);
+                }
             }
-        }
-        for (group, commands) in commands::ribbon(tab) {
-            let commands: Vec<_> = commands
-                .into_iter()
-                .map(|(command, _)| command)
-                .filter(|command| {
-                    (command.shown)(state)
-                        && !(start && command.id == "sketch")
-                        && command.id != "smart_dimension"
-                        && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
-                })
-                .collect();
-            if commands.is_empty() {
-                continue;
-            }
-            ui.add_space(6.0);
-            if compact {
-                ui.separator();
-            } else {
-                ui.label(
-                    egui::RichText::new(commands::palette_group(group, tab))
-                        .font(theme::font_medium(tokens::SMALL_SIZE))
-                        .color(theme::muted()),
-                );
-            }
-            let width = if compact { ui.available_width() } else { (ui.available_width() - tokens::COLUMN_GAP) / 2.0 };
-            for row in commands.chunks(if compact { 1 } else { 2 }) {
-                let height = row
-                    .iter()
-                    .map(|command| {
-                        if compact {
-                            28.0
-                        } else {
-                            text(ui, state, command, width).size().y + 2.0 * tokens::TOOL_PADDING
-                        }
+            for (group, commands) in commands::ribbon(tab) {
+                if state.drawing.is_active() && group == "Assistant" {
+                    continue;
+                }
+                if state.assembly.is_active() && tab == Tab::Assembly && group == "View" {
+                    continue;
+                }
+                let commands: Vec<_> = commands
+                    .into_iter()
+                    .map(|(command, _)| command)
+                    .filter(|command| {
+                        (command.shown)(state)
+                            && !(start && command.id == "sketch")
+                            && command.id != "smart_dimension"
+                            && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
+                            && !(state.assembly.is_active()
+                                && tab == Tab::Assembly
+                                && command.id == "assembly_interference")
                     })
-                    .fold(24.0, f32::max);
-                ui.horizontal(|ui| {
-                    for command in row {
-                        let response = tile(ui, state, command, width, height, compact);
-                        if command.id == "relations" {
-                            relations_anchor = response.rect;
+                    .collect();
+                if commands.is_empty() {
+                    continue;
+                }
+                ui.add_space(6.0);
+                if compact {
+                    ui.separator();
+                } else {
+                    ui.label(
+                        egui::RichText::new(commands::palette_group(group, tab))
+                            .font(theme::font_medium(tokens::SMALL_SIZE))
+                            .color(theme::muted()),
+                    );
+                }
+                let width =
+                    if compact { ui.available_width() } else { (ui.available_width() - tokens::COLUMN_GAP) / 2.0 };
+                for row in commands.chunks(if compact { 1 } else { 2 }) {
+                    let height = row
+                        .iter()
+                        .map(|command| {
+                            if compact {
+                                28.0
+                            } else {
+                                text(ui, state, command, width).size().y + 2.0 * tokens::TOOL_PADDING
+                            }
+                        })
+                        .fold(24.0, f32::max);
+                    ui.horizontal(|ui| {
+                        for command in row {
+                            let response = tile(ui, state, command, width, height, compact);
+                            if command.id == "relations" {
+                                relations_anchor = response.rect;
+                            }
+                            if response.clicked() {
+                                pending = Some(*command);
+                            }
                         }
-                        if response.clicked() {
-                            pending = Some(*command);
-                        }
-                    }
-                });
+                    });
+                }
             }
-        }
-    });
+        });
     if let Some(command) = pending {
         state.run_command(command);
     }

@@ -1588,6 +1588,15 @@
       ],
       "route": "rendered viewport face/edge picks -> dimension annotations for every built feature",
       "evidence": "target/ux-tools/edit-suite-all-dimensions; two-feature face and edge picks, current dimension targets; viewport_settings checks the axes default and saved override"
+    },
+    {
+      "id": "edit-suite-document-workspaces",
+      "file": "crates/soliddraft-app/tests/frame_layout.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest pointer and command line -> document workspace switch -> registry palette -> assembly and drawing actions -> software Vulkan renderer",
+      "evidence": "target/ribbon-acceptance/assembly-workspaces and drawing-workspaces; per-document workspaces, assembly camera and scenes, Mate bar, drawing sheet edits and AI session routing"
     }
   ]
 }

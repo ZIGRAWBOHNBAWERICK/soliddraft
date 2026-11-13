@@ -1052,7 +1052,7 @@ impl SolidDraftApp {
                     }
                 }
             }
-            AppAction::SetView(v) => self.state.viewport.camera.set_view(v),
+            AppAction::SetView(v) => self.state.active_viewport_mut().camera.set_view(v),
             AppAction::NormalTo => {
                 let normal = match (&self.state.sketch, self.state.doc.selection) {
                     (Some(s), _) => Some(s.plane.normal),
@@ -1072,9 +1072,9 @@ impl SolidDraftApp {
                 let bounds = self.fit_bounds();
                 self.state.viewport.camera.fit(bounds);
             }
-            AppAction::SetDisplay(d) => self.state.viewport.display = d,
+            AppAction::SetDisplay(d) => self.state.active_viewport_mut().display = d,
             AppAction::SetPreset(p) => {
-                let viewport = &mut self.state.viewport;
+                let viewport = self.state.active_viewport_mut();
                 // Realistic leaves edges off; switching to or from it moves the shaded
                 // modes along, and a wireframe stays a wireframe.
                 if p.shows_edges() != viewport.preset.shows_edges() && viewport.display != DisplayMode::Wireframe {
@@ -1108,6 +1108,9 @@ impl SolidDraftApp {
             AppAction::SetScene(scene) => {
                 if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
                     self.state.viewport.scene = Some(scene);
+                    if let Some(session) = self.state.assembly.session.as_mut() {
+                        session.viewport.scene = Some(scene);
+                    }
                     if let Err(e) = crate::settings::save_scene(scene) {
                         self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                     }
@@ -1120,7 +1123,8 @@ impl SolidDraftApp {
                 }
             }
             AppAction::ToggleProjection => {
-                self.state.viewport.camera.orthographic = !self.state.viewport.camera.orthographic
+                let camera = &mut self.state.active_viewport_mut().camera;
+                camera.orthographic = !camera.orthographic;
             }
             AppAction::PreviewProposal(id) => {
                 self.close_editor();
@@ -1336,6 +1340,8 @@ impl SolidDraftApp {
                 self.tree_dock = tree_dock();
                 self.suite_tree_dock = egui_dock::DockState::new(vec![Tab::Tree, Tab::Values]);
                 self.state.layout = Layout::default();
+                self.state.assembly.tree_hidden = false;
+                self.state.drawing.tree_hidden = false;
                 self.state.command_line.settings.session_height = crate::command_line::SESSION_DEFAULT_HEIGHT;
                 // Forget the sizes egui kept, so the defaults apply again.
                 ctx.data_mut(|d| {

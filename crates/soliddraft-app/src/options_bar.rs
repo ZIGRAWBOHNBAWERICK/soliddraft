@@ -55,7 +55,12 @@ fn command(ui: &mut egui::Ui, state: &mut AppState, id: &str) {
 }
 
 fn show(ui: &mut egui::Ui, state: &mut AppState) {
-    if state.editor.is_some() && !state.in_sketch() {
+    if state.assembly.is_active() && state.assembly.mate.open {
+        crate::mates::panel::show_suite(ui, state);
+        return;
+    }
+    let part = !state.assembly.is_active() && !state.drawing.is_active();
+    if part && state.editor.is_some() && !state.in_sketch() {
         crate::feature_forms::show(ui, state);
         return;
     }
@@ -69,7 +74,13 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     let mut sheet_anchor = ui.available_rect_before_wrap();
-    if state.in_sketch() {
+    if state.drawing.is_active()
+        && let Some(anchor) = crate::drawing::properties_drawing::sheet_bar(ui, state)
+    {
+        details_sheet(ui, state, anchor);
+        return;
+    }
+    if part && state.in_sketch() {
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), 30.0),
             egui::Layout::right_to_left(egui::Align::Center),
@@ -160,6 +171,17 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
+                    if let Some(session) = &state.sketch
+                        && let Some(info) = state.doc.describe(Selection::Feature(session.feature))
+                    {
+                        let plane =
+                            info.details.iter().find(|(label, _)| label == "Plane").map(|(_, value)| value.as_str());
+                        ui.label(
+                            egui::RichText::new(format!("{} · {}", info.title, plane.unwrap_or("Sketch plane")))
+                                .color(theme::accent()),
+                        );
+                        ui.separator();
+                    }
                     if state.in_sketch() || state.editor.is_some() || state.measure.open {
                         ui.label(egui::RichText::new(prompt).color(theme::muted()));
                     } else if let Some(selection) = state.doc.selection {
@@ -274,10 +296,10 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
     if !state.options_details {
         return;
     }
-    let screen = ui.ctx().input(|i| i.content_rect());
+    let screen = ui.ctx().input(|input| input.content_rect());
     let width = 380.0_f32.min(screen.width() - 16.0);
     let left = anchor.left().clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
-    egui::Area::new(egui::Id::new("options_details"))
+    egui::Area::new(egui::Id::new("document_options_details"))
         .order(egui::Order::Foreground)
         .fixed_pos(egui::pos2(left, anchor.bottom() + 8.0))
         .show(ui.ctx(), |ui| {

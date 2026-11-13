@@ -254,6 +254,7 @@ fn view_glyph(painter: &egui::Painter, view: StandardView, rect: Rect, colour: C
 /// then the selection.
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let doc_name = state.doc.name.clone();
+    let suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
     let Some(s) = state.drawing.session.as_mut() else { return };
     let mut actions: Vec<DrawingAction> = Vec::new();
     let attention = s.doc.attention_count();
@@ -274,7 +275,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
         None => match s.tool.clone() {
             DrawingTool::PlaceView(kind) => placing_panel(ui, s, kind, &mut actions),
-            _ => sheet_panel(ui, s, &mut actions),
+            _ => sheet_panel(ui, s, &mut actions, suite),
         },
     }
     for a in actions {
@@ -854,7 +855,7 @@ fn placing_panel(ui: &mut egui::Ui, s: &DrawingSession, kind: super::PlaceKind, 
     });
 }
 
-fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>) {
+fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<DrawingAction>, suite: bool) {
     let si = s.sheet;
     let sheet = s.sheet().clone();
     let name = sheet.name.replace("Sheet", "Sheet ");
@@ -918,49 +919,53 @@ fn sheet_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Draw
                 "Size",
                 &format!("{} · {} × {} mm", sheet.size.name, sheet.size.width_mm, sheet.size.height_mm),
             );
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    vec2(68.0, 22.0),
-                    egui::Label::new(egui::RichText::new("Scale").size(12.0).color(theme::muted())),
-                );
-                egui::ComboBox::from_id_salt("sheet_scale")
-                    .width(ui.available_width() - 20.0)
-                    .selected_text(sheet.scale.to_string())
-                    .show_ui(ui, |ui| {
-                        for sc in template.scales() {
-                            if ui.selectable_label(sheet.scale == sc, sc.to_string()).clicked() && sheet.scale != sc {
-                                actions.push(DrawingAction::Command(Command::SetSheetScale { sheet: si, scale: sc }));
+            if !suite {
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        vec2(68.0, 22.0),
+                        egui::Label::new(egui::RichText::new("Scale").size(12.0).color(theme::muted())),
+                    );
+                    egui::ComboBox::from_id_salt("sheet_scale")
+                        .width(ui.available_width() - 20.0)
+                        .selected_text(sheet.scale.to_string())
+                        .show_ui(ui, |ui| {
+                            for sc in template.scales() {
+                                if ui.selectable_label(sheet.scale == sc, sc.to_string()).clicked() && sheet.scale != sc
+                                {
+                                    actions
+                                        .push(DrawingAction::Command(Command::SetSheetScale { sheet: si, scale: sc }));
+                                }
                             }
-                        }
-                        let _ = Scale::FULL;
-                    });
-            });
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    vec2(68.0, 22.0),
-                    egui::Label::new(egui::RichText::new("Projection").size(12.0).color(theme::muted())),
-                );
-                let label = match sheet.projection {
-                    Projection::FirstAngle => "First angle",
-                    Projection::ThirdAngle => "Third angle",
-                };
-                egui::ComboBox::from_id_salt("sheet_projection")
-                    .width(ui.available_width() - 20.0)
-                    .selected_text(label)
-                    .show_ui(ui, |ui| {
-                        for (p, l) in [
-                            (Projection::FirstAngle, "First angle (ISO)"),
-                            (Projection::ThirdAngle, "Third angle (ASME)"),
-                        ] {
-                            if ui.selectable_label(sheet.projection == p, l).clicked() && sheet.projection != p {
-                                actions.push(DrawingAction::Command(Command::SetSheetProjection {
-                                    sheet: si,
-                                    projection: p,
-                                }));
+                            let _ = Scale::FULL;
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        vec2(68.0, 22.0),
+                        egui::Label::new(egui::RichText::new("Projection").size(12.0).color(theme::muted())),
+                    );
+                    let label = match sheet.projection {
+                        Projection::FirstAngle => "First angle",
+                        Projection::ThirdAngle => "Third angle",
+                    };
+                    egui::ComboBox::from_id_salt("sheet_projection")
+                        .width(ui.available_width() - 20.0)
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            for (p, l) in [
+                                (Projection::FirstAngle, "First angle (ISO)"),
+                                (Projection::ThirdAngle, "Third angle (ASME)"),
+                            ] {
+                                if ui.selectable_label(sheet.projection == p, l).clicked() && sheet.projection != p {
+                                    actions.push(DrawingAction::Command(Command::SetSheetProjection {
+                                        sheet: si,
+                                        projection: p,
+                                    }));
+                                }
                             }
-                        }
-                    });
-            });
+                        });
+                });
+            }
             hint(ui, "Changing the projection angle applies to views placed from now on.");
             section_gap(ui);
             theme::section_label(ui, "Automatic update");
@@ -1074,4 +1079,62 @@ fn format_panel(ui: &mut egui::Ui, s: &mut DrawingSession, actions: &mut Vec<Dra
         }
     });
     let _ = NewDrawing::new;
+}
+
+/// The idle drawing bar keeps the sheet's current values beside its properties button.
+pub fn sheet_bar(ui: &mut egui::Ui, state: &mut AppState) -> Option<Rect> {
+    let session = state.drawing.session.as_ref()?;
+    if session.selection.is_some() || session.tool != DrawingTool::Select {
+        return None;
+    }
+    let index = session.sheet;
+    let sheet = session.sheet().clone();
+    let scales = session.doc.template().scales();
+    let mut actions = Vec::new();
+    let mut anchor = Rect::NOTHING;
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.label("Sheet");
+        ui.add_sized(vec2(160.0, 24.0), egui::Label::new(&sheet.name).truncate()).on_hover_text(&sheet.name);
+        ui.separator();
+        ui.label("Size");
+        ui.label(&sheet.size.name);
+        ui.separator();
+        ui.label("Scale");
+        egui::ComboBox::from_id_salt("sheet_bar_scale").width(80.0).selected_text(sheet.scale.to_string()).show_ui(
+            ui,
+            |ui| {
+                for scale in scales {
+                    if ui.selectable_label(sheet.scale == scale, scale.to_string()).clicked() && sheet.scale != scale {
+                        actions.push(DrawingAction::Command(Command::SetSheetScale { sheet: index, scale }));
+                    }
+                }
+            },
+        );
+        ui.label("Projection");
+        let current = match sheet.projection {
+            Projection::FirstAngle => "First angle",
+            Projection::ThirdAngle => "Third angle",
+        };
+        egui::ComboBox::from_id_salt("sheet_bar_projection").width(110.0).selected_text(current).show_ui(ui, |ui| {
+            for (projection, label) in
+                [(Projection::FirstAngle, "First angle"), (Projection::ThirdAngle, "Third angle")]
+            {
+                if ui.selectable_label(sheet.projection == projection, label).clicked()
+                    && sheet.projection != projection
+                {
+                    actions.push(DrawingAction::Command(Command::SetSheetProjection { sheet: index, projection }));
+                }
+            }
+        });
+        let properties = ui.button("Sheet properties");
+        anchor = properties.rect;
+        if properties.clicked() {
+            actions.push(DrawingAction::SheetProperties);
+        }
+    });
+    for action in actions {
+        state.push(AppAction::Drawing(action));
+    }
+    Some(anchor)
 }

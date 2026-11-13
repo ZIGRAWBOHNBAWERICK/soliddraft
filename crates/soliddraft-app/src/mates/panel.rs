@@ -485,6 +485,123 @@ fn labelled(ui: &mut egui::Ui, value: &mut String, hint: &str, name: &'static st
 
 /// The panel. Nothing shows while it is closed.
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
+    details(ui, state, false);
+}
+
+fn choose_family(draft: &mut Draft, family: Family) {
+    draft.family = family;
+    if family == Family::Angle {
+        draft.distance = "30".into();
+    }
+    if matches!(family, Family::LimitAngle | Family::Hinge) {
+        draft.min = "-30".into();
+        draft.max = "30".into();
+    }
+    if family == Family::LimitDistance {
+        draft.min = "0 mm".into();
+        draft.max = "10 mm".into();
+    }
+}
+
+/// Mate uses the feature form's fixed actions and overflow sheet in Edit Suite.
+pub fn show_suite(ui: &mut egui::Ui, state: &mut AppState) {
+    use crate::form_bar::{Field, Form};
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    enum Key {
+        Type,
+        Picks,
+        Alignment,
+        Value,
+        Details,
+    }
+    let draft = &state.assembly.mate;
+    let mut fields = vec![Field::new(Key::Type, "Type", "Mate", 240.0), Field::new(Key::Picks, "Faces", "Mate", 140.0)];
+    if draft.family.has_alignment() {
+        fields.push(Field::new(Key::Alignment, "", "Mate", 90.0));
+    }
+    if matches!(draft.family, Family::Distance | Family::ProfileCenter | Family::Angle) {
+        fields.push(Field::new(
+            Key::Value,
+            if draft.family == Family::Angle { "Degrees" } else { "Value" },
+            "Mate",
+            180.0,
+        ));
+    }
+    fields.push(Field::new(Key::Details, "", "Mate", 0.0).sheet());
+    let error = draft.error.clone();
+    let mut bar = std::mem::take(&mut state.form_bar);
+    let response = crate::form_bar::show(
+        ui,
+        &mut bar,
+        Form {
+            key: egui::Id::new("assembly_mate_form"),
+            title: "Mate",
+            icon: crate::icons::Icon::Tree,
+            fields: &fields,
+            can_confirm: true,
+            error: error.as_deref(),
+        },
+        |ui, key| {
+            if key == Key::Details {
+                details(ui, state, true);
+                return false;
+            }
+            let draft = &mut state.assembly.mate;
+            match key {
+                Key::Type => {
+                    egui::ComboBox::from_id_salt("mate_family").selected_text(draft.family.label()).show_ui(ui, |ui| {
+                        for family in Family::ALL {
+                            if ui.selectable_label(draft.family == family, family.label()).clicked()
+                                && draft.family != family
+                            {
+                                choose_family(draft, family);
+                            }
+                        }
+                    });
+                }
+                Key::Picks => {
+                    let count =
+                        [&draft.a, &draft.b, &draft.c, &draft.d].into_iter().filter(|pick| pick.is_some()).count();
+                    return ui
+                        .button(format!("{count} picked"))
+                        .on_hover_text("Pick faces in the model; open the sheet to inspect or clear them")
+                        .clicked();
+                }
+                Key::Alignment => {
+                    let mut flipped = draft.alignment == Alignment::Aligned;
+                    if ui.checkbox(&mut flipped, "Flip").changed() {
+                        draft.alignment = if flipped { Alignment::Aligned } else { Alignment::Opposed };
+                    }
+                }
+                Key::Value => {
+                    let (cell, _) =
+                        ui.allocate_exact_size(egui::vec2(ui.available_width().min(130.0), 24.0), egui::Sense::hover());
+                    let response = crate::form_bar::value_cell(ui, cell, "", |ui, inner| {
+                        ui.put(inner, egui::TextEdit::singleline(&mut draft.distance).frame(egui::Frame::NONE))
+                    });
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Mate value"));
+                }
+                Key::Details => unreachable!(),
+            }
+            false
+        },
+    );
+    state.form_bar = bar;
+    let shortcuts = !egui::Popup::is_any_open(ui.ctx())
+        && !ui.ctx().egui_wants_keyboard_input()
+        && !state.command_line.session_open;
+    let confirm_key = shortcuts && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let cancel_key = shortcuts && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if response.cancel || cancel_key {
+        state.form_bar.reset();
+        state.push(crate::state::AppAction::Assembly(crate::assembly::AssemblyAction::Mate(MateAction::Toggle)));
+        state.options_details = false;
+    } else if response.confirm || confirm_key {
+        state.push(crate::state::AppAction::Assembly(crate::assembly::AssemblyAction::Mate(MateAction::Add)));
+    }
+}
+
+fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
     if !state.assembly.mate.open {
         return;
     }
@@ -505,7 +622,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         .collect();
     let d = &mut state.assembly.mate;
     ui.add_space(8.0);
-    theme::section_label(ui, "Mate");
+    if !suite {
+        theme::section_label(ui, "Mate");
+    }
     let face = |p: &Option<PickedFace>| {
         p.as_ref().map_or("Pick a face".to_owned(), |p| format!("{}: {}", p.component, p.face.label))
     };
@@ -524,28 +643,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     for (label, slot) in slots.iter().zip([&d.a, &d.b, &d.c, &d.d]) {
         ui.label(format!("{label}  {}", face(slot)));
     }
-    ui.horizontal_wrapped(|ui| {
-        for f in Family::ALL {
-            if ui.selectable_value(&mut d.family, f, f.label()).changed() {
-                if f == Family::Angle {
-                    d.distance = "30".into();
-                }
-                if matches!(f, Family::LimitAngle | Family::Hinge) {
-                    d.min = "-30".into();
-                    d.max = "30".into();
-                }
-                if f == Family::LimitDistance {
-                    d.min = "0 mm".into();
-                    d.max = "10 mm".into();
+    if !suite {
+        ui.horizontal_wrapped(|ui| {
+            for family in Family::ALL {
+                if ui.selectable_label(d.family == family, family.label()).clicked() && d.family != family {
+                    choose_family(d, family);
                 }
             }
-        }
-    });
-    if d.family.has_alignment() {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut d.alignment, Alignment::Opposed, "Opposed");
-            ui.selectable_value(&mut d.alignment, Alignment::Aligned, "Aligned");
         });
+        if d.family.has_alignment() {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut d.alignment, Alignment::Opposed, "Opposed");
+                ui.selectable_value(&mut d.alignment, Alignment::Aligned, "Aligned");
+            });
+        }
     }
     if d.family == Family::Hinge {
         ui.checkbox(&mut d.hinge_limits, "Angular stops");
@@ -591,14 +702,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             ui.checkbox(&mut d.flipped, "From the second end");
         }
     }
-    if d.family == Family::Angle {
+    if !suite && d.family == Family::Angle {
         labelled(ui, &mut d.distance, "Signed degrees", "Mate degrees");
     }
     if d.family == Family::LimitAngle || (d.family == Family::Hinge && d.hinge_limits) {
         labelled(ui, &mut d.min, "Least signed degrees", "Mate least degrees");
         labelled(ui, &mut d.max, "Greatest signed degrees", "Mate greatest degrees");
     }
-    if matches!(d.family, Family::Distance | Family::ProfileCenter) {
+    if !suite && matches!(d.family, Family::Distance | Family::ProfileCenter) {
         labelled(ui, &mut d.distance, "Distance, such as 5 mm", "Mate distance");
     }
     if d.family == Family::LimitDistance {
@@ -626,7 +737,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.checkbox(&mut d.reverse, "Reverse");
     }
     ui.horizontal(|ui| {
-        if ui.button("Add mate").clicked() {
+        if !suite && ui.button("Add mate").clicked() {
             actions.push(MateAction::Add);
         }
         if ui.button("Clear faces").clicked() {
@@ -639,7 +750,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
     // What the last command refused, under the button that ran it.
-    if let Some(e) = &d.error {
+    if !suite && let Some(e) = &d.error {
         ui.colored_label(theme::error(), e);
     }
     if let Some(c) = &d.conflict {

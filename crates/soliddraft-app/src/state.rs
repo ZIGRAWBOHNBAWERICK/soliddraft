@@ -1133,6 +1133,77 @@ impl AppState {
         }
     }
 
+    /// The workspaces offered by the active document in Edit Suite.
+    pub fn workspaces(&self) -> Vec<crate::commands::Tab> {
+        if self.drawing.is_active() {
+            crate::drawing::DrawingTab::EDIT_SUITE.into_iter().map(Into::into).collect()
+        } else if self.assembly.is_active() {
+            crate::assembly::Workspace::ALL.into_iter().map(Into::into).collect()
+        } else {
+            RibbonTab::ALL.into_iter().map(Into::into).collect()
+        }
+    }
+
+    pub fn workspace(&self) -> crate::commands::Tab {
+        if let Some(session) = self.drawing.session.as_ref().filter(|_| self.drawing.is_active()) {
+            if session.tab == crate::drawing::DrawingTab::Assistant {
+                crate::drawing::DrawingTab::Views.into()
+            } else {
+                session.tab.into()
+            }
+        } else if self.assembly.is_active() {
+            self.assembly.workspace.into()
+        } else if self.in_sketch() {
+            RibbonTab::Sketch.into()
+        } else {
+            self.ribbon_tab.into()
+        }
+    }
+
+    pub fn select_workspace(&mut self, tab: crate::commands::Tab) {
+        if self.in_sketch() && !self.drawing.is_active() && !self.assembly.is_active() {
+            return;
+        }
+        if !self.workspaces().contains(&tab) {
+            return;
+        }
+        self.options_details = false;
+        self.form_bar.expanded = false;
+        if self.drawing.is_active() {
+            if let crate::commands::Tab::Drawing(tab) = tab {
+                self.push(AppAction::Drawing(crate::drawing::DrawingAction::SetTab(tab)));
+            }
+        } else if self.assembly.is_active() {
+            self.assembly.workspace = match tab {
+                crate::commands::Tab::Assembly => crate::assembly::Workspace::Assembly,
+                crate::commands::Tab::AssemblyInspect => crate::assembly::Workspace::Inspect,
+                crate::commands::Tab::AssemblyView => crate::assembly::Workspace::View,
+                _ => return,
+            };
+        } else {
+            self.ribbon_tab = match tab {
+                crate::commands::Tab::Part(tab) => tab,
+                crate::commands::Tab::Assembly => RibbonTab::Assembly,
+                _ => return,
+            };
+        }
+    }
+
+    pub fn active_viewport(&self) -> &ViewportState {
+        match self.assembly.session.as_ref().filter(|_| self.assembly.is_active()) {
+            Some(session) => &session.viewport,
+            None => &self.viewport,
+        }
+    }
+
+    pub fn active_viewport_mut(&mut self) -> &mut ViewportState {
+        if self.assembly.is_active() {
+            &mut self.assembly.session.as_mut().expect("active assembly").viewport
+        } else {
+            &mut self.viewport
+        }
+    }
+
     pub fn new(doc: Document) -> Self {
         Self {
             doc,

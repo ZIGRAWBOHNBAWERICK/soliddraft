@@ -290,9 +290,10 @@ impl SolidDraftApp {
                 self.state.sketch = None;
                 self.state.chat.preview = None;
                 let n = doc.features.len();
+                self.state.scan = Default::default();
                 self.state.doc = doc;
                 self.state.remember_revision();
-                self.state.viewport.camera.fit(self.state.doc.bounds());
+                self.state.viewport.camera.fit(crate::scan::document_bounds(&self.state.doc));
                 self.state.recent = file::recent();
                 let problems = self.state.doc.error_count() + self.state.doc.repair_count();
                 if std::mem::take(&mut self.state.drawing_after_open) {

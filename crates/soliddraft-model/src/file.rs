@@ -398,6 +398,11 @@ impl Document {
         // An imported file is immutable: bytes that no longer match their hash are a damaged
         // file, not a different geometry.
         for f in &recipe.features {
+            if let crate::FeatureKind::Scan(scan) = &f.kind
+                && crate::sha256_hex(&scan.source.bytes) != scan.source.sha256
+            {
+                return Err(FileError::Invalid(format!("{} holds a scan that does not match its sha256", f.id)));
+            }
             if let crate::feature::FeatureKind::ImportStep(i) = &f.kind
                 && !i.hash_matches()
             {

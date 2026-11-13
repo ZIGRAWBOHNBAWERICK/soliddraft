@@ -340,6 +340,7 @@ fn references(doc: &soliddraft_model::Document) -> Value {
             | FeatureKind::Pattern(_)
             | FeatureKind::Revolve(_)
             | FeatureKind::Sweep(_)
+            | FeatureKind::Scan(_)
             | FeatureKind::ImportStep(_)
             | FeatureKind::Lattice(_)
             | FeatureKind::Gyroid(_) => Vec::new(),

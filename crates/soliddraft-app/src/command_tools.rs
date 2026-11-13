@@ -2928,6 +2928,9 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             "frame": g.frame, "accuracy_mm": g.accuracy_mm, "min_detail_mm": g.min_detail_mm,
             "display": "unproved preview",
         }),
+        FeatureKind::Scan(s) => {
+            json!({"source":s.source.name,"sha256":s.source.sha256,"reference":true,"fitted":s.fit.is_some()})
+        }
         FeatureKind::ImportStep(i) => json!({
             "type": match i.format { soliddraft_kernel_api::ImportFormat::Step => "import_step", soliddraft_kernel_api::ImportFormat::Iges => "import_iges", soliddraft_kernel_api::ImportFormat::Mesh => "import_mesh" }, "source_name": i.source_name, "sha256": i.sha256,
             "bytes": i.source.len(), "decisions": i.decisions,

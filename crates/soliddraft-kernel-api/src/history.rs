@@ -61,6 +61,8 @@ pub enum OpKind {
     ImportIges,
     /// An imported closed mesh solid.
     ImportMesh,
+    /// A part reconstructed from a scan, with a saved native recipe.
+    ScanFit,
     /// Terminal field lattice.
     Lattice,
     /// Terminal field gyroid.
@@ -94,6 +96,7 @@ impl OpKind {
             OpKind::ImportStep => "import_step",
             OpKind::ImportIges => "import_iges",
             OpKind::ImportMesh => "import_mesh",
+            OpKind::ScanFit => "scan_fit",
         }
     }
 }

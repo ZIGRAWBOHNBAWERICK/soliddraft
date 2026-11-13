@@ -188,6 +188,41 @@ MCP clients call `import_scene {"path":"washer.glb","out":"washer.dwasm"}`, with
 
 The `scene-import` application scenario imports the sand3d bracket as `.usda`, `.glb`, `.urdf`, `.obj` and `.stl`, the sand3d washer as `.usda`, `.glb` and `.urdf`, and NVIDIA's SimReady cardboard box as binary `.usd`. It checks each tree, its names, scale and orientation against the source, and the transforms, colours and joints where the file has them. It saves and reopens the washer in a fresh process. The fixtures and their licences are in `ci/fixtures/scene-import`. `cargo test -p soliddraft-scene` runs the same files through the reader alone, and checks that the washer's three formats agree on every part's box and every joint's axis. `cargo test -p soliddraft-app --test scene_import_app` imports the washer from GLB and the box from USD in the rendered window; set `SOLIDDRAFT_SCENE_IMPORT_PROOF_DIR` to keep its frames.
 
+## Scan references and fitted parts
+
+File > Import scan reference reads STL and OBJ coordinates in millimetres. Review
+shows the point and triangle counts, open edges, reversed edge pairs and
+nonmanifold edges. Accept stores the unchanged source with the part as `Scan1`.
+A reference has no inside, mass or volume. Holes, crossing or reversed triangles,
+degenerate triangles and isolated OBJ points stay as supplied. The limits are
+200,000 triangles and 1,000,000 points.
+
+Open Scan workspace from File or the command palette. Fit scan to part runs in
+the background and offers a review before it changes the part. It needs at least
+100 points and an empty solid history. The supported family is block stock with
+bosses, bores and convex rounds on stock edges. Unsupported regions and surfaces
+are listed explicitly, including their sample counts. Free-form regions are reported as unexplained.
+
+The review shows maximum, RMS, 95th percentile and sample count in both
+directions. Scan to part measures the supplied samples against the fitted
+boundary. Part to scan also exposes gaps in the scan. Switch between their
+colour maps in the viewport; the legend is in millimetres. These are sampled
+distances, not bounds on the whole scanned surface. The display mesh's chord
+bound is shown separately. The viewport draws up to 30,000 evenly spaced map
+points from the selected map. Both complete maps stay in the saved part.
+Scan-to-part statistics also include triangle-interior probes. The scan map
+contains the input fitting points and does not retain those additional probes.
+
+Accept fitted part keeps the scan and its maps and rebuilds the saved native
+recipe as a solid. Later solid features and checked exports use that solid.
+Reopening replays the accepted definitions without fitting again. Undo removes
+the fit and restores the reference. Cancel, a refused fit or a part changed
+during fitting leaves the original part unchanged.
+
+The `scan_workspace` application test drives reference review, cancellation,
+acceptance, a fitting refusal, both maps, fit acceptance, save/reopen, downstream
+editing and STEP export through the real application and renderer.
+
 ## STEP proof reports
 
 Every STEP file written by the app or `soliddraft export` has two adjacent reports:

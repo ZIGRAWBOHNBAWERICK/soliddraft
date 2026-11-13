@@ -376,6 +376,40 @@ impl Document {
                 FeatureKind::Thicken(t) => self.build_thicken(f, t, current),
                 FeatureKind::Shell(s) => self.build_shell(f, s, current),
                 FeatureKind::ImportStep(i) => self.build_import(f, i, current),
+                FeatureKind::Scan(scan) => {
+                    if crate::sha256_hex(&scan.source.bytes) != scan.source.sha256 {
+                        Built::failed(current, "The saved scan does not match its original file.")
+                    } else if let Some(fit) = &scan.fit {
+                        if current.is_some() {
+                            Built::failed(current, "A fitted scan must come before the part's solid features.")
+                        } else {
+                            let fingerprint =
+                                crate::sha256_hex(&serde_json::to_vec(&fit.recipe).expect("recipe serializes"))
+                                    .into_boxed_str();
+                            self.finish(
+                                self.kernel.build_scan_fit(&OpTag::new(format!("{}.scan", f.id)), &scan.source, fit),
+                                current,
+                                |r| {
+                                    r.record
+                                        .face_roles
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, o)| NamedFace {
+                                            origin: Origin { tag: r.record.tag.clone(), role: o.role.clone() },
+                                            generator: Generator::Imported { sha256: fingerprint.clone() },
+                                            ordinal: i as u32,
+                                        })
+                                        .collect()
+                                },
+                            )
+                        }
+                    } else {
+                        match self.kernel.scan_reference(&scan.source) {
+                            Ok(_) => Built::pass(FeatureStatus::Ok, current),
+                            Err(e) => Built::failed(current, feature_error(e)),
+                        }
+                    }
+                }
                 FeatureKind::Lattice(l) => self.build_lattice(f, l, current),
                 FeatureKind::Gyroid(g) => self.build_gyroid(f, g, current),
             });

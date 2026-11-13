@@ -725,7 +725,7 @@ pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {
         FeatureKind::Combine { .. } => Icon::Extrude,
         FeatureKind::Shell(_) | FeatureKind::Thicken(_) => Icon::Shell,
         FeatureKind::Offset(_) => Icon::Cad("srf_offset"),
-        FeatureKind::ImportStep(_) => Icon::Import,
+        FeatureKind::ImportStep(_) | FeatureKind::Scan(_) => Icon::Import,
         FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Cad("lattice"),
     }
 }

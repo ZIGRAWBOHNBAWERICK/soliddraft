@@ -225,6 +225,13 @@ paths = ["crates/soliddraft-app/src/ribbon.rs"]
 module = ["ribbon"]
 
 [[areas]]
+name = "app.scan"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/scan.rs"]
+module = ["scan"]
+
+[[areas]]
 name = "app.scene_import"
 owner = "core"
 crate = "soliddraft-app"

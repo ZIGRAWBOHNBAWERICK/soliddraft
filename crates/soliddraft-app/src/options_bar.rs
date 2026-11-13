@@ -83,6 +83,18 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
+                    if let Some(sketch) = &state.sketch
+                        && let Some(info) = state.doc.describe(Selection::Feature(sketch.feature))
+                    {
+                        let plane = info
+                            .details
+                            .iter()
+                            .find(|(label, _)| label == "Plane")
+                            .map(|(_, value)| value.as_str())
+                            .unwrap_or("Sketch plane");
+                        ui.label(egui::RichText::new(format!("{} · {plane}", info.title)).color(theme::accent()));
+                        ui.separator();
+                    }
                     if state.in_sketch() || state.editor.is_some() || state.measure.open {
                         ui.label(egui::RichText::new(prompt).color(theme::muted()));
                     } else if let Some(selection) = state.doc.selection {

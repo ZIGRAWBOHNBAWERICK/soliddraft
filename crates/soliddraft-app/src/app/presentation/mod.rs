@@ -684,6 +684,10 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
 
 /// The same workspace ids as the classic ribbon, in the Edit Suite title bar.
 fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
+    let locked = st.in_sketch();
+    if locked {
+        st.ribbon_tab = RibbonTab::Sketch;
+    }
     let widths = RibbonTab::ALL.map(|tab| {
         ui.painter().layout_no_wrap(tab.label().to_owned(), theme::font_medium(12.5), theme::ink()).size().x + 28.0
     });
@@ -698,11 +702,16 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
         let bounds = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 22.0));
         x += width + gap;
         let selected = st.ribbon_tab == tab;
-        let response = ui.interact(bounds, ui.id().with(("workspace", tab.id())), Sense::click());
+        let enabled = !locked || tab == RibbonTab::Sketch;
+        let response = ui.interact(
+            bounds,
+            ui.id().with(("workspace", tab.id())),
+            if enabled { Sense::click() } else { Sense::hover() },
+        );
         response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("{} tab", tab.label()))
+            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, format!("{} tab", tab.label()))
         });
-        if selected || response.hovered() || response.has_focus() {
+        if selected || (enabled && (response.hovered() || response.has_focus())) {
             ui.painter().rect_filled(
                 bounds,
                 CornerRadius::same(4),
@@ -716,7 +725,7 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
             theme::font_medium(12.5),
             if selected { theme::selection_ink() } else { theme::muted() },
         );
-        if response.has_focus() {
+        if enabled && response.has_focus() {
             ui.painter().rect_stroke(
                 bounds,
                 CornerRadius::same(4),
@@ -724,8 +733,11 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
                 egui::StrokeKind::Inside,
             );
         }
-        if response.clicked() {
+        if enabled && response.clicked() {
             st.ribbon_tab = tab;
+        }
+        if !enabled {
+            response.on_hover_text("Close sketch to change workspace");
         }
     }
     ui.add_space(8.0);

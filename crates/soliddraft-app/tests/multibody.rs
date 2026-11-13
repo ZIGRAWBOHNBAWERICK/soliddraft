@@ -58,7 +58,7 @@ fn editing_combine_refuses_export_until_the_dialog_is_finished() {
         app.run_steps(8);
         assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
         assert!(app.state().state.note.as_ref().unwrap().text.contains("Finish or cancel"));
-        app.get_by_role_and_label(egui::accesskit::Role::Button, "Combine").click();
+        app.get_by_label("Combine bodies").get_by_label("Combine").click();
         app.run_steps(8);
         assert!(app.state().state.doc.combine_form.is_none());
         assert!(!app.state().state.export_part(Format::Stl).unwrap().bytes.is_empty());

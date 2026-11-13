@@ -3815,15 +3815,20 @@ impl Document {
         self.model.face_ref(face).ok()
     }
 
-    /// The sketch plane on a planar face of the displayed body.
+    /// The sketch plane on a planar face of the displayed part.
     pub fn face_plane(&self, face: FaceId) -> Option<Plane> {
         if !self.current_exact_display() {
             return None;
         }
-        let body = self.display_body()?;
-        let topology = self.kernel().topology(body).ok()?;
-        let info = topology.face(face)?;
-        Some(model::plane_on_face(info.normal?, info.centroid))
+        let plane = |body| {
+            let topology = self.kernel().topology(body).ok()?;
+            let info = topology.face(face)?;
+            Some(model::plane_on_face(info.normal?, info.centroid))
+        };
+        if self.model.next_body() == 1 {
+            return plane(self.display_body()?);
+        }
+        self.model.live_bodies().into_iter().find_map(|(_, body)| plane(body))
     }
 
     pub fn mass_properties(&self, id: FeatureId) -> Option<soliddraft_kernel_api::MassProperties> {

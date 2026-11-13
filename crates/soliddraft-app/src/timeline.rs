@@ -31,7 +31,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let mut actions = Vec::new();
     let editing = state.sketch.as_ref().map(|s| s.feature);
     let edit_index = editing.and_then(|id| state.doc.features.iter().position(|f| f.id == id));
-    let can_change = editing.is_none() && state.editor.is_none();
+    let can_change = !state.feature_edit_open();
     if !can_change || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.timeline.dragging = None;
         state.timeline.rollback_drag = false;
@@ -291,6 +291,11 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, chip: Rec
         }
     } else if state.sketch.as_ref().is_some_and(|sketch| sketch.feature == id) {
         ("Pending", "Finish or cancel this sketch edit before exporting.".into())
+    } else if let Some(form) = state.doc.combine_form.as_ref().filter(|form| form.editing == Some(id)) {
+        match &form.error {
+            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+        }
     } else if let Some(soliddraft_model::FeatureStatus::Blocked(input)) =
         state.doc.model().status(soliddraft_model::FeatureId(id as u32))
         && !matches!(feature.status, FeatureStatus::Inactive)

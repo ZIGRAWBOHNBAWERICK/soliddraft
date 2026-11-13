@@ -13,11 +13,11 @@ pub fn operation_name(operation: BooleanOp) -> &'static str {
 }
 
 pub struct CombineForm {
-    editing: Option<FeatureId>,
+    pub(crate) editing: Option<FeatureId>,
     target: u32,
     tool: u32,
     operation: BooleanOp,
-    error: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 impl CombineForm {

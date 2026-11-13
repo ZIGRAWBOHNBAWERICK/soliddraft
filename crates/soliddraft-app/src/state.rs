@@ -1457,13 +1457,17 @@ impl AppState {
         self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
     }
 
+    pub(crate) fn feature_edit_open(&self) -> bool {
+        self.editor.is_some() || self.sketch.is_some() || self.doc.combine_form.is_some()
+    }
+
     /// Exports only the committed revision. A live dimension edit cannot export
     /// the preceding body as if it represented the value currently requested.
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
         }
-        if self.editor.is_some() || self.sketch.is_some() {
+        if self.feature_edit_open() {
             return Err("Finish or cancel the feature or sketch edit before exporting".into());
         }
         let proof = self.doc.proof_state();
@@ -1506,7 +1510,7 @@ impl AppState {
     pub fn drag_dimension(&mut self, step: DragStep) {
         match step {
             DragStep::Start { feature, dimension } => {
-                if self.editor.is_some() || self.sketch.is_some() {
+                if self.feature_edit_open() {
                     return;
                 }
                 if let Some(previous) = self.drag_preview.take() {

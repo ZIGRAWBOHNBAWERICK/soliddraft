@@ -139,6 +139,7 @@ fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plain
 fn three_section_smooth_display_fits_the_application_allowance() {
     use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
 
+    assert_eq!(APP_REQUEST_WORK, 20_000_000);
     let k = CatallaxKernel::new();
     let profiles: Vec<_> = [(2.0, 0.0), (4.0, 3.0), (2.0, 6.0)]
         .into_iter()
@@ -155,18 +156,22 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     let (answer, work) = with_request_allowance(APP_REQUEST_WORK, || -> KernelResult<_> {
         let body = k.loft(&OpTag::new("smooth"), &profiles, LoftShape::Smooth)?;
         let mesh = k.tessellate(body.body, &TessellationParams { chord_height: 0.01, ..Default::default() })?;
-        let mass = k.mass_properties(body.body)?;
-        Ok((body, mesh, mass))
+        Ok((body, mesh))
     });
     eprintln!("three-section Smooth display: {work:?}; refusal: {:?}", answer.as_ref().err());
     assert!(!work.exhausted, "{work:?}; {:?}", answer.as_ref().err());
-    let (body, mesh, mass) = answer.unwrap();
+    let (body, mesh) = answer.unwrap();
     assert!(!mesh.unproved);
     assert!(!mesh.indices.is_empty());
     assert_eq!(mesh.triangle_faces.len(), mesh.triangle_count());
     let faces = k.faces(body.body).unwrap();
     assert_eq!(faces.len(), 6);
     assert!(mesh.triangle_faces.iter().all(|id| faces.iter().any(|face| face.id == *id)));
+    // Background mass has its own application request allowance.
+    let (mass, mass_work) = with_request_allowance(APP_REQUEST_WORK, || k.mass_properties(body.body));
+    eprintln!("three-section Smooth mass: {mass_work:?}; refusal: {:?}", mass.as_ref().err());
+    assert!(!mass_work.exhausted, "{mass_work:?}; {:?}", mass.as_ref().err());
+    let mass = mass.unwrap();
     assert!((mass.volume - 4596.0 / 70.0).abs() < 1e-7);
     assert!(mass.centroid.distance(Vec3::new(0.0, 0.0, 3.0)) < 1e-9);
     let valid = k.validate(body.body).unwrap();

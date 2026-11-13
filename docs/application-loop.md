@@ -220,6 +220,9 @@ A step's `repair` lists the features expected
 to raise the repair prompt; features that wait for them may report it, and every other
 feature must build. `{bundle}` in a string argument is replaced by the run's bundle
 directory, for `save` and `open`.
+`checked_step_faces` may declare an independent export-face count when STEP splits logical faces into patches.
+The checker then requires both OpenCASCADE and the native report to match that count.
+Without it, the logical-body count, less reported removals, remains required.
 
 Every step also checks references: each reference in `command.json` must keep its
 original identity and Catallax operation tag and role. A built face sketch must lie on

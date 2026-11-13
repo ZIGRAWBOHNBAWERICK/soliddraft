@@ -13,6 +13,9 @@ deviation plus any fitted surface's reported fit to its exact definition, plus O
 estimate of its integration error, plus the exact volume's measurement width (a
 relative 1e-12 around Catallax's proven enclosure).
 
+A design may state expected_export_faces when STEP splits logical faces into patches.
+The file and report must both match that independent expectation.
+
 This checker belongs to CI. The application never runs OpenCASCADE.
 """
 
@@ -94,9 +97,17 @@ def check(step_path, report):
                         f"from 0 to the exact body's {exact[REMOVED_COUNTS[key]]}")
     if seen["solids"] != step["solids"]:
         failures.append(f"{seen['solids']} solids in OpenCASCADE, {step['solids']} in the report")
-    if "removed_faces" not in invalid and not (seen["faces"] == step["faces"] == exact["faces"] - step["removed_faces"]):
+    expected_faces = exact["faces"] - step["removed_faces"] if "removed_faces" not in invalid else None
+    split_expectation = "expected_export_faces" in report
+    if split_expectation:
+        expected_faces = report["expected_export_faces"]
+        if type(expected_faces) is not int or expected_faces <= 0:
+            failures.append("expected_export_faces must be a positive whole number")
+            expected_faces = None
+    if expected_faces is not None and not (seen["faces"] == step["faces"] == expected_faces):
+        reason = f", expected {expected_faces} export faces" if split_expectation else ""
         failures.append(
-            f"{seen['faces']} faces in OpenCASCADE, {step['faces']} in the report, {exact['faces']} on the exact body"
+            f"{seen['faces']} faces in OpenCASCADE, {step['faces']} in the report, {exact['faces']} on the exact body{reason}"
         )
     if not seen["valid"]:
         failures.append("OpenCASCADE's shape check failed")

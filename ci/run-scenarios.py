@@ -703,7 +703,9 @@ def request_work_check(value, ceiling):
                                         and value["report"].get("work", 0) <= request.get("used", 0) <= ceiling}
 
 
-def checked_step_export(binary, part, directory, evidence, timeout, max_work=None, oracle=None):
+def checked_step_export(binary, part, directory, evidence, timeout, max_work=None, oracle=None, expected_faces=None):
+    if expected_faces is not None and (type(expected_faces) is not int or expected_faces <= 0):
+        raise ValueError("checked_step_faces must be a positive whole number")
     lowered = [] if max_work is None else ["--max-work", max_work]
     exported = cli(binary, ["export", part, "--json", "--out", directory / "part.step", *lowered],
                    directory, "checked-step-export", timeout)
@@ -716,12 +718,15 @@ def checked_step_export(binary, part, directory, evidence, timeout, max_work=Non
     checks.append({"check": "one within-tolerance STEP solid", "report": report,
                    "pass": report.get("kind") == "step" and report.get("within_tolerance") is True
                            and report.get("solids") == 1})
-    write(directory / "step-report.json", {"report": report, "body": {
+    comparison = {"report": report, "body": {
         "faces": evidence["summary"]["body"]["faces"],
         "edges": evidence["summary"]["body"]["edges"],
         "volume": evidence["measurement"]["volume_mm3"],
         "area": evidence["measurement"]["area_mm2"],
-    }})
+    }}
+    if expected_faces is not None:
+        comparison["expected_export_faces"] = expected_faces
+    write(directory / "step-report.json", comparison)
     checks.extend(output_files([directory / "part.step"]))
     checks.append(cli(sys.executable, [pathlib.Path(__file__).with_name("check-step.py"),
         directory / "part.step", directory / "step-report.json"], directory, "check-step", timeout))
@@ -1163,7 +1168,7 @@ def run(args):
             if "checked_step_export" in step:
                 checks.extend(checked_step_export(args.soliddraft,
                     substitute(step["checked_step_export"], args.out), directory, evidence, args.timeout,
-                    step.get("checked_step_max_work"), step.get("step_oracle")))
+                    step.get("checked_step_max_work"), step.get("step_oracle"), step.get("checked_step_faces")))
             if "checked_iges_export" in step:
                 spec = step["checked_iges_export"]
                 checks.extend(checked_iges_export(args.soliddraft,

@@ -126,12 +126,14 @@ class CheckStepFit(unittest.TestCase):
 
 
 class CheckStepFaces(unittest.TestCase):
-    def failures(self, read, reported, exact, removed, removed_edges=0):
+    def failures(self, read, reported, exact, removed, removed_edges=0, volume=1000.0, **expectation):
         checker = step_checker()
         checker.count = lambda shape, kind: read if kind is checker.TopAbs_FACE else 1
+        checker.GProp_GProps.return_value.Mass.return_value = volume
         report = {"body": {"faces": exact, "edges": 20, "volume": 1000.0, "area": 600.0},
                   "report": {"solids": 1, "faces": reported, "removed_faces": removed, "removed_edges": removed_edges,
                              "max_deviation_mm": 0.0, "max_deviation": "0", "within_tolerance": True}}
+        report.update(expectation)
         return checker.check("part.step", report)[0]
 
     def test_removed_faces_reconcile_the_written_and_exact_counts(self):
@@ -157,6 +159,23 @@ class CheckStepFaces(unittest.TestCase):
         self.assertEqual(self.failures(11, 11, 11, 0, 21), [
             "the report's removed_edges is 21, not a whole number from 0 to the exact body's 20"])
         self.assertEqual(self.failures(11, 11, 11, 0, 20), [])
+
+    def test_split_faces_require_an_independent_exact_export_count(self):
+        self.assertEqual(self.failures(10, 10, 6, 0, expected_export_faces=10), [])
+        for read, reported, expected in [(9, 10, 10), (10, 9, 10), (10, 10, 9)]:
+            self.assertTrue(self.failures(read, reported, 6, 0, expected_export_faces=expected))
+        self.assertTrue(self.failures(10, 10, 6, 0))
+
+    def test_split_expectations_cannot_excuse_a_volume_mismatch(self):
+        failures = self.failures(10, 10, 6, 0, volume=1000.001, expected_export_faces=10)
+        self.assertTrue(any(failure.startswith("volume ") for failure in failures))
+
+    def test_split_expectations_cannot_hide_invalid_removed_counts(self):
+        self.assertTrue(self.failures(10, 10, 6, -1, expected_export_faces=10))
+        for expected in [0, -1, True, False, 10.0, 0.5, "10", None, float("inf"), float("nan")]:
+            with self.subTest(expected=expected):
+                failures = self.failures(10, 10, 6, 0, expected_export_faces=expected)
+                self.assertIn("expected_export_faces must be a positive whole number", failures)
 
 
 class Checks(unittest.TestCase):

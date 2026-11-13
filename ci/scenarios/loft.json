@@ -288,7 +288,8 @@
       ],
       "same_geometry_as_step": 15,
       "checked_step_export": "{bundle}/smooth-loft.dwprt",
-      "checked_step_max_work": 20000000
+      "checked_step_max_work": 20000000,
+      "checked_step_faces": 10
     }
   ]
 }

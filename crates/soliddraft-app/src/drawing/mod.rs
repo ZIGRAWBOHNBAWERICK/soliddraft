@@ -1357,7 +1357,10 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
             show_part_tab(dock);
             state.drawing.active = false;
         }
-        DrawingAction::TogglePanel(side) => state.layout.toggle(side),
+        DrawingAction::TogglePanel(_) => {
+            let shown = state.tree_shown();
+            state.show_tree(!shown);
+        }
         DrawingAction::ShowDrawing => {
             if state.drawing.session.is_some() {
                 show_drawing_tab(dock);

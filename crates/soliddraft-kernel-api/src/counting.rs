@@ -155,6 +155,18 @@ impl Kernel for Counting {
         self.inner.chamfer(tag, body, edges, distance)
     }
 
+    fn chamfer_distances(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        distance: f64,
+        other_distance: Option<f64>,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.chamfer_distances(tag, body, edges, distance, other_distance)
+    }
+
     fn shell(&self, tag: &OpTag, body: BodyId, open_faces: &[FaceId], thickness: f64) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.shell(tag, body, open_faces, thickness)
@@ -258,6 +270,20 @@ impl Kernel for Counting {
     fn tessellate_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
         self.note(Work::Mesh(body));
         self.inner.tessellate_edges(body, params)
+    }
+
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.note(Work::Mesh(body));
+        self.inner.rendering(body, params)
+    }
+
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.note(Work::Mesh(body));
+        self.inner.rendering_edges(body, params)
+    }
+
+    fn display_bound(&self, body: BodyId) -> KernelResult<Option<crate::DisplayBound>> {
+        self.inner.display_bound(body)
     }
 
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {

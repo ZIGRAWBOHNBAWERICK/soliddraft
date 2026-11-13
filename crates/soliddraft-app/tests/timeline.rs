@@ -73,7 +73,7 @@ fn sketches() -> Document {
 fn edit_suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);
     app.state_mut().state.frame_layout = FrameLayout::EditSuite;
-    app.state_mut().state.layout.tree.shown = false;
+    app.state_mut().state.show_tree(false);
     app.run_steps(8);
     app
 }
@@ -108,13 +108,13 @@ fn keyboard_focus_is_visible_and_distinct_from_history_selection() {
                 assert!(!app.get_by_label(label).is_focused(), "Tab leaves {name}");
                 let rect = app.get_by_label(label).rect();
                 let selection = app.state().state.doc.selection;
-                let tree_shown = app.state().state.layout.tree.shown;
+                let tree_shown = app.state().state.tree_shown();
                 let before = app.render().expect("unfocused history renders");
                 app.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
                 app.run_steps(2);
                 assert!(app.get_by_label(label).is_focused(), "Shift+Tab returns to {name}");
                 assert_eq!(app.state().state.doc.selection, selection, "focus does not select {name}");
-                assert_eq!(app.state().state.layout.tree.shown, tree_shown, "focus does not toggle the Tree");
+                assert_eq!(app.state().state.tree_shown(), tree_shown, "focus does not toggle the Tree");
                 let focused = app.render().expect("focused history renders");
                 focused.save(case.path(&format!("{}-{name}-focused.png", mode.label().to_lowercase()))).unwrap();
                 let at = if name == "rollback" {
@@ -157,14 +157,14 @@ fn tree_button_toggles_the_shared_pane_and_remembers_the_choice() {
     std::fs::write(case.path("config").join("settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
     let mut app = ribbon::app(ribbon::plate());
     case.run(&mut app, |app| {
-        assert!(!app.state().state.layout.tree.shown);
+        assert!(!app.state().state.tree_shown());
         let wide = app.state().state.viewport.rect.width();
         let tree = ribbon::control(app, "Tree", bounds(app));
         assert!(!tree.selected);
         case.frame(app, "hidden-by-default");
         ribbon::click_at(app, tree.rect.center());
         app.run_steps(12);
-        assert!(app.state().state.layout.tree.shown);
+        assert!(app.state().state.tree_shown());
         let open_tree = ribbon::control(app, "Tree", bounds(app));
         assert!(open_tree.selected);
         assert!((open_tree.rect.left() - tree.rect.left()).abs() < 1.0, "the toggle stays beside the timeline");
@@ -174,15 +174,15 @@ fn tree_button_toggles_the_shared_pane_and_remembers_the_choice() {
         let tree = ribbon::control(app, "Tree", bounds(app)).rect;
         ribbon::click_at(app, tree.center());
         app.run_steps(12);
-        assert!(!app.state().state.layout.tree.shown);
+        assert!(!app.state().state.tree_shown());
         assert!((app.state().state.viewport.rect.width() - wide).abs() < 1.0);
         app.key_press(Key::F9);
         app.run_steps(12);
-        assert!(app.state().state.layout.tree.shown);
+        assert!(app.state().state.tree_shown());
         assert!(ribbon::control(app, "Tree", bounds(app)).selected);
     });
     let reopened = ribbon::app(ribbon::plate());
-    assert!(reopened.state().state.layout.tree.shown);
+    assert!(reopened.state().state.tree_shown());
 }
 
 #[test]
@@ -198,14 +198,23 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
     let mut app = ribbon::app(doc);
     assert!(app.query_all_by_label("Sketch1 in history").next().is_none());
     app.state_mut().state.frame_layout = FrameLayout::EditSuite;
-    app.state_mut().state.layout.tree.shown = false;
+    app.state_mut().state.show_tree(false);
     app.run_steps(8);
     case.run(&mut app, |app| {
         for name in ["Sketch1", "Boss-Extrude1"] {
             let rect = chip(app, name);
             assert!(bounds(app).contains_rect(rect));
             let painted = ribbon::painted_in(app, rect);
-            assert!(painted.iter().any(|text| text.text == name));
+            let feature = app.state().state.doc.features.iter().find(|f| f.name == name).unwrap();
+            let caption = if feature
+                .sketch()
+                .is_some_and(|s| s.sketch.status == soliddraft_app::sketch::SolveStatus::UnderDefined)
+            {
+                format!("(-) {name}")
+            } else {
+                name.into()
+            };
+            assert!(painted.iter().any(|text| text.text == caption));
             assert!(painted.len() >= 2, "the chip has a summary");
             ribbon::click_at(app, rect.center());
             let expected = app.state().state.doc.features.iter().find(|f| f.name == name).unwrap().id;
@@ -222,7 +231,8 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
         let editor = app.state().state.editor.as_ref().expect("the feature editor opens");
         assert_eq!(editor.target, Some(app.state().state.doc.features[1].id));
         assert!(matches!(editor.params, soliddraft_app::state::EditorParams::Extrude(_)));
-        assert!(app.state().state.layout.tree.shown, "the feature form is reachable");
+        assert!(!app.state().state.tree_shown(), "the feature form does not need the pane");
+        assert!(app.query_all_by_label("Depth value").next().is_some(), "the form is on the options bar");
     });
 }
 

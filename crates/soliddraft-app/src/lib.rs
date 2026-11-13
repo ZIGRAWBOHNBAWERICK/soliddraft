@@ -22,6 +22,7 @@ pub mod document;
 pub mod documents_browser;
 pub mod drag;
 pub mod drawing;
+pub mod feature_forms;
 pub mod file;
 pub mod fillet_collect;
 pub mod form_bar;

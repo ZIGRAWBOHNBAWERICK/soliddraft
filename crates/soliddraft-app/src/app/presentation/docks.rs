@@ -166,6 +166,7 @@ impl TabViewer for Panels<'_> {
                 st.viewport.context_menus = st.frame_layout == crate::settings::FrameLayout::EditSuite;
                 let overlay = Overlay {
                     pick_filter,
+                    dimensions_on_geometry: st.frame_layout == crate::settings::FrameLayout::EditSuite,
                     ghost,
                     preview,
                     sketch: st.sketch.as_mut(),

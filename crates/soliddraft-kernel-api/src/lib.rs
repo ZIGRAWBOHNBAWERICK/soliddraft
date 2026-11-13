@@ -57,8 +57,9 @@ pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
     Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportFormat, ImportOptions, ImportStepRequest,
-    ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT,
-    RepairChange, RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
+    ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, PlanarRepairMethod, Proposal, ProposalSet,
+    REPAIR_FORMAT, RepairChange, RepairDerivative, RepairRecord, RepairSource, SourceIncidence, question_id,
+    question_index,
 };
 pub use profile::{BezierControls, Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
@@ -275,6 +276,27 @@ pub struct Draft {
 pub enum LatticeCell {
     /// Axis-aligned cubic beams.
     Cubic,
+    /// Beams from the cell centre to its eight corners.
+    BodyCentred,
+    /// Beams from each face centre to its four corners.
+    FaceCentred,
+    /// Face-centred beams with links between neighbouring face centres.
+    Octet,
+}
+
+impl LatticeCell {
+    /// Cells available in the lattice editor.
+    pub const ALL: [Self; 4] = [Self::Cubic, Self::BodyCentred, Self::FaceCentred, Self::Octet];
+
+    /// The name shown in the editor.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cubic => "Cubic",
+            Self::BodyCentred => "Body centred",
+            Self::FaceCentred => "Face centred",
+            Self::Octet => "Octet",
+        }
+    }
 }
 
 /// A terminal field is fixed to the part origin and axes.
@@ -420,6 +442,41 @@ impl Default for TessellationParams {
     }
 }
 
+/// A measured display result, distinct from a certified mesh or an unmeasured preview.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DisplayBound {
+    /// Named native rendering case.
+    pub kind: String,
+    /// Versioned rule selected before evaluation.
+    pub rule: String,
+    /// Preset maximum deviation in millimetres.
+    pub level_mm: f64,
+    /// Whole-surface deviation including screen-coordinate rounding, in millimetres.
+    pub measured_mm: f64,
+    /// Native measurement method over the complete surface scope.
+    pub method: String,
+    /// Immutable retained definition, revision and covered entities.
+    pub definition: String,
+}
+
+impl DisplayBound {
+    /// Rejects missing evidence or a measured deviation outside the preset rule.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.kind != "spline display mesh"
+            || self.rule.trim().is_empty()
+            || self.method.trim().is_empty()
+            || self.definition.trim().is_empty()
+            || self.level_mm != 0.01
+            || !self.measured_mm.is_finite()
+            || self.measured_mm < 0.0
+            || self.measured_mm > self.level_mm
+        {
+            return Err("The spline display needs a measured deviation within its stated 0.01 mm bound and a retained definition".into());
+        }
+        Ok(())
+    }
+}
+
 /// A triangle mesh of a body, with each triangle labelled by the face it came from.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Mesh {
@@ -434,10 +491,13 @@ pub struct Mesh {
     /// Requested controls this backend cannot guarantee. The mesh still meets its supported controls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unavailable_controls: Vec<String>,
-    /// True for a preview: sampled for the screen, with no claimed deviation, watertightness
-    /// or quality. A preview is never exported or published as proven.
+    /// True for rendering without proof. A measured bound, when present, stays distinct
+    /// from a certificate. This geometry is never exported or published as proven.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// Native measured display evidence. This geometry remains unproved and is never exported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounded: Option<DisplayBound>,
 }
 
 impl Mesh {
@@ -493,6 +553,23 @@ pub enum CurveKind {
     Other,
 }
 
+/// How a face's carrier relates to its retained geometric definition. This is
+/// independent of tessellation quality, measurement accuracy and export rounding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FaceAccuracy {
+    /// No approximation of the face's retained surface definition.
+    Exact,
+    /// A checked fit, with a conservative upper bound in millimetres.
+    Fitted {
+        /// Maximum distance to the retained surface definition, rounded up.
+        max_deviation_mm: f64,
+    },
+    /// The backend supplies no carrier accuracy, for example a field preview.
+    #[default]
+    Unknown,
+}
+
 /// One face of a body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FaceInfo {
@@ -500,6 +577,9 @@ pub struct FaceInfo {
     pub id: FaceId,
     /// Surface type.
     pub surface: SurfaceKind,
+    /// Carrier accuracy reported by the backend.
+    #[serde(default)]
+    pub accuracy: FaceAccuracy,
     /// Area within the trim boundary.
     pub area: f64,
     /// Area centroid.
@@ -798,6 +878,16 @@ pub enum KernelError {
         /// The kernel's or backend's explanation.
         message: String,
     },
+    /// The named spline rendering request exhausted its unchanged work allowance.
+    #[error(
+        "Spline display limit (SD-DISPLAY-01): The 0.01 mm surface check stopped after {used} work units. The application limit is {limit} units. The existing part is retained"
+    )]
+    DisplayLimit {
+        /// Work consumed before the refused reservation.
+        used: u64,
+        /// The application's request allowance.
+        limit: u64,
+    },
     /// The backend does not implement this operation or input.
     #[error("unsupported: {0}")]
     Unsupported(String),
@@ -862,6 +952,22 @@ pub trait Kernel: Send + Sync {
 
     /// Bevels the given edges with a flat cross section `distance` wide.
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult>;
+
+    /// Bevels edges with independent setbacks on the two adjacent faces. `None`
+    /// uses the first distance on both faces, as in [`Kernel::chamfer`].
+    fn chamfer_distances(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        distance: f64,
+        other_distance: Option<f64>,
+    ) -> KernelResult<OpResult> {
+        if other_distance.is_some_and(|other| other != distance) {
+            return Err(KernelError::InvalidInput("two-distance chamfer is unavailable".into()));
+        }
+        self.chamfer(tag, body, edges, distance)
+    }
 
     /// Hollows a solid to wall `thickness`, leaving `open_faces` open.
     fn shell(&self, tag: &OpTag, body: BodyId, open_faces: &[FaceId], thickness: f64) -> KernelResult<OpResult>;
@@ -984,9 +1090,26 @@ pub trait Kernel: Send + Sync {
     /// `params.chord_height`, when set, the distance from chord to curve.
     fn tessellate_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>>;
 
+    /// The screen result under a backend's named rendering rule. Its stated level may
+    /// differ from viewport refinement controls; exports use certified tessellation.
+    /// Backends without a named rule retain their existing preview behavior.
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.preview(body, params)
+    }
+
+    /// Physical picking edges of the named rendering result, or the ordinary preview.
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.preview_edges(body, params)
+    }
+
+    /// Measured rendering evidence for this immutable body, never an export certificate.
+    fn display_bound(&self, _body: BodyId) -> KernelResult<Option<DisplayBound>> {
+        Ok(None)
+    }
+
     /// A display mesh for the screen: the viewport and drawing views. A backend may
-    /// sample it faster than [`tessellate`](Self::tessellate) by claiming no bounds, and
-    /// then marks it [`Mesh::unproved`]. Exports and proven results use `tessellate`.
+    /// return unproved rendering, with a measured bound or no claimed deviation.
+    /// Exports and proven results use [`tessellate`](Self::tessellate).
     /// The default returns `tessellate`.
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.tessellate(body, params)
@@ -1206,6 +1329,7 @@ pub trait Kernel: Send + Sync {
         match format {
             ImportFormat::Step => self.propose_import(source, options),
             ImportFormat::Iges => Err(KernelError::Unsupported("IGES import".into())),
+            ImportFormat::Mesh => Err(KernelError::Unsupported("mesh solid import".into())),
         }
     }
 
@@ -1219,6 +1343,7 @@ pub trait Kernel: Send + Sync {
         match format {
             ImportFormat::Step => self.import_step(tag, request),
             ImportFormat::Iges => Err(KernelError::Unsupported("IGES import".into())),
+            ImportFormat::Mesh => Err(KernelError::Unsupported("mesh solid import".into())),
         }
     }
 

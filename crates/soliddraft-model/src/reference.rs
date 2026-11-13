@@ -70,6 +70,11 @@ pub enum Generator {
     },
     /// Any other face a feature made.
     Other,
+    /// A face from one immutable imported source. A replacement needs new references.
+    Imported {
+        /// Hash of the source that generated this face.
+        sha256: Box<str>,
+    },
     /// An inset wall of a shell, ranked by its source face name.
     ShellWall,
     /// A rounded face where a shell's wall turns round a concave edge, ranked by the
@@ -103,7 +108,7 @@ impl fmt::Display for Generator {
             Generator::Blend { edge } => write!(f, "Blend of edge {}", edge + 1),
             Generator::Hole { placement, part } => write!(f, "Hole {} {}", placement + 1, part.label().to_lowercase()),
             Generator::Copy { instance } => write!(f, "Copy {instance} face"),
-            Generator::Other => f.write_str("Face"),
+            Generator::Other | Generator::Imported { .. } => f.write_str("Face"),
             Generator::OffsetFace => f.write_str("Offset face"),
             Generator::OffsetRound => f.write_str("Offset round"),
             Generator::OffsetCorner => f.write_str("Offset corner"),
@@ -719,6 +724,7 @@ mod tests {
         FaceInfo {
             id: FaceId::from_raw(id),
             surface: SurfaceKind::Plane,
+            accuracy: soliddraft_kernel_api::FaceAccuracy::Unknown,
             area: 1.0,
             centroid: Vec3::new(id as f64, 0.0, z),
             bbox: Aabb { min: Vec3::ZERO, max: Vec3::ZERO },

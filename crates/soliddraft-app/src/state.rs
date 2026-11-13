@@ -50,6 +50,7 @@ pub enum AppAction {
     StartCut,
     StartFillet,
     StartChamfer,
+    ShowMaterial,
     StartHole,
     StartPattern {
         circular: bool,
@@ -139,6 +140,13 @@ pub enum AppAction {
     ShowStartPage,
     ImportStep(Option<PathBuf>),
     ImportIges(Option<PathBuf>),
+    /// Review a closed STL or OBJ mesh as an exact solid.
+    ImportMesh(Option<PathBuf>),
+    /// Review a replacement source for an imported feature.
+    ReplaceImport {
+        feature: FeatureId,
+        path: Option<PathBuf>,
+    },
     /// Imports an OpenUSD, glTF, URDF, OBJ or STL file as an assembly of mesh bodies and
     /// opens it. `None` asks for the file and where to write the assembly.
     ImportScene(Option<PathBuf>),
@@ -351,7 +359,7 @@ impl FeatureEditor {
             self.marked = (self.edges().to_vec(), before);
             self.marks = doc.edge_paths(&self.marked.0, before);
         }
-        if self.feedback.size.is_some() {
+        if self.feedback.size.is_some() || self.feedback.second_size.is_some() {
             self.preview = Preview::default();
             self.error = None;
             self.last = None;
@@ -1119,24 +1127,25 @@ pub struct AppState {
 impl AppState {
     pub fn tree_shown(&self) -> bool {
         if self.frame_layout == crate::settings::FrameLayout::Classic {
-            return self.layout.tree.shown;
-        }
-        if self.assembly.is_active() {
-            !self.assembly.tree_hidden
-        } else if self.drawing.is_active() {
-            !self.drawing.tree_hidden
-        } else {
             self.layout.tree.shown
+        } else if self.assembly.is_active() {
+            self.layout.suite.assembly
+        } else if self.drawing.is_active() || self.drawing.new.is_some() {
+            self.layout.suite.drawing
+        } else {
+            self.layout.suite.part
         }
     }
 
     pub fn show_tree(&mut self, shown: bool) {
-        if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.assembly.is_active() {
-            self.assembly.tree_hidden = !shown;
-        } else if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.drawing.is_active() {
-            self.drawing.tree_hidden = !shown;
-        } else {
+        if self.frame_layout == crate::settings::FrameLayout::Classic {
             self.layout.tree.shown = shown;
+        } else if self.assembly.is_active() {
+            self.layout.suite.assembly = shown;
+        } else if self.drawing.is_active() || self.drawing.new.is_some() {
+            self.layout.suite.drawing = shown;
+        } else {
+            self.layout.suite.part = shown;
         }
     }
 
@@ -1448,7 +1457,8 @@ impl AppState {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
         }
-        if self.doc.proof_state().answered_within_bound {
+        let proof = self.doc.proof_state();
+        if proof.answered_within_bound && !proof.display_only_bound {
             return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
         if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {

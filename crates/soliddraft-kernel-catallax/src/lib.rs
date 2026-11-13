@@ -13,6 +13,7 @@ mod distance;
 mod drawing_queries;
 mod edge_control;
 mod feature_pattern;
+mod field_preview;
 mod frames;
 mod identity;
 mod iges;
@@ -38,7 +39,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "e4e6df4b2c400481068f35fd08ce7a739a2c3b4a";
+pub const CATALLAX_REVISION: &str = "7cde4119547109994eb685d6ff10187ce0b846fc";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -72,6 +73,7 @@ struct Solid {
     display: MeshCache<catallax_mesh::Mesh>,
     /// `None` where Catallax refused to sample a preview, so it is not asked again.
     previews: MeshCache<Option<PreviewMesh>>,
+    rendering: MeshCache<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>,
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
@@ -146,6 +148,96 @@ impl<T> MeshCache<T> {
 }
 
 impl Solid {
+    fn has_splines(&self) -> bool {
+        let built = self.app.checkpoint.built();
+        built.model.faces_of_body(built.result).iter().any(|face| {
+            matches!(built.model.geom().surface(built.model.face(*face).surface), catallax_shapes::Surface::BSpline(_))
+        })
+    }
+
+    fn rendering(&self) -> KernelResult<Arc<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>> {
+        use catallax_numbers::{Answer, OperationResult, Refusal};
+        self.rendering.get(display_key(&MeshOptions::default()), || {
+            let run = || numerical("display_result", |dec| match self.app.display_result(&MeshOptions::default(), dec) {
+                Ok(OperationResult::Refused(refusal)) => Err(refusal),
+                Ok(answer) => Ok(Answer::exact(answer)),
+                Err(Error::Display(refusal)) => Err(refusal),
+                Err(error) => Err(Refusal::new(error.code(), error.to_string())),
+            });
+            let (result, used) = if catallax_numbers::operation_budget_active() {
+                let result = run();
+                (result, catallax_numbers::current_operation_work().used)
+            } else {
+                let (result, work) = catallax_numbers::with_operation_budget(APP_REQUEST_WORK, run);
+                (result, work.used)
+            };
+            result.map(|answer| answer.value).map_err(|error| {
+                if matches!(error.code, "mesh.spline-display-budget" | "numbers.operation-budget" | "numbers.budget-exhausted" | "application.work-limit") {
+                    KernelError::DisplayLimit { used, limit: APP_REQUEST_WORK }
+                } else {
+                    KernelError::Unsupported("Spline display bound (SD-DISPLAY-02): A measured deviation within 0.01 mm could not be established over the entire boundary. The existing part is retained".into())
+                }
+            })
+        })
+    }
+
+    fn rendering_mesh(&self) -> KernelResult<Mesh> {
+        use catallax_numbers::OperationResult;
+        let answer = self.rendering()?;
+        let (display, evidence) = match answer.as_ref() {
+            OperationResult::Proven(answer) => (&answer.value, None),
+            OperationResult::Bounded(answer) => (answer.value(), Some(answer.evidence())),
+            OperationResult::Refused(refusal) => return Err(query_error("display_result", refusal.clone())),
+        };
+        if display.geometry.positions.iter().flatten().any(|value| !(*value as f32).is_finite()) {
+            return Err(KernelError::Unsupported("The display coordinates cannot be represented on screen".into()));
+        }
+        let mut mesh = convert::preview(&display.geometry, &self.ids);
+        let rounding = display
+            .geometry
+            .positions
+            .iter()
+            .map(|point| {
+                point
+                    .iter()
+                    .fold(0.0_f64, |sum, value| (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up())
+            })
+            .fold(0.0_f64, f64::max);
+        let rounding = Rational::from_f64_exact(rounding).ok_or_else(|| {
+            KernelError::Unsupported("The display coordinates cannot be represented on screen".into())
+        })?;
+        let bound = &display.measurement.maximum_deviation + &rounding;
+        let level = MeshOptions::default().chord_tolerance;
+        if bound > level {
+            return Err(KernelError::Unsupported(
+                "Spline display bound (SD-DISPLAY-03): The measured deviation exceeds 0.01 mm after screen-coordinate rounding. The existing part is retained".into(),
+            ));
+        }
+        if let Some(evidence) = evidence {
+            let mut measured = bound.to_f64_nearest();
+            if Rational::from_f64_exact(measured).is_some_and(|value| value < bound) {
+                measured = measured.next_up();
+            }
+            let definition = evidence.definition();
+            mesh.bounded = Some(DisplayBound {
+                kind: evidence.rule().case_kind.into(),
+                rule: evidence.rule().name.into(),
+                level_mm: evidence.level().to_f64_nearest(),
+                measured_mm: measured,
+                method: format!("{}; outward L1 bound for f32 screen-coordinate rounding", display.measurement.method),
+                definition: json!({"revision":definition.revision,"representation":definition.representation,
+                    "target":definition.target,"scope":format!("{:?}", definition.scope)})
+                .to_string(),
+            });
+        } else {
+            mesh.unproved = false;
+        }
+        if let Some(bound) = &mesh.bounded {
+            bound.validate().map_err(KernelError::Unsupported)?;
+        }
+        Ok(mesh)
+    }
+
     /// The certified mesh for these controls, for exports and proven results.
     fn display(&self, options: &MeshOptions, query: &str) -> KernelResult<Arc<catallax_mesh::Mesh>> {
         let key = display_key(options);
@@ -159,13 +251,24 @@ impl Solid {
                     },
                 );
             }
-            // The default mesh spans the body; pad it by both chord bounds so the
-            // rounding allowance for a requested edge length covers every vertex.
-            let pad =
-                MeshOptions::default().chord_tolerance.to_f64_nearest() + options.chord_tolerance.to_f64_nearest();
-            let default_mesh = self.display(&MeshOptions::default(), query)?;
-            let extent = default_mesh.positions.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs())) + pad;
-            let native = edge_control::native_options(options, extent)?;
+            let native = if options.max_edge_length.is_some() {
+                let built = self.app.checkpoint.built();
+                let bounds = numerical("display_bounding_box", |dec| {
+                    catallax_measure::bounding_box(
+                        &built.model,
+                        built.result,
+                        &catallax_measure::Accuracy::default(),
+                        dec,
+                    )
+                })
+                .map_err(|e| query_error(query, e))?
+                .value
+                .ok_or_else(|| KernelError::InvalidInput("an empty body has no display bounds".into()))?;
+                let extent = edge_control::display_extent(&bounds.min, &bounds.max, &options.chord_tolerance)?;
+                edge_control::native_options(options, extent)?
+            } else {
+                options.clone()
+            };
             let mesh = numerical(query, |dec| {
                 self.app.display(&native, dec).map_err(|error| match error {
                     Error::Display(refusal) => refusal,
@@ -204,11 +307,11 @@ impl State {
         self.bodies.get(&body).ok_or(KernelError::UnknownBody(body))
     }
 
-    /// The STEP sources that the import steps among `steps` read.
+    /// The immutable sources that the import steps among `steps` read.
     fn sources(&self, steps: &BTreeMap<u64, Value>) -> KernelResult<BTreeMap<String, Arc<[u8]>>> {
         steps
             .values()
-            .filter(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges")))
+            .filter(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
             .map(|step| {
                 let sha = step["file"]["sha256"].as_str().unwrap_or_default();
                 let bytes = self.files.get(sha).ok_or_else(|| {
@@ -277,7 +380,7 @@ impl CatallaxKernel {
             || stored.steps.values().any(|s| {
                 matches!(
                     s["op"].as_str(),
-                    Some("import_step" | "import_iges" | "loft" | "native_profile" | "feature_pattern")
+                    Some("import_step" | "import_iges" | "import_mesh" | "loft" | "native_profile" | "feature_pattern")
                 )
             })
         {
@@ -377,6 +480,7 @@ impl CatallaxKernel {
                     ids,
                     display,
                     previews: MeshCache::new(),
+                    rendering: MeshCache::new(),
                     topology: OnceLock::new(),
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),
@@ -543,7 +647,7 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     let mut imports = Vec::new();
     let steps = legacy["steps"].as_array_mut().expect("generated recipe steps");
     for index in (0..steps.len()).rev() {
-        if !matches!(steps[index]["op"].as_str(), Some("import_step" | "import_iges")) {
+        if !matches!(steps[index]["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")) {
             continue;
         }
         let mut native = steps[index].clone();
@@ -870,6 +974,7 @@ impl Kernel for CatallaxKernel {
         let op = match format {
             ImportFormat::Step => "import_step",
             ImportFormat::Iges => "import_iges",
+            ImportFormat::Mesh => "import_mesh",
         };
         self.observe(op, || self.import_body(format, tag, request))
     }
@@ -1062,6 +1167,17 @@ impl Kernel for CatallaxKernel {
     }
 
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {
+        self.chamfer_distances(tag, body, edges, distance, None)
+    }
+
+    fn chamfer_distances(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        distance: f64,
+        other_distance: Option<f64>,
+    ) -> KernelResult<OpResult> {
         self.observe("chamfer", || {
             let state = self.state()?;
             let solid = state.solid(body)?;
@@ -1073,7 +1189,7 @@ impl Kernel for CatallaxKernel {
                 body: state.step(body)?,
                 edges: catallax_recipe::EdgeSelection::Refs(refs),
                 distance: native::number(distance, "chamfer distance")?,
-                other_distance: None,
+                other_distance: other_distance.map(|d| native::number(d, "second chamfer distance")).transpose()?,
             };
             self.native(state, tag, OpKind::Chamfer, body, &[body], native, None, edges)
         })
@@ -1336,6 +1452,60 @@ impl Kernel for CatallaxKernel {
         self.observe("construction_edit", || construction::prepare(self, body, edits, params))
     }
 
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        if self.field(body)?.is_none() {
+            let solid = self.solid(body)?;
+            if solid.has_splines() {
+                options(params)?;
+                return self.observe("preview", || solid.rendering_mesh());
+            }
+        }
+        self.preview(body, params)
+    }
+
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        if self.field(body)?.is_some() {
+            return self.preview_edges(body, params);
+        }
+        let solid = self.solid(body)?;
+        if solid.has_splines() {
+            options(params)?;
+            return self.observe("preview_edges", || {
+                let answer = solid.rendering()?;
+                let mesh = match answer.as_ref() {
+                    catallax_numbers::OperationResult::Proven(answer) => &answer.value.geometry,
+                    catallax_numbers::OperationResult::Bounded(answer) => &answer.value().geometry,
+                    catallax_numbers::OperationResult::Refused(refusal) => {
+                        return Err(query_error("preview_edges", refusal.clone()));
+                    }
+                };
+                Ok(mesh
+                    .edges
+                    .iter()
+                    .map(|edge| EdgePolyline {
+                        edge: solid.ids.edges[&edge.edge],
+                        points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
+                    })
+                    .collect())
+            });
+        }
+
+        self.preview_edges(body, params)
+    }
+
+    fn display_bound(&self, body: BodyId) -> KernelResult<Option<DisplayBound>> {
+        self.observe("display_bound", || {
+            if self.field(body)?.is_some() {
+                return Ok(None);
+            }
+            let solid = self.solid(body)?;
+            if !solid.has_splines() {
+                return Ok(None);
+            }
+            Ok(solid.rendering_mesh()?.bounded)
+        })
+    }
+
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.observe("preview", || {
             if let Some(field) = self.field(body)? {
@@ -1450,9 +1620,23 @@ impl Kernel for CatallaxKernel {
                 return Ok(field.topology());
             }
             let solid = self.solid(body)?;
-            // Topology uses the original certified display, independent of later mesh requests.
+            // Logical topology uses the initial screen mesh, independent of later refinement requests.
             if let Some(value) = solid.topology.get() {
                 return value.clone();
+            }
+            if solid.has_splines() {
+                let answer = solid.rendering()?;
+                let mesh = match answer.as_ref() {
+                    catallax_numbers::OperationResult::Proven(answer) => &answer.value,
+                    catallax_numbers::OperationResult::Bounded(answer) => answer.value(),
+                    catallax_numbers::OperationResult::Refused(refusal) => {
+                        return Err(query_error("topology", refusal.clone()));
+                    }
+                };
+                return solid
+                    .topology
+                    .get_or_init(|| convert::rendering_topology(&solid.app, &solid.ids, mesh))
+                    .clone();
             }
             let mesh = solid.display(&MeshOptions::default(), "topology")?;
             solid.topology.get_or_init(|| convert::topology(&solid.app, &solid.ids, &mesh, false)).clone()

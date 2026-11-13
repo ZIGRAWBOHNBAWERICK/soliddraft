@@ -22,6 +22,8 @@ pub struct Rules {
     pub refuse_fillet_radii: Vec<f64>,
     /// No body can be meshed for display.
     pub refuse_display: bool,
+    /// Measured rendering evidence supplied independently of the model verdict.
+    pub display_bound: Option<DisplayBound>,
     /// Bodies with more volume than this cannot be meshed for display.
     pub refuse_display_above: Option<f64>,
     /// Pair proofs fail, as an incomplete bound would.
@@ -117,6 +119,19 @@ impl Kernel for Gated {
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn soliddraft_kernel_api::ProofWork>> {
         self.inner.reserve_proof_work()
     }
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.display(body)?;
+        self.inner.rendering(body, params)
+    }
+
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.inner.rendering_edges(body, params)
+    }
+
+    fn display_bound(&self, _body: BodyId) -> KernelResult<Option<DisplayBound>> {
+        Ok(self.rules.lock().unwrap().display_bound.clone())
+    }
+
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.display(body)?;
         self.inner.preview(body, params)

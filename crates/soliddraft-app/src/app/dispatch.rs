@@ -45,9 +45,6 @@ impl SolidDraftApp {
             let _ = self.state.doc.rebuild();
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
-        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-            self.state.layout.tree.shown = true;
-        }
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
     }
 
@@ -349,7 +346,7 @@ impl SolidDraftApp {
             AppAction::StartFillet | AppAction::StartChamfer => {
                 let chamfer = matches!(action, AppAction::StartChamfer);
                 let params = if chamfer {
-                    EditorParams::Chamfer(ChamferParams { edges: Vec::new(), distance: 2.0 })
+                    EditorParams::Chamfer(ChamferParams { edges: Vec::new(), distance: 2.0, other_distance: None })
                 } else {
                     EditorParams::Fillet(FilletParams { edges: Vec::new(), radius: 4.0 })
                 };
@@ -563,8 +560,12 @@ impl SolidDraftApp {
             AppAction::CommitEditor => {
                 // A refused size stays open for correction: OK cannot apply the last
                 // accepted one in its place.
-                if let Some(why) = self.state.editor.as_ref().and_then(|e| e.feedback.size.clone()) {
-                    self.state.note(format!("Not applied: {why}"), NoteKind::Error);
+                if self
+                    .state
+                    .editor
+                    .as_ref()
+                    .is_some_and(|e| e.feedback.size.is_some() || e.feedback.second_size.is_some())
+                {
                     return;
                 }
                 if let Some(why) = self
@@ -934,6 +935,10 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ShowMaterial => {
+                self.state.doc.selection = Some(Selection::Body);
+                self.state.layout.tree.shown = true;
+            }
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));
                 if let Some(id) = feature {
@@ -1257,6 +1262,47 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::ImportMesh(path) => {
+                if self.state.in_sketch() || self.state.doc.proof_pending() {
+                    return;
+                }
+                let path =
+                    path.or_else(|| crate::platform::open_path("Import mesh solid", "STL or OBJ", &["stl", "obj"]));
+                if let Some(path) = path {
+                    match crate::import::Preview::read_source(
+                        &self.state.doc,
+                        &path,
+                        soliddraft_kernel_api::ImportFormat::Mesh,
+                    ) {
+                        Ok(preview) => self.state.import_dialog = Some(preview),
+                        Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
+            AppAction::ReplaceImport { feature, path } => {
+                if self.state.in_sketch() || self.state.doc.proof_pending() {
+                    return;
+                }
+                let Some(FeatureKind::ImportStep(import)) = self.state.doc.feature(feature).map(|f| &f.kind) else {
+                    return;
+                };
+                let format = import.format;
+                let extensions: &[&str] = match format {
+                    soliddraft_kernel_api::ImportFormat::Step => &["step", "stp"],
+                    soliddraft_kernel_api::ImportFormat::Iges => &["iges", "igs"],
+                    soliddraft_kernel_api::ImportFormat::Mesh => &["stl", "obj"],
+                };
+                let path =
+                    path.or_else(|| crate::platform::open_path("Replace imported file", format.label(), extensions));
+                if let Some(path) = path {
+                    match crate::import::Preview::read_source(&self.state.doc, &path, format)
+                        .and_then(|preview| preview.replacing(&self.state.doc, feature))
+                    {
+                        Ok(preview) => self.state.import_dialog = Some(preview),
+                        Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
             AppAction::ImportScene(path) => {
                 let path = path.or_else(|| {
                     crate::platform::open_path(
@@ -1394,6 +1440,7 @@ impl SolidDraftApp {
                     self.dock.push_to_focused_leaf(Tab::Assembly);
                 }
                 self.tree_dock = tree_dock();
+                self.suite_tree_dock = egui_dock::DockState::new(vec![Tab::Tree, Tab::Values]);
                 self.state.layout = Layout::default();
                 self.state.assembly.tree_hidden = false;
                 self.state.drawing.tree_hidden = false;
@@ -1406,7 +1453,7 @@ impl SolidDraftApp {
                     d.remove::<egui::PanelState>(crate::command_line::session_id());
                 });
             }
-            AppAction::TogglePanel(_side) => {
+            AppAction::TogglePanel(_) => {
                 let shown = self.state.tree_shown();
                 self.state.show_tree(!shown);
             }

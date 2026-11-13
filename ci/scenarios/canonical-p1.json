@@ -465,13 +465,62 @@
       "exports": [
         {
           "format": "step",
+          "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STEP"
+          "sentinel": "previous accepted STEP",
+          "attempt": "budget"
         },
         {
           "format": "stl",
+          "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STL"
+          "sentinel": "previous accepted STL",
+          "attempt": "budget"
+        },
+        {
+          "format": "step",
+          "raw_valid": true,
+          "checks": [
+            {
+              "pointer": "/report/kind",
+              "equals": "step"
+            },
+            {
+              "pointer": "/report/within_tolerance",
+              "equals": true
+            },
+            {
+              "pointer": "/report/solids",
+              "equals": 1
+            }
+          ],
+          "attempt": "accepted"
+        },
+        {
+          "format": "stl",
+          "checks": [
+            {
+              "pointer": "/report/kind",
+              "equals": "mesh"
+            },
+            {
+              "pointer": "/report/closed",
+              "equals": true
+            },
+            {
+              "pointer": "/report/chord_height",
+              "equals": 0.01
+            },
+            {
+              "pointer": "/report/triangles",
+              "minimum": 4
+            },
+            {
+              "pointer": "/report/vertices",
+              "minimum": 4
+            }
+          ],
+          "attempt": "accepted"
         }
       ],
       "checks": [
@@ -493,13 +542,62 @@
       "exports": [
         {
           "format": "step",
+          "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STEP"
+          "sentinel": "previous accepted STEP",
+          "attempt": "budget"
         },
         {
           "format": "stl",
+          "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STL"
+          "sentinel": "previous accepted STL",
+          "attempt": "budget"
+        },
+        {
+          "format": "step",
+          "raw_valid": true,
+          "checks": [
+            {
+              "pointer": "/report/kind",
+              "equals": "step"
+            },
+            {
+              "pointer": "/report/within_tolerance",
+              "equals": true
+            },
+            {
+              "pointer": "/report/solids",
+              "equals": 1
+            }
+          ],
+          "attempt": "accepted"
+        },
+        {
+          "format": "stl",
+          "checks": [
+            {
+              "pointer": "/report/kind",
+              "equals": "mesh"
+            },
+            {
+              "pointer": "/report/closed",
+              "equals": true
+            },
+            {
+              "pointer": "/report/chord_height",
+              "equals": 0.01
+            },
+            {
+              "pointer": "/report/triangles",
+              "minimum": 4
+            },
+            {
+              "pointer": "/report/vertices",
+              "minimum": 4
+            }
+          ],
+          "attempt": "accepted"
         }
       ],
       "checks": [
@@ -553,13 +651,62 @@
       "exports": [
         {
           "format": "step",
+          "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STEP"
+          "sentinel": "previous accepted STEP",
+          "attempt": "budget"
         },
         {
           "format": "stl",
+          "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STL"
+          "sentinel": "previous accepted STL",
+          "attempt": "budget"
+        },
+        {
+          "format": "step",
+          "raw_valid": true,
+          "checks": [
+            {
+              "pointer": "/report/kind",
+              "equals": "step"
+            },
+            {
+              "pointer": "/report/within_tolerance",
+              "equals": true
+            },
+            {
+              "pointer": "/report/solids",
+              "equals": 1
+            }
+          ],
+          "attempt": "accepted"
+        },
+        {
+          "format": "stl",
+          "checks": [
+            {
+              "pointer": "/report/kind",
+              "equals": "mesh"
+            },
+            {
+              "pointer": "/report/closed",
+              "equals": true
+            },
+            {
+              "pointer": "/report/chord_height",
+              "equals": 0.01
+            },
+            {
+              "pointer": "/report/triangles",
+              "minimum": 4
+            },
+            {
+              "pointer": "/report/vertices",
+              "minimum": 4
+            }
+          ],
+          "attempt": "accepted"
         }
       ],
       "checks": [
@@ -586,7 +733,9 @@
           "approx": 20478.008730847458,
           "tolerance": 0.005
         }
-      ]
+      ],
+      "checked_step_export": "{bundle}/canonical-p1.dwprt",
+      "checked_step_max_work": 20000000
     }
   ]
 }

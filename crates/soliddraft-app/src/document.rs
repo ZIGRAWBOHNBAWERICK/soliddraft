@@ -355,7 +355,7 @@ pub struct FilletParams {
 impl FilletParams {
     /// The model's fillet these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature { edges: self.edges.clone(), size: self.radius }
+        model::BlendFeature { edges: self.edges.clone(), size: self.radius, other_distance: None }
     }
 }
 
@@ -363,12 +363,14 @@ impl FilletParams {
 pub struct ChamferParams {
     pub edges: Vec<EdgeRef>,
     pub distance: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_distance: Option<f64>,
 }
 
 impl ChamferParams {
     /// The model's chamfer these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature { edges: self.edges.clone(), size: self.distance }
+        model::BlendFeature { edges: self.edges.clone(), size: self.distance, other_distance: self.other_distance }
     }
 }
 
@@ -656,9 +658,11 @@ impl FeatureKind {
             model::FeatureKind::Fillet(b) => {
                 FeatureKind::Fillet(FilletParams { edges: b.edges.clone(), radius: b.size })
             }
-            model::FeatureKind::Chamfer(b) => {
-                FeatureKind::Chamfer(ChamferParams { edges: b.edges.clone(), distance: b.size })
-            }
+            model::FeatureKind::Chamfer(b) => FeatureKind::Chamfer(ChamferParams {
+                edges: b.edges.clone(),
+                distance: b.size,
+                other_distance: b.other_distance,
+            }),
             model::FeatureKind::Hole(h) => FeatureKind::Hole(h.clone()),
             model::FeatureKind::Pattern(p) => FeatureKind::Pattern(p.clone()),
             model::FeatureKind::Mirror(m) => FeatureKind::Mirror(m.clone()),
@@ -728,6 +732,8 @@ pub struct AnswerBound {
     measured_bound: f64,
     allowed_bound: f64,
     unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display: Option<soliddraft_kernel_api::DisplayBound>,
 }
 
 #[derive(Deserialize)]
@@ -737,12 +743,28 @@ struct AnswerBoundFields {
     measured_bound: f64,
     allowed_bound: f64,
     unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display: Option<soliddraft_kernel_api::DisplayBound>,
 }
 
 impl TryFrom<AnswerBoundFields> for AnswerBound {
     type Error = String;
     fn try_from(value: AnswerBoundFields) -> Result<Self, Self::Error> {
-        Self::new(value.rule, value.kept_definition, value.measured_bound, value.allowed_bound, value.unit)
+        let mut answer =
+            Self::new(value.rule, value.kept_definition, value.measured_bound, value.allowed_bound, value.unit)?;
+        if let Some(display) = value.display {
+            display.validate()?;
+            if display.rule != answer.rule
+                || display.definition != answer.kept_definition
+                || display.measured_mm != answer.measured_bound
+                || display.level_mm != answer.allowed_bound
+                || answer.unit != "mm"
+            {
+                return Err("The display bound must match its native measurement record".into());
+            }
+            answer.display = Some(display);
+        }
+        Ok(answer)
     }
 }
 
@@ -765,7 +787,20 @@ impl AnswerBound {
         {
             return Err("The measured bound must be finite, nonnegative and within the rule's limit".into());
         }
-        Ok(Self { rule, kept_definition, measured_bound, allowed_bound, unit })
+        Ok(Self { rule, kept_definition, measured_bound, allowed_bound, unit, display: None })
+    }
+
+    fn from_display(display: soliddraft_kernel_api::DisplayBound) -> Result<Self, String> {
+        display.validate()?;
+        let mut answer = Self::new(
+            display.rule.clone(),
+            display.definition.clone(),
+            display.measured_mm,
+            display.level_mm,
+            "mm".into(),
+        )?;
+        answer.display = Some(display);
+        Ok(answer)
     }
 
     pub fn summary(&self) -> String {
@@ -773,10 +808,29 @@ impl AnswerBound {
     }
 
     pub fn description(&self) -> String {
+        if let Some(display) = &self.display {
+            let revision = ContentHash::of_bytes(display.definition.as_bytes());
+            return format!(
+                "Kind: {}\nMeasured bound: {} mm\nRule limit: {} mm\nMeasurement: {}\nKept boundary revision: {}",
+                display.kind, display.measured_mm, display.level_mm, display.method, revision
+            );
+        }
         format!(
             "Measured bound: {} {}\nRule limit: {} {}\nRule: {}\nKept definition: {}",
             self.measured_bound, self.unit, self.allowed_bound, self.unit, self.rule, self.kept_definition
         )
+    }
+}
+
+#[derive(Clone, Default)]
+struct FeatureBounds {
+    model: Option<AnswerBound>,
+    display: Option<AnswerBound>,
+}
+
+impl FeatureBounds {
+    fn visible(&self) -> Option<&AnswerBound> {
+        self.model.as_ref().or(self.display.as_ref())
     }
 }
 
@@ -800,6 +854,9 @@ pub struct NamedFace {
     pub feature: FeatureId,
     pub label: String,
     pub surface: SurfaceKind,
+    pub accuracy: soliddraft_kernel_api::FaceAccuracy,
+    /// Immutable entity name in the imported source, when present.
+    pub imported_key: Option<String>,
     pub area: f64,
     pub centroid: Vec3,
 }
@@ -862,7 +919,10 @@ impl Feature {
                 }
             ),
             FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
-            FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
+            FeatureKind::Chamfer(c) => match c.other_distance {
+                Some(other) => format!("{} × {} mm", fmt_mm(c.distance), fmt_mm(other)),
+                None => format!("{} mm", fmt_mm(c.distance)),
+            },
             FeatureKind::Hole(h) => {
                 format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter))
             }
@@ -1331,13 +1391,16 @@ pub struct ProofState {
     pub pending: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub answered_within_bound: bool,
+    /// The exact model is proved independently; only its rendering has a measured bound.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub display_only_bound: bool,
     pub failed: bool,
 }
 
 impl ProofState {
     pub fn current_proved_model(&self) -> bool {
         !self.pending
-            && !self.answered_within_bound
+            && (!self.answered_within_bound || self.display_only_bound)
             && !self.failed
             && !self.transient
             && self.proved_revision == Some(self.requested_revision)
@@ -1346,6 +1409,7 @@ impl ProofState {
 
     pub fn current_proved_display(&self) -> bool {
         self.current_proved_model()
+            && !self.answered_within_bound
             && self.display_ready
             && self.displayed_edit.is_none()
             && self.displayed_revision == self.requested_revision
@@ -1419,13 +1483,13 @@ pub struct Document {
     /// The immutable body `meshes` and `picks` show.
     shown: Option<BodyId>,
     /// Assignments used by the currently shown mesh.
-    shading: model::PartMaterials,
+    shading: (model::PartMaterials, Option<soliddraft_document::ConfigurationId>),
     /// Bodies shown before, latest last, kept while the part keeps them.
     recent: Vec<Shown>,
     model: model::Document,
     geometry: ContentHash,
     /// Keep verdicts with their geometry so rename and undo cannot turn them into proof.
-    bounded_answers: HashMap<ContentHash, HashMap<FeatureId, AnswerBound>>,
+    bounded_answers: HashMap<ContentHash, HashMap<FeatureId, FeatureBounds>>,
     last_proved: Option<ProvedRevision>,
     worker: Option<crate::drag::Worker>,
     /// Woken when a background answer arrives; see [`Document::set_repaint`].
@@ -1480,7 +1544,7 @@ impl Document {
             edit_request: None,
             picks: Vec::new(),
             shown: None,
-            shading: model.materials().clone(),
+            shading: (model.materials().clone(), model.active_configuration().cloned()),
             recent: Vec::new(),
             quality: DisplayQuality::new(model.kernel().clone()),
             model,
@@ -1603,22 +1667,58 @@ impl Document {
             return Err("A bounded answer needs a completed current feature result".into());
         }
         self.geometry = self.model.geometry_hash();
-        self.bounded_answers.entry(self.geometry.clone()).or_default().insert(id, answer);
+        let bounds = self.bounded_answers.entry(self.geometry.clone()).or_default().entry(id).or_default();
+        if answer.display.is_some() {
+            bounds.display = Some(answer);
+        } else {
+            bounds.model = Some(answer);
+        }
         self.sync();
         Ok(())
     }
 
-    fn has_bounded_answer(&self) -> bool {
-        self.bounded_answers.get(&self.geometry).is_some_and(|answers| {
-            self.model
-                .features()
-                .iter()
-                .take(self.model.active_count())
-                .any(|feature| !feature.suppressed && answers.contains_key(&app_id(feature.id)))
-        })
+    /// Retained display evidence, independent of any model bound for the feature.
+    pub fn display_answer(&self, id: FeatureId) -> Option<&AnswerBound> {
+        self.bounded_answers.get(&self.geometry)?.get(&id)?.display.as_ref()
+    }
+
+    fn bounded_state(&self) -> (bool, bool) {
+        let Some(answers) = self.bounded_answers.get(&self.geometry) else { return (false, false) };
+        self.model.features().iter().take(self.model.active_count()).filter(|feature| !feature.suppressed).fold(
+            (false, false),
+            |(model, display), feature| {
+                let Some(bounds) = answers.get(&app_id(feature.id)) else { return (model, display) };
+                (
+                    model || bounds.model.is_some(),
+                    display || (bounds.display.is_some() && self.model.body_after(feature.id) == self.model.body()),
+                )
+            },
+        )
+    }
+
+    fn capture_display_bound(&mut self, body: BodyId) -> Result<(), String> {
+        if self.model.is_dirty() || self.model.body() != Some(body) || self.has_model_failure() {
+            return Ok(());
+        }
+        let Some(bound) = self.kernel().display_bound(body).map_err(|error| error.to_string())? else { return Ok(()) };
+        let answer = AnswerBound::from_display(bound)?;
+        let id = self
+            .model
+            .features()
+            .iter()
+            .rev()
+            .find(|feature| {
+                !matches!(feature.kind, model::FeatureKind::Sketch(_) | model::FeatureKind::ReferencePlane(_))
+                    && self.model.body_after(feature.id) == Some(body)
+                    && self.model.status(feature.id) == Some(&model::FeatureStatus::Ok)
+            })
+            .map(|feature| app_id(feature.id))
+            .ok_or("The display has no current feature")?;
+        self.record_answer_within_bound(id, answer)
     }
 
     pub fn proof_state(&self) -> ProofState {
+        let (model_bound, display_bound) = self.bounded_state();
         ProofState {
             document: self.model.id(),
             requested_revision: self.revision,
@@ -1633,7 +1733,8 @@ impl Document {
             proved_edit: self.last_proved.as_ref().and_then(|proved| proved.request),
             transient: self.provisional.as_ref().is_some_and(|shown| shown.token.transient),
             pending: self.proof_pending(),
-            answered_within_bound: self.has_bounded_answer(),
+            answered_within_bound: model_bound || display_bound,
+            display_only_bound: display_bound && !model_bound,
             failed: self.proof_failure.is_some() || self.has_model_failure(),
         }
     }
@@ -1663,7 +1764,7 @@ impl Document {
         if self.model.is_dirty()
             || self.has_model_failure()
             || self.proof_failure.is_some()
-            || self.proof_state().answered_within_bound
+            || (self.proof_state().answered_within_bound && !self.proof_state().display_only_bound)
         {
             return;
         }
@@ -1915,6 +2016,9 @@ impl Document {
                 self.selection = Some(Selection::Feature(feature));
             }
             return Ok(());
+        }
+        if let Some(display) = &proof.display {
+            self.capture_display_bound(display.body)?;
         }
         self.retain_proved_revision();
         let depth = self.edit_depth.take();
@@ -2707,6 +2811,7 @@ impl Document {
                         match view_status(&f.kind, status, &names) {
                             FeatureStatus::Ok if !inactive => bounded
                                 .and_then(|answers| answers.get(&app_id(f.id)))
+                                .and_then(FeatureBounds::visible)
                                 .map_or(FeatureStatus::Ok, |answer| FeatureStatus::AnsweredWithinBound(answer.clone())),
                             status => status,
                         }
@@ -2724,8 +2829,15 @@ impl Document {
     /// geometry and GPU buffers; undo and redo restore recent bodies' meshes and picks.
     fn refresh_display(&mut self) {
         let next = self.display_body();
+        if let Some(body) = next
+            && let Err(message) = self.capture_display_bound(body)
+        {
+            self.display_failure = Some(display_unavailable(message));
+            return;
+        }
         if next.is_some() && next == self.shown && !self.meshes.is_empty() {
-            if self.shading != *self.model.materials() {
+            if self.shading.0 != *self.model.materials() || self.shading.1.as_ref() != self.model.active_configuration()
+            {
                 self.apply_appearances();
                 self.mesh_version += 1;
             }
@@ -2791,7 +2903,7 @@ impl Document {
                     self.show_mesh(body, &topology, &mesh);
                     self.shown = next;
                 } else {
-                    match self.kernel().preview(body, &self.tess_params) {
+                    match self.kernel().rendering(body, &self.tess_params) {
                         Ok(mesh) => {
                             self.show_mesh(body, &topology, &mesh);
                             self.quality.made(body, mesh);
@@ -2807,9 +2919,48 @@ impl Document {
         self.mesh_version += 1;
     }
 
-    /// Applies an appearance to the part, a feature's faces or one face, or removes the
-    /// one there with `None`, in every configuration, as one undo entry. Only the colours
-    /// change: the meshes keep their geometry and the kernel is not asked for anything.
+    /// The effective material of the configuration shown by the app.
+    pub fn material(&self) -> Option<&soliddraft_materials::Material> {
+        self.model.material(self.model.active_configuration())
+    }
+
+    fn material_scope(&self) -> soliddraft_document::ConfigScope {
+        match self.model.active_configuration() {
+            Some(id) => soliddraft_document::ConfigScope::Only(vec![id.clone()]),
+            None => soliddraft_document::ConfigScope::All,
+        }
+    }
+
+    /// The assignment owned by the current configuration, or the part default.
+    /// None in a configuration means it inherits a broader assignment.
+    pub fn material_assignment(&self) -> Option<&soliddraft_materials::MaterialId> {
+        let scope = self.material_scope();
+        self.model
+            .materials()
+            .material
+            .iter()
+            .find(|assignment| assignment.scope == scope)
+            .map(|assignment| &assignment.material)
+    }
+
+    /// Assigns a material to the current configuration, or sets the part default.
+    /// Clearing a configuration assignment restores its inherited material.
+    pub fn set_material(
+        &mut self,
+        material: Option<soliddraft_materials::Material>,
+        default_appearance: Option<Appearance>,
+    ) -> Result<(), String> {
+        let scope = self.material_scope();
+        self.model
+            .execute(model::Command::SetMaterial { material, default_appearance, scope })
+            .map_err(|e| e.to_string())?;
+        self.touch();
+        self.apply_appearances();
+        self.mesh_version += 1;
+        Ok(())
+    }
+
+    /// Applies an appearance as one undo entry.
     pub fn set_appearance(
         &mut self,
         target: model::AppearanceTarget,
@@ -2824,10 +2975,10 @@ impl Document {
     }
 
     /// Fills each display mesh's appearance table and per-vertex index from the part's
-    /// appearance assignments, resolved by the model for its default configuration.
+    /// appearance assignments, resolved for the visible configuration.
     fn apply_appearances(&mut self) {
-        self.shading = self.model.materials().clone();
-        let resolved = self.model.appearance_table(None);
+        self.shading = (self.model.materials().clone(), self.model.active_configuration().cloned());
+        let resolved = self.model.appearance_table(self.model.active_configuration());
         let table: Vec<Shading> = resolved.appearances.iter().map(Appearance::shading).collect();
         for mesh in self.meshes.values_mut() {
             if mesh.appearances == table
@@ -3452,6 +3603,20 @@ impl Document {
         })
     }
 
+    /// The measured source deviation of an unchanged imported face. The record
+    /// covers the import body only, so a later modified body never inherits it.
+    pub fn import_face_tolerance(&self, id: FaceId) -> Option<&soliddraft_kernel_api::FaceTolerance> {
+        let named = self.named_face(id)?;
+        let feature = self.feature(named.feature)?;
+        let body = self.display_body()?;
+        if feature.body != Some(body) || !matches!(feature.kind, FeatureKind::ImportStep(_)) {
+            return None;
+        }
+        let key = named.imported_key.as_ref()?;
+        let record = self.model.import_record(model_id(named.feature))?;
+        record.face_tolerances.iter().find(|tolerance| &tolerance.face == key)
+    }
+
     pub fn named_face(&self, id: FaceId) -> Option<&NamedFace> {
         self.faces.iter().find(|f| f.id == id)
     }
@@ -3564,6 +3729,9 @@ impl Document {
                     FeatureKind::Chamfer(p) => {
                         details.push(("Edges".to_owned(), p.edges.len().to_string()));
                         details.push(("Distance".to_owned(), format!("{} mm", fmt_mm(p.distance))));
+                        if let Some(other) = p.other_distance {
+                            details.push(("Second distance".into(), format!("{} mm", fmt_mm(other))));
+                        }
                     }
                     FeatureKind::Hole(h) => {
                         details.push(("Face".to_owned(), h.face.label.clone()));
@@ -3626,7 +3794,7 @@ impl Document {
                 {
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));
-                    let material = self.model().material(self.model().active_configuration());
+                    let material = self.material();
                     let mass = soliddraft_materials::mass::of_body(&mp, material);
                     details.push((
                         "Mass".into(),
@@ -3679,9 +3847,27 @@ impl Document {
                 let details = vec![
                     ("Feature".to_owned(), name.clone()),
                     ("Surface".to_owned(), surface.to_owned()),
+                    (
+                        "Carrier accuracy".into(),
+                        match nf.accuracy {
+                            soliddraft_kernel_api::FaceAccuracy::Exact => "Exact".into(),
+                            soliddraft_kernel_api::FaceAccuracy::Fitted { max_deviation_mm } => {
+                                format!("Fitted, deviation ≤ {max_deviation_mm:e} mm")
+                            }
+                            soliddraft_kernel_api::FaceAccuracy::Unknown => "Unknown".into(),
+                        },
+                    ),
                     ("Area".to_owned(), format!("{:.1} mm²", nf.area)),
                     ("Centroid".to_owned(), format!("{:.2}, {:.2}, {:.2}", c.x, c.y, c.z)),
                 ];
+                let mut details = details;
+                if let Some(tolerance) = self.import_face_tolerance(fid) {
+                    details.push((
+                        "Import deviation".into(),
+                        format!("≤ {} mm from source", tolerance.deviation_upper_mm),
+                    ));
+                    details.push(("Approved import limit".into(), format!("{} mm", tolerance.approved_tolerance_mm)));
+                }
                 Some(EntityInfo { title: format!("{} · {}", name, nf.label), feature: f.map(|f| f.id), details })
             }
             Selection::Edge(eid) => {
@@ -3729,6 +3915,11 @@ fn named_entities(model: &model::Document, body: BodyId, topology: &Topology) ->
                 feature,
                 label,
                 surface: face.surface,
+                accuracy: face.accuracy,
+                imported_key: face.origins.iter().find_map(|origin| match &origin.role {
+                    soliddraft_kernel_api::FaceRole::Imported { key } => Some(key.clone()),
+                    _ => None,
+                }),
                 area: face.area,
                 centroid: kv(face.centroid),
             }
@@ -3764,7 +3955,7 @@ pub(crate) fn ready_display(
     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
     let params =
         *soliddraft_tessellation::Levels::new(&model.settings().viewport, topology.bbox.diagonal()).params(level);
-    let kernel_mesh = kernel.preview(body, &params).map_err(|error| error.to_string())?;
+    let kernel_mesh = kernel.rendering(body, &params).map_err(|error| error.to_string())?;
     let edges = edge_polylines(kernel.as_ref(), body, &params);
     let (faces, named_edges) = named_entities(model, body, &topology);
     let makers = faces.iter().map(|face| (face.id, face.feature)).collect();
@@ -3941,7 +4132,11 @@ fn view_status(
 /// The display mesh of a body that is only previewed: no picks, so nothing in it can be
 /// selected or confused with the document's own body.
 fn display_unavailable(reason: String) -> String {
-    let message = reason.strip_prefix("invalid input: ").unwrap_or(&reason);
+    let message =
+        reason.strip_prefix("invalid input: ").or_else(|| reason.strip_prefix("unsupported: ")).unwrap_or(&reason);
+    if message.starts_with("Spline display ") && message.contains("(SD-DISPLAY-") {
+        return message.to_owned();
+    }
     format!("Display unavailable: {message}")
 }
 
@@ -3965,7 +4160,7 @@ fn preview_mesh_marked(
     made: &HashMap<FaceId, FeatureId>,
 ) -> Result<Arc<DisplayMesh>, String> {
     let topology = kernel.topology(body).map_err(|e| e.to_string())?;
-    let mesh = kernel.preview(body, params).map_err(|e| e.to_string())?;
+    let mesh = kernel.rendering(body, params).map_err(|e| e.to_string())?;
     let edges = edge_polylines(kernel, body, params);
     let mut picks = Vec::new();
     Ok(Arc::new(display_mesh(0, &mesh, &edges, &topology, made, &mut picks)))
@@ -3974,7 +4169,7 @@ fn preview_mesh_marked(
 /// The body's edges sampled along their curves. A kernel that cannot sample them
 /// leaves the body without edges rather than without faces.
 fn edge_polylines(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams) -> Vec<EdgePolyline> {
-    kernel.preview_edges(body, params).unwrap_or_else(|e| {
+    kernel.rendering_edges(body, params).unwrap_or_else(|e| {
         log::warn!("edges of body {body:?}: {e}");
         Vec::new()
     })

@@ -51,7 +51,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.vertical(|ui| {
             ui.set_width(62.0);
             ui.label(egui::RichText::new("History").font(theme::font_medium(11.0)).color(theme::muted()));
-            let shown = state.layout.tree.shown;
+            let shown = state.tree_shown();
             let (rect, response) = ui.allocate_exact_size(vec2(54.0, 20.0), Sense::click());
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, shown, "Tree"));
             if response.hovered() || shown {
@@ -85,6 +85,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         playhead(ui, state, can_change, &mut actions);
                     }
                     let Some(feature) = state.doc.features.get(index) else { break };
+                    let status = state
+                        .sketch
+                        .as_ref()
+                        .filter(|s| s.feature == feature.id)
+                        .map(|s| &s.sketch.status)
+                        .or_else(|| feature.sketch().map(|s| &s.sketch.status));
+                    let caption = if matches!(status, Some(crate::sketch::SolveStatus::UnderDefined)) {
+                        format!("(-) {}", feature.name)
+                    } else {
+                        feature.name.clone()
+                    };
                     let (id, name, summary, icon, is_sketch, suppressed, repair) = (
                         feature.id,
                         feature.name.clone(),
@@ -98,7 +109,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     let active = editing == Some(id) || selected == Some(id);
                     let width = ui
                         .painter()
-                        .layout_no_wrap(name.clone(), theme::font_medium(12.0), theme::ink())
+                        .layout_no_wrap(caption.clone(), theme::font_medium(12.0), theme::ink())
                         .size()
                         .x
                         .max(ui.painter().layout_no_wrap(summary.clone(), theme::font(10.5), theme::muted()).size().x)
@@ -138,7 +149,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     painter.text(
                         pos2(text.left(), rect.top() + 12.0),
                         Align2::LEFT_CENTER,
-                        &name,
+                        &caption,
                         theme::font_medium(12.0),
                         ink,
                     );

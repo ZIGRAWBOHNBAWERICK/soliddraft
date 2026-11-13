@@ -59,10 +59,87 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         crate::mates::panel::show_suite(ui, state);
         return;
     }
+    let part = !state.assembly.is_active() && !state.drawing.is_active();
+    if part && state.editor.is_some() && !state.in_sketch() {
+        crate::feature_forms::show(ui, state);
+        return;
+    }
+    state.form_bar.reset();
+    let context = (state.in_sketch(), state.assembly.is_active(), state.drawing.is_active());
+    ui.data_mut(|data| {
+        let id = egui::Id::new("options_details_context");
+        if data.get_temp::<(bool, bool, bool)>(id) != Some(context) {
+            state.options_details = false;
+            data.insert_temp(id, context);
+        }
+    });
+    let mut sheet_anchor = ui.available_rect_before_wrap();
     if state.drawing.is_active()
         && let Some(anchor) = crate::drawing::properties_drawing::sheet_bar(ui, state)
     {
         details_sheet(ui, state, anchor);
+        return;
+    }
+    if part && state.in_sketch() {
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), 30.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if ui
+                    .add_sized(
+                        vec2(116.0, 30.0),
+                        egui::Button::new(egui::RichText::new("Close sketch").color(theme::edit_suite::ON_DANGER))
+                            .fill(theme::edit_suite::DANGER),
+                    )
+                    .on_hover_text("Close sketch (Enter or Esc)")
+                    .clicked()
+                {
+                    state.push(AppAction::ExitSketch);
+                }
+                if let Some(sketch) = &state.sketch {
+                    let (text, color) = match &sketch.sketch.status {
+                        crate::sketch::SolveStatus::Empty => ("Empty", theme::muted()),
+                        crate::sketch::SolveStatus::UnderDefined => {
+                            ("Under defined", theme::edit_suite::UNDER_DEFINED_LABEL)
+                        }
+                        crate::sketch::SolveStatus::FullyDefined => ("Fully defined", theme::ink()),
+                        crate::sketch::SolveStatus::OverDefined { .. } => ("Over defined", theme::error()),
+                        crate::sketch::SolveStatus::Failed(_) => ("Solver failed", theme::error()),
+                    };
+                    ui.colored_label(color, text);
+                }
+                let more = ui.button("Sketch options");
+                sheet_anchor = more.rect;
+                if more.clicked() {
+                    state.options_details = !state.options_details;
+                }
+                let (icon, label, _) = active_tool(state);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let (rect, response) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                    icons::paint(ui.painter(), icon, rect, theme::accent());
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}"))
+                    });
+                    ui.add(egui::Label::new(label).truncate());
+                    if let Some(session) = &state.sketch
+                        && let Some(info) = state.doc.describe(Selection::Feature(session.feature))
+                    {
+                        let plane =
+                            info.details.iter().find(|(label, _)| label == "Plane").map(|(_, value)| value.as_str());
+                        ui.separator();
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("{} · {}", info.title, plane.unwrap_or("Sketch plane")))
+                                    .color(theme::accent()),
+                            )
+                            .truncate(),
+                        );
+                    }
+                });
+            },
+        );
+        details_sheet(ui, state, sheet_anchor);
+        crate::sketch_values::popup(ui, state);
         return;
     }
     if state.assembly.is_active() || state.drawing.is_active() || state.drawing.new.is_some() {
@@ -73,7 +150,6 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
         details_sheet(ui, state, response.rect);
         return;
     }
-
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (icon, label, prompt) = active_tool(state);
@@ -96,23 +172,19 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}")));
         response.on_hover_text(&label);
 
+        if state.doc.selection.is_some() || state.measure.open {
+            let response = ui.button("Details");
+            sheet_anchor = response.rect;
+            if response.clicked() {
+                state.options_details = !state.options_details;
+            }
+        }
         egui::ScrollArea::horizontal()
             .id_salt(("options_contents", label, format!("{:?}", state.doc.selection)))
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if let Some(session) = &state.sketch
-                        && let Some(info) = state.doc.describe(Selection::Feature(session.feature))
-                    {
-                        let plane =
-                            info.details.iter().find(|(label, _)| label == "Plane").map(|(_, value)| value.as_str());
-                        ui.label(
-                            egui::RichText::new(format!("{} · {}", info.title, plane.unwrap_or("Sketch plane")))
-                                .color(theme::accent()),
-                        );
-                        ui.separator();
-                    }
                     if state.in_sketch() || state.editor.is_some() || state.measure.open {
                         ui.label(egui::RichText::new(prompt).color(theme::muted()));
                     } else if let Some(selection) = state.doc.selection {
@@ -132,6 +204,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 });
             });
     });
+    details_sheet(ui, state, sheet_anchor);
 }
 
 fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selection) {
@@ -151,7 +224,7 @@ fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selecti
             value_label(ui, label, value);
         }
     }
-    let features: Vec<_> = if selection == Selection::Body {
+    let features: Vec<_> = if matches!(selection, Selection::Body | Selection::Face(_) | Selection::Edge(_)) {
         let end = state.doc.rollback.unwrap_or(state.doc.features.len()).min(state.doc.features.len());
         state.doc.features[..end]
             .iter()
@@ -162,7 +235,12 @@ fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selecti
         info.feature.into_iter().collect()
     };
     for id in features {
-        feature_dimensions(ui, state, id, selection == Selection::Body);
+        feature_dimensions(
+            ui,
+            state,
+            id,
+            matches!(selection, Selection::Body | Selection::Face(_) | Selection::Edge(_)),
+        );
     }
 }
 
@@ -245,6 +323,8 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                         crate::drawing::properties_drawing::new_drawing(ui, state);
                     } else if state.drawing.is_active() {
                         crate::drawing::properties_drawing::show(ui, state);
+                    } else {
+                        crate::properties::show(ui, state);
                     }
                 });
         });

@@ -802,7 +802,7 @@ impl Document {
         }
         let tag = OpTag::new(format!("{}.blend", f.id));
         let result = if chamfer {
-            self.kernel.chamfer(&tag, body, &ids, b.size)
+            self.kernel.chamfer_distances(&tag, body, &ids, b.size, b.other_distance)
         } else {
             self.kernel.fillet(&tag, body, &ids, b.size)
         };
@@ -1161,7 +1161,7 @@ impl Document {
     fn build_lattice(&self, f: &Feature, l: &LatticeFeature, current: Option<BodyId>) -> Built {
         let Some(body) = current else { return Built::failed(current, "there is no body to lattice") };
         let (Some(cell), Some(cell_size_mm), Some(radius_mm)) = (l.cell, l.cell_size_mm, l.radius_mm) else {
-            return Built::failed(current, "lattice is missing cell size and density; configure the cubic cell");
+            return Built::failed(current, "lattice is missing cell size and density; configure the cell");
         };
         let params = Lattice {
             cell,
@@ -1263,7 +1263,7 @@ impl Document {
                     status: FeatureStatus::Ok,
                     output: Some(body),
                     owned: Some(body),
-                    names: imported_names(&result.record),
+                    names: imported_names(&result.record, i),
                     sketch: None,
                     plane: None,
                     version: 0,
@@ -1332,7 +1332,7 @@ fn number(mut faces: Vec<(Origin, Generator, usize)>) -> Vec<NamedFace> {
 /// The faces of an imported body, ranked by their entity names in the source file:
 /// `#17` before `#40` before `#102`. The saved source never changes, so neither do the
 /// ranks, and the faces read "Face 1", "Face 2" and so on.
-fn imported_names(record: &HistoryRecord) -> Vec<NamedFace> {
+fn imported_names(record: &HistoryRecord, import: &ImportStepFeature) -> Vec<NamedFace> {
     let mut faces: Vec<(u64, &str, &FaceRole)> = record
         .face_roles
         .iter()
@@ -1351,7 +1351,11 @@ fn imported_names(record: &HistoryRecord) -> Vec<NamedFace> {
         .enumerate()
         .map(|(ordinal, (_, _, role))| NamedFace {
             origin: Origin { tag: record.tag.clone(), role: role.clone() },
-            generator: Generator::Other,
+            generator: if import.source_bound_names {
+                Generator::Imported { sha256: import.sha256.clone().into_boxed_str() }
+            } else {
+                Generator::Other
+            },
             ordinal: ordinal as u32,
         })
         .collect()

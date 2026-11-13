@@ -83,7 +83,7 @@ impl Diagnostics {
             }
             (None, false) => (run(), None),
         });
-        if work.is_some_and(|w| w.exhausted) {
+        if work.is_some_and(|w| w.exhausted) && !matches!(result, Err(KernelError::DisplayLimit { .. })) {
             result =
                 Err(KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into()));
         }
@@ -195,6 +195,20 @@ mod tests {
         assert_eq!(calls[0]["max_work"], 5 * APP_REQUEST_WORK);
         assert_eq!(calls[1]["max_work"], APP_REQUEST_WORK);
         assert_eq!(calls[1]["work"]["exhausted"], true);
+    }
+
+    #[test]
+    fn exhausted_display_keeps_its_named_quantified_refusal() {
+        let diagnostics = Diagnostics::new(Some(5));
+        let result = diagnostics.observe("display_bound", || {
+            OperationAllowance::reserve(5).unwrap();
+            assert!(OperationAllowance::reserve(1).is_err());
+            Err::<(), _>(KernelError::DisplayLimit { used: 5, limit: 5 })
+        });
+        assert!(matches!(result, Err(KernelError::DisplayLimit { used: 5, limit: 5 })));
+        let calls = diagnostics.take();
+        assert_eq!(calls[0]["work"]["exhausted"], true);
+        assert!(calls[0]["error"].as_str().unwrap().contains("SD-DISPLAY-01"));
     }
 
     #[test]

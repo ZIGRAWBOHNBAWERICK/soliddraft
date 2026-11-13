@@ -126,12 +126,14 @@ class CheckStepFit(unittest.TestCase):
 
 
 class CheckStepFaces(unittest.TestCase):
-    def failures(self, read, reported, exact, removed, removed_edges=0):
+    def failures(self, read, reported, exact, removed, removed_edges=0, volume=1000.0, **expectation):
         checker = step_checker()
         checker.count = lambda shape, kind: read if kind is checker.TopAbs_FACE else 1
+        checker.GProp_GProps.return_value.Mass.return_value = volume
         report = {"body": {"faces": exact, "edges": 20, "volume": 1000.0, "area": 600.0},
                   "report": {"solids": 1, "faces": reported, "removed_faces": removed, "removed_edges": removed_edges,
                              "max_deviation_mm": 0.0, "max_deviation": "0", "within_tolerance": True}}
+        report.update(expectation)
         return checker.check("part.step", report)[0]
 
     def test_removed_faces_reconcile_the_written_and_exact_counts(self):
@@ -157,6 +159,23 @@ class CheckStepFaces(unittest.TestCase):
         self.assertEqual(self.failures(11, 11, 11, 0, 21), [
             "the report's removed_edges is 21, not a whole number from 0 to the exact body's 20"])
         self.assertEqual(self.failures(11, 11, 11, 0, 20), [])
+
+    def test_split_faces_require_an_independent_exact_export_count(self):
+        self.assertEqual(self.failures(10, 10, 6, 0, expected_export_faces=10), [])
+        for read, reported, expected in [(9, 10, 10), (10, 9, 10), (10, 10, 9)]:
+            self.assertTrue(self.failures(read, reported, 6, 0, expected_export_faces=expected))
+        self.assertTrue(self.failures(10, 10, 6, 0))
+
+    def test_split_expectations_cannot_excuse_a_volume_mismatch(self):
+        failures = self.failures(10, 10, 6, 0, volume=1000.001, expected_export_faces=10)
+        self.assertTrue(any(failure.startswith("volume ") for failure in failures))
+
+    def test_split_expectations_cannot_hide_invalid_removed_counts(self):
+        self.assertTrue(self.failures(10, 10, 6, -1, expected_export_faces=10))
+        for expected in [0, -1, True, False, 10.0, 0.5, "10", None, float("inf"), float("nan")]:
+            with self.subTest(expected=expected):
+                failures = self.failures(10, 10, 6, 0, expected_export_faces=expected)
+                self.assertIn("expected_export_faces must be a positive whole number", failures)
 
 
 class Checks(unittest.TestCase):
@@ -971,6 +990,12 @@ class RunnerEndToEnd(unittest.TestCase):
             report, _ = self.run_step(mode, extra={"exports": [{"format": "step", "refused": "field parts export as meshes"}]})
             self.assertEqual(report["pass"], expected, mode)
 
+    def test_named_same_format_exports_keep_separate_intervals(self):
+        report, _ = self.run_step("ok", extra={"exports": [
+            {"format": "stl", "attempt": "first"}, {"format": "stl", "attempt": "second"}]})
+        self.assertTrue(report["pass"])
+        self.assertEqual(set(report["steps"][0]["intervals"]["export"]), {"stl-first", "stl-second"})
+
     def test_a_refused_export_leaves_an_existing_destination_unchanged(self):
         spec = {"format": "step", "refused": "field parts export as meshes", "sentinel": "existing export sentinel\n"}
         for mode, expected in [("export-refused", True), ("export-refused-written", False),
@@ -1335,6 +1360,40 @@ class Trends(unittest.TestCase):
             with self.subTest(damage=damage):
                 self.assertFalse(self.verdict(rows)["pass"])
 
+
+
+class ExportAttemptEvidence(unittest.TestCase):
+    def test_attempt_identifiers_cannot_escape_or_replace_other_evidence(self):
+        for attempt in ["", "../part", "dir/name", None, True, 3]:
+            with self.subTest(attempt=attempt), self.assertRaises(ValueError):
+                scenarios.export_check(argparse.Namespace(), pathlib.Path("unused"),
+                    {"format": "stl", "attempt": attempt}, {})
+
+    def test_same_format_refusal_then_success_preserves_both_witnesses(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            args = argparse.Namespace(soliddraft="soliddraft", timeout=5)
+
+            def export(command, **kwargs):
+                path = pathlib.Path(command[command.index("--out") + 1])
+                if "--max-work" in command:
+                    return scenarios.subprocess.CompletedProcess(command, 1, "refusal stdout", "numbers.operation-budget")
+                path.write_bytes(b"accepted mesh bytes")
+                value = {"report": {"kind": "mesh"}, "request_work": {
+                    "limit": scenarios.APP_REQUEST_WORK, "used": 5, "exhausted": False}}
+                return scenarios.subprocess.CompletedProcess(command, 0, json.dumps(value), "")
+
+            with mock.patch.object(scenarios.subprocess, "run", side_effect=export):
+                refused = scenarios.export_check(args, directory, {"format": "stl", "attempt": "budget",
+                    "max_work": 10000000, "refused": "numbers.operation-budget", "sentinel": "prior export"}, {})
+                accepted = scenarios.export_check(args, directory, {"format": "stl", "attempt": "accepted"}, {})
+            self.assertTrue(refused["pass"] and accepted["pass"])
+            self.assertEqual((directory / "part-budget.stl").read_bytes(), b"prior export")
+            self.assertEqual((directory / "part-accepted.stl").read_bytes(), b"accepted mesh bytes")
+            self.assertEqual((directory / "export-stl-budget.stderr").read_text(), "numbers.operation-budget")
+            self.assertEqual((directory / "export-stl-budget.stdout").read_text(), "refusal stdout")
+            self.assertEqual((directory / "export-stl-accepted.stderr").read_text(), "")
+            self.assertEqual(json.loads((directory / "export-stl-accepted.stdout").read_text())["report"]["kind"], "mesh")
 
 if __name__ == "__main__":
     unittest.main()

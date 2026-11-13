@@ -181,6 +181,10 @@ mod ribbon;
 use egui_kittest::kittest::{NodeT, Queryable};
 use soliddraft_app::state::{AppAction, EditorParams};
 
+fn finish_label(app: &ribbon::App) -> &'static str {
+    if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }
+}
+
 fn field(app: &mut ribbon::App, label: &str, value: &str) {
     app.get_by_label(label).click();
     app.run_steps(2);
@@ -206,7 +210,7 @@ fn distance_commands_render_in_both_frames_and_hide_pins_during_sketches() {
             app.run_steps(5);
             field(app, "Offset value", "-1");
             assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
-            app.get_by_label("OK (Enter)").click();
+            app.get_by_label(finish_label(app)).click();
             app.run_steps(10);
             volume(&app.state().state, 192.0);
             let id = app.state().state.doc.features.last().unwrap().id;
@@ -218,7 +222,7 @@ fn distance_commands_render_in_both_frames_and_hide_pins_during_sketches() {
             assert!(editor.preview.result.is_none());
             case.frame(app, &format!("{frame}-offset-refused"));
             field(app, "Offset value", "-0.5");
-            app.get_by_label("OK (Enter)").click();
+            app.get_by_label(finish_label(app)).click();
             app.run_steps(10);
             volume(&app.state().state, 315.0);
             case.frame(app, &format!("{frame}-offset"));
@@ -245,48 +249,51 @@ fn distance_commands_render_in_both_frames_and_hide_pins_during_sketches() {
 #[test]
 fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
     let case = ribbon::case("thicken-pattern-controls");
-    let mut app = ribbon::app_at(blank(10.0, 8.0, 6.0).doc, ribbon::EXPANDED_WINDOW, 1.0);
-    case.run(&mut app, |app| {
-        ribbon::run_command(app, "zoom_fit");
-        ribbon::run_command(app, "thicken");
-        let screen = {
-            let s = &app.state().state;
-            s.viewport.camera.project(glam::Vec3::new(0.0, 0.0, 6.0), s.viewport.rect).unwrap()
-        };
-        ribbon::pick_at(app, screen);
-        app.run_steps(6);
-        let editor = app.state().state.editor.as_ref().unwrap();
-        let EditorParams::Thicken(s) = &editor.params else { panic!("Thicken editor") };
-        assert_eq!(s.faces.len(), 1);
-        assert!(editor.preview.result.is_some(), "{:?}", editor.error);
-        field(app, "Thickness value", "1");
-        app.get_by_label("Thicken side").click();
-        app.run_steps(2);
-        app.get_by_label("Back").click();
-        app.run_steps(4);
-        assert_eq!(app.get_by_label("Thicken side").accesskit_node().value().as_deref(), Some("Back"));
-        app.get_by_label("OK (Enter)").click();
-        app.run_steps(10);
-        volume(&app.state().state, 80.0);
-        case.frame(app, "thicken-back");
-    });
-    drop(app);
-    let mut s = blank(20.0, 20.0, 2.0);
-    cut(&mut s, [6.0, 0.0, 0.0], "Sketch1");
-    let source = s.doc.features.last().unwrap().id;
-    s.doc.selection = Some(soliddraft_app::document::Selection::Feature(source));
-    let mut app = ribbon::app_at(s.doc, ribbon::EXPANDED_WINDOW, 1.0);
-    case.run(&mut app, |app| {
-        ribbon::run_command(app, "circular_pattern");
-        let EditorParams::Pattern(p) = &app.state().state.editor.as_ref().unwrap().params else {
-            panic!("Pattern editor")
-        };
-        assert_eq!(p.source, Some(soliddraft_model::FeatureId(source as u32)));
-        assert_eq!(app.get_by_label("Pattern source").accesskit_node().value().as_deref(), Some("Cut-Extrude1"));
-        case.frame(app, "selected-feature-pattern");
-        app.get_by_label("OK (Enter)").click();
-        app.run_steps(10);
-        volume(&app.state().state, 768.0);
-        case.frame(app, "patterned-cuts");
-    });
+    for frame in ["classic", "edit_suite"] {
+        std::fs::write(case.path("config/settings.json"), format!(r#"{{"frame_layout":"{frame}"}}"#)).unwrap();
+        let mut app = ribbon::app_at(blank(10.0, 8.0, 6.0).doc, ribbon::EXPANDED_WINDOW, 1.0);
+        case.run(&mut app, |app| {
+            ribbon::run_command(app, "zoom_fit");
+            ribbon::run_command(app, "thicken");
+            let screen = {
+                let s = &app.state().state;
+                s.viewport.camera.project(glam::Vec3::new(0.0, 0.0, 6.0), s.viewport.rect).unwrap()
+            };
+            ribbon::pick_at(app, screen);
+            app.run_steps(6);
+            let editor = app.state().state.editor.as_ref().unwrap();
+            let EditorParams::Thicken(s) = &editor.params else { panic!("Thicken editor") };
+            assert_eq!(s.faces.len(), 1);
+            assert!(editor.preview.result.is_some(), "{:?}", editor.error);
+            field(app, "Thickness value", "1");
+            app.get_by_label("Thicken side").click();
+            app.run_steps(2);
+            app.get_by_label("Back").click();
+            app.run_steps(4);
+            assert_eq!(app.get_by_label("Thicken side").accesskit_node().value().as_deref(), Some("Back"));
+            app.get_by_label(finish_label(app)).click();
+            app.run_steps(10);
+            volume(&app.state().state, 80.0);
+            case.frame(app, &format!("{frame}-thicken-back"));
+        });
+        drop(app);
+        let mut s = blank(20.0, 20.0, 2.0);
+        cut(&mut s, [6.0, 0.0, 0.0], "Sketch1");
+        let source = s.doc.features.last().unwrap().id;
+        s.doc.selection = Some(soliddraft_app::document::Selection::Feature(source));
+        let mut app = ribbon::app_at(s.doc, ribbon::EXPANDED_WINDOW, 1.0);
+        case.run(&mut app, |app| {
+            ribbon::run_command(app, "circular_pattern");
+            let EditorParams::Pattern(p) = &app.state().state.editor.as_ref().unwrap().params else {
+                panic!("Pattern editor")
+            };
+            assert_eq!(p.source, Some(soliddraft_model::FeatureId(source as u32)));
+            assert_eq!(app.get_by_label("Pattern source").accesskit_node().value().as_deref(), Some("Cut-Extrude1"));
+            case.frame(app, &format!("{frame}-selected-feature-pattern"));
+            app.get_by_label(finish_label(app)).click();
+            app.run_steps(10);
+            volume(&app.state().state, 768.0);
+            case.frame(app, &format!("{frame}-patterned-cuts"));
+        });
+    }
 }

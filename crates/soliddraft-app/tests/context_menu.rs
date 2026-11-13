@@ -82,11 +82,11 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
     set_frame(&case, "edit_suite");
     let mut app = ribbon::app(ribbon::plate());
     case.run(&mut app, |app| {
-        assert!(!app.state().state.layout.tree.shown);
+        assert!(!app.state().state.tree_shown());
         let tree = app.get_by_label("Tree").rect().center();
         ribbon::click_at(app, tree);
         app.run_steps(6);
-        assert!(app.state().state.layout.tree.shown);
+        assert!(app.state().state.tree_shown());
         let feature = app.state().state.doc.features[0].id;
         let name = app.state().state.doc.features[0].name.clone();
         let face = world(app, Vec3::new(0.0, 0.0, 20.0));
@@ -117,7 +117,10 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         right_click(app, row, false);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
         groups(app, &["Body"]);
-        dismiss(app);
+        menu_command(app, "material");
+        app.run_steps(6);
+        app.get_by_label("Part material");
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
 
         let empty = app.state().state.viewport.rect.left_bottom() + egui::vec2(45.0, -50.0);
         right_click(app, empty, true);

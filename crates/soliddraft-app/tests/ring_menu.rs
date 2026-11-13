@@ -81,7 +81,7 @@ fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choic
         assert_eq!(app.state().state.doc.revision(), revision, "hiding does not change geometry");
         assert!(!egui::Popup::is_any_open(&app.ctx));
 
-        if !app.state().state.layout.tree.shown {
+        if !app.state().state.tree_shown() {
             ribbon::run_command(app, "toggle_tree");
         }
         let tree = egui::PanelState::load(&app.ctx, soliddraft_app::panels::Side::Tree.panel_id())
@@ -107,7 +107,7 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
     edit_suite(&case);
     for size in [ribbon::WINDOW, vec2(1280.0, 720.0)] {
         let mut app = ribbon::app_at(ribbon::plate(), size, 1.0);
-        if app.state().state.layout.tree.shown {
+        if app.state().state.tree_shown() {
             ribbon::run_command(&mut app, "toggle_tree");
         }
         case.run(&mut app, |app| {

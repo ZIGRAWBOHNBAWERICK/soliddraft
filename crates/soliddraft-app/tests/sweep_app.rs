@@ -483,11 +483,9 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     let before = doc.features[1].kind.clone();
     let mut returning = spline_controls(3.0);
     returning[0]["control_points"][3] = json!([0, 0, 0]);
-    let mut detailed = spline_controls(3.0);
-    detailed[0]["control_points"][3] = json!([0, 1, 6]);
-    for (segments, message) in
-        [(returning, "path may turn back or cross itself"), (detailed, "too much detail to display accurately")]
     {
+        let segments = returning;
+        let message = "path may turn back or cross itself";
         let refused =
             CommandTools { doc: &mut doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }
                 .call(
@@ -503,6 +501,32 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         assert_eq!(doc.features[1].kind, before);
         check_spline(&doc, 48.0);
     }
+    // Owner decision 13 Nov: certified-first display now accepts this former display refusal as proved.
+    let mut detailed = spline_controls(3.0);
+    detailed[0]["control_points"][3] = json!([0, 1, 6]);
+    let (accepted, work) =
+        soliddraft_kernel_catallax::with_request_allowance(soliddraft_kernel_catallax::APP_REQUEST_WORK, || {
+            call(&mut doc, "edit_sweep", json!({"feature":"Sweep1", "start":[0,0,0], "segments":detailed}))
+        });
+    let body = doc.display_body().unwrap();
+    let mesh = doc.kernel().rendering(body, &Default::default()).unwrap();
+    eprintln!(
+        "detailed spline sweep: {work:?}; vertices={}; bound={:?}; {accepted}",
+        mesh.positions.len(),
+        mesh.bounded.as_ref().map(|bound| (&bound.kind, bound.measured_mm, bound.level_mm))
+    );
+    assert!(!work.exhausted && work.used > 0 && work.used <= 20_000_000, "{work:?}");
+    assert!(mesh.bounded.is_none() && !mesh.unproved, "the native proved answer must stay proved");
+    assert!(!mesh.positions.is_empty() && !mesh.indices.is_empty());
+    assert!(doc.proof_state().current_proved_display());
+    assert!(doc.display_answer(doc.features[1].id).is_none());
+    let (export, _) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
+        doc.kernel().tessellate(body, &Default::default())
+    });
+    assert!(export.is_err(), "a named screen result cannot replace an independent certified request");
+    call(&mut doc, "undo", json!({}));
+    assert_eq!(doc.features[1].kind, before);
+    check_spline(&doc, 48.0);
     let path = std::env::temp_dir().join(format!("soliddraft-spline-sweep-{}.dwprt", std::process::id()));
     call(&mut doc, "save", json!({"path":path}));
     let mut reopened = Document::new("Reopened spline", soliddraft_app::kernel());
@@ -529,13 +553,20 @@ fn spline_controls_build_through_the_registry_in_both_frames() {
         app.state_mut().state.frame_layout = layout;
         app.run_steps(4);
         ribbon::run_command(&mut app, "sweep");
+        if layout == FrameLayout::EditSuite {
+            let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+            let (_, rect) =
+                ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
+            ribbon::click_at(&mut app, rect.center());
+            app.run_steps(6);
+        }
         app.get_by_label("Use spline path").scroll_to_me();
         app.run_steps(24);
         app.get_by_label("Use spline path").click();
         app.run_steps(6);
         assert!(app.query_by_label("Turn with the path · Coming soon").is_some());
         case.frame(&mut app, &format!("{layout:?}-controls"));
-        app.get_by_label("OK (Enter)").click();
+        app.get_by_label(if layout == FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }).click();
         app.run_steps(6);
         assert!(app.state().state.editor.is_none());
         check_spline(&app.state().state.doc, 240.0);

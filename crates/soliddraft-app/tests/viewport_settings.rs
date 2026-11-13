@@ -222,3 +222,14 @@ fn a_new_install_that_writes_display_first_keeps_its_starting_preset() {
     );
     assert!(!view_unchanged(&case).references.show_grid);
 }
+
+#[test]
+fn edit_suite_starts_with_origin_axes_and_keeps_an_explicit_choice() {
+    let case = Case::settings("edit_suite_axes_default");
+    case.seed_settings(r#"{"frame_layout":"edit_suite"}"#);
+    assert!(view_unchanged(&case).references.always_show_origin_axes);
+    case.seed_settings(r#"{"frame_layout":"edit_suite","view":{"always_show_origin_axes":false}}"#);
+    assert!(!view_unchanged(&case).references.always_show_origin_axes);
+    case.seed_settings(r#"{"frame_layout":"classic"}"#);
+    assert!(!view_unchanged(&case).references.always_show_origin_axes);
+}

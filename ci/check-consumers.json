@@ -338,6 +338,12 @@
     "ci/test_merge_shards.py": [
       "lint"
     ],
+    "ci/fixtures/import/tetrahedron.obj": [
+      "lint",
+      "test-linux",
+      "test-macos",
+      "application-loop"
+    ],
     "ci/blade-disk.py": [
       "lint",
       "kernel",

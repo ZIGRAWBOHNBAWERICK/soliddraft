@@ -6,6 +6,7 @@ use crate::document::{
     fmt_mm, plane_ref_label,
 };
 use crate::drag::Dimension;
+use crate::form_bar::value_cell;
 use crate::icons::{self, Icon};
 use crate::sketch::{ConstraintKind, EntityKind, fmt_value, solve};
 use crate::sketcher;
@@ -18,7 +19,9 @@ use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef};
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if state.sketch.is_some() {
         sketch_panel(ui, state);
-        crate::sketch_values::popup(ui, state);
+        if state.frame_layout == crate::settings::FrameLayout::Classic {
+            crate::sketch_values::popup(ui, state);
+        }
     } else if state.editor.is_some() {
         editor(ui, state);
     } else {
@@ -84,8 +87,6 @@ fn ok_cancel(ui: &mut egui::Ui, head: Rect, ok_tip: &str, cancel_tip: &str) -> (
 const LABEL_WIDTH: f32 = 96.0;
 /// The height of one row of a form table.
 const ROW_HEIGHT: f32 = 24.0;
-/// The room a value cell keeps at its right for the unit.
-const UNIT_WIDTH: f32 = 30.0;
 /// The space between the cards of a form.
 const CARD_GAP: f32 = 6.0;
 /// The height of a pick's chip, inside its margin.
@@ -171,56 +172,6 @@ fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, Rect) 
     add(ui, cell)
 }
 
-/// A framed value cell: the widget fills it, the unit sits at its right. The frame
-/// follows the widget: the accent while it has the keyboard, a stronger line on hover.
-fn value_cell(
-    ui: &mut egui::Ui,
-    cell: Rect,
-    unit: &str,
-    add: impl FnOnce(&mut egui::Ui, Rect) -> egui::Response,
-) -> egui::Response {
-    let frame = ui.painter().add(egui::Shape::Noop);
-    // Every value keeps the unit's room, with a unit or without, so the column stays one width.
-    let inner = Rect::from_min_max(
-        pos2(cell.left() + 2.0, cell.top() + 1.0),
-        pos2(cell.right() - UNIT_WIDTH, cell.bottom() - 1.0),
-    );
-    let response = ui
-        .scope(|ui| {
-            let v = ui.visuals_mut();
-            for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active] {
-                w.bg_fill = egui::Color32::TRANSPARENT;
-                w.weak_bg_fill = egui::Color32::TRANSPARENT;
-                w.bg_stroke = Stroke::NONE;
-                w.expansion = 0.0;
-            }
-            v.selection.stroke = Stroke::NONE;
-            ui.spacing_mut().interact_size = inner.size();
-            ui.spacing_mut().button_padding = vec2(6.0, 2.0);
-            add(ui, inner)
-        })
-        .inner;
-    let (fill, stroke) = if response.has_focus() {
-        (theme::chip(), Stroke::new(1.5, theme::accent()))
-    } else if response.hovered() {
-        (theme::field_bg(), Stroke::new(1.0, theme::line_strong()))
-    } else {
-        (theme::field_bg(), Stroke::new(1.0, theme::line()))
-    };
-    ui.painter()
-        .set(frame, egui::epaint::RectShape::new(cell, CornerRadius::same(6), fill, stroke, egui::StrokeKind::Inside));
-    if !unit.is_empty() {
-        ui.painter().text(
-            pos2(cell.right() - 8.0, cell.center().y),
-            Align2::RIGHT_CENTER,
-            unit,
-            theme::font(11.0),
-            theme::muted(),
-        );
-    }
-    response
-}
-
 /// A row whose cell holds a number widget, named "<label> value" for automation.
 fn number_row(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) -> egui::Response {
     number_row_named(ui, label, label, unit, widget)
@@ -282,25 +233,37 @@ fn unit_value(
 /// positive number of millimetres is the new size at once; anything else is refused
 /// beside the field and keeps the text, so nothing is silently clamped to another size.
 fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Option<String>) {
-    let what = label.to_lowercase();
     let id = ui.make_persistent_id(("size", label));
+    row(ui, label, |ui, cell| size_input(ui, label, value, refused, cell, id));
+    if let Some(why) = refused {
+        error_row(ui, why);
+    }
+}
+
+pub(crate) fn size_input(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f64,
+    refused: &mut Option<String>,
+    cell: Rect,
+    id: egui::Id,
+) {
+    let what = label.to_lowercase();
     // The typed text outlives the frame; it restarts from the size when it no longer
     // stands for it.
     let kept = ui.data(|d| d.get_temp::<String>(id));
     let mut text = kept
         .filter(|t| refused.is_some() || crate::fillet_collect::parse_size(t, &what) == Ok(*value))
         .unwrap_or_else(|| crate::document::fmt_mm(*value));
-    let r = row(ui, label, |ui, cell| {
-        value_cell(ui, cell, "mm", |ui, inner| {
-            ui.put(
-                inner,
-                egui::TextEdit::singleline(&mut text)
-                    .font(theme::font(12.5))
-                    .frame(egui::Frame::NONE)
-                    .horizontal_align(egui::Align::Center)
-                    .vertical_align(egui::Align::Center),
-            )
-        })
+    let r = value_cell(ui, cell, "mm", |ui, inner| {
+        ui.put(
+            inner,
+            egui::TextEdit::singleline(&mut text)
+                .font(theme::font(12.5))
+                .frame(egui::Frame::NONE)
+                .horizontal_align(egui::Align::Center)
+                .vertical_align(egui::Align::Center),
+        )
     });
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{label} value")));
     if r.changed() {
@@ -313,9 +276,6 @@ fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Opt
         }
     }
     ui.data_mut(|d| d.insert_temp(id, text));
-    if let Some(why) = refused {
-        error_row(ui, why);
-    }
 }
 
 /// The selected feature's dimension. Dragging it previews the part off the interface
@@ -452,7 +412,12 @@ fn picked_chip(ui: &mut egui::Ui, icon: Icon, label: &str, remove: bool) -> bool
 
 /// The picks a form holds, as chips, or the prompt for the first one. Returns the index
 /// whose remove button was clicked.
-fn pick_list<'a>(ui: &mut egui::Ui, prompt: &str, icon: Icon, picks: impl Iterator<Item = &'a str>) -> Option<usize> {
+pub(crate) fn pick_list<'a>(
+    ui: &mut egui::Ui,
+    prompt: &str,
+    icon: Icon,
+    picks: impl Iterator<Item = &'a str>,
+) -> Option<usize> {
     let picks: Vec<&str> = picks.collect();
     if picks.is_empty() {
         pick_prompt(ui, prompt);
@@ -540,7 +505,7 @@ fn segmented(ui: &mut egui::Ui, id: &str, options: &[&str], selected: usize) -> 
     clicked
 }
 
-fn coord(ui: &mut egui::Ui, id: &str, label: &str, value: &mut f64) {
+pub(crate) fn coord(ui: &mut egui::Ui, id: &str, label: &str, value: &mut f64) {
     ui.label(egui::RichText::new(label).size(11.0).color(theme::muted()));
     let r = ui.add_sized(
         vec2(64.0, 22.0),
@@ -588,7 +553,12 @@ fn axis_combo(ui: &mut egui::Ui, id: &str, label: &str, direction: &mut Vec3) {
 }
 
 /// A reference plane choice; a picked face shows by its label.
-fn plane_combo(ui: &mut egui::Ui, id: &str, plane: &mut PlaneRef, choices: &[(soliddraft_model::FeatureId, String)]) {
+pub(crate) fn plane_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    plane: &mut PlaneRef,
+    choices: &[(soliddraft_model::FeatureId, String)],
+) {
     egui::ComboBox::from_id_salt(id)
         .width(ui.available_width() - 4.0)
         .selected_text(match plane {
@@ -658,7 +628,34 @@ fn error_row(ui: &mut egui::Ui, err: &str) {
 
 /// A field parameter: one value, or a linear grade between two anchors on a part axis.
 /// `unit` names the values, such as "mm"; the anchors are always millimetres.
-fn grade_field(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_kernel_api::Grade, unit: &str, speed: f64) {
+pub(crate) fn grade_field(
+    ui: &mut egui::Ui,
+    label: &str,
+    grade: &mut soliddraft_kernel_api::Grade,
+    unit: &str,
+    speed: f64,
+) {
+    grade_controls(ui, label, grade, unit, speed, true);
+}
+
+pub(crate) fn grade_options(
+    ui: &mut egui::Ui,
+    label: &str,
+    grade: &mut soliddraft_kernel_api::Grade,
+    unit: &str,
+    speed: f64,
+) {
+    grade_controls(ui, label, grade, unit, speed, false);
+}
+
+fn grade_controls(
+    ui: &mut egui::Ui,
+    label: &str,
+    grade: &mut soliddraft_kernel_api::Grade,
+    unit: &str,
+    speed: f64,
+    constant_value: bool,
+) {
     use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
     let linear = matches!(grade, Grade::Linear(_));
@@ -679,7 +676,8 @@ fn grade_field(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_kernel_api
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, info.clone()));
     };
     match grade {
-        Grade::Constant(v) => value(ui, "", v, unit),
+        Grade::Constant(v) if constant_value => value(ui, "", v, unit),
+        Grade::Constant(_) => {}
         Grade::Linear(l) => {
             choice_row(ui, "Axis", |ui, _| {
                 ui.horizontal_centered(|ui| {
@@ -697,7 +695,60 @@ fn grade_field(ui: &mut egui::Ui, label: &str, grade: &mut soliddraft_kernel_api
     }
 }
 
+pub(crate) fn pattern_sources(
+    doc: &crate::document::Document,
+    target: usize,
+) -> Vec<(soliddraft_model::FeatureId, String)> {
+    doc.features
+        .iter()
+        .take(target)
+        .filter(|f| f.kind.to_model().can_pattern_feature())
+        .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
+        .collect()
+}
+
+pub(crate) fn pattern_source(
+    ui: &mut egui::Ui,
+    pattern: &mut soliddraft_model::PatternFeature,
+    choices: &[(soliddraft_model::FeatureId, String)],
+) {
+    let name = pattern
+        .source
+        .and_then(|id| choices.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()))
+        .unwrap_or("Whole body");
+    let response = egui::ComboBox::from_id_salt("pattern_source").selected_text(name).show_ui(ui, |ui| {
+        ui.selectable_value(&mut pattern.source, None, "Whole body");
+        for (id, name) in choices {
+            ui.selectable_value(&mut pattern.source, Some(*id), name);
+        }
+    });
+    response.response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Pattern source");
+        info.current_text_value = Some(name.into());
+        info
+    });
+}
+
+pub(crate) fn thicken_side(ui: &mut egui::Ui, side: &mut soliddraft_kernel_api::ThickenSide) {
+    use soliddraft_kernel_api::ThickenSide;
+    let name = match side {
+        ThickenSide::Front => "Front",
+        ThickenSide::Back => "Back",
+    };
+    let response = egui::ComboBox::from_id_salt("thicken_side").selected_text(name).show_ui(ui, |ui| {
+        for (value, name) in [(ThickenSide::Front, "Front"), (ThickenSide::Back, "Back")] {
+            ui.selectable_value(side, value, name);
+        }
+    });
+    response.response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Thicken side");
+        info.current_text_value = Some(name.into());
+        info
+    });
+}
+
 fn editor(ui: &mut egui::Ui, state: &mut AppState) {
+    let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
     let (title, icon) = match state.editor.as_ref().map(|e| &e.params) {
         Some(EditorParams::Revolve(_)) => (state.editor.as_ref().unwrap().title(), Icon::Revolve),
         Some(EditorParams::Loft(_)) => (state.editor.as_ref().unwrap().title(), Icon::Loft),
@@ -753,41 +804,8 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
         .filter(|f| matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
         .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
         .collect();
-    let pattern_choices: Vec<_> = state
-        .doc
-        .features
-        .iter()
-        .take(target)
-        .filter(|f| f.kind.to_model().can_pattern_feature())
-        .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
-        .collect();
-    let mut loft_choices: Vec<_> = state
-        .doc
-        .features
-        .iter()
-        .take(target)
-        .filter(|f| f.is_sketch())
-        .map(|f| {
-            (
-                soliddraft_model::LoftProfile::Sketch { feature: soliddraft_model::FeatureId(f.id as u32) },
-                f.name.clone(),
-            )
-        })
-        .collect();
-    loft_choices.extend(
-        state
-            .doc
-            .faces
-            .iter()
-            .filter(|f| f.surface == soliddraft_kernel_api::SurfaceKind::Plane)
-            .filter(|f| state.doc.index_of(f.feature).is_some_and(|i| i < target))
-            .filter_map(|f| {
-                state.doc.face_ref(f.id).map(|face| {
-                    let label = face.label.clone();
-                    (soliddraft_model::LoftProfile::Face { face }, label)
-                })
-            }),
-    );
+    let pattern_choices = pattern_sources(&state.doc, target);
+    let loft_choices = crate::loft_panel::choices(&state.doc, target);
     let sweep_radius = match state.editor.as_ref().map(|e| &e.params) {
         Some(EditorParams::Sweep(s)) => state.doc.sweep_anchor(s.sketch.0 as u64).map_or(10.0, |(_, radius)| radius),
         _ => 0.0,
@@ -938,7 +956,19 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     let refused = &mut editor.feedback.size;
                     match &mut editor.params {
                         EditorParams::Fillet(f) => size_field(ui, "Radius", &mut f.radius, refused),
-                        EditorParams::Chamfer(c) => size_field(ui, "Distance", &mut c.distance, refused),
+                        EditorParams::Chamfer(c) => {
+                            size_field(ui, "Distance", &mut c.distance, refused);
+                            if edit_suite {
+                                let mut unequal = c.other_distance.is_some();
+                                if ui.checkbox(&mut unequal, "Two distances").changed() {
+                                    c.other_distance = unequal.then_some(c.distance);
+                                    editor.feedback.second_size = None;
+                                }
+                                if let Some(other) = &mut c.other_distance {
+                                    size_field(ui, "Distance 2", other, &mut editor.feedback.second_size);
+                                }
+                            }
+                        }
                         _ => {}
                     }
                     if let Some(err) = &editor.error {
@@ -1044,25 +1074,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
             }
             EditorParams::Pattern(p) => {
                 section(ui, "Features", |ui| {
-                    choice_row(ui, "Source", |ui, _| {
-                        let name = p
-                            .source
-                            .and_then(|id| pattern_choices.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()))
-                            .unwrap_or("Whole body");
-                        let response =
-                            egui::ComboBox::from_id_salt("pattern_source").selected_text(name).show_ui(ui, |ui| {
-                                ui.selectable_value(&mut p.source, None, "Whole body");
-                                for (id, name) in &pattern_choices {
-                                    ui.selectable_value(&mut p.source, Some(*id), name);
-                                }
-                            });
-                        response.response.widget_info(|| {
-                            let mut info =
-                                egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Pattern source");
-                            info.current_text_value = Some(name.into());
-                            info
-                        });
-                    });
+                    choice_row(ui, "Source", |ui, _| pattern_source(ui, p, &pattern_choices));
                 });
                 section(ui, "Layout", |ui| match &mut p.layout {
                     PatternSpec::Linear { direction, spacing, count } => {
@@ -1127,7 +1139,16 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             EditorParams::Lattice(l) => {
-                section(ui, "Cubic lattice", |ui| {
+                let title = l.cell.map_or("Lattice".to_owned(), |cell| format!("{} lattice", cell.label()));
+                section(ui, if edit_suite { "Lattice" } else { &title }, |ui| {
+                    if edit_suite {
+                        let cell = l.cell.get_or_insert(soliddraft_kernel_api::LatticeCell::Cubic);
+                        egui::ComboBox::from_label("Cell type").selected_text(cell.label()).show_ui(ui, |ui| {
+                            for choice in soliddraft_kernel_api::LatticeCell::ALL {
+                                ui.selectable_value(cell, choice, choice.label());
+                            }
+                        });
+                    }
                     hint(ui, "Grid at the part origin. Unproved preview; export certifies the mesh.");
                     let v = l.cell_size_mm.get_or_insert(0.0);
                     number_row(ui, "Cell size", "mm", egui::DragValue::new(v).speed(0.1));
@@ -1137,7 +1158,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                         number_row(ui, label, "mm", egui::DragValue::new(v).speed(0.01));
                     }
                 });
-                l.cell = Some(soliddraft_kernel_api::LatticeCell::Cubic);
+
                 ui.label("unproved preview");
                 if let Some(error) = &editor.error {
                     error_row(ui, error);
@@ -1176,24 +1197,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 });
                 section(ui, "Thickness", |ui| {
                     number_row(ui, "Thickness", "mm", egui::DragValue::new(&mut s.thickness).speed(0.1));
-                    choice_row(ui, "Side", |ui, _| {
-                        use soliddraft_kernel_api::ThickenSide;
-                        let name = match s.side {
-                            ThickenSide::Front => "Front",
-                            ThickenSide::Back => "Back",
-                        };
-                        let response =
-                            egui::ComboBox::from_id_salt("thicken_side").selected_text(name).show_ui(ui, |ui| {
-                                for (side, name) in [(ThickenSide::Front, "Front"), (ThickenSide::Back, "Back")] {
-                                    ui.selectable_value(&mut s.side, side, name);
-                                }
-                            });
-                        response.response.widget_info(|| {
-                            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Thicken side");
-                            info.current_text_value = Some(name.into());
-                            info
-                        });
-                    });
+                    choice_row(ui, "Side", |ui, _| thicken_side(ui, &mut s.side));
                 });
                 if let Some(error) = &editor.error {
                     error_row(ui, error);
@@ -1368,10 +1372,12 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         .and_then(|f| f.sketch())
         .map(|s| s.plane.label())
         .unwrap_or_default();
-    let head = header(ui, Icon::Sketch, &name);
-    let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
-    if ok || cancel {
-        state.push(AppAction::ExitSketch);
+    if state.frame_layout == crate::settings::FrameLayout::Classic {
+        let head = header(ui, Icon::Sketch, &name);
+        let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
+        if ok || cancel {
+            state.push(AppAction::ExitSketch);
+        }
     }
     let mut actions = Vec::new();
     let has_body = state.doc.model().body().is_some();
@@ -1941,6 +1947,11 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         theme::section_label(ui, kind);
         egui::Grid::new("props").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
             for (k, v) in &info.details {
+                if matches!(k.as_str(), "Carrier accuracy" | "Import deviation" | "Approved import limit")
+                    && state.frame_layout != crate::settings::FrameLayout::EditSuite
+                {
+                    continue;
+                }
                 ui.label(egui::RichText::new(k).size(12.0).color(theme::muted()));
                 let color = match k.as_str() {
                     "Error" => theme::error(),
@@ -1951,6 +1962,10 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             }
         });
+        if state.frame_layout == crate::settings::FrameLayout::EditSuite && sel == Selection::Body {
+            ui.add_space(8.0);
+            material_panel(ui, state);
+        }
         if let (Selection::Feature(id), Some(f)) = (sel, feature)
             && f.status != FeatureStatus::Inactive
         {
@@ -1994,6 +2009,15 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| match sel {
             Selection::Feature(id) => {
+                if state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && state
+                        .doc
+                        .feature(id)
+                        .is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_)))
+                    && ui.button("Replace file...").clicked()
+                {
+                    state.push(AppAction::ReplaceImport { feature: id, path: None });
+                }
                 if is_sketch {
                     if ui.button("Edit sketch").clicked() {
                         state.push(AppAction::EditSketch(id));
@@ -2045,4 +2069,74 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         });
         let _ = fmt_mm(0.0);
     });
+}
+
+fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
+    static CATALOG: std::sync::OnceLock<soliddraft_materials::Catalog> = std::sync::OnceLock::new();
+    let catalog = CATALOG.get_or_init(soliddraft_materials::Catalog::built_in);
+    let current = state.doc.material();
+    let mut selected = state.doc.material_assignment().cloned();
+    let before = selected.clone();
+    let mut error = None;
+    section(ui, "Material", |ui| {
+        egui::ComboBox::from_label("Part material")
+            .selected_text(current.map_or("Unassigned", |m| m.name.as_str()))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut selected,
+                    None,
+                    if state.doc.model().active_configuration().is_some() {
+                        "Use inherited material"
+                    } else {
+                        "Unassigned"
+                    },
+                );
+                for (_, material) in catalog.materials() {
+                    ui.selectable_value(&mut selected, Some(material.id.clone()), &material.name);
+                }
+            });
+        if let Some(material) = current {
+            match material.density_kg_m3 {
+                Some(density) => {
+                    ui.label(format!("Density: {density} kg/m³"));
+                }
+                None => {
+                    ui.label("Density: unknown");
+                }
+            }
+        }
+        if let Some(index) = state.doc.display_index() {
+            let id = state.doc.features[index].id;
+            if ui.button("Calculate mass").clicked() {
+                error = state.mass.request(&state.doc, id, ui.ctx()).err();
+            }
+            if state.doc.proof_state().current_proved_display()
+                && let Some(body) = state.doc.display_body()
+                && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
+            {
+                ui.label(format!("Volume: {:.3} mm³", properties.volume));
+                match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {
+                    Ok(mass) => {
+                        ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
+                    }
+                    Err(why) => {
+                        ui.label(format!("Mass: {why}"));
+                    }
+                }
+            }
+            if let Some(message) = state.mass.message(&state.doc, id) {
+                hint(ui, &crate::geometry_message::for_user(message));
+            }
+        }
+    });
+    if let Some(error) = error {
+        state.note(error, crate::state::NoteKind::Error);
+    }
+    if selected != before {
+        let material = selected.as_ref().and_then(|id| catalog.material(id)).map(|(_, m)| m.clone());
+        let appearance = material.as_ref().and_then(|m| catalog.default_appearance_of(m)).cloned();
+        if let Err(error) = state.doc.set_material(material, appearance) {
+            state.note(error, crate::state::NoteKind::Error);
+        }
+    }
 }

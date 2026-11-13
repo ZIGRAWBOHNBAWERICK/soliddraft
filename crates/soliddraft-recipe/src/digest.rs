@@ -101,6 +101,7 @@ mod tests {
             .map(|i| FaceInfo {
                 id: FaceId::from_raw(i + 100),
                 surface: SurfaceKind::Plane,
+                accuracy: soliddraft_kernel_api::FaceAccuracy::Unknown,
                 area: 100.0 + offset,
                 centroid: Vec3::new(i as f64, 5.0, 5.0),
                 bbox,

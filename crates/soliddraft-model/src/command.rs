@@ -603,6 +603,12 @@ impl Document {
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) if !(b.size.is_finite() && b.size > 0.0) => {
                 Err(CommandError::Invalid(format!("size must be positive, got {}", b.size)))
             }
+            FeatureKind::Chamfer(b) if b.other_distance.is_some_and(|d| !d.is_finite() || d <= 0.0) => {
+                Err(CommandError::Invalid("the second chamfer distance must be positive and finite".into()))
+            }
+            FeatureKind::Fillet(b) if b.other_distance.is_some() => {
+                Err(CommandError::Invalid("a fillet has no second distance".into()))
+            }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) if b.edges.is_empty() => {
                 Err(CommandError::Invalid("a fillet or chamfer needs at least one edge".into()))
             }
@@ -821,9 +827,15 @@ impl Document {
     fn edit_feature_definition(
         &mut self,
         id: FeatureId,
-        kind: FeatureKind,
+        mut kind: FeatureKind,
         restoring: bool,
     ) -> Result<Applied, CommandError> {
+        if !restoring
+            && let (Some(FeatureKind::ImportStep(old)), FeatureKind::ImportStep(new)) =
+                (self.feature(id).map(|f| &f.kind), &mut kind)
+        {
+            new.source_bound_names = old.source_bound_names || old.sha256 != new.sha256 || old.format != new.format;
+        }
         Self::check_kind(&kind)?;
         if !restoring {
             self.check_inputs(&kind)?;

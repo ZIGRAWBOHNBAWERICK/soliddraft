@@ -2,7 +2,7 @@
 
 use crate::commands::{self, CommandSpec, Tab};
 use crate::icons;
-use crate::state::{AppAction, AppState, EditorParams, RibbonTab};
+use crate::state::{AppState, RibbonTab};
 use crate::theme::{self, edit_suite as tokens};
 use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
@@ -15,33 +15,6 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
         .resizable(false)
         .frame(egui::Frame::new().fill(theme::panel()).inner_margin(4))
         .show(root, |ui| show_mode(ui, state, compact));
-}
-
-pub fn plane_picker_panel(root: &mut egui::Ui, state: &mut AppState) {
-    if !state.editor.as_ref().is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane)) {
-        return;
-    }
-    egui::Panel::top("sketch_plane_picker")
-        .exact_size(38.0)
-        .frame(egui::Frame::new().fill(theme::panel()).inner_margin(6))
-        .show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Sketch plane");
-                for plane in crate::document::PlaneKind::ALL {
-                    let name = state.doc.model().datum_name(plane.to_model());
-                    if ui.button(name).clicked() {
-                        state.push(AppAction::StartSketchOn(crate::document::SketchPlane::Reference {
-                            plane,
-                            offset: 0.0,
-                        }));
-                    }
-                }
-                ui.label(egui::RichText::new("or pick a flat face").color(theme::muted()));
-                if ui.button("Cancel").clicked() {
-                    state.push(AppAction::CancelEditor);
-                }
-            });
-        });
 }
 
 fn label(command: &CommandSpec, state: &AppState) -> String {
@@ -95,6 +68,7 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                         (command.shown)(state)
                             && !(start && command.id == "sketch")
                             && command.id != "smart_dimension"
+                            && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
                             && !(state.assembly.is_active()
                                 && tab == Tab::Assembly
                                 && command.id == "assembly_interference")

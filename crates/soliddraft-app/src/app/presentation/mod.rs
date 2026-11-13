@@ -204,14 +204,16 @@ impl SolidDraftApp {
         let mut shown = self.state.tree_shown();
         let mut open_requested = false;
         let dock = match side {
-            Side::Tree
-                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && (self.state.assembly.is_active() || self.state.drawing.is_active()) =>
-            {
-                &mut self.document_tree_dock
+            Side::Tree if self.state.frame_layout == crate::settings::FrameLayout::EditSuite => {
+                &mut self.suite_tree_dock
             }
             Side::Tree => &mut self.tree_dock,
         };
+        if std::mem::take(&mut self.state.values.tree_focus)
+            && let Some(at) = dock.find_tab(&docks::Tab::Tree)
+        {
+            let _ = dock.set_active_tab(at);
+        }
         if std::mem::take(&mut self.state.values.focus)
             && let Some(at) = dock.find_tab(&docks::Tab::Values)
         {
@@ -527,6 +529,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         menu_command(ui, st, "open", "Open…");
         menu_command(ui, st, "import_step", "Import STEP…");
         menu_command(ui, st, "import_iges", "Import IGES…");
+        menu_command(ui, st, "import_mesh", "Import mesh solid…");
         menu_command(ui, st, "make_drawing", "New drawing from part…");
         menu_command(ui, st, "new_assembly", "New assembly");
         menu_command(ui, st, "make_assembly", "Make assembly from part");
@@ -647,6 +650,17 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
             }
         }
         ui.separator();
+        if st.frame_layout == crate::settings::FrameLayout::EditSuite {
+            if ui.button("Tree").clicked() {
+                st.show_tree(true);
+                st.values.tree_focus = true;
+                ui.close();
+            }
+            if ui.button("Values").clicked() {
+                st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
+                ui.close();
+            }
+        }
         for side in Side::ALL {
             let shown = st.tree_shown();
             let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();

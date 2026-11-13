@@ -19,11 +19,19 @@ boundaries with an exact frame. Other faces need a closed sketch instead.
 Catallax refuses profiles it cannot verify as a solid without crossing or folding.
 The editor explains the refusal and keeps the existing part.
 
+Spline displays try certification first.
+When the native result instead meets its preset measured display rule, the proof light says "Answered within a stated bound".
+Its tooltip records the 0.01 mm limit, measured surface deviation and measurement method against the retained boundary.
+This display result remains separate from the exact part's proof and from certified exports.
+A deviation above the limit or a request that cannot finish within its work allowance still refuses and retains the part.
+
 The `loft` and `edit_loft` commands accept `profiles` as an ordered list of sketch names
 or face labels, and `shape` as `ruled` or `smooth`. For example,
 `{"op":"loft","profiles":["Sketch1","Sketch2"],"shape":"ruled"}`.
 Profile sources, order, and shape are saved in the part and restored by undo and redo.
-`ci/scenarios/loft.json` covers ruled and smooth builds, a refused edit, and reopening.
+`ci/scenarios/loft.json` retains the two-profile checks and adds a bulged Smooth loft
+through square profiles of width 2, 4 and 2 mm at z = 0, 3 and 6 mm. It checks the
+`4596/70 mm³` volume, refused edits, fresh-process reopening and STEP export.
 
 ## Crates
 
@@ -291,11 +299,29 @@ their dependent builds; names and refusals are resolved by the new rebuild.
 
 The document tests also reopen a part containing a chamfer and check that it rebuilds to the same body. Ribbon tests check that waiting commands stay visible, stay disabled and name their stages, and that the switched-on commands are enabled. These run in the workspace CI suite. The application scenarios in `ci/scenarios` build and edit each switched-on feature through MCP.
 
-## Terminal cubic lattice
+## Chamfer setbacks and face accuracy
 
-With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius is one value, or linear along a part axis (see [graded fields](#graded-fields)). The cubic grid uses the part's origin and axes. Accuracy and minimum detail control certified STL export. The viewport and tree label the displayed mesh as an unproved preview.
+In the internal Edit Suite layout, the Chamfer editor offers Two distances. Enable it
+and enter Distance 2 to set independent setbacks on the adjacent faces.
+Disable it to use the first distance on both faces. Both distances must be positive
+and finite. The `chamfer` and `edit_chamfer` verbs accept `other_distance`; omitting it
+uses equal distances. Saved parts, previews, undo/redo and the values table retain
+both distances. Older equal-distance parts keep their original behaviour.
 
-The lattice stays last. Edit an earlier feature to rebuild it, or return before the lattice to continue CAD work without losing its settings. The `lattice` and `edit_lattice` agent verbs use the same document commands. Old two-setting lattice files open with their earlier body visible and a message naming the missing cell size and density. Configure those inputs to build the field.
+Select a face in Edit Suite to read its Carrier accuracy. Exact means the carrier
+has no approximation relative to its retained surface definition. Fitted reports
+the producer's measured upper deviation bound in millimetres. Unknown means the
+backend supplied no bound, as for a field's display region. Carrier accuracy is
+separate from viewport quality, measurement accuracy and STEP export rounding.
+An unchanged repaired import also shows Import deviation, its attained whole-face
+bound against the source, and Approved import limit as a separate value. That bound
+covers the original import only and is not copied onto a later modified body.
+
+## Terminal lattice
+
+With a finished body, choose Lattice on the Features ribbon. Cell size and the beam radius, which controls density, are in millimetres. The radius is one value, or linear along a part axis (see [graded fields](#graded-fields)). The cell grid uses the part's origin and axes. Edit Suite adds a Cell type selector for cubic, body-centred, face-centred and octet beams. Accuracy and minimum detail control certified STL export. The viewport and tree label the displayed mesh as an unproved preview. The additional named cells use a bounded sample of the native field for display. Sampling does not set the export accuracy, and certified exports still use the native field definition.
+
+The lattice stays last. Edit an earlier feature to rebuild it, or return before the lattice to continue CAD work without losing its settings. The `lattice` and `edit_lattice` agent verbs use the same document commands. Both accept `cell` as `cubic`, `body_centred`, `face_centred` or `octet`. A partial edit that omits `cell` keeps the current type. Old two-setting lattice files open with their earlier body visible and a message naming the missing cell size and density. Configure those inputs to build the field.
 
 ## Terminal network gyroid
 

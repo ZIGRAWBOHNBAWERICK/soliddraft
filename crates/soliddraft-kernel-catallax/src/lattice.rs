@@ -180,6 +180,9 @@ impl CatallaxKernel {
         let spec = LatticeSpec {
             cell: match params.cell {
                 LatticeCell::Cubic => catallax_recipe::LatticeCell::Cubic,
+                LatticeCell::BodyCentred => catallax_recipe::LatticeCell::BodyCentred,
+                LatticeCell::FaceCentred => catallax_recipe::LatticeCell::FaceCentred,
+                LatticeCell::Octet => catallax_recipe::LatticeCell::Octet,
             },
             size: native::number(params.cell_size_mm, "cell size")?,
             frame: match params.frame {
@@ -187,7 +190,11 @@ impl CatallaxKernel {
             },
             radius: grade(&params.radius_mm, "density")?,
         };
-        self.build_field(tag, body, OpKind::Lattice, spec, settings)
+        let sampling_radius = (params.cell != LatticeCell::Cubic).then_some(match &params.radius_mm {
+            Grade::Constant(radius) => *radius,
+            Grade::Linear(grade) => grade.start.min(grade.end),
+        });
+        self.build_field(tag, body, OpKind::Lattice, spec, settings, sampling_radius)
     }
 
     pub(super) fn build_gyroid(&self, tag: &OpTag, body: BodyId, params: &Gyroid) -> KernelResult<OpResult> {
@@ -202,7 +209,7 @@ impl CatallaxKernel {
                 FieldFrame::Part => Pose::identity(),
             },
         };
-        self.build_field(tag, body, OpKind::Gyroid, spec, settings)
+        self.build_field(tag, body, OpKind::Gyroid, spec, settings, None)
     }
 
     fn build_field<S>(
@@ -212,6 +219,7 @@ impl CatallaxKernel {
         op: OpKind,
         spec: S,
         settings: Settings,
+        sampling_radius: Option<f64>,
     ) -> KernelResult<OpResult>
     where
         S: TerminalField + Send + Sync + 'static,
@@ -227,7 +235,7 @@ impl CatallaxKernel {
             .get(body)?
             .steps
             .values()
-            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges")))
+            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
         {
             return Err(gap(&format!("A {} on an imported body", op.name())));
         }
@@ -254,8 +262,12 @@ impl CatallaxKernel {
             }
         }
         let mesh = run("preview", |dec| {
-            let controls = lattice_stage::default_preview_options(stage.plan(), dec)?;
-            Ok(stage.preview(&controls, dec)?.mesh)
+            if let Some(radius) = sampling_radius {
+                crate::field_preview::sample(stage.plan(), bbox, radius, dec)
+            } else {
+                let controls = lattice_stage::default_preview_options(stage.plan(), dec)?;
+                Ok(stage.preview(&controls, dec)?.mesh)
+            }
         })?;
         let mut state = self.state()?;
         let id = BodyId::from_raw(state.id());
@@ -267,6 +279,7 @@ impl CatallaxKernel {
             faces: vec![FaceInfo {
                 id: face,
                 surface: SurfaceKind::Other,
+                accuracy: soliddraft_kernel_api::FaceAccuracy::Unknown,
                 area: 0.0,
                 centroid: (bbox.min + bbox.max) * 0.5,
                 bbox,
@@ -461,5 +474,6 @@ fn preview_mesh(mesh: &printing::Mesh, face: FaceId) -> Mesh {
         triangle_faces: vec![face; mesh.triangles.len()],
         unavailable_controls: vec![],
         unproved: true,
+        bounded: None,
     }
 }

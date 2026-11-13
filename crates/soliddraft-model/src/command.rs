@@ -39,6 +39,16 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         via_assistant: bool,
     },
+    /// Adds a feature to a named body, creating that body if it is empty.
+    AddFeatureInBody {
+        /// Stable body identity.
+        body: u32,
+        /// Marks the feature as the assistant's.
+        #[serde(default)]
+        via_assistant: bool,
+        /// Feature definition.
+        kind: FeatureKind,
+    },
     /// Puts back a feature with a known id, as redo of an add and undo of a delete do.
     InsertFeature {
         /// The feature, id included.
@@ -893,7 +903,8 @@ impl Document {
                 self.check_inputs(&kind)?;
                 let position = position.unwrap_or_else(|| self.active_count());
                 let name = name.unwrap_or_else(|| self.fresh_name(kind.base_name()));
-                let feature = Feature { id: FeatureId(self.next_id), name, kind, suppressed: false, via_assistant };
+                let feature =
+                    Feature { body: 0, id: FeatureId(self.next_id), name, kind, suppressed: false, via_assistant };
                 let id = feature.id;
                 let label = format!("add {}", feature.name);
                 self.insert(feature.clone(), position)?;
@@ -903,6 +914,20 @@ impl Document {
                     created: Some(id),
                     label,
                 })
+            }
+            Command::AddFeatureInBody { body, kind, via_assistant } => {
+                Self::check_kind(&kind)?;
+                self.check_inputs(&kind)?;
+                let position = self.active_count();
+                let feature = Feature {
+                    body,
+                    id: FeatureId(self.next_id),
+                    name: self.fresh_name(kind.base_name()),
+                    kind,
+                    suppressed: false,
+                    via_assistant,
+                };
+                self.apply_inner(Command::InsertFeature { feature, position })
             }
             Command::InsertFeature { feature, position } => {
                 Self::check_kind(&feature.kind)?;

@@ -355,7 +355,7 @@ impl Document {
 
     /// The part body at the end of the tree (or at the rollback bar).
     pub fn body(&self) -> Option<BodyId> {
-        self.built.last().and_then(|b| b.output)
+        self.live_bodies().last().map(|(_, body)| *body)
     }
 
     /// The part body right after a feature.
@@ -366,7 +366,43 @@ impl Document {
     /// The part body a feature starts from.
     pub fn body_before(&self, id: FeatureId) -> Option<BodyId> {
         let i = self.built_index(id)?;
-        i.checked_sub(1).and_then(|p| self.built[p].output)
+        self.body_at(self.features[i].body, i)
+    }
+
+    /// Current solid for each stable body identity, in body order.
+    pub fn live_bodies(&self) -> Vec<(u32, BodyId)> {
+        self.body_states(self.built.len()).into_iter().collect()
+    }
+
+    /// Solid bodies available immediately before a feature.
+    pub fn bodies_before(&self, id: FeatureId) -> Vec<(u32, BodyId)> {
+        self.index_of(id).map(|end| self.body_states(end).into_iter().collect()).unwrap_or_default()
+    }
+
+    /// The next unused body identity.
+    pub fn next_body(&self) -> u32 {
+        self.features.iter().map(|f| f.body).max().unwrap_or(0).saturating_add(1)
+    }
+
+    pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {
+        self.body_states(end).get(&key).copied()
+    }
+
+    fn body_states(&self, end: usize) -> BTreeMap<u32, BodyId> {
+        let mut bodies = BTreeMap::new();
+        for (f, b) in self.features.iter().zip(&self.built).take(end) {
+            if let Some(body) = b.output {
+                bodies.insert(f.body, body);
+            } else {
+                bodies.remove(&f.body);
+            }
+            if b.status.is_ok()
+                && let FeatureKind::Combine { tool, .. } = f.kind
+            {
+                bodies.remove(&tool);
+            }
+        }
+        bodies
     }
 
     /// Where a sketch lies and what regions it has, as the last rebuild placed it.

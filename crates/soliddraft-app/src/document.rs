@@ -459,6 +459,7 @@ pub fn plane_ref_label(plane: &model::PlaneRef) -> String {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FeatureKind {
+    Combine { operation: soliddraft_kernel_api::BooleanOp, tool: u32 },
     ReferencePlane(model::SketchPlane),
     Sketch(SketchFeature),
     Extrude(ExtrudeParams),
@@ -483,6 +484,7 @@ pub enum FeatureKind {
 impl FeatureKind {
     pub fn prefix(&self) -> &'static str {
         match self {
+            FeatureKind::Combine { .. } => "Combine",
             FeatureKind::ReferencePlane(_) => "Plane",
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Extrude(_) => "Boss-Extrude",
@@ -511,6 +513,7 @@ impl FeatureKind {
     /// The kind in lower case, for menu labels: "hole", "linear pattern".
     pub fn noun(&self) -> &'static str {
         match self {
+            FeatureKind::Combine { .. } => "combine",
             FeatureKind::ReferencePlane(_) => "reference plane",
             FeatureKind::Sketch(_) => "sketch",
             FeatureKind::Extrude(_) => "extrude",
@@ -583,6 +586,9 @@ impl FeatureKind {
             FeatureKind::Shell(s) => model::FeatureKind::Shell(s.clone()),
             FeatureKind::Offset(s) => model::FeatureKind::Offset(s.clone()),
             FeatureKind::Thicken(s) => model::FeatureKind::Thicken(s.clone()),
+            FeatureKind::Combine { operation, tool } => {
+                model::FeatureKind::Combine { operation: *operation, tool: *tool }
+            }
             FeatureKind::ImportStep(i) => model::FeatureKind::ImportStep(i.clone()),
             FeatureKind::Lattice(l) => model::FeatureKind::Lattice(*l),
             FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(*g),
@@ -670,6 +676,9 @@ impl FeatureKind {
             model::FeatureKind::Shell(s) => FeatureKind::Shell(s.clone()),
             model::FeatureKind::Offset(s) => FeatureKind::Offset(s.clone()),
             model::FeatureKind::Thicken(s) => FeatureKind::Thicken(s.clone()),
+            model::FeatureKind::Combine { operation, tool } => {
+                FeatureKind::Combine { operation: *operation, tool: *tool }
+            }
             model::FeatureKind::ImportStep(i) => FeatureKind::ImportStep(i.clone()),
             model::FeatureKind::Lattice(l) => FeatureKind::Lattice(*l),
             model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(*g),
@@ -873,6 +882,7 @@ pub struct NamedEdge {
 /// One row of the feature tree, mirrored from the model after every change.
 #[derive(Clone, Debug)]
 pub struct Feature {
+    pub body_key: u32,
     pub id: FeatureId,
     pub name: String,
     pub kind: FeatureKind,
@@ -892,6 +902,9 @@ impl Feature {
             return bound.summary();
         }
         match &self.kind {
+            FeatureKind::Combine { operation, tool } => {
+                format!("{} with Body {}", crate::multibody::operation_name(*operation), tool + 1)
+            }
             FeatureKind::ReferencePlane(p) => format!("offset {} mm", fmt_mm(p.offset())),
             FeatureKind::Sketch(s) => {
                 let n = s.sketch.drawn().count();
@@ -1228,6 +1241,7 @@ pub(crate) struct ReadyDisplay {
     body: BodyId,
     params: TessellationParams,
     pub mesh: Arc<DisplayMesh>,
+    meshes: HashMap<BodyId, Arc<DisplayMesh>>,
     picks: Vec<PickEntry>,
     faces: Vec<NamedFace>,
     edges: Vec<NamedEdge>,
@@ -1454,6 +1468,8 @@ pub struct Document {
     /// change it through commands.
     pub features: Vec<Feature>,
     pub selection: Option<Selection>,
+    pub active_body: u32,
+    pub combine_form: Option<crate::multibody::CombineForm>,
     /// What the display meshes are tessellated with: the shown level's parameters,
     /// from the part's viewport quality. Previews use them too.
     pub tess_params: TessellationParams,
@@ -1525,12 +1541,15 @@ impl Document {
     /// A document over a part the model already holds, such as one opened from a file.
     pub fn from_model(model: model::Document) -> Self {
         let geometry = model.geometry_hash();
+        let active_body = model.live_bodies().first().map_or(0, |(key, _)| *key);
         let mut doc = Self {
             instance: DocumentId::new(),
             name: model.name().to_owned(),
             path: None,
             features: Vec::new(),
             selection: None,
+            active_body,
+            combine_form: None,
             tess_params: TessellationParams::default(),
             meshes: HashMap::new(),
             mesh_version: 0,
@@ -1582,6 +1601,8 @@ impl Document {
             path: None,
             features: self.features.clone(),
             selection: None,
+            active_body: self.active_body,
+            combine_form: None,
             tess_params: self.tess_params,
             meshes: self.meshes.clone(),
             mesh_version: self.mesh_version,
@@ -2035,8 +2056,7 @@ impl Document {
             self.faces = display.faces;
             self.edges = display.edges;
             self.picks = display.picks;
-            self.meshes.clear();
-            self.meshes.insert(display.body, display.mesh);
+            self.meshes = display.meshes;
             self.apply_appearances();
             self.shown_revision = self.revision;
             self.mesh_version += 1;
@@ -2246,7 +2266,9 @@ impl Document {
 
     /// The last feature before `end` with a body, unless a later one left none.
     fn last_body(&self, end: usize) -> Option<usize> {
-        let last = (0..end).rev().find(|&i| self.features[i].body.is_some() || self.left_nothing(i))?;
+        let last = (0..end).rev().find(|&i| {
+            self.features[i].body_key == self.active_body && (self.features[i].body.is_some() || self.left_nothing(i))
+        })?;
         self.features[last].body.is_some().then_some(last)
     }
 
@@ -2267,14 +2289,19 @@ impl Document {
         if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
             && let Some(proved) = &self.last_proved
         {
-            return proved.model.body();
+            return proved
+                .model
+                .live_bodies()
+                .into_iter()
+                .find(|(key, _)| *key == self.active_body)
+                .map(|(_, body)| body);
         }
-        self.display_index().and_then(|i| self.features[i].body)
+        self.model.live_bodies().into_iter().find(|(key, _)| *key == self.active_body).map(|(_, body)| body)
     }
 
     /// The running body before feature `index`.
     pub fn body_before(&self, index: usize) -> Option<BodyId> {
-        self.last_body(index.min(self.features.len())).and_then(|i| self.features[i].body)
+        self.features.get(index).and_then(|f| self.model.body_before(model_id(f.id)))
     }
 
     pub fn can_undo(&self) -> bool {
@@ -2471,11 +2498,27 @@ impl Document {
 
     /// The model commands for one panel command.
     fn to_model(&self, command: Command) -> Result<Vec<model::Command>, String> {
-        let add = |kind: model::FeatureKind, via_assistant: bool| model::Command::AddFeature {
-            kind,
-            name: None,
-            position: None,
-            via_assistant: via_assistant || self.assistant_mark,
+        let add = |kind: model::FeatureKind, via_assistant: bool| {
+            let sketch = match &kind {
+                model::FeatureKind::Extrude(model::ExtrudeFeature {
+                    profile: model::ProfileSource::Sketch { feature },
+                    ..
+                }) => Some(*feature),
+                model::FeatureKind::Revolve(r) => Some(r.sketch),
+                model::FeatureKind::Sweep(s) => Some(s.sketch),
+                _ => None,
+            };
+            let body = sketch.and_then(|id| self.model.feature(id)).map_or(self.active_body, |f| f.body);
+            if body != 0 {
+                model::Command::AddFeatureInBody { body, kind, via_assistant: via_assistant || self.assistant_mark }
+            } else {
+                model::Command::AddFeature {
+                    kind,
+                    name: None,
+                    position: None,
+                    via_assistant: via_assistant || self.assistant_mark,
+                }
+            }
         };
         let edit =
             |id: FeatureId, kind: &FeatureKind| model::Command::EditFeature { id: model_id(id), kind: kind.to_model() };
@@ -2700,6 +2743,12 @@ impl Document {
 
     /// Mirrors the model and refreshes the display, keeping the selection by name.
     fn after_change(&mut self) {
+        let bodies = self.model.live_bodies();
+        if !bodies.iter().any(|(key, _)| *key == self.active_body)
+            && let Some((key, _)) = bodies.first()
+        {
+            self.active_body = *key;
+        }
         if self.model.geometry_hash() == self.geometry {
             self.after_metadata_change();
             return;
@@ -2800,6 +2849,7 @@ impl Document {
                 let status = m.status(f.id).cloned().unwrap_or(model::FeatureStatus::RolledBack);
                 let inactive = f.suppressed || index >= active;
                 Feature {
+                    body_key: f.body,
                     id: app_id(f.id),
                     name: f.name.clone(),
                     kind: FeatureKind::from_model(&f.kind),
@@ -2828,6 +2878,10 @@ impl Document {
     /// Shows a new body at the requested level. Unchanged bodies keep their display
     /// geometry and GPU buffers; undo and redo restore recent bodies' meshes and picks.
     fn refresh_display(&mut self) {
+        if self.model.live_bodies().len() > 1 && !self.model.is_dirty() && !self.has_model_failure() {
+            self.refresh_bodies();
+            return;
+        }
         let next = self.display_body();
         if let Some(body) = next
             && let Err(message) = self.capture_display_bound(body)
@@ -2917,6 +2971,98 @@ impl Document {
             self.quality.clear();
         }
         self.mesh_version += 1;
+    }
+
+    fn refresh_bodies(&mut self) {
+        let bodies = self.model.live_bodies();
+        if bodies.len() == self.meshes.len() && bodies.iter().all(|(_, body)| self.meshes.contains_key(body)) {
+            self.apply_appearances();
+            return;
+        }
+        match ready_display(&self.model, soliddraft_tessellation::Level::Standard) {
+            Ok(Some(display)) => {
+                self.meshes = if self.headless { HashMap::new() } else { display.meshes };
+                self.faces = display.faces;
+                self.edges = display.edges;
+                self.picks = display.picks;
+                self.shown = self.display_body();
+                self.apply_appearances();
+                self.mesh_version += 1;
+            }
+            Ok(None) => {}
+            Err(message) => self.display_failure = Some(display_unavailable(message)),
+        }
+    }
+
+    /// Starts the next additive feature in a separate body.
+    pub fn new_body(&mut self) {
+        self.active_body = self.model.next_body();
+        self.selection = None;
+    }
+
+    /// Selects a solid and uses it for subsequent features.
+    pub fn select_body(&mut self, key: u32) {
+        self.active_body = key;
+        self.selection = Some(Selection::Body);
+    }
+
+    /// Uses the selected entity's body for subsequent features.
+    pub fn target_selection(&mut self, selection: Option<Selection>) {
+        let bodies = self.model.live_bodies();
+        let key = match selection {
+            Some(Selection::Face(face)) => {
+                bodies.iter().find_map(|(key, body)| self.kernel().topology(*body).ok()?.face(face).map(|_| *key))
+            }
+            Some(Selection::Edge(edge)) => {
+                bodies.iter().find_map(|(key, body)| self.kernel().topology(*body).ok()?.edge(edge).map(|_| *key))
+            }
+            Some(Selection::Vertex(vertex)) => self.feature(vertex.feature).map(|f| f.body_key),
+            Some(Selection::Feature(id)) => self.feature(id).map(|f| f.body_key),
+            _ => None,
+        };
+        if let Some(key) = key.filter(|key| bodies.iter().any(|(body, _)| body == key)) {
+            self.active_body = key;
+        }
+    }
+
+    /// Adds a boolean feature to the selected target body.
+    pub fn combine(
+        &mut self,
+        target: u32,
+        tool: u32,
+        operation: soliddraft_kernel_api::BooleanOp,
+    ) -> Result<Option<FeatureId>, String> {
+        if target == tool {
+            return Err("Choose two different bodies to combine.".into());
+        }
+        let bodies = self.model.live_bodies();
+        if ![target, tool].iter().all(|key| bodies.iter().any(|(body, _)| body == key)) {
+            return Err("Combine needs two available solid bodies.".into());
+        }
+        let mut trial = self.scratch();
+        trial.active_body = target;
+        let command = Command::AddFeature(FeatureKind::Combine { operation, tool });
+        trial.apply(command.clone())?;
+        self.reuse_builds_from(trial.model());
+        self.active_body = target;
+        self.apply(command)
+    }
+
+    /// Checks a Combine edit before changing the document or its undo history.
+    pub fn edit_combine(
+        &mut self,
+        id: FeatureId,
+        tool: u32,
+        operation: soliddraft_kernel_api::BooleanOp,
+    ) -> Result<Option<FeatureId>, String> {
+        let command = Command::EditFeature { id, kind: FeatureKind::Combine { operation, tool } };
+        let mut trial = self.scratch();
+        trial.apply(command.clone())?;
+        if let Some(FeatureStatus::Error(message)) = trial.feature(id).map(|f| &f.status) {
+            return Err(message.clone());
+        }
+        self.reuse_builds_from(trial.model());
+        self.apply(command)
     }
 
     /// The effective material of the configuration shown by the app.
@@ -3025,7 +3171,11 @@ impl Document {
     pub fn update_display(&mut self, projection: &Projection, dt_s: f32) -> bool {
         // Display levels wait for a proved part. A pending proof's worker wakes the
         // interface itself, so waiting here draws nothing.
-        if self.model.is_dirty() || self.provisional.is_some() || self.proof_failure.is_some() {
+        if self.model.live_bodies().len() > 1
+            || self.model.is_dirty()
+            || self.provisional.is_some()
+            || self.proof_failure.is_some()
+        {
             return false;
         }
         let Some((level, mesh)) = self.quality.update(projection, dt_s) else {
@@ -3660,6 +3810,10 @@ impl Document {
                 let f = self.feature(id)?;
                 let mut details = Vec::new();
                 match &f.kind {
+                    FeatureKind::Combine { operation, tool } => {
+                        details.push(("Operation".into(), crate::multibody::operation_name(*operation).into()));
+                        details.push(("Tool body".into(), format!("Body {}", tool + 1)));
+                    }
                     FeatureKind::ReferencePlane(p) => {
                         let source = match p {
                             model::SketchPlane::Datum { datum, .. } => self.model().datum_name(*datum).to_owned(),
@@ -3973,7 +4127,51 @@ pub(crate) fn ready_display(
         .unwrap_or(0);
     let mut picks = Vec::new();
     let mesh = Arc::new(display_mesh(feature, &kernel_mesh, &edges, &topology, &makers, &mut picks));
-    Ok(Some(ReadyDisplay { body, params, mesh, picks, faces, edges: named_edges, topology, kernel_mesh }))
+    let mut display = ReadyDisplay {
+        body,
+        params,
+        meshes: HashMap::from([(body, mesh.clone())]),
+        mesh,
+        picks,
+        faces,
+        edges: named_edges,
+        topology,
+        kernel_mesh,
+    };
+    let mut aggregate = (*display.mesh).clone();
+    for (key, other) in model.live_bodies().into_iter().filter(|(_, other)| *other != body) {
+        let topology = kernel.topology(other).map_err(|error| error.to_string())?;
+        let params =
+            *soliddraft_tessellation::Levels::new(&model.settings().viewport, topology.bbox.diagonal()).params(level);
+        let kernel_mesh = kernel.rendering(other, &params).map_err(|error| error.to_string())?;
+        let edges = edge_polylines(kernel.as_ref(), other, &params);
+        let (faces, named_edges) = named_entities(model, other, &topology);
+        let makers = faces.iter().map(|face| (face.id, face.feature)).collect();
+        let feature = model
+            .features()
+            .iter()
+            .rev()
+            .find(|feature| feature.body == key && model.body_after(feature.id) == Some(other))
+            .map_or(0, |f| app_id(f.id));
+        let mesh = display_mesh(feature, &kernel_mesh, &edges, &topology, &makers, &mut display.picks);
+        let offset = aggregate.positions.len() as u32;
+        aggregate.positions.extend_from_slice(&mesh.positions);
+        aggregate.normals.extend_from_slice(&mesh.normals);
+        aggregate.face_picks.extend_from_slice(&mesh.face_picks);
+        aggregate.face_features.extend_from_slice(&mesh.face_features);
+        aggregate.face_appearances.extend_from_slice(&mesh.face_appearances);
+        aggregate.indices.extend(mesh.indices.iter().map(|i| i + offset));
+        aggregate.edges.extend_from_slice(&mesh.edges);
+        aggregate.corners.extend_from_slice(&mesh.corners);
+        display.meshes.insert(other, Arc::new(mesh));
+        display.faces.extend(faces);
+        display.edges.extend(named_edges);
+        display.topology.faces.extend(topology.faces);
+        display.topology.edges.extend(topology.edges);
+        display.topology.vertices.extend(topology.vertices);
+    }
+    display.mesh = Arc::new(aggregate);
+    Ok(Some(display))
 }
 
 pub(crate) fn construction_view(

@@ -556,6 +556,7 @@ impl eframe::App for SolidDraftApp {
     }
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
+        crate::multibody::show(root.ctx(), &mut self.state);
         let ctx = &root.ctx().clone();
         theme::set_layout(ctx, self.state.frame_layout);
         log::debug!("ui frame {}", self.frame);

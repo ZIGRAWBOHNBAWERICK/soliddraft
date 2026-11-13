@@ -2825,6 +2825,7 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
     let name = |id: FeatureId| doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "missing".into());
     let labels = |refs: &[EdgeRef]| refs.iter().map(|r| r.label.clone()).collect::<Vec<_>>();
     match kind {
+        FeatureKind::Combine { operation, tool } => json!({"type":"combine", "operation":operation, "tool_body":tool}),
         FeatureKind::ReferencePlane(p) => json!({"type": "reference_plane", "source": p, "offset": p.offset()}),
         FeatureKind::Sketch(s) => json!({
             "type": "sketch",

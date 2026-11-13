@@ -24,6 +24,9 @@ impl fmt::Display for FeatureId {
 /// One step of the part.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Feature {
+    /// Stable body identity. Zero is the original body in older files.
+    #[serde(default, skip_serializing_if = "body_is_zero")]
+    pub body: u32,
     /// Stable id.
     pub id: FeatureId,
     /// The name the tree shows, such as "Boss-Extrude1".
@@ -38,6 +41,10 @@ pub struct Feature {
     pub via_assistant: bool,
 }
 
+fn body_is_zero(body: &u32) -> bool {
+    *body == 0
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -50,6 +57,13 @@ fn is_zero(v: &f64) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// Combines the target body with another body.
+    Combine {
+        /// Boolean operation.
+        operation: soliddraft_kernel_api::BooleanOp,
+        /// Stable identity of the tool body, consumed on success.
+        tool: u32,
+    },
     /// A reusable offset plane with a persistent source.
     ReferencePlane(SketchPlane),
     /// A 2D sketch on a plane.
@@ -92,6 +106,7 @@ impl FeatureKind {
     /// The tree's base name for the kind, numbered to make a feature name.
     pub fn base_name(&self) -> &'static str {
         match self {
+            FeatureKind::Combine { .. } => "Combine",
             FeatureKind::ReferencePlane(_) => "Plane",
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Revolve(_) => "Revolve",
@@ -148,6 +163,7 @@ impl FeatureKind {
     pub fn dependencies(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
         match self {
+            FeatureKind::Combine { .. } => {}
             FeatureKind::Sketch(s) => out.extend(s.plane.dependencies()),
             FeatureKind::ReferencePlane(p) => out.extend(p.dependencies()),
             FeatureKind::Revolve(r) => out.push(r.sketch),

@@ -185,9 +185,10 @@ impl Document {
         self.built.truncate(start);
         let active = self.active_count();
         let mut cache = std::mem::take(&mut self.cache);
-        let mut current = start.checked_sub(1).and_then(|i| self.built[i].output);
+
         for i in start..self.features.len() {
             let f = self.features[i].clone();
+            let current = self.body_at(f.body, i);
             let built = if i >= active {
                 Built::pass(FeatureStatus::RolledBack, current)
             } else if f.suppressed {
@@ -195,7 +196,6 @@ impl Document {
             } else {
                 self.build(&f, current, &mut cache)
             };
-            current = built.output;
             self.built.push(built);
         }
         cache.trim(&self.built);
@@ -214,7 +214,7 @@ impl Document {
         let mut cache = std::mem::take(&mut self.cache);
         for i in 0..self.dirty.min(self.built.len()) {
             if i < self.active_count() && !self.features[i].suppressed {
-                let current = i.checked_sub(1).and_then(|i| self.built[i].output);
+                let current = self.body_at(self.features[i].body, i);
                 self.built[i] = self.build_or_keep(&self.features[i], current, &mut cache, Some(&self.built[i]));
             }
         }
@@ -278,6 +278,14 @@ impl Document {
                 profiles.push(self.built[index].version);
             }
         }
+        if let FeatureKind::Combine { tool, .. } = f.kind {
+            let end = self.index_of(f.id).unwrap_or(self.built.len());
+            if let Some(body) = self.body_at(tool, end)
+                && let Some(owner) = self.built.iter().find(|b| b.owned == Some(body))
+            {
+                profiles.push(owner.version);
+            }
+        }
         if let Some(kept) = kept {
             return kept.clone();
         }
@@ -286,6 +294,25 @@ impl Document {
             return built;
         }
         let built = match &f.kind {
+            FeatureKind::Combine { operation, tool } => {
+                let end = self.index_of(f.id).unwrap_or(self.built.len());
+                match (current, self.body_at(*tool, end)) {
+                    _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
+                    (Some(target), Some(tool)) => {
+                        let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
+                            let message = match error {
+                                KernelError::InvalidInput(message) => message,
+                                KernelError::Unsupported(message) if message == "this would leave nothing of the part" => "This combine would leave no solid body.".into(),
+                                KernelError::Unsupported(_) => "Combine for these bodies is coming soon.".into(),
+                                _ => "These bodies cannot be combined with this operation. Check that their boundaries are closed and overlap.".into(),
+                            };
+                            KernelError::InvalidInput(message)
+                        });
+                        self.finish(result, current, |_| Vec::new())
+                    }
+                    _ => Built::failed(current, "Combine needs two available solid bodies."),
+                }
+            }
             FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
                 Ok((plane, _)) => {
                     let mut built = Built::pass(FeatureStatus::Ok, current);
@@ -1254,8 +1281,7 @@ impl Document {
                 }
                 if r.bodies.len() != 1 {
                     release(&r);
-                    let n = r.bodies.len();
-                    return Built::failed(current, format!("the file holds {n} solids; a part holds one body"));
+                    return Built::failed(current, "Several-solid import is coming soon.");
                 }
                 let result = r.bodies.remove(0).result;
                 let body = result.body;

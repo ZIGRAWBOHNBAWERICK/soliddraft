@@ -169,21 +169,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         if can_assign && material_row.clicked() {
             actions.push(AppAction::ShowMaterial);
         }
-        // The body row: selecting it shows every dimension that builds the body.
-        if state.doc.display_body().is_some() {
+        for (key, _) in state.doc.model().live_bodies() {
+            let label = if key == 0 { crate::document::BODY_NAME.to_owned() } else { format!("Body {}", key + 1) };
             let r = row(
                 ui,
                 RowSpec {
                     indent: 0,
                     icon: Icon::Extrude,
-                    name: crate::document::BODY_NAME,
-                    selected: state.doc.selection == Some(Selection::Body),
+                    name: &label,
+                    selected: state.doc.selection == Some(Selection::Body) && state.doc.active_body == key,
                     ..RowSpec::plain()
                 },
-            )
-            .on_hover_text("Select to show every dimension that builds the body");
+            );
             if r.clicked() {
-                actions.push(AppAction::Select(Some(Selection::Body)));
+                actions.push(AppAction::SelectBody(key));
             }
             if !state.in_sketch() {
                 crate::context_menu::show(state, &r, crate::context_menu::Target::Body, Some(Selection::Body));
@@ -722,6 +721,7 @@ pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {
         },
         FeatureKind::Mirror(_) => Icon::Mirror,
         FeatureKind::Draft(_) => Icon::Draft,
+        FeatureKind::Combine { .. } => Icon::Extrude,
         FeatureKind::Shell(_) | FeatureKind::Thicken(_) => Icon::Shell,
         FeatureKind::Offset(_) => Icon::Cad("srf_offset"),
         FeatureKind::ImportStep(_) => Icon::Import,

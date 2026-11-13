@@ -91,7 +91,7 @@ impl BuildCache {
     /// The key of `feature` built on `input` and its sketch or plane versions.
     /// These inputs can change without changing the part body.
     pub(crate) fn key(&mut self, feature: &Feature, input: Option<BodyId>, profiles: Vec<u64>) -> StepKey {
-        let definition = match crate::exact::bytes(&feature.kind) {
+        let definition = match crate::exact::bytes(&(feature.body, &feature.kind)) {
             Some(bytes) => Definition::Exact(bytes),
             None => {
                 self.next_version += 1;

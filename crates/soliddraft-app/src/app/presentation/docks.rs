@@ -211,6 +211,7 @@ impl TabViewer for Panels<'_> {
                 if let Some(picked) = events.clicked {
                     let reference = events.clicked_reference.map(Selection::Reference);
                     let sel = picked.and_then(|p| selection_of(&st.doc, p)).or(reference);
+                    st.doc.target_selection(sel);
                     st.push(AppAction::Select(pick_filter.selection(sel)));
                 }
                 if let Some(v) = events.set_view {

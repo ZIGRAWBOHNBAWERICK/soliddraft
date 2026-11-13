@@ -99,7 +99,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     let (id, name, summary, icon, is_sketch, suppressed, repair) = (
                         feature.id,
                         feature.name.clone(),
-                        feature.summary(),
+                        format!("Body {} · {}", feature.body_key + 1, feature.summary()),
                         tree::feature_icon(&feature.kind),
                         feature.is_sketch(),
                         feature.suppressed,

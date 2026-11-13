@@ -2017,6 +2017,16 @@ fn registry() -> Vec<CommandSpec> {
                  0.1 mm⁵. Never computed from the preview or a mesh, and only when asked for.",
                 Vec::new,
             ),
+        cmd("new_body", "New body", Icon::Extrude, "Create the next feature in a separate solid body")
+            .on(Solid, "Create", Small).outside_sketch()
+            .run(|_| AppAction::NewBody)
+            .when(|s| !s.in_sketch() && s.editor.is_none() && field_open(s)),
+        cmd("combine", "Combine", Icon::Extrude, "Union, subtract or intersect two solid bodies")
+            .on(Solid, "Modify", Small).outside_sketch()
+            .run(|_| AppAction::StartCombine)
+            .when(|s| !s.in_sketch() && s.editor.is_none() && s.doc.model().live_bodies().len() >= 2 && field_open(s))
+            .hint(|s| (s.doc.model().live_bodies().len() < 2).then(|| "Combine needs two solid bodies".into()))
+            .undo(Undo::Step),
         cmd("offset", "Offset", Icon::Cad("srf_offset"), "Grow or shrink the body by a signed distance")
             .on(Solid, "Modify", Small).outside_sketch()
             .run(|_| AppAction::StartOffset)
@@ -2431,7 +2441,7 @@ fn registry() -> Vec<CommandSpec> {
 .undo(Undo::Replaces),
         cmd("preview_import", "Preview import", Icon::Import, "Read a STEP or IGES file's proposed repairs")
             .agents(Agents::Mcp, "Reads the source without changing the part.", crate::import::preview_params),
-        cmd("import_step", "Import STEP", Icon::Import, "Import one STEP body after reviewing its repairs")
+        cmd("import_step", "Import STEP", Icon::Import, "Import STEP solids after reviewing their repairs")
             .run(|_| AppAction::ImportStep(None))
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
             .agents(Agents::Mcp, "Automatic repairs take no answer. Declined gap ids, and each approved repair with its limit and approver, are saved with the source.", crate::import::params)

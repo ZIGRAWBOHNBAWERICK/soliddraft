@@ -193,16 +193,7 @@ impl CatallaxKernel {
         }
         let count = imported.bodies.len() + imported.left_open.len();
         if count != 1 {
-            let names = imported
-                .bodies
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .chain(imported.left_open.iter().map(String::as_str))
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(KernelError::InvalidInput(format!(
-                "the file holds {count} solids; a part holds one body ({names})"
-            )));
+            return Err(KernelError::InvalidInput("Several-solid import is coming soon.".into()));
         }
         let record = wire(imported.record)?;
         if !imported.left_open.is_empty() {

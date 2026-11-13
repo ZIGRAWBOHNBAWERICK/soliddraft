@@ -223,7 +223,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         );
         assert!(app.query_all_by_label("Assistant tab").next().is_none());
         for (workspace, command) in
-            [("Views", "Front"), ("Annotate", "Smart dimension"), ("Sheet", "Add sheet"), ("View", "Fit")]
+            [("Views", "Standard views"), ("Annotate", "Smart dimension"), ("Sheet", "Add sheet"), ("View", "Fit")]
         {
             let tab = app.get_by_label(&format!("{workspace} tab")).rect();
             ribbon::click_at(app, tab.center());
@@ -231,6 +231,9 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
             ribbon::control(app, command, suite_palette(app));
             assert!(!ribbon::painted_in(app, suite_palette(app)).iter().any(|text| text.text == "Assistant"));
         }
+        let views = app.get_by_label("Views tab").rect();
+        ribbon::click_at(app, views.center());
+        app.run_steps(8);
         case.frame(app, "drawing-views");
         let sheet = app.get_by_label("Sheet tab").rect();
         ribbon::click_at(app, sheet.center());

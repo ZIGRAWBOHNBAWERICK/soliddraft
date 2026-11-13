@@ -587,9 +587,11 @@ pub fn show_suite(ui: &mut egui::Ui, state: &mut AppState) {
         },
     );
     state.form_bar = bar;
-    let popup = egui::Popup::is_any_open(ui.ctx());
-    let confirm_key = !popup && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    let cancel_key = !popup && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let shortcuts = !egui::Popup::is_any_open(ui.ctx())
+        && !ui.ctx().egui_wants_keyboard_input()
+        && !state.command_line.session_open;
+    let confirm_key = shortcuts && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let cancel_key = shortcuts && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     if response.cancel || cancel_key {
         state.form_bar.reset();
         state.push(crate::state::AppAction::Assembly(crate::assembly::AssemblyAction::Mate(MateAction::Toggle)));

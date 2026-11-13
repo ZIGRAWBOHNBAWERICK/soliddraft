@@ -255,3 +255,28 @@ fn single_body_consumers_explain_the_multi_body_limit() {
         "Several-body drawings are coming soon. Combine the bodies first."
     );
 }
+
+#[test]
+fn a_refused_first_feature_in_a_new_body_keeps_the_existing_body_visible() {
+    let mut doc = Document::new("Refused new body", soliddraft_app::kernel());
+    block(&mut doc, 10.0, 10.0);
+    let before = doc.meshes.clone();
+    doc.new_body();
+    let sketch = doc
+        .apply(Command::AddSketch {
+            plane: soliddraft_app::document::SketchPlane::Reference {
+                plane: soliddraft_app::document::PlaneKind::Top,
+                offset: 0.0,
+            },
+        })
+        .unwrap()
+        .unwrap();
+    let error = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(sketch), depth: 2.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap_err();
+    assert!(error.contains("no closed region"), "{error}");
+    assert_eq!(doc.meshes, before);
+}

@@ -2956,7 +2956,9 @@ impl Document {
             self.mesh_version += 1;
             return;
         }
-        if let Some(body) = self.shown.take()
+        let previous = self.shown.take();
+        if self.meshes.len() == 1
+            && let Some(body) = previous
             && let Some(mesh) = self.meshes.get(&body).cloned()
         {
             self.recent.retain(|s| s.body != body);
@@ -4205,6 +4207,9 @@ pub(crate) fn ready_display(
         topology,
         kernel_mesh,
     };
+    if model.live_bodies().len() == 1 {
+        return Ok(Some(display));
+    }
     let mut aggregate = (*display.mesh).clone();
     for (key, other) in model.live_bodies().into_iter().filter(|(_, other)| *other != body) {
         let topology = kernel.topology(other).map_err(|error| error.to_string())?;

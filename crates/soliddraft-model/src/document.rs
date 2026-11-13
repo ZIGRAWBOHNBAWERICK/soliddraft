@@ -360,6 +360,9 @@ impl Document {
 
     /// The single solid at the rollback bar. Several-body parts use `live_bodies`.
     pub fn body(&self) -> Option<BodyId> {
+        if self.next_body == 1 {
+            return self.built.last().and_then(|b| b.output);
+        }
         let bodies = self.live_bodies();
         (bodies.len() == 1).then(|| bodies[0].1)
     }

@@ -95,6 +95,7 @@ pub enum AppAction {
     MeasureEntity,
     /// Run independent construction checks on the current part.
     CheckPart,
+    ToggleSection,
     SetView(StandardView),
     /// Look straight at the active sketch plane, or the selected planar face.
     NormalTo,
@@ -1054,6 +1055,7 @@ pub struct AppState {
     pub measure: crate::measure::panel::State,
     pub part_check: Option<crate::part_check::Inspection>,
     pub print_check: Option<crate::print_check::Dialog>,
+    pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
@@ -1230,6 +1232,7 @@ impl AppState {
             measure: Default::default(),
             part_check: None,
             print_check: None,
+            section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),

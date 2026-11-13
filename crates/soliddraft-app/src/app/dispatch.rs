@@ -935,6 +935,7 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);
                 self.state.layout.tree.shown = true;

@@ -146,8 +146,15 @@ impl TabViewer for Panels<'_> {
             Tab::Drawing => crate::drawing::canvas::show(ui, self.state),
             Tab::Viewport => {
                 let st = &mut *self.state;
+                let section_allowed = st.editor.is_none() && !st.in_sketch() && st.drag_preview.is_none();
+                if section_allowed {
+                    st.section.refresh(&st.doc, ui.ctx());
+                    st.section.show(ui.ctx(), &st.doc);
+                }
+                st.viewport.section_active = section_allowed && st.section.enabled;
+                let section_mesh = section_allowed.then(|| st.section.mesh(&st.doc)).flatten();
                 let ghost = st.ghost();
-                let preview = st.preview_body();
+                let preview = section_mesh.or_else(|| st.preview_body());
                 let selection = st.doc.selection;
                 let hover_label = st.hover_info.as_ref().map(|i| i.title.clone());
                 // Shown sketches lie quietly on their planes, except the one open for editing.
@@ -162,7 +169,11 @@ impl TabViewer for Panels<'_> {
                         Some((f.plane?, &f.sketch()?.sketch))
                     })
                     .collect();
-                let pick_filter = st.selection_filter();
+                let pick_filter = if st.viewport.section_active {
+                    crate::viewport::PickFilter { faces: false, edges: false, bodies: false }
+                } else {
+                    st.selection_filter()
+                };
                 st.viewport.context_menus = st.frame_layout == crate::settings::FrameLayout::EditSuite;
                 let overlay = Overlay {
                     pick_filter,
@@ -208,7 +219,7 @@ impl TabViewer for Panels<'_> {
                 for a in events.actions {
                     st.push(a);
                 }
-                if let Some(picked) = events.clicked {
+                if let Some(picked) = events.clicked.filter(|_| !st.viewport.section_active) {
                     let reference = events.clicked_reference.map(Selection::Reference);
                     let sel = picked.and_then(|p| selection_of(&st.doc, p)).or(reference);
                     st.push(AppAction::Select(pick_filter.selection(sel)));

@@ -1101,8 +1101,6 @@ pub struct AppState {
     pub values: crate::values_tab::ValuesTab,
     /// Whether the side area is shown and how wide it is.
     pub layout: crate::panels::Layout,
-    /// Internal choice of frame during the layout rebuild.
-    pub frame_layout: crate::settings::FrameLayout,
     /// The command line along the bottom and the assistant session above it.
     pub command_line: crate::command_line::CommandLine,
     /// Where pinned revisions of referenced documents come from. Cache-only for now: the
@@ -1126,9 +1124,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn tree_shown(&self) -> bool {
-        if self.frame_layout == crate::settings::FrameLayout::Classic {
-            self.layout.tree.shown
-        } else if self.assembly.is_active() {
+        if self.assembly.is_active() {
             self.layout.suite.assembly
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing
@@ -1138,9 +1134,7 @@ impl AppState {
     }
 
     pub fn show_tree(&mut self, shown: bool) {
-        if self.frame_layout == crate::settings::FrameLayout::Classic {
-            self.layout.tree.shown = shown;
-        } else if self.assembly.is_active() {
+        if self.assembly.is_active() {
             self.layout.suite.assembly = shown;
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing = shown;
@@ -1260,7 +1254,6 @@ impl AppState {
             assembly: Default::default(),
             tool_document: None,
             layout: crate::panels::Layout::load(),
-            frame_layout: crate::settings::frame_layout(),
             command_line: crate::command_line::CommandLine::load(),
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),
             commands: crate::settings::command_history(),
@@ -1274,11 +1267,7 @@ impl AppState {
     }
 
     pub fn selection_filter(&self) -> crate::viewport::PickFilter {
-        if self.frame_layout == crate::settings::FrameLayout::EditSuite
-            && self.editor.is_none()
-            && self.sketch.is_none()
-            && !self.measure.open
-        {
+        if self.editor.is_none() && self.sketch.is_none() && !self.measure.open {
             self.pick_filter
         } else {
             Default::default()

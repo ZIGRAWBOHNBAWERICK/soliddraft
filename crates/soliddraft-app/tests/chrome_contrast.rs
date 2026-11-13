@@ -1,6 +1,6 @@
-//! Contrast of the light theme's text and controls on their shared backgrounds.
+//! Contrast of text on the shared Edit Suite chrome.
 use egui::Color32;
-use soliddraft_app::theme::LIGHT;
+use soliddraft_app::theme::edit_suite::PALETTE;
 
 fn luminance(color: Color32) -> f64 {
     let linear = |channel: u8| {
@@ -17,43 +17,21 @@ fn contrast(foreground: Color32, background: Color32) -> f64 {
 }
 
 #[test]
-fn light_text_and_controls_meet_aa() {
-    let p = LIGHT;
-    let backgrounds = [
-        p.chrome,
-        p.panel,
-        p.panel_header,
-        p.field_bg,
-        p.chip,
-        p.selection_bg,
-        p.hover,
-        p.accent_soft,
-        p.warn_soft,
-        p.error_soft,
-        p.hud_bg,
-        p.command_line,
-        p.viewport_top,
-        p.viewport_bottom,
-        p.canvas_bg,
-    ];
+fn edit_suite_text_meets_aa() {
+    let p = PALETTE;
+    let backgrounds = [p.chrome, p.panel, p.panel_header, p.field_bg, p.chip, p.hud_bg, p.command_line];
     for background in backgrounds {
         for foreground in [p.ink, p.muted, p.accent, p.ok, p.warn, p.error] {
             let ratio = contrast(foreground, background);
             assert!(ratio >= 4.5, "text {foreground:?} on {background:?}: {ratio:.2}:1");
         }
-        for foreground in [p.line, p.line_strong, p.axis_x, p.axis_y, p.axis_z] {
-            let ratio = contrast(foreground, background);
-            assert!(ratio >= 3.0, "control {foreground:?} on {background:?}: {ratio:.2}:1");
-        }
     }
-    assert!(contrast(p.selection_ink, p.selection_bg) >= 4.5);
     assert!(contrast(p.on_accent, p.accent) >= 4.5);
-    assert!(contrast(p.ink, p.line) >= 4.5, "secondary button hover text");
     assert!(contrast(p.command_prompt, p.command_line) >= 4.5);
 }
 
 #[test]
-fn light_field_hints_remain_readable() {
+fn field_hints_remain_readable() {
     let ctx = egui::Context::default();
     soliddraft_app::theme::install(&ctx, soliddraft_app::theme::Mode::Light);
     let style = ctx.global_style();

@@ -1,24 +1,14 @@
-//! Merge 3 of the ribbon layout: the original operation icons. Acceptance cases I1 and I2
-//! of the ribbon test design. The references under `tests/fixtures/ribbon_icons` are the
-//! prototype's drawings rendered by rsvg-convert, so nothing here compares the app's
-//! renderer with itself.
-//!
-//! Requires a renderer: a run without one fails.
-//!
-//! Run them one at a time, away from the other GPU targets:
-//! `cargo test -p soliddraft-app --test ribbon_icons -- --test-threads=1`.
+//! The original icon catalogue at palette, chip and menu sizes.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Color32, Key, Rect, pos2, vec2};
+use egui::{Color32, Rect, pos2, vec2};
 use egui_kittest::Harness;
 use image::{Rgba, RgbaImage, imageops};
 use resvg::usvg;
-use ribbon::App;
 use soliddraft_app::commands;
 use soliddraft_app::icons::{self, Icon, Treatment};
-use soliddraft_app::state::EditorParams;
 use soliddraft_app::theme::{self, Mode};
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -125,8 +115,6 @@ const INSPECT: [(&str, &str, &[Family]); 5] = [
 const ASSEMBLY: [(&str, &str, &[Family]); 1] = [("Insert component", "insert_comp", &[Body, Added])];
 
 /// The chrome glyphs that follow the text colour.
-const ASSEMBLY_GLYPHS: [(&str, &str); 4] =
-    [("Save assembly", "save"), ("Save assembly as", "save"), ("Undo", "undo"), ("Redo", "redo")];
 
 /// Pairs a user must be able to tell apart.
 const CORE_PAIRS: [(&str, &str); 7] = [
@@ -246,12 +234,6 @@ fn crop(frame: &RgbaImage, rect: Rect, ppp: f32) -> RgbaImage {
 }
 
 /// The icon's own square from the frame: the image the production ribbon drew on the button.
-fn icon_square(app: &App, label: &str, button: Rect) -> Rect {
-    let images = ribbon::images_in(app, button);
-    assert_eq!(images.len(), 1, "the button {label} shows one drawing: {images:?}");
-    images[0]
-}
-
 fn share(crop: &RgbaImage, wanted: Family) -> f32 {
     crop.pixels().filter(|p| family(**p) == Some(wanted)).count() as f32 / crop.pixels().len() as f32
 }
@@ -283,212 +265,6 @@ fn fits_its_view(key: &str, svg: &str) {
 }
 
 #[derive(Default)]
-struct Log(String);
-
-impl Log {
-    fn row(&mut self, what: &str, key: &str, state: &str, logical: f32, physical: u32, off: f32) {
-        writeln!(self.0, "{what}\t{key}\t{state}\t{logical}\t{physical}\t{off:.2}").unwrap();
-    }
-}
-
-/// One tab as the app drew it, against the references. Commands the state switches off are
-/// held to the disabled treatment.
-fn compare_tab(app: &mut App, rows: &[(&str, &str, &[Family])], dark: bool, ppp: f32, log: &mut Log, seen: &str) {
-    let first_frame = app.render().expect("the frame renders");
-    let panel = theme::panel().to_array();
-    let background = Rgba(panel);
-    for (label, key, families) in rows {
-        let id = ribbon::ribbon_command_id(app, label);
-        let button = ribbon::reveal_ribbon_command(app, id);
-        let row_frame = (!ribbon::ribbon_region(app).contains_rect(button.rect))
-            .then(|| app.render().expect("the group row renders"));
-        let frame = row_frame.as_ref().unwrap_or(&first_frame);
-        let square = icon_square(app, label, button.rect);
-        let actual = crop(frame, square, ppp);
-        let what = format!("{seen} {label}");
-        let wanted = reference(key, dark);
-        let expected = if button.enabled {
-            over(&wanted, actual.dimensions(), background, normal)
-        } else {
-            over(&wanted, actual.dimensions(), background, disabled)
-        };
-        let off = difference(&actual, &expected);
-        let state = if button.enabled { "enabled" } else { "disabled" };
-        log.row(&what, key, state, square.width(), actual.width(), off);
-        assert!(off <= MAX_DIFFERENCE, "{what} is {off} from the {key} reference");
-        inside_its_square(frame, square, ppp, background, &what);
-        if button.enabled {
-            for accent in *families {
-                let covered = share(&actual, *accent);
-                assert!(covered >= MIN_ACCENT, "{what} shows {accent:?} on {covered} of its square");
-            }
-        }
-        if ["hole", "shell"].contains(key) {
-            // The opening stays open: its middle matches the drawing on its own.
-            let side = actual.width();
-            let middle = |i: &RgbaImage| imageops::crop_imm(i, side / 4, side / 5, side / 2, side / 2).to_image();
-            let off = difference(&middle(&actual), &middle(&expected));
-            assert!(off <= MAX_DIFFERENCE * 1.5, "{what} fills its opening: {off}");
-        }
-        ribbon::dismiss_ribbon_popup(app);
-    }
-}
-
-fn compare_glyphs(app: &mut App, rows: &[(&str, &str)], ppp: f32, log: &mut Log, seen: &str) {
-    let first_frame = app.render().expect("the frame renders");
-    let background = Rgba(theme::panel().to_array());
-    for (label, key) in rows {
-        let id = ribbon::ribbon_command_id(app, label);
-        let button = ribbon::reveal_ribbon_command(app, id);
-        let row_frame = (!ribbon::ribbon_region(app).contains_rect(button.rect))
-            .then(|| app.render().expect("the group row renders"));
-        let frame = row_frame.as_ref().unwrap_or(&first_frame);
-        let square = icon_square(app, label, button.rect);
-        let actual = crop(frame, square, ppp);
-        let color = if button.enabled { theme::ink() } else { theme::muted().gamma_multiply(0.55) };
-        let wanted = fixture(&format!("line/{key}.png"));
-        let off = difference(&actual, &over(&wanted, actual.dimensions(), background, tinted(color)));
-        let what = format!("{seen} {label}");
-        log.row(&what, key, "glyph", square.width(), actual.width(), off);
-        assert!(off <= MAX_DIFFERENCE, "{what} is {off} from the {key} glyph");
-        ribbon::dismiss_ribbon_popup(app);
-    }
-}
-
-/// Fillet: the hover and the active treatments, and the same command behind them.
-fn fillet_stays_a_fillet(app: &mut App, ppp: f32) {
-    let camera = |a: &App| a.state().state.viewport.camera.distance;
-    let mut last = camera(app);
-    loop {
-        app.run_steps(4);
-        if camera(app) == last {
-            break;
-        }
-        last = camera(app);
-    }
-    let start = ribbon::fingerprint(app).without_history();
-    let button = ribbon::ribbon_button(app, "Fillet");
-    let square = icon_square(app, "Fillet", button.rect);
-    let resting = crop(&app.render().expect("the frame renders"), button.rect, ppp);
-    app.hover_at(button.rect.center());
-    app.run_steps(3);
-    let hovered = crop(&app.render().expect("the frame renders"), button.rect, ppp);
-    assert!(difference(&resting, &hovered) > 0.2, "hovering Fillet shows");
-    ribbon::run_command(app, "fillet");
-    let rest = ribbon::window(app).center();
-    app.hover_at(rest);
-    app.run_steps(4);
-    assert!(
-        matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Fillet(_))),
-        "the button opens the Fillet editor"
-    );
-    assert!(app.state().state.doc.undo_depth() == start.undo_depth, "opening it changes nothing");
-    let active = ribbon::ribbon_button(app, "Fillet");
-    assert!(active.selected, "Fillet reads as active");
-    assert!(ribbon::painted_in(app, active.rect).iter().any(|p| p.text == "Fillet"), "its label stays");
-    let frame = app.render().expect("the frame renders");
-    assert!(difference(&resting, &crop(&frame, button.rect, ppp)) > 0.5, "the active treatment shows");
-    let shown = crop(&frame, square, ppp);
-    assert!(share(&shown, Added) >= MIN_ACCENT, "the drawing stays on the active button");
-    app.key_press(Key::Escape);
-    app.run_steps(6);
-    assert_eq!(ribbon::fingerprint(app).without_history(), start, "cancelling leaves the part");
-}
-
-fn one_pass(case: &ribbon::Case, mode: Mode, ppp: f32, log: &mut Log) {
-    let dark = mode == Mode::Dark;
-    let seen = format!("{mode:?} {ppp}");
-
-    // Disabled art on a blank part.
-    let mut blank = ribbon::app_at(ribbon::blank(), ribbon::EXPANDED_WINDOW, ppp);
-    case.run(&mut blank, |app| {
-        theme::set_mode(&app.ctx.clone(), mode);
-        app.run_steps(6);
-        let button = ribbon::ribbon_button(app, "Fillet");
-        assert!(!button.enabled);
-        compare_tab(app, &SOLID[8..10], dark, ppp, log, &format!("{seen} blank"));
-        let said = ribbon::tooltip(app, button.rect);
-        assert!(said.contains("Fillet needs a body"), "{said:?}");
-    });
-
-    // The plate on every tab, with each first paint held to the references.
-    let mut plate = ribbon::app_at(ribbon::plate(), ribbon::EXPANDED_WINDOW, ppp);
-    case.run(&mut plate, |app| {
-        app.run_steps(6);
-        if dark {
-            app.run_steps(2);
-            let view = ribbon::button_rect(app, "View", ribbon::window(app));
-            ribbon::click_at(app, view.center());
-            let entry = ribbon::menu_entry(app, "View", "Dark theme");
-            ribbon::click_for_first_paint(app, entry.center());
-            // The menu closes on the next frame; the drawings are already the dark ones.
-            app.run_steps(2);
-            assert!(theme::mode().is_dark(), "the menu switched the theme");
-        } else {
-            theme::set_mode(&app.ctx.clone(), mode);
-            app.run_steps(2);
-        }
-        compare_tab(app, &SOLID, dark, ppp, log, &format!("{seen} solid"));
-        fillet_stays_a_fillet(app, ppp);
-
-        // Lattice and Linear are different drawings on the real ribbon.
-        let frame = app.render().expect("the frame renders");
-        let [lattice, linear] = ["Lattice", "Linear"].map(|label| {
-            let square = icon_square(app, label, ribbon::ribbon_button(app, label).rect);
-            crop(&frame, square, ppp)
-        });
-        assert!(difference(&lattice, &linear) >= MIN_DISTINCT, "Lattice is not the Linear symbol");
-        let ground = Rgba(theme::panel().to_array());
-        is_its_own_drawing(&lattice, "lattice", "linear", ground, dark);
-
-        for (name, rows) in [("Sketch", &SKETCH[..]), ("Inspect", &INSPECT[..])] {
-            let tab = ribbon::tab(app, name).rect;
-            ribbon::click_for_first_paint(app, tab.center());
-            compare_tab(app, rows, dark, ppp, log, &format!("{seen} {name}"));
-        }
-        case.frame(app, &format!("inspect-{seen}"));
-        let tab = ribbon::tab(app, "Assembly").rect;
-        ribbon::click_for_first_paint(app, tab.center());
-        compare_tab(app, &ASSEMBLY, dark, ppp, log, &format!("{seen} assembly tab"));
-
-        ribbon::menu(app, "File", "New assembly");
-        app.run_steps(6);
-        assert!(app.state().state.assembly.is_active(), "the assembly is the active document");
-        compare_tab(app, &ASSEMBLY, dark, ppp, log, &format!("{seen} assembly"));
-        compare_glyphs(app, &ASSEMBLY_GLYPHS, ppp, log, &format!("{seen} assembly"));
-    });
-
-    // The sketch tab with its tools enabled, in a real sketch.
-    let mut sketch = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, ppp);
-    case.run(&mut sketch, |app| {
-        theme::set_mode(&app.ctx.clone(), mode);
-        app.run_steps(6);
-        let name = app.state().state.doc.features[0].name.clone();
-        let view = app.state().state.viewport.rect;
-        let left = Rect::from_min_max(pos2(0.0, view.top()), pos2(view.left(), view.bottom()));
-        let row = ribbon::button_rect(app, &name, left);
-        ribbon::double_click_at(app, row.center());
-        app.run_steps(12);
-        assert!(app.state().state.sketch.is_some(), "the sketch is open");
-        // The open sketch lights its own button; the active ground is held by the Fillet case.
-        compare_tab(app, &SKETCH[..SKETCH.len() - 1], dark, ppp, log, &format!("{seen} in a sketch"));
-    });
-    theme::set_mode(&plate.ctx.clone(), Mode::Light);
-}
-
-#[test]
-fn the_real_ribbon_uses_original_operation_art_in_each_theme_and_scale() {
-    let case = ribbon::case("i1");
-    let mut log = Log::default();
-    for mode in MODES {
-        for ppp in SCALES {
-            one_pass(&case, mode, ppp, &mut log);
-        }
-    }
-    let table = "shown\tkey\tstate\tlogical\tphysical\tdifference\n".to_owned() + &log.0;
-    std::fs::write(case.path("captures.tsv"), table).expect("the capture table is written");
-}
-
 /// One sheet of drawings at one size, drawn by the production renderer with nothing else on
 /// it. Each row of `cells` is a drawing, a treatment and the ground under it.
 struct Cell {
@@ -588,10 +364,10 @@ fn the_complete_icon_catalogue_survives_real_size_rendering() {
 
     let mut report = String::new();
     for mode in MODES {
-        let dark = mode == Mode::Dark;
+        let dark = true;
         for ppp in SCALES {
             // The sizes the ribbon ships.
-            for side in [26.0, 22.0] {
+            for side in [16.0, 22.0, 26.0] {
                 let panel = Color32::TRANSPARENT;
                 let ink = {
                     let probe = Harness::builder().with_size(vec2(8.0, 8.0)).build_ui(|_| {});

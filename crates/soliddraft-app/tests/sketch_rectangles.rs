@@ -1,6 +1,6 @@
 //! Rectangle placement, persistent relations, refusal, history and reopen.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Pos2};

@@ -208,12 +208,9 @@ impl SolidDraftApp {
                     None => {
                         self.open_editor(None, EditorParams::PickPlane);
                         self.state.origin_open = true;
-                        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                            self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
-                            self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
-                        } else {
-                            self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
-                        }
+
+                        self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                        self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
                     }
                 }
             }
@@ -963,10 +960,7 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SketchTool(tool) => {
-                if !self.state.in_sketch()
-                    && self.state.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && crate::commands::Context::of(&self.state).part()
-                {
+                if !self.state.in_sketch() && crate::commands::Context::of(&self.state).part() {
                     self.apply(ctx, AppAction::StartSketch);
                     if let Some(editor) = &mut self.state.editor
                         && matches!(editor.params, EditorParams::PickPlane)
@@ -1106,10 +1100,7 @@ impl SolidDraftApp {
                     && let Some(f) = self.state.doc.feature(id)
                 {
                     let rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
-                    if self.state.frame_layout == crate::settings::FrameLayout::EditSuite
-                        && !self.state.drawing.is_active()
-                        && !self.state.assembly.is_active()
-                    {
+                    if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
                         self.state.timeline.rename = rename;
                     } else {
                         self.state.rename = rename;
@@ -1170,14 +1161,12 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SetScene(scene) => {
-                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                    self.state.viewport.scene = Some(scene);
-                    if let Some(session) = self.state.assembly.session.as_mut() {
-                        session.viewport.scene = Some(scene);
-                    }
-                    if let Err(e) = crate::settings::save_scene(scene) {
-                        self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
-                    }
+                self.state.viewport.scene = Some(scene);
+                if let Some(session) = self.state.assembly.session.as_mut() {
+                    session.viewport.scene = Some(scene);
+                }
+                if let Err(e) = crate::settings::save_scene(scene) {
+                    self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                 }
             }
             AppAction::SetTheme(mode) => {
@@ -1443,7 +1432,6 @@ impl SolidDraftApp {
                     self.dock.push_to_focused_leaf(Tab::Assembly);
                 }
                 self.tree_dock = tree_dock();
-                self.suite_tree_dock = egui_dock::DockState::new(vec![Tab::Tree, Tab::Values]);
                 self.state.layout = Layout::default();
                 self.state.assembly.tree_hidden = false;
                 self.state.drawing.tree_hidden = false;

@@ -1,28 +1,24 @@
-//! Both internal frame choices run the real app without a user-facing layout toggle.
+//! Old and current settings open the same Edit Suite frame.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Rect, pos2, vec2};
 use egui_kittest::kittest::Queryable;
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::RibbonTab;
 use soliddraft_app::theme::{self, Mode};
 
 #[test]
-fn both_frame_settings_open_the_workspace_and_command_palette() {
+fn old_and_current_frame_settings_open_edit_suite_and_the_command_palette() {
     let case = ribbon::case("frame-layout");
     let config = case.path("config");
-    for (setting, layout) in [("classic", FrameLayout::Classic), ("edit_suite", FrameLayout::EditSuite)] {
+    for setting in ["classic", "edit_suite", "unknown"] {
         std::fs::write(config.join("settings.json"), format!(r#"{{"frame_layout":"{setting}"}}"#)).unwrap();
         let mut app = ribbon::app(ribbon::plate());
         case.run(&mut app, |app| {
-            assert_eq!(app.state().state.frame_layout, layout);
-            assert_eq!(app.state().state.tree_shown(), layout == FrameLayout::Classic);
-            let palette = match layout {
-                FrameLayout::Classic => &theme::LIGHT,
-                FrameLayout::EditSuite => &theme::edit_suite::PALETTE,
-            };
+            assert!(!app.state().state.tree_shown());
+            let palette = &theme::edit_suite::PALETTE;
             assert_eq!(theme::palette(), palette, "{setting}: startup installs the frame's tokens");
             assert_eq!(app.ctx.global_style().visuals.panel_fill, palette.panel);
             assert!(app.state().state.viewport.rect.is_positive());
@@ -55,7 +51,7 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
     for mode in [Mode::Light, Mode::Dark] {
         for (width, scale) in [(1440.0, 1.0), (1280.0, 1.0), (960.0, 1.0), (1280.0, 2.0)] {
             let mut app = ribbon::app_at(ribbon::plate(), vec2(width, 900.0), scale);
-            app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
             theme::set_mode(&app.ctx, mode);
             app.run_steps(8);
             case.run(&mut app, |app| {
@@ -130,7 +126,7 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
     let case = ribbon::case("assembly-workspaces");
     let mut app = ribbon::app(ribbon::plate());
     ribbon::until(&mut app, "the plate proof", |app| !app.state().state.doc.proof_pending());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.run_steps(8);
     app.state_mut().state.push(AppAction::Assembly(AssemblyAction::New));
     app.run_steps(12);
@@ -219,7 +215,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
     let case = ribbon::case("drawing-workspaces");
     let mut app = ribbon::app(ribbon::plate());
     ribbon::until(&mut app, "the plate proof", |app| !app.state().state.doc.proof_pending());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.push(AppAction::Drawing(DrawingAction::MakeDrawing));
     app.run_steps(8);
     app.state_mut().state.push(AppAction::Drawing(DrawingAction::CreateDrawing));

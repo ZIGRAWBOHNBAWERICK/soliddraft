@@ -1,6 +1,6 @@
 //! Corpus IGES files through both frames, the shared review, display and saved part.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::Key;
@@ -8,7 +8,6 @@ use egui_kittest::kittest::Queryable;
 use soliddraft_app::{
     commands,
     document::{Document, FeatureKind, FeatureStatus, PlaneKind, SketchPlane},
-    settings::FrameLayout,
     state::AppAction,
 };
 use soliddraft_kernel_api::ImportFormat;
@@ -19,16 +18,17 @@ const REFUSAL: &str =
     "This IGES file uses a transform that changes lengths or angles. It cannot be imported without changing the shape.";
 
 #[test]
-fn corpus_iges_review_cancel_accept_reopen_and_refusal_in_both_frames() {
+fn corpus_iges_review_cancel_accept_reopen_and_refusal_in_edit_suite() {
     let case = ribbon::case("iges-import");
     // The extension deliberately disagrees. Reopening must use the saved format.
     let source = case.path("box.step");
     let refused = case.path("sphere.igs");
     std::fs::write(&source, BOX).unwrap();
     std::fs::write(&refused, SPHERE).unwrap();
-    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut app = ribbon::app(Document::new("IGES import", soliddraft_app::kernel()));
-        app.state_mut().state.frame_layout = layout;
+
         app.run_steps(3);
         case.run(&mut app, |app| {
             let command = commands::get("import_iges").unwrap();

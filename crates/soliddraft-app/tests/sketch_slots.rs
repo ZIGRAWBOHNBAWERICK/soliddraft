@@ -1,6 +1,6 @@
 //! Slot commands through native pointer input, including cancellation and history.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::Key;

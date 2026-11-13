@@ -103,7 +103,7 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
         harness.state().state.editor.as_ref().unwrap().params,
         soliddraft_app::state::EditorParams::Sweep(_)
     ));
-    harness.get_by_label("OK (Enter)").click();
+    harness.get_by_label("OK").click();
     harness.run_steps(4);
     assert!(harness.state().state.editor.is_none());
     check(&harness.state().state.doc, 80.0);
@@ -134,7 +134,7 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
     harness.run_steps(3);
     harness.key_press(egui::Key::Enter);
     harness.run_steps(4);
-    harness.get_by_label("OK (Enter)").click();
+    harness.get_by_label("OK").click();
     harness.run_steps(4);
     check(&harness.state().state.doc, 48.0);
     harness.render().unwrap().save(proof.join("sweep-edited.png")).unwrap();
@@ -415,7 +415,7 @@ fn property_page_builds_a_chain_and_offers_only_what_works() {
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-chain-proof-{}", std::process::id())));
     std::fs::create_dir_all(&proof).unwrap();
     harness.render().unwrap().save(proof.join("sweep-chain-page.png")).unwrap();
-    harness.get_by_label("OK (Enter)").click();
+    harness.get_by_label("OK").click();
     harness.run_steps(6);
     assert!(harness.state().state.editor.is_none());
     let doc = &harness.state().state.doc;
@@ -538,35 +538,35 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
     std::fs::remove_file(path).unwrap();
 }
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 #[test]
-fn spline_controls_build_through_the_registry_in_both_frames() {
+fn spline_controls_build_through_the_registry_in_edit_suite() {
     use egui_kittest::kittest::Queryable;
-    use soliddraft_app::{commands, settings::FrameLayout};
+    use soliddraft_app::commands;
     let case = ribbon::case("spline-sweep");
-    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut doc = profile();
         doc.selection = Some(Selection::Feature(doc.features[0].id));
         let mut app = ribbon::app(doc);
-        app.state_mut().state.frame_layout = layout;
+
         app.run_steps(4);
         ribbon::run_command(&mut app, "sweep");
-        if layout == FrameLayout::EditSuite {
-            let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
-            let (_, rect) =
-                ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
-            ribbon::click_at(&mut app, rect.center());
-            app.run_steps(6);
-        }
+
+        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+        let (_, rect) = ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
+        ribbon::click_at(&mut app, rect.center());
+        app.run_steps(6);
+
         app.get_by_label("Use spline path").scroll_to_me();
         app.run_steps(24);
         app.get_by_label("Use spline path").click();
         app.run_steps(6);
         assert!(app.query_by_label("Turn with the path · Coming soon").is_some());
         case.frame(&mut app, &format!("{layout:?}-controls"));
-        app.get_by_label(if layout == FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }).click();
+        app.get_by_label("OK").click();
         app.run_steps(6);
         assert!(app.state().state.editor.is_none());
         check_spline(&app.state().state.doc, 240.0);
@@ -576,17 +576,18 @@ fn spline_controls_build_through_the_registry_in_both_frames() {
 }
 
 #[test]
-fn pinned_sweep_hides_during_sketch_and_returns_in_both_frames() {
+fn pinned_sweep_hides_during_sketch_and_returns_in_edit_suite() {
     use egui_kittest::kittest::Queryable;
-    use soliddraft_app::{command_line::BarSettings, settings::FrameLayout};
+    use soliddraft_app::command_line::BarSettings;
     let case = ribbon::case("pinned-sweep-sketch");
     let pins = BarSettings { tools: vec!["sweep".into(), "zoom_fit".into()], ..Default::default() };
     soliddraft_app::settings::save_command_line(&pins).unwrap();
-    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut doc = ribbon::sketch();
         doc.selection = Some(Selection::Feature(doc.features[0].id));
         let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
-        app.state_mut().state.frame_layout = layout;
+
         app.run_steps(4);
         case.run(&mut app, |app| {
             app.get_by_label("Sweep on the command bar");

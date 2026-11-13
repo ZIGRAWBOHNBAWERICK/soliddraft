@@ -211,13 +211,6 @@ paths = ["crates/soliddraft-app/src/recovery.rs", "crates/soliddraft-app/src/rec
 module = ["recovery"]
 
 [[areas]]
-name = "app.ribbon"
-owner = "core"
-crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/ribbon.rs"]
-module = ["ribbon"]
-
-[[areas]]
 name = "app.scene_import"
 owner = "core"
 crate = "soliddraft-app"

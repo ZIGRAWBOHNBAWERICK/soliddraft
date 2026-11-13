@@ -1,6 +1,6 @@
 //! The relation list, its edits and glyph visibility through the rendered app.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, Rect, Shape, pos2, vec2};

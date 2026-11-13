@@ -89,7 +89,7 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     field(&mut app, "Accuracy value", "0.1");
     field(&mut app, "Minimum detail value", "0.1");
     assert!(app.query_by_label("unproved preview").is_some());
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(12);
     let (name, kind, status) = last(&app);
     assert_eq!(name, "Lattice1");

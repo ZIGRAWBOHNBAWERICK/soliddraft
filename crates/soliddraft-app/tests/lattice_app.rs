@@ -71,7 +71,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_lattice() {
     field(&mut app, "Cell size value", "5");
     field(&mut app, "Beam radius (mm), controls density value", "1");
     assert!(app.query_by_label("unproved preview").is_some());
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(12);
     let doc = &app.state().state.doc;
     let last = doc.features.last().unwrap();
@@ -131,7 +131,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     field(&mut app, "Period value", "10");
     field(&mut app, "Network level (dimensionless) value", "0");
     assert!(app.query_by_label("unproved preview").is_some());
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(12);
     let last = app.state().state.doc.features.last().unwrap();
     assert_eq!(last.name, "Gyroid1");
@@ -143,7 +143,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     button(&mut app, "Gyroid1");
     button(&mut app, "Edit feature");
     field(&mut app, "Network level (dimensionless) value", "0.5");
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(12);
     let last = app.state().state.doc.features.last().unwrap();
     assert_eq!(last.name, "Gyroid1");

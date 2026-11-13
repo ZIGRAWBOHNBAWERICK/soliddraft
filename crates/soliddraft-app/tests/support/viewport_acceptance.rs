@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
-#[path = "ribbon.rs"]
+#[path = "ui.rs"]
 mod ribbon;
 
 pub use ribbon::render_steps;

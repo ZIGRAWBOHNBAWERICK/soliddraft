@@ -1,6 +1,6 @@
 //! Options bar acceptance through the real app, pointer, command dispatcher and renderer.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -9,7 +9,7 @@ use egui::{Key, Rect, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::document::{PlaneKind, Reference, Selection};
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::{EditorParams, Tool};
 use soliddraft_app::theme::{self, Mode};
 use soliddraft_app::viewport::{PickFilter, render::DisplayMode};
@@ -32,7 +32,6 @@ fn text(app: &App, expected: &str) {
 }
 
 fn edit_suite(app: &mut App) {
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
     app.state_mut().state.doc.selection = None;
     settle(app);
 }
@@ -152,11 +151,6 @@ fn pick_filters_control_real_picks_without_restricting_tools_or_classic() {
         app.key_press(Key::Escape);
         settle(app);
 
-        app.state_mut().state.frame_layout = FrameLayout::Classic;
-        settle(app);
-        ribbon::click_world(app, face);
-        settle(app);
-        assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "classic ignores the Edit Suite filter");
         let after = ribbon::fingerprint(app);
         assert_eq!(before.features, after.features);
         assert_eq!(before.undo_depth, after.undo_depth);

@@ -7,7 +7,7 @@ use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::sketcher::Frame;
 use soliddraft_app::state::{SketchSession, Tool};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -108,7 +108,7 @@ fn number(app: &mut App, index: usize, text: &str) {
 }
 
 fn tool(app: &mut App, label: &str) {
-    let band = ribbon::ribbon_region(app);
+    let band = ribbon::palette_region(app);
     if !app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| band.intersects(n.rect())) {
         let window = ribbon::window(app);
         ribbon::click_button(app, "Transform group", window);

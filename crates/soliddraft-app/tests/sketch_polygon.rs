@@ -1,6 +1,6 @@
 //! Native polygon placement, retained parameter editing, history and persistence.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers};
@@ -103,7 +103,7 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     for mode in [PolygonMode::Inscribed, PolygonMode::Circumscribed] {
-        let polygon = ribbon::reveal_ribbon_command(&mut app, "sketch_polygon").rect;
+        let polygon = ribbon::reveal_command(&mut app, "sketch_polygon").rect;
         ribbon::click_at(&mut app, polygon.center());
         assert_eq!(session(&app).tool, Tool::Polygon, "the ribbon activates polygon placement");
         control(&mut app, if mode == PolygonMode::Inscribed { "Inscribed" } else { "Circumscribed" });
@@ -116,7 +116,7 @@ fn native_modes_parameters_cancellation_undo_and_reopen() {
         app.run_steps(5);
         assert_eq!(session(&app).tool, Tool::Select);
         assert_eq!(session(&app).sketch, before);
-        let polygon = ribbon::reveal_ribbon_command(&mut app, "sketch_polygon").rect;
+        let polygon = ribbon::reveal_command(&mut app, "sketch_polygon").rect;
         ribbon::click_at(&mut app, polygon.center());
         assert_eq!(session(&app).tool, Tool::Polygon, "the ribbon activates polygon placement");
         pick(&mut app, center);

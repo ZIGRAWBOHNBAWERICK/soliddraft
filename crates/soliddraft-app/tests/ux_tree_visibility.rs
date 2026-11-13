@@ -1080,7 +1080,7 @@ fn one_click(window: &str) {
         assert_eq!(direction(app), soliddraft_kernel_api::Vec3::Y, "an eye is no collector pick");
         assert_eq!(choices(app), [Some(false), None, Some(!z_shown)], "the eye still flips Z");
         click_eye(case, app, "Z axis");
-        let cancel = bounds(app, "Cancel (Esc)");
+        let cancel = bounds(app, "Cancel");
         click_at(app, cancel.center());
         assert!(app.state().state.editor.is_none(), "Cancel closed the editor");
         assert_eq!(geometry(app), before, "the cancelled pattern left the part as it was");

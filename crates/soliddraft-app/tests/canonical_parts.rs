@@ -8,7 +8,7 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_exchange::{Format, Report};
 use soliddraft_model::{EdgeRef, FaceRef};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 const PARTS: [&str; 5] = [
@@ -236,7 +236,7 @@ fn exercise(index: usize) {
         assert!(!state.doc.proof_pending(), "{label}: proof is still pending");
         exports(&mut state, &dir, label, index == 4);
         let mut app = ribbon::app(state.doc);
-        app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+
         app.key_press(egui::Key::Z);
         app.run_steps(5);
         app.render().unwrap().save(dir.join(format!("{label}.png"))).unwrap();

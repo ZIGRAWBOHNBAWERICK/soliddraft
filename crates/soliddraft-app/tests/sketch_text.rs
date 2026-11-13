@@ -1,5 +1,5 @@
 //! Native text placement, atomic property edits, history and persistence.
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers};

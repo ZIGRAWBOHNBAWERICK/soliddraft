@@ -1,5 +1,5 @@
 //! Linked and dynamic mirror through the rendered sketch editor.
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 use egui::{Key, Modifiers, Pos2};
 use ribbon::App;

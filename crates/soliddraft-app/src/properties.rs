@@ -19,9 +19,6 @@ use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef};
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if state.sketch.is_some() {
         sketch_panel(ui, state);
-        if state.frame_layout == crate::settings::FrameLayout::Classic {
-            crate::sketch_values::popup(ui, state);
-        }
     } else if state.editor.is_some() {
         editor(ui, state);
     } else {
@@ -1359,12 +1356,6 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
-    let name = state
-        .sketch
-        .as_ref()
-        .and_then(|s| state.doc.feature(s.feature))
-        .map(|f| f.name.clone())
-        .unwrap_or("Sketch".into());
     let plane_label = state
         .sketch
         .as_ref()
@@ -1372,13 +1363,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         .and_then(|f| f.sketch())
         .map(|s| s.plane.label())
         .unwrap_or_default();
-    if state.frame_layout == crate::settings::FrameLayout::Classic {
-        let head = header(ui, Icon::Sketch, &name);
-        let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
-        if ok || cancel {
-            state.push(AppAction::ExitSketch);
-        }
-    }
+
     let mut actions = Vec::new();
     let has_body = state.doc.model().body().is_some();
     let links =

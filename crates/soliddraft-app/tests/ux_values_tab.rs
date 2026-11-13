@@ -15,7 +15,7 @@ use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
 use soliddraft_model::{EndCondition, FeatureKind};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;

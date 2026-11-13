@@ -1,6 +1,6 @@
 //! Composite and whole-entity relations use native selection, one undo step and saved geometry.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, Rect};

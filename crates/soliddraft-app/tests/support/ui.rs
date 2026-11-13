@@ -1,9 +1,9 @@
-//! Input and observation shared by the ribbon acceptance tests: the real app on the real
+//! Input and observation shared by the native UI tests: the real app on the real
 //! wgpu pipeline and the real kernel, driven with registry commands, pointer and keyboard
 //! events, and read back from the frame it painted. Layout expectations stay in the tests; nothing here
 //! repeats how the app lays itself out.
 //!
-//! A test file brings this in with `#[path = "support/ribbon.rs"] mod ribbon;`.
+//! A test file brings this in with `#[path = "support/ui.rs"] mod ribbon;`.
 
 #![allow(dead_code)]
 
@@ -283,90 +283,24 @@ pub fn switch_workspace(app: &mut App, id: &str) {
     settle_command(app);
 }
 
-/// Everything above the side panels: the menus, the tabs and the ribbon.
-pub fn ribbon_region(app: &App) -> Rect {
-    let panels = painted(app)
-        .iter()
-        .filter(|p| p.text == "Tree" || p.text.ends_with(" tree"))
-        .map(|p| p.rect.top())
-        .fold(0.0, f32::max);
-    let window = window(app);
-    Rect::from_min_max(window.min, pos2(window.right(), panels))
+/// The visible command palette at the left of the viewport.
+pub fn palette_region(app: &App) -> Rect {
+    egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the tool palette is open").outer_rect
 }
 
-/// A ribbon button, by the name it shows.
-pub fn ribbon_button(app: &App, label: &str) -> Control {
-    control(app, label, ribbon_region(app))
-}
-
-fn ribbon_command_region(app: &App) -> Rect {
-    let window = window(app);
-    let bottom = painted(app).into_iter().find(|p| p.text == "Properties").map_or(window.bottom(), |p| p.rect.top());
-    let top = window.top() + soliddraft_app::theme::MENU_HEIGHT + soliddraft_app::theme::RIBBON_TABS_HEIGHT;
-    Rect::from_min_max(pos2(window.left(), top), pos2(window.right(), bottom))
-}
-
-fn active_ribbon_tab(app: &App) -> soliddraft_app::commands::Tab {
-    let state = &app.state().state;
-    if state.drawing.is_active() {
-        soliddraft_app::commands::Tab::Drawing(state.drawing.session.as_ref().expect("active drawing").tab)
-    } else if state.assembly.is_active() {
-        soliddraft_app::commands::Tab::Assembly
-    } else {
-        state.ribbon_tab.into()
-    }
-}
-
-/// Reveals a registered command on the current tab, including collapsed groups.
-/// Inspecting it runs no command; dismiss its ribbon popup after inspection.
-pub fn reveal_ribbon_command(app: &mut App, id: &str) -> Control {
-    let (label, group) = {
-        let state = &app.state().state;
-        let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
-        let group = soliddraft_app::commands::ribbon(active_ribbon_tab(app))
-            .into_iter()
-            .find_map(|(group, items)| items.iter().any(|(c, _)| c.id == id && (c.shown)(state)).then_some(group))
-            .unwrap_or_else(|| panic!("{id} is not shown on the current tab"));
-        (command.label_in(state), group)
+/// Reveals a palette command by stable id without running it.
+pub fn reveal_command(app: &mut App, id: &str) -> Control {
+    let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
+    let label = match id {
+        "sketch" if !app.state().state.in_sketch() => "Start sketch".to_owned(),
+        "smart_dimension" => "Smart Dimension".to_owned(),
+        _ => command.label_in(&app.state().state),
     };
-    // Clipped property buttons still have accessibility bounds.
-    let visible_label = |app: &App| {
-        let buttons: Vec<_> =
-            app.query_all(By::new().role(egui::accesskit::Role::Button).label(&label)).map(|n| n.rect()).collect();
-        painted_in(app, ribbon_command_region(app))
-            .into_iter()
-            .find(|p| p.text == label && buttons.iter().any(|r| r.expand(TOLERANCE).contains_rect(p.rect)))
-            .map(|p| p.rect)
-    };
-    if visible_label(app).is_none() {
-        let band = ribbon_region(app);
-        click_button(app, &format!("{group} group"), band);
-        app.run_steps(4);
-    }
-    let label_rect = visible_label(app).unwrap_or_else(|| panic!("ribbon command {label} must be painted"));
-    control(app, &label, label_rect)
+    app.get_by_label(&label).scroll_to_me();
+    app.run_steps(24);
+    control(app, &label, palette_region(app))
 }
 
-/// Closes an inspected ribbon row without cancelling the current sketch tool.
-pub fn dismiss_ribbon_popup(app: &mut App) {
-    if egui::Popup::is_any_open(&app.ctx) {
-        app.key_press(Key::Escape);
-        app.run_steps(4);
-        assert!(!egui::Popup::is_any_open(&app.ctx), "Escape closes the ribbon row");
-    }
-}
-
-/// Resolves a command's shown label on the active ribbon tab.
-pub fn ribbon_command_id(app: &App, label: &str) -> &'static str {
-    let state = &app.state().state;
-    soliddraft_app::commands::ribbon(active_ribbon_tab(app))
-        .into_iter()
-        .flat_map(|(_, items)| items)
-        .find_map(|(c, _)| ((c.shown)(state) && c.label_in(state) == label).then_some(c.id))
-        .unwrap_or_else(|| panic!("ribbon command {label}"))
-}
-
-/// Runs a registry command by id, then waits for the resulting view to settle.
 pub fn run_command(app: &mut App, id: &str) {
     let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
     app.state_mut().state.run_command(command);
@@ -633,63 +567,6 @@ pub fn status_lines(app: &mut App) -> Vec<String> {
 }
 
 /// The group captions of the open ribbon tab, left to right: the lowest row of its text.
-pub fn captions(app: &App) -> Vec<Painted> {
-    let text = painted_in(app, ribbon_region(app));
-    let lowest = text.iter().map(|p| p.rect.center().y).fold(0.0, f32::max);
-    let mut row: Vec<Painted> = text.into_iter().filter(|p| p.rect.center().y >= lowest - TOLERANCE).collect();
-    row.sort_by(|a, b| a.rect.left().total_cmp(&b.rect.left()));
-    row
-}
-
-/// The caption names of the open ribbon tab.
-pub fn caption_names(app: &App) -> Vec<String> {
-    captions(app).into_iter().map(|p| p.text).collect()
-}
-
-/// The open tab has exactly these groups in order, with visible command labels or
-/// a collapsed group that reveals them. Group footprints do not overlap.
-pub fn groups_in_order(app: &mut App, groups: &[(&str, &[&str])]) {
-    let names: Vec<&str> = groups.iter().map(|(name, _)| *name).collect();
-    assert_eq!(caption_names(app), names, "the group captions");
-    let mut right = 0.0_f32;
-    for ((name, labels), caption) in groups.iter().zip(captions(app)) {
-        let collapsed = buttons_in(app, ribbon_region(app))
-            .into_iter()
-            .find_map(|(label, button)| (label == format!("{name} group")).then_some(button));
-        let mut bounds = collapsed.unwrap_or(Rect::NOTHING);
-        for label in *labels {
-            let id = soliddraft_app::commands::ribbon(active_ribbon_tab(app))
-                .into_iter()
-                .find_map(|(group, items)| {
-                    if group != *name {
-                        return None;
-                    }
-                    let state = &app.state().state;
-                    items
-                        .into_iter()
-                        .find_map(|(c, _)| ((c.shown)(state) && c.label_in(state) == *label).then_some(c.id))
-                })
-                .unwrap_or_else(|| panic!("{name}: registered command {label}"));
-            let rect = reveal_ribbon_command(app, id).rect;
-            assert!(window(app).contains_rect(rect), "{name}: {id} is reachable");
-            let seen = painted_in(app, rect).iter().any(|p| p.text == *label);
-            assert!(seen, "{name}: the label {label} is painted on its button {rect:?}");
-            if collapsed.is_none() {
-                bounds = bounds.union(rect);
-            }
-            dismiss_ribbon_popup(app);
-        }
-        let x = caption.rect.center().x;
-        assert!(
-            x >= bounds.left() - TOLERANCE && x <= bounds.right() + TOLERANCE,
-            "{name}: the caption at {x} is over its commands {bounds:?}"
-        );
-        assert!(bounds.left() >= right - TOLERANCE, "{name} starts after the group before it: {bounds:?} {right}");
-        right = bounds.right();
-    }
-}
-
-/// The panel titles a user reads, by name.
 pub fn title_rect(app: &App, title: &str) -> Rect {
     painted(app).into_iter().find(|p| p.text == title).unwrap_or_else(|| panic!("no title {title} in the frame")).rect
 }

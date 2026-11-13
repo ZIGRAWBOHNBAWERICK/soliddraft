@@ -1,6 +1,5 @@
-//! Shared theme tokens. Classic keeps the Studio light and dark palettes. The
-//! internal Edit Suite frame uses the approved charcoal and amber [`edit_suite`]
-//! tokens in either appearance mode. Viewport scenes remain a separate choice.
+//! Shared Edit Suite theme tokens. The frame uses charcoal and amber in either
+//! saved appearance mode. Viewport scenes remain a separate choice.
 //!
 //! The mode is process-wide: [`set_mode`] switches it and restyles the context, and the
 //! accessors ([`ink`], [`panel`], ...) read the active palette each call, so a widget
@@ -9,8 +8,6 @@
 use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Vec2};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-
-use crate::settings::FrameLayout;
 
 /// Which column of the palette the interface reads.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -34,13 +31,6 @@ impl Mode {
     /// Parses a mode name as typed on the command line or in a page address.
     pub fn parse(name: &str) -> Option<Mode> {
         Mode::ALL.into_iter().find(|m| m.label().eq_ignore_ascii_case(name.trim()))
-    }
-
-    pub fn palette(self) -> &'static Palette {
-        match self {
-            Mode::Light => &LIGHT,
-            Mode::Dark => &DARK,
-        }
     }
 
     pub fn is_dark(self) -> bool {
@@ -113,78 +103,6 @@ const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied_const(r, g, b, a)
 }
 
-pub const LIGHT: Palette = Palette {
-    chrome: rgb(0xe9, 0xec, 0xf0),
-    panel: rgb(0xf7, 0xf8, 0xfa),
-    panel_header: rgb(0xee, 0xf0, 0xf4),
-    line: rgb(0x73, 0x7f, 0x90),
-    line_strong: rgb(0x58, 0x67, 0x7b),
-    ink: rgb(0x0c, 0x14, 0x20),
-    muted: rgb(0x46, 0x52, 0x64),
-    accent: rgb(0x1d, 0x4e, 0xd8),
-    accent_soft: rgb(0xe3, 0xec, 0xfd),
-    selection_bg: rgb(0xd4, 0xe2, 0xfc),
-    selection_ink: rgb(0x0e, 0x2a, 0x66),
-    hover: rgb(0xe2, 0xe6, 0xed),
-    ok: rgb(0x17, 0x6b, 0x39),
-    bounded: rgb(0x76, 0x35, 0xa8),
-    warn: rgb(0x89, 0x50, 0x06),
-    error: rgb(0xb5, 0x2b, 0x32),
-    warn_soft: rgb(0xfd, 0xf6, 0xe3),
-    error_soft: rgb(0xfd, 0xee, 0xe8),
-    field_bg: rgb(0xee, 0xf0, 0xf4),
-    chip: Color32::WHITE,
-    on_accent: Color32::WHITE,
-    hud_bg: rgb(0xf7, 0xf8, 0xfa),
-    command_line: rgb(0xf7, 0xf8, 0xfa),
-    command_prompt: rgb(0x1d, 0x4e, 0xd8),
-    terminal_bg: rgb(0x14, 0x18, 0x1f),
-    terminal_ink: rgb(0xe6, 0xe9, 0xee),
-    terminal_accent: rgb(0x7a, 0xa2, 0xff),
-    viewport_top: rgb(0xf2, 0xf4, 0xf7),
-    viewport_bottom: rgb(0xd8, 0xdf, 0xe8),
-    canvas_bg: rgb(0xdd, 0xe2, 0xe9),
-    axis_x: rgb(0xb5, 0x2b, 0x32),
-    axis_y: rgb(0x17, 0x6b, 0x39),
-    axis_z: rgb(0x1d, 0x4e, 0xd8),
-};
-
-pub const DARK: Palette = Palette {
-    chrome: rgb(0x2a, 0x2e, 0x35),
-    panel: rgb(0x31, 0x36, 0x3e),
-    panel_header: rgb(0x2c, 0x31, 0x38),
-    line: rgb(0x3e, 0x44, 0x4d),
-    line_strong: rgb(0x52, 0x59, 0x64),
-    ink: rgb(0xe4, 0xe7, 0xec),
-    muted: rgb(0x98, 0xa1, 0xae),
-    accent: rgb(0x6f, 0xa0, 0xff),
-    accent_soft: rgba(0x6f, 0xa0, 0xff, 41),
-    selection_bg: rgba(0x6f, 0xa0, 0xff, 61),
-    selection_ink: rgb(0xcf, 0xe0, 0xff),
-    hover: rgb(0x3a, 0x40, 0x49),
-    ok: rgb(0x5b, 0xd2, 0x7a),
-    bounded: rgb(0xd2, 0xa0, 0xff),
-    warn: rgb(0xe3, 0xa0, 0x3c),
-    error: rgb(0xff, 0x6b, 0x6b),
-    warn_soft: rgba(0xe3, 0xa0, 0x3c, 46),
-    error_soft: rgba(0xff, 0x6b, 0x6b, 46),
-    field_bg: rgb(0x2c, 0x31, 0x38),
-    chip: rgb(0x2e, 0x33, 0x3b),
-    on_accent: rgb(0x0f, 0x12, 0x16),
-    hud_bg: rgba(0x28, 0x2c, 0x34, 235),
-    command_line: rgb(0x23, 0x27, 0x2e),
-    command_prompt: rgb(0x6f, 0xa0, 0xff),
-    terminal_bg: rgb(0x14, 0x18, 0x1f),
-    terminal_ink: rgb(0xe6, 0xe9, 0xee),
-    terminal_accent: rgb(0x7a, 0xa2, 0xff),
-    viewport_top: rgb(0x4a, 0x50, 0x5a),
-    viewport_bottom: rgb(0x22, 0x26, 0x2c),
-    canvas_bg: rgb(0x1e, 0x22, 0x27),
-    axis_x: rgb(0xff, 0x6b, 0x6b),
-    axis_y: rgb(0x5b, 0xd2, 0x7a),
-    axis_z: rgb(0x6f, 0xa8, 0xff),
-};
-
 /// Values from the approved L00 merged prototype, in logical pixels.
 pub mod edit_suite {
     use super::{Palette, rgb, rgba};
@@ -218,7 +136,7 @@ pub mod edit_suite {
         selection_ink: rgb(0xf5, 0xa5, 0x24),
         hover: POPUP_HOVER,
         ok: rgb(0x63, 0xd6, 0x8f),
-        bounded: super::DARK.bounded,
+        bounded: rgb(0xd2, 0xa0, 0xff),
         warn: rgb(0xf5, 0xa5, 0x24),
         error: rgb(0xff, 0xb4, 0xad),
         warn_soft: rgba(245, 165, 36, 51),
@@ -267,18 +185,6 @@ pub mod edit_suite {
 }
 
 static MODE: AtomicU8 = AtomicU8::new(0);
-static LAYOUT: AtomicU8 = AtomicU8::new(0);
-
-/// Whether the internal Edit Suite frame is active.
-pub fn is_edit_suite() -> bool {
-    LAYOUT.load(Ordering::Relaxed) == 1
-}
-
-/// Whether the active frame has dark chrome, independent of the saved mode.
-pub fn dark_chrome() -> bool {
-    is_edit_suite() || mode().is_dark()
-}
-
 /// The mode the interface is in.
 pub fn mode() -> Mode {
     match MODE.load(Ordering::Relaxed) {
@@ -289,22 +195,14 @@ pub fn mode() -> Mode {
 
 /// The active palette.
 pub fn palette() -> &'static Palette {
-    if is_edit_suite() { &edit_suite::PALETTE } else { mode().palette() }
+    &edit_suite::PALETTE
 }
 
 /// Switches the mode and restyles `ctx`, so the next frame is drawn in it.
 pub fn set_mode(ctx: &egui::Context, mode: Mode) {
     MODE.store(mode as u8, Ordering::Relaxed);
-    ctx.set_theme(if dark_chrome() { egui::Theme::Dark } else { egui::Theme::Light });
+    ctx.set_theme(egui::Theme::Dark);
     ctx.all_styles_mut(apply_style);
-}
-
-/// Applies the frame's tokens without changing the saved appearance preference.
-pub fn set_layout(ctx: &egui::Context, layout: FrameLayout) {
-    let next = u8::from(layout == FrameLayout::EditSuite);
-    if LAYOUT.swap(next, Ordering::Relaxed) != next {
-        set_mode(ctx, mode());
-    }
 }
 
 pub fn chrome() -> Color32 {
@@ -433,9 +331,7 @@ pub const RADIUS: u8 = 4;
 pub const WINDOW_RADIUS: u8 = 6;
 
 pub const MENU_HEIGHT: f32 = 30.0;
-pub const RIBBON_TABS_HEIGHT: f32 = 26.0;
-pub const RIBBON_BODY_HEIGHT: f32 = 92.0;
-pub const COMMAND_LINE_HEIGHT: f32 = 32.0;
+pub const COMMAND_LINE_HEIGHT: f32 = edit_suite::COMMAND_LINE_HEIGHT;
 /// Keep room for the model and an optional pane in a narrow Edit Suite window.
 pub const COMPACT_WIDTH: f32 = 1100.0;
 pub const ROW_HEIGHT: f32 = 22.0;
@@ -471,13 +367,7 @@ pub fn mono(size: f32) -> FontId {
 
 /// Installs the fonts and the style for `mode` on a fresh context.
 pub fn install(ctx: &egui::Context, mode: Mode) {
-    install_for_layout(ctx, mode, FrameLayout::Classic);
-}
-
-/// Installs the shared fonts and the selected frame's tokens on a fresh context.
-pub fn install_for_layout(ctx: &egui::Context, mode: Mode, layout: FrameLayout) {
     ctx.set_fonts(fonts());
-    LAYOUT.store(u8::from(layout == FrameLayout::EditSuite), Ordering::Relaxed);
     set_mode(ctx, mode);
 }
 
@@ -525,7 +415,7 @@ fn apply_style(style: &mut egui::Style) {
     spacing.indent = 16.0;
     spacing.icon_width = 14.0;
     spacing.icon_width_inner = 9.0;
-    spacing.menu_margin = Margin::same(if is_edit_suite() { 4 } else { 6 });
+    spacing.menu_margin = Margin::same(4);
     spacing.window_margin = Margin::same(10);
     spacing.combo_width = 120.0;
     spacing.text_edit_width = 160.0;
@@ -542,19 +432,18 @@ fn apply_style(style: &mut egui::Style) {
 
 fn visuals() -> egui::Visuals {
     let p = palette();
-    let dark = dark_chrome();
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    let r = CornerRadius::same(if is_edit_suite() { edit_suite::RADIUS } else { RADIUS });
+    let mut v = egui::Visuals::dark();
+    let r = CornerRadius::same(edit_suite::RADIUS);
     let shadow = |blur: u8, offset: i8| egui::Shadow {
         offset: [0, offset],
         blur,
         spread: 0,
-        color: Color32::from_black_alpha(if dark { 110 } else { 28 }),
+        color: Color32::from_black_alpha(110),
     };
     v.override_text_color = None;
     v.panel_fill = p.panel;
-    v.window_fill = if is_edit_suite() { edit_suite::POPUP } else { p.panel };
-    v.window_stroke = Stroke::new(1.0, if is_edit_suite() { edit_suite::CHIP_LINE } else { p.line });
+    v.window_fill = edit_suite::POPUP;
+    v.window_stroke = Stroke::new(1.0, edit_suite::CHIP_LINE);
     v.window_corner_radius = CornerRadius::same(WINDOW_RADIUS);
     v.window_shadow = shadow(18, 6);
     v.popup_shadow = shadow(12, 4);
@@ -576,10 +465,9 @@ fn visuals() -> egui::Visuals {
     v.handle_shape = egui::style::HandleShape::Circle;
     v.resize_corner_size = 10.0;
     v.weak_text_alpha = 0.6;
-    if !dark || is_edit_suite() {
-        // Hints and secondary labels need opaque ink, not an alpha wash over the field.
-        v.weak_text_color = Some(p.muted);
-    }
+
+    // Hints and secondary labels need opaque ink, not an alpha wash over the field.
+    v.weak_text_color = Some(p.muted);
 
     let w = &mut v.widgets;
     w.noninteractive = egui::style::WidgetVisuals {

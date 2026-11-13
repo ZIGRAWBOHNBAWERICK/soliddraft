@@ -116,38 +116,34 @@ fn loft_uses_an_exact_face_boundary_and_joins_to_the_existing_part() {
     assert!(doc.faces.iter().all(|f| doc.any_face_ref(f.id).is_some()));
 }
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
 
 fn open_profiles(app: &mut ribbon::App) {
     use egui_kittest::kittest::Queryable;
-    if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite {
-        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
-        let (_, rect) = ribbon::buttons_in(app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
-        ribbon::click_at(app, rect.center());
-        ux_tools::settle(app);
-        assert!(bar.contains_rect(app.get_by_label("OK").rect()), "finish stays on the bar above the profile list");
-    }
-}
 
-fn finish_label(layout: soliddraft_app::settings::FrameLayout) -> &'static str {
-    if layout == soliddraft_app::settings::FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }
+    let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+    let (_, rect) = ribbon::buttons_in(app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
+    ribbon::click_at(app, rect.center());
+    ux_tools::settle(app);
+    assert!(bar.contains_rect(app.get_by_label("OK").rect()), "finish stays on the bar above the profile list");
 }
 
 #[test]
-fn warmed_loft_completion_disappears_when_a_sketch_opens_in_both_frames() {
+fn warmed_loft_completion_disappears_when_a_sketch_opens_in_edit_suite() {
     use egui::Key;
     use egui_kittest::kittest::Queryable;
-    use soliddraft_app::settings::FrameLayout;
+
     let mut case = ux_tools::Case::new("loft-completion");
     let loft = format!("{:<24}{}", "loft", "Loft");
-    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut doc = ribbon::sketch();
         doc.selection = Some(Selection::Feature(doc.features[0].id));
         let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
-        app.state_mut().state.frame_layout = layout;
+
         ux_tools::settle(&mut app);
         app.get_by_label("Command line").click();
         app.run_steps(2);
@@ -182,11 +178,12 @@ fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal(
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;
     let mut case = ux_tools::Case::new("loft");
-    for layout in [soliddraft_app::settings::FrameLayout::Classic, soliddraft_app::settings::FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut doc = profiles();
         doc.selection = Some(Selection::Feature(doc.features[0].id));
         let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
-        app.state_mut().state.frame_layout = layout;
+
         app.state_mut()
             .state
             .viewport
@@ -197,7 +194,7 @@ fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal(
         ux_tools::settle(&mut app);
         assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
         assert!(app.query_by_label("Loft needs at least two profiles in order").is_some());
-        app.get_by_label(finish_label(layout)).click();
+        app.get_by_label("OK").click();
         ux_tools::settle(&mut app);
         assert!(app.state().state.editor.is_some());
         assert_eq!(app.state().state.doc.features.len(), 3);
@@ -211,7 +208,7 @@ fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal(
         assert!(app.state().state.editor.as_ref().unwrap().error.is_none());
         assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
         case.frame(&mut app, &format!("{layout:?}-preview"));
-        app.get_by_label(finish_label(layout)).click();
+        app.get_by_label("OK").click();
         ux_tools::settle(&mut app);
         ux_tools::rebuilt(&mut app);
         assert!(matches!(app.state().state.doc.features[3].kind, FeatureKind::Loft(_)));
@@ -236,13 +233,14 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;
     let mut case = ux_tools::Case::new("loft-edit");
-    for layout in [soliddraft_app::settings::FrameLayout::Classic, soliddraft_app::settings::FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut doc = profiles();
         call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
         let id = doc.features.last().unwrap().id;
         doc.selection = Some(Selection::Feature(id));
         let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
-        app.state_mut().state.frame_layout = layout;
+
         app.state_mut()
             .state
             .viewport
@@ -261,10 +259,10 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
         ux_tools::settle(&mut app);
         app.get_all_by_label("Sketch3").last().unwrap().click();
         ux_tools::settle(&mut app);
-        if layout == soliddraft_app::settings::FrameLayout::EditSuite {
-            app.get_by_value("Ruled").click();
-            ux_tools::settle(&mut app);
-        }
+
+        app.get_by_value("Ruled").click();
+        ux_tools::settle(&mut app);
+
         app.get_by_label("Smooth").click();
         ux_tools::settle(&mut app);
         let editor = app.state().state.editor.as_ref().unwrap();
@@ -276,7 +274,7 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
         assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
             if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Ruled));
         case.frame(&mut app, &format!("{layout:?}-edited-preview"));
-        app.get_by_label(finish_label(layout)).click();
+        app.get_by_label("OK").click();
         ux_tools::settle(&mut app);
         ux_tools::rebuilt(&mut app);
         assert!(app.state().state.editor.is_none());

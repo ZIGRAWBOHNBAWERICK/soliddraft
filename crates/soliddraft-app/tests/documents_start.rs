@@ -7,7 +7,7 @@
 //!
 //! Frames land under `target/ribbon-acceptance/<case>/`.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::vec2;

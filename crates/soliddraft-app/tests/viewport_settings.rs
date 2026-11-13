@@ -231,5 +231,5 @@ fn edit_suite_starts_with_origin_axes_and_keeps_an_explicit_choice() {
     case.seed_settings(r#"{"frame_layout":"edit_suite","view":{"always_show_origin_axes":false}}"#);
     assert!(!view_unchanged(&case).references.always_show_origin_axes);
     case.seed_settings(r#"{"frame_layout":"classic"}"#);
-    assert!(!view_unchanged(&case).references.always_show_origin_axes);
+    assert!(view_unchanged(&case).references.always_show_origin_axes);
 }

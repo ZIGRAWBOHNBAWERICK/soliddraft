@@ -176,14 +176,10 @@ fn circular_cut_uses_quarter_turns_and_preserves_the_part_on_exact_parameter_ref
     volume(&s, 768.0);
 }
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 use egui_kittest::kittest::{NodeT, Queryable};
 use soliddraft_app::state::{AppAction, EditorParams};
-
-fn finish_label(app: &ribbon::App) -> &'static str {
-    if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }
-}
 
 fn field(app: &mut ribbon::App, label: &str, value: &str) {
     app.get_by_label(label).click();
@@ -210,7 +206,7 @@ fn distance_commands_render_in_both_frames_and_hide_pins_during_sketches() {
             app.run_steps(5);
             field(app, "Offset value", "-1");
             assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
-            app.get_by_label(finish_label(app)).click();
+            app.get_by_label("OK").click();
             app.run_steps(10);
             volume(&app.state().state, 192.0);
             let id = app.state().state.doc.features.last().unwrap().id;
@@ -222,7 +218,7 @@ fn distance_commands_render_in_both_frames_and_hide_pins_during_sketches() {
             assert!(editor.preview.result.is_none());
             case.frame(app, &format!("{frame}-offset-refused"));
             field(app, "Offset value", "-0.5");
-            app.get_by_label(finish_label(app)).click();
+            app.get_by_label("OK").click();
             app.run_steps(10);
             volume(&app.state().state, 315.0);
             case.frame(app, &format!("{frame}-offset"));
@@ -271,7 +267,7 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
             app.get_by_label("Back").click();
             app.run_steps(4);
             assert_eq!(app.get_by_label("Thicken side").accesskit_node().value().as_deref(), Some("Back"));
-            app.get_by_label(finish_label(app)).click();
+            app.get_by_label("OK").click();
             app.run_steps(10);
             volume(&app.state().state, 80.0);
             case.frame(app, &format!("{frame}-thicken-back"));
@@ -290,7 +286,7 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
             assert_eq!(p.source, Some(soliddraft_model::FeatureId(source as u32)));
             assert_eq!(app.get_by_label("Pattern source").accesskit_node().value().as_deref(), Some("Cut-Extrude1"));
             case.frame(app, &format!("{frame}-selected-feature-pattern"));
-            app.get_by_label(finish_label(app)).click();
+            app.get_by_label("OK").click();
             app.run_steps(10);
             volume(&app.state().state, 768.0);
             case.frame(app, &format!("{frame}-patterned-cuts"));

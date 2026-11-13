@@ -9,7 +9,7 @@ use serde_json::Value;
 use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureId, FeatureKind, ProfileKind};
 use soliddraft_app::viewport::dimensions::DimensionTarget;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;

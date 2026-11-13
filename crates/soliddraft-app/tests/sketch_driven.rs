@@ -1,6 +1,6 @@
 //! Dimension placement and reference annotations through native sketch input.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, pos2, vec2};

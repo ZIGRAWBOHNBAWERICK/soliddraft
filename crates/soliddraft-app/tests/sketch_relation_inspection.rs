@@ -1,6 +1,6 @@
 //! Relation inspection through property rows and canvas glyphs.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, Rect, Shape, pos2, vec2};

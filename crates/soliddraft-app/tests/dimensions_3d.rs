@@ -7,7 +7,7 @@ use soliddraft_app::viewport::camera::StandardView;
 use soliddraft_app::viewport::dimensions::{DimensionTarget, ShownDimension};
 use soliddraft_model::view::AnnotationKey;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 use ribbon::App;
 

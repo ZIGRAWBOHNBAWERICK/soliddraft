@@ -1,7 +1,7 @@
 //! L14, L22 and F14 through the app, rendered frames and the real proof worker.
 
 mod gated;
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Rect, pos2, vec2};
@@ -13,7 +13,7 @@ use soliddraft_app::chat::ChatState;
 use soliddraft_app::document::{
     AnswerBound, Command, Document, ExtrudeParams, FeatureStatus, PlaneKind, ProfileKind, Reference, Selection,
 };
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::{AppAction, Tool};
 use soliddraft_assistant::tools::call_checked;
 use soliddraft_assistant::{Caller, MockProvider, MockTurn};
@@ -388,7 +388,7 @@ fn bounded_fixtures_reject_answers_outside_the_declared_limit_or_without_a_defin
 
 fn suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.layout.tree.shown = false;
     app.run_steps(8);
     app

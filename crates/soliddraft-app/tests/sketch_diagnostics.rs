@@ -1,6 +1,6 @@
 //! Read-only profile diagnostics through the real sketch property panel.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, Shape, pos2, vec2};

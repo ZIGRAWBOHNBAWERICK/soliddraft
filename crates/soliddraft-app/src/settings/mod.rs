@@ -55,24 +55,6 @@ fn assistant_from(all: &Value) -> AssistantSettings {
     serde_json::from_value(all["assistant"].clone()).unwrap_or_default()
 }
 
-/// Internal frame selection during the layout rebuild. No preference control exposes it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FrameLayout {
-    #[default]
-    Classic,
-    EditSuite,
-}
-
-/// Reads the internal `frame_layout` key. Older and unknown values keep the classic frame.
-pub fn frame_layout() -> FrameLayout {
-    frame_layout_from(&stored())
-}
-
-fn frame_layout_from(all: &Value) -> FrameLayout {
-    serde_json::from_value(all["frame_layout"].clone()).unwrap_or_default()
-}
-
 /// The panel layout, or the default when there is none or it is unreadable.
 pub fn layout() -> Layout {
     layout_from(&stored())
@@ -85,8 +67,7 @@ pub fn save_layout(layout: &Layout) -> Result<(), NotKept> {
 
 fn layout_from(all: &Value) -> Layout {
     let mut layout = serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped();
-    if frame_layout_from(all) == FrameLayout::EditSuite
-        && all["layout"]["suite"].is_null()
+    if all["layout"]["suite"].is_null()
         && let Some(shown) = all["layout"]["tree"]["shown"].as_bool()
     {
         layout.suite.part = shown;
@@ -219,7 +200,7 @@ pub struct ReferenceDisplay {
 
 impl Default for ReferenceDisplay {
     fn default() -> Self {
-        Self { show_grid: true, show_origin_planes: true, always_show_origin_axes: false }
+        Self { show_grid: true, show_origin_planes: true, always_show_origin_axes: true }
     }
 }
 
@@ -278,10 +259,7 @@ pub fn save_grid_style(style: &GridStyle) -> Result<(), NotKept> {
 
 fn view_from(all: &Value) -> ViewSettings {
     let view = &all["view"];
-    let shown = ReferenceDisplay {
-        always_show_origin_axes: frame_layout_from(all) == FrameLayout::EditSuite,
-        ..ReferenceDisplay::default()
-    };
+    let shown = ReferenceDisplay { always_show_origin_axes: true, ..ReferenceDisplay::default() };
     let flag = |key: &str, default| view[key].as_bool().unwrap_or(default);
     ViewSettings {
         preset: serde_json::from_value(view["preset"].clone()).unwrap_or_default(),
@@ -507,19 +485,39 @@ mod tests {
     }
 
     #[test]
-    fn internal_frame_layout_defaults_and_accepts_both_frames() {
-        for all in [
-            serde_json::json!({}),
-            serde_json::json!({"frame_layout": "unknown"}),
-            serde_json::json!({"frame_layout": null}),
-            serde_json::json!({"frame_layout": 7}),
+    fn legacy_frame_settings_keep_panel_and_view_choices() {
+        for frame in [
+            serde_json::json!("classic"),
+            serde_json::json!("edit_suite"),
+            serde_json::json!("future"),
+            serde_json::json!(null),
         ] {
-            assert_eq!(frame_layout_from(&all), FrameLayout::Classic);
+            let all = serde_json::json!({
+                "frame_layout": frame,
+                "layout": {"tree": {"shown": true, "width": 300.0}},
+                "view": {"scene": "graphite", "show_grid": false, "always_show_origin_axes": false},
+                "commands": {"pinned": ["extrude", "sweep"]},
+                "future": {"keep": 7}
+            });
+            let layout = layout_from(&all);
+            assert!(layout.suite.part);
+            assert_eq!(layout.tree.width, 300.0);
+            let view = view_from(&all);
+            assert_eq!(view.scene, Scene::Graphite);
+            assert!(!view.references.show_grid);
+            assert!(!view.references.always_show_origin_axes);
+            assert_eq!(command_history_from(&all).pinned, ["extrude", "sweep"]);
         }
-        for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
-            let all = serde_json::json!({"frame_layout": layout, "layout": {"tree_width": 300}});
-            assert_eq!(frame_layout_from(&all), layout);
-        }
+        assert!(!layout_from(&serde_json::json!({})).suite.part);
+        assert!(view_from(&serde_json::json!({"frame_layout": "classic"})).references.always_show_origin_axes);
+        assert!(
+            !layout_from(&serde_json::json!({
+                "layout": {"tree": {"shown": true}, "suite": {"part": false}}
+            }))
+            .suite
+            .part,
+            "an explicit pane choice wins over the legacy tree setting"
+        );
     }
 
     #[test]

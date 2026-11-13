@@ -1,6 +1,6 @@
 //! Pointer creation, preview, cancellation, history and reopen for ellipse tools.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Pos2};

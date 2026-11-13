@@ -399,55 +399,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let (is_sketch, suppressed, index) = (item.is_sketch, item.suppressed, item.index);
             let needs_repair = matches!(item.status, FeatureStatus::NeedsRepair(_));
             let name = item.name.clone();
-            if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                if !state.in_sketch() {
-                    crate::context_menu::show(
-                        state,
-                        &resp,
-                        crate::context_menu::Target::Feature,
-                        Some(Selection::Feature(id)),
-                    );
-                }
-            } else {
-                resp.context_menu(|ui| {
-                    if ui.button(if is_sketch { "Edit sketch" } else { "Edit feature" }).clicked() {
-                        actions.push(if is_sketch { AppAction::EditSketch(id) } else { AppAction::EditFeature(id) });
-                        ui.close();
-                    }
-                    if needs_repair && ui.button("Repair references…").clicked() {
-                        actions.push(AppAction::StartRepair(id));
-                        ui.close();
-                    }
-                    let rename_key = state.shortcuts.shortcut_text("rename").unwrap_or_default();
-                    if ui.add(egui::Button::new("Rename").shortcut_text(rename_key)).clicked() {
-                        state.rename = Some(Rename { feature: id, text: name.clone(), focus: true });
-                        ui.close();
-                    }
-                    if ui.button(if suppressed { "Unsuppress" } else { "Suppress" }).clicked() {
-                        actions.push(AppAction::Command(Command::Suppress { id, suppressed: !suppressed }));
-                        ui.close();
-                    }
-                    if ui.button("Roll back to here").clicked() {
-                        actions.push(AppAction::Command(Command::Rollback(Some(index + 1))));
-                        ui.close();
-                    }
-                    if ui.button("Zoom to fit").clicked() {
-                        actions.push(AppAction::ZoomFit);
-                        ui.close();
-                    }
-                    ui.separator();
-                    let delete_key = state.shortcuts.shortcut_text("delete").unwrap_or_default();
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("Delete").color(theme::error()))
-                                .shortcut_text(delete_key),
-                        )
-                        .clicked()
-                    {
-                        actions.push(AppAction::Command(Command::DeleteFeature(id)));
-                        ui.close();
-                    }
-                });
+
+            if !state.in_sketch() {
+                crate::context_menu::show(
+                    state,
+                    &resp,
+                    crate::context_menu::Target::Feature,
+                    Some(Selection::Feature(id)),
+                );
             }
         }
         if !bar_drawn && !items.is_empty() {

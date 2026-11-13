@@ -163,7 +163,7 @@ pub struct ViewportState {
     pub camera: Camera,
     pub display: DisplayMode,
     pub preset: Preset,
-    /// Named background in Edit Suite; classic keeps the theme fade.
+    /// Named background; offscreen views can use the theme fade.
     pub scene: Option<scenes::Scene>,
     pub(crate) context_menus: bool,
     context_pick: Option<ContextPick>,
@@ -467,7 +467,7 @@ impl ViewportState {
                 rect,
                 &response,
                 spacing,
-                theme::is_edit_suite() && self.scene.is_some_and(scenes::Scene::is_dark),
+                self.scene.is_some_and(scenes::Scene::is_dark),
             );
             ui.ctx().request_repaint();
         }
@@ -910,21 +910,20 @@ impl ViewportState {
         sketch_dimensions: Option<bool>,
         allow_dimensions: bool,
     ) {
-        if theme::is_edit_suite() {
-            self.navigation_bar.show(
-                ui,
-                rect,
-                &mut self.camera,
-                self.display,
-                self.scene.unwrap_or_default(),
-                &mut self.references,
-                &mut self.all_dimensions,
-                sketch_dimensions,
-                allow_dimensions,
-                events,
-            );
-            return;
-        }
+        self.navigation_bar.show(
+            ui,
+            rect,
+            &mut self.camera,
+            self.display,
+            self.scene.unwrap_or_default(),
+            &mut self.references,
+            &mut self.all_dimensions,
+            sketch_dimensions,
+            allow_dimensions,
+            events,
+        );
+        return;
+
         let height = 30.0;
         let items: Vec<HudItem> = vec![
             HudItem::Icon(Icon::Home, "Isometric view (I)"),
@@ -1043,7 +1042,7 @@ impl ViewportState {
     }
 
     fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>) {
-        let rect = if theme::is_edit_suite() { Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0)) } else { rect };
+        let rect = Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0));
         let proj = if self.camera.orthographic { "Orthographic" } else { "Perspective" };
         let text =
             format!("mm · {} · {} · {} · {}", self.camera.view_name, self.display.label(), self.preset.label(), proj);

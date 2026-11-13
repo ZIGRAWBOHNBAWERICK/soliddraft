@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use ribbon::App;
@@ -290,7 +290,7 @@ fn type_radius(case: &Case, app: &mut App, value: &str) {
 /// The panel's own OK button.
 fn click_ok(case: &Case, app: &mut App) {
     case.note("click OK");
-    let rect = ribbon::button_rect(app, "OK (Enter)", ribbon::window(app));
+    let rect = ribbon::button_rect(app, "OK", ribbon::window(app));
     ribbon::click_at(app, rect.center());
     settle(app);
 }

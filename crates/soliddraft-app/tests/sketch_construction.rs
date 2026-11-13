@@ -1,6 +1,6 @@
 //! Construction retention and dedicated centreline placement through native input.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2};

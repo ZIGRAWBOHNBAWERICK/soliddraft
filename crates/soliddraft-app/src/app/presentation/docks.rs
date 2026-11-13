@@ -5,10 +5,10 @@ use crate::icons::{self, Icon};
 use crate::panels::Side;
 use crate::state::{AppAction, AppState};
 use crate::theme;
+use crate::tree;
 use crate::viewport::Overlay;
-use crate::{properties, tree};
 use egui::{CornerRadius, Rect, Sense, pos2, vec2};
-use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
+use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::dispatch::selection_of;
 
@@ -17,7 +17,6 @@ pub enum Tab {
     Tree,
     /// Globals, the numbers typed into features and the configurations, beside the tree.
     Values,
-    Properties,
     Viewport,
     /// The drawing document, opened beside the part by Make drawing.
     Drawing,
@@ -30,7 +29,6 @@ impl Tab {
         match self {
             Tab::Tree => "Tree",
             Tab::Values => "Values",
-            Tab::Properties => "Properties",
             Tab::Viewport => "Part",
             Tab::Drawing => "Drawing",
             Tab::Assembly => "Assembly",
@@ -43,12 +41,9 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
     DockState::new(vec![Tab::Viewport])
 }
 
-/// The left side area: the feature tree and the Values tab, with the property panel under
-/// them.
+/// The optional tree pane and its Values tab.
 pub(in crate::app) fn tree_dock() -> DockState<Tab> {
-    let mut dock = DockState::new(vec![Tab::Tree, Tab::Values]);
-    dock.main_surface_mut().split_below(NodeIndex::root(), 0.46, vec![Tab::Properties]);
-    dock
+    DockState::new(vec![Tab::Tree, Tab::Values])
 }
 
 /// A dock area in the app's style, without the buttons the shell does not use.
@@ -131,18 +126,10 @@ impl TabViewer for Panels<'_> {
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         match tab {
             Tab::Tree if self.state.assembly.is_active() => crate::assembly::tree(ui, self.state),
-            Tab::Properties if self.state.assembly.is_active() => crate::assembly::properties(ui, self.state),
             Tab::Assembly => crate::assembly::viewport(ui, self.state),
             Tab::Tree if self.state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, self.state),
             Tab::Tree => tree::show(ui, self.state),
             Tab::Values => crate::values_tab::show(ui, self.state),
-            Tab::Properties if self.state.drawing.new.is_some() && !self.state.drawing.is_active() => {
-                crate::drawing::properties_drawing::new_drawing(ui, self.state)
-            }
-            Tab::Properties if self.state.drawing.is_active() => {
-                crate::drawing::properties_drawing::show(ui, self.state)
-            }
-            Tab::Properties => properties::show(ui, self.state),
             Tab::Drawing => crate::drawing::canvas::show(ui, self.state),
             Tab::Viewport => {
                 let st = &mut *self.state;
@@ -163,10 +150,10 @@ impl TabViewer for Panels<'_> {
                     })
                     .collect();
                 let pick_filter = st.selection_filter();
-                st.viewport.context_menus = st.frame_layout == crate::settings::FrameLayout::EditSuite;
+                st.viewport.context_menus = true;
                 let overlay = Overlay {
                     pick_filter,
-                    dimensions_on_geometry: st.frame_layout == crate::settings::FrameLayout::EditSuite,
+                    dimensions_on_geometry: true,
                     ghost,
                     preview,
                     sketch: st.sketch.as_mut(),
@@ -177,9 +164,7 @@ impl TabViewer for Panels<'_> {
                 };
                 let events = st.viewport.show(ui, &st.doc, overlay, selection, hover_label.as_deref(), &st.navigation);
                 st.after_viewport(ui, &events);
-                if st.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && let Some(response) = &events.context_response
-                {
+                if let Some(response) = &events.context_response {
                     let selection = pick_filter.selection(
                         events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p)),
                     );

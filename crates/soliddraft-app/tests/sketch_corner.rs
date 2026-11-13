@@ -1,6 +1,6 @@
 //! Corner trim through the existing Trim tool panel and real pointer picks.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, pos2, vec2};
@@ -62,7 +62,7 @@ fn frame(app: &mut App, name: &str) {
 
 fn corner_mode(app: &mut App) {
     let window = ribbon::window(app);
-    let band = ribbon::ribbon_region(app);
+    let band = ribbon::palette_region(app);
     if !app.query_all(By::new().role(egui::accesskit::Role::Button).label("Trim")).any(|n| band.intersects(n.rect())) {
         ribbon::click_button(app, "Modify group", window);
     }

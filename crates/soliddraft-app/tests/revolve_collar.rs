@@ -111,7 +111,7 @@ fn revolve_ribbon_opens_and_commits_the_real_editor() {
         harness.state().state.editor.as_ref().unwrap().params,
         soliddraft_app::state::EditorParams::Revolve(_)
     ));
-    harness.get_by_label("OK (Enter)").click();
+    harness.get_by_label("OK").click();
     harness.run_steps(4);
     assert!(harness.state().state.editor.is_none());
     assert!(matches!(harness.state().state.doc.features[1].kind, FeatureKind::Revolve(_)));

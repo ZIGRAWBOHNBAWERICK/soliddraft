@@ -1,6 +1,6 @@
 //! Trim-to-closest and power trim through real pointer input, including sparse samples.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, PointerButton, Pos2, pos2, vec2};

@@ -15,7 +15,7 @@ use soliddraft_app::sketch::{Entity, EntityId, EntityKind, P2, profile};
 use soliddraft_app::sketcher::Frame;
 use soliddraft_app::state::{SketchSession, Tool};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -159,7 +159,7 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
             "sketch_linear_pattern",
             "sketch_circular_pattern",
         ] {
-            let button = ribbon::reveal_ribbon_command(app, id);
+            let button = ribbon::reveal_command(app, id);
             assert!(button.enabled, "{id} is enabled in a sketch");
             ribbon::click_at(app, button.rect.center());
             assert_eq!(
@@ -167,25 +167,15 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
                 soliddraft_app::commands::get(id).unwrap().label,
                 "{id} runs its registered tool"
             );
-            ribbon::dismiss_ribbon_popup(app);
         }
         case.frame(app, "01-sketch-tab");
 
         // Polygon: the centre on the origin, the vertex under the pointer, previewed live.
         ribbon::run_command(app, "sketch_polygon");
         assert_eq!(session(app).tool, Tool::Polygon);
-        assert!(ribbon::reveal_ribbon_command(app, "sketch_polygon").selected, "the tile is lit");
-        ribbon::dismiss_ribbon_popup(app);
+        assert!(ribbon::reveal_command(app, "sketch_polygon").selected, "the tile is lit");
+
         assert_eq!(session(app).tool, Tool::Polygon, "inspecting the tile keeps the tool active");
-        let band = ribbon::ribbon_region(app);
-        let active = if ribbon::buttons_in(app, band).iter().any(|(name, _)| name == "Polygon") {
-            "Polygon"
-        } else {
-            "Modify group"
-        };
-        assert!(ribbon::ribbon_button(app, active).selected, "the tool or its folded group is lit");
-        assert!(ribbon::reveal_ribbon_command(app, "sketch_polygon").selected, "the tile is lit");
-        ribbon::dismiss_ribbon_popup(app);
         assert_eq!(session(app).tool, Tool::Polygon, "inspecting the tile keeps the tool active");
         sketch_click(app, P2::ZERO);
         assert_eq!(session(app).pending.len(), 1, "the centre is placed");

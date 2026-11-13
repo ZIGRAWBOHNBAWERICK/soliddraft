@@ -477,9 +477,9 @@ pub fn replace(state: &mut AppState, doc: AssemblyDocument, scene: Scene) {
 fn install(state: &mut AppState, mut session: AssemblySession) {
     state.assembly.workspace = Workspace::Assembly;
     state.assembly.tree_hidden = false;
-    if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-        session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
-    }
+
+    session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
+
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;

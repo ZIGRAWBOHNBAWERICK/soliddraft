@@ -1,6 +1,6 @@
 //! Native corner treatments and splits preview, cancel, commit and reopen.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2};

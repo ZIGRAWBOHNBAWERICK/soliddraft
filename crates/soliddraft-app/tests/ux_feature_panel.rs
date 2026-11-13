@@ -19,7 +19,7 @@ use soliddraft_app::document::{Command, Document, PlaneKind, Selection, SketchPl
 use soliddraft_app::state::{AppAction, EditorParams};
 use soliddraft_app::theme;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -135,7 +135,7 @@ fn extrude_numbers_line_up_and_tab_walks_them() {
         case.frame(app, "extrude");
         assert_table(app, "Boss-Extrude", &["Width value", "Height value", "Depth value"]);
         assert!(app.query_by_label("Flip direction").is_some(), "the flip stays a labelled checkbox");
-        assert!(app.query_by_label("OK (Enter)").is_some() && app.query_by_label("Cancel (Esc)").is_some());
+        assert!(app.query_by_label("OK").is_some() && app.query_by_label("Cancel").is_some());
 
         // Keyboard: Tab walks the numbers in reading order.
         let width = app.get_by_label("Width value").rect();

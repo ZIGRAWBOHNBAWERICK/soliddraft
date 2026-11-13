@@ -1,6 +1,6 @@
 //! Native point placement, completion, closure and saved history for splines.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Pos2};

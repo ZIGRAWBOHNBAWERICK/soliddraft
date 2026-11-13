@@ -1,6 +1,6 @@
 //! Circle and arc placement through native input.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2};
@@ -140,7 +140,7 @@ fn centrepoint_arc_can_place_a_major_sweep() {
 }
 
 fn property_button(app: &App, label: &str) -> egui::Rect {
-    let band = ribbon::ribbon_region(app);
+    let band = ribbon::palette_region(app);
     app.query_all(By::new().role(egui::accesskit::Role::Button).label(label))
         .find(|n| n.rect().top() >= band.bottom())
         .unwrap_or_else(|| panic!("property tool {label}"))

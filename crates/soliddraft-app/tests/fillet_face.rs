@@ -24,7 +24,7 @@ use soliddraft_app::state::{EditorParams, NoteKind};
 use soliddraft_kernel_api::{EdgeId, FaceId, OpTag, StepOptions};
 use soliddraft_sketch::P2;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use ribbon::render_steps;
@@ -270,9 +270,9 @@ fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(4);
 }
 
-/// The panel's own OK button, labelled with its shortcut ("OK (Enter)").
+/// The panel's own OK button, labelled with its shortcut ("OK").
 fn ok(app: &mut App) {
-    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK (Enter)")
+    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK")
         .next()
         .expect("the open panel has an OK button")
         .click();

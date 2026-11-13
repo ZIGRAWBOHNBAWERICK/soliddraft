@@ -117,7 +117,7 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
     if let Some(command) = pending {
         state.run_command(command);
     }
-    crate::ribbon::relations(ui, state, tab, relations_anchor);
+    relations(ui, state, tab, relations_anchor);
 }
 
 fn text(ui: &egui::Ui, state: &AppState, command: &CommandSpec, width: f32) -> std::sync::Arc<egui::Galley> {
@@ -202,4 +202,30 @@ fn tile(
         ui.painter().galley(at, galley, theme::ink());
     }
     response.on_hover_text(format!("{}\n{}", label(command, state), command.tip(state)))
+}
+
+/// Opens relations beside the palette command.
+fn relations(ui: &egui::Ui, state: &mut AppState, tab: Tab, anchor: Rect) {
+    if let Some(s) = state.sketch.as_mut() {
+        if tab != Tab::Part(RibbonTab::Sketch) {
+            s.relations_open = false;
+            return;
+        }
+        let mut open = s.relations_open;
+        let align = egui::RectAlign::RIGHT_START;
+        let action = egui::Popup::new(ui.id().with("sketch_relations"), ui.ctx().clone(), anchor, ui.layer_id())
+            .align(align)
+            .kind(egui::PopupKind::Menu)
+            .open_bool(&mut open)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .layout(egui::Layout::top_down_justified(egui::Align::Min))
+            .width(220.0)
+            .gap(4.0)
+            .show(|ui| crate::sketcher::relations_menu(ui, s))
+            .and_then(|shown| shown.inner);
+        s.relations_open = open;
+        if let Some(action) = action {
+            state.push(action);
+        }
+    }
 }

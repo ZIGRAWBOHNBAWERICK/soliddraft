@@ -1,6 +1,6 @@
 //! Edit Suite palette acceptance through the real app, pointer and renderer.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Rect, pos2, vec2};
@@ -8,7 +8,7 @@ use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::commands::{self, KeyChord, ShortcutPreset, Shortcuts};
 use soliddraft_app::document::{PlaneKind, Reference, Selection, ViewItem};
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::{RibbonTab, Tool};
 use soliddraft_app::theme::{self, Mode};
 
@@ -33,7 +33,7 @@ fn start_sketch(app: &mut App) {
 fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
     let case = ribbon::case("tool-palette-plane-pick");
     let mut app = ribbon::app(ribbon::blank());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.viewport.references.show_origin_planes = false;
     app.run_steps(8);
     case.run(&mut app, |app| {
@@ -69,7 +69,7 @@ fn plane_bar(app: &App) -> Rect {
 fn plane_picking_is_temporary_and_cancel_drops_the_pending_tool() {
     let case = ribbon::case("tool-palette-plane-cancel");
     let mut app = ribbon::app(ribbon::blank());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.viewport.references.show_origin_planes = false;
     for plane in PlaneKind::ALL {
         app.state_mut().state.doc.set_view_choice(ViewItem::Plane(plane), Some(false));
@@ -101,7 +101,7 @@ fn sketch_tools_accept_viewport_planes_and_flat_faces() {
     let case = ribbon::case("tool-palette-viewport-plane");
     let mut app = ribbon::app(ribbon::blank());
     assert!(!commands::get("sketch_circle").unwrap().is_enabled(&app.state().state));
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.viewport.references.show_origin_planes = false;
     app.run_steps(8);
     case.run(&mut app, |app| {
@@ -119,7 +119,7 @@ fn sketch_tools_accept_viewport_planes_and_flat_faces() {
         case.frame(app, "right-plane");
     });
     let mut app = ribbon::app(ribbon::plate());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.doc.selection = None;
     app.run_steps(8);
     case.run(&mut app, |app| {
@@ -142,7 +142,7 @@ fn sketch_tools_accept_viewport_planes_and_flat_faces() {
 fn sketch_workspace_locks_and_smart_dimension_leads_the_palette() {
     let case = ribbon::case("tool-palette-sketch-takeover");
     let mut app = ribbon::app(ribbon::blank());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.run_steps(8);
     case.run(&mut app, |app| {
         start_sketch(app);
@@ -157,7 +157,7 @@ fn sketch_workspace_locks_and_smart_dimension_leads_the_palette() {
             app.run_steps(8);
             assert_eq!(app.state().state.ribbon_tab, RibbonTab::Sketch);
         }
-        let painted = ribbon::painted_in(app, ribbon::ribbon_region(app));
+        let painted = ribbon::painted_in(app, ribbon::palette_region(app));
         assert!(painted.iter().any(|p| p.text.contains("Sketch1") && p.text.contains("Top plane")));
         assert!(app.query_all_by_label("Extrude").next().is_none());
         case.frame(app, "locked-workspace");
@@ -172,7 +172,7 @@ fn sketch_workspace_locks_and_smart_dimension_leads_the_palette() {
 fn sketch_keys_follow_every_preset_and_keep_custom_bindings() {
     let case = ribbon::case("tool-palette-sketch-keys");
     let mut app = ribbon::app(ribbon::blank());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.run_steps(8);
     case.run(&mut app, |app| {
         start_sketch(app);
@@ -214,7 +214,7 @@ fn sketch_keys_follow_every_preset_and_keep_custom_bindings() {
 fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
     let case = ribbon::case("tool-palette-registry");
     let mut app = ribbon::app_at(ribbon::blank(), vec2(1440.0, 1800.0), 1.0);
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.run_steps(8);
     case.run(&mut app, |app| {
         let start = ribbon::control(app, "Start sketch", palette(app));
@@ -275,7 +275,7 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
 fn palette_tiles_pin_command_chips_by_id() {
     let case = ribbon::case("tool-palette-chips");
     let mut app = ribbon::app(ribbon::plate());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.run_steps(8);
     case.run(&mut app, |app| {
         let shell = ribbon::control(app, "Shell", palette(app)).rect;
@@ -310,7 +310,7 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
         for scale in [1.0, 2.0] {
             let mut app = ribbon::app_at(ribbon::blank(), vec2(1280.0, 600.0), scale);
             theme::set_mode(&app.ctx, mode);
-            app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
             app.run_steps(8);
             case.run(&mut app, |app| {
                 start_sketch(app);

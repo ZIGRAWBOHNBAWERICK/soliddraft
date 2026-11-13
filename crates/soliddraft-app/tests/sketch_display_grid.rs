@@ -1,6 +1,6 @@
 //! Display controls and grid placements through the native sketch editor.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2};

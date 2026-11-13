@@ -62,10 +62,9 @@ fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
 }
 
 fn plane_bar(app: &App) -> Rect {
-    Rect::from_min_max(
-        pos2(0.0, theme::MENU_HEIGHT + theme::RIBBON_TABS_HEIGHT),
-        pos2(ribbon::window(app).right(), theme::MENU_HEIGHT + theme::RIBBON_TABS_HEIGHT + 44.0),
-    )
+    egui::PanelState::load(&app.ctx, egui::Id::new("sketch_plane_picker"))
+        .expect("the plane picker is laid out")
+        .outer_rect
 }
 
 #[test]

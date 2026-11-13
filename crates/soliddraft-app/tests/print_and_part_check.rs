@@ -1,6 +1,6 @@
 //! Release checks through the real command queue, report windows and export buttons.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::accesskit::Role;
@@ -46,7 +46,7 @@ fn inspect_check_reports_independent_coverage_and_invalidates_on_undo() {
     let mut app = ribbon::app(counted_plate());
     let before = app.state().state.doc.model().part_json();
     let undo = app.state().state.doc.undo_depth();
-    click(&mut app, "Inspect tab");
+    ribbon::switch_workspace(&mut app, "inspect");
     click(&mut app, "Check");
     settle(&mut app);
     let report = app.state().state.part_check.as_ref().unwrap().result.as_ref().unwrap().as_ref().unwrap();

@@ -39,9 +39,8 @@ fn right_click(app: &mut App, pos: Pos2, model: bool) {
 }
 
 fn tree_row(app: &mut App, name: &str) -> Pos2 {
-    let visible = app
-        .query_all_by_label(name)
-        .any(|node| node.accesskit_node().role() == egui::accesskit::Role::Button);
+    let visible =
+        app.query_all_by_label(name).any(|node| node.accesskit_node().role() == egui::accesskit::Role::Button);
     if !visible {
         ribbon::run_command(app, "toggle_tree");
         app.run_steps(12);

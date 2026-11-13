@@ -825,7 +825,7 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
         let r = Rect::from_center_size(rect.center(), galley.size() + vec2(28.0, 14.0));
         painter.rect_filled(r, egui::CornerRadius::same(99), theme::hud_bg());
         painter.rect_stroke(r, egui::CornerRadius::same(99), Stroke::new(1.0, theme::line()), egui::StrokeKind::Inside);
-        painter.galley(r.center() - galley.size() / 2.0, galley, theme::muted());
+        painter.galley(r.center() - galley.rect.center().to_vec2(), galley, theme::muted());
     }
 }
 

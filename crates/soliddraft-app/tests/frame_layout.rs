@@ -201,7 +201,8 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
             .into_iter()
             .find(|text| text.text.starts_with("Insert component, or drop"))
             .expect("an empty assembly explains how to add parts");
-        assert!(viewport.contains_rect(hint.rect), "the empty assembly hint fits the viewport");
+        assert!(viewport.contains_rect(hint.full), "the whole empty assembly hint fits the viewport");
+        case.frame(app, "assembly-empty-960");
         let more = app.get_by_label("More (2)").rect();
         ribbon::click_at(app, more.center());
         app.run_steps(8);

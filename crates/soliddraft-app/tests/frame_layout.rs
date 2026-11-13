@@ -90,7 +90,12 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
                     assert!(!menu.intersects(sketch));
                     ribbon::click_at(app, menu.center());
                     app.run_steps(4);
-                    assert!(app.query_all_by_label("File").next().is_some(), "compact menus remain reachable");
+                    let file = app.get_by_label_contains("File").rect();
+                    ribbon::click_at(app, file.center());
+                    app.run_steps(4);
+                    assert!(app.query_all_by_label_contains("New part").next().is_some(), "compact File commands remain reachable");
+                    app.key_press(Key::Escape);
+                    app.run_steps(4);
                     app.key_press(Key::Escape);
                     app.run_steps(4);
                 }

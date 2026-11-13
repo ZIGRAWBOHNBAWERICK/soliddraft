@@ -371,7 +371,7 @@ pub enum Line {
         /// Unite the reflection with the original.
         keep_original: bool,
     },
-    /// Replaces the finished body with a terminal cubic lattice.
+    /// Replaces the finished body with a terminal lattice.
     Lattice { cell: soliddraft_kernel_api::LatticeCell, cell_size: f64, radius: f64, accuracy: f64, min_detail: f64 },
     /// Edits only the supplied lattice settings.
     EditLattice {

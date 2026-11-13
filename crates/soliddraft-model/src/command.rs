@@ -604,10 +604,10 @@ impl Document {
                 Err(CommandError::Invalid(format!("size must be positive, got {}", b.size)))
             }
             FeatureKind::Chamfer(b) if b.other_distance.is_some_and(|d| !d.is_finite() || d <= 0.0) => {
-                return Err(CommandError::Invalid("the second chamfer distance must be positive and finite".into()));
+                Err(CommandError::Invalid("the second chamfer distance must be positive and finite".into()))
             }
             FeatureKind::Fillet(b) if b.other_distance.is_some() => {
-                return Err(CommandError::Invalid("a fillet has no second distance".into()));
+                Err(CommandError::Invalid("a fillet has no second distance".into()))
             }
             FeatureKind::Fillet(b) | FeatureKind::Chamfer(b) if b.edges.is_empty() => {
                 Err(CommandError::Invalid("a fillet or chamfer needs at least one edge".into()))

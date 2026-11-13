@@ -976,7 +976,7 @@ impl Document {
     fn build_lattice(&self, f: &Feature, l: &LatticeFeature, current: Option<BodyId>) -> Built {
         let Some(body) = current else { return Built::failed(current, "there is no body to lattice") };
         let (Some(cell), Some(cell_size_mm), Some(radius_mm)) = (l.cell, l.cell_size_mm, l.radius_mm) else {
-            return Built::failed(current, "lattice is missing cell size and density; configure the cubic cell");
+            return Built::failed(current, "lattice is missing cell size and density; configure the cell");
         };
         let params = Lattice {
             cell,

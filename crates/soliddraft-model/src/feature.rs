@@ -582,7 +582,7 @@ pub struct LatticeFeature {
     /// Missing in legacy files, which keep their earlier body visible until configured.
     #[serde(default)]
     pub cell: Option<soliddraft_kernel_api::LatticeCell>,
-    /// Cubic cell edge length, in millimetres.
+    /// Cell edge length, in millimetres.
     #[serde(default)]
     pub cell_size_mm: Option<f64>,
     /// Density as the beam radius in millimetres: one value, or a linear grade along a

@@ -1073,7 +1073,8 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             EditorParams::Lattice(l) => {
-                section(ui, if edit_suite { "Lattice" } else { "Cubic lattice" }, |ui| {
+                let title = l.cell.map_or("Lattice".to_owned(), |cell| format!("{} lattice", cell.label()));
+                section(ui, if edit_suite { "Lattice" } else { &title }, |ui| {
                     if edit_suite {
                         let cell = l.cell.get_or_insert(soliddraft_kernel_api::LatticeCell::Cubic);
                         egui::ComboBox::from_label("Cell type").selected_text(cell.label()).show_ui(ui, |ui| {
@@ -1991,7 +1992,8 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
         {
             state.note(error, crate::state::NoteKind::Error);
         }
-        if let Some(body) = state.doc.display_body()
+        if state.doc.proof_state().current_proved_display()
+            && let Some(body) = state.doc.display_body()
             && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
         {
             ui.label(format!("Volume: {:.3} mm³", properties.volume));

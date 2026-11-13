@@ -1869,7 +1869,7 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Chamfer needs a body".into())))
             .agents(Agents::Verb, "", tools::chamfer_params)
 .undo(Undo::Step),
-        cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal cubic lattice")
+        cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal lattice")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartLattice)
             .when(|s| has_body(s) && field_open(s))
@@ -1877,7 +1877,7 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Lattice needs a body".into())))
             .agents(Agents::Verb, "Density is the constant beam radius. The preview is unproved; export certifies the mesh.", tools::lattice_params)
             .undo(Undo::Step),
-        cmd("edit_lattice", "Edit lattice", Icon::Cad("lattice"), "Change lattice density and output settings")
+        cmd("edit_lattice", "Edit lattice", Icon::Cad("lattice"), "Change lattice cell, density and output settings")
             .agents(Agents::Verb, "Only supplied settings change.", tools::edit_lattice_params)
             .undo(Undo::Step),
         cmd("gyroid", "Gyroid", Icon::Cad("lattice"), "Make a terminal network gyroid")

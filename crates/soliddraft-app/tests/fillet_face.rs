@@ -851,7 +851,12 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     app.get_by_label("Two distances").click();
     app.run_steps(4);
     type_field(&mut app, "Distance value", "1");
+    type_field(&mut app, "Second distance value", "-1");
+    ok(&mut app);
+    assert!(app.state().state.editor.is_some(), "a refused second distance keeps the editor open");
+    assert_eq!(app.state().state.doc.features.len(), 1);
     type_field(&mut app, "Second distance value", "3");
+    app.render().unwrap().save(proof_folder().join("ridealong-chamfer-editor.png")).unwrap();
     ok(&mut app);
     let state = &app.state().state;
     assert!(state.editor.is_none());
@@ -886,4 +891,40 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::Classic;
     app.run_steps(4);
     assert!(app.query_by_label("Carrier accuracy").is_none());
+}
+
+#[test]
+fn ridealong_edit_suite_displays_fitted_face_deviation() {
+    use soliddraft_app::app_tools::AppTools;
+    use soliddraft_app::state::{AppAction, AppState};
+    use soliddraft_assistant::{Caller, tools::call_checked};
+    use soliddraft_kernel_api::FaceAccuracy;
+    let _gpu = gpu();
+    let scenario: serde_json::Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
+    let mut state = AppState::new(Document::new("Fitted face", soliddraft_app::kernel()));
+    for step in scenario["steps"].as_array().unwrap().iter().take(5) {
+        let out = call_checked(
+            &mut AppTools { state: &mut state },
+            step["tool"].as_str().unwrap(),
+            step["arguments"].clone(),
+            &Caller::Mcp { client: "ridealong".into() },
+        );
+        assert!(!out.is_error, "{}", out.content);
+    }
+    let (face, bound) = state
+        .doc
+        .faces
+        .iter()
+        .find_map(|face| match face.accuracy {
+            FaceAccuracy::Fitted { max_deviation_mm } => Some((face.id, max_deviation_mm)),
+            _ => None,
+        })
+        .expect("the rolling envelope has a fit bound");
+    let mut app = harness(state.doc);
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
+    app.run_steps(4);
+    app.get_by_label(&format!("Fitted, deviation ≤ {bound:e} mm"));
+    app.render().unwrap().save(proof_folder().join("ridealong-fitted-face.png")).unwrap();
 }

@@ -192,12 +192,13 @@ fn ridealong_edit_suite_exposes_all_lattice_cells() {
         };
         assert_eq!(lattice.cell, Some(choice));
     }
+    let folder = std::env::var_os("SOLIDDRAFT_TEST_OUT").map(std::path::PathBuf::from).unwrap_or(temporary);
+    std::fs::create_dir_all(&folder).unwrap();
+    app.render().unwrap().save(folder.join("ridealong-lattice-editor.png")).unwrap();
     button(&mut app, "OK (Enter)");
     app.run_steps(30);
     let FeatureKind::Lattice(lattice) = &app.state().state.doc.features.last().unwrap().kind else { panic!("lattice") };
     assert_eq!(lattice.cell, Some(soliddraft_kernel_api::LatticeCell::Octet));
     assert_eq!(app.state().state.doc.features.last().unwrap().status, soliddraft_app::document::FeatureStatus::Ok);
-    let folder = std::env::var_os("SOLIDDRAFT_TEST_OUT").map(std::path::PathBuf::from).unwrap_or(temporary);
-    std::fs::create_dir_all(&folder).unwrap();
     app.render().unwrap().save(folder.join("ridealong-octet.png")).unwrap();
 }

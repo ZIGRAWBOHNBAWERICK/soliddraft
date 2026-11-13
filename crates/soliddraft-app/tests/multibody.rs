@@ -123,6 +123,14 @@ fn new_body_and_combine_are_available_in_the_application() {
         app.run_steps(8);
         assert_eq!(app.state().state.doc.meshes.len(), 2);
         assert_picks(&app.state().state.doc);
+        app.state_mut().state.show_tree(true);
+        app.run_steps(8);
+        app.get_by_label("Solid body").click();
+        app.run_steps(4);
+        assert_eq!(app.state().state.doc.active_body, 0);
+        app.get_by_label("Body 2").click();
+        app.run_steps(4);
+        assert_eq!(app.state().state.doc.active_body, 1);
         case.frame(app, "two-bodies");
         ribbon::run_command(app, "combine");
         app.run_steps(4);

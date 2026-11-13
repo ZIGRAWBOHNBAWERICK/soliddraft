@@ -207,7 +207,8 @@ fn always_on_is_persisted_and_selection_still_overrides_off() {
     // On through the window: with nothing selected the axes show.
     open_grid_and_planes(&mut app);
     assert!(!checked(&app, ALWAYS_SHOW_AXES), "unchecked on a new install");
-    press_label(&mut app, ALWAYS_SHOW_AXES);
+    app.get_by_role_and_label(egui::accesskit::Role::CheckBox, ALWAYS_SHOW_AXES).click();
+    settle(&mut app);
     assert!(checked(&app, ALWAYS_SHOW_AXES));
     close_preferences(&mut app);
     assert_eq!(reference(&app), None);

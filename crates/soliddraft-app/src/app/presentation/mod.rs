@@ -7,7 +7,7 @@ use crate::commands;
 use crate::file;
 use crate::icons::{self, Icon};
 use crate::panels::{self, Side};
-use crate::state::{AppAction, AppState, EditorParams, NoteKind};
+use crate::state::{AppAction, AppState, EditorParams, NoteKind, RibbonTab};
 use crate::theme;
 use crate::viewport::look::Preset;
 use crate::viewport::render::DisplayMode;
@@ -102,6 +102,9 @@ impl SolidDraftApp {
 
     pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         let st = &mut self.state;
+        let edit_suite = st.frame_layout == crate::settings::FrameLayout::EditSuite
+            && !st.drawing.is_active()
+            && !st.assembly.is_active();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let (brand, _) = ui.allocate_exact_size(vec2(96.0, theme::MENU_HEIGHT), Sense::hover());
@@ -121,193 +124,18 @@ impl SolidDraftApp {
             );
             ui.add_space(6.0);
 
-            ui.menu_button("File", |ui| {
-                menu_command(ui, st, "new_part", "New part");
-                menu_command(ui, st, "open", "Open…");
-                menu_command(ui, st, "import_step", "Import STEP…");
-                menu_command(ui, st, "import_iges", "Import IGES…");
-                menu_command(ui, st, "make_drawing", "New drawing from part…");
-                menu_command(ui, st, "new_assembly", "New assembly");
-                menu_command(ui, st, "make_assembly", "Make assembly from part");
-                if ui.add_enabled(st.start.is_none(), egui::Button::new("Start page")).clicked() {
-                    st.push(AppAction::ShowStartPage);
-                    ui.close();
-                }
-                // The browser keeps its recent documents for the start page; it cannot
-                // open a file again by its path.
-                #[cfg(not(target_arch = "wasm32"))]
-                ui.menu_button("Open recent", |ui| {
-                    if st.recent.is_empty() {
-                        ui.add_enabled(false, egui::Button::new("No recent files"));
-                    }
-                    for path in st.recent.clone() {
-                        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
-                            st.push(AppAction::Open(Some(path)));
-                            ui.close();
-                        }
-                    }
-                    ui.separator();
-                    if ui.add_enabled(!st.recent.is_empty(), egui::Button::new("Clear list")).clicked() {
-                        st.push(AppAction::ClearRecent);
-                        ui.close();
-                    }
-                });
-                ui.separator();
-                if st.assembly.is_active() {
-                    menu_command(ui, st, "assembly_save", "Save assembly");
-                    menu_command(ui, st, "assembly_save_as", "Save assembly as…");
-                    menu_command(ui, st, "insert_component", "Insert component…");
-                } else {
-                    menu_command(ui, st, "save", "Save");
-                    menu_command(ui, st, "save_as", "Save as…");
-                }
-                ui.menu_button("Export", |ui| {
-                    menu_command(ui, st, "export_step", "STEP AP242…");
-                    menu_command(ui, st, "export_iges", "IGES 5.3…");
-                    menu_command(ui, st, "export_stl", "STL…");
-                    menu_command(ui, st, "export_3mf", "3MF…");
-                    menu_command(ui, st, "export_obj", "OBJ…");
-                });
-                #[cfg(target_arch = "wasm32")]
-                if crate::journal_browser::has_offers() && ui.button("Crash report journals…").clicked() {
-                    st.push(AppAction::ShowRecovery);
-                    ui.close();
-                }
-                if st.recovery.as_ref().is_some_and(|r| !r.offers.is_empty() || !r.journals.is_empty())
-                    && ui.button("Recover documents…").clicked()
-                {
-                    st.push(AppAction::ShowRecovery);
-                    ui.close();
-                }
-                ui.separator();
-                menu_command(ui, st, "quit", "Quit");
-            });
-            ui.menu_button("Edit", |ui| {
-                // Rebuild sits where SolidWorks keeps it: Edit, Ctrl+B.
-                let drawing = st.drawing.session.as_ref();
-                let rebuild = match drawing.map(|s| s.marker()) {
-                    Some(Some((marker, _))) => format!("Rebuild drawing · {}", marker.to_lowercase()),
-                    _ => "Rebuild drawing".to_owned(),
-                };
-                menu_command(ui, st, "drawing_rebuild", &rebuild);
-                ui.separator();
-                let labels = match st.assembly.session.as_ref().filter(|_| st.assembly.is_active()) {
-                    Some(a) => (a.doc.undo_label(), a.doc.redo_label()),
-                    None => (st.doc.undo_label(), st.doc.redo_label()),
-                };
-                let undo = labels.0.map(|l| format!("Undo {l}")).unwrap_or("Undo".into());
-                let redo = labels.1.map(|l| format!("Redo {l}")).unwrap_or("Redo".into());
-                menu_command(ui, st, "undo", &undo);
-                menu_command(ui, st, "redo", &redo);
-                ui.separator();
-                let feature = st.selected_feature().and_then(|id| st.doc.feature(id));
-                let is_sketch = feature.is_some_and(|f| f.is_sketch());
-                let suppressed = feature.is_some_and(|f| f.suppressed);
-                menu_command(ui, st, "edit_feature", if is_sketch { "Edit sketch" } else { "Edit feature" });
-                menu_command(ui, st, "rename", "Rename feature");
-                menu_command(ui, st, "suppress", if suppressed { "Unsuppress feature" } else { "Suppress feature" });
-                menu_command(ui, st, "delete_feature", "Delete feature");
-                ui.separator();
-                menu_command(ui, st, "roll_to_end", "Roll to end");
-            });
-            ui.menu_button("View", |ui| {
-                for id in
-                    ["view_isometric", "view_front", "view_top", "view_right", "view_back", "view_left", "view_bottom"]
-                {
-                    menu_command(ui, st, id, commands::get(id).map(|c| c.label).unwrap_or(id));
-                }
-                menu_command(ui, st, "normal_to", "Normal to");
-                ui.separator();
-                menu_command(ui, st, "zoom_fit", "Zoom to fit");
-                menu_command(
-                    ui,
-                    st,
-                    "orthographic",
-                    if st.viewport.camera.orthographic { "Perspective" } else { "Orthographic" },
-                );
-                ui.separator();
-                for m in DisplayMode::ALL {
-                    if ui.radio(st.viewport.display == m, m.label()).clicked() {
-                        st.push(AppAction::SetDisplay(m));
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                for p in Preset::ALL {
-                    if ui.radio(st.viewport.preset == p, p.label()).clicked() {
-                        st.push(AppAction::SetPreset(p));
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                for m in theme::Mode::ALL {
-                    if ui.radio(theme::mode() == m, format!("{} theme", m.label())).clicked() {
-                        st.push(AppAction::SetTheme(m));
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if st.frame_layout == crate::settings::FrameLayout::EditSuite {
-                    if ui.button("Tree").clicked() {
-                        st.show_tree(true);
-                        st.values.tree_focus = true;
-                        ui.close();
-                    }
-                    if ui.button("Values").clicked() {
-                        st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
-                        ui.close();
-                    }
-                }
-                for side in Side::ALL {
-                    let shown = st.tree_shown();
-                    let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
-                    if ui.add(egui::Button::selectable(shown, side.title()).shortcut_text(key)).clicked() {
-                        st.push(AppAction::TogglePanel(side));
-                        ui.close();
-                    }
-                }
-            });
-            ui.menu_button("Insert", |ui| {
-                menu_command(ui, st, "sketch", "Sketch");
-                menu_command(ui, st, "extrude", "Boss extrude");
-                menu_command(ui, st, "cut", "Cut extrude");
-                menu_command(ui, st, "fillet", "Fillet");
-                menu_command(ui, st, "chamfer", "Chamfer");
-            });
-            ui.menu_button("Tools", |ui| {
-                menu_command(ui, st, "measure", "Measure");
-                menu_command(ui, st, "check", "Check");
-                if !st.drawing.is_active() && !st.assembly.is_active() {
-                    ui.menu_button("Assistant", |ui| {
-                        menu_command(ui, st, "ask", "Ask");
-                        menu_command(ui, st, "check_model", "Check model");
-                        menu_command(ui, st, "explain", "Explain");
-                        menu_command(ui, st, "summarise", "Summarise");
-                        menu_command(ui, st, "find_issues", "Find issues");
-                        ui.separator();
-                        menu_command(ui, st, "provider_settings", "Provider…");
-                        menu_command(ui, st, "auto_apply", "Auto-apply");
-                    });
-                }
-                ui.separator();
-                menu_command(ui, st, "file_locations", "File locations…");
-                menu_command(ui, st, "settings", "Preferences…");
-            });
-            ui.menu_button("Window", |ui| {
-                menu_command(ui, st, "reset_layout", "Reset panel layout");
-                menu_command(ui, st, "show_drawing", "Open drawings");
-                menu_command(ui, st, "ask", "Assistant");
-                menu_command(ui, st, "command_palette", "Command palette");
-            });
-            ui.menu_button("Help", |ui| {
-                menu_command(ui, st, "shortcuts", "Keyboard shortcuts");
-                menu_command(ui, st, "about", "About SolidDraft");
-            });
+            if edit_suite && ui.max_rect().width() < 1280.0 {
+                ui.menu_button("Menu", |ui| main_menus(ui, st));
+            } else {
+                main_menus(ui, st);
+            }
 
             ui.add_space(8.0);
             if !st.drawing.is_active() && !st.assembly.is_active() {
                 quick_access(ui, st);
+            }
+            if edit_suite && st.start.is_none() {
+                workspace_switch(ui, st);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(10.0);
@@ -320,9 +148,10 @@ impl SolidDraftApp {
                     None => format!("{}.{}", st.doc.name, file::EXTENSION),
                 };
                 let text = if st.doc.dirty { format!("{name} •") } else { name };
-                ui.label(egui::RichText::new(text).size(12.0).color(theme::muted())).on_hover_text(
-                    st.doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or("Not saved yet".into()),
-                );
+                ui.add(egui::Label::new(egui::RichText::new(text).size(12.0).color(theme::muted())).truncate())
+                    .on_hover_text(
+                        st.doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or("Not saved yet".into()),
+                    );
             });
         });
     }
@@ -686,4 +515,237 @@ fn shortcuts_grid(ui: &mut egui::Ui, shortcuts: &commands::Shortcuts) {
             ui.end_row();
         }
     });
+}
+
+fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
+    ui.menu_button("File", |ui| {
+        menu_command(ui, st, "new_part", "New part");
+        menu_command(ui, st, "open", "Open…");
+        menu_command(ui, st, "import_step", "Import STEP…");
+        menu_command(ui, st, "import_iges", "Import IGES…");
+        menu_command(ui, st, "make_drawing", "New drawing from part…");
+        menu_command(ui, st, "new_assembly", "New assembly");
+        menu_command(ui, st, "make_assembly", "Make assembly from part");
+        if ui.add_enabled(st.start.is_none(), egui::Button::new("Start page")).clicked() {
+            st.push(AppAction::ShowStartPage);
+            ui.close();
+        }
+        // The browser keeps its recent documents for the start page; it cannot
+        // open a file again by its path.
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.menu_button("Open recent", |ui| {
+            if st.recent.is_empty() {
+                ui.add_enabled(false, egui::Button::new("No recent files"));
+            }
+            for path in st.recent.clone() {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                    st.push(AppAction::Open(Some(path)));
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.add_enabled(!st.recent.is_empty(), egui::Button::new("Clear list")).clicked() {
+                st.push(AppAction::ClearRecent);
+                ui.close();
+            }
+        });
+        ui.separator();
+        if st.assembly.is_active() {
+            menu_command(ui, st, "assembly_save", "Save assembly");
+            menu_command(ui, st, "assembly_save_as", "Save assembly as…");
+            menu_command(ui, st, "insert_component", "Insert component…");
+        } else {
+            menu_command(ui, st, "save", "Save");
+            menu_command(ui, st, "save_as", "Save as…");
+        }
+        ui.menu_button("Export", |ui| {
+            menu_command(ui, st, "export_step", "STEP AP242…");
+            menu_command(ui, st, "export_iges", "IGES 5.3…");
+            menu_command(ui, st, "export_stl", "STL…");
+            menu_command(ui, st, "export_3mf", "3MF…");
+            menu_command(ui, st, "export_obj", "OBJ…");
+        });
+        #[cfg(target_arch = "wasm32")]
+        if crate::journal_browser::has_offers() && ui.button("Crash report journals…").clicked() {
+            st.push(AppAction::ShowRecovery);
+            ui.close();
+        }
+        if st.recovery.as_ref().is_some_and(|r| !r.offers.is_empty() || !r.journals.is_empty())
+            && ui.button("Recover documents…").clicked()
+        {
+            st.push(AppAction::ShowRecovery);
+            ui.close();
+        }
+        ui.separator();
+        menu_command(ui, st, "quit", "Quit");
+    });
+    ui.menu_button("Edit", |ui| {
+        // Rebuild sits where SolidWorks keeps it: Edit, Ctrl+B.
+        let drawing = st.drawing.session.as_ref();
+        let rebuild = match drawing.map(|s| s.marker()) {
+            Some(Some((marker, _))) => format!("Rebuild drawing · {}", marker.to_lowercase()),
+            _ => "Rebuild drawing".to_owned(),
+        };
+        menu_command(ui, st, "drawing_rebuild", &rebuild);
+        ui.separator();
+        let labels = match st.assembly.session.as_ref().filter(|_| st.assembly.is_active()) {
+            Some(a) => (a.doc.undo_label(), a.doc.redo_label()),
+            None => (st.doc.undo_label(), st.doc.redo_label()),
+        };
+        let undo = labels.0.map(|l| format!("Undo {l}")).unwrap_or("Undo".into());
+        let redo = labels.1.map(|l| format!("Redo {l}")).unwrap_or("Redo".into());
+        menu_command(ui, st, "undo", &undo);
+        menu_command(ui, st, "redo", &redo);
+        ui.separator();
+        let feature = st.selected_feature().and_then(|id| st.doc.feature(id));
+        let is_sketch = feature.is_some_and(|f| f.is_sketch());
+        let suppressed = feature.is_some_and(|f| f.suppressed);
+        menu_command(ui, st, "edit_feature", if is_sketch { "Edit sketch" } else { "Edit feature" });
+        menu_command(ui, st, "rename", "Rename feature");
+        menu_command(ui, st, "suppress", if suppressed { "Unsuppress feature" } else { "Suppress feature" });
+        menu_command(ui, st, "delete_feature", "Delete feature");
+        ui.separator();
+        menu_command(ui, st, "roll_to_end", "Roll to end");
+    });
+    ui.menu_button("View", |ui| {
+        for id in ["view_isometric", "view_front", "view_top", "view_right", "view_back", "view_left", "view_bottom"] {
+            menu_command(ui, st, id, commands::get(id).map(|c| c.label).unwrap_or(id));
+        }
+        menu_command(ui, st, "normal_to", "Normal to");
+        ui.separator();
+        menu_command(ui, st, "zoom_fit", "Zoom to fit");
+        menu_command(
+            ui,
+            st,
+            "orthographic",
+            if st.viewport.camera.orthographic { "Perspective" } else { "Orthographic" },
+        );
+        ui.separator();
+        for m in DisplayMode::ALL {
+            if ui.radio(st.viewport.display == m, m.label()).clicked() {
+                st.push(AppAction::SetDisplay(m));
+                ui.close();
+            }
+        }
+        ui.separator();
+        for p in Preset::ALL {
+            if ui.radio(st.viewport.preset == p, p.label()).clicked() {
+                st.push(AppAction::SetPreset(p));
+                ui.close();
+            }
+        }
+        ui.separator();
+        for m in theme::Mode::ALL {
+            if ui.radio(theme::mode() == m, format!("{} theme", m.label())).clicked() {
+                st.push(AppAction::SetTheme(m));
+                ui.close();
+            }
+        }
+        ui.separator();
+        if st.frame_layout == crate::settings::FrameLayout::EditSuite {
+            if ui.button("Tree").clicked() {
+                st.show_tree(true);
+                st.values.tree_focus = true;
+                ui.close();
+            }
+            if ui.button("Values").clicked() {
+                st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
+                ui.close();
+            }
+        }
+        for side in Side::ALL {
+            let shown = st.tree_shown();
+            let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
+            if ui.add(egui::Button::selectable(shown, side.title()).shortcut_text(key)).clicked() {
+                st.push(AppAction::TogglePanel(side));
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button("Insert", |ui| {
+        menu_command(ui, st, "sketch", "Sketch");
+        menu_command(ui, st, "extrude", "Boss extrude");
+        menu_command(ui, st, "cut", "Cut extrude");
+        menu_command(ui, st, "fillet", "Fillet");
+        menu_command(ui, st, "chamfer", "Chamfer");
+    });
+    ui.menu_button("Tools", |ui| {
+        menu_command(ui, st, "measure", "Measure");
+        menu_command(ui, st, "check", "Check");
+        if !st.drawing.is_active() && !st.assembly.is_active() {
+            ui.menu_button("Assistant", |ui| {
+                menu_command(ui, st, "ask", "Ask");
+                menu_command(ui, st, "check_model", "Check model");
+                menu_command(ui, st, "explain", "Explain");
+                menu_command(ui, st, "summarise", "Summarise");
+                menu_command(ui, st, "find_issues", "Find issues");
+                ui.separator();
+                menu_command(ui, st, "provider_settings", "Provider…");
+                menu_command(ui, st, "auto_apply", "Auto-apply");
+            });
+        }
+        ui.separator();
+        menu_command(ui, st, "file_locations", "File locations…");
+        menu_command(ui, st, "settings", "Preferences…");
+    });
+    ui.menu_button("Window", |ui| {
+        menu_command(ui, st, "reset_layout", "Reset panel layout");
+        menu_command(ui, st, "show_drawing", "Open drawings");
+        menu_command(ui, st, "ask", "Assistant");
+        menu_command(ui, st, "command_palette", "Command palette");
+    });
+    ui.menu_button("Help", |ui| {
+        menu_command(ui, st, "shortcuts", "Keyboard shortcuts");
+        menu_command(ui, st, "about", "About SolidDraft");
+    });
+}
+
+/// The same workspace ids as the classic ribbon, in the Edit Suite title bar.
+fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
+    let widths = RibbonTab::ALL.map(|tab| {
+        ui.painter().layout_no_wrap(tab.label().to_owned(), theme::font_medium(12.5), theme::ink()).size().x + 28.0
+    });
+    let gap = 1.0;
+    let width = widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32 + 4.0;
+    let centered = ui.max_rect().center().x - width / 2.0;
+    ui.add_space((centered - ui.cursor().left()).max(8.0));
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
+    ui.painter().rect_filled(rect, CornerRadius::same(6), theme::panel_header());
+    let mut x = rect.left() + 2.0;
+    for (tab, width) in RibbonTab::ALL.into_iter().zip(widths) {
+        let bounds = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 22.0));
+        x += width + gap;
+        let selected = st.ribbon_tab == tab;
+        let response = ui.interact(bounds, ui.id().with(("workspace", tab.id())), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("{} tab", tab.label()))
+        });
+        if selected || response.hovered() || response.has_focus() {
+            ui.painter().rect_filled(
+                bounds,
+                CornerRadius::same(4),
+                if selected { theme::selection_bg() } else { theme::hover() },
+            );
+        }
+        ui.painter().text(
+            bounds.center(),
+            Align2::CENTER_CENTER,
+            tab.label(),
+            theme::font_medium(12.5),
+            if selected { theme::selection_ink() } else { theme::muted() },
+        );
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                bounds,
+                CornerRadius::same(4),
+                egui::Stroke::new(1.0, theme::accent()),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if response.clicked() {
+            st.ribbon_tab = tab;
+        }
+    }
+    ui.add_space(8.0);
 }

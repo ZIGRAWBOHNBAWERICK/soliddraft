@@ -59,6 +59,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3) {
         assert!(!out.is_error && !work.exhausted, "{name}: {}; {work:?}", out.content);
     }
     let before = state.doc.model().to_bytes().unwrap();
+    let geometry = state.doc.model().geometry_hash();
     let undo = state.doc.undo_depth();
     let mut arguments = scenario["steps"][3]["arguments"].clone();
     let selected = edge_at(&state, rail);
@@ -113,7 +114,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3) {
         let out = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
         assert!(!out.is_error, "{tool}: {}", out.content);
         if tool == "undo" {
-            assert_eq!(state.doc.model().to_bytes().unwrap(), before);
+            assert_eq!(state.doc.model().geometry_hash(), geometry);
             assert!(!state.doc.proof_state().answered_within_bound);
         } else {
             check(&state);

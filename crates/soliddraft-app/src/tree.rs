@@ -181,7 +181,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     ..RowSpec::plain()
                 },
             );
-            if r.clicked() {
+            if r.clicked() || (!state.in_sketch() && r.secondary_clicked()) {
                 actions.push(AppAction::SelectBody(key));
             }
             if !state.in_sketch() {

@@ -2289,6 +2289,9 @@ pub(crate) fn status_text(doc: &Document, id: FeatureId) -> String {
     match doc.feature(id).map(|f| (&f.status, f.suppressed)) {
         Some((FeatureStatus::Ok, _)) => "ok".into(),
         Some((FeatureStatus::Pending, _)) => "proof pending".into(),
+        Some((FeatureStatus::AnsweredWithinBound(bound), _)) => {
+            format!("{}: {}", crate::document::WITHIN_BOUND_LABEL, bound.description())
+        }
         Some((FeatureStatus::Error(e), _)) => format!("error: {e}"),
         Some((FeatureStatus::NeedsRepair(items), _)) => format!(
             "needs repair: {} no longer resolve{}",

@@ -65,6 +65,7 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
         app.get_by_label("Wireframe").click();
         settle(app);
         assert_eq!(app.state().state.viewport.display, DisplayMode::Wireframe, "navigation applies the chosen mode");
+        assert_ne!(app.state().state.viewport.display, display, "navigation changes the selected display mode");
         click(app, "Front");
         let front = ribbon::fingerprint(app).camera;
         click(app, "Top");

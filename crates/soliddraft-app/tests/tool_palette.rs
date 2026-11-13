@@ -309,7 +309,7 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
     let case = ribbon::case("tool-palette-short");
     for mode in [Mode::Light, Mode::Dark] {
         for scale in [1.0, 2.0] {
-            let mut app = ribbon::app_at(ribbon::blank(), vec2(960.0, 600.0), scale);
+            let mut app = ribbon::app_at(ribbon::blank(), vec2(1280.0, 600.0), scale);
             theme::set_mode(&app.ctx, mode);
             app.state_mut().state.frame_layout = FrameLayout::EditSuite;
             app.run_steps(8);

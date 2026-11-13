@@ -209,10 +209,33 @@ impl Document {
         self.stale_tracked("proof pending");
     }
 
+    /// Refreshes name-dependent checks without retrying refused geometry or dirtying proof.
+    pub(crate) fn refresh_names(&mut self) {
+        let mut cache = std::mem::take(&mut self.cache);
+        for i in 0..self.dirty.min(self.built.len()) {
+            if i < self.active_count() && !self.features[i].suppressed {
+                let current = i.checked_sub(1).and_then(|i| self.built[i].output);
+                self.built[i] = self.build_or_keep(&self.features[i], current, &mut cache, Some(&self.built[i]));
+            }
+        }
+        self.cache = cache;
+        self.refresh_tracked();
+    }
+
     /// A feature's build: the kept one when the cache has its exact inputs, else a new
     /// one, kept. Checks whose messages name another feature run every time and are not
     /// kept, so a rename shows in them without building anything.
     fn build(&self, f: &Feature, current: Option<BodyId>, cache: &mut BuildCache) -> Built {
+        self.build_or_keep(f, current, cache, None)
+    }
+
+    fn build_or_keep(
+        &self,
+        f: &Feature,
+        current: Option<BodyId>,
+        cache: &mut BuildCache,
+        kept: Option<&Built>,
+    ) -> Built {
         let named_plane = match &f.kind {
             FeatureKind::Sketch(SketchFeature { plane: SketchPlane::Feature { feature, .. }, .. }) => {
                 Some((*feature, ReferenceSlot::SketchPlane))
@@ -254,6 +277,9 @@ impl Document {
                 }
                 profiles.push(self.built[index].version);
             }
+        }
+        if let Some(kept) = kept {
+            return kept.clone();
         }
         let key = cache.key(f, current, profiles);
         if let Some(built) = cache.get(&key) {

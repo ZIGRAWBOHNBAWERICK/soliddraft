@@ -463,6 +463,7 @@ impl SolidDraftApp {
     }
 
     fn frame_with_tools(&mut self, root: &mut egui::Ui, palette: bool) {
+        let edit_suite = palette;
         let palette = palette && !self.state.drawing.is_active() && !self.state.assembly.is_active();
         // The menu bar is chrome; the ribbon paints its own strip and body.
         let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
@@ -477,26 +478,26 @@ impl SolidDraftApp {
         if !start {
             if palette {
                 crate::options_bar::panel(root, &mut self.state);
+            } else {
+                egui::Panel::top("ribbon")
+                    .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
+                    .frame(panel_frame)
+                    .show_separator_line(false)
+                    .show(root, |ui| ribbon::show(ui, &mut self.state));
             }
-            egui::Panel::top("ribbon")
-                .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
-                .frame(panel_frame)
-                .show_separator_line(false)
-                .show(root, |ui| {
-                    if palette {
-                        ribbon::tabs(ui, &mut self.state);
-                    } else {
-                        ribbon::show(ui, &mut self.state);
-                    }
-                });
         }
         let status = self.status();
-        crate::command_line::panel(root, &mut self.state, &status);
+        if !edit_suite {
+            crate::command_line::panel(root, &mut self.state, &status);
+        } else if start || !palette {
+            crate::command_line::edit_suite_panel(root, &mut self.state, &status);
+        }
         let window_width = root.available_width();
         if !start {
             if palette {
                 crate::tool_palette::plane_picker_panel(root, &mut self.state);
                 crate::tool_palette::panel(root, &mut self.state);
+                crate::command_line::edit_suite_panel(root, &mut self.state, &status);
                 crate::timeline::panel(root, &mut self.state);
             }
             if !palette || self.state.layout.tree.shown {

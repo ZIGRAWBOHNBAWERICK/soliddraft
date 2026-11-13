@@ -8,11 +8,6 @@ use egui_kittest::kittest::Queryable;
 use soliddraft_app::{document::DisplayMesh, section::SectionPlane};
 
 fn ready(app: &mut ribbon::App) {
-    let state = &app.state().state;
-    eprintln!(
-        "[DEBUG-section-wait] request: enabled={} plane={:?} offset={} flip={} display={}",
-        state.section.enabled, state.section.plane, state.section.offset, state.section.flip, state.doc.mesh_version
-    );
     let start = std::time::Instant::now();
     loop {
         let state = &app.state().state;
@@ -25,7 +20,7 @@ fn ready(app: &mut ribbon::App) {
             "the requested cut succeeded"
         );
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(60),
+            start.elapsed() < ribbon::render_steps::HANG_GUARD,
             "section did not settle: enabled={} plane={:?} offset={} flip={} display={} proved={}",
             state.section.enabled,
             state.section.plane,
@@ -55,6 +50,30 @@ fn click(app: &mut ribbon::App, label: &str) {
     app.run_steps(4);
 }
 
+fn drag_offset(app: &mut ribbon::App, dx: f32) {
+    let offset = app.get_by_label("Section offset").rect();
+    let from = offset.center();
+    app.hover_at(from);
+    app.run_steps(2);
+    app.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    app.run_steps(2);
+    app.hover_at(pos2(from.x + dx, from.y));
+    app.run_steps(2);
+    app.event(egui::Event::PointerButton {
+        pos: pos2(from.x + dx, from.y),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    app.run_steps(4);
+    ready(app);
+}
+
 #[test]
 fn inspect_and_navigation_section_drag_flip_face_and_close() {
     let case = ribbon::case("section-view");
@@ -78,27 +97,7 @@ fn inspect_and_navigation_section_drag_flip_face_and_close() {
         case.frame(app, "inspect-half-with-cap");
 
         // Drag the actual offset control, then wait for the displayed body to catch up.
-        let offset = app.get_by_label("Section offset").rect();
-        let from = offset.center();
-        app.hover_at(from);
-        app.run_steps(2);
-        app.event(egui::Event::PointerButton {
-            pos: from,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: Default::default(),
-        });
-        app.run_steps(2);
-        app.hover_at(pos2(from.x + 20.0, from.y));
-        app.run_steps(2);
-        app.event(egui::Event::PointerButton {
-            pos: pos2(from.x + 20.0, from.y),
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: Default::default(),
-        });
-        app.run_steps(4);
-        ready(app);
+        drag_offset(app, 20.0);
         let offset = app.state().state.section.offset;
         assert!(offset > 10.0 && offset < 20.0, "the pointer moved the cut plane: {offset}");
         let first = volume(&app.state().state.section.mesh(&app.state().state.doc).unwrap());
@@ -124,6 +123,16 @@ fn inspect_and_navigation_section_drag_flip_face_and_close() {
         ready(app);
         assert_eq!(app.state().state.section.plane, SectionPlane::Face(id));
         assert_eq!(app.state().state.section.offset, 0.0);
+        assert!(app.state().state.section.mesh(&app.state().state.doc).unwrap().indices.is_empty());
+        assert!(app.query_by_label("Nothing of the part is on this side of the plane").is_some());
+        assert!(app.state().state.section.enabled);
+        case.frame(app, "empty-face-side");
+        click(app, "Flip side");
+        ready(app);
+        assert!((volume(&app.state().state.section.mesh(&app.state().state.doc).unwrap()) - 48_000.0).abs() < 0.1);
+        drag_offset(app, -20.0);
+        let moved = volume(&app.state().state.section.mesh(&app.state().state.doc).unwrap());
+        assert!(moved > 0.0 && moved < 48_000.0, "the face plane still moves after an empty cut");
         click(app, "Close section");
         assert!(!app.state().state.section.enabled);
         assert!(app.state().state.section.mesh(&app.state().state.doc).is_none());

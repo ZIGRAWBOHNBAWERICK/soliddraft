@@ -208,6 +208,8 @@ impl State {
                 });
             } else if let Some((_, Err(error))) = &self.cached {
                 ui.colored_label(theme::error(), error);
+            } else if self.mesh(doc).is_some_and(|mesh| mesh.indices.is_empty()) {
+                ui.label("Nothing of the part is on this side of the plane");
             } else if self.mesh(doc).is_none() {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -272,7 +274,15 @@ fn cut_mesh(
         let tool = tool?;
         let cut = kernel.boolean(&OpTag::new("viewport_section"), BooleanOp::Subtract, body, tool.body);
         let _ = kernel.release(tool.body);
-        let cut = cut?;
+        let cut = match cut {
+            // A conservative box can miss the boundary case; an empty cut is a valid view.
+            Err(soliddraft_kernel_api::KernelError::Unsupported(reason))
+                if reason == "this would leave nothing of the part" =>
+            {
+                return Ok(Arc::new(DisplayMesh::default()));
+            }
+            result => result?,
+        };
         let mesh = preview_mesh(kernel, cut.body, params);
         let _ = kernel.release(cut.body);
         mesh.map_err(soliddraft_kernel_api::KernelError::InvalidInput)
@@ -385,6 +395,18 @@ mod tests {
             .unwrap();
             assert!((volume(&mesh) - expected).abs() < 0.1);
         }
+    }
+
+    #[test]
+    fn the_flipped_end_face_is_an_empty_view_and_can_be_flipped_back() {
+        let doc = block();
+        let face = doc.faces.iter().find(|face| (face.centroid.z - 20.0).abs() < 1e-5).unwrap();
+        let plane = SectionPlane::Face(face.id).resolve(&doc).unwrap();
+        let body = doc.display_body().unwrap();
+        let empty = cut_mesh(doc.kernel().as_ref(), body, plane, true, &doc.tess_params).unwrap();
+        assert!(empty.indices.is_empty());
+        let whole = cut_mesh(doc.kernel().as_ref(), body, plane, false, &doc.tess_params).unwrap();
+        assert!((volume(&whole) - 48_000.0).abs() < 0.1);
     }
 
     #[test]

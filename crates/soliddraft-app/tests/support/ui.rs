@@ -327,6 +327,29 @@ pub fn close_options(app: &mut App) {
     }
 }
 
+/// Bounds of the painted sketch options sheet.
+pub fn options_region(app: &App) -> Rect {
+    let close = app.get_by_label("Close options").rect();
+    fn visit(shape: &Shape, close: Rect, found: &mut Vec<Rect>) {
+        match shape {
+            Shape::Vec(shapes) => {
+                for shape in shapes {
+                    visit(shape, close, found);
+                }
+            }
+            Shape::Rect(rect) if rect.rect.contains_rect(close) && rect.rect.height() > close.height() * 2.0 => {
+                found.push(rect.rect)
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for shape in &app.output().shapes {
+        visit(&shape.shape, close, &mut found);
+    }
+    found.into_iter().min_by(|a, b| a.area().total_cmp(&b.area())).expect("the options sheet is painted")
+}
+
 pub fn click_option(app: &mut App, label: &str) {
     open_options(app);
     app.get_by_label(label).scroll_to_me();

@@ -44,6 +44,7 @@ fn launch(mut sketch: Sketch) -> (App, FeatureId) {
     theme::set_mode(&app.ctx, theme::Mode::Light);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
+    ribbon::open_options(&mut app);
     (app, id)
 }
 
@@ -61,6 +62,7 @@ fn frame(app: &mut App, name: &str) {
 }
 
 fn click(app: &mut App, at: Pos2, modifiers: Modifiers) {
+    ribbon::close_options(app);
     app.hover_at(at);
     app.run_steps(3);
     for pressed in [true, false] {
@@ -71,12 +73,14 @@ fn click(app: &mut App, at: Pos2, modifiers: Modifiers) {
         app.step();
     }
     app.run_steps(6);
+    ribbon::open_options(app);
 }
 
 fn filter_button(app: &mut App) -> (String, Rect) {
+    ribbon::open_options(app);
     for _ in 0..6 {
         let painted = ribbon::painted(app);
-        let left = app.state().state.viewport.rect.left();
+        let left = ribbon::options_region(&app).right() + ribbon::TOLERANCE;
         if let Some(head) = painted.iter().find(|p| p.text == "Existing relations" && p.rect.right() < left)
             && let Some(current) = painted.iter().find(|p| {
                 ["Selected", "All", "Conflicting", "Dangling"].contains(&p.text.as_str())
@@ -87,7 +91,7 @@ fn filter_button(app: &mut App) -> (String, Rect) {
         {
             return (current.text.clone(), current.rect);
         }
-        let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
+        let head = app.get_by_label("Close options").rect();
         app.hover_at(pos2(left - 15.0, (head.bottom() + ribbon::band(app).top()) / 2.0));
         app.event(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
@@ -187,7 +191,7 @@ fn conflict_filter_locates_solver_relations_and_row_deletion_resolves_them() {
         .find(|p| {
             p.text == chosen.name()
                 && p.full.top() >= top
-                && p.rect.right() < app.state().state.viewport.rect.left()
+                && p.rect.right() < ribbon::options_region(&app).right() + ribbon::TOLERANCE
                 && p.rect.contains_rect(p.full)
         })
         .unwrap()
@@ -196,7 +200,7 @@ fn conflict_filter_locates_solver_relations_and_row_deletion_resolves_them() {
         .query_all(By::new().role(egui::accesskit::Role::Button).label("×"))
         .find(|n| {
             (n.rect().center().y - row.center().y).abs() < 8.0
-                && n.rect().right() < app.state().state.viewport.rect.left()
+                && n.rect().right() < ribbon::options_region(&app).right() + ribbon::TOLERANCE
         })
         .unwrap()
         .rect();
@@ -291,15 +295,16 @@ fn empty_filter_states_and_popup_escape_do_not_leave_the_sketch() {
 fn panel_heading(app: &App, name: &str) -> Rect {
     ribbon::painted(app)
         .into_iter()
-        .find(|t| t.text == name && t.rect.right() < app.state().state.viewport.rect.left())
+        .find(|t| t.text == name && t.rect.right() < ribbon::options_region(&app).right() + ribbon::TOLERANCE)
         .unwrap_or_else(|| panic!("property panel must show {name}"))
         .rect
 }
 
 fn inspect(app: &mut App, label: &str) {
+    ribbon::open_options(app);
     for _ in 0..4 {
         let text = ribbon::painted(app);
-        let left = app.state().state.viewport.rect.left();
+        let left = ribbon::options_region(&app).right() + ribbon::TOLERANCE;
         let top =
             text.iter().find(|t| t.text == "Existing relations" && t.rect.right() < left).map(|t| t.rect.bottom());
         let bottom = text
@@ -318,7 +323,7 @@ fn inspect(app: &mut App, label: &str) {
             ribbon::click_at(app, row.rect.center());
             return;
         }
-        let head = panel_heading(app, "Properties");
+        let head = app.get_by_label("Close options").rect();
         app.hover_at(pos2(left - 15.0, (head.bottom() + ribbon::band(app).top()) / 2.0));
         app.event(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
@@ -509,7 +514,8 @@ fn relation_inspection_includes_selected_points_and_the_origin() {
     frame(&mut app, "point-and-origin");
     let top = ribbon::painted(&app).into_iter().find(|t| t.text.starts_with("Selection (")).unwrap().rect.bottom();
     let bottom = panel_heading(&app, "Existing relations").top();
-    let row = Rect::from_min_max(pos2(0.0, top), pos2(app.state().state.viewport.rect.left(), bottom));
+    let row =
+        Rect::from_min_max(pos2(0.0, top), pos2(ribbon::options_region(&app).right() + ribbon::TOLERANCE, bottom));
     ribbon::click_button(&mut app, "×", row);
     assert!(session(&app).sketch.constraint(relation).is_none());
     assert_eq!(session(&app).sketch.entities, before.entities);

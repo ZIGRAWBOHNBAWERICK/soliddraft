@@ -72,14 +72,9 @@ fn number(app: &mut App, index: usize, text: &str) {
 }
 
 fn tool(app: &mut App, label: &str) {
-    let band = ribbon::palette_region(app);
-    if !app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| band.intersects(n.rect())) {
-        let window = ribbon::window(app);
-        ribbon::click_button(app, "Transform group", window);
-    }
-    let controls = egui::Rect::from_min_max(band.min, egui::pos2(band.right(), band.bottom() + 120.0));
-    ribbon::click_button(app, label, controls);
-    settle(app);
+    let id =
+        soliddraft_app::commands::all().iter().find(|c| c.id.starts_with("sketch_") && c.label == label).unwrap().id;
+    ribbon::run_command(app, id);
     assert_eq!(session(app).tool.label(), label);
 }
 

@@ -12,7 +12,7 @@ use soliddraft_app::viewport::look::Preset;
 use support::{ALWAYS_SHOW_AXES, Case, empty, launch, set_preference};
 
 const DEFAULTS: ReferenceDisplay =
-    ReferenceDisplay { show_grid: true, show_origin_planes: true, always_show_origin_axes: false };
+    ReferenceDisplay { show_grid: true, show_origin_planes: true, always_show_origin_axes: true };
 
 /// Reads the settings and checks that reading wrote nothing.
 fn view_unchanged(case: &Case) -> settings::ViewSettings {

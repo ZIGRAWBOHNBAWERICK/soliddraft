@@ -159,7 +159,7 @@ fn relation_sets_apply_once_undo_together_and_survive_reopening() {
         assert_eq!(session(&app).sketch, after, "{name}: one redo");
         if name == "Fix" {
             let path = dir.join("relations.dwprt");
-            app.state_mut().state.push(AppAction::ExitSketch(None));
+            app.state_mut().state.push(AppAction::ExitSketch);
             app.run_steps(5);
             app.state_mut().state.push(AppAction::SaveAs(Some(path.clone())));
             app.run_steps(5);

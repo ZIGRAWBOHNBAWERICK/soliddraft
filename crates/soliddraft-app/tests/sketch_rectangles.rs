@@ -202,8 +202,7 @@ fn all_rectangle_tools_preview_cancel_retain_relations_undo_and_reopen() {
         check_shape(&edited, tool, 0.0);
 
         let path = proof_dir().join(format!("{command}.dwprt"));
-        for action in [AppAction::ExitSketch(None), AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))]
-        {
+        for action in [AppAction::ExitSketch, AppAction::SaveAs(Some(path.clone())), AppAction::Open(Some(path))] {
             app.state_mut().state.push(action);
             app.run_steps(10);
         }

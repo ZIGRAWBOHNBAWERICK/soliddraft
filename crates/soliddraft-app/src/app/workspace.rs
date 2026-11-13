@@ -455,6 +455,11 @@ impl SolidDraftApp {
     }
 
     fn classic_frame(&mut self, root: &mut egui::Ui) {
+        self.frame_with_tools(root, false);
+    }
+
+    fn frame_with_tools(&mut self, root: &mut egui::Ui, palette: bool) {
+        let palette = palette && !self.state.drawing.is_active() && !self.state.assembly.is_active();
         // The menu bar is chrome; the ribbon paints its own strip and body.
         let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
         let panel_frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);
@@ -467,15 +472,24 @@ impl SolidDraftApp {
         let start = self.state.start.is_some();
         if !start {
             egui::Panel::top("ribbon")
-                .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
+                .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
                 .frame(panel_frame)
                 .show_separator_line(false)
-                .show(root, |ui| ribbon::show(ui, &mut self.state));
+                .show(root, |ui| {
+                    if palette {
+                        ribbon::tabs(ui, &mut self.state);
+                    } else {
+                        ribbon::show(ui, &mut self.state);
+                    }
+                });
         }
         let status = self.status();
         crate::command_line::panel(root, &mut self.state, &status);
         let window_width = root.available_width();
         if !start {
+            if palette {
+                crate::tool_palette::panel(root, &mut self.state);
+            }
             self.side_panel(root, Side::Tree, window_width);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
@@ -489,8 +503,7 @@ impl SolidDraftApp {
     }
 
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
-        // Keep the working controls until the Edit Suite component tickets replace them.
-        self.classic_frame(root);
+        self.frame_with_tools(root, true);
     }
 
     /// Closes the start page once a document was opened, made or edited.

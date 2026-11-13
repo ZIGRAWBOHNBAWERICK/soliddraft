@@ -1,6 +1,6 @@
 //! Edit Suite history. Chips share the tree's document actions, with a horizontal rollback bar.
 
-use crate::document::{Command, FeatureId, FeatureStatus, Selection};
+use crate::document::{Command, Feature, FeatureId, FeatureStatus, Selection};
 use crate::icons::{self, Icon};
 use crate::panels::Side;
 use crate::state::{AppAction, AppState, Rename};
@@ -132,7 +132,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         Rect::from_center_size(pos2(rect.left() + 17.0, rect.center().y), vec2(18.0, 18.0)),
                         ink,
                     );
-                    // Keep the rightmost eight points free for the F14 proof badge.
+                    proof_badge(ui, state, feature, rect);
                     let text = Rect::from_min_max(rect.min + vec2(32.0, 0.0), rect.max - vec2(12.0, 0.0));
                     let painter = ui.painter().with_clip_rect(text.intersect(ui.clip_rect()));
                     painter.text(
@@ -245,6 +245,66 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     for action in actions {
         state.push(action);
     }
+}
+
+fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, chip: Rect) {
+    let id = feature.id;
+    let (label, reason) = if let Some(drag) = state.drag_preview.as_ref().filter(|drag| drag.feature() == id) {
+        let (reason, failed) = drag.label();
+        let label = if failed {
+            "Refused"
+        } else if drag.proved_request().is_some() && !drag.pending() {
+            "Proved"
+        } else {
+            "Pending"
+        };
+        (label, reason)
+    } else {
+        match &feature.status {
+            FeatureStatus::Ok => ("Proved", "The current feature is proved.".to_owned()),
+            FeatureStatus::AnsweredWithinBound(bound) => (crate::document::WITHIN_BOUND_LABEL, bound.description()),
+            FeatureStatus::Pending => {
+                ("Pending", "The current edit is waiting for proof. Export waits for proof.".to_owned())
+            }
+            FeatureStatus::Error(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            FeatureStatus::NeedsRepair(_) => {
+                ("Refused", "A reference is missing. Choose Repair to replace it.".to_owned())
+            }
+            FeatureStatus::Inactive => ("Inactive", "This feature is suppressed or past the rollback bar.".to_owned()),
+        }
+    };
+    let color = match label {
+        "Proved" => theme::ok(),
+        "Pending" => theme::warn(),
+        "Refused" => theme::error(),
+        crate::document::WITHIN_BOUND_LABEL => theme::bounded(),
+        _ => theme::muted(),
+    };
+    let centre = pos2(chip.right() - 7.0, chip.center().y);
+    if label == crate::document::WITHIN_BOUND_LABEL {
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![centre + vec2(0.0, -4.0), centre + vec2(4.0, 0.0), centre + vec2(0.0, 4.0), centre + vec2(-4.0, 0.0)],
+            color,
+            Stroke::NONE,
+        ));
+    } else if label == "Refused" {
+        for sign in [-1.0, 1.0] {
+            ui.painter().line_segment(
+                [centre + vec2(-3.0, -3.0 * sign), centre + vec2(3.0, 3.0 * sign)],
+                Stroke::new(1.5, color),
+            );
+        }
+    } else if label == "Proved" {
+        ui.painter().circle_filled(centre, 3.0, color);
+    } else {
+        ui.painter().circle_stroke(centre, 3.0, Stroke::new(1.5, color));
+    }
+    let response =
+        ui.interact(Rect::from_center_size(centre, vec2(12.0, 18.0)), ui.id().with(("proof", id)), Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} proof: {label}", feature.name))
+    });
+    response.on_hover_text(format!("{label}: {reason}"));
 }
 
 fn focus_ring(ui: &egui::Ui, rect: Rect, focused: bool) {

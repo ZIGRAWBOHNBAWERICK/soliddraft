@@ -48,6 +48,7 @@ const SESSION_MAX_HEIGHT: f32 = 2000.0;
 const HISTORY: usize = 100;
 /// How long a note stays on the bar. The status details keep the latest one after that.
 pub const NOTE_ON_BAR: Duration = Duration::from_secs(6);
+pub const SESSION_IDLE_SECONDS: f64 = 30.0;
 /// What the bar keeps for the prompt, its `Command:` mark included, and for the status,
 /// however many chips there are.
 const PROMPT_MIN_WIDTH: f32 = 220.0;
@@ -65,8 +66,8 @@ pub fn session_id() -> egui::Id {
     egui::Id::new("command_session")
 }
 
-/// The prompt's text field, in the bar and in the session alike, so focus stays on it
-/// when the session opens or closes.
+/// The bar's prompt id. The classic session shares it; the Edit Suite overlay has
+/// its own id because it draws on a different layer.
 pub fn input_id() -> egui::Id {
     egui::Id::new("command_line_input")
 }
@@ -194,6 +195,8 @@ pub struct CommandLine {
     cursor_to_end: bool,
     /// The search in the + menu.
     adding: String,
+    idle_since: Option<f64>,
+    session_rect: Option<Rect>,
 }
 
 impl CommandLine {
@@ -205,10 +208,13 @@ impl CommandLine {
     pub fn open_session(&mut self) {
         self.session_open = true;
         self.focus_requested = true;
+        self.idle_since = None;
     }
 
     pub fn close_session(&mut self) {
         self.session_open = false;
+        self.idle_since = None;
+        self.session_rect = None;
     }
 
     pub fn toggle_session(&mut self) {
@@ -529,6 +535,74 @@ pub fn panel(root: &mut egui::Ui, state: &mut AppState, status: &Status) {
     }
 }
 
+/// The Edit Suite bar stays below history; its session covers history without moving the viewport.
+pub fn edit_suite_panel(root: &mut egui::Ui, state: &mut AppState, status: &Status) {
+    let now = root.input(|i| i.time);
+    let activity = root.input(|i| {
+        i.events.iter().any(|event| match event {
+            egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_) => true,
+            egui::Event::PointerMoved(pos) | egui::Event::PointerButton { pos, .. } => {
+                state.command_line.session_rect.is_some_and(|rect| rect.contains(*pos))
+            }
+            egui::Event::MouseWheel { .. } => i
+                .pointer
+                .hover_pos()
+                .is_some_and(|pos| state.command_line.session_rect.is_some_and(|rect| rect.contains(pos))),
+            _ => false,
+        })
+    });
+    if state.command_line.session_open {
+        let since = state.command_line.idle_since.get_or_insert(now);
+        if activity || state.chat.busy() {
+            *since = now;
+        }
+        if now - *since >= SESSION_IDLE_SECONDS {
+            state.command_line.close_session();
+        } else {
+            root.ctx().request_repaint_after(Duration::from_secs(1));
+        }
+    }
+    let available = root.available_rect_before_wrap();
+    let was_open = state.command_line.session_open;
+    let bar_rect = egui::Panel::bottom(bar_id())
+        .exact_size(theme::COMMAND_LINE_HEIGHT)
+        .resizable(false)
+        .frame(egui::Frame::new().fill(theme::command_line()).inner_margin(egui::Margin::ZERO))
+        .show(root, |ui| bar(ui, state, status, was_open))
+        .response
+        .rect;
+    if !state.command_line.session_open {
+        return;
+    }
+    if !was_open {
+        state.command_line.focus_requested = true;
+    }
+    let max = (available.height() - theme::COMMAND_LINE_HEIGHT - 100.0).max(SESSION_MIN_HEIGHT);
+    let height = state.command_line.settings.session_height.clamp(SESSION_MIN_HEIGHT, max);
+    let rect = Rect::from_min_max(pos2(bar_rect.left(), bar_rect.top() - height), bar_rect.right_top());
+    state.command_line.session_rect = Some(rect);
+    egui::Area::new(session_id().with("overlay")).fixed_pos(rect.min).order(egui::Order::Foreground).show(
+        root.ctx(),
+        |ui| {
+            ui.set_min_size(rect.size());
+            ui.set_max_size(rect.size());
+            let region = ui.interact(rect, ui.id().with("session_region"), Sense::hover());
+            region.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "AI session"));
+            session(ui, state);
+            let handle = Rect::from_min_max(rect.min, pos2(rect.right(), rect.top() + 5.0));
+            let resize = ui
+                .interact(handle, ui.id().with("resize_session"), Sense::drag())
+                .on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            if resize.dragged()
+                && let Some(pointer) = resize.interact_pointer_pos()
+            {
+                state.command_line.settings.session_height =
+                    (bar_rect.top() - pointer.y).clamp(SESSION_MIN_HEIGHT, max);
+            }
+        },
+    );
+}
+
 /// The bar: the chips, then the prompt, or while the session is open a line saying the
 /// typing happens above, then the status. The chips scroll sideways once they would crowd
 /// out the other two.
@@ -538,12 +612,19 @@ fn bar(ui: &mut egui::Ui, state: &mut AppState, status: &Status, session_open: b
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.add_space(8.0);
+        let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
         egui::ScrollArea::horizontal()
             .id_salt("chip_row")
-            .max_width(ui.available_width() - PROMPT_MIN_WIDTH - STATUS_MIN_WIDTH)
+            .max_width(
+                (ui.available_width() - PROMPT_MIN_WIDTH - STATUS_MIN_WIDTH - if edit_suite { 100.0 } else { 0.0 })
+                    .max(24.0),
+            )
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .scroll_source(egui::scroll_area::ScrollSource::MOUSE_WHEEL)
             .show(ui, |ui| ui.horizontal_centered(|ui| chips(ui, state)));
+        if edit_suite {
+            ai_chip(ui, state);
+        }
         ui.add_space(6.0);
         let x = ui.cursor().left();
         ui.painter().vline(x, rect.y_range().shrink(7.0), Stroke::new(1.0, theme::line()));
@@ -638,7 +719,11 @@ fn status_details(ui: &mut egui::Ui, status: &Status) {
 
 /// The prompt's text field, with Tab, Up, Down, Enter and Escape taken before it sees them.
 fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
-    let id = input_id();
+    let id = if session && state.frame_layout == crate::settings::FrameLayout::EditSuite {
+        input_id().with("overlay")
+    } else {
+        input_id()
+    };
     let focused = ui.memory(|m| m.has_focus(id));
     let none = Modifiers::NONE;
     let (tab, up, down, enter, escape) = if focused {
@@ -834,6 +919,18 @@ fn chips(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
+fn ai_chip(ui: &mut egui::Ui, state: &mut AppState) {
+    let turns = state.chat.messages.iter().filter(|m| matches!(m.role, Role::User | Role::Command)).count();
+    let label = if turns == 0 {
+        "ai".to_owned()
+    } else {
+        format!("ai · {turns} {}", if turns == 1 { "turn" } else { "turns" })
+    };
+    if ui.button(label).on_hover_text("Open the AI session").clicked() {
+        state.command_line.open_session();
+    }
+}
+
 /// One chip: the command's icon and label in a pill, lit while the command is on.
 fn chip(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, lifted: bool) -> egui::Response {
     let label = command.label_in(state);
@@ -911,13 +1008,30 @@ fn session(ui: &mut egui::Ui, state: &mut AppState) {
     visuals.selection.bg_fill = theme::terminal_accent().gamma_multiply(0.35);
     let header = Rect::from_min_size(full.min, vec2(full.width(), 26.0));
     ui.painter().hline(full.x_range(), header.bottom(), Stroke::new(1.0, theme::terminal_line()));
-    ui.painter().text(
-        pos2(header.left() + 12.0, header.center().y),
-        Align2::LEFT_CENTER,
-        format!("assistant session · {}", state.chat.status),
+    let reserve = if state.frame_layout == crate::settings::FrameLayout::EditSuite { 280.0 } else { 44.0 };
+    let title = status_text(
+        ui,
+        &format!("assistant session · {}", state.chat.status),
         theme::mono(11.0),
         theme::terminal_muted(),
+        (header.width() - reserve).max(0.0),
     );
+    ui.painter().galley(
+        pos2(header.left() + 12.0, header.center().y - title.size().y / 2.0),
+        title,
+        theme::terminal_muted(),
+    );
+    if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+        let now = ui.input(|i| i.time);
+        let left = (SESSION_IDLE_SECONDS - (now - state.command_line.idle_since.unwrap_or(now))).ceil().max(0.0);
+        ui.painter().text(
+            pos2(header.right() - 36.0, header.center().y),
+            Align2::RIGHT_CENTER,
+            format!("Collapses when idle, {left:.0} s"),
+            theme::mono(11.0),
+            theme::terminal_muted(),
+        );
+    }
     let close = Rect::from_center_size(pos2(header.right() - 16.0, header.center().y), vec2(20.0, 20.0));
     let close_resp = ui.interact(close, ui.id().with("session_close"), Sense::click());
     close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close the session"));

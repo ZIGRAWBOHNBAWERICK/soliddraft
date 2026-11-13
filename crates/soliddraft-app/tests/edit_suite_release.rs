@@ -166,6 +166,10 @@ fn model_bound_survives_display_capture_on_rename_and_history() {
     assert_eq!(state.doc.model().geometry_hash(), geometry);
     assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(model_bound.clone()));
     assert!(!state.doc.proof_state().display_only_bound);
+    let display =
+        serde_json::to_value(state.doc.display_answer(id).expect("the display evidence is retained")).unwrap();
+    assert_eq!(display["display"]["kind"], "spline display mesh");
+    assert_eq!(display["display"]["measured_mm"], 0.007);
     for action in ["undo", "redo"] {
         let out = call_checked(&mut AppTools { state: &mut state }, action, json!({}), &caller);
         assert!(!out.is_error, "{action}: {}", out.content);
@@ -173,7 +177,55 @@ fn model_bound_survives_display_capture_on_rename_and_history() {
         assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(model_bound.clone()));
         assert!(!state.doc.proof_state().display_only_bound);
         assert!(state.export_part(soliddraft_exchange::Format::Step).is_err(), "{action} unlocked export");
+        assert_eq!(serde_json::to_value(state.doc.display_answer(id).unwrap()).unwrap(), display);
     }
+}
+
+#[test]
+fn display_only_evidence_keeps_independent_export_until_a_model_bound_arrives() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Independent display bound", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    kernel.rules.lock().unwrap().display_bound = Some(soliddraft_kernel_api::DisplayBound {
+        kind: "spline display mesh".into(),
+        rule: "spline-display-evaluator-v1".into(),
+        level_mm: 0.01,
+        measured_mm: 0.006,
+        method: "complete surface-cell measurement fixture".into(),
+        definition: format!("retained display boundary {}", doc.model().geometry_hash()),
+    });
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    let caller = Caller::Mcp { client: "independent-display-regression".into() };
+    let renamed = call_checked(
+        &mut AppTools { state: &mut state },
+        "rename",
+        json!({"feature":"Boss-Extrude1", "name":"Display plate"}),
+        &caller,
+    );
+    assert!(!renamed.is_error, "{}", renamed.content);
+    assert!(state.doc.proof_state().display_only_bound);
+    assert!(!state.doc.proof_state().current_proved_display());
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_ok());
+    let display = serde_json::to_value(state.doc.display_answer(id).unwrap()).unwrap();
+    let model_bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();
+    state.doc.record_answer_within_bound(id, model_bound.clone()).unwrap();
+    let renamed = call_checked(
+        &mut AppTools { state: &mut state },
+        "rename",
+        json!({"feature":"Display plate", "name":"Model-limited plate"}),
+        &caller,
+    );
+    assert!(!renamed.is_error, "{}", renamed.content);
+    assert!(!state.doc.proof_state().display_only_bound);
+    assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(model_bound));
+    assert_eq!(serde_json::to_value(state.doc.display_answer(id).unwrap()).unwrap(), display);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
 }
 
 fn settle(doc: &mut Document) {

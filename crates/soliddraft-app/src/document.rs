@@ -808,6 +808,18 @@ impl AnswerBound {
     }
 }
 
+#[derive(Clone, Default)]
+struct FeatureBounds {
+    model: Option<AnswerBound>,
+    display: Option<AnswerBound>,
+}
+
+impl FeatureBounds {
+    fn visible(&self) -> Option<&AnswerBound> {
+        self.model.as_ref().or(self.display.as_ref())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FeatureStatus {
     Ok,
@@ -1450,7 +1462,7 @@ pub struct Document {
     model: model::Document,
     geometry: ContentHash,
     /// Keep verdicts with their geometry so rename and undo cannot turn them into proof.
-    bounded_answers: HashMap<ContentHash, HashMap<FeatureId, AnswerBound>>,
+    bounded_answers: HashMap<ContentHash, HashMap<FeatureId, FeatureBounds>>,
     last_proved: Option<ProvedRevision>,
     worker: Option<crate::drag::Worker>,
     /// Woken when a background answer arrives; see [`Document::set_repaint`].
@@ -1628,20 +1640,33 @@ impl Document {
             return Err("A bounded answer needs a completed current feature result".into());
         }
         self.geometry = self.model.geometry_hash();
-        self.bounded_answers.entry(self.geometry.clone()).or_default().insert(id, answer);
+        let bounds = self.bounded_answers.entry(self.geometry.clone()).or_default().entry(id).or_default();
+        if answer.display.is_some() {
+            bounds.display = Some(answer);
+        } else {
+            bounds.model = Some(answer);
+        }
         self.sync();
         Ok(())
     }
 
-    fn has_bounded_answer(&self) -> bool {
-        self.bounded_answers.get(&self.geometry).is_some_and(|answers| {
-            self.model.features().iter().take(self.model.active_count()).any(|feature| {
-                !feature.suppressed
-                    && answers.get(&app_id(feature.id)).is_some_and(|answer| {
-                        answer.display.is_none() || self.model.body_after(feature.id) == self.model.body()
-                    })
-            })
-        })
+    /// Retained display evidence, independent of any model bound for the feature.
+    pub fn display_answer(&self, id: FeatureId) -> Option<&AnswerBound> {
+        self.bounded_answers.get(&self.geometry)?.get(&id)?.display.as_ref()
+    }
+
+    fn bounded_state(&self) -> (bool, bool) {
+        let Some(answers) = self.bounded_answers.get(&self.geometry) else { return (false, false) };
+        self.model.features().iter().take(self.model.active_count()).filter(|feature| !feature.suppressed).fold(
+            (false, false),
+            |(model, display), feature| {
+                let Some(bounds) = answers.get(&app_id(feature.id)) else { return (model, display) };
+                (
+                    model || bounds.model.is_some(),
+                    display || (bounds.display.is_some() && self.model.body_after(feature.id) == self.model.body()),
+                )
+            },
+        )
     }
 
     fn capture_display_bound(&mut self, body: BodyId) -> Result<(), String> {
@@ -1666,6 +1691,7 @@ impl Document {
     }
 
     pub fn proof_state(&self) -> ProofState {
+        let (model_bound, display_bound) = self.bounded_state();
         ProofState {
             document: self.model.id(),
             requested_revision: self.revision,
@@ -1680,17 +1706,8 @@ impl Document {
             proved_edit: self.last_proved.as_ref().and_then(|proved| proved.request),
             transient: self.provisional.as_ref().is_some_and(|shown| shown.token.transient),
             pending: self.proof_pending(),
-            answered_within_bound: self.has_bounded_answer(),
-            display_only_bound: self.has_bounded_answer()
-                && self.bounded_answers.get(&self.geometry).is_some_and(|answers| {
-                    self.model
-                        .features()
-                        .iter()
-                        .take(self.model.active_count())
-                        .filter(|feature| !feature.suppressed)
-                        .filter_map(|feature| answers.get(&app_id(feature.id)))
-                        .all(|answer| answer.display.is_some())
-                }),
+            answered_within_bound: model_bound || display_bound,
+            display_only_bound: display_bound && !model_bound,
             failed: self.proof_failure.is_some() || self.has_model_failure(),
         }
     }
@@ -2764,6 +2781,7 @@ impl Document {
                         match view_status(&f.kind, status, &names) {
                             FeatureStatus::Ok if !inactive => bounded
                                 .and_then(|answers| answers.get(&app_id(f.id)))
+                                .and_then(FeatureBounds::visible)
                                 .map_or(FeatureStatus::Ok, |answer| FeatureStatus::AnsweredWithinBound(answer.clone())),
                             status => status,
                         }

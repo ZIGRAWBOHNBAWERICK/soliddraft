@@ -1351,6 +1351,9 @@ impl Kernel for CatallaxKernel {
 
     fn display_bound(&self, body: BodyId) -> KernelResult<Option<DisplayBound>> {
         self.observe("display_bound", || {
+            if self.field(body)?.is_some() {
+                return Ok(None);
+            }
             let solid = self.solid(body)?;
             if !solid.has_splines() {
                 return Ok(None);

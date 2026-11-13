@@ -2816,6 +2816,9 @@ impl CommandTools<'_> {
                 if let FeatureStatus::AnsweredWithinBound(bound) = &f.status {
                     v["answer_bound"] = json!(bound);
                 }
+                if let Some(display) = doc.display_answer(f.id) {
+                    v["display_answer"] = json!(display);
+                }
                 if let Some(record) = doc.model().import_record(soliddraft_model::FeatureId(f.id as u32)) {
                     v["record"] = json!(record);
                 }

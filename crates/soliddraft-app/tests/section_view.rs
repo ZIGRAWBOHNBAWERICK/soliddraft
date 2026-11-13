@@ -7,6 +7,62 @@ use egui::{accesskit::Role, pos2};
 use egui_kittest::kittest::Queryable;
 use soliddraft_app::{document::DisplayMesh, section::SectionPlane};
 
+#[test]
+fn section_keeps_every_body_when_the_active_body_changes() {
+    use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, SketchPlane};
+    use soliddraft_sketch::{P2, Sketch};
+
+    let case = ribbon::case("section-multibody");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let mut doc = Document::new("Section both bodies", soliddraft_app::kernel());
+    for (x, depth) in [(-30.0, 10.0), (30.0, 20.0)] {
+        if x > 0.0 {
+            doc.new_body();
+        }
+        let id = doc
+            .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+            .unwrap()
+            .unwrap();
+        let mut sketch = Sketch::new();
+        sketch.rectangle(P2::new(x, 0.0), 20.0, 10.0).unwrap();
+        doc.apply(Command::EditSketch { id, sketch }).unwrap();
+        doc.apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(id), depth, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap();
+    }
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        let before = app.state().state.doc.model().to_bytes().unwrap();
+        let meshes = app.state().state.doc.meshes.clone();
+        click(app, "Inspect tab");
+        click(app, "Section");
+        ready(app);
+        let section = |app: &ribbon::App| app.state().state.section.mesh(&app.state().state.doc).unwrap();
+        assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "both bodies contribute to the section");
+        let (lo, hi) = section(app).bounds().unwrap();
+        assert!(lo.x < -30.0 && hi.x > 30.0, "the section spans both separated bodies");
+
+        app.state_mut().state.doc.select_body(0);
+        app.run_steps(3);
+        ready(app);
+        assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "selection does not change the section");
+        drag_offset(app, -20.0);
+        let offset = app.state().state.section.offset;
+        assert!(offset > 0.0 && offset < 10.0);
+        let kept = volume(&section(app));
+        assert!((kept - 400.0 * offset).abs() < 0.1, "both bodies are cut at the same plane");
+        click(app, "Flip side");
+        ready(app);
+        assert!((kept + volume(&section(app)) - 6000.0).abs() < 0.1, "both complementary cuts stay visible");
+        case.frame(app, "both-bodies-sectioned");
+        click(app, "Close section");
+        assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
+        assert_eq!(app.state().state.doc.meshes, meshes);
+    });
+}
+
 fn ready(app: &mut ribbon::App) {
     let start = std::time::Instant::now();
     loop {

@@ -11,7 +11,7 @@ use crate::display_quality::{self, DisplayQuality};
 use crate::sketch::{self, Sketch};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
-use soliddraft_document::DocumentId;
+use soliddraft_document::{ContentHash, DocumentId};
 use soliddraft_kernel_api::{
     BodyId, BooleanOp, EdgeId, EdgePolyline, Extrude, FaceId, Kernel, KernelError, Mesh, OpTag, Plane, Point2, Profile,
     SurfaceKind, TessellationParams, Topology,
@@ -711,11 +711,75 @@ pub struct RepairItem {
     pub label: String,
 }
 
+pub const WITHIN_BOUND_LABEL: &str = "Answered within a stated bound";
+
+/// An answer against a kept definition and a rule whose limit was set before evaluation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "AnswerBoundFields")]
+pub struct AnswerBound {
+    rule: String,
+    kept_definition: String,
+    measured_bound: f64,
+    allowed_bound: f64,
+    unit: String,
+}
+
+#[derive(Deserialize)]
+struct AnswerBoundFields {
+    rule: String,
+    kept_definition: String,
+    measured_bound: f64,
+    allowed_bound: f64,
+    unit: String,
+}
+
+impl TryFrom<AnswerBoundFields> for AnswerBound {
+    type Error = String;
+    fn try_from(value: AnswerBoundFields) -> Result<Self, Self::Error> {
+        Self::new(value.rule, value.kept_definition, value.measured_bound, value.allowed_bound, value.unit)
+    }
+}
+
+impl AnswerBound {
+    pub fn new(
+        rule: String,
+        kept_definition: String,
+        measured_bound: f64,
+        allowed_bound: f64,
+        unit: String,
+    ) -> Result<Self, String> {
+        if rule.trim().is_empty() || kept_definition.trim().is_empty() || unit.trim().is_empty() {
+            return Err("A bounded answer needs its rule, kept definition and unit".into());
+        }
+        if !measured_bound.is_finite()
+            || !allowed_bound.is_finite()
+            || measured_bound < 0.0
+            || allowed_bound < 0.0
+            || measured_bound > allowed_bound
+        {
+            return Err("The measured bound must be finite, nonnegative and within the rule's limit".into());
+        }
+        Ok(Self { rule, kept_definition, measured_bound, allowed_bound, unit })
+    }
+
+    pub fn summary(&self) -> String {
+        format!("≤ {} {}", self.measured_bound, self.unit)
+    }
+
+    pub fn description(&self) -> String {
+        format!(
+            "Measured bound: {} {}\nRule limit: {} {}\nRule: {}\nKept definition: {}",
+            self.measured_bound, self.unit, self.allowed_bound, self.unit, self.rule, self.kept_definition
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FeatureStatus {
     Ok,
     /// Authored definitions await the scoped proof; no prior body certifies them.
     Pending,
+    AnsweredWithinBound(AnswerBound),
     Error(String),
     /// Some reference no longer resolves; the feature was skipped.
     NeedsRepair(Vec<RepairItem>),
@@ -764,6 +828,9 @@ pub struct Feature {
 
 impl Feature {
     pub fn summary(&self) -> String {
+        if let FeatureStatus::AnsweredWithinBound(bound) = &self.status {
+            return bound.summary();
+        }
         match &self.kind {
             FeatureKind::ReferencePlane(p) => format!("offset {} mm", fmt_mm(p.offset())),
             FeatureKind::Sketch(s) => {
@@ -1255,12 +1322,15 @@ pub struct ProofState {
     pub proved_edit: Option<u64>,
     pub transient: bool,
     pub pending: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub answered_within_bound: bool,
     pub failed: bool,
 }
 
 impl ProofState {
     pub fn current_proved_model(&self) -> bool {
         !self.pending
+            && !self.answered_within_bound
             && !self.failed
             && !self.transient
             && self.proved_revision == Some(self.requested_revision)
@@ -1346,6 +1416,9 @@ pub struct Document {
     /// Bodies shown before, latest last, kept while the part keeps them.
     recent: Vec<Shown>,
     model: model::Document,
+    geometry: ContentHash,
+    /// Keep verdicts with their geometry so rename and undo cannot turn them into proof.
+    bounded_answers: HashMap<ContentHash, HashMap<FeatureId, AnswerBound>>,
     last_proved: Option<ProvedRevision>,
     worker: Option<crate::drag::Worker>,
     /// Woken when a background answer arrives; see [`Document::set_repaint`].
@@ -1380,6 +1453,7 @@ impl Document {
 
     /// A document over a part the model already holds, such as one opened from a file.
     pub fn from_model(model: model::Document) -> Self {
+        let geometry = model.geometry_hash();
         let mut doc = Self {
             instance: DocumentId::new(),
             name: model.name().to_owned(),
@@ -1403,6 +1477,8 @@ impl Document {
             recent: Vec::new(),
             quality: DisplayQuality::new(model.kernel().clone()),
             model,
+            geometry,
+            bounded_answers: HashMap::new(),
             last_proved: None,
             worker: None,
             repaint: None,
@@ -1451,6 +1527,8 @@ impl Document {
             shading: self.shading.clone(),
             recent: Vec::new(),
             model: self.model.fork(),
+            geometry: self.geometry.clone(),
+            bounded_answers: self.bounded_answers.clone(),
             last_proved: self.last_proved.as_ref().map(|proved| ProvedRevision {
                 revision: proved.revision,
                 request: proved.request,
@@ -1460,7 +1538,7 @@ impl Document {
             repaint: self.repaint.clone(),
             pending: None,
             provisional: None,
-            proof_failure: None,
+            proof_failure: self.proof_failure.clone(),
             proof_notice: None,
             display_failure: None,
             edit_depth: None,
@@ -1506,6 +1584,33 @@ impl Document {
         self.provisional.as_ref().map_or(self.shown_revision, |view| view.token.revision)
     }
 
+    /// Records a result for the current kept geometry, independent of the tree projection.
+    pub fn record_answer_within_bound(&mut self, id: FeatureId, answer: AnswerBound) -> Result<(), String> {
+        let index = self.model.index_of(model_id(id)).ok_or("no such feature")?;
+        if self.model.is_dirty()
+            || self.proof_failure.is_some()
+            || index >= self.model.active_count()
+            || self.model.features()[index].suppressed
+            || self.model.status(model_id(id)) != Some(&model::FeatureStatus::Ok)
+        {
+            return Err("A bounded answer needs a completed current feature result".into());
+        }
+        self.geometry = self.model.geometry_hash();
+        self.bounded_answers.entry(self.geometry.clone()).or_default().insert(id, answer);
+        self.sync();
+        Ok(())
+    }
+
+    fn has_bounded_answer(&self) -> bool {
+        self.bounded_answers.get(&self.geometry).is_some_and(|answers| {
+            self.model
+                .features()
+                .iter()
+                .take(self.model.active_count())
+                .any(|feature| !feature.suppressed && answers.contains_key(&app_id(feature.id)))
+        })
+    }
+
     pub fn proof_state(&self) -> ProofState {
         ProofState {
             document: self.model.id(),
@@ -1521,6 +1626,7 @@ impl Document {
             proved_edit: self.last_proved.as_ref().and_then(|proved| proved.request),
             transient: self.provisional.as_ref().is_some_and(|shown| shown.token.transient),
             pending: self.proof_pending(),
+            answered_within_bound: self.has_bounded_answer(),
             failed: self.proof_failure.is_some() || self.has_model_failure(),
         }
     }
@@ -1528,9 +1634,16 @@ impl Document {
     /// A feature that shapes the body did not build. A sketch adds no geometry: an
     /// active feature that uses a sketch which did not build is blocked itself.
     fn has_model_failure(&self) -> bool {
-        self.features.iter().any(|feature| {
-            !matches!(feature.kind, FeatureKind::Sketch(_))
-                && matches!(feature.status, FeatureStatus::Error(_) | FeatureStatus::NeedsRepair(_))
+        self.model.features().iter().any(|feature| {
+            !matches!(feature.kind, model::FeatureKind::Sketch(_))
+                && matches!(
+                    self.model.status(feature.id),
+                    Some(
+                        model::FeatureStatus::Failed(_)
+                            | model::FeatureStatus::RepairNeeded(_)
+                            | model::FeatureStatus::Blocked(_)
+                    )
+                )
         })
     }
 
@@ -1540,7 +1653,11 @@ impl Document {
     }
 
     fn retain_proved_revision(&mut self) {
-        if self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some() {
+        if self.model.is_dirty()
+            || self.has_model_failure()
+            || self.proof_failure.is_some()
+            || self.proof_state().answered_within_bound
+        {
             return;
         }
         if let Some(proved) = &mut self.last_proved
@@ -1570,6 +1687,9 @@ impl Document {
         }
         if self.proof_pending() {
             return Some(("Proof pending", false));
+        }
+        if self.proof_state().answered_within_bound {
+            return Some((WITHIN_BOUND_LABEL, false));
         }
         self.display_failure
             .as_deref()
@@ -1884,6 +2004,10 @@ impl Document {
         }
         let label = self.model.undo_deferred().map_err(|error| error.to_string())?;
         self.touch();
+        if self.model.geometry_hash() == self.geometry {
+            self.after_metadata_change();
+            return Ok(label);
+        }
         self.after_deferred_change();
         if let Err(message) = self.schedule_proof() {
             self.fail_proof(message);
@@ -1897,6 +2021,10 @@ impl Document {
         }
         let label = self.model.redo_deferred().map_err(|error| error.to_string())?;
         self.touch();
+        if self.model.geometry_hash() == self.geometry {
+            self.after_metadata_change();
+            return Ok(label);
+        }
         self.after_deferred_change();
         if let Err(message) = self.schedule_proof() {
             self.fail_proof(message);
@@ -2144,7 +2272,10 @@ impl Document {
         }
         let journal = self.model.journal_command(|| serde_json::json!({"op":"app_undo"}));
         journal.finish((|| {
-            let label = self.model.undo().map_err(|e| e.to_string())?;
+            let label = self.model.undo_deferred().map_err(|e| e.to_string())?;
+            if self.model.geometry_hash() != self.geometry {
+                self.model.rebuild();
+            }
             self.touch();
             self.after_change();
             Ok(label)
@@ -2157,7 +2288,10 @@ impl Document {
         }
         let journal = self.model.journal_command(|| serde_json::json!({"op":"app_redo"}));
         journal.finish((|| {
-            let label = self.model.redo().map_err(|e| e.to_string())?;
+            let label = self.model.redo_deferred().map_err(|e| e.to_string())?;
+            if self.model.geometry_hash() != self.geometry {
+                self.model.rebuild();
+            }
             self.touch();
             self.after_change();
             Ok(label)
@@ -2187,8 +2321,10 @@ impl Document {
             let retained = if deferred || drawn.is_some() { None } else { self.retained_display() };
             let commands = self.to_model(command)?;
             let batch = model::Command::Batch { label, commands };
-            let done = if deferred { self.model.execute_deferred(batch) } else { self.model.execute(batch) }
-                .map_err(|error| error.to_string())?;
+            let done = self.model.execute_deferred(batch).map_err(|error| error.to_string())?;
+            if !deferred && self.model.geometry_hash() != self.geometry {
+                self.model.rebuild();
+            }
             self.touch();
             if deferred {
                 self.after_deferred_change();
@@ -2436,6 +2572,7 @@ impl Document {
         journal.finish({
             let before = self.rollback.and_then(|c| self.features.get(c)).map(|f| model_id(f.id));
             self.model.set_rollback(before);
+            self.display_failure = None;
             self.after_change();
             match self.features.iter().find_map(|f| match &f.status {
                 FeatureStatus::Error(e) => Some(format!("{}: {e}", f.name)),
@@ -2449,6 +2586,10 @@ impl Document {
 
     /// Mirrors the model and refreshes the display, keeping the selection by name.
     fn after_change(&mut self) {
+        if self.model.geometry_hash() == self.geometry {
+            self.after_metadata_change();
+            return;
+        }
         if let Some(worker) = &mut self.worker {
             worker.invalidate();
         }
@@ -2478,9 +2619,47 @@ impl Document {
         self.restore_selection(previous_selection);
     }
 
+    fn after_metadata_change(&mut self) {
+        // Identical parameter edits dirty the model without changing its geometry.
+        if !self.model.is_dirty() || (self.pending.is_none() && self.proof_failure.is_none()) {
+            self.model.rebuild();
+        }
+        let previous = self.revision;
+        let selection = self.selection.and_then(|s| self.describe(s)).map(|i| (i.feature, i.title));
+        let pending = self.pending.is_some();
+        if pending {
+            if let Some(worker) = &mut self.worker {
+                worker.invalidate();
+            }
+            self.pending = None;
+        }
+        self.provisional = None;
+        self.revision += 1;
+        self.sync();
+        if pending && let Err(message) = self.schedule_proof() {
+            self.fail_proof(message);
+        }
+        self.retain_proved_revision();
+        self.refresh_display();
+        if self.table_edits != self.model.table_edits() {
+            self.table_edits = self.model.table_edits();
+            self.mesh_version += 1;
+        }
+        if self.shown_revision == previous
+            && !self.proof_pending()
+            && self.proof_failure.is_none()
+            && !self.has_model_failure()
+        {
+            self.shown_revision = self.revision;
+        }
+        self.restore_selection(selection);
+    }
+
     /// Copies the model's tree into the panels' shape.
     fn sync(&mut self) {
+        self.geometry = self.model.geometry_hash();
         let m = &self.model;
+        let bounded = self.bounded_answers.get(&self.geometry);
         let active = m.active_count();
         let pending_from = if m.is_dirty() {
             self.last_proved.as_ref().map_or(0, |proved| {
@@ -2515,7 +2694,12 @@ impl Document {
                             .as_ref()
                             .map_or(FeatureStatus::Pending, |message| FeatureStatus::Error(message.clone()))
                     } else {
-                        view_status(&f.kind, status, &names)
+                        match view_status(&f.kind, status, &names) {
+                            FeatureStatus::Ok if !inactive => bounded
+                                .and_then(|answers| answers.get(&app_id(f.id)))
+                                .map_or(FeatureStatus::Ok, |answer| FeatureStatus::AnsweredWithinBound(answer.clone())),
+                            status => status,
+                        }
                     },
                     suppressed: f.suppressed,
                     body: if inactive || index >= pending_from { None } else { m.body_after(f.id) },
@@ -3494,6 +3678,9 @@ impl Document {
                     FeatureStatus::Inactive => details.push(("State".to_owned(), "Rolled back".to_owned())),
                     FeatureStatus::Ok => {}
                     FeatureStatus::Pending => details.push(("State".into(), "Proof pending".into())),
+                    FeatureStatus::AnsweredWithinBound(bound) => {
+                        details.push((WITHIN_BOUND_LABEL.into(), bound.description()))
+                    }
                 }
                 Some(EntityInfo { title: f.name.clone(), feature: Some(id), details })
             }

@@ -1069,6 +1069,21 @@ impl Shortcuts {
                     _ => {}
                 }
             }
+            // Existing assignments predate these defaults, so they keep the key on upgrade.
+            for id in ["sketch_trim", "sketch_offset", "sketch_move"] {
+                let assigned = overrides.get(id).and_then(Value::as_str).and_then(KeyChord::parse).is_some();
+                if s.overrides.contains_key(id) || assigned {
+                    continue;
+                }
+                let claimed = s.preset.keys_of(id).iter().any(|key| {
+                    s.conflicts_for_key(id, *key)
+                        .iter()
+                        .any(|other| s.overrides.get(other.id).is_some_and(Option::is_some))
+                });
+                if claimed {
+                    s.set_raw(id, None);
+                }
+            }
         }
         // Read the whole assignment before checking it: a swap can use two keys that
         // the defaults still own until both overrides have been read.

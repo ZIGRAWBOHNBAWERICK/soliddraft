@@ -247,9 +247,13 @@ fn saved_custom_sketch_keys_survive_the_new_defaults_in_every_preset() {
             ("sketch_circle", "O", "sketch_offset"),
             ("smart_dimension", "M", "sketch_move"),
         ] {
-            write(&dir, &serde_json::json!({
-                "shortcuts": {"preset": preset.id(), "overrides": {custom: key}}
-            }).to_string());
+            write(
+                &dir,
+                &serde_json::json!({
+                    "shortcuts": {"preset": preset.id(), "overrides": {custom: key}}
+                })
+                .to_string(),
+            );
             let before = bytes(&dir);
             let mut w = window();
             w.run_steps(2);
@@ -259,6 +263,11 @@ fn saved_custom_sketch_keys_survive_the_new_defaults_in_every_preset() {
                 continue;
             }
             assert!(loaded.keys_of(added_default).is_empty(), "the custom assignment owns {key}");
+            for (other, default_key) in [("sketch_trim", "T"), ("sketch_offset", "O"), ("sketch_move", "M")] {
+                if other != added_default {
+                    assert_eq!(loaded.shortcut_text(other).as_deref(), Some(default_key));
+                }
+            }
             assert_eq!(bytes(&dir), before, "opening Preferences does not write settings");
             settings::save_shortcuts(loaded).unwrap();
             assert_eq!(settings::shortcuts(), *loaded, "migration survives save and reopen");

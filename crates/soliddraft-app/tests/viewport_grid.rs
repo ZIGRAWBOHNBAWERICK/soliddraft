@@ -175,6 +175,9 @@ fn sweep(case_name: &str, size: egui::Vec2, ppp: f32) {
     let mut case = Case::gpu(case_name);
     seed_gpu_settings(&case, r#"{"view":{}}"#);
     let mut app = launch_for_frames(empty(), size, ppp);
+    if size.x < 1280.0 {
+        render_steps::set_eager(&mut app, true);
+    }
     let before = model(&app);
     to_top_orthographic(&mut app);
 

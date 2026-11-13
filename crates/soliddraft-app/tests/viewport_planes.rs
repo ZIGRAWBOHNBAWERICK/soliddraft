@@ -227,6 +227,7 @@ fn picks(app: &mut App, points: &[Vec3]) -> Vec<Option<Selection>> {
 #[test]
 fn reference_overlays_leave_opaque_model_and_picks_readable() {
     let mut case = Case::gpu("overlays_and_the_model");
+    case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#0c1420"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(box_part());
     let before = model(&app);
     pointer_to_chrome(&mut app);

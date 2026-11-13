@@ -57,7 +57,7 @@ fn a_refused_export_leaves_its_destination_alone() {
 }
 
 #[test]
-fn three_section_smooth_loft_exports_the_certified_mesh_through_the_app() {
+fn smooth_rendering_cannot_satisfy_an_independent_certified_export() {
     let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     assert_eq!(APP_REQUEST_WORK, 20_000_000);
     let dir = std::env::temp_dir().join(format!("soliddraft-smooth-export-{}", soliddraft_document::DocumentId::new()));
@@ -82,15 +82,11 @@ fn three_section_smooth_loft_exports_the_certified_mesh_through_the_app() {
     assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
     assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
     assert_eq!(std::fs::read(&path).unwrap(), sentinel);
-    let (exported, work) = with_request_allowance(APP_REQUEST_WORK, || call(&mut state, "export_stl", arguments));
-    eprintln!("three-section Smooth app export: {work:?}; {}", exported.content);
-    assert!(!exported.is_error && !work.exhausted, "{}; {work:?}", exported.content);
-    let report: Value = serde_json::from_str(&exported.content).unwrap();
-    assert!(report["report"].as_str().unwrap().contains("within 0.01 mm"), "{report}");
-    let stl = std::fs::read(&path).unwrap();
-    let triangles = u32::from_le_bytes(stl[80..84].try_into().unwrap()) as usize;
-    assert!(triangles > 0);
-    assert_eq!(stl.len(), 84 + 50 * triangles);
+    let (refused, work) = with_request_allowance(APP_REQUEST_WORK, || call(&mut state, "export_stl", arguments));
+    eprintln!("three-section Smooth certified export: {work:?}; {}", refused.content);
+    assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
+    assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
+    assert_eq!(std::fs::read(&path).unwrap(), sentinel, "a screen result cannot replace certified export");
     assert_eq!(state.doc.model().to_bytes().unwrap(), before);
     assert_eq!(state.doc.undo_depth(), undo);
     std::fs::remove_dir_all(dir).unwrap();

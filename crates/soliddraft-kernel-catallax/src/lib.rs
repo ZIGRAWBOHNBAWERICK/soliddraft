@@ -1523,7 +1523,7 @@ impl Kernel for CatallaxKernel {
                 return Ok(field.topology());
             }
             let solid = self.solid(body)?;
-            // Topology uses the original certified display, independent of later mesh requests.
+            // Logical topology uses the initial screen mesh, independent of later refinement requests.
             if let Some(value) = solid.topology.get() {
                 return value.clone();
             }

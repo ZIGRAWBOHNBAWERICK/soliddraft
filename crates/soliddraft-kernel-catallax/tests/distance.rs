@@ -22,7 +22,8 @@ fn inward_offset_uses_the_exact_result_and_keeps_its_source() {
     assert!(topology.faces.iter().all(|f| !f.origins.is_empty()));
     assert!(k.export_step(result.body, &StepOptions::default()).unwrap().text.contains("MANIFOLD_SOLID_BREP"));
     assert!(k.offset(&OpTag::new("zero"), source, 0.0).unwrap_err().to_string().contains("nonzero distance"));
-    assert!(k.offset(&OpTag::new("consumed"), source, -10.0).is_err());
+    let consumed = k.offset(&OpTag::new("consumed"), source, -10.0).unwrap_err();
+    assert!(consumed.to_string().contains("remove the whole body"), "{consumed}");
     assert!((k.mass_properties(source).unwrap().volume - 480.0).abs() < 1e-8);
 }
 

@@ -31,6 +31,9 @@ fn linear_boss_copies_preserve_stock_and_later_cut() {
     assert!(result.record.face_roles.iter().any(|f| matches!(f.role, FaceRole::FeatureCopy { instance: 1, .. })));
     assert!(result.record.face_roles.iter().any(|f| matches!(f.role, FaceRole::FeatureCopy { instance: 2, .. })));
     assert!(k.export_step(result.body, &StepOptions::default()).is_ok());
+    let recipe: catallax_recipe::Recipe = serde_json::from_value(k.body_recipe(result.body).unwrap()).unwrap();
+    recipe.check().unwrap();
+
     volume(&k, later, 604.0);
 }
 #[test]

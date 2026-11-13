@@ -2546,6 +2546,7 @@ impl Document {
         journal.finish({
             let before = self.rollback.and_then(|c| self.features.get(c)).map(|f| model_id(f.id));
             self.model.set_rollback(before);
+            self.display_failure = None;
             self.after_change();
             match self.features.iter().find_map(|f| match &f.status {
                 FeatureStatus::Error(e) => Some(format!("{}: {e}", f.name)),
@@ -2593,6 +2594,9 @@ impl Document {
     }
 
     fn after_metadata_change(&mut self) {
+        if !self.model.is_dirty() {
+            self.model.rebuild();
+        }
         let previous = self.revision;
         let selection = self.selection.and_then(|s| self.describe(s)).map(|i| (i.feature, i.title));
         let pending = self.pending.is_some();

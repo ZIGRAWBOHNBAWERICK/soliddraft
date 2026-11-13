@@ -721,12 +721,29 @@ fn build_with_files(
     if work.exhausted { Err(Error::ResourceLimit) } else { result }
 }
 
+fn loft_fillet_refusal(error: &Error) -> Option<&'static str> {
+    let Error::Build(catallax_features::BuildError::Geometry { refusal, .. }) = error else { return None };
+    if refusal.code != "fillet.unsupported-spline" {
+        return None;
+    }
+    Some(if refusal.detail.starts_with("a spline fillet's side face must be its whole patch, with no other trims") {
+        "Fillet cannot round this loft edge because a side face has already been trimmed. Choose an edge on an untrimmed face"
+    } else {
+        "Fillet cannot round this loft edge. Pick an outside edge with untrimmed side faces and flat end faces"
+    })
+}
+
 fn build_error(op: OpKind, error: Error) -> KernelError {
     if op == OpKind::Sweep {
         return sweep::refusal(error.code());
     }
     if op == OpKind::Loft {
         return loft::refusal(error.code());
+    }
+    if op == OpKind::Fillet
+        && let Some(message) = loft_fillet_refusal(&error)
+    {
+        return KernelError::InvalidInput(message.into());
     }
     let code = error.code();
     if matches!(error, Error::Conversion(catallax_app::soliddraft::ConversionError::NotYet { .. })) {

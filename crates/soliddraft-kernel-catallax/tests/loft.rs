@@ -109,7 +109,7 @@ fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plain
     let error = k.fillet(&OpTag::new("again"), rounded.body, &[neighbour], 0.1).unwrap_err();
     assert!(
         matches!(error, KernelError::InvalidInput(ref message)
-        if message == "Fillet cannot round another edge on this loft face because an earlier fillet has already trimmed it. Choose an edge on an untrimmed face"),
+        if message == "Fillet cannot round this loft edge because a side face has already been trimmed. Choose an edge on an untrimmed face"),
         "{error}"
     );
     assert_eq!(before, k.body_recipe(rounded.body).unwrap());

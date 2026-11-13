@@ -146,6 +146,15 @@ projection and rendering quality retain their existing preferences.
 
 ## Sketch mode
 
+The internal Edit Suite frame leads its sketch palette with a full-width Smart
+Dimension tile. Entity tools use Edit and Move and copy groups, and Relations opens
+beside its palette tile. Canceling plane picking restores plane visibility and drops
+the pending tool. The classic frame keeps its ribbon.
+
+L, R, C, A, D, T, O and M select line, rectangle, circle, arc, Smart Dimension, trim,
+offset and move across all shortcut presets. Custom bindings take precedence, and
+typing in a field leaves the tool alone.
+
 An open sketch locks the workspace switch to its sketch and plane. The palette
 contains sketch tools only. A red Close sketch action occupies the right end of
 the options bar. It stays visible while a tool or dimension editor is active.

@@ -2441,7 +2441,7 @@ fn registry() -> Vec<CommandSpec> {
 .undo(Undo::Replaces),
         cmd("preview_import", "Preview import", Icon::Import, "Read a STEP or IGES file's proposed repairs")
             .agents(Agents::Mcp, "Reads the source without changing the part.", crate::import::preview_params),
-        cmd("import_step", "Import STEP", Icon::Import, "Import STEP solids after reviewing their repairs")
+        cmd("import_step", "Import STEP", Icon::Import, "Import one STEP body after reviewing its repairs")
             .run(|_| AppAction::ImportStep(None))
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
             .agents(Agents::Mcp, "Automatic repairs take no answer. Declined gap ids, and each approved repair with its limit and approver, are saved with the source.", crate::import::params)

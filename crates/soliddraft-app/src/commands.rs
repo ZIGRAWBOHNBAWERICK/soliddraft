@@ -724,12 +724,8 @@ impl CommandSpec {
         self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), p.panel))
     }
 
-    pub fn path_in(&self, state: &AppState) -> Option<String> {
-        if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-            self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), palette_group(p.panel, p.tab)))
-        } else {
-            self.path()
-        }
+    pub fn path_in(&self, _state: &AppState) -> Option<String> {
+        self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), palette_group(p.panel, p.tab)))
     }
 
     /// The agent tool's description: the doc, then the details.
@@ -1445,7 +1441,7 @@ fn editing(s: &AppState, f: fn(&EditorParams) -> bool) -> bool {
 }
 
 fn can_sketch_tool(s: &AppState) -> bool {
-    s.in_sketch() || s.frame_layout == crate::settings::FrameLayout::EditSuite && Context::of(s).part() && field_open(s)
+    s.in_sketch() || Context::of(s).part() && field_open(s)
 }
 
 fn tool_is(s: &AppState, t: Tool) -> bool {
@@ -1577,145 +1573,145 @@ fn registry() -> Vec<CommandSpec> {
             .on(Sketch, "Sketch", Large)
             .run(|_| AppAction::ExitSketch)
             .when(AppState::in_sketch)
-.app_only(EDITOR),
+            .app_only(EDITOR),
         cmd("sketch_line", "Line", Icon::Cad("line"), "Line: click points; right-click ends the chain")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::L)
             .run(|_| AppAction::SketchTool(Tool::Line))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Line))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_centreline", "Centreline", Icon::Cad("construction"), "Construction line: click points; right-click ends the chain")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Centreline))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Centreline))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_circle", "Circle", Icon::Cad("circle"), "Circle: centre, then a point on it")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::C)
             .run(|_| AppAction::SketchTool(Tool::Circle))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Circle))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_perimeter_circle", "Perimeter circle", Icon::Cad("circle"), "Circle through three perimeter points")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::PerimeterCircle))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::PerimeterCircle))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_ellipse", "Ellipse", Icon::Circle, "Ellipse: centre, first semi-axis, second semi-axis")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Ellipse))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Ellipse))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_partial_ellipse", "Partial ellipse", Icon::Arc, "Partial ellipse: centre, axes, start, then counterclockwise end")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::PartialEllipse))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::PartialEllipse))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_fit_spline", "Fit-point spline", Icon::Arc, "Spline through picked points; double-click or Enter to finish")
             .on(Sketch,"Draw",Small)
             .run(|_| AppAction::SketchTool(Tool::FitSpline))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s,Tool::FitSpline))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_control_spline", "Control-point spline", Icon::Arc, "Spline from a control polygon; double-click or Enter to finish")
             .on(Sketch,"Draw",Small)
             .run(|_| AppAction::SketchTool(Tool::ControlSpline))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s,Tool::ControlSpline))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_text", "Sketch text", Icon::Text, "Place editable font outlines on the sketch baseline")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Text))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Text))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_rectangle", "Rectangle", Icon::Cad("rect"), "Corner rectangle")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::R)
             .run(|_| AppAction::SketchTool(Tool::Rectangle))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Rectangle))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_centre_rectangle", "Centre rectangle", Icon::Cad("rect"), "Centre and corner")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::CentreRectangle))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::CentreRectangle))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_three_point_corner_rectangle", "3-point corner rectangle", Icon::Cad("rect"), "First edge, then perpendicular height")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointCornerRectangle))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointCornerRectangle))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_three_point_centre_rectangle", "3-point centre rectangle", Icon::Cad("rect"), "Centre, side midpoint, then half-width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointCentreRectangle))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointCentreRectangle))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_parallelogram", "Parallelogram", Icon::Cad("rect"), "Three consecutive corners")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Parallelogram))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Parallelogram))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_arc", "Arc", Icon::Cad("arc"), "Centrepoint arc: centre, start, end; choose direction in properties")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::A)
             .run(|_| AppAction::SketchTool(Tool::Arc))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Arc))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_three_point_arc", "Three-point arc", Icon::Cad("arc"), "Arc: start, end, then a point on the sweep")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointArc))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointArc))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_tangent_arc", "Tangent arc", Icon::Cad("arc"), "Continue a line or circular arc: endpoint, then new endpoint")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::TangentArc))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::TangentArc))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_slot", "Slot", Icon::Cad("slot_sketch"), "Straight slot: two centres, then the width")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::S)
             .run(|_| AppAction::SketchTool(Tool::Slot))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Slot))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_centrepoint_slot", "Centrepoint slot", Icon::Cad("slot_sketch"), "Straight slot: midpoint, end centre, then width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::CentrepointSlot))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::CentrepointSlot))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_three_point_arc_slot", "Three-point arc slot", Icon::Cad("slot_sketch"), "Arc slot: start, end, point along the arc, then width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointArcSlot))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointArcSlot))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_centrepoint_arc_slot", "Centrepoint arc slot", Icon::Cad("slot_sketch"), "Arc slot: arc centre, start, counterclockwise end, then width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::CentrepointArcSlot))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::CentrepointArcSlot))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_point", "Point", Icon::Cad("sk_point"), "Point")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::P)
             .run(|_| AppAction::SketchTool(Tool::Point))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Point))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         // The Modify tools: each previews what it will do and applies it on a click or
         // from the property panel. Escape or a right-click returns to Select.
         cmd("sketch_polygon", "Polygon", Icon::Polygon, "Regular polygon: click the centre, then a vertex")
@@ -1723,57 +1719,57 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::SketchTool(Tool::Polygon))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Polygon))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_trim", "Trim", Icon::Trim, "Trim a picked piece, power-trim a drag, or choose Corner, Inside or Outside in the tool panel")
             .on(Sketch, "Modify", Small)
             .key(Scope::Sketch, none, Key::T)
             .run(|_| AppAction::SketchTool(Tool::Trim))
             .when(can_sketch_tool)
             .lit(|s| s.sketch.as_ref().is_some_and(|k| k.tool.trims()))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_fillet", "Sketch fillet", Icon::Fillet, "Insert a tangent radius between two picked lines or arcs")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Fillet))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Fillet))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_chamfer", "Sketch chamfer", Icon::Chamfer, "Replace a picked line corner with a setback or distance/angle chamfer")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Chamfer))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Chamfer))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_split", "Split entities", Icon::Trim, "Split a line or arc at one point, or a circle at two points")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Split))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Split))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_extend", "Extend", Icon::Extend, "Extend: click the end of a line or arc to lengthen it to the next curve")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Extend))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Extend))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_offset", "Offset", Icon::Offset, "Offset: copy the selected chain at a distance")
             .on(Sketch, "Modify", Small)
             .key(Scope::Sketch, none, Key::O)
             .run(|_| AppAction::SketchTool(Tool::Offset))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Offset))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_mirror", "Mirror entities", Icon::Mirror, "Mirror: copy the selected entities across an axis")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Mirror))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Mirror))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_linear_pattern", "Linear pattern", Icon::LinearPattern, "Copy the selected entities along a step")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::LinearPattern))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::LinearPattern))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd(
             "sketch_circular_pattern",
             "Circular pattern",
@@ -1784,70 +1780,70 @@ fn registry() -> Vec<CommandSpec> {
         .run(|_| AppAction::SketchTool(Tool::CircularPattern))
         .when(can_sketch_tool)
         .lit(|s| tool_is(s, Tool::CircularPattern))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_move", "Move entities", Icon::Views, "Translate selected geometry with compatible constraints")
             .on(Sketch, "Transform", Small)
             .key(Scope::Sketch, none, Key::M)
             .run(|_| AppAction::SketchTool(Tool::Move))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Move))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_copy", "Copy entities", Icon::LinearPattern, "Copy selected geometry from a base point and displacement")
             .on(Sketch, "Transform", Small)
             .run(|_| AppAction::SketchTool(Tool::Copy))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Copy))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_rotate", "Rotate entities", Icon::CircularPattern, "Rotate or copy selected geometry about a centre")
             .on(Sketch, "Transform", Small)
             .run(|_| AppAction::SketchTool(Tool::Rotate))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Rotate))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_scale", "Scale entities", Icon::Rectangle, "Uniformly scale selected geometry about a base point")
             .on(Sketch, "Transform", Small)
             .run(|_| AppAction::SketchTool(Tool::Scale))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Scale))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_select", "Select", Icon::Sketch, "Select and drag sketch geometry")
             .key(Scope::Sketch, none, Key::V)
             .run(|_| AppAction::SketchTool(Tool::Select))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Select))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("smart_dimension", "Smart dim", Icon::Cad("smart_dim"), "Dimension a line, arc, circle, point or pair")
             .on(Sketch, "Constrain", Large)
             .key(Scope::Sketch, none, Key::D)
             .run(|_| AppAction::SketchTool(Tool::Dimension))
             .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Dimension))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("construction", "Construction", Icon::Cad("construction"), "Toggle construction geometry on the selection")
             .on(Sketch, "Constrain", Small)
             .key(Scope::Sketch, none, Key::X)
             .run(|_| AppAction::ToggleConstruction)
             .when(AppState::in_sketch)
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("check_sketch_feature", "Check sketch for feature", Icon::Cad("check"), "Check closed profiles for a boss or cut extrude")
             .run(|_| AppAction::CheckSketchFeature)
             .when(AppState::in_sketch)
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_diagnostics", "Sketch diagnostics", Icon::Cad("check"), "Inspect profile warnings without repairing geometry")
             .run(|_| AppAction::SketchDiagnostics(true))
             .when(AppState::in_sketch)
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("link_values", "Link values", Icon::SmartDim, "Share a named value between selected driving dimensions")
             .run(|_|AppAction::SketchValues(crate::sketch_values::Action::Open))
             .when(|state|state.sketch.as_ref().is_some_and(|s|crate::sketch_values::selected(s).is_ok()))
             .hint(|state|state.sketch.as_ref().and_then(|s|crate::sketch_values::selected(s).err()))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("relations", "Relations", Icon::Cad("relations"), "Relations between sketch entities")
             .on(Sketch, "Constrain", Small)
             .run(|s| AppAction::SketchRelations(!s.sketch.as_ref().is_some_and(|s| s.relations_open)))
             .when(AppState::in_sketch)
             .lit(|s| s.sketch.as_ref().is_some_and(|s| s.relations_open))
-.app_only(SKETCHER),
+            .app_only(SKETCHER),
         cmd("sketch_shading", "Contour shading", Icon::Display, "Show or hide closed-contour shading in this sketch")
             .on(Sketch, "Display", Small)
             .run(|s| AppAction::SketchShading(!s.sketch.as_ref().is_some_and(|s| s.show_regions)))
@@ -2126,21 +2122,21 @@ fn registry() -> Vec<CommandSpec> {
             .key(Scope::Model, none, Key::Slash)
             .key(Scope::Drawing, none, Key::Slash)
             .run(|_| AppAction::FocusChat)
-.app_only(CHAT),
+            .app_only(CHAT),
         cmd("check_model", "Check model", Icon::Check, "Ask the assistant to check the part")
             .run(|_| {
                 AppAction::Ask("Check the part: does every feature rebuild, and is anything likely to be wrong?".into())
             })
-.app_only(CHAT),
+            .app_only(CHAT),
         cmd("explain", "Explain", Icon::Chat, "Ask the assistant to explain the selection")
             .run(|_| AppAction::Ask("Explain what is selected and how it was made.".into()))
-.app_only(CHAT),
+            .app_only(CHAT),
         cmd("summarise", "Summarise", Icon::Mass, "Ask the assistant to summarise the part")
             .run(|_| AppAction::Ask("Summarise the part in a few lines.".into()))
-.app_only(CHAT),
+            .app_only(CHAT),
         cmd("find_issues", "Find issues", Icon::Warning, "Ask the assistant for features that fail or look wrong")
             .run(|_| AppAction::Ask("List features that fail or look wrong, and why.".into()))
-.app_only(CHAT),
+            .app_only(CHAT),
         cmd(
             "provider_settings",
             "Provider",
@@ -2148,11 +2144,11 @@ fn registry() -> Vec<CommandSpec> {
             "Choose the assistant's provider and model, and add API keys",
         )
         .run(|_| AppAction::ShowProviderSettings)
-.app_only("It opens the Provider dialog; `soliddraft key` manages the assistant's keys without a window"),
+            .app_only("It opens the Provider dialog; `soliddraft key` manages the assistant's keys without a window"),
         cmd("auto_apply", "Auto-apply", Icon::Eye, "Let the assistant apply its own proposals for this session")
             .run(|_| AppAction::ToggleAutoApply)
             .lit(|s| s.chat.book.auto_apply)
-.app_only("It sets what the app's own assistant may do this session; MCP clients and scripts run commands directly"),
+            .app_only("It sets what the app's own assistant may do this session; MCP clients and scripts run commands directly"),
         // Inspect.
         cmd("measure", "Measure", Icon::Cad("measure"), "Prove a distance or angle between two edges or faces")
             .on(Inspect, "Measure", Large)
@@ -2213,12 +2209,10 @@ fn registry() -> Vec<CommandSpec> {
             .outside_sketch()
             .run(|_| AppAction::ShowMaterial)
             .when(|s| {
-                s.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && s.doc.display_body().is_some()
+                s.doc.display_body().is_some()
                     && s.editor.is_none()
                     && !s.in_sketch()
             })
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Build the part independently with the distance-field model")
             .run(|_| AppAction::CheckPart)
@@ -2238,7 +2232,7 @@ fn registry() -> Vec<CommandSpec> {
             .on(View, "Orientation", Large)
             .key(Scope::Model, none, Key::I)
             .run(|_| AppAction::SetView(StandardView::Isometric))
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("zoom_fit", "Fit", Icon::Glyph("fit"), "Zoom to fit")
             .both()
             .on(View, "Orientation", Large)
@@ -2258,136 +2252,124 @@ fn registry() -> Vec<CommandSpec> {
                     AppAction::ZoomFit
                 }
             })
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("view_front", "Front", Icon::Glyph("iso"), "Front view")
             .model()
             .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Small)
             .key(Scope::Model, none, Key::F)
             .run(|_| AppAction::SetView(StandardView::Front))
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("view_top", "Top", Icon::Glyph("iso"), "Top view")
             .model()
             .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Small)
             .key(Scope::Model, none, Key::T)
             .run(|_| AppAction::SetView(StandardView::Top))
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("view_right", "Right", Icon::Glyph("iso"), "Right view")
             .model()
             .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Small)
             .key(Scope::Model, none, Key::R)
             .run(|_| AppAction::SetView(StandardView::Right))
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("normal_to", "Normal to", Icon::Cad("normal_to"), "Look straight at the sketch plane or the selected face")
             .on(Sketch, "View", Large)
             .on(View, "Orientation", Small)
             .key(Scope::Part, none, Key::N)
             .run(|_| AppAction::NormalTo)
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("view_back", "Back", Icon::Glyph("iso"), "Back view").run(|_| AppAction::SetView(StandardView::Back))
             .model()
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("view_left", "Left", Icon::Glyph("iso"), "Left view").run(|_| AppAction::SetView(StandardView::Left))
             .model()
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("view_bottom", "Bottom", Icon::Glyph("iso"), "Bottom view").run(|_| AppAction::SetView(StandardView::Bottom))
             .model()
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("display_shaded_edges", "Shaded, edges", Icon::Views, "Shaded with edges")
             .model()
             .on(Tab::AssemblyView, "Display", Small)
             .on(View, "Display", Large)
             .run(|_| AppAction::SetDisplay(DisplayMode::ShadedWithEdges))
             .lit(|s| s.active_viewport().display == DisplayMode::ShadedWithEdges)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("display_shaded", "Shaded", Icon::Display, "Shaded")
             .model()
             .on(Tab::AssemblyView, "Display", Small)
             .on(View, "Display", Large)
             .run(|_| AppAction::SetDisplay(DisplayMode::Shaded))
             .lit(|s| s.active_viewport().display == DisplayMode::Shaded)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("display_wireframe", "Wireframe", Icon::Wireframe, "Wireframe")
             .model()
             .on(Tab::AssemblyView, "Display", Small)
             .on(View, "Display", Large)
             .run(|_| AppAction::SetDisplay(DisplayMode::Wireframe))
             .lit(|s| s.active_viewport().display == DisplayMode::Wireframe)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("scene_white", "Plain white", Icon::Display, "Set the viewport background to Plain white")
             .model()
             .on(Tab::AssemblyView, "Scene", Small)
             .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::White)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::White))
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("scene_studio", "Studio fade", Icon::Display, "Set the viewport background to Studio fade")
             .model()
             .on(Tab::AssemblyView, "Scene", Small)
             .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Studio)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Studio))
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("scene_faded", "3 point faded", Icon::Display, "Set the viewport background to 3 point faded")
             .model()
             .on(Tab::AssemblyView, "Scene", Small)
             .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Faded)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Faded))
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("scene_spot", "Soft spotlight", Icon::Display, "Set the viewport background to Soft spotlight")
             .model()
             .on(Tab::AssemblyView, "Scene", Small)
             .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Spot)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Spot))
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("scene_graphite", "Graphite", Icon::Display, "Set the viewport background to Graphite")
             .model()
             .on(Tab::AssemblyView, "Scene", Small)
             .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Graphite)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Graphite))
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("scene", "Scene", Icon::Display, "Choose a background: scene white, scene studio, scene graphite")
             .run(|s| AppAction::SetScene(s.viewport.scene.unwrap_or_default()))
-            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("look_fast", "Fast look", Icon::Display, "Colour, lighting and edges, without shadows or occlusion")
             .run(|_| AppAction::SetPreset(Preset::Fast))
             .lit(|s| s.viewport.preset == Preset::Fast)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("look_studio", "Studio look", Icon::Display, "Soft shadows from a fixed light and light occlusion")
             .run(|_| AppAction::SetPreset(Preset::Studio))
             .lit(|s| s.viewport.preset == Preset::Studio)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("look_realistic", "Realistic look", Icon::Display, "Stronger shadows and reflections, without edges")
             .run(|_| AppAction::SetPreset(Preset::Realistic))
             .lit(|s| s.viewport.preset == Preset::Realistic)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("theme_light", "Light theme", Icon::Display, "Light chrome and panels; saved in the settings")
             .run(|_| AppAction::SetTheme(crate::theme::Mode::Light))
             .lit(|_| crate::theme::mode() == crate::theme::Mode::Light)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("theme_dark", "Dark theme", Icon::Display, "Dark chrome and panels; saved in the settings")
             .run(|_| AppAction::SetTheme(crate::theme::Mode::Dark))
             .lit(|_| crate::theme::mode() == crate::theme::Mode::Dark)
-.app_only(LOOK),
+            .app_only(LOOK),
         cmd("orthographic", "Orthographic", Icon::OnPlane, "Toggle perspective and orthographic projection")
             .model()
             .on(Tab::AssemblyView, "Projection", Small)
             .on(View, "Projection", Large)
             .run(|_| AppAction::ToggleProjection)
             .lit(|s| s.active_viewport().camera.orthographic)
-.app_only(CAMERA),
+            .app_only(CAMERA),
         cmd("toggle_tree", "Feature tree", Icon::Tree, "Show or hide the feature tree")
             .both()
             .on(View, "Panels", Large)
@@ -2397,7 +2379,7 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::TogglePanel(Side::Tree))
             .lit(AppState::tree_shown)
             .label_now(|s| s.drawing.is_active().then(|| "Drawing tree".to_owned()))
-.app_only(PANELS),
+            .app_only(PANELS),
         cmd(
             crate::command_line::AI_COMMAND,
             "AI session",
@@ -2410,16 +2392,16 @@ fn registry() -> Vec<CommandSpec> {
         .key_anytime(Scope::App, Modifiers::SHIFT, Key::F9)
         .run(|_| AppAction::ToggleSession)
         .lit(|s| s.command_line.session_open)
-.app_only(PANELS),
+            .app_only(PANELS),
         cmd("reset_layout", "Reset layout", Icon::Config, "Restore the default panel layout")
             .both()
             .on(View, "Panels", Small)
             .run(|_| AppAction::ResetLayout)
-.app_only(PANELS),
+            .app_only(PANELS),
         cmd("settings", "Preferences", Icon::Config, "Open settings for navigation, the viewport and more")
             .both()
             .run(|_| AppAction::ShowPreferences)
-.app_only("It opens the Preferences window"),
+            .app_only("It opens the Preferences window"),
         // Files.
         cmd("new_part", "New part", Icon::Glyph("new"), "Start a new, empty part")
             .key(Scope::Part, ctrl, Key::N)
@@ -2452,8 +2434,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("import_mesh", "Import mesh solid", Icon::Import, "Import a closed STL or OBJ mesh as a solid in millimetres")
             .run(|_| AppAction::ImportMesh(None))
             .outside_sketch()
-            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32") && s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
             .agents(Agents::Mcp, "Review with preview_import using format mesh first. One closed solid, up to 200,000 triangles, coordinates in millimetres.", crate::import::params)
             .undo(Undo::Step),
         cmd("import_scan", "Import scan reference", Icon::Import, "Import an STL or OBJ scan as reference data in millimetres")
@@ -2473,8 +2454,8 @@ fn registry() -> Vec<CommandSpec> {
         cmd("replace_import", "Replace imported file", Icon::Import, "Replace the file behind an imported feature after reviewing it")
             .run(|s| AppAction::ReplaceImport { feature: s.doc.selection.and_then(|s| match s { crate::document::Selection::Feature(id) => Some(id), _ => None }).unwrap_or_default(), path: None })
             .outside_sketch()
-            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32") && s.frame_layout == crate::settings::FrameLayout::EditSuite && s.doc.selection.is_some_and(|sel| matches!(sel, crate::document::Selection::Feature(id) if s.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_))))))
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite && s.doc.selection.is_some_and(|sel| matches!(sel, crate::document::Selection::Feature(id) if s.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_))))))
+            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32") && s.doc.selection.is_some_and(|sel| matches!(sel, crate::document::Selection::Feature(id) if s.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_))))))
+            .shown(|s| s.doc.selection.is_some_and(|sel| matches!(sel, crate::document::Selection::Feature(id) if s.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_))))))
             .agents(Agents::Mcp, "Review with preview_import and feature first. Keeps the feature identity; changed source references require repair. Undo restores the old source and references.", crate::import::params)
             .undo(Undo::Step),
         cmd(
@@ -2536,7 +2517,7 @@ fn registry() -> Vec<CommandSpec> {
             .both()
             .key(Scope::App, ctrl, Key::Q)
             .run(|_| AppAction::Quit)
-.app_only("It closes the window"),
+            .app_only("It closes the window"),
         // Context commands share the registry and existing document actions.
         cmd("edit_sketch", "Edit sketch", Icon::Sketch, "Edit the sketch used by the selected feature")
             .run(|s| AppAction::EditSketch(s.selected_sketch().expect("enabled with a source sketch")))
@@ -2601,13 +2582,13 @@ fn registry() -> Vec<CommandSpec> {
                 }
             })
             .when(|s| s.selected_feature().is_some())
-.app_only("It opens the feature's PropertyManager; agents and scripts change a feature with edit_extrude, edit_revolve, edit_sweep, edit_cut, edit_fillet, edit_chamfer and edit_dimension"),
+            .app_only("It opens the feature's PropertyManager; agents and scripts change a feature with edit_extrude, edit_revolve, edit_sweep, edit_cut, edit_fillet, edit_chamfer and edit_dimension"),
         cmd("repair_feature", "Repair references…", Icon::Repair, "Repair the selected feature's references")
             .run(|s| AppAction::StartRepair(s.selected_feature().expect("enabled with a selected feature")))
             .outside_sketch()
             .when(|s| selected_feature_is(s, |f| matches!(f.status, crate::document::FeatureStatus::NeedsRepair(_))))
             .shown(|s| selected_feature_is(s, |f| matches!(f.status, crate::document::FeatureStatus::NeedsRepair(_))))
-.app_only(EDITOR),
+            .app_only(EDITOR),
         cmd("rollback_here", "Roll back to here", Icon::Rollback, "Build the part through the selected feature")
             .run(|s| {
                 let id = s.selected_feature().expect("enabled with a selected feature");
@@ -2616,7 +2597,7 @@ fn registry() -> Vec<CommandSpec> {
             })
             .outside_sketch()
             .when(|s| s.selected_feature().is_some())
-.app_only("It uses the feature selected in the window")
+            .app_only("It uses the feature selected in the window")
 .undo(Undo::Step),
         cmd("rename", "Rename", Icon::Props, "Rename the selected feature")
             .key(Scope::Part, none, Key::F2)
@@ -2680,7 +2661,7 @@ fn registry() -> Vec<CommandSpec> {
         .key(Scope::Part, none, Key::Delete)
         .key(Scope::Part, none, Key::Backspace)
         .run(|_| AppAction::DeleteSelection)
-.app_only("It deletes what is selected in the viewport or the sketch; agents and scripts name the feature with delete_feature"),
+            .app_only("It deletes what is selected in the viewport or the sketch; agents and scripts name the feature with delete_feature"),
         cmd("edit_extrude", "Edit extrude", Icon::Extrude, "Change an extrude's depth or direction").agents(
             Agents::Verb,
             "Everything after it rebuilds.",
@@ -2766,7 +2747,7 @@ fn registry() -> Vec<CommandSpec> {
                 AppAction::Select(None)
             }
         })
-.app_only(EDITOR),
+            .app_only(EDITOR),
         cmd("confirm", "OK", Icon::Check, "Apply the open feature or new drawing, or leave the sketch")
             .key(Scope::Part, none, Key::Enter)
             .run(|s| {
@@ -2781,17 +2762,17 @@ fn registry() -> Vec<CommandSpec> {
                 }
             })
             .when(|s| s.drawing.new.is_some() || s.editor.is_some() || (s.in_sketch() && s.sketch.as_ref().is_some_and(|s|s.link_values.is_none())))
-.app_only(EDITOR),
+            .app_only(EDITOR),
         // Help.
         cmd("command_palette", "Command palette", Icon::Search, "Search the commands and run one")
             .both()
             .key(Scope::App, ctrl_shift, Key::P)
             .run(|_| AppAction::TogglePalette)
-.app_only(WINDOW),
+            .app_only(WINDOW),
         cmd("shortcuts", "Keyboard shortcuts", Icon::Config, "List the keyboard shortcuts")
             .key(Scope::Model, none, Key::Questionmark)
             .run(|_| AppAction::ShowShortcuts)
-.app_only(WINDOW),
+            .app_only(WINDOW),
         cmd(
             "file_locations",
             "File locations",
@@ -2800,11 +2781,11 @@ fn registry() -> Vec<CommandSpec> {
         )
         .both()
         .run(|_| AppAction::ShowFileLocations(None))
-.app_only("It opens the File locations page; `soliddraft locations` lists and edits them without a window"),
+            .app_only("It opens the File locations page; `soliddraft locations` lists and edits them without a window"),
         cmd("about", "About SolidDraft", Icon::Config, "The version and build information")
             .both()
             .run(|_| AppAction::ShowAbout)
-.app_only(WINDOW),
+            .app_only(WINDOW),
     ]
     .into_iter()
     .chain(assembly_registry::registry())
@@ -2836,14 +2817,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .run(|_| AppAction::Drawing(DrawingAction::SetTool(DrawingTool::PlaceView(PlaceKind::Standard(
             soliddraft_kernel_api::drawing::StandardView::Front,
         )))))
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_model_view", "Model view", Icon::Display, "Place a view of the model in a standard orientation",
             DrawingTool::PlaceView(PlaceKind::Standard(_)) =>
                 DrawingTool::PlaceView(PlaceKind::Standard(soliddraft_kernel_api::drawing::StandardView::Isometric))
         )
         .on(Views, "Standard", Large)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         cmd("drawing_projected", "Projected", Icon::OnPlane, "Fold a view off the selected view in one of eight directions")
             .on(Views, "Derived", Large)
             .run(|s| {
@@ -2853,7 +2834,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
             .when(|s| sheet_view(s).is_some())
             .lit(|s| drawing_tool_is(s, |t| matches!(t, DrawingTool::PlaceView(PlaceKind::Projected { .. }))))
             .hint(|s| sheet_view(s).is_none().then(|| "Select a view first, then fold a new view off it".into()))
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_section", "Section", Icon::Section,
             "Draw a cutting line on a view, pick the direction, place the section",
@@ -2874,19 +2855,19 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::Detail => DrawingTool::Detail
         )
         .on(Views, "Derived", Large)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_auxiliary", "Auxiliary", Icon::Plane, "Pick an edge; the view unfolds square to it",
             DrawingTool::Auxiliary => DrawingTool::Auxiliary
         )
         .on(Views, "Derived", Small)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_broken_out", "Broken-out", Icon::Cut, "Cut away a circle of a view to a depth and hatch the cut",
             DrawingTool::BrokenOut => DrawingTool::BrokenOut
         )
         .on(Views, "Derived", Small)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_crop", "Crop", Icon::Rectangle, "Keep only a rectangle of a view",
             DrawingTool::Crop => DrawingTool::Crop
@@ -2924,7 +2905,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
                 AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::View(view))))
             })
             .when(|s| sheet_view(s).is_some())
-.app_only(PANEL),
+            .app_only(PANEL),
         cmd("drawing_hidden_lines", "Hidden lines", Icon::Eye, "Show or remove the selected view's hidden lines (dashed)")
             .on(Views, "Display", Small)
             .run(|s| {
@@ -3028,7 +3009,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
         )
         .on(Annotate, "Dimension", Large)
         .key(Scope::Drawing, none, Key::D)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         cmd("drawing_model_items", "Model items", Icon::Tree, "Import the part's own dimensions into the most appropriate views")
             .on(Annotate, "Dimension", Large)
             .run(|_| AppAction::Drawing(DrawingAction::ModelItems))
@@ -3039,33 +3020,33 @@ fn drawing_registry() -> Vec<CommandSpec> {
         )
         .on(Annotate, "Dimension", Small)
         .key(Scope::Drawing, none, Key::O)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_baseline", "Baseline", Icon::Line, "Stacked dimensions from an origin",
             DrawingTool::DimensionSet(SetKind::Baseline) => DrawingTool::DimensionSet(SetKind::Baseline)
         )
         .on(Annotate, "Dimension", Small)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_chain", "Chain", Icon::Relation, "Dimensions end to end along a line",
             DrawingTool::DimensionSet(SetKind::Chain) => DrawingTool::DimensionSet(SetKind::Chain)
         )
         .on(Annotate, "Dimension", Small)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_note", "Note", Icon::Chat, "Text with an optional leader",
             DrawingTool::Note => DrawingTool::Note
         )
         .on(Annotate, "Notes", Large)
         .key(Scope::Drawing, none, Key::N)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_hole_callout", "Hole callout", Icon::Hole, "Read a hole: count, diameter, THRU or depth",
             DrawingTool::HoleCallout => DrawingTool::HoleCallout
         )
         .on(Annotate, "Notes", Large)
         .key(Scope::Drawing, none, Key::H)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         CommandSpec::new("drawing_balloon", "Balloon", Icon::Circle, "Number an assembly component")
             .drawing()
             .on(Annotate, "Notes", Small)
@@ -3075,14 +3056,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::RevisionSymbol => DrawingTool::RevisionSymbol
         )
         .on(Annotate, "Notes", Small)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         cmd("drawing_chamfer_dimension", "Chamfer", Icon::Chamfer, "Dimension a chamfer").on(Annotate, "Notes", Small),
         drawing_tool!(
             "drawing_centre_mark", "Centre mark", Icon::Point, "Mark the centre of a circle seen face-on",
             DrawingTool::CentreMark => DrawingTool::CentreMark
         )
         .on(Annotate, "Centre", Large)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         cmd("drawing_centreline", "Centreline", Icon::Axis, "Draw a centreline between two edges")
             .on(Annotate, "Centre", Large),
         cmd(
@@ -3099,19 +3080,19 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::SurfaceFinish => DrawingTool::SurfaceFinish
         )
         .on(Annotate, "Symbols", Large)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_gdt", "GD&T frame", Icon::Rectangle, "A feature control frame: characteristic, tolerance zone, datums",
             DrawingTool::Gdt => DrawingTool::Gdt
         )
         .on(Annotate, "Symbols", Large)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         drawing_tool!(
             "drawing_datum", "Datum", Icon::Plane, "A datum feature symbol on an edge",
             DrawingTool::Datum => DrawingTool::Datum
         )
         .on(Annotate, "Symbols", Small)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         cmd("drawing_weld", "Weld", Icon::Construction, "A weld symbol").on(Annotate, "Symbols", Small),
         cmd(
             "drawing_revision_table",
@@ -3122,7 +3103,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
         .on(Annotate, "Tables", Large)
         .run(|_| AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Revisions))))
         .lit(|s| session(s).is_some_and(|d| d.selection == Some(DrawingSel::Revisions)))
-.app_only(PANEL),
+            .app_only(PANEL),
         cmd("drawing_hole_table", "Hole table", Icon::Hole, "Tabulate the holes of a view").on(Annotate, "Tables", Small),
         CommandSpec::new("drawing_bom", "BOM", Icon::Mass, "A bill of materials")
             .drawing()
@@ -3132,7 +3113,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
         cmd("drawing_sheet_properties", "Sheet properties", Icon::Props, "Name, size, scale, projection angle and title block")
             .on(Sheet, "Sheet", Large)
             .run(|_| AppAction::Drawing(DrawingAction::SheetProperties))
-.app_only(PANEL),
+            .app_only(PANEL),
         cmd(
             "drawing_add_sheet",
             "Add sheet",
@@ -3145,7 +3126,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
         cmd("drawing_zones", "Zones", Icon::Rectangle, "The zone grid comes from the template")
             .on(Sheet, "Sheet", Small)
             .run(|_| AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Format))))
-.app_only(PANEL),
+            .app_only(PANEL),
         cmd(
             "drawing_edit_format",
             "Edit sheet format",
@@ -3154,11 +3135,11 @@ fn drawing_registry() -> Vec<CommandSpec> {
         )
         .on(Sheet, "Format", Large)
         .run(|_| AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Format))))
-.app_only(PANEL),
+            .app_only(PANEL),
         cmd("drawing_title_block", "Title block fields", Icon::Props, "Edit the title block values")
             .on(Sheet, "Format", Small)
             .run(|_| AppAction::Drawing(DrawingAction::Select(Some(DrawingSel::Format))))
-.app_only(PANEL),
+            .app_only(PANEL),
         CommandSpec::new("drawing_line_styles", "Line styles", Icon::Line, "Line widths and styles")
             .drawing()
             .on(Sheet, "Format", Small)
@@ -3195,23 +3176,23 @@ fn drawing_registry() -> Vec<CommandSpec> {
             .key(Scope::Drawing, none, Key::Plus)
             .key(Scope::Drawing, none, Key::Equals)
             .run(|_| AppAction::Drawing(DrawingAction::ZoomIn))
-.app_only(SHEET_VIEW),
+            .app_only(SHEET_VIEW),
         cmd("drawing_zoom_out", "Zoom out", Icon::Search, "Zoom out")
             .on(View, "Zoom", Small)
             .key(Scope::Drawing, none, Key::Minus)
             .run(|_| AppAction::Drawing(DrawingAction::ZoomOut))
-.app_only(SHEET_VIEW),
+            .app_only(SHEET_VIEW),
         cmd("drawing_grid", "Grid", Icon::Rectangle, "Show a 10 mm grid")
             .on(View, "Sheet", Large)
             .key(Scope::Drawing, none, Key::G)
             .run(|_| AppAction::Drawing(DrawingAction::ToggleGrid))
             .lit(|s| session(s).is_some_and(|d| d.show_grid))
-.app_only(SHEET_VIEW),
+            .app_only(SHEET_VIEW),
         cmd("drawing_snap", "Snap", Icon::Relation, "Snap placements to the alignment guides")
             .on(View, "Sheet", Large)
             .run(|_| AppAction::Drawing(DrawingAction::ToggleSnap))
             .lit(|s| session(s).is_some_and(|d| d.snap))
-.app_only(SHEET_VIEW),
+            .app_only(SHEET_VIEW),
         cmd("drawing_close", "Close drawing", Icon::Close, "Close the drawing tab")
             .on(View, "Documents", Small)
             .run(|_| AppAction::Drawing(DrawingAction::CloseDrawing))
@@ -3235,7 +3216,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
             DrawingTool::Select => DrawingTool::Select
         )
         .key(Scope::Drawing, none, Key::V)
-.app_only(CANVAS),
+            .app_only(CANVAS),
         cmd("drawing_cancel", "Cancel", Icon::Close, "Put the tool down, or clear the selection")
             .key(Scope::Drawing, none, Key::Escape)
             .run(|s| match session(s) {
@@ -3247,7 +3228,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
             .when(|s| {
                 session(s).is_some_and(|d| d.tool != DrawingTool::Select || !d.picks.is_empty() || d.selection.is_some())
             })
-.app_only(CANVAS_STEP),
+            .app_only(CANVAS_STEP),
         cmd("drawing_delete", "Delete", Icon::Close, "Delete the selected view or annotation")
             .key(Scope::Drawing, none, Key::Delete)
             .key(Scope::Drawing, none, Key::Backspace)
@@ -3256,14 +3237,14 @@ fn drawing_registry() -> Vec<CommandSpec> {
         cmd("drawing_flip", "Flip direction", Icon::Rollback, "Flip the section or auxiliary view being placed")
             .key(Scope::Placing, none, Key::F)
             .run(|_| AppAction::Drawing(DrawingAction::FlipPending))
-.app_only(CANVAS_STEP),
+            .app_only(CANVAS_STEP),
         cmd("drawing_close_profile", "Close profile", Icon::Check, "Close the detail's profile and compute the view")
             .key(Scope::Drawing, none, Key::Enter)
             .run(|_| AppAction::Drawing(DrawingAction::CloseProfile))
             .when(|s| {
                 session(s).is_some_and(|d| d.tool == DrawingTool::Detail && d.draft.profile && d.draft.points.len() >= 3)
             })
-.app_only(CANVAS_STEP),
+            .app_only(CANVAS_STEP),
     ]
 }
 

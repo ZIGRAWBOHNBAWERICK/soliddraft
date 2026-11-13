@@ -1,14 +1,6 @@
-//! Merge 2 of the ribbon layout: what a pointer cannot prove exhaustively. The tab and
-//! group contract comes first, then every command compared with its frozen state on main
-//! before the merge. Moving a command on the ribbon changes where it is drawn, and nothing
-//! else about it.
-//!
-//! Requires a renderer: a run without one fails.
-//!
-//! Run it away from the other GPU targets:
-//! `cargo test -p soliddraft-app --test ribbon_registry -- --test-threads=1`.
+//! Stable command ids, shortcuts, agent schemas and availability against the frozen contract.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 #[path = "support/configuration_registry.rs"]
@@ -728,7 +720,7 @@ fn holds(tab: &str, groups: &[(&str, &[&str])]) {
 }
 
 #[test]
-fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
+fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
     let _case = ribbon::case("u1");
 
     // The new tabs and groups come first: on main this is what fails.
@@ -819,6 +811,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     // Every command as main left it.
     let (frozen, now) = (baseline(), observed());
     let rows = frozen["commands"].as_object().expect("the frozen commands");
+    let part_entry = AppState::new(ribbon::blank());
     for (id, row) in rows {
         if id == "reference_plane" {
             let plane = commands::get(id).unwrap();
@@ -941,6 +934,20 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             }
             for fixture in ["blank", "sketch", "plate", "assembly"] {
                 assert_eq!(current["availability"][fixture]["enabled"], true);
+                current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
+        if (id.starts_with("sketch_") || id == "smart_dimension")
+            && commands::get(id)
+                .and_then(|c| c.action)
+                .is_some_and(|action| matches!(action(&part_entry), AppAction::SketchTool(_)))
+        {
+            for fixture in ["blank", "sketch", "plate", "assembly"] {
+                assert_eq!(
+                    current["availability"][fixture]["enabled"],
+                    fixture != "assembly",
+                    "Edit Suite sketch tools start a sketch on part documents"
+                );
                 current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }

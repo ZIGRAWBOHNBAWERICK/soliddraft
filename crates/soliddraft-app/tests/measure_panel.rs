@@ -4,7 +4,7 @@
 #[path = "support/measure_window.rs"]
 mod window;
 
-use egui::{Key, Modifiers, Pos2, vec2};
+use egui::{Key, Modifiers, vec2};
 use egui_kittest::{Harness, kittest::Queryable};
 use glam::Vec3;
 use soliddraft_app::{
@@ -12,54 +12,8 @@ use soliddraft_app::{
     document::{Command, Document, ExtrudeParams, ProfileKind, Selection},
     measure, theme,
 };
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-/// The hang guard every test shares: a wait this long means stuck, not slow.
-const HANG: Duration = Duration::from_secs(600);
-
-type App<'a> = Harness<'a, SolidDraftApp>;
-fn settle(h: &mut App<'_>) {
-    h.run_steps(5);
-    let until = Instant::now() + HANG;
-    while h.state().state.doc.proof_pending() {
-        assert!(Instant::now() < until, "proof did not settle");
-        std::thread::sleep(Duration::from_millis(10));
-        h.run_steps(1);
-    }
-    h.run_steps(3);
-}
-fn click_at(h: &mut App<'_>, pos: Pos2) {
-    h.hover_at(pos);
-    h.run_steps(3);
-    for pressed in [true, false] {
-        h.event(egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        });
-        h.run_steps(2);
-    }
-}
-fn screen_of(h: &App<'_>, world: Vec3) -> Pos2 {
-    let st = &h.state().state;
-    st.viewport.camera.project(world, st.viewport.rect).unwrap()
-}
-fn button(h: &mut App<'_>, name: &str) {
-    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().click();
-    h.run_steps(3);
-}
-fn snapshot(h: &mut App<'_>, name: &str) {
-    let dir = std::env::var_os("SOLIDDRAFT_MEASURE_PROOF_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/exit-test"));
-    std::fs::create_dir_all(&dir).unwrap();
-    h.render().unwrap().save(dir.join(format!("measure-{name}.png"))).unwrap();
-}
+use std::sync::Arc;
+use window::{App, button, click_at, screen_of, settle, snapshot};
 
 #[test]
 fn pick_measure_track_and_edit() {

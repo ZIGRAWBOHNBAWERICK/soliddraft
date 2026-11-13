@@ -1,6 +1,6 @@
 //! Native pointer placement uses the shared analytic snap and retains its relations.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Pos2};

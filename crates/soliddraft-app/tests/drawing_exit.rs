@@ -74,6 +74,10 @@ fn settle(harness: &mut App<'_>) {
 }
 
 fn click_at(harness: &mut App<'_>, pos: Pos2) {
+    if harness.query_by_label("Close options").is_some() {
+        harness.get_by_label("Close options").click();
+        harness.run_steps(8);
+    }
     render_steps::rendered(harness, |harness| {
         harness.hover_at(pos);
         harness.run_steps(3);
@@ -101,18 +105,47 @@ fn make_drawing(harness: &mut App<'_>) {
     harness.run_steps(4);
 }
 
+fn open_options(harness: &mut App<'_>) {
+    if !harness.state().state.options_details {
+        let label =
+            if harness.query_by_label("Sheet properties").is_some() { "Sheet properties" } else { "Drawing options" };
+        harness.get_by_label(label).click();
+        harness.run_steps(8);
+    }
+}
+
 fn click_button(harness: &mut App<'_>, label: &str) {
-    harness
+    if label == "Edit feature" {
+        harness.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
+        harness.run_steps(8);
+        return;
+    }
+    if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none()
+        && (harness.state().state.drawing.is_active() || harness.state().state.drawing.new.is_some())
+    {
+        open_options(harness);
+    }
+    let button = harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .unwrap_or_else(|| panic!("no button labelled {label}"))
-        .click();
+        .rect();
+    let palette = egui::PanelState::load(&harness.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
+    if palette.contains_rect(button) && harness.query_by_label("Close options").is_some() {
+        harness.get_by_label("Close options").click();
+        harness.run_steps(8);
+    }
+    harness.get_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap().click();
     harness.run_steps(4);
 }
 
 /// Clicks a feature row in the tree. Ribbon buttons come first in the tree of nodes and
 /// a feature may share its name with one ("Slot"), so the row is the last match.
 fn click_row(harness: &mut App<'_>, name: &str) {
+    if !harness.state().state.tree_shown() {
+        harness.key_press(Key::F9);
+        harness.run_steps(8);
+    }
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, name).last().expect("a tree row").scroll_to_me();
     harness.run_steps(3);
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, name).last().expect("a tree row").click();
@@ -425,6 +458,7 @@ fn bracket_drawing_dimensioned_exported_updated_and_repaired() {
     let beside_top = screen_of(&harness, top, Vec3::new(132.0, 84.0, 10.0));
     click_at(&mut harness, beside_top);
     harness.run_steps(3);
+    open_options(&mut harness);
     // The multiline editor registers an inner node with the same label; the first is the field.
     // The section caption carries the same label; the editor is the last match.
     harness.get_all_by_label("Note text").last().expect("the note editor").click();
@@ -432,7 +466,8 @@ fn bracket_drawing_dimensioned_exported_updated_and_repaired() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     harness.get_all_by_label("Note text").last().expect("the note editor").type_text("DEBURR AFTER MACHINING");
     harness.run_steps(2);
-    click_button(&mut harness, "Apply text");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run_steps(4);
     let notes: Vec<String> = session(&harness)
         .sheet()
         .annotations
@@ -520,6 +555,7 @@ fn bracket_drawing_dimensioned_exported_updated_and_repaired() {
     }
     open_drawings(&mut harness);
     settle(&mut harness);
+    open_options(&mut harness);
     assert!(harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Reattach…").count() >= 2, "two cards");
     save(&mut harness, "d05-dangling");
 
@@ -574,6 +610,7 @@ fn fixture_drawing_renders_with_attention_list() {
     settle(&mut harness);
     assert!(harness.state().state.drawing.is_active());
     assert_eq!(session(&harness).doc.attention_count(), 2);
+    open_options(&mut harness);
     assert!(harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Reattach…").count() >= 1);
     save(&mut harness, "d10-fixture");
     push(&mut harness, DrawingAction::Select(Some(DrawingSel::Annotation(soliddraft_drawing::AnnotationId(5)))));
@@ -613,6 +650,11 @@ fn annotations_of_kind(
 }
 
 fn type_field(harness: &mut App<'_>, label: &str, value: &str) {
+    if harness.query_by_label(label).is_none() {
+        open_options(harness);
+    }
+    harness.get_by_label(label).scroll_to_me();
+    harness.run_steps(24);
     harness.get_by_label(label).click();
     harness.run_steps(2);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);

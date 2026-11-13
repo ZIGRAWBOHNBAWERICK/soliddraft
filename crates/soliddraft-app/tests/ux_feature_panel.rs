@@ -1,16 +1,4 @@
-//! The feature panel: the forms of Boss-Extrude, Cut-Extrude, Fillet, Chamfer, Hole,
-//! Shell, Draft and Linear Pattern, and the viewport's preview of a fillet while its panel
-//! is open. The real app on the real wgpu pipeline and the real kernel, driven by ribbon
-//! actions, pointer picks and keys.
-//!
-//! The panel lays its numbers out as one table: every value field of a form starts at
-//! the same x, ends at the same x and has the same height, so the values read as a
-//! column. Tab walks the fields in order. The fillet preview tints the faces the fillet
-//! makes, names its radius and edge count over the viewport, and marks the picked edges
-//! when no rounded body can be shown.
-//!
-//! Frames go to `target/ux-tools/feature-panel/`; the PR's before and after pictures
-//! come from them.
+//! Feature form fields, keyboard input, pick lists and rendered fillet previews.
 
 use egui::{Key, Rect};
 use egui_kittest::kittest::{By, NodeT, Queryable};
@@ -19,7 +7,7 @@ use soliddraft_app::document::{Command, Document, PlaneKind, Selection, SketchPl
 use soliddraft_app::state::{AppAction, EditorParams};
 use soliddraft_app::theme;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -56,40 +44,24 @@ fn editor_title(app: &App) -> String {
 
 /// The value fields of the open form, top to bottom.
 fn value_fields(app: &App) -> Vec<(String, Rect)> {
-    let left = ux_tools::viewport(app).left();
     let mut fields: Vec<(String, Rect)> = app
         .query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.ends_with(" value"))))
         .map(|n| (n.accesskit_node().label().unwrap_or_default(), n.rect()))
-        .filter(|(_, r)| r.right() <= left + ribbon::TOLERANCE)
+        .filter(|(_, r)| ribbon::window(app).contains_rect(*r))
         .collect();
     fields.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()));
     fields
 }
 
-/// The form's value fields line up as a column of one width and one height.
-fn assert_table(app: &App, what: &str, wanted: &[&str]) {
+/// The active form exposes each expected field inside the window.
+fn assert_fields(app: &App, what: &str, wanted: &[&str]) {
     let fields = value_fields(app);
     let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
     for w in wanted {
         assert!(names.contains(w), "{what}: the form has {w:?}: {names:?}");
     }
-    let table: Vec<&(String, Rect)> = fields.iter().filter(|(n, _)| wanted.contains(&n.as_str())).collect();
-    let first = table[0].1;
-    for (name, rect) in &table {
-        assert!(
-            (rect.left() - first.left()).abs() <= ribbon::TOLERANCE
-                && (rect.right() - first.right()).abs() <= ribbon::TOLERANCE,
-            "{what}: {name} spans the value column {:?}, not {:?}",
-            first.x_range(),
-            rect.x_range()
-        );
-        assert!(
-            (rect.height() - first.height()).abs() <= ribbon::TOLERANCE,
-            "{what}: {name} is {} tall like the others, not {}",
-            first.height(),
-            rect.height()
-        );
-        assert!(rect.width() >= 80.0, "{what}: {name} is wide enough to read a value: {rect:?}");
+    for (name, rect) in fields.iter().filter(|(name, _)| wanted.contains(&name.as_str())) {
+        assert!(rect.width() >= 36.0 && rect.height() >= 18.0, "{what}: readable {name}: {rect:?}");
     }
 }
 
@@ -126,16 +98,17 @@ fn pixel(image: &image::RgbaImage, app: &App, world: Vec3) -> [u8; 4] {
 }
 
 #[test]
-fn extrude_numbers_line_up_and_tab_walks_them() {
+fn extrude_numbers_accept_keyboard_input() {
     let mut case = Case::new("feature-panel/extrude");
     let mut app = launch(ribbon::blank(), STANDARD);
     case.run(&mut app, |case, app| {
         open(app, AppAction::StartExtrude);
         assert_eq!(editor_title(app), "Boss-Extrude");
         case.frame(app, "extrude");
-        assert_table(app, "Boss-Extrude", &["Width value", "Height value", "Depth value"]);
+        assert_fields(app, "Boss-Extrude", &["Width value", "Height value", "Depth value"]);
+        ribbon::open_options(app);
         assert!(app.query_by_label("Flip direction").is_some(), "the flip stays a labelled checkbox");
-        assert!(app.query_by_label("OK (Enter)").is_some() && app.query_by_label("Cancel (Esc)").is_some());
+        assert!(app.query_by_label("OK").is_some() && app.query_by_label("Cancel").is_some());
 
         // Keyboard: Tab walks the numbers in reading order.
         let width = app.get_by_label("Width value").rect();
@@ -160,7 +133,7 @@ fn extrude_numbers_line_up_and_tab_walks_them() {
 }
 
 #[test]
-fn cut_shell_draft_and_pattern_forms_share_the_table() {
+fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
     let mut case = Case::new("feature-panel/forms");
     let (doc, _) = plate_with_circle();
     let mut app = launch(doc, STANDARD);
@@ -168,6 +141,7 @@ fn cut_shell_draft_and_pattern_forms_share_the_table() {
         open(app, AppAction::StartCut);
         assert_eq!(editor_title(app), "Cut-Extrude");
         case.frame(app, "cut");
+        ribbon::open_options(app);
         assert!(app.query_by_label("Flip direction").is_some(), "the cut keeps its flip");
         assert!(shows(app, "Through all"), "a cut starts through all");
         open(app, AppAction::CancelEditor);
@@ -179,7 +153,7 @@ fn cut_shell_draft_and_pattern_forms_share_the_table() {
 
         open(app, AppAction::StartHole);
         case.frame(app, "hole");
-        assert_table(app, "Hole", &["Diameter value"]);
+        assert_fields(app, "Hole", &["Diameter value"]);
         open(app, AppAction::CancelEditor);
 
         open(app, AppAction::StartShell);
@@ -189,12 +163,12 @@ fn cut_shell_draft_and_pattern_forms_share_the_table() {
 
         open(app, AppAction::StartDraft);
         case.frame(app, "draft");
-        assert_table(app, "Draft", &["Angle value"]);
+        assert_fields(app, "Draft", &["Angle value"]);
         open(app, AppAction::CancelEditor);
 
         open(app, AppAction::StartPattern { circular: false });
         case.frame(app, "pattern");
-        assert_table(app, "Linear Pattern", &["Spacing value", "Copies value"]);
+        assert_fields(app, "Linear Pattern", &["Spacing value", "Copies value"]);
         open(app, AppAction::CancelEditor);
     });
 }
@@ -276,8 +250,12 @@ fn a_long_pick_list_scrolls_and_keeps_the_radius_in_view() {
         settle(app);
         let held = app.state().state.editor.as_ref().unwrap().edges().len();
         assert_eq!(held, 7, "the two faces hold seven edges");
+        app.get_by_label(&format!("{held} edges")).click();
+        app.run_steps(8);
         let chips = app.query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.starts_with("Remove ")))).count();
         assert_eq!(chips, held, "every pick keeps its chip, in the list's own scroll box");
+        app.get_by_label(&format!("{held} edges")).click();
+        app.run_steps(8);
 
         // The list scrolls in its box, so the radius stays above the status bar.
         let radius = app.get_by_label("Radius value").rect();
@@ -304,7 +282,7 @@ fn fillet_panel_in_dark_at_double_scale() {
         settle(app);
         pointer_to_chrome(app);
         case.frame(app, "fillet-dark");
-        assert_table(app, "Fillet", &["Radius value"]);
+        assert_fields(app, "Fillet", &["Radius value"]);
         let hud = app.get_by_label("Fillet preview").accesskit_node().value().unwrap_or_default();
         assert_eq!(hud, "R 4 mm · 1 edge");
     });
@@ -332,9 +310,11 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
         pointer_to_chrome(app);
         case.frame(app, "fillet-options");
 
-        for title in ["Items to round", "Fillet parameters"] {
-            assert!(shows(app, title), "the form has the {title} card");
-        }
+        app.get_by_label("1 edges").click();
+        app.run_steps(8);
+        assert!(app.query_by_label_contains("Remove ").is_some(), "the picked edge can be removed");
+        app.get_by_label("1 edges").click();
+        app.run_steps(8);
         for gone in ["Setback parameters", "Fillet options"] {
             assert!(!shows(app, gone), "the form has no {gone} card");
         }
@@ -343,7 +323,7 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
             assert!(app.query_by_label(gone).is_none(), "the form offers no {gone} control");
         }
         assert_eq!(nodes_reading(app, "Coming soon"), soon_before, "nothing in the form waits as Coming soon");
-        assert_table(app, "Fillet", &["Radius value"]);
+        assert_fields(app, "Fillet", &["Radius value"]);
 
         // The radius previews and commits.
         ribbon::type_field(app, "Radius value", "5");

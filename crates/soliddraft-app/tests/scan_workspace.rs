@@ -1,6 +1,6 @@
 //! Scan review, fitting and deviation maps through the real application.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui_kittest::kittest::Queryable;
@@ -66,7 +66,7 @@ fn open_scan_review_cancel_accept_save_reopen_and_fit_refusal_leave_reference_in
     assert!(reopened.display_body().is_none());
     app.state_mut().state.scan.open = false;
     app.run_steps(2);
-    app.get_by_role_and_label(egui::accesskit::Role::Button, "Edit feature").click();
+    ribbon::run_command(&mut app, "edit_feature");
     app.run_steps(3);
     assert!(app.state().state.scan.open, "editing a scan must reopen its workspace");
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Fit scan to part").click();
@@ -94,7 +94,6 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
     let bytes = cloud();
     std::fs::write(&path, &bytes).unwrap();
     let mut app = ribbon::app(Document::new("Fit", soliddraft_app::kernel()));
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.run_steps(3);
     app.state_mut().state.push(AppAction::ImportScan(Some(path)));
     app.run_steps(4);

@@ -16,6 +16,15 @@ type App = Harness<'static, SolidDraftApp>;
 static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn button(app: &mut App, label: &str) {
+    if label == "Edit feature" {
+        app.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
+        app.run_steps(8);
+        return;
+    }
+    if app.state().state.doc.features.iter().any(|f| f.name == label) && !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        app.run_steps(8);
+    }
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .unwrap_or_else(|| panic!("missing button {label}"))
@@ -98,7 +107,7 @@ fn shell_opens_picks_previews_edits_persists_selects_and_exports() {
     assert_eq!(shell.open_faces.picked().len(), 1, "viewport click selects the open top");
     assert!(editor.preview.result.is_some(), "{:?}", editor.error);
     field(&mut app, "2");
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(30);
     let build_click_ms = start.elapsed().as_secs_f64() * 1000.0;
     let shell_id = app.state().state.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Shell(_))).unwrap().id;
@@ -127,7 +136,7 @@ fn shell_opens_picks_previews_edits_persists_selects_and_exports() {
     let start = std::time::Instant::now();
     field(&mut app, "1.5");
     assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(30);
     let edit_click_ms = start.elapsed().as_secs_f64() * 1000.0;
     check_volume(&app, 1.5);
@@ -232,7 +241,7 @@ fn bored_tray_creates_edits_persists_selects_and_exports() {
     let EditorParams::Shell(shell) = &app.state().state.editor.as_ref().unwrap().params else { panic!("wrong editor") };
     assert_eq!(shell.open_faces.picked().len(), 1, "a click beside the bore picks the open top");
     field(&mut app, "2");
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(30);
     let shell = shell_feature(&app);
     assert_eq!(app.state().state.doc.feature(shell).unwrap().status, FeatureStatus::Ok);
@@ -255,7 +264,7 @@ fn bored_tray_creates_edits_persists_selects_and_exports() {
     button(&mut app, "Edit feature");
     field(&mut app, "1.5");
     assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(30);
     check_bored_volume(&app, 4239.189131381832);
 
@@ -296,9 +305,11 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
     let solid = app.state().state.doc.display_body();
 
     button(&mut app, "Shell");
+    button(&mut app, "0 faces");
     app.get_by_label("Open every face").click();
     app.run_steps(6);
     app.render().unwrap().save(out.join("every-face-chosen.png")).unwrap();
+    button(&mut app, "Every face");
     click_model(&mut app, glam::Vec3::new(12.0, 8.0, 12.0));
     let editor = app.state().state.editor.as_ref().unwrap();
     let EditorParams::Shell(shell) = &editor.params else { panic!("wrong editor") };
@@ -306,7 +317,7 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
     assert!(editor.error.is_none(), "{:?}", editor.error);
     assert!(editor.preview.result.as_ref().is_some_and(|mesh| mesh.indices.is_empty()), "the preview shows nothing");
 
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "OK");
     app.run_steps(30);
     let doc = &app.state().state.doc;
     assert_eq!(doc.feature(shell_feature(&app)).unwrap().status, FeatureStatus::Ok);
@@ -325,9 +336,11 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
 
     button(&mut app, "Shell1");
     button(&mut app, "Edit feature");
+    button(&mut app, "Every face");
     app.get_by_label("Open every face").click();
     app.run_steps(6);
-    button(&mut app, "OK (Enter)");
+    button(&mut app, "0 faces");
+    button(&mut app, "OK");
     app.run_steps(30);
     let doc = &app.state().state.doc;
     assert!(doc.display_body().is_some(), "clearing the choice gives a closed shell, a real body again");

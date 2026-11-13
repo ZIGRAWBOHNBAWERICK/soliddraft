@@ -3,7 +3,7 @@
 //! whatever the kernel can mesh today.
 
 mod gated;
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use gated::Gated;

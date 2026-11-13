@@ -258,6 +258,10 @@ fn approved_seam_repair_renders_saves_reopens_and_exports_with_its_record() {
     let selected = soliddraft_app::document::Selection::Feature(id.0.into());
     app.state_mut().state.doc.selection = Some(selected);
     app.run_steps(3);
+    if !app.state().state.options_details {
+        app.get_by_label("Details").click();
+        app.run_steps(8);
+    }
     app.get_by_label("Gap 1 approved limit");
     app.get_by_label("Face #40 from source");
     app.render().unwrap().save(root.join("repair-record.png")).unwrap();

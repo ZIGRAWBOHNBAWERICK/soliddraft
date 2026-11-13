@@ -1,5 +1,5 @@
 //! Native text placement, atomic property edits, history and persistence.
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers};
@@ -49,7 +49,7 @@ fn text_command_places_and_edits_one_retained_entity() {
         .unwrap();
     let mut app = ribbon::app_at(document, ribbon::EXPANDED_WINDOW, 1.0);
     let command = commands::get("sketch_text").unwrap();
-    assert!(!command.is_enabled(&app.state().state));
+    assert!(command.is_enabled(&app.state().state));
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(15);
     assert!(command.is_enabled(&app.state().state));
@@ -99,6 +99,7 @@ fn text_command_places_and_edits_one_retained_entity() {
     app.run_steps(5);
     assert_eq!(app.state().state.sketch.as_ref().unwrap().sketch, placed);
     ribbon::click_at(&mut app, at);
+    ribbon::open_options(&mut app);
     {
         let s = app.state_mut().state.sketch.as_mut().unwrap();
         let text = &mut s.text_edit.as_mut().expect("text editor for selected entity").draft;

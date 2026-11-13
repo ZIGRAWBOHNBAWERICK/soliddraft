@@ -10,7 +10,7 @@ use soliddraft_app::document::{Document, FeatureKind, FeatureStatus, Selection};
 use soliddraft_app::state::AppAction;
 use std::time::{Duration, Instant};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use ribbon::App;
@@ -42,7 +42,7 @@ fn pick(app: &mut App, world: Vec3) {
 }
 
 fn ok(app: &mut App) {
-    let rect = ribbon::button_rect(app, "OK (Enter)", ribbon::window(app));
+    let rect = ribbon::button_rect(app, "OK", ribbon::window(app));
     ribbon::click_at(app, rect.center());
     settle(app);
 }

@@ -1,6 +1,6 @@
 //! Order 71: connected line placement and the boundaries between independent chains.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, PointerButton, Pos2};

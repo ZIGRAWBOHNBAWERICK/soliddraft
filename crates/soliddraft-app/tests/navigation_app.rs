@@ -290,7 +290,7 @@ fn held_ordinary_keys_are_modifiers_and_taps_still_run_their_command() {
     });
     assert_eq!(effect_of, PAN, "held F2 and a left drag pans");
     let s = &app.state().state;
-    assert!(s.rename.is_none(), "the held F2 did not rename");
+    assert!(s.timeline.rename.is_none(), "the held F2 did not rename");
     assert_eq!(s.doc.selection, Some(Selection::Feature(feature)), "the drag selected nothing");
     rendered(&mut app, |app| {
         app.key_down(Key::F2);
@@ -298,7 +298,7 @@ fn held_ordinary_keys_are_modifiers_and_taps_still_run_their_command() {
         app.key_up(Key::F2);
         app.run_steps(3);
     });
-    assert!(app.state().state.rename.is_some(), "a tap of F2 still renames");
+    assert!(app.state().state.timeline.rename.is_some(), "a tap of F2 still renames");
     record("held-keys", &dir);
 }
 
@@ -379,6 +379,8 @@ fn navigation_drag_does_not_select_or_open_a_secondary_click_path() {
         release(app, PointerButton::Secondary, top, Modifiers::NONE);
     });
     assert_eq!(r_click, NOTHING, "a right click does not move the camera");
+    app.key_press(Key::Escape);
+    app.run_steps(4);
 
     // A click without a drag still selects what is under the pointer.
     let top = {
@@ -780,7 +782,7 @@ fn inventor_held_keys_and_wheel_direction() {
         app.key_up(Key::F2);
         app.run_steps(3);
     });
-    assert!(app.state().state.rename.is_some(), "an F2 tap renames");
+    assert!(app.state().state.timeline.rename.is_some(), "an F2 tap renames");
 }
 
 #[test]

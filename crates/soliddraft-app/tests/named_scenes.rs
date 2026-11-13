@@ -1,9 +1,9 @@
 //! Scene commands, persistence, classic isolation and pixels on both renderer tiers.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, pos2};
+use egui::Key;
 use egui_kittest::{Harness, kittest::Queryable};
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::settings;
@@ -119,8 +119,8 @@ fn scene_commands_persist_and_render_on_both_tiers() {
 }
 
 #[test]
-fn classic_ignores_saved_scenes_and_scene_commands() {
-    let case = ribbon::case("classic-scenes");
+fn classic_settings_open_with_the_saved_scene_and_accept_scene_commands() {
+    let case = ribbon::case("legacy-scene-settings");
     let config = case.path("config").join("settings.json");
     std::fs::write(
         &config,
@@ -129,15 +129,12 @@ fn classic_ignores_saved_scenes_and_scene_commands() {
     .unwrap();
     let mut app = ribbon::app(ribbon::blank());
     case.run(&mut app, |app| {
-        assert_eq!(app.state().state.viewport.scene, None);
-        let before = app.render().unwrap();
+        assert_eq!(app.state().state.viewport.scene, Some(Scene::Graphite));
         type_line(app, "scene white");
-        assert_eq!(app.state().state.viewport.scene, None);
-        assert_eq!(settings::view().scene, Scene::Graphite);
-        app.hover_at(pos2(10.0, 10.0));
-        app.run_steps(4);
-        let after = app.render().unwrap();
-        near(pixel(app, &before, [0.18, 0.3]), pixel(app, &after, [0.18, 0.3]));
+        assert_eq!(app.state().state.viewport.scene, Some(Scene::White));
+        assert_eq!(settings::view().scene, Scene::White);
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+        assert_eq!(saved["frame_layout"], "classic");
     });
 }
 

@@ -26,6 +26,10 @@ fn button(app: &mut App, label: &str) {
 }
 
 fn field(app: &mut App, label: &str, text: &str) {
+    if app.query_by_label(label).is_none() && !app.state().state.form_bar.expanded {
+        app.get_by_label_contains("More (").click();
+        app.run_steps(8);
+    }
     // The property page scrolls; bring the field into view as a user would.
     app.get_by_label(label).scroll_to_me();
     app.run_steps(24);
@@ -78,18 +82,25 @@ fn last(app: &App) -> (String, FeatureKind, FeatureStatus) {
 fn the_editor_grades_d0s_beam_radius_along_z() {
     let mut app = renderer();
     region(&mut app, 6.0, 20.0, 10.0);
+    let source = (app.state().state.doc.display_body(), app.state().state.doc.model().undo_depth());
     button(&mut app, "Lattice");
     field(&mut app, "Cell size value", "100");
-    assert!(app.query_by_label("Beam radius (mm), controls density").is_some(), "the designed label");
+    assert!(app.query_by_label("Beam radius").is_some(), "the designed label");
+    app.get_by_label_contains("More (").click();
+    app.run_steps(8);
     button(&mut app, "Linear along an axis");
     button(&mut app, "z");
     for (name, value) in [("from", "20"), ("to", "30"), ("start", "1"), ("end", "2")] {
-        field(&mut app, &format!("Beam radius (mm), controls density {name} value"), value);
+        field(&mut app, &format!("Beam radius {name} value"), value);
     }
     field(&mut app, "Accuracy value", "0.1");
     field(&mut app, "Minimum detail value", "0.1");
-    assert!(app.query_by_label("unproved preview").is_some());
-    button(&mut app, "OK (Enter)");
+    assert_eq!(
+        (app.state().state.doc.display_body(), app.state().state.doc.model().undo_depth()),
+        source,
+        "editing a field preview leaves the source body and history unchanged"
+    );
+    button(&mut app, "OK");
     app.run_steps(12);
     let (name, kind, status) = last(&app);
     assert_eq!(name, "Lattice1");

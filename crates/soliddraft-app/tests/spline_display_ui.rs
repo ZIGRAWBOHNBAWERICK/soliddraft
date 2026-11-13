@@ -1,21 +1,21 @@
-//! Native spline display retains its bounded answer in both application frames.
+//! Native spline display retains its bounded answer in Edit Suite.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui_kittest::kittest::Queryable;
 use serde_json::Value;
-use soliddraft_app::{app_tools::AppTools, settings::FrameLayout};
+use soliddraft_app::app_tools::AppTools;
 use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
 
 #[test]
-fn native_scaled_spline_fillet_shows_its_numbered_refusal_and_work_in_both_frames() {
+fn native_scaled_spline_fillet_shows_its_numbered_refusal_and_work_in_edit_suite() {
     check_display("scaled", include_str!("../../../ci/scenarios/loft-edge-fillet.json"), false);
 }
 
 #[test]
-fn native_small_warp_spline_fillet_shows_its_bounded_answer_in_both_frames() {
+fn native_small_warp_spline_fillet_shows_its_bounded_answer_in_edit_suite() {
     check_display("small-warp", include_str!("../../../ci/scenarios/loft-edge-fillet-small-warp.json"), true);
 }
 
@@ -23,9 +23,9 @@ fn check_display(name: &str, source: &str, bounded: bool) {
     let case = ribbon::case(&format!("native-spline-display-{name}"));
     let scenario: Value = serde_json::from_str(source).unwrap();
     let caller = Caller::Mcp { client: "native-spline-display-ui".into() };
-    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut app = ribbon::app(soliddraft_app::new_document());
-        app.state_mut().state.frame_layout = layout;
         case.run(&mut app, |app| {
             for step in scenario["steps"].as_array().unwrap().iter().take(3) {
                 let name = step["tool"].as_str().unwrap();
@@ -70,10 +70,8 @@ fn check_display(name: &str, source: &str, bounded: bool) {
                 assert!(!bound.method.is_empty() && !bound.definition.is_empty());
                 assert!(!app.state().state.doc.meshes.is_empty(), "the bounded fillet is visible");
                 assert_eq!(app.state().state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
-                if layout == FrameLayout::EditSuite {
-                    assert!(app.query_all_by_label("Fillet1 proof: Answered within a stated bound").next().is_some());
-                    assert!(app.query_all_by_label("Fillet1 proof: Proved").next().is_none());
-                }
+                assert!(app.query_all_by_label("Fillet1 proof: Answered within a stated bound").next().is_some());
+                assert!(app.query_all_by_label("Fillet1 proof: Proved").next().is_none());
             } else {
                 assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
                 assert_eq!(work.used, 19_999_956);

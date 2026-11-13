@@ -73,6 +73,8 @@ impl Case {
     /// A case on the real renderer. Panics when there is no adapter.
     pub fn gpu(name: &str) -> Self {
         let mut case = Self::settings(name);
+        // These cases exercise axes on demand with an explicit saved preference.
+        case.seed_settings(r#"{"view":{"always_show_origin_axes":false}}"#);
         let _ = env_logger::try_init();
         let instance = egui_wgpu::wgpu::Instance::default();
         let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));

@@ -26,7 +26,7 @@ fn assert_cube_works(app: &mut App) {
 
 fn assert_hidden_at_rest(case: &mut Case, app: &mut App, name: &str) {
     assert_eq!(reference(app), None, "{name}: nothing selected");
-    assert!(!app.state().state.viewport.references.always_show_origin_axes, "{name}: the default is off");
+    assert!(!app.state().state.viewport.references.always_show_origin_axes, "{name}: the saved axes preference is off");
     pointer_to_chrome(app);
     let image = case.frame(app, &format!("{name}-rest"));
     case.note(format!("{name} rest: rays {:?}, corner {}", rays(&image, app), corner_triad_pixels(&image, app)));
@@ -35,7 +35,7 @@ fn assert_hidden_at_rest(case: &mut Case, app: &mut App, name: &str) {
 }
 
 #[test]
-fn origin_axes_are_hidden_in_a_fresh_and_old_part() {
+fn saved_preference_hides_origin_axes_in_fresh_and_old_parts() {
     {
         let mut case = Case::gpu("origin_axes_are_hidden_fresh");
         let mut app = launch(empty());

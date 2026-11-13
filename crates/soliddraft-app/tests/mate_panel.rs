@@ -68,7 +68,7 @@ fn click_at(h: &mut App<'_>, pos: Pos2) {
 /// Clicks a button, first scrolling it into view: a button clipped out of the panel takes
 /// no click, and egui animates the scroll.
 fn button(h: &mut App<'_>, name: &str) {
-    use soliddraft_app::mates::panel::Family;
+    use soliddraft_app::mates::Family;
     use soliddraft_assembly::Alignment;
     if Family::ALL.iter().any(|family| family.label() == name) {
         if h.state().state.form_bar.expanded {
@@ -117,7 +117,7 @@ fn type_into(h: &mut App<'_>, label: &str, text: &str) {
     let label = if label == "Mate distance"
         && matches!(
             h.state().state.assembly.mate.family,
-            soliddraft_app::mates::panel::Family::Distance | soliddraft_app::mates::panel::Family::ProfileCenter
+            soliddraft_app::mates::Family::Distance | soliddraft_app::mates::Family::ProfileCenter
         ) {
         "Mate value"
     } else {

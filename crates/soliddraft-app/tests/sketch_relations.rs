@@ -4,7 +4,7 @@
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, Rect, Shape, pos2, vec2};
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, Document, FeatureId, PlaneKind, SketchPlane},

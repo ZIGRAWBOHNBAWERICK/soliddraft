@@ -56,7 +56,7 @@ pub enum Family {
 }
 
 impl Family {
-    const ALL: [Family; 19] = [
+    pub const ALL: [Family; 19] = [
         Family::Gear,
         Family::RackAndPinion,
         Family::Screw,
@@ -78,7 +78,7 @@ impl Family {
         Family::Slot,
     ];
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Family::Gear => "Gear",
             Family::RackAndPinion => "Rack and Pinion",

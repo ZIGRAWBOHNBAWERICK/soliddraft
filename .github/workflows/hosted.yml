@@ -164,8 +164,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 
@@ -234,8 +234,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 
@@ -307,8 +307,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 
@@ -389,8 +389,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 
@@ -469,8 +469,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 
@@ -523,8 +523,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 
@@ -1038,8 +1038,8 @@ jobs:
         run: |
           test -f /.dockerenv
           rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
-          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions"
-          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
           curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
 

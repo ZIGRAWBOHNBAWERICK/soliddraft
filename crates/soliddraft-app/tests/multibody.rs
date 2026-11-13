@@ -271,6 +271,7 @@ fn a_refused_first_feature_in_a_new_body_keeps_the_existing_body_visible() {
         })
         .unwrap()
         .unwrap();
+    assert_eq!(doc.meshes, before, "an empty new body keeps existing geometry visible");
     let error = doc
         .apply(Command::AddExtrude {
             params: ExtrudeParams { sketch: Some(sketch), depth: 2.0, ..Default::default() },

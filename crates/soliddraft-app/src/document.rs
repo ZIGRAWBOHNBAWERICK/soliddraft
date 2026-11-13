@@ -2908,7 +2908,7 @@ impl Document {
                     self.faces = display.faces;
                     self.edges = display.edges;
                     self.picks = display.picks;
-                    self.shown = self.display_body();
+                    self.shown = Some(display.body);
                     self.apply_appearances();
                     self.mesh_version += 1;
                 }
@@ -2921,7 +2921,7 @@ impl Document {
             self.refresh_bodies();
             return;
         }
-        let next = self.display_body();
+        let next = self.display_body().or_else(|| self.model.live_bodies().first().map(|(_, body)| *body));
         if let Some(body) = next
             && let Err(message) = self.capture_display_bound(body)
         {
@@ -3045,7 +3045,7 @@ impl Document {
                 self.faces = display.faces;
                 self.edges = display.edges;
                 self.picks = display.picks;
-                self.shown = self.display_body();
+                self.shown = Some(display.body);
                 self.apply_appearances();
                 self.mesh_version += 1;
             }
@@ -3223,7 +3223,7 @@ impl Document {
     /// Makes `mesh` the displayed body's display mesh and its picks.
     fn show_mesh(&mut self, body: BodyId, topology: &Topology, mesh: &Mesh) {
         let mut picks = Vec::new();
-        let feature = self.display_index().map(|i| self.features[i].id).unwrap_or(0);
+        let feature = self.features.iter().rev().find(|f| f.body == Some(body)).map_or(0, |f| f.id);
         let makers: HashMap<FaceId, FeatureId> = self.faces.iter().map(|f| (f.id, f.feature)).collect();
         let edges = self.edge_polylines(body);
         self.meshes =

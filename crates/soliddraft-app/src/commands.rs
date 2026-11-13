@@ -2231,7 +2231,11 @@ fn registry() -> Vec<CommandSpec> {
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Check the body for geometry faults").on(Inspect, "Check", Large),
-        cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane").on(Inspect, "Check", Small),
+        cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane")
+            .on(Inspect, "Check", Small)
+            .run(|_| AppAction::ToggleSection)
+            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .app_only("Section view"),
         cmd("draft_check", "Draft check", Icon::Cad("draft_check"), "Show which faces have enough draft")
             .on(Inspect, "Surface quality", Small),
         // View.

@@ -96,6 +96,7 @@ pub enum AppAction {
     /// Computes mass properties only after the user requests them.
     MeasureMassProperties,
     MeasureEntity,
+    ToggleSection,
     SetView(StandardView),
     /// Look straight at the active sketch plane, or the selected planar face.
     NormalTo,
@@ -1053,6 +1054,7 @@ pub struct Rename {
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
+    pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
@@ -1227,6 +1229,7 @@ impl AppState {
         Self {
             doc,
             measure: Default::default(),
+            section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),

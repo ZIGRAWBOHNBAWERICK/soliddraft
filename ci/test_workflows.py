@@ -341,7 +341,7 @@ class BoatRunners(unittest.TestCase):
                               event={'pull_request': {'user': {'login': author},
                                      'head': {'repo': {'full_name': source}}}},
                               needs={k: '["boat-large"]' for k in
-                                     ('plain_runner', 'archive_runner', 'application_runner')})
+                                     ('plain_runner', 'archive_runner', 'application_runner', 'blade_runner')})
                 trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
                 self.assertEqual(evaluate(expression, **values),
                                  ['boat-large'] if trusted else ['ubuntu-latest'])

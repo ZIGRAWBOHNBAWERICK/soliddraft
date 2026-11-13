@@ -51,6 +51,7 @@ jobs:
     outputs:
       selected: ${{ steps.select.outputs.selected }}
       packaging: ${{ steps.select.outputs.packaging }}
+      blade_runner: ${{ steps.runner.outputs.blade }}
       archive_runner: ${{ steps.runner.outputs.archive }}
       plain_runner: ${{ steps.runner.outputs.plain }}
       application_runner: ${{ steps.runner.outputs.application }}
@@ -62,6 +63,7 @@ jobs:
       - id: runner
         env:
           USE_BOAT: ${{ vars.USE_BOAT == 'true' || (github.event_name == 'workflow_dispatch' && inputs.benchmark_boat) }}
+          RUNNER_BLADE_OK_AT: ${{ vars.RUNNER_BLADE_OK_AT }}
           RUNNER_BOAT_OK_AT: ${{ vars.RUNNER_BOAT_OK_AT }}
           RUNNER_BOHN03_OK_AT: ${{ vars.RUNNER_BOHN03_OK_AT }}
         run: python3 ci/select-runner.py
@@ -126,7 +128,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'lint')
     name: Lint (fmt, clippy)
-    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.blade_runner || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -137,7 +139,17 @@ jobs:
         with:
           shared-key: native-dev
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check Blade archive compatibility
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          cat /etc/os-release
+          ldd --version
+          rustc --print target-libdir
+          readelf -l "$(rustc --print sysroot)/bin/rustc" | grep 'Requesting program interpreter'
       - run: ci/run lint
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: rm -rf -- "$GITHUB_WORKSPACE/target"
 
   kernel:
     needs: select

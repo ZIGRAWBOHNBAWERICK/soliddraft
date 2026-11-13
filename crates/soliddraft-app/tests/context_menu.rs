@@ -4,7 +4,7 @@
 mod ribbon;
 
 use egui::{Key, Modifiers, PointerButton, Pos2};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use glam::Vec3;
 use ribbon::{App, render_steps};
 use soliddraft_app::{

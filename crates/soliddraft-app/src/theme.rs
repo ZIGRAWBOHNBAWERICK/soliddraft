@@ -331,7 +331,7 @@ pub const RADIUS: u8 = 4;
 pub const WINDOW_RADIUS: u8 = 6;
 
 pub const MENU_HEIGHT: f32 = 30.0;
-pub const COMMAND_LINE_HEIGHT: f32 = edit_suite::COMMAND_LINE_HEIGHT;
+pub const COMMAND_LINE_HEIGHT: f32 = 32.0;
 /// Keep room for the model and an optional pane in a narrow Edit Suite window.
 pub const COMPACT_WIDTH: f32 = 1100.0;
 pub const ROW_HEIGHT: f32 = 22.0;

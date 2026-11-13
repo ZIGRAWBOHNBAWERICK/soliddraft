@@ -61,38 +61,9 @@ fn frame(app: &mut App, name: &str) {
 }
 
 fn corner_mode(app: &mut App) {
-    let window = ribbon::window(app);
-    let band = ribbon::palette_region(app);
-    if !app.query_all(By::new().role(egui::accesskit::Role::Button).label("Trim")).any(|n| band.intersects(n.rect())) {
-        ribbon::click_button(app, "Modify group", window);
-    }
-    let properties = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect.top();
-    let controls = egui::Rect::from_min_max(window.min, pos2(window.right(), properties));
-    ribbon::click_button(app, "Trim", controls);
-    for _ in 0..4 {
-        if let Some(label) = ribbon::painted(app).into_iter().find(|p| {
-            p.text == "Corner"
-                && p.rect.contains_rect(p.full)
-                && p.rect.right() < app.state().state.viewport.rect.left()
-        }) {
-            ribbon::click_at(app, label.rect.center());
-            assert_eq!(session(app).tool.label(), "Trim corner");
-            return;
-        }
-        let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
-        app.hover_at(pos2(
-            app.state().state.viewport.rect.left() - 15.0,
-            (head.bottom() + ribbon::band(app).top()) / 2.0,
-        ));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -180.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(12);
-    }
-    panic!("Trim must expose a Corner mode in its existing property panel");
+    ribbon::run_command(app, "sketch_trim");
+    ribbon::click_option(app, "Corner");
+    assert_eq!(session(app).tool.label(), "Trim corner");
 }
 
 #[test]

@@ -46,28 +46,7 @@ fn session(app: &App) -> &SketchSession {
 }
 
 fn control(app: &mut App, label: &str) {
-    for direction in [-1.0, 1.0] {
-        for _ in 0..12 {
-            let left = app.state().state.viewport.rect.left();
-            if let Some(p) = ribbon::painted(app)
-                .into_iter()
-                .find(|p| p.text == label && p.rect.right() < left && p.rect.contains_rect(p.full))
-            {
-                ribbon::click_at(app, p.rect.center());
-                return;
-            }
-            let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
-            app.hover_at(pos2(left - 15.0, (head.bottom() + ribbon::band(app).top()) / 2.0));
-            app.event(egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: vec2(0.0, direction * 80.0),
-                phase: egui::TouchPhase::Move,
-                modifiers: Modifiers::NONE,
-            });
-            app.run_steps(10);
-        }
-    }
-    panic!("the sketch must expose {label} in its diagnostics workflow");
+    ribbon::click_option(app, label);
 }
 
 fn screen(app: &App, p: P2) -> Pos2 {

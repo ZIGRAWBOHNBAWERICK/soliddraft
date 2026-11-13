@@ -58,25 +58,6 @@ fn small_button(ui: &mut egui::Ui, rect: Rect, icon: Icon, tip: &str, primary: b
     resp.on_hover_text(tip)
 }
 
-/// OK and Cancel in the header; returns (ok, cancel).
-fn ok_cancel(ui: &mut egui::Ui, head: Rect, ok_tip: &str, cancel_tip: &str) -> (bool, bool) {
-    let ok = small_button(
-        ui,
-        Rect::from_center_size(pos2(head.right() - 42.0, head.center().y), vec2(22.0, 22.0)),
-        Icon::Check,
-        ok_tip,
-        true,
-    );
-    let cancel = small_button(
-        ui,
-        Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), vec2(22.0, 22.0)),
-        Icon::Close,
-        cancel_tip,
-        false,
-    );
-    (ok.clicked(), cancel.clicked())
-}
-
 // ---------------------------------------------------------------------------
 // The feature form: a header, cards of sections, and the numbers in one table.
 

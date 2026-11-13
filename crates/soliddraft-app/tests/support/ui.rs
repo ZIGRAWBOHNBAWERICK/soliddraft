@@ -301,6 +301,41 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
     control(app, &label, palette_region(app))
 }
 
+/// Opens the active tool's detailed controls using the options bar.
+pub fn open_options(app: &mut App) {
+    if app.state().state.in_sketch() {
+        if !app.state().state.options_details {
+            app.get_by_label("Sketch options").click();
+            app.run_steps(8);
+        }
+    } else if app.state().state.editor.is_some() {
+        if !app.state().state.form_bar.expanded {
+            app.get_by_label_contains("More (").click();
+            app.run_steps(8);
+        }
+    } else if !app.state().state.options_details {
+        app.get_by_label("Options").click();
+        app.run_steps(8);
+    }
+}
+
+/// Closes the details sheet before interacting with geometry beneath it.
+pub fn close_options(app: &mut App) {
+    if app.query_by_label("Close options").is_some() {
+        app.get_by_label("Close options").click();
+        app.run_steps(8);
+    }
+}
+
+pub fn click_option(app: &mut App, label: &str) {
+    open_options(app);
+    app.get_by_label(label).scroll_to_me();
+    app.run_steps(24);
+    app.get_by_label(label).click();
+    app.run_steps(8);
+    close_options(app);
+}
+
 pub fn run_command(app: &mut App, id: &str) {
     let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
     app.state_mut().state.run_command(command);

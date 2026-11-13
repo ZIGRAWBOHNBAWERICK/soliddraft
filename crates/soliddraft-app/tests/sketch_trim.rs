@@ -50,25 +50,7 @@ fn frame(app: &mut App, name: &str) {
 }
 
 fn option(app: &mut App, label: &str) {
-    for _ in 0..12 {
-        if let Some(p) = ribbon::painted(app).into_iter().find(|p| p.text == label && p.rect.contains_rect(p.full)) {
-            ribbon::click_at(app, p.rect.center());
-            return;
-        }
-        let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
-        app.hover_at(pos2(
-            app.state().state.viewport.rect.left() - 15.0,
-            (head.bottom() + ribbon::band(app).top()) / 2.0,
-        ));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -80.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(12);
-    }
-    panic!("Trim must expose the {label} checkbox");
+    ribbon::click_option(app, label);
 }
 
 #[test]

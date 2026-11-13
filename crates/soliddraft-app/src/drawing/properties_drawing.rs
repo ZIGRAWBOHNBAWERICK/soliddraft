@@ -11,8 +11,8 @@ use soliddraft_drawing::display::annotation_name;
 use soliddraft_drawing::library as templates;
 use soliddraft_drawing::project::{standard_label, view_label};
 use soliddraft_drawing::{
-    AnnotationKind, AnnotationState, Command, DimensionKind, HiddenLines, LinearOrientation, Projection, Scale,
-    TangentEdges, Tolerance, ViewScale,
+    AnnotationKind, AnnotationState, Command, DimensionKind, HiddenLines, LinearOrientation, Projection, TangentEdges,
+    Tolerance, ViewScale,
 };
 use soliddraft_kernel_api::drawing::StandardView;
 

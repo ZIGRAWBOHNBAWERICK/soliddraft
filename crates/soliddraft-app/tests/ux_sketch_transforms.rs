@@ -49,23 +49,7 @@ fn hover(app: &mut App, p: P2) {
 }
 
 fn button(app: &mut App, label: &str) {
-    let view = app.state().state.viewport.rect;
-    let pane = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
-    for _ in 0..6 {
-        if app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| pane.contains_rect(n.rect())) {
-            break;
-        }
-        app.hover_at(egui::pos2(pane.right() - 18.0, pane.bottom() - 60.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -120.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        settle(app);
-    }
-    ribbon::click_button(app, label, pane);
-    settle(app);
+    ribbon::click_option(app, label);
 }
 
 fn near(a: P2, b: P2) {
@@ -73,31 +57,10 @@ fn near(a: P2, b: P2) {
 }
 
 fn number(app: &mut App, index: usize, text: &str) {
-    let view = app.state().state.viewport.rect;
-    let header = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").expect("properties panel");
-    let fields =
-        egui::Rect::from_min_max(egui::pos2(0.0, header.rect.bottom() + 40.0), egui::pos2(view.left(), view.bottom()));
-    // Accessibility retains clipped controls. Never click their offscreen bounds,
-    // which can overlap the command bar's Cancel button.
-    for _ in 0..8 {
-        if app
-            .query_all(egui_kittest::kittest::By::new().role(egui::accesskit::Role::SpinButton))
-            .nth(index)
-            .is_some_and(|n| fields.contains_rect(n.rect()))
-        {
-            break;
-        }
-        app.hover_at(egui::pos2(view.left() - 18.0, view.bottom() - 60.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -120.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        settle(app);
-    }
+    ribbon::open_options(app);
+    app.get_all_by_role(egui::accesskit::Role::SpinButton).nth(index).expect("numeric input").scroll_to_me();
+    settle(app);
     let rect = app.get_all_by_role(egui::accesskit::Role::SpinButton).nth(index).expect("numeric input").rect();
-    assert!(fields.contains_rect(rect), "numeric field must be fully visible: {rect:?}");
     ribbon::double_click_at(app, rect.center());
     app.run_steps(2);
     assert!(app.ctx.egui_wants_keyboard_input(), "double click must focus the numeric editor");
@@ -105,6 +68,7 @@ fn number(app: &mut App, index: usize, text: &str) {
     app.event(egui::Event::Text(text.into()));
     app.key_press(Key::Enter);
     settle(app);
+    ribbon::close_options(app);
 }
 
 fn tool(app: &mut App, label: &str) {

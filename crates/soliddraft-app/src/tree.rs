@@ -396,9 +396,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(crate::dimension_edit::row_double_click(state, item.id));
             }
             let id = item.id;
-            let (is_sketch, suppressed, index) = (item.is_sketch, item.suppressed, item.index);
-            let needs_repair = matches!(item.status, FeatureStatus::NeedsRepair(_));
-            let name = item.name.clone();
 
             if !state.in_sketch() {
                 crate::context_menu::show(

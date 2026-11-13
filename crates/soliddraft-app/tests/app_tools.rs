@@ -641,6 +641,24 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     assert_eq!(redone["features"], imported["features"]);
 
     s.call("new_part", json!({}));
+    let block = json!({"shape":"rectangle","center":[0,0,0],"width":10,"height":8});
+    s.call("sketch", json!({"plane":"top","shapes":[block]}));
+    s.call("extrude", json!({"sketch":"Sketch1","depth":6,"flip":false}));
+    s.call("offset", json!({"distance":-1}));
+    assert_eq!(s.call("mass_properties", json!({"name":"Offset1"}))["volume_mm3"], 192.0);
+    s.call("edit_offset", json!({"feature":"Offset1","distance":-0.5}));
+    assert_eq!(s.call("mass_properties", json!({"name":"Offset1"}))["volume_mm3"], 315.0);
+
+    s.call("new_part", json!({}));
+    let block = json!({"shape":"rectangle","center":[0,0,0],"width":10,"height":8});
+    s.call("sketch", json!({"plane":"top","shapes":[block]}));
+    s.call("extrude", json!({"sketch":"Sketch1","depth":6,"flip":false}));
+    s.call("thicken", json!({"faces":["Boss-Extrude1 · End cap"],"thickness":2,"side":"front"}));
+    assert_eq!(s.call("mass_properties", json!({"name":"Thicken1"}))["volume_mm3"], 160.0);
+    s.call("edit_thicken", json!({"feature":"Thicken1","thickness":1,"side":"back"}));
+    assert_eq!(s.call("mass_properties", json!({"name":"Thicken1"}))["volume_mm3"], 80.0);
+
+    s.call("new_part", json!({}));
     for z in [0, 4, 8] {
         s.call(
             "sketch",

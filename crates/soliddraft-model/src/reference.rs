@@ -78,6 +78,14 @@ pub enum Generator {
     /// A spherical face where a shell's wall turns round a concave vertex, ranked by
     /// the names of the vertex's faces.
     ShellCorner,
+    /// An offset image of a face, ranked by its source face name.
+    OffsetFace,
+    /// A round where offset images meet at an edge.
+    OffsetRound,
+    /// A round where offset images meet at a vertex.
+    OffsetCorner,
+    /// A closing wall along a thickened face's boundary.
+    ThickenRim,
     /// A profile end left exposed at a join inside a sweep path.
     PathJoin {
         /// The saved path piece at that join.
@@ -96,6 +104,10 @@ impl fmt::Display for Generator {
             Generator::Hole { placement, part } => write!(f, "Hole {} {}", placement + 1, part.label().to_lowercase()),
             Generator::Copy { instance } => write!(f, "Copy {instance} face"),
             Generator::Other => f.write_str("Face"),
+            Generator::OffsetFace => f.write_str("Offset face"),
+            Generator::OffsetRound => f.write_str("Offset round"),
+            Generator::OffsetCorner => f.write_str("Offset corner"),
+            Generator::ThickenRim => f.write_str("Thicken rim"),
             Generator::ShellWall => f.write_str("Inner wall"),
             Generator::ShellRound => f.write_str("Inner round"),
             Generator::ShellCorner => f.write_str("Inner corner"),

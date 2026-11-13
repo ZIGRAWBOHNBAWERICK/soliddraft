@@ -627,6 +627,15 @@ impl Document {
                 }
                 _ => Ok(()),
             },
+            FeatureKind::Offset(o) if !o.distance.is_finite() || o.distance == 0.0 => {
+                Err(CommandError::Invalid("offset distance must be finite and nonzero".into()))
+            }
+            FeatureKind::Thicken(t) if t.faces.is_empty() => {
+                Err(CommandError::Invalid("select at least one face to thicken".into()))
+            }
+            FeatureKind::Thicken(t) if !t.thickness.is_finite() || t.thickness <= 0.0 => {
+                Err(CommandError::Invalid("thickness must be finite and positive".into()))
+            }
             FeatureKind::Shell(s) if !(s.thickness.is_finite() && s.thickness > 0.0) => {
                 Err(CommandError::Invalid("shell thickness must be finite and positive".into()))
             }

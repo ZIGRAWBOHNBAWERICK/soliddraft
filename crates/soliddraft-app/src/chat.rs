@@ -328,9 +328,14 @@ impl AppState {
             self.chat.messages.push(ChatMessage::new(Role::System, reason));
             return;
         }
-        let summary =
-            CommandTools { doc: &mut self.doc, book: &mut self.chat.book, surface: Surface::Assistant, drawing: None }
-                .summary();
+        let mut summary = crate::app_tools::AppTools { state: self }.summary();
+        summary["active_document"] = serde_json::json!(if self.drawing.is_active() {
+            "drawing"
+        } else if self.assembly.is_active() {
+            "assembly"
+        } else {
+            "part"
+        });
         let context = format!("<model_summary>\n{summary}\n</model_summary>");
         let Link::Connected(conversation) = &mut self.chat.link else { return };
         match conversation.send(&text, Some(&context)) {

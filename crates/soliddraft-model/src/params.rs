@@ -249,6 +249,8 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
             }
         },
         FeatureKind::Draft(d) => out.push(param(Parameter::Angle, Unit::Angle, d.angle)),
+        FeatureKind::Offset(o) => out.push(param(Parameter::Distance, Unit::Length, o.distance)),
+        FeatureKind::Thicken(t) => out.push(param(Parameter::Thickness, Unit::Length, t.thickness)),
         FeatureKind::Shell(s) => out.push(param(Parameter::Thickness, Unit::Length, s.thickness)),
         FeatureKind::Lattice(l) => {
             if let Some(size) = l.cell_size_mm {
@@ -431,6 +433,13 @@ fn write_parameter(
             PatternSpec::Linear { .. } => return missing(),
         },
         (FeatureKind::Draft(d), Parameter::Angle) => d.angle = value,
+        (FeatureKind::Offset(o), Parameter::Distance) => {
+            if value == 0.0 {
+                return Err("offset distance must not be zero".into());
+            }
+            o.distance = value;
+        }
+        (FeatureKind::Thicken(t), Parameter::Thickness) => t.thickness = positive("thickness")?,
         (FeatureKind::Shell(s), Parameter::Thickness) => s.thickness = positive("thickness")?,
         (FeatureKind::Lattice(l), Parameter::CellSize) if l.cell_size_mm.is_some() => {
             l.cell_size_mm = Some(positive("cell size")?)

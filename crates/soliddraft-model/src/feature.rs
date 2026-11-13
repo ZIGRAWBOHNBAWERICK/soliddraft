@@ -68,12 +68,16 @@ pub enum FeatureKind {
     Chamfer(BlendFeature),
     /// Drills holes into a planar face of the part.
     Hole(HoleFeature),
-    /// Copies the part's body along a line or around an axis.
+    /// Repeats a feature or copies the body along a line or around an axis.
     Pattern(PatternFeature),
     /// Reflects the part's body in a plane.
     Mirror(MirrorFeature),
     /// Tilts faces of the part away from a pull direction.
     Draft(DraftFeature),
+    /// Moves the complete body boundary by a signed distance.
+    Offset(OffsetFeature),
+    /// Makes a solid from selected faces at a constant thickness.
+    Thicken(ThickenFeature),
     /// Hollows the body, leaving the selected faces open.
     Shell(ShellFeature),
     /// A body read from an external STEP file, with the answers to its repair questions.
@@ -104,6 +108,8 @@ impl FeatureKind {
             },
             FeatureKind::Mirror(_) => "Mirror",
             FeatureKind::Draft(_) => "Draft",
+            FeatureKind::Offset(_) => "Offset",
+            FeatureKind::Thicken(_) => "Thicken",
             FeatureKind::Shell(_) => "Shell",
             FeatureKind::ImportStep(_) => "Import",
             FeatureKind::Lattice(_) => "Lattice",
@@ -121,6 +127,20 @@ impl FeatureKind {
     pub(crate) fn same_stage(&self, other: &FeatureKind) -> bool {
         !(self.is_terminal_field() || other.is_terminal_field())
             || std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+
+    /// Whether this feature has local geometry that can be repeated on the current body.
+    pub fn can_pattern_feature(&self) -> bool {
+        matches!(
+            self,
+            Self::Extrude(_)
+                | Self::Revolve(_)
+                | Self::Sweep(_)
+                | Self::Hole(_)
+                | Self::Fillet(_)
+                | Self::Chamfer(_)
+                | Self::Draft(_)
+        )
     }
 
     /// The features this one reads: its sketch, and the features that made the faces
@@ -145,8 +165,9 @@ impl FeatureKind {
                 out.extend(b.edges.iter().flat_map(|e| e.faces.iter().map(|f| f.feature)));
             }
             FeatureKind::Hole(h) => out.push(h.face.feature),
-            FeatureKind::Pattern(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {
-            }
+            FeatureKind::Pattern(p) => out.extend(p.source),
+            FeatureKind::Thicken(t) => out.extend(t.faces.iter().map(|face| face.feature)),
+            FeatureKind::Offset(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {}
             FeatureKind::Mirror(m) => {
                 out.extend(m.plane.dependencies());
             }
@@ -473,11 +494,14 @@ pub enum PatternSpec {
     },
 }
 
-/// Copies of the part's body, united with it.
+/// A repeated feature operation, or copies of the whole body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PatternFeature {
     /// Where the copies go.
     pub layout: PatternSpec,
+    /// The local feature to repeat. Missing in older parts, which pattern the whole body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<FeatureId>,
 }
 
 /// A plane a feature reads: a reference plane or a planar face of the part.
@@ -611,6 +635,24 @@ pub struct ShellFeature {
     pub open_faces: ShellOpenings,
     /// Positive, finite wall thickness in millimetres.
     pub thickness: f64,
+}
+
+/// A signed offset of the complete body boundary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OffsetFeature {
+    /// Positive grows the body; negative shrinks it, in millimetres.
+    pub distance: f64,
+}
+
+/// A solid thickened from selected faces of the preceding body.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThickenFeature {
+    /// Persistent names of the selected faces.
+    pub faces: Vec<FaceRef>,
+    /// Positive thickness in millimetres.
+    pub thickness: f64,
+    /// Which side of the selected faces receives material.
+    pub side: soliddraft_kernel_api::ThickenSide,
 }
 
 /// The final lattice stage. It reads the whole finished body, so it references nothing.

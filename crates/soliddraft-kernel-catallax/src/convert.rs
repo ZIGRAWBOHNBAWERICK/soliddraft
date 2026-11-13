@@ -161,7 +161,15 @@ impl Ids {
             .flat_map(|face| {
                 let mut roles: Vec<_> = self.origins[face]
                     .iter()
-                    .filter(|origin| origin.step.as_str() == step)
+                    .filter(|origin| {
+                        origin.step.as_str() == step
+                            || (op == OpKind::Pattern
+                                && origin
+                                    .step
+                                    .as_str()
+                                    .strip_prefix(step)
+                                    .is_some_and(|suffix| suffix.starts_with("_copy")))
+                    })
                     .filter_map(|origin| self.named.iter().find(|(source, _)| source == origin))
                     .map(|(_, origin)| origin.role.clone())
                     .collect();
@@ -212,6 +220,13 @@ fn named_origin_for_edges(
     tags: &BTreeMap<String, OpTag>,
     selected_edges: &[EdgeId],
 ) -> Option<soliddraft_kernel_api::Origin> {
+    if let Some((instance, source)) = crate::feature_pattern::instance(origin.step.as_str()) {
+        let original = Origin { step: catallax_recipe::StepId::new(source).ok()?, role: origin.role.clone() };
+        return Some(soliddraft_kernel_api::Origin {
+            tag: tags.get(origin.step.as_str())?.clone(),
+            role: FaceRole::FeatureCopy { instance, source: crate::feature_pattern::source_key(&original, tags)? },
+        });
+    }
     parents
         .iter()
         .find_map(|parent| parent.named.iter().find_map(|(source, named)| (source == origin).then_some(named)))
@@ -274,8 +289,16 @@ fn face_role(role: &Role, parents: &[&Ids], selected_edges: &[EdgeId]) -> Option
                 _ => None,
             }
         }
+        Role::Rim { edge } => {
+            let name = serde_json::to_string(edge).expect("edge name serializes");
+            let candidates: BTreeSet<_> = parents
+                .iter()
+                .flat_map(|p| p.edge_names.iter().filter_map(|(id, n)| (*n == name).then_some(*id)))
+                .collect();
+            (candidates.len() == 1).then(|| FaceRole::Rim { edge: *candidates.first().unwrap() })
+        }
         Role::RoundCorner { vertex } => parent_vertex(vertex, parents).map(|vertex| FaceRole::ShellCorner { vertex }),
-        Role::Inner { of } => parents
+        Role::Inner { of } | Role::Offset { of } => parents
             .iter()
             .find_map(|p| p.origins.iter().find_map(|(id, os)| os.contains(of).then_some(*id)))
             .map(|face| FaceRole::Offset { face }),

@@ -24,6 +24,8 @@ fn commands_json_lists_the_whole_registry() {
     assert_eq!(extrude["shortcuts"][0]["keys"], "E");
     assert_eq!(extrude["agents"], "verb");
     assert_eq!(extrude["params"][1]["name"], "depth");
+    let front = listed.as_array().unwrap().iter().find(|c| c["id"] == "view_front").unwrap();
+    assert_eq!(front["workspace"], "model");
 }
 
 #[test]

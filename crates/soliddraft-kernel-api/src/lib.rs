@@ -223,6 +223,28 @@ pub enum PatternLayout {
     },
 }
 
+/// Which side of selected faces receives the thickened material.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThickenSide {
+    /// Along the outward face normals.
+    #[default]
+    Front,
+    /// Against the outward face normals.
+    Back,
+}
+
+/// A solid made from selected faces at a constant thickness.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Thicken {
+    /// Faces of the input body to thicken.
+    pub faces: Vec<FaceId>,
+    /// Positive thickness in millimetres.
+    pub thickness: f64,
+    /// Where the material lies relative to the selected faces.
+    pub side: ThickenSide,
+}
+
 /// Parameters of a reflection of a solid in a plane.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mirror {
@@ -906,6 +928,28 @@ pub trait Kernel: Send + Sync {
     /// one. A refusal leaves `body` as it was.
     fn shell_all_faces(&self, _body: BodyId, _thickness: f64) -> KernelResult<()> {
         Err(KernelError::Unsupported("Opening every face is coming soon.".into()))
+    }
+
+    /// Offsets the body's boundary by a signed distance. Positive grows the body.
+    fn offset(&self, _tag: &OpTag, _body: BodyId, _distance: f64) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Offset is coming soon.".into()))
+    }
+
+    /// Makes a solid from the selected faces at a constant thickness.
+    fn thicken(&self, _tag: &OpTag, _body: BodyId, _params: &Thicken) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Thicken is coming soon.".into()))
+    }
+
+    /// Repeats only the operation graph between a feature's input and result.
+    fn pattern_feature(
+        &self,
+        _tag: &OpTag,
+        _body: BodyId,
+        _source: BodyId,
+        _before: Option<BodyId>,
+        _layout: &PatternLayout,
+    ) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Feature patterns are coming soon.".into()))
     }
 
     /// Sweeps a profile along a straight line until it meets `target` as `limit` says,

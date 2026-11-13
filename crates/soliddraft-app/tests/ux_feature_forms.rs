@@ -85,7 +85,7 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
                 let button = ribbon::control(app, label, bar(app));
                 assert!(bar(app).contains_rect(button.rect), "{id}: {label} stays on the bar");
             }
-            assert!(app.query_all_by_label("Properties").next().is_none());
+            assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
             let has_sheet = ribbon::buttons_in(app, bar(app)).iter().any(|(s, _)| s.starts_with("More ("));
             assert_eq!(has_sheet, sheet, "{id}: only extra fields need a sheet at 1440 px");
             case.frame(app, id);
@@ -174,29 +174,23 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
     suite(&mut app);
     case.run(&mut app, |case, app| {
         assert!(!app.state().state.tree_shown(), "part starts with the pane hidden");
-        assert!(app.query_all_by_label("Properties").next().is_none());
-        ribbon::run_command(app, "show_values");
+        assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
+        ribbon::run_command(app, "configuration_grid");
         settle(app);
         assert!(app.state().state.tree_shown());
-        assert!(app.query_all_by_label("Values").next().is_some());
-        assert!(app.query_all_by_label("Properties").next().is_none());
+        assert!(app.query_all_by_label("New global name").next().is_some(), "Values content is active");
+        assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
         case.frame(app, "values");
         app.key_press(Key::F9);
         settle(app);
         assert!(!app.state().state.tree_shown());
-        app.state_mut().state.assembly.active = true;
-        assert!(app.state().state.tree_shown(), "assembly defaults open independently of part");
-        app.state_mut().state.assembly.active = false;
-        app.state_mut().state.drawing.active = true;
-        assert!(app.state().state.tree_shown(), "drawing defaults open independently of part");
-        app.state_mut().state.drawing.active = false;
         app.state_mut().state.doc.selection = Some(Selection::Reference(Reference::Plane(PlaneKind::Top)));
         ribbon::run_command(app, "sketch");
         settle(app);
         assert!(app.state().state.in_sketch());
         assert!(bar(app).contains_rect(app.get_by_label("Close sketch").rect()));
-        assert!(app.query_all_by_label("OK").next().is_none());
-        assert!(app.query_all_by_label("Cancel").next().is_none());
+        let actions = ribbon::buttons_in(app, bar(app));
+        assert!(!actions.iter().any(|(label, _)| matches!(label.as_str(), "OK" | "Cancel")));
         case.frame(app, "close-sketch");
         click_bar(app, "Close sketch");
         assert!(!app.state().state.in_sketch());
@@ -204,7 +198,7 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         assert_eq!(app.state().state.doc.features.len(), 1, "closing saves the sketch without adding a feature");
         app.state_mut().state.frame_layout = FrameLayout::Classic;
         settle(app);
-        assert!(app.query_all_by_label("Properties").next().is_some(), "classic keeps its dock");
+        assert!(ribbon::painted(app).iter().any(|p| p.text == "Properties"), "classic keeps its dock");
     });
 }
 
@@ -292,5 +286,35 @@ fn plane_picker_and_repair_use_the_same_bar_and_sheet() {
         case.frame(app, "repair-list");
         click_bar(app, "Cancel");
         assert!(app.state().state.editor.is_none());
+    });
+}
+
+#[test]
+fn assembly_and_drawing_panes_start_open_and_keep_part_visibility_separate() {
+    use soliddraft_app::{assembly::AssemblyAction, drawing::DrawingAction};
+    let mut case = Case::new("edit-suite-document-panes");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    suite(&mut app);
+    case.run(&mut app, |case, app| {
+        assert!(!app.state().state.tree_shown());
+        app.state_mut().state.push(AppAction::Assembly(AssemblyAction::New));
+        settle(app);
+        assert!(app.state().state.assembly.is_active());
+        assert!(app.state().state.tree_shown());
+        assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
+        case.frame(app, "assembly-pane");
+        let part = app.state().state.doc.name.clone();
+        ribbon::document_tab(app, &part);
+        settle(app);
+        assert!(!app.state().state.assembly.is_active());
+        assert!(!app.state().state.tree_shown(), "part keeps its hidden pane");
+        app.state_mut().state.push(AppAction::Drawing(DrawingAction::MakeDrawing));
+        settle(app);
+        app.state_mut().state.push(AppAction::Drawing(DrawingAction::CreateDrawing));
+        settle(app);
+        assert!(app.state().state.drawing.is_active());
+        assert!(app.state().state.tree_shown());
+        assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
+        case.frame(app, "drawing-pane");
     });
 }

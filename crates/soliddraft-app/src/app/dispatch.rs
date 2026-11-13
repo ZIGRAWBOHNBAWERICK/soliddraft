@@ -1230,10 +1230,6 @@ impl SolidDraftApp {
                     d.remove::<egui::PanelState>(crate::command_line::session_id());
                 });
             }
-            AppAction::ShowValues => {
-                self.state.show_tree(true);
-                self.state.values.focus = true;
-            }
             AppAction::TogglePanel(_) => {
                 let shown = self.state.tree_shown();
                 self.state.show_tree(!shown);

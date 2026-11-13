@@ -255,8 +255,7 @@ impl SolidDraftApp {
                         ui.close();
                     }
                     if ui.button("Values").clicked() {
-                        st.show_tree(true);
-                        st.values.focus = true;
+                        st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
                         ui.close();
                     }
                 }

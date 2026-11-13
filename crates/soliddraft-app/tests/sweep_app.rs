@@ -529,13 +529,20 @@ fn spline_controls_build_through_the_registry_in_both_frames() {
         app.state_mut().state.frame_layout = layout;
         app.run_steps(4);
         ribbon::run_command(&mut app, "sweep");
+        if layout == FrameLayout::EditSuite {
+            let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+            let (_, rect) =
+                ribbon::buttons_in(&app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
+            ribbon::click_at(&mut app, rect.center());
+            app.run_steps(6);
+        }
         app.get_by_label("Use spline path").scroll_to_me();
         app.run_steps(24);
         app.get_by_label("Use spline path").click();
         app.run_steps(6);
         assert!(app.query_by_label("Turn with the path · Coming soon").is_some());
         case.frame(&mut app, &format!("{layout:?}-controls"));
-        app.get_by_label("OK (Enter)").click();
+        app.get_by_label(if layout == FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }).click();
         app.run_steps(6);
         assert!(app.state().state.editor.is_none());
         check_spline(&app.state().state.doc, 240.0);

@@ -196,14 +196,17 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
                             .layout_no_wrap(field.label.clone(), theme::font(11.5), theme::muted())
                             .size()
                             .x
-                            .min(field.width * 0.5);
+                            .ceil()
+                            + 2.0;
                         ui.allocate_ui_with_layout(
                             vec2(caption_width, 24.0),
                             egui::Layout::left_to_right(Align::Center),
                             |ui| {
                                 ui.add(
-                                    egui::Label::new(egui::RichText::new(&field.label).color(theme::muted()))
-                                        .truncate(),
+                                    egui::Label::new(
+                                        egui::RichText::new(&field.label).font(theme::font(11.5)).color(theme::muted()),
+                                    )
+                                    .truncate(),
                                 )
                                 .on_hover_text(&field.label);
                             },

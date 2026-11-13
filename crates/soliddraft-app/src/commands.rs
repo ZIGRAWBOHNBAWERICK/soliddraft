@@ -2183,13 +2183,6 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::ToggleProjection)
             .lit(|s| s.viewport.camera.orthographic)
 .app_only(CAMERA),
-        cmd("show_values", "Values", Icon::Config, "Open the Values tab")
-            .both()
-            .on(View, "Panels", Large)
-            .on(DrawingTab::View, "Panels", Large)
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
-            .run(|_| AppAction::ShowValues)
-.app_only(PANELS),
         cmd("toggle_tree", "Feature tree", Icon::Tree, "Show or hide the feature tree")
             .both()
             .on(View, "Panels", Large)

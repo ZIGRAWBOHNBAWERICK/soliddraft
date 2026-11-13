@@ -413,6 +413,8 @@ pub struct CommandSpec {
     pub workspace: Workspace,
     /// Hidden from command searches while a sketch is open.
     pub outside_sketch: bool,
+    /// A planned command shown in a context menu, without a ribbon placement.
+    pub in_menu: bool,
     /// One line on what it does: the tooltip, the search result and the CLI listing.
     pub doc: &'static str,
     /// More for agents, after `doc`: how the parameters work, what to call first.
@@ -467,6 +469,7 @@ impl CommandSpec {
             label_now: |_| None,
             workspace: Workspace::Part,
             outside_sketch: false,
+            in_menu: false,
             doc,
             details: "",
             icon,
@@ -546,6 +549,11 @@ impl CommandSpec {
         self
     }
 
+    fn in_menu(mut self) -> Self {
+        self.in_menu = true;
+        self
+    }
+
     pub(crate) fn lit(mut self, active: fn(&AppState) -> bool) -> Self {
         self.active = active;
         self
@@ -579,9 +587,9 @@ impl CommandSpec {
         self
     }
 
-    /// Whether the app runs it: it has an action, or it holds a place on the ribbon.
+    /// Whether the app offers it as an action, ribbon tile or planned context command.
     pub fn in_app(&self) -> bool {
-        self.action.is_some() || !self.ribbon.is_empty()
+        self.action.is_some() || !self.ribbon.is_empty() || self.in_menu
     }
 
     /// Whether the app offers it in the current workspace and sketch mode.
@@ -1374,6 +1382,17 @@ fn selected_feature_is(s: &AppState, f: fn(&crate::document::Feature) -> bool) -
 /// The text of another command's first shortcut, for hints that name it.
 fn key_of(id: &str) -> String {
     get(id).and_then(CommandSpec::shortcut_text).unwrap_or_default()
+}
+
+fn menu_relation(s: &AppState, name: &str) -> Option<Vec<crate::sketch::ConstraintKind>> {
+    let sketch = s.sketch.as_ref()?;
+    let (_, kinds) = crate::sketcher::applicable_relation_sets(&sketch.sketch, &sketch.selection)
+        .into_iter()
+        .find(|(label, _)| *label == name)?;
+    kinds
+        .iter()
+        .any(|kind| !sketch.sketch.constraints.iter().any(|constraint| constraint.kind == *kind))
+        .then_some(kinds)
 }
 
 fn registry() -> Vec<CommandSpec> {
@@ -2350,6 +2369,59 @@ fn registry() -> Vec<CommandSpec> {
             .key(Scope::App, ctrl, Key::Q)
             .run(|_| AppAction::Quit)
 .app_only("It closes the window"),
+        // Context commands share the registry and existing document actions.
+        cmd("edit_sketch", "Edit sketch", Icon::Sketch, "Edit the sketch used by the selected feature")
+            .run(|s| AppAction::EditSketch(s.selected_sketch().expect("enabled with a source sketch")))
+            .when(|s| s.selected_sketch().is_some())
+            .hint(|s| s.selected_sketch().is_none().then(|| "This feature has no source sketch".into()))
+            .outside_sketch().app_only(EDITOR),
+        cmd("hide_body", "Hide body", Icon::Eye, "Show or hide the solid body")
+            .run(|s| AppAction::SetBodyVisible(!crate::tree_visibility::visible(s).body))
+            .when(|s| s.doc.display_body().is_some())
+            .label_now(|s| Some(if crate::tree_visibility::visible(s).body { "Hide body" } else { "Show body" }.into()))
+            .outside_sketch().app_only(LOOK),
+        cmd("show_all_bodies", "Show all bodies", Icon::Eye, "Show the part's solid body")
+            .run(|_| AppAction::SetBodyVisible(true))
+            .when(|s| s.doc.display_body().is_some())
+            .outside_sketch().app_only(LOOK),
+        cmd("show_dimensions", "Show all dimensions", Icon::SmartDim, "Select the body to show the dimensions that build it")
+            .run(|_| AppAction::Select(Some(Selection::Body)))
+            .when(|s| s.doc.display_body().is_some())
+            .outside_sketch().app_only(LOOK),
+        cmd("origin_axes", "Origin axes", Icon::Origin, "Show or hide the origin axes")
+            .run(|s| {
+                let mut display = s.viewport.references;
+                display.always_show_origin_axes = !display.always_show_origin_axes;
+                AppAction::SetReferenceDisplay(display)
+            }).lit(|s| s.viewport.references.always_show_origin_axes).app_only(LOOK),
+        cmd("origin_planes", "Origin planes", Icon::Plane, "Show or hide the origin planes")
+            .run(|s| {
+                let mut display = s.viewport.references;
+                display.show_origin_planes = !display.show_origin_planes;
+                AppAction::SetReferenceDisplay(display)
+            }).lit(|s| s.viewport.references.show_origin_planes).app_only(LOOK),
+        cmd("sketch_vertical", "Make vertical", Icon::Relation, "Select one line or two points")
+            .run(|s| AppAction::SketchRelationSet(menu_relation(s, "Vertical").expect("enabled with an applicable relation")))
+            .when(|s| menu_relation(s, "Vertical").is_some())
+            .hint(|s| menu_relation(s, "Vertical").is_none().then(|| "Select one line or two points; an existing relation is already applied".into()))
+            .app_only(SKETCHER),
+        cmd("sketch_horizontal", "Make horizontal", Icon::Relation, "Select one line or two points")
+            .run(|s| AppAction::SketchRelationSet(menu_relation(s, "Horizontal").expect("enabled with an applicable relation")))
+            .when(|s| menu_relation(s, "Horizontal").is_some())
+            .hint(|s| menu_relation(s, "Horizontal").is_none().then(|| "Select one line or two points; an existing relation is already applied".into()))
+            .app_only(SKETCHER),
+        cmd("sketch_fix", "Fix", Icon::Relation, "Select one point or entity other than the origin")
+            .run(|s| AppAction::SketchRelationSet(menu_relation(s, "Fix").expect("enabled with an applicable relation")))
+            .when(|s| menu_relation(s, "Fix").is_some())
+            .hint(|s| menu_relation(s, "Fix").is_none().then(|| "Select one point or entity other than the origin; an existing relation is already applied".into()))
+            .app_only(SKETCHER),
+        cmd("select_other", "Select other", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
+        cmd("select_tangent_chain", "Select tangent chain", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
+        cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
+        cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch(),
+        cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch(),
+        cmd("appearance", "Appearance", Icon::Display, COMING_SOON).in_menu().outside_sketch(),
+        cmd("material", "Material", Icon::Material, COMING_SOON).in_menu().outside_sketch(),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
             .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))

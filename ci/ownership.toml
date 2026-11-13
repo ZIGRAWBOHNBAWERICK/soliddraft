@@ -225,6 +225,13 @@ paths = ["crates/soliddraft-app/src/scene_import.rs"]
 module = ["scene_import"]
 
 [[areas]]
+name = "app.ring_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/ring_menu.rs"]
+module = ["ring_menu"]
+
+[[areas]]
 name = "app.settings"
 owner = "core"
 crate = "soliddraft-app"

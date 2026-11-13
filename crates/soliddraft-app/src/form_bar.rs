@@ -138,7 +138,7 @@ pub struct Response {
 }
 
 /// The field renderer returns true when a summary field asks to open its details sheet.
-pub fn show<K: Copy + Eq + Hash>(
+pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
     ui: &mut egui::Ui,
     state: &mut State,
     form: Form<'_, K>,

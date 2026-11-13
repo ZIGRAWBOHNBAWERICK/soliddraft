@@ -332,6 +332,8 @@ pub const MENU_HEIGHT: f32 = 30.0;
 pub const RIBBON_TABS_HEIGHT: f32 = 26.0;
 pub const RIBBON_BODY_HEIGHT: f32 = 92.0;
 pub const COMMAND_LINE_HEIGHT: f32 = 32.0;
+/// Keep room for the model and an optional pane in a narrow Edit Suite window.
+pub const COMPACT_WIDTH: f32 = 1100.0;
 pub const ROW_HEIGHT: f32 = 22.0;
 
 pub const FONT_REGULAR: &str = "Inter";

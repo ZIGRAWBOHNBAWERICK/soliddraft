@@ -133,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         Rect::from_center_size(pos2(rect.left() + 17.0, rect.center().y), vec2(18.0, 18.0)),
                         ink,
                     );
-                    // Keep the rightmost eight points free for the F14 proof badge.
+                    proof_badge(ui, state, id, rect);
                     let text = Rect::from_min_max(rect.min + vec2(32.0, 0.0), rect.max - vec2(12.0, 0.0));
                     let painter = ui.painter().with_clip_rect(text.intersect(ui.clip_rect()));
                     painter.text(
@@ -246,6 +246,58 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     for action in actions {
         state.push(action);
     }
+}
+
+fn proof_badge(ui: &mut egui::Ui, state: &AppState, id: FeatureId, chip: Rect) {
+    let Some(feature) = state.doc.feature(id) else { return };
+    let (label, reason) = if let Some(drag) = state.drag_preview.as_ref().filter(|drag| drag.feature() == id) {
+        let (reason, failed) = drag.label();
+        let label = if failed {
+            "Refused"
+        } else if drag.proved_request().is_some() && !drag.pending() {
+            "Proved"
+        } else {
+            "Pending"
+        };
+        (label, reason)
+    } else {
+        match &feature.status {
+            FeatureStatus::Ok => ("Proved", "The current feature is proved.".to_owned()),
+            FeatureStatus::Pending => {
+                ("Pending", "The current edit is waiting for proof. Export waits for proof.".to_owned())
+            }
+            FeatureStatus::Error(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            FeatureStatus::NeedsRepair(_) => {
+                ("Refused", "A reference is missing. Choose Repair to replace it.".to_owned())
+            }
+            FeatureStatus::Inactive => ("Inactive", "This feature is suppressed or past the rollback bar.".to_owned()),
+        }
+    };
+    let color = match label {
+        "Proved" => theme::ok(),
+        "Pending" => theme::warn(),
+        "Refused" => theme::error(),
+        _ => theme::muted(),
+    };
+    let centre = pos2(chip.right() - 7.0, chip.center().y);
+    if label == "Refused" {
+        for sign in [-1.0, 1.0] {
+            ui.painter().line_segment(
+                [centre + vec2(-3.0, -3.0 * sign), centre + vec2(3.0, 3.0 * sign)],
+                Stroke::new(1.5, color),
+            );
+        }
+    } else if label == "Proved" {
+        ui.painter().circle_filled(centre, 3.0, color);
+    } else {
+        ui.painter().circle_stroke(centre, 3.0, Stroke::new(1.5, color));
+    }
+    let response =
+        ui.interact(Rect::from_center_size(centre, vec2(12.0, 18.0)), ui.id().with(("proof", id)), Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} proof: {label}", feature.name))
+    });
+    response.on_hover_text(format!("{label}: {reason}"));
 }
 
 fn playhead(ui: &mut egui::Ui, state: &mut AppState, enabled: bool, actions: &mut Vec<AppAction>) {

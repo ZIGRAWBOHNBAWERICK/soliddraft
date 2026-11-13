@@ -1,17 +1,27 @@
-//! Native spline refusal preserves the rendered part in Edit Suite.
+//! Native spline display retains its bounded answer in Edit Suite.
 
 #[path = "support/ui.rs"]
 mod ribbon;
 
+use egui_kittest::kittest::Queryable;
 use serde_json::Value;
 use soliddraft_app::app_tools::AppTools;
 use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
 
 #[test]
-fn native_spline_fillet_refusal_keeps_the_visible_loft_in_edit_suite() {
-    let case = ribbon::case("native-spline-display-refusal");
-    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/loft-edge-fillet.json")).unwrap();
+fn native_scaled_spline_fillet_shows_its_numbered_refusal_and_work_in_edit_suite() {
+    check_display("scaled", include_str!("../../../ci/scenarios/loft-edge-fillet.json"), false);
+}
+
+#[test]
+fn native_small_warp_spline_fillet_shows_its_bounded_answer_in_edit_suite() {
+    check_display("small-warp", include_str!("../../../ci/scenarios/loft-edge-fillet-small-warp.json"), true);
+}
+
+fn check_display(name: &str, source: &str, bounded: bool) {
+    let case = ribbon::case(&format!("native-spline-display-{name}"));
+    let scenario: Value = serde_json::from_str(source).unwrap();
     let caller = Caller::Mcp { client: "native-spline-display-ui".into() };
     {
         let layout = "edit_suite";
@@ -41,18 +51,47 @@ fn native_spline_fillet_refusal_keeps_the_visible_loft_in_edit_suite() {
                 )
             });
             eprintln!("{layout:?}: {work:?}; {}", out.content);
-            assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
-            assert!(out.content.contains("SD-DISPLAY-01") && out.content.contains("20000000"), "{}", out.content);
-            for forbidden in ["kernel", "step op_", "mesh.spline", "numbers.operation"] {
-                assert!(!out.content.contains(forbidden), "{forbidden}: {}", out.content);
-            }
-            assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
-            assert_eq!(app.state().state.doc.undo_depth(), undo);
-            assert!(!app.state().state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
-            assert!(!app.state().state.doc.proof_state().answered_within_bound);
             app.run_steps(8);
-            assert!(!app.state().state.doc.meshes.is_empty(), "the accepted loft remains visible");
-            case.frame(app, &format!("{layout:?}-retained-loft"));
+            if bounded {
+                assert!(!out.is_error && !work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
+                assert_ne!(app.state().state.doc.model().to_bytes().unwrap(), before);
+                assert_eq!(app.state().state.doc.undo_depth(), undo + 1);
+                let doc = &app.state().state.doc;
+                assert_eq!(doc.features.last().unwrap().name, "Fillet1");
+                let proof = doc.proof_state();
+                assert!(proof.answered_within_bound && proof.display_only_bound);
+                assert!(!proof.current_proved_display());
+                let mesh = doc
+                    .kernel()
+                    .rendering(doc.display_body().unwrap(), &soliddraft_kernel_api::TessellationParams::default())
+                    .unwrap();
+                let bound = mesh.bounded.as_ref().unwrap();
+                assert!(mesh.unproved && bound.measured_mm <= 0.01);
+                assert!(!bound.method.is_empty() && !bound.definition.is_empty());
+                assert!(!app.state().state.doc.meshes.is_empty(), "the bounded fillet is visible");
+                assert_eq!(app.state().state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
+                assert!(app.query_all_by_label("Fillet1 proof: Answered within a stated bound").next().is_some());
+                assert!(app.query_all_by_label("Fillet1 proof: Proved").next().is_none());
+            } else {
+                assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
+                assert_eq!(work.used, 19_999_956);
+                assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
+                assert_eq!(app.state().state.doc.undo_depth(), undo);
+                assert!(!app.state().state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
+                assert!(!app.state().state.doc.proof_state().answered_within_bound);
+            }
+            if !bounded {
+                app.get_by_label("Status details").click();
+                app.run_steps(4);
+                let painted = ribbon::painted(app);
+                for expected in ["SD-DISPLAY-01", "19999956 work units", "20000000"] {
+                    assert!(
+                        painted.iter().any(|text| text.text.contains(expected)),
+                        "missing {expected} in status chip details"
+                    );
+                }
+            }
+            case.frame(app, &format!("{layout:?}-fillet"));
         });
     }
 }

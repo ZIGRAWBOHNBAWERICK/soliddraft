@@ -39,7 +39,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "7cde4119547109994eb685d6ff10187ce0b846fc";
+pub const CATALLAX_REVISION: &str = "45b0a37f483d0acf3b3525a4961d54a80a056efd";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -1437,6 +1437,27 @@ impl Kernel for CatallaxKernel {
                 })
                 .collect())
         })
+    }
+
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
+        let (used, exhausted) = if catallax_numbers::operation_budget_active() {
+            let before = catallax_numbers::current_operation_work().used;
+            run();
+            let after = catallax_numbers::current_operation_work();
+            (after.used.saturating_sub(before), after.exhausted)
+        } else if let Some(diagnostics) = &self.diagnostics {
+            let before = diagnostics.work_used();
+            run();
+            return Ok(before.zip(diagnostics.work_used()).map(|(before, after)| after.saturating_sub(before)));
+        } else {
+            let (_, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
+            (work.used, work.exhausted)
+        };
+        if exhausted {
+            Err(KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into()))
+        } else {
+            Ok(Some(used))
+        }
     }
 
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn ProofWork>> {

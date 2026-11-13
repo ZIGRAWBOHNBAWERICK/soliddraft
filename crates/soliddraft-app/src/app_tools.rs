@@ -405,12 +405,8 @@ impl AppTools<'_> {
         if !format.suits(&path) {
             return Err(format!("the path must end in .{} for {}", format.extension(), format.name()));
         }
-        let doc = &self.state.doc;
-        if doc.display_body().is_none() {
-            return Err("the part has no body to export".into());
-        }
         let out = self.state.export_part(format)?;
-        crate::platform::write_file(&path, &out.bytes)?;
+        out.write_with(&path, crate::platform::write_file)?;
         Ok(json!({ "exported": path, "report": out.report.summary() }))
     }
 
@@ -690,6 +686,9 @@ impl ToolHost for AppTools<'_> {
                 None => self.part().call(name, input, caller),
             },
         };
+        if out.is_error && out.content.contains("(SD-DISPLAY-") {
+            self.state.doc.record_display_refusal(out.content.clone());
+        }
         if opening_part && !out.is_error {
             self.state.assembly.active = false;
             self.state.drawing.active = false;

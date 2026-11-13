@@ -521,7 +521,8 @@ fn topology_view(
         let (display_area, display_center) = display_face(mesh.positions, triangles);
         let area = match super::numerical("face_area", |dec| catallax_measure::face_area(model, id, &accuracy, dec)) {
             Ok(area) => midpoint(&area.value),
-            Err(e) if display_only(&e) => display_area,
+            // Position-only cap cuts still have a measured rendering mesh, not exact area derivatives.
+            Err(e) if display_only(&e) || (!proven && e.code == "intersect.fillet-cut-derivative") => display_area,
             Err(e) => return Err(query("face_area", e)),
         };
         let measured = if proven {

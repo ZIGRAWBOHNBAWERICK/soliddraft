@@ -1214,7 +1214,7 @@ fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) ->
             add(ui)
         })
         .inner;
-    ui.add_space(8.0);
+    ui.add_space(6.0);
     inner
 }
 

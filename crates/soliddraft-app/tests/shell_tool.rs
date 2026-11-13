@@ -300,11 +300,11 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
     let solid = app.state().state.doc.display_body();
 
     button(&mut app, "Shell");
-    app.get_by_label_contains("More (").click();
-    app.run_steps(8);
+    button(&mut app, "0 faces");
     app.get_by_label("Open every face").click();
     app.run_steps(6);
     app.render().unwrap().save(out.join("every-face-chosen.png")).unwrap();
+    button(&mut app, "Every face");
     click_model(&mut app, glam::Vec3::new(12.0, 8.0, 12.0));
     let editor = app.state().state.editor.as_ref().unwrap();
     let EditorParams::Shell(shell) = &editor.params else { panic!("wrong editor") };
@@ -331,10 +331,10 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
 
     button(&mut app, "Shell1");
     button(&mut app, "Edit feature");
-    app.get_by_label_contains("More (").click();
-    app.run_steps(8);
+    button(&mut app, "Every face");
     app.get_by_label("Open every face").click();
     app.run_steps(6);
+    button(&mut app, "0 faces");
     button(&mut app, "OK");
     app.run_steps(30);
     let doc = &app.state().state.doc;

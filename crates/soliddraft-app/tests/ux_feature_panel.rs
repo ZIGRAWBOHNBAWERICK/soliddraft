@@ -250,7 +250,8 @@ fn a_long_pick_list_scrolls_and_keeps_the_radius_in_view() {
         settle(app);
         let held = app.state().state.editor.as_ref().unwrap().edges().len();
         assert_eq!(held, 7, "the two faces hold seven edges");
-        ribbon::open_options(app);
+        app.get_by_label(&format!("{held} edges")).click();
+        app.run_steps(8);
         let chips = app.query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.starts_with("Remove ")))).count();
         assert_eq!(chips, held, "every pick keeps its chip, in the list's own scroll box");
 
@@ -307,8 +308,11 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
         pointer_to_chrome(app);
         case.frame(app, "fillet-options");
 
-        ribbon::open_options(app);
+        app.get_by_label("1 edges").click();
+        app.run_steps(8);
         assert!(app.query_by_label_contains("Remove ").is_some(), "the picked edge can be removed");
+        app.get_by_label("1 edges").click();
+        app.run_steps(8);
         for gone in ["Setback parameters", "Fillet options"] {
             assert!(!shows(app, gone), "the form has no {gone} card");
         }

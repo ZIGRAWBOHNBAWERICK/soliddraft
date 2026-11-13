@@ -3823,6 +3823,13 @@ pub fn grade_text(grade: &soliddraft_kernel_api::Grade, unit: &str) -> String {
     }
 }
 
+fn plain_kernel_error(error: soliddraft_kernel_api::KernelError) -> String {
+    match error {
+        soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4025,12 +4032,5 @@ mod tests {
         assert_eq!(d.display_index(), Some(2));
         d.apply(Command::Rollback(None)).unwrap();
         built(&d);
-    }
-}
-
-fn plain_kernel_error(error: soliddraft_kernel_api::KernelError) -> String {
-    match error {
-        soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
-        other => other.to_string(),
     }
 }

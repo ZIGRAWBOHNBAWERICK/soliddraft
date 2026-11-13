@@ -716,9 +716,8 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
         Some(EditorParams::Lattice(_) | EditorParams::Gyroid(_)) => {
             (state.editor.as_ref().unwrap().title(), Icon::Cad("lattice"))
         }
-        Some(EditorParams::Offset(_) | EditorParams::Thicken(_)) => {
-            (state.editor.as_ref().unwrap().title(), Icon::Shell)
-        }
+        Some(EditorParams::Offset(_)) => (state.editor.as_ref().unwrap().title(), Icon::Cad("srf_offset")),
+        Some(EditorParams::Thicken(_)) => (state.editor.as_ref().unwrap().title(), Icon::Shell),
         Some(EditorParams::Shell(_)) => (state.editor.as_ref().unwrap().title(), Icon::Shell),
         Some(EditorParams::PickPlane) => ("Sketch".to_owned(), Icon::Sketch),
         Some(EditorParams::Repair { .. }) => ("Repair references".to_owned(), Icon::Repair),

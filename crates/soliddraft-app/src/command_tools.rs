@@ -3149,6 +3149,15 @@ pub fn board_bracket() -> Document {
     doc
 }
 
+fn pattern_source(doc: &Document, source: Option<&str>) -> Result<Option<soliddraft_model::FeatureId>, String> {
+    let Some(source) = source.filter(|name| !name.eq_ignore_ascii_case("body")) else { return Ok(None) };
+    let id = feature_by_name(doc, source)?;
+    if !doc.feature(id).is_some_and(|f| f.kind.to_model().can_pattern_feature()) {
+        return Err("Select a boss, cut, hole or local face feature to pattern".into());
+    }
+    Ok(Some(soliddraft_model::FeatureId(id as u32)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3566,13 +3575,4 @@ mod tests {
         );
         assert!(!out.is_error, "{}", out.content);
     }
-}
-
-fn pattern_source(doc: &Document, source: Option<&str>) -> Result<Option<soliddraft_model::FeatureId>, String> {
-    let Some(source) = source.filter(|name| !name.eq_ignore_ascii_case("body")) else { return Ok(None) };
-    let id = feature_by_name(doc, source)?;
-    if !doc.feature(id).is_some_and(|f| f.kind.to_model().can_pattern_feature()) {
-        return Err("Select a boss, cut, hole or local face feature to pattern".into());
-    }
-    Ok(Some(soliddraft_model::FeatureId(id as u32)))
 }

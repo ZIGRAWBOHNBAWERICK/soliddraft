@@ -1910,7 +1910,7 @@ fn registry() -> Vec<CommandSpec> {
                  0.1 mm⁵. Never computed from the preview or a mesh, and only when asked for.",
                 Vec::new,
             ),
-        cmd("offset", "Offset", Icon::Shell, "Grow or shrink the body by a signed distance")
+        cmd("offset", "Offset", Icon::Cad("srf_offset"), "Grow or shrink the body by a signed distance")
             .on(Solid, "Modify", Small).outside_sketch()
             .run(|_| AppAction::StartOffset)
             .when(|s| !s.in_sketch() && has_body(s) && field_open(s))
@@ -1924,7 +1924,7 @@ fn registry() -> Vec<CommandSpec> {
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Thicken(_))))
             .agents(Agents::Verb, "Choose faces, thickness and front or back side.", tools::thicken_params)
             .undo(Undo::Step),
-        cmd("edit_offset", "Edit offset", Icon::Shell, "Change an offset distance").outside_sketch()
+        cmd("edit_offset", "Edit offset", Icon::Cad("srf_offset"), "Change an offset distance").outside_sketch()
             .agents(Agents::Verb, "Everything after it rebuilds.", tools::edit_offset_params).undo(Undo::Step),
         cmd("edit_thicken", "Edit thicken", Icon::Shell, "Change thickness and side").outside_sketch()
             .agents(Agents::Verb, "Selected faces stay the same; everything after it rebuilds.", tools::edit_thicken_params).undo(Undo::Step),

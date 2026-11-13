@@ -316,6 +316,13 @@ paths = ["crates/soliddraft-app/src/timeline.rs"]
 module = ["timeline"]
 
 [[areas]]
+name = "app.form_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/form_bar.rs"]
+module = ["form_bar"]
+
+[[areas]]
 name = "app.tool_palette"
 owner = "core"
 crate = "soliddraft-app"
@@ -591,6 +598,20 @@ owner = "B7"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/interference/"]
 module = ["interference"]
+
+[[areas]]
+name = "kernel_catallax.distance"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/distance.rs", "crates/soliddraft-kernel-catallax/tests/distance.rs"]
+module = ["distance"]
+
+[[areas]]
+name = "kernel_catallax.feature_pattern"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/feature_pattern.rs", "crates/soliddraft-kernel-catallax/tests/feature_pattern.rs"]
+module = ["feature_pattern"]
 
 [[areas]]
 name = "app.canonical_parts"

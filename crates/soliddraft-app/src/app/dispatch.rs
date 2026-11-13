@@ -386,7 +386,21 @@ impl SolidDraftApp {
                         count: 3,
                     }
                 };
-                self.open_editor(None, EditorParams::Pattern(soliddraft_model::PatternFeature { layout }));
+                self.open_editor(
+                    None,
+                    EditorParams::Pattern(soliddraft_model::PatternFeature {
+                        layout,
+                        source: self.state.doc.selection.and_then(|selection| match selection {
+                            Selection::Feature(id) => self
+                                .state
+                                .doc
+                                .feature(id)
+                                .filter(|f| f.kind.to_model().can_pattern_feature())
+                                .map(|_| soliddraft_model::FeatureId(id as u32)),
+                            _ => None,
+                        }),
+                    }),
+                );
             }
             AppAction::StartReferencePlane => {
                 let source = match self.state.doc.selection {
@@ -444,6 +458,25 @@ impl SolidDraftApp {
             }
             AppAction::StartGyroid => {
                 self.open_editor(None, EditorParams::Gyroid(soliddraft_model::GyroidFeature::default()));
+                self.state.doc.selection = None;
+            }
+            AppAction::StartOffset => {
+                self.open_editor(None, EditorParams::Offset(soliddraft_model::OffsetFeature { distance: 1.0 }));
+                self.state.doc.selection = None;
+            }
+            AppAction::StartThicken => {
+                let faces = match self.state.doc.selection {
+                    Some(Selection::Face(face)) => self.state.doc.any_face_ref(face).into_iter().collect(),
+                    _ => Vec::new(),
+                };
+                self.open_editor(
+                    None,
+                    EditorParams::Thicken(soliddraft_model::ThickenFeature {
+                        faces,
+                        thickness: 2.0,
+                        side: soliddraft_kernel_api::ThickenSide::Front,
+                    }),
+                );
                 self.state.doc.selection = None;
             }
             AppAction::StartShell => {
@@ -506,6 +539,8 @@ impl SolidDraftApp {
                     FeatureKind::ReferencePlane(p) => EditorParams::ReferencePlane(p.clone()),
                     FeatureKind::Mirror(m) => EditorParams::Mirror(m.clone()),
                     FeatureKind::Shell(s) => EditorParams::Shell(s.clone()),
+                    FeatureKind::Offset(s) => EditorParams::Offset(s.clone()),
+                    FeatureKind::Thicken(s) => EditorParams::Thicken(s.clone()),
                     FeatureKind::Draft(d) => EditorParams::Draft(DraftParams {
                         faces: d.faces.clone(),
                         neutral: d.neutral.clone(),
@@ -593,6 +628,14 @@ impl SolidDraftApp {
                     (target, EditorParams::Gyroid(g)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Gyroid(g) },
                         None => Command::AddFeature(FeatureKind::Gyroid(g)),
+                    },
+                    (target, EditorParams::Offset(s)) => match target {
+                        Some(id) => Command::EditFeature { id, kind: FeatureKind::Offset(s) },
+                        None => Command::AddFeature(FeatureKind::Offset(s)),
+                    },
+                    (target, EditorParams::Thicken(s)) => match target {
+                        Some(id) => Command::EditFeature { id, kind: FeatureKind::Thicken(s) },
+                        None => Command::AddFeature(FeatureKind::Thicken(s)),
                     },
                     (target, EditorParams::Shell(s)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Shell(s) },
@@ -753,6 +796,16 @@ impl SolidDraftApp {
                             match self.state.doc.face_ref(f) {
                                 Some(face) => m.plane = soliddraft_model::PlaneRef::Face { face },
                                 None => e.error = Some("Mirror in a planar face or a reference plane".into()),
+                            }
+                            return;
+                        }
+                        (EditorParams::Thicken(s), Some(Selection::Face(f))) => {
+                            if let Some(reference) = self.state.doc.any_face_ref(f) {
+                                if let Some(i) = s.faces.iter().position(|face| face == &reference) {
+                                    s.faces.remove(i);
+                                } else {
+                                    s.faces.push(reference);
+                                }
                             }
                             return;
                         }
@@ -1055,7 +1108,7 @@ impl SolidDraftApp {
                     }
                 }
             }
-            AppAction::SetView(v) => self.state.viewport.camera.set_view(v),
+            AppAction::SetView(v) => self.state.active_viewport_mut().camera.set_view(v),
             AppAction::NormalTo => {
                 let normal = match (&self.state.sketch, self.state.doc.selection) {
                     (Some(s), _) => Some(s.plane.normal),
@@ -1075,9 +1128,9 @@ impl SolidDraftApp {
                 let bounds = self.fit_bounds();
                 self.state.viewport.camera.fit(bounds);
             }
-            AppAction::SetDisplay(d) => self.state.viewport.display = d,
+            AppAction::SetDisplay(d) => self.state.active_viewport_mut().display = d,
             AppAction::SetPreset(p) => {
-                let viewport = &mut self.state.viewport;
+                let viewport = self.state.active_viewport_mut();
                 // Realistic leaves edges off; switching to or from it moves the shaded
                 // modes along, and a wireframe stays a wireframe.
                 if p.shows_edges() != viewport.preset.shows_edges() && viewport.display != DisplayMode::Wireframe {
@@ -1111,6 +1164,9 @@ impl SolidDraftApp {
             AppAction::SetScene(scene) => {
                 if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
                     self.state.viewport.scene = Some(scene);
+                    if let Some(session) = self.state.assembly.session.as_mut() {
+                        session.viewport.scene = Some(scene);
+                    }
                     if let Err(e) = crate::settings::save_scene(scene) {
                         self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                     }
@@ -1123,7 +1179,8 @@ impl SolidDraftApp {
                 }
             }
             AppAction::ToggleProjection => {
-                self.state.viewport.camera.orthographic = !self.state.viewport.camera.orthographic
+                let camera = &mut self.state.active_viewport_mut().camera;
+                camera.orthographic = !camera.orthographic;
             }
             AppAction::PreviewProposal(id) => {
                 self.close_editor();
@@ -1379,6 +1436,8 @@ impl SolidDraftApp {
                 }
                 self.tree_dock = tree_dock();
                 self.state.layout = Layout::default();
+                self.state.assembly.tree_hidden = false;
+                self.state.drawing.tree_hidden = false;
                 self.state.command_line.settings.session_height = crate::command_line::SESSION_DEFAULT_HEIGHT;
                 // Forget the sizes egui kept, so the defaults apply again.
                 ctx.data_mut(|d| {
@@ -1388,7 +1447,10 @@ impl SolidDraftApp {
                     d.remove::<egui::PanelState>(crate::command_line::session_id());
                 });
             }
-            AppAction::TogglePanel(side) => self.state.layout.toggle(side),
+            AppAction::TogglePanel(_side) => {
+                let shown = self.state.tree_shown();
+                self.state.show_tree(!shown);
+            }
             AppAction::ShowFileLocations(kind) => {
                 self.state.locations_dialog = Some(crate::locations::LocationsDialog::new(kind));
             }

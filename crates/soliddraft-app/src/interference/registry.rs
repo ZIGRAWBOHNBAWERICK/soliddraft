@@ -52,6 +52,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         )
         .on(Tab::Assembly, "Component", Size::Large)
         .shown(|s| !s.in_sketch())
+        .on(Tab::AssemblyInspect, "Check", Size::Large)
         .run(|_| AppAction::Assembly(AssemblyAction::Interference(InterferenceAction::Toggle)))
         .lit(|s| s.assembly.interference.open)
         .app_only("It opens the Interference panel; the assembly_check tools run the same checks without it"),

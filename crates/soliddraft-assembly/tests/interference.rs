@@ -87,7 +87,7 @@ fn new_cubes(path: &Path) {
     new_block(path, 1.0, 1.0, 1.0);
     let mut doc = Document::open(path, kernel()).unwrap();
     let layout = PatternSpec::Linear { direction: Vec3::X, spacing: 20.0, count: 100 };
-    let kind = FeatureKind::Pattern(PatternFeature { layout });
+    let kind = FeatureKind::Pattern(PatternFeature { layout, source: None });
     doc.execute(Command::AddFeature { kind, name: None, position: None, via_assistant: false }).unwrap();
     doc.save(path).unwrap();
 }

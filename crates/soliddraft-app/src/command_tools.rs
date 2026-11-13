@@ -384,8 +384,10 @@ pub enum Line {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         countersink: Option<Countersink>,
     },
-    /// Copies the part's body along a direction.
+    /// Repeats a feature or copies the body along a direction.
     LinearPattern {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         /// Direction, [x, y, z].
         direction: Point,
         /// Distance between copies, mm.
@@ -393,8 +395,10 @@ pub enum Line {
         /// Copies, including the original.
         count: u32,
     },
-    /// Copies the part's body around an axis.
+    /// Repeats a feature or copies the body around an axis.
     CircularPattern {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         /// A point on the axis.
         axis_origin: Point,
         /// The axis direction.
@@ -442,6 +446,14 @@ pub enum Line {
     /// Grades a terminal field linearly along one part axis: a lattice's beam radius or a
     /// gyroid's level is `start` at part coordinate `from` and `end` at `to`.
     GradeField { feature: String, axis: soliddraft_kernel_api::GradeAxis, from: f64, to: f64, start: f64, end: f64 },
+    /// Offsets every face by a signed distance.
+    Offset { distance: f64 },
+    /// Builds a solid from selected faces.
+    Thicken { faces: Vec<String>, thickness: f64, side: soliddraft_kernel_api::ThickenSide },
+    /// Changes an offset distance.
+    EditOffset { feature: String, distance: f64 },
+    /// Changes thickness and side, retaining selected faces.
+    EditThicken { feature: String, thickness: f64, side: soliddraft_kernel_api::ThickenSide },
     /// Hollows the part, leaving named faces open.
     Shell {
         /// Faces left open; empty requests a closed shell.
@@ -526,6 +538,8 @@ pub enum Line {
     },
     /// Changes a pattern's copies and spacing or angle.
     EditPattern {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         /// The feature's name.
         feature: String,
         /// Copies, including the original.
@@ -839,6 +853,7 @@ fn countersink_param() -> Value {
 /// The `linear_pattern` verb's parameters.
 pub fn linear_pattern_params() -> Vec<(&'static str, Value)> {
     vec![
+        ("source", optional(string("Feature name to repeat; omit or use body to copy the whole body"))),
         ("direction", array(number("component"), "Direction [x, y, z]")),
         ("spacing", number("Distance between copies, mm, greater than 0")),
         ("count", number("Copies including the original, at least 2")),
@@ -848,6 +863,7 @@ pub fn linear_pattern_params() -> Vec<(&'static str, Value)> {
 /// The `circular_pattern` verb's parameters.
 pub fn circular_pattern_params() -> Vec<(&'static str, Value)> {
     vec![
+        ("source", optional(string("Feature name to repeat; omit or use body to copy the whole body"))),
         ("axis_origin", point("A point on the axis")),
         ("axis_direction", array(number("component"), "Axis direction [x, y, z]")),
         ("count", number("Copies including the original, at least 2")),
@@ -930,6 +946,28 @@ pub fn edit_gyroid_params() -> Vec<(&'static str, Value)> {
     params
 }
 
+pub fn offset_params() -> Vec<(&'static str, Value)> {
+    vec![("distance", number("Signed offset in mm, nonzero; positive grows, negative shrinks"))]
+}
+pub fn edit_offset_params() -> Vec<(&'static str, Value)> {
+    let mut params = vec![feature_param()];
+    params.extend(offset_params());
+    params
+}
+pub fn thicken_params() -> Vec<(&'static str, Value)> {
+    vec![
+        // The model refuses empty selections so the command journal records the refusal.
+        ("faces", array(string("Face name"), "Select at least one face")),
+        ("thickness", number("Thickness in mm, greater than zero")),
+        ("side", string("front or back")),
+    ]
+}
+pub fn edit_thicken_params() -> Vec<(&'static str, Value)> {
+    let mut params = vec![feature_param()];
+    params.extend(thicken_params().into_iter().filter(|(key, _)| *key != "faces"));
+    params
+}
+
 /// The `shell` verb's parameters.
 pub fn shell_params() -> Vec<(&'static str, Value)> {
     vec![
@@ -970,6 +1008,7 @@ pub fn edit_hole_params() -> Vec<(&'static str, Value)> {
 /// The `edit_pattern` verb's parameters.
 pub fn edit_pattern_params() -> Vec<(&'static str, Value)> {
     vec![
+        ("source", optional(string("Feature name to repeat; body copies the whole body; omit to retain"))),
         feature_param(),
         ("count", number("Copies including the original, at least 2")),
         ("step", number("Spacing in mm for a linear pattern, angle in degrees for a circular one")),
@@ -1642,22 +1681,34 @@ impl Line {
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Hole(hole)))?;
             }
-            Line::LinearPattern { direction, spacing, count } => {
+            Line::LinearPattern { direction, spacing, count, source } => {
                 let layout = PatternSpec::Linear {
                     direction: vec3_of(*direction, "direction")?,
                     spacing: positive("spacing", *spacing)?,
                     count: *count,
                 };
-                run.apply(doc, Command::AddFeature(FeatureKind::Pattern(soliddraft_model::PatternFeature { layout })))?;
+                run.apply(
+                    doc,
+                    Command::AddFeature(FeatureKind::Pattern(soliddraft_model::PatternFeature {
+                        layout,
+                        source: pattern_source(doc, source.as_deref())?,
+                    })),
+                )?;
             }
-            Line::CircularPattern { axis_origin, axis_direction, count, angle } => {
+            Line::CircularPattern { axis_origin, axis_direction, count, angle, source } => {
                 let layout = PatternSpec::Circular {
                     axis_origin: soliddraft_kernel_api::Vec3::new(axis_origin[0], axis_origin[1], axis_origin[2]),
                     axis_direction: vec3_of(*axis_direction, "axis direction")?,
                     count: *count,
                     angle: *angle,
                 };
-                run.apply(doc, Command::AddFeature(FeatureKind::Pattern(soliddraft_model::PatternFeature { layout })))?;
+                run.apply(
+                    doc,
+                    Command::AddFeature(FeatureKind::Pattern(soliddraft_model::PatternFeature {
+                        layout,
+                        source: pattern_source(doc, source.as_deref())?,
+                    })),
+                )?;
             }
             Line::Mirror { plane, keep_original } => {
                 let mirror =
@@ -1745,6 +1796,45 @@ impl Line {
                 };
                 run.apply(doc, Command::EditFeature { id, kind })?;
             }
+            Line::Offset { distance } => {
+                run.apply(
+                    doc,
+                    Command::AddFeature(FeatureKind::Offset(soliddraft_model::OffsetFeature { distance: *distance })),
+                )?;
+            }
+            Line::Thicken { faces, thickness, side } => {
+                let faces = faces.iter().map(|name| face_ref_by_name(doc, name)).collect::<Result<Vec<_>, _>>()?;
+                run.apply(
+                    doc,
+                    Command::AddFeature(FeatureKind::Thicken(soliddraft_model::ThickenFeature {
+                        faces,
+                        thickness: *thickness,
+                        side: *side,
+                    })),
+                )?;
+            }
+            Line::EditOffset { feature, distance } => {
+                let id = feature_by_name(doc, feature)?;
+                if !matches!(doc.feature(id).map(|f| &f.kind), Some(FeatureKind::Offset(_))) {
+                    return Err(format!("{feature} is not an offset"));
+                }
+                run.apply(
+                    doc,
+                    Command::EditFeature {
+                        id,
+                        kind: FeatureKind::Offset(soliddraft_model::OffsetFeature { distance: *distance }),
+                    },
+                )?;
+            }
+            Line::EditThicken { feature, thickness, side } => {
+                let id = feature_by_name(doc, feature)?;
+                let Some(FeatureKind::Thicken(mut s)) = doc.feature(id).map(|f| f.kind.clone()) else {
+                    return Err(format!("{feature} is not a thicken feature"));
+                };
+                s.thickness = *thickness;
+                s.side = *side;
+                run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Thicken(s) })?;
+            }
             Line::Shell { open_faces, all_faces, thickness } => {
                 if *all_faces && !open_faces.is_empty() {
                     return Err("name faces in open_faces or set all_faces, not both".into());
@@ -1815,11 +1905,14 @@ impl Line {
                 }
                 run.apply(doc, Command::EditFeature { id, kind: FeatureKind::Hole(h) })?;
             }
-            Line::EditPattern { feature, count, step } => {
+            Line::EditPattern { feature, count, step, source } => {
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Pattern(mut p)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a pattern"));
                 };
+                if source.is_some() {
+                    p.source = pattern_source(doc, source.as_deref())?;
+                }
                 match &mut p.layout {
                     PatternSpec::Linear { spacing, count: c, .. } => {
                         *spacing = positive("spacing", *step)?;
@@ -1905,6 +1998,8 @@ impl Line {
                 | Line::Mirror { .. }
                 | Line::Draft { .. }
                 | Line::Shell { .. }
+                | Line::Offset { .. }
+                | Line::Thicken { .. }
         )
     }
 
@@ -1946,6 +2041,10 @@ impl Line {
             Line::EditGyroid { .. } => "edit_gyroid",
             Line::GradeField { .. } => "grade_field",
             Line::Shell { .. } => "shell",
+            Line::Offset { .. } => "offset",
+            Line::Thicken { .. } => "thicken",
+            Line::EditOffset { .. } => "edit_offset",
+            Line::EditThicken { .. } => "edit_thicken",
             Line::EditShell { .. } => "edit_shell",
             Line::EditHole { .. } => "edit_hole",
             Line::EditPattern { .. } => "edit_pattern",
@@ -1958,6 +2057,8 @@ impl Line {
 
     /// The line as people read it, for the card and the command log.
     pub fn describe(&self) -> (String, String) {
+        let source_prefix =
+            |source: &Option<String>| source.as_ref().map_or_else(String::new, |name| format!("{name}, "));
         let pt = |p: &Point| format!("({}, {}, {})", fmt_mm(p[0]), fmt_mm(p[1]), fmt_mm(p[2]));
         let end = |through: bool, depth: f64, flip: bool| {
             let mut s = if through { "through all".to_owned() } else { format!("{} mm", fmt_mm(depth)) };
@@ -2048,12 +2149,14 @@ impl Line {
                 };
                 ("Hole".into(), format!("{} × Ø{} {depth}{head} on {face}", points.len(), fmt_mm(*diameter)))
             }
-            Line::LinearPattern { direction, spacing, count } => {
-                ("Linear pattern".into(), format!("{count} × {} mm along {}", fmt_mm(*spacing), pt(direction)))
-            }
-            Line::CircularPattern { axis_direction, count, angle, .. } => {
-                ("Circular pattern".into(), format!("{count} × {}° about {}", fmt_mm(*angle), pt(axis_direction)))
-            }
+            Line::LinearPattern { direction, spacing, count, source } => (
+                "Linear pattern".into(),
+                format!("{}{count} × {} mm along {}", source_prefix(source), fmt_mm(*spacing), pt(direction)),
+            ),
+            Line::CircularPattern { axis_direction, count, angle, source, .. } => (
+                "Circular pattern".into(),
+                format!("{}{count} × {}° about {}", source_prefix(source), fmt_mm(*angle), pt(axis_direction)),
+            ),
             Line::Mirror { plane, keep_original } => {
                 ("Mirror".into(), format!("in {plane}{}", if *keep_original { ", keeping the original" } else { "" }))
             }
@@ -2067,6 +2170,19 @@ impl Line {
             Line::EditGyroid { feature, .. } => (format!("Edit {feature}"), "Change gyroid settings".into()),
             Line::GradeField { feature, axis, from, to, start, end } => {
                 (format!("Grade {feature}"), format!("{start} to {end} along {} from {from} to {to} mm", axis.name()))
+            }
+            Line::Offset { distance } => ("Offset".into(), format!("{distance} mm")),
+            Line::Thicken { faces, thickness, side } => (
+                "Thicken".into(),
+                format!(
+                    "{} {}, {thickness} mm, {side:?}",
+                    faces.len(),
+                    if faces.len() == 1 { "face" } else { "faces" }
+                ),
+            ),
+            Line::EditOffset { feature, distance } => ("Edit offset".into(), format!("{feature}, {distance} mm")),
+            Line::EditThicken { feature, thickness, side } => {
+                ("Edit thicken".into(), format!("{feature}, {thickness} mm, {side:?}"))
             }
             Line::Shell { open_faces, all_faces, thickness } => (
                 "Shell".into(),
@@ -2100,8 +2216,8 @@ impl Line {
                     ))
                 ),
             ),
-            Line::EditPattern { feature, count, step } => {
-                (format!("Edit {feature}"), format!("{count} × {}", fmt_mm(*step)))
+            Line::EditPattern { feature, count, step, source } => {
+                (format!("Edit {feature}"), format!("{}{count} × {}", source_prefix(source), fmt_mm(*step)))
             }
             Line::EditMirror { feature, keep_original } => {
                 (format!("Edit {feature}"), if *keep_original { "keep the original" } else { "reflection only" }.into())
@@ -2746,15 +2862,19 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
         }
         FeatureKind::Pattern(p) => match p.layout {
             PatternSpec::Linear { direction, spacing, count } => json!({
-                "type": "linear_pattern", "direction": kvec(direction), "spacing": spacing, "count": count,
+                "type": "linear_pattern", "direction": kvec(direction), "spacing": spacing, "count": count, "source":p.source.map(|id| name(id.0 as _)),
             }),
             PatternSpec::Circular { axis_origin, axis_direction, count, angle } => json!({
                 "type": "circular_pattern", "axis_origin": kvec(axis_origin), "axis_direction": kvec(axis_direction),
-                "count": count, "angle": angle,
+                "count": count, "angle": angle, "source":p.source.map(|id| name(id.0 as _)),
             }),
         },
         FeatureKind::Mirror(m) => {
             json!({ "type": "mirror", "plane": match &m.plane { PlaneRef::Feature { feature } => name(feature.0 as _), _ => plane_ref_label(&m.plane) }, "keep_original": m.keep_original })
+        }
+        FeatureKind::Offset(s) => json!({ "type":"offset", "distance":s.distance }),
+        FeatureKind::Thicken(s) => {
+            json!({ "type":"thicken", "faces":s.faces.iter().map(|f| &f.label).collect::<Vec<_>>(), "thickness":s.thickness, "side":s.side })
         }
         FeatureKind::Shell(s) => json!({
             "type": "shell", "open_faces": s.open_faces.picked().iter().map(|f| f.label.clone()).collect::<Vec<_>>(),
@@ -3178,6 +3298,15 @@ pub fn board_bracket() -> Document {
     }
     doc.selection = None;
     doc
+}
+
+fn pattern_source(doc: &Document, source: Option<&str>) -> Result<Option<soliddraft_model::FeatureId>, String> {
+    let Some(source) = source.filter(|name| !name.eq_ignore_ascii_case("body")) else { return Ok(None) };
+    let id = feature_by_name(doc, source)?;
+    if !doc.feature(id).is_some_and(|f| f.kind.to_model().can_pattern_feature()) {
+        return Err("Select a boss, cut, hole or local face feature to pattern".into());
+    }
+    Ok(Some(soliddraft_model::FeatureId(id as u32)))
 }
 
 #[cfg(test)]

@@ -90,7 +90,7 @@ fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut sketch = Sketch::new();
     let mut ids = Vec::new();
-    for (x, radius, y) in [(-12.0, 5.0, -9.0), (12.0, 7.0, -11.0)] {
+    for (x, radius, y) in [(-12.0, 5.0, -15.0), (12.0, 7.0, -17.0)] {
         let entity = sketch.add(EntityKind::Circle { center: P2::new(x, 0.0), radius }, false);
         ids.push(sketch.constrain(ConstraintKind::Radius {
             entity,

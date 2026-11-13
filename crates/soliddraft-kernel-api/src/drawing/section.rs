@@ -369,6 +369,7 @@ fn clip_mesh(mesh: &crate::Mesh, past: &dyn Fn(Vec3) -> f64, eps: f64) -> (crate
         triangle_faces: Vec::new(),
         unavailable_controls: mesh.unavailable_controls.clone(),
         unproved: mesh.unproved,
+        bounded: mesh.bounded.clone(),
     };
     let mut cut_vertex: HashMap<(u32, u32), u32> = HashMap::new();
     let mut crossings = Vec::new();

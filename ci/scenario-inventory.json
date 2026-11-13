@@ -1088,9 +1088,9 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Two-profile ruled square prism edited into a taller two-profile Smooth square prism, with ordered closed sketch regions. Coplanar profiles refuse without changing the part.",
+      "supported_limits": "Two-profile ruled and Smooth prisms, plus a bulged three-profile Smooth loft with square widths 2, 4 and 2 at z=0, 3 and 6. Certified display, fresh-process reopen and checked STEP export stay within the unchanged 20M request allowance. Coplanar profiles refuse without changing the part.",
       "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export; live viewport PNG and kernel view records for every solid state."
     },
     {
@@ -1555,9 +1555,9 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Canonical 60 x 40 x 5 plate, flush 60 x 5 x 25 flange, radius-8 boss and radius-4 bore, four radius-2 bolt holes, eight radius-3 slot cuts and bridge. Boss radius edits to 9. Cold CLI rebuild and export exhaust the whole-request 20M allowance with numbers.operation-budget; live-application exports succeed.",
+      "supported_limits": "Canonical 60 x 40 x 5 plate, flush 60 x 5 x 25 flange, radius-8 boss and radius-4 bore, four radius-2 bolt holes, eight radius-3 slot cuts and bridge. Boss radius edits to 9. Cold CLI rebuild and proven STEP or closed STL export succeed within the unchanged whole-request 20M allowance. Lowered 10M probes require numbers.operation-budget and preserve existing destinations; live-application exports remain checked.",
       "evidence": "Build, parameter edit, undo, redo, fresh reopen, proven STEP and closed STL exports. canonical_parts also resolves stored face and edge references and renders each checkpoint in Edit Suite."
     },
     {
@@ -1615,6 +1615,34 @@
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "Canonical radius-22 flange and radius-12 housing with radius-8 bore, four diameter-4 holes with diameter-8 90-degree countersinks. B-rep junction radius 2 edited to 2.5. This does not claim field support at radius 2 or freeform Boolean support. STL may refuse mesh.precision-or-budget on fitted patches; the application test records that refusal and checks destination preservation. The lattice attempt refuses at source bounding-box measurement with measure.unsupported-surface before field compilation.",
       "evidence": "Build, parameter edit, undo, redo, fresh reopen and proven STEP. STL is either closed or has a recorded mesh.precision-or-budget refusal with the destination and accepted part preserved. Stored references and Edit Suite frames are checked by canonical_parts."
+    },
+    {
+      "id": "loft-edge-fillet",
+      "file": "ci/scenarios/loft-edge-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
+      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and typed measured-display refusal -> unchanged retained loft -> history, reopen and certified STEP",
+      "supported_limits": "Scaled 0.2 mm ruled loft and radius 0.01 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
+      "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
+    },
+    {
+      "id": "loft-edge-fillet-small-warp",
+      "file": "ci/scenarios/loft-edge-fillet-small-warp.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
+      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and typed measured-display refusal -> unchanged retained loft -> history, reopen and certified STEP",
+      "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
+      "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
     }
   ],
   "native_ui_scenarios": [

@@ -260,6 +260,20 @@ impl Kernel for Counting {
         self.inner.tessellate_edges(body, params)
     }
 
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.note(Work::Mesh(body));
+        self.inner.rendering(body, params)
+    }
+
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.note(Work::Mesh(body));
+        self.inner.rendering_edges(body, params)
+    }
+
+    fn display_bound(&self, body: BodyId) -> KernelResult<Option<crate::DisplayBound>> {
+        self.inner.display_bound(body)
+    }
+
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
         self.inner.preview(body, params)

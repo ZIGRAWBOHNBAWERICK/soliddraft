@@ -39,6 +39,13 @@ pub(super) fn resolved_view(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -
 }
 
 pub(super) fn view_curves(k: &CatallaxKernel, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
+    if spec.preview && spec.tolerance <= 0.0 && k.solid(body).is_ok_and(|solid| solid.has_splines()) {
+        let spec =
+            ViewSpec { tolerance: catallax_mesh::MeshOptions::default().chord_tolerance.to_f64_nearest(), ..*spec };
+        // Automatic screen line work shares the named mesh and stays unproved.
+        // Exact curve promotion and exported views keep their independent certified path.
+        return mesh_hlr::rendering_view_curves(k, body, &spec);
+    }
     let spec = &resolved_view(k, body, spec);
     let mut view = mesh_hlr::view_curves(k, body, spec)?;
     let mut counts = BTreeMap::new();

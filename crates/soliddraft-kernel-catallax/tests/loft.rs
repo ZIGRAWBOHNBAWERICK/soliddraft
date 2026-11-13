@@ -73,6 +73,19 @@ fn incompatible_holes_report_the_typed_refusal_in_plain_words() {
     }
 }
 
+fn log_display_work(k: &CatallaxKernel, request: &str) {
+    let evidence = k.take_diagnostics().unwrap();
+    for call in evidence["calls"].as_array().unwrap() {
+        for operation in call["operation_log"]["operations"].as_array().unwrap() {
+            let stage = serde_json::json!({
+                "request": request, "call": call["operation"], "operation": operation["operation"],
+                "work": operation["work"], "status": operation["status"], "refusal": operation["refusal"],
+            });
+            eprintln!("three-section Smooth stage: {}", serde_json::to_string(&stage).unwrap());
+        }
+    }
+}
+
 #[test]
 fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plainly() {
     let k = CatallaxKernel::with_diagnostics(20_000_000);
@@ -131,6 +144,88 @@ fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plain
     );
     assert_eq!(before, k.body_recipe(rounded.body).unwrap());
     for body in [a, b, loft.body, rounded.body] {
+        k.release(body).unwrap();
+    }
+}
+
+#[test]
+fn three_section_smooth_display_fits_the_application_allowance() {
+    use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+
+    assert_eq!(APP_REQUEST_WORK, 20_000_000);
+    let k = CatallaxKernel::with_operation_log();
+    let profiles: Vec<_> = [(2.0, 0.0), (4.0, 3.0), (2.0, 6.0)]
+        .into_iter()
+        .map(|(size, z)| {
+            let plane = Plane { origin: Vec3::new(0.0, 0.0, z), ..Plane::XY };
+            k.create_body_from_profile(
+                &OpTag::new("section"),
+                &Profile::rectangle(plane, Point2::new(0.0, 0.0), size, size),
+            )
+            .unwrap()
+            .body
+        })
+        .collect();
+    let params = TessellationParams { chord_height: 0.01, ..Default::default() };
+    let (answer, work) = with_request_allowance(APP_REQUEST_WORK, || -> KernelResult<_> {
+        let body = k.loft(&OpTag::new("smooth"), &profiles, LoftShape::Smooth)?;
+        let mesh = k.rendering(body.body, &params)?;
+        Ok((body, mesh))
+    });
+    eprintln!("three-section Smooth display: {work:?}; refusal: {:?}", answer.as_ref().err());
+    log_display_work(&k, "build-and-display");
+    assert!(!work.exhausted, "{work:?}; {:?}", answer.as_ref().err());
+    let (body, mesh) = answer.unwrap();
+    if let Some(bound) = &mesh.bounded {
+        assert!(mesh.unproved);
+        bound.validate().unwrap();
+        assert_eq!(bound.kind, "spline display mesh");
+        assert_eq!(bound.level_mm, 0.01);
+        assert!(!bound.method.is_empty() && !bound.definition.is_empty());
+    } else {
+        assert!(!mesh.unproved);
+    }
+    assert!(!mesh.indices.is_empty());
+    assert_eq!(mesh.triangle_faces.len(), mesh.triangle_count());
+    let (certified, certificate_work) = with_request_allowance(0, || k.tessellate(body.body, &params));
+    assert!(
+        certified.is_err() && certificate_work.exhausted,
+        "rendering cannot satisfy an independent certified request with different controls"
+    );
+    let faces = k.topology(body.body).unwrap().faces;
+    assert_eq!(faces.len(), 6);
+    assert!(mesh.triangle_faces.iter().all(|id| faces.iter().any(|face| face.id == *id)));
+    let screen = soliddraft_kernel_api::drawing::ViewSpec {
+        preview: true,
+        ..soliddraft_kernel_api::drawing::ViewSpec::standard(soliddraft_kernel_api::drawing::StandardView::Isometric)
+    };
+    let (view, work) = with_request_allowance(0, || k.view_curves(body.body, &screen));
+    let view = view.unwrap();
+    eprintln!("named screen view: {work:?}; curves={}; unproved={}", view.curves.len(), view.unproved);
+    assert!(!work.exhausted && view.unproved && !view.curves.is_empty());
+    for spec in [
+        soliddraft_kernel_api::drawing::ViewSpec { tolerance: 0.005, ..screen },
+        soliddraft_kernel_api::drawing::ViewSpec { preview: false, ..screen },
+    ] {
+        let (view, work) = with_request_allowance(0, || k.view_curves(body.body, &spec));
+        assert!(view.is_err() && work.exhausted, "named screen geometry cannot satisfy independent view controls");
+    }
+    // Background mass has its own application request allowance.
+    let (mass, mass_work) = with_request_allowance(APP_REQUEST_WORK, || k.mass_properties(body.body));
+    eprintln!("three-section Smooth mass: {mass_work:?}; refusal: {:?}", mass.as_ref().err());
+    assert!(!mass_work.exhausted, "{mass_work:?}; {:?}", mass.as_ref().err());
+    let mass = mass.unwrap();
+    assert!((mass.volume - 4596.0 / 70.0).abs() < 1e-7);
+    assert!(mass.centroid.distance(Vec3::new(0.0, 0.0, 3.0)) < 1e-9);
+    let valid = k.validate(body.body).unwrap();
+    assert!(valid.valid && valid.manifold_solid, "{valid:?}");
+    eprintln!(
+        "display: {} positions, {} triangles; volume {} mm3",
+        mesh.positions.len(),
+        mesh.triangle_count(),
+        mass.volume
+    );
+    for body in profiles.into_iter().chain([body.body]) {
         k.release(body).unwrap();
     }
 }

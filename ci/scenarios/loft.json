@@ -164,6 +164,132 @@
       "same_geometry_as_step": 5,
       "checked_step_export": "{bundle}/loft.dwprt",
       "checked_step_max_work": 20000000
+    },
+    {
+      "tool": "new_part",
+      "arguments": {}
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 0,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 2,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 3,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              3
+            ],
+            "width": 4,
+            "height": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 6,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              6
+            ],
+            "width": 2,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "loft",
+      "arguments": {
+        "profiles": [
+          "Sketch1",
+          "Sketch2",
+          "Sketch3"
+        ],
+        "shape": "smooth"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 65.65714285714286,
+          "tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "tool": "edit_loft",
+      "arguments": {
+        "feature": "Loft1",
+        "profiles": [
+          "Sketch1",
+          "Sketch1"
+        ],
+        "shape": "ruled"
+      },
+      "refused": "Loft profiles must enclose a solid. Move them onto different planes",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 65.65714285714286,
+          "tolerance": 1e-05
+        }
+      ],
+      "same_geometry_as_step": 15
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/smooth-loft.dwprt"
+      },
+      "files": [
+        "{bundle}/smooth-loft.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/smooth-loft.dwprt"
+      },
+      "fresh_process": true,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 65.65714285714286,
+          "tolerance": 1e-05
+        }
+      ],
+      "same_geometry_as_step": 15,
+      "checked_step_export": "{bundle}/smooth-loft.dwprt",
+      "checked_step_max_work": 20000000,
+      "checked_step_faces": 10
     }
   ]
 }

@@ -287,3 +287,46 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
         case.frame(&mut app, &format!("{layout:?}-edited-committed"));
     }
 }
+
+#[test]
+fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance() {
+    use egui_kittest::kittest::Queryable;
+    use soliddraft_app::state::EditorParams;
+
+    let mut case = ux_tools::Case::new("loft-smooth-three-section");
+    let mut doc = profiles();
+    doc.selection = Some(Selection::Feature(doc.features[0].id));
+    let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
+    app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+    ux_tools::settle(&mut app);
+    case.run(&mut app, |case, app| {
+        ribbon::run_command(app, "loft");
+        ux_tools::settle(app);
+        for label in ["Sketch2", "Sketch3"] {
+            app.get_by_label("Add profile").click();
+            ux_tools::settle(app);
+            app.get_all_by_label(label).last().unwrap().click();
+            ux_tools::settle(app);
+        }
+        app.get_by_label("Smooth").click();
+        ux_tools::settle(app);
+        case.frame(app, "preview");
+        let editor = app.state().state.editor.as_ref().unwrap();
+        assert!(matches!(&editor.params, EditorParams::Loft(l)
+            if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+        assert!(editor.error.is_none(), "three-section Smooth preview: {:?}", editor.error);
+        assert!(editor.preview.result.is_some());
+        assert_eq!(app.state().state.doc.features.len(), 3);
+        app.get_by_label("OK (Enter)").click();
+        ux_tools::settle(app);
+        ux_tools::rebuilt(app);
+        assert!(app.state().state.editor.is_none());
+        assert!(matches!(&app.state().state.doc.features[3].kind, FeatureKind::Loft(l)
+            if l.profiles.len() == 3 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+        let measured = volume(&app.state().state.doc);
+        assert!((measured - 4596.0 / 70.0).abs() < 1e-7, "{measured}");
+        assert!(!app.state().state.doc.proof_state().failed);
+        case.note(format!("three-section Smooth volume {measured} mm3"));
+        case.frame(app, "committed");
+    });
+}

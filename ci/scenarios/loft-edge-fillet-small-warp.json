@@ -1,0 +1,220 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "loft-edge-fillet-small-warp",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "offset": 0,
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -1,
+                "v": -1
+              },
+              "b": {
+                "u": 1,
+                "v": -1
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 1,
+                "v": -1
+              },
+              "b": {
+                "u": 1,
+                "v": 1
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 1,
+                "v": 1
+              },
+              "b": {
+                "u": -1,
+                "v": 1
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -1,
+                "v": 1
+              },
+              "b": {
+                "u": -1,
+                "v": -1
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "offset": 2,
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -0.999,
+                "v": -1.0
+              },
+              "b": {
+                "u": 1.0,
+                "v": -0.999
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 1.0,
+                "v": -0.999
+              },
+              "b": {
+                "u": 0.999,
+                "v": 1.001
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0.999,
+                "v": 1.001
+              },
+              "b": {
+                "u": -1.001,
+                "v": 0.999
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -1.001,
+                "v": 0.999
+              },
+              "b": {
+                "u": -0.999,
+                "v": -1.0
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "loft",
+      "arguments": {
+        "profiles": [
+          "Sketch1",
+          "Sketch2"
+        ],
+        "shape": "ruled"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Loft1 \u00b7 Edge 1"
+        ],
+        "radius": 0.1
+      },
+      "refused": "Spline display limit (SD-DISPLAY-01)",
+      "same_geometry_as_step": 3,
+      "checks": [
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {}
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/loft-fillet.dwprt"
+      },
+      "files": [
+        "{bundle}/loft-fillet.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/loft-fillet.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 3,
+      "exports": [
+        {
+          "format": "step",
+          "raw_valid": true,
+          "checks": [
+            {
+              "pointer": "/report/within_tolerance",
+              "equals": true
+            },
+            {
+              "pointer": "/report/solids",
+              "equals": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

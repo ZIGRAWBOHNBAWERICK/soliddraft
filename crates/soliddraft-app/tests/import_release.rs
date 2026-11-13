@@ -126,6 +126,27 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     assert!((doc.kernel().mass_properties(body).unwrap().volume - 1000.0 / 6.0).abs() < 1e-8);
     assert!(doc.meshes[&body].triangle_count() > 0);
     case.frame(&mut app, "accepted");
+    let row = app.query_all_by_label("Import1").next().unwrap().rect().center();
+    app.hover_at(row);
+    app.run_steps(3);
+    for pressed in [true, false] {
+        app.event(egui::Event::PointerButton {
+            pos: row,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        app.step();
+    }
+    app.run_steps(3);
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Replace imported file");
+    assert!(matches!(
+        soliddraft_app::commands::get("replace_import").unwrap().action_now(&app.state().state),
+        Some(AppAction::ReplaceImport { .. })
+    ));
+    case.frame(&mut app, "replace-menu");
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
     let saved = app.state().state.doc.model().to_bytes().unwrap();
     let reopened = soliddraft_app::file::open_bytes("mesh.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
     let FeatureKind::ImportStep(import) = &reopened.features[0].kind else { panic!("import") };

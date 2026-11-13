@@ -1,6 +1,6 @@
 //! Edit Suite history. Chips share the tree's document actions, with a horizontal rollback bar.
 
-use crate::document::{Command, FeatureId, FeatureStatus, Selection};
+use crate::document::{Command, Feature, FeatureId, FeatureStatus, Selection};
 use crate::icons::{self, Icon};
 use crate::panels::Side;
 use crate::state::{AppAction, AppState, Rename};
@@ -133,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         Rect::from_center_size(pos2(rect.left() + 17.0, rect.center().y), vec2(18.0, 18.0)),
                         ink,
                     );
-                    proof_badge(ui, state, id, rect);
+                    proof_badge(ui, state, feature, rect);
                     let text = Rect::from_min_max(rect.min + vec2(32.0, 0.0), rect.max - vec2(12.0, 0.0));
                     let painter = ui.painter().with_clip_rect(text.intersect(ui.clip_rect()));
                     painter.text(
@@ -248,8 +248,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-fn proof_badge(ui: &mut egui::Ui, state: &AppState, id: FeatureId, chip: Rect) {
-    let Some(feature) = state.doc.feature(id) else { return };
+fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, chip: Rect) {
+    let id = feature.id;
     let (label, reason) = if let Some(drag) = state.drag_preview.as_ref().filter(|drag| drag.feature() == id) {
         let (reason, failed) = drag.label();
         let label = if failed {
@@ -263,6 +263,7 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, id: FeatureId, chip: Rect) {
     } else {
         match &feature.status {
             FeatureStatus::Ok => ("Proved", "The current feature is proved.".to_owned()),
+            FeatureStatus::AnsweredWithinBound(bound) => (crate::document::WITHIN_BOUND_LABEL, bound.description()),
             FeatureStatus::Pending => {
                 ("Pending", "The current edit is waiting for proof. Export waits for proof.".to_owned())
             }
@@ -277,10 +278,17 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, id: FeatureId, chip: Rect) {
         "Proved" => theme::ok(),
         "Pending" => theme::warn(),
         "Refused" => theme::error(),
+        crate::document::WITHIN_BOUND_LABEL => theme::bounded(),
         _ => theme::muted(),
     };
     let centre = pos2(chip.right() - 7.0, chip.center().y);
-    if label == "Refused" {
+    if label == crate::document::WITHIN_BOUND_LABEL {
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![centre + vec2(0.0, -4.0), centre + vec2(4.0, 0.0), centre + vec2(0.0, 4.0), centre + vec2(-4.0, 0.0)],
+            color,
+            Stroke::NONE,
+        ));
+    } else if label == "Refused" {
         for sign in [-1.0, 1.0] {
             ui.painter().line_segment(
                 [centre + vec2(-3.0, -3.0 * sign), centre + vec2(3.0, 3.0 * sign)],

@@ -10,12 +10,89 @@ use ribbon::App;
 use serde_json::json;
 use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::chat::ChatState;
-use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, ProfileKind, Reference, Selection};
+use soliddraft_app::document::{
+    AnswerBound, Command, Document, ExtrudeParams, FeatureStatus, PlaneKind, ProfileKind, Reference, Selection,
+};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::{AppAction, Tool};
 use soliddraft_assistant::tools::call_checked;
 use soliddraft_assistant::{Caller, MockProvider, MockTurn};
 use std::sync::Arc;
+
+fn bounded_fixture() -> serde_json::Value {
+    json!({
+        "rule": "Imported profile maximum deviation",
+        "kept_definition": "Kept profile A",
+        "measured_bound": 0.008,
+        "allowed_bound": 0.01,
+        "unit": "mm"
+    })
+}
+
+#[test]
+fn a_bounded_answer_is_distinct_from_proof_and_keeps_its_definition_and_limit() {
+    let case = ribbon::case("edit-suite-bounded");
+    let bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();
+    assert_eq!(serde_json::to_value(&bound).unwrap(), bounded_fixture());
+    for mode in [soliddraft_app::theme::Mode::Light, soliddraft_app::theme::Mode::Dark] {
+        let mut app = suite(ribbon::plate());
+        soliddraft_app::theme::set_mode(&app.ctx, mode);
+        app.state_mut().state.doc.features[0].status = FeatureStatus::AnsweredWithinBound(bound.clone());
+        app.run_steps(8);
+        let state = &app.state().state;
+        let proof = state.doc.proof_state();
+        assert!(proof.answered_within_bound);
+        assert!(!proof.failed && !proof.pending);
+        assert!(!proof.current_proved_model());
+        assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
+        let badge = app.get_by_label("Boss-Extrude1 proof: Answered within a stated bound").rect();
+        let chip = app.get_by_label("Boss-Extrude1 in history").rect();
+        assert!(chip.contains_rect(badge));
+        assert!(ribbon::painted_in(&app, chip).iter().any(|text| text.text.contains("0.008 mm")));
+        let palette = soliddraft_app::theme::palette();
+        assert_ne!(palette.bounded, palette.ok);
+        assert_ne!(palette.bounded, palette.warn);
+        assert_ne!(palette.bounded, palette.error);
+        let caller = Caller::Mcp { client: "bounded-fixture".into() };
+        for (tool, extension) in [("export_step", "step"), ("export_iges", "iges"), ("export_stl", "stl")] {
+            let destination = case.path(&format!("bounded.{extension}"));
+            std::fs::write(&destination, b"existing export").unwrap();
+            let output = call_checked(
+                &mut AppTools { state: &mut app.state_mut().state },
+                tool,
+                json!({"path": destination}),
+                &caller,
+            );
+            assert!(output.is_error && output.content.contains("stated bound"), "{tool}: {}", output.content);
+            assert_eq!(std::fs::read(destination).unwrap(), b"existing export");
+        }
+        app.hover_at(badge.center());
+        app.run_steps(90);
+        let text = ribbon::painted(&app).into_iter().map(|p| p.text).collect::<Vec<_>>().join("\n");
+        for detail in ["0.008 mm", "0.01 mm", "Kept profile A", "Imported profile maximum deviation"] {
+            assert!(text.contains(detail), "{detail} is shown in {mode:?}");
+        }
+        case.frame(&mut app, &format!("{mode:?}-within-bound"));
+    }
+}
+
+#[test]
+fn bounded_fixtures_reject_answers_outside_the_declared_limit_or_without_a_definition() {
+    for (key, value) in [
+        ("measured_bound", json!(0.011)),
+        ("measured_bound", json!(-0.001)),
+        ("allowed_bound", json!(-0.01)),
+        ("kept_definition", json!("")),
+        ("rule", json!("")),
+        ("unit", json!("")),
+    ] {
+        let mut fixture = bounded_fixture();
+        fixture[key] = value;
+        assert!(serde_json::from_value::<AnswerBound>(fixture).is_err(), "invalid {key} is refused");
+    }
+    assert!(AnswerBound::new("rule".into(), "definition".into(), f64::NAN, 0.01, "mm".into()).is_err());
+    assert!(AnswerBound::new("rule".into(), "definition".into(), 0.001, f64::INFINITY, "mm".into()).is_err());
+}
 
 fn suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);

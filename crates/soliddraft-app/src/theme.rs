@@ -73,6 +73,7 @@ pub struct Palette {
     pub selection_ink: Color32,
     pub hover: Color32,
     pub ok: Color32,
+    pub bounded: Color32,
     pub warn: Color32,
     pub error: Color32,
     /// Notice fills behind warn and error text.
@@ -128,6 +129,7 @@ pub const LIGHT: Palette = Palette {
     selection_ink: rgb(0x0e, 0x2a, 0x66),
     hover: rgb(0xe2, 0xe6, 0xed),
     ok: rgb(0x17, 0x6b, 0x39),
+    bounded: rgb(0x76, 0x35, 0xa8),
     warn: rgb(0x89, 0x50, 0x06),
     error: rgb(0xb5, 0x2b, 0x32),
     warn_soft: rgb(0xfd, 0xf6, 0xe3),
@@ -163,6 +165,7 @@ pub const DARK: Palette = Palette {
     selection_ink: rgb(0xcf, 0xe0, 0xff),
     hover: rgb(0x3a, 0x40, 0x49),
     ok: rgb(0x5b, 0xd2, 0x7a),
+    bounded: rgb(0xd2, 0xa0, 0xff),
     warn: rgb(0xe3, 0xa0, 0x3c),
     error: rgb(0xff, 0x6b, 0x6b),
     warn_soft: rgba(0xe3, 0xa0, 0x3c, 46),
@@ -249,6 +252,9 @@ pub fn hover() -> Color32 {
 }
 pub fn ok() -> Color32 {
     palette().ok
+}
+pub fn bounded() -> Color32 {
+    palette().bounded
 }
 pub fn warn() -> Color32 {
     palette().warn

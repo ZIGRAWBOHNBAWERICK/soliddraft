@@ -702,11 +702,75 @@ pub struct RepairItem {
     pub label: String,
 }
 
+pub const WITHIN_BOUND_LABEL: &str = "Answered within a stated bound";
+
+/// An answer against a kept definition and a rule whose limit was set before evaluation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "AnswerBoundFields")]
+pub struct AnswerBound {
+    rule: String,
+    kept_definition: String,
+    measured_bound: f64,
+    allowed_bound: f64,
+    unit: String,
+}
+
+#[derive(Deserialize)]
+struct AnswerBoundFields {
+    rule: String,
+    kept_definition: String,
+    measured_bound: f64,
+    allowed_bound: f64,
+    unit: String,
+}
+
+impl TryFrom<AnswerBoundFields> for AnswerBound {
+    type Error = String;
+    fn try_from(value: AnswerBoundFields) -> Result<Self, Self::Error> {
+        Self::new(value.rule, value.kept_definition, value.measured_bound, value.allowed_bound, value.unit)
+    }
+}
+
+impl AnswerBound {
+    pub fn new(
+        rule: String,
+        kept_definition: String,
+        measured_bound: f64,
+        allowed_bound: f64,
+        unit: String,
+    ) -> Result<Self, String> {
+        if rule.trim().is_empty() || kept_definition.trim().is_empty() || unit.trim().is_empty() {
+            return Err("A bounded answer needs its rule, kept definition and unit".into());
+        }
+        if !measured_bound.is_finite()
+            || !allowed_bound.is_finite()
+            || measured_bound < 0.0
+            || allowed_bound < 0.0
+            || measured_bound > allowed_bound
+        {
+            return Err("The measured bound must be finite, nonnegative and within the rule's limit".into());
+        }
+        Ok(Self { rule, kept_definition, measured_bound, allowed_bound, unit })
+    }
+
+    pub fn summary(&self) -> String {
+        format!("≤ {} {}", self.measured_bound, self.unit)
+    }
+
+    pub fn description(&self) -> String {
+        format!(
+            "Measured bound: {} {}\nRule limit: {} {}\nRule: {}\nKept definition: {}",
+            self.measured_bound, self.unit, self.allowed_bound, self.unit, self.rule, self.kept_definition
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FeatureStatus {
     Ok,
     /// Authored definitions await the scoped proof; no prior body certifies them.
     Pending,
+    AnsweredWithinBound(AnswerBound),
     Error(String),
     /// Some reference no longer resolves; the feature was skipped.
     NeedsRepair(Vec<RepairItem>),
@@ -752,6 +816,9 @@ pub struct Feature {
 
 impl Feature {
     pub fn summary(&self) -> String {
+        if let FeatureStatus::AnsweredWithinBound(bound) = &self.status {
+            return bound.summary();
+        }
         match &self.kind {
             FeatureKind::ReferencePlane(p) => format!("offset {} mm", fmt_mm(p.offset())),
             FeatureKind::Sketch(s) => {
@@ -1232,12 +1299,14 @@ pub struct ProofState {
     pub proved_edit: Option<u64>,
     pub transient: bool,
     pub pending: bool,
+    pub answered_within_bound: bool,
     pub failed: bool,
 }
 
 impl ProofState {
     pub fn current_proved_model(&self) -> bool {
         !self.pending
+            && !self.answered_within_bound
             && !self.failed
             && !self.transient
             && self.proved_revision == Some(self.requested_revision)
@@ -1498,6 +1567,10 @@ impl Document {
             proved_edit: self.last_proved.as_ref().and_then(|proved| proved.request),
             transient: self.provisional.as_ref().is_some_and(|shown| shown.token.transient),
             pending: self.proof_pending(),
+            answered_within_bound: self
+                .features
+                .iter()
+                .any(|f| matches!(f.status, FeatureStatus::AnsweredWithinBound(_))),
             failed: self.proof_failure.is_some() || self.has_model_failure(),
         }
     }
@@ -1517,7 +1590,11 @@ impl Document {
     }
 
     fn retain_proved_revision(&mut self) {
-        if self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some() {
+        if self.model.is_dirty()
+            || self.has_model_failure()
+            || self.proof_failure.is_some()
+            || self.proof_state().answered_within_bound
+        {
             return;
         }
         if let Some(proved) = &mut self.last_proved
@@ -1547,6 +1624,9 @@ impl Document {
         }
         if self.proof_pending() {
             return Some(("Proof pending", false));
+        }
+        if self.proof_state().answered_within_bound {
+            return Some((WITHIN_BOUND_LABEL, false));
         }
         self.display_failure
             .as_deref()
@@ -3376,6 +3456,9 @@ impl Document {
                     FeatureStatus::Inactive => details.push(("State".to_owned(), "Rolled back".to_owned())),
                     FeatureStatus::Ok => {}
                     FeatureStatus::Pending => details.push(("State".into(), "Proof pending".into())),
+                    FeatureStatus::AnsweredWithinBound(bound) => {
+                        details.push((WITHIN_BOUND_LABEL.into(), bound.description()))
+                    }
                 }
                 Some(EntityInfo { title: f.name.clone(), feature: Some(id), details })
             }

@@ -1303,6 +1303,9 @@ impl AppState {
                 ("Preview", NoteKind::Info)
             });
         }
+        if self.doc.proof_state().answered_within_bound {
+            return Some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info));
+        }
         self.doc.proof_pending().then_some(("Proof pending", NoteKind::Info))
     }
 
@@ -1311,6 +1314,9 @@ impl AppState {
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
+        }
+        if self.doc.proof_state().answered_within_bound {
+            return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
         if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {
             return Err("The requested revision has not passed proof".into());

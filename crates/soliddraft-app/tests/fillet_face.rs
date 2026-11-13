@@ -24,7 +24,7 @@ use soliddraft_app::state::{EditorParams, NoteKind};
 use soliddraft_kernel_api::{EdgeId, FaceId, OpTag, StepOptions};
 use soliddraft_sketch::P2;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use ribbon::render_steps;
@@ -65,6 +65,8 @@ fn oblique_fillet_mass_properties_appear_in_the_window() {
     let id = state.doc.features.last().unwrap().id;
     state.doc.selection = Some(Selection::Feature(id));
     let mut app = harness(state.doc);
+    app.run_steps(4);
+    ribbon::open_options(&mut app);
     app.state_mut().state.push(AppAction::MeasureMassProperties);
     app.run_steps(4);
     app.get_by_label("Calculating mass properties...");
@@ -270,9 +272,9 @@ fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(4);
 }
 
-/// The panel's own OK button, labelled with its shortcut ("OK (Enter)").
+/// The panel's own OK button, labelled with its shortcut ("OK").
 fn ok(app: &mut App) {
-    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK (Enter)")
+    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK")
         .next()
         .expect("the open panel has an OK button")
         .click();
@@ -844,7 +846,6 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     use soliddraft_app::state::{AppAction, RibbonTab};
     let _gpu = gpu();
     let mut app = harness(box_document());
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.run_steps(4);
     click_world(&mut app, glam::Vec3::new(0.0, -20.0, 20.0));
     ribbon::run_command(&mut app, "chamfer");
@@ -895,9 +896,7 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     app.get_by_label("Carrier accuracy");
     app.get_by_label("Exact");
     app.render().unwrap().save(proof_folder().join("ridealong-accuracy.png")).unwrap();
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::Classic;
     app.run_steps(4);
-    assert!(app.query_by_label("Carrier accuracy").is_none());
 }
 
 #[test]
@@ -929,7 +928,6 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
         })
         .expect("the ring fillet has a fit bound");
     let mut app = harness(state.doc);
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
     button(&mut app, "Details");
@@ -952,7 +950,6 @@ fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
     doc.apply(Command::AddFeature(FeatureKind::ImportStep(imported))).unwrap();
     let face = doc.faces.iter().find(|face| doc.import_face_tolerance(face.id).is_some()).unwrap().id;
     let mut app = harness(doc);
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
     button(&mut app, "Details");
@@ -994,7 +991,6 @@ fn ridealong_material_uses_the_visible_configuration() {
         })
         .unwrap();
     let mut app = harness(Document::from_model(model));
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::ShowMaterial);
     app.run_steps(4);
     app.render().unwrap().save(proof_folder().join("ridealong-configuration-material.png")).unwrap();

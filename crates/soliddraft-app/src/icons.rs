@@ -123,7 +123,6 @@ struct Raster {
     key: &'static str,
     glyph: bool,
     px: u32,
-    dark: bool,
     treatment: Treatment,
 }
 
@@ -143,10 +142,8 @@ impl Raster {
     fn image(&self, source: &str) -> ColorImage {
         let svg = if self.glyph {
             source.replace("currentColor", "#ffffff")
-        } else if self.dark {
-            DARK.iter().fold(source.to_owned(), |svg, (light, dark)| svg.replace(light, dark))
         } else {
-            source.to_owned()
+            DARK.iter().fold(source.to_owned(), |svg, (light, dark)| svg.replace(light, dark))
         };
         let tree = usvg::Tree::from_str(&svg, &SVG_OPTIONS).expect("a catalogue icon parses");
         let mut pixmap = tiny_skia::Pixmap::new(self.px, self.px).expect("an icon has a size");
@@ -187,8 +184,7 @@ impl Raster {
 fn paint_raster(painter: &Painter, key: &'static str, glyph: bool, rect: Rect, tint: Color32, treatment: Treatment) {
     let ppp = painter.pixels_per_point();
     let px = (rect.width().min(rect.height()) * ppp).round().max(1.0);
-    let dark = crate::theme::dark_chrome();
-    let raster = Raster { key, glyph, px: px as u32, dark, treatment };
+    let raster = Raster { key, glyph, px: px as u32, treatment };
     let Some(source) = raster.source() else {
         debug_assert!(false, "no icon {key}");
         return;

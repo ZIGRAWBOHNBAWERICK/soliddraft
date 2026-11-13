@@ -3,7 +3,6 @@
 use crate::commands::{self, Context};
 use crate::document::{Document, Selection};
 use crate::ring_menu;
-use crate::settings::FrameLayout;
 use crate::state::AppState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -375,9 +374,6 @@ pub fn show_at(
     selection: Option<Selection>,
     at: Option<egui::Pos2>,
 ) {
-    if state.frame_layout != FrameLayout::EditSuite {
-        return;
-    }
     let key = response.id.with("context_target");
     let popup_id = response.id.with("context_menu");
     let opening = at.is_some();

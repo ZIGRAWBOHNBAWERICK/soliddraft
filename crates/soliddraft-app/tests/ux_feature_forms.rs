@@ -1,6 +1,6 @@
 //! Edit Suite forms, pane access and sketch completion through the real app.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -10,7 +10,6 @@ use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::{
     document::{FeatureKind, PlaneKind, Reference, Selection},
-    settings::FrameLayout,
     state::{AppAction, EditorParams},
 };
 use ux_tools::{Case, Look, STANDARD, launch, settle};
@@ -20,7 +19,6 @@ fn bar(app: &App) -> Rect {
 }
 
 fn suite(app: &mut App) {
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
     settle(app);
 }
 
@@ -222,9 +220,7 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         assert!(ribbon::painted_in(app, chip).iter().any(|p| p.text == "(-) Sketch1"));
         assert_eq!(app.state().state.doc.features[0].name, "Sketch1", "the prefix is display only");
         case.frame(app, "closed-sketch");
-        app.state_mut().state.frame_layout = FrameLayout::Classic;
-        settle(app);
-        assert!(ribbon::painted(app).iter().any(|p| p.text == "Properties"), "classic keeps its dock");
+        assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
     });
 }
 

@@ -49,7 +49,6 @@ pub mod print_check;
 pub mod properties;
 pub mod recent;
 pub mod recovery;
-pub mod ribbon;
 mod ring_menu;
 pub mod scan;
 pub mod scene_import;

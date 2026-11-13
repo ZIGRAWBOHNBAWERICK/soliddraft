@@ -66,8 +66,7 @@ pub fn session_id() -> egui::Id {
     egui::Id::new("command_session")
 }
 
-/// The bar's prompt id. The classic session shares it; the Edit Suite overlay has
-/// its own id because it draws on a different layer.
+/// The bar's prompt id. The session overlay has its own id on a different layer.
 pub fn input_id() -> egui::Id {
     egui::Id::new("command_line_input")
 }
@@ -498,45 +497,8 @@ fn submit_session(state: &mut AppState, line: String) {
     }
 }
 
-/// The bottom of the window: the bar, with the session above it while it is open. Dragging
-/// the bar's top edge up opens the session; dragging the session down past its minimum
-/// closes it.
-pub fn panel(root: &mut egui::Ui, state: &mut AppState, status: &Status) {
-    let max = (root.available_height() - 220.0).max(SESSION_MIN_HEIGHT);
-    let frame = egui::Frame::new().fill(theme::command_line()).inner_margin(egui::Margin::ZERO);
-    let collapsed = egui::Panel::bottom(bar_id()).resizable(true).exact_size(theme::COMMAND_LINE_HEIGHT).frame(frame);
-    let expanded = egui::Panel::bottom(session_id())
-        .resizable(true)
-        .default_size(state.command_line.settings.session_height.min(max))
-        .size_range(SESSION_MIN_HEIGHT..=max)
-        .frame(frame);
-    let before = state.command_line.session_open;
-    let mut open = before;
-    egui::Panel::show_switched(root, &mut open, collapsed, expanded, |ui, expanded| {
-        if expanded {
-            let full = ui.max_rect();
-            let split = full.bottom() - theme::COMMAND_LINE_HEIGHT;
-            let top = Rect::from_min_max(full.min, pos2(full.right(), split));
-            let bottom = Rect::from_min_max(pos2(full.left(), split), full.max);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| session(ui, state));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(bottom), |ui| bar(ui, state, status, true));
-        } else {
-            bar(ui, state, status, false);
-        }
-    });
-    if open != before {
-        state.command_line.session_open = open;
-        state.command_line.focus_requested |= open;
-    }
-    if state.command_line.session_open
-        && let Some(s) = egui::PanelState::load(root.ctx(), session_id())
-    {
-        state.command_line.settings.session_height = s.outer_rect.height().max(SESSION_MIN_HEIGHT);
-    }
-}
-
 /// The Edit Suite bar stays below history; its session covers history without moving the viewport.
-pub fn edit_suite_panel(root: &mut egui::Ui, state: &mut AppState, status: &Status) {
+pub fn panel(root: &mut egui::Ui, state: &mut AppState, status: &Status) {
     let now = root.input(|i| i.time);
     let activity = root.input(|i| {
         i.events.iter().any(|event| match event {
@@ -612,19 +574,15 @@ fn bar(ui: &mut egui::Ui, state: &mut AppState, status: &Status, session_open: b
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.add_space(8.0);
-        let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
         egui::ScrollArea::horizontal()
             .id_salt("chip_row")
-            .max_width(
-                (ui.available_width() - PROMPT_MIN_WIDTH - STATUS_MIN_WIDTH - if edit_suite { 100.0 } else { 0.0 })
-                    .max(24.0),
-            )
+            .max_width((ui.available_width() - PROMPT_MIN_WIDTH - STATUS_MIN_WIDTH - 100.0).max(24.0))
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .scroll_source(egui::scroll_area::ScrollSource::MOUSE_WHEEL)
             .show(ui, |ui| ui.horizontal_centered(|ui| chips(ui, state)));
-        if edit_suite {
-            ai_chip(ui, state);
-        }
+
+        ai_chip(ui, state);
+
         ui.add_space(6.0);
         let x = ui.cursor().left();
         ui.painter().vline(x, rect.y_range().shrink(7.0), Stroke::new(1.0, theme::line()));
@@ -719,11 +677,7 @@ fn status_details(ui: &mut egui::Ui, status: &Status) {
 
 /// The prompt's text field, with Tab, Up, Down, Enter and Escape taken before it sees them.
 fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
-    let id = if session && state.frame_layout == crate::settings::FrameLayout::EditSuite {
-        input_id().with("overlay")
-    } else {
-        input_id()
-    };
+    let id = if session { input_id().with("overlay") } else { input_id() };
     let focused = ui.memory(|m| m.has_focus(id));
     let none = Modifiers::NONE;
     let (tab, up, down, enter, escape) = if focused {
@@ -1008,7 +962,7 @@ fn session(ui: &mut egui::Ui, state: &mut AppState) {
     visuals.selection.bg_fill = theme::terminal_accent().gamma_multiply(0.35);
     let header = Rect::from_min_size(full.min, vec2(full.width(), 26.0));
     ui.painter().hline(full.x_range(), header.bottom(), Stroke::new(1.0, theme::terminal_line()));
-    let reserve = if state.frame_layout == crate::settings::FrameLayout::EditSuite { 280.0 } else { 44.0 };
+    let reserve = 280.0;
     let title = status_text(
         ui,
         &format!("assistant session · {}", state.chat.status),
@@ -1021,17 +975,17 @@ fn session(ui: &mut egui::Ui, state: &mut AppState) {
         title,
         theme::terminal_muted(),
     );
-    if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-        let now = ui.input(|i| i.time);
-        let left = (SESSION_IDLE_SECONDS - (now - state.command_line.idle_since.unwrap_or(now))).ceil().max(0.0);
-        ui.painter().text(
-            pos2(header.right() - 36.0, header.center().y),
-            Align2::RIGHT_CENTER,
-            format!("Collapses when idle, {left:.0} s"),
-            theme::mono(11.0),
-            theme::terminal_muted(),
-        );
-    }
+
+    let now = ui.input(|i| i.time);
+    let left = (SESSION_IDLE_SECONDS - (now - state.command_line.idle_since.unwrap_or(now))).ceil().max(0.0);
+    ui.painter().text(
+        pos2(header.right() - 36.0, header.center().y),
+        Align2::RIGHT_CENTER,
+        format!("Collapses when idle, {left:.0} s"),
+        theme::mono(11.0),
+        theme::terminal_muted(),
+    );
+
     let close = Rect::from_center_size(pos2(header.right() - 16.0, header.center().y), vec2(20.0, 20.0));
     let close_resp = ui.interact(close, ui.id().with("session_close"), Sense::click());
     close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close the session"));

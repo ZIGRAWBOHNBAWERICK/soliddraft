@@ -388,7 +388,7 @@ fn narrower_uprights_roll_over_an_equal_round_top_mitre() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 fn wait_for(app: &mut ribbon::App, ready: impl Fn(&ribbon::App) -> bool) {
@@ -429,7 +429,7 @@ fn rendered_real_use_rounds_an_earlier_round_then_shells_an_l_tray() {
     });
     app.render().unwrap().save(dir.join("equal-radius-preview.png")).unwrap();
     let window = ribbon::window(&app);
-    ribbon::click_button(&mut app, "OK (Enter)", window);
+    ribbon::click_button(&mut app, "OK", window);
     app.run_steps(30);
     assert!(app.state().state.editor.is_none());
     displayed(&app.state().state);
@@ -456,7 +456,7 @@ fn rendered_real_use_rounds_an_earlier_round_then_shells_an_l_tray() {
     });
     app.render().unwrap().save(dir.join("l-shell-preview.png")).unwrap();
     let window = ribbon::window(&app);
-    ribbon::click_button(&mut app, "OK (Enter)", window);
+    ribbon::click_button(&mut app, "OK", window);
     app.run_steps(30);
     assert!(app.state().state.editor.is_none());
     displayed(&app.state().state);

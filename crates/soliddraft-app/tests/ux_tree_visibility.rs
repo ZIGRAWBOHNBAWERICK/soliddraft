@@ -31,8 +31,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
-#[path = "support/render_steps.rs"]
-mod render_steps;
+#[path = "support/ui.rs"]
+mod ribbon;
+
+use ribbon::render_steps;
 
 use render_steps::HANG_GUARD;
 
@@ -206,6 +208,7 @@ fn launch(case: &mut Case, doc: Document, window: &str) -> App {
     // The fixture's isolated config: the theme, and the view keys the image oracles need.
     let mut settings = manifest()["fixtures"]["config"].clone();
     settings.as_object_mut().expect("the fixture config").remove("note");
+    settings["view"]["always_show_origin_axes"] = serde_json::json!(false);
     settings["appearance"] = serde_json::json!({ "theme": w["theme"] });
     std::fs::write(case.dir.join("config/settings.json"), settings.to_string()).unwrap();
     let size = vec2(f(&w["size"][0]) as f32, f(&w["size"][1]) as f32);
@@ -218,6 +221,10 @@ fn launch(case: &mut Case, doc: Document, window: &str) -> App {
         .renderer(render_steps::renderer())
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     settle(&mut app);
+    if !app.state().state.tree_shown() {
+        app.key_press(egui::Key::F9);
+        settle(&mut app);
+    }
     app
 }
 
@@ -298,6 +305,7 @@ fn eye_label(app: &App, name: &str) -> String {
 }
 
 fn click_eye(case: &mut Case, app: &mut App, name: &str) {
+    ribbon::close_options(app);
     reveal(app, name);
     let label = eye_label(app, name);
     let node = app.get_by_label(&label);
@@ -339,21 +347,7 @@ fn row_selected(app: &App, label: &str) -> bool {
         == Some(egui::accesskit::Toggled::True)
 }
 
-/// Clicks a ribbon command by its label. A narrow window folds its group into one
-/// button, which opens the group's row first.
-fn ribbon_command(case: &mut Case, app: &mut App, group: &str, label: &str) {
-    let button =
-        |app: &App| app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().map(|n| n.rect());
-    if button(app).is_none() {
-        let folded = format!("{group} group");
-        case.note(format!("open the folded ribbon group '{folded}'"));
-        click_at(app, bounds(app, &folded).center());
-    }
-    let r = button(app).unwrap_or_else(|| panic!("the ribbon offers {label}"));
-    case.note(format!("ribbon {label} at {:?}", r.center()));
-    click_at(app, r.center());
-}
-
+/// Opens the tree's origin group.
 fn open_origin(app: &mut App) {
     if app.query_by_label("Origin").is_none() {
         click_row_name(app, "Origin, planes and axes");
@@ -388,7 +382,8 @@ fn menu(case: &mut Case, app: &mut App, path: &[&str]) {
 /// Sets Show origin planes through Preferences. The fixture starts with it off so the image
 /// oracles read a plain backdrop, and the cases about planes turn it on, its own default.
 fn show_planes(case: &mut Case, app: &mut App, on: bool) {
-    menu(case, app, &["Tools", "Preferences…"]);
+    case.note("open grid and plane preferences");
+    ribbon::run_command(app, "settings");
     assert!(app.state().preferences.is_some(), "the menu opened Preferences");
     let press = |app: &mut App, label: &str| {
         app.get_by_label(label).hover();
@@ -1060,10 +1055,10 @@ fn one_click(window: &str) {
         assert_eq!(choices(app), [Some(false), None, None], "the disclosure writes no choice");
 
         // A pattern editor takes an axis row's name as its direction.
-        ribbon_command(case, app, "Pattern", "Linear");
+        ribbon::run_command(app, "linear_pattern");
         assert!(
             matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Pattern(_))),
-            "the ribbon's Linear opened the pattern editor"
+            "the Linear command opened the pattern editor"
         );
         let direction = |app: &App| match &app.state().state.editor.as_ref().expect("the pattern editor").params {
             EditorParams::Pattern(p) => match p.layout {
@@ -1080,7 +1075,7 @@ fn one_click(window: &str) {
         assert_eq!(direction(app), soliddraft_kernel_api::Vec3::Y, "an eye is no collector pick");
         assert_eq!(choices(app), [Some(false), None, Some(!z_shown)], "the eye still flips Z");
         click_eye(case, app, "Z axis");
-        let cancel = bounds(app, "Cancel (Esc)");
+        let cancel = bounds(app, "Cancel");
         click_at(app, cancel.center());
         assert!(app.state().state.editor.is_none(), "Cancel closed the editor");
         assert_eq!(geometry(app), before, "the cancelled pattern left the part as it was");
@@ -1179,6 +1174,7 @@ fn hiding_a_solid_hides_its_pending_replacement_body() {
 
         // A real scalar edit: drag the Depth field, with the exact proof held back.
         kernel.rules.lock().unwrap().hold_next = true;
+        ribbon::open_options(app);
         let start = app.get_by_label("Depth value").rect().center();
         render_steps::rendered(app, |app| {
             app.hover_at(start);
@@ -1432,8 +1428,7 @@ fn view_choices_survive_undo_and_native_reopen() {
 
 /// For a part other than B20: zooms to fit through the heads-up toolbar.
 fn frame_fixture_any(case: &mut Case, app: &mut App) {
-    let fit = bounds(app, "Zoom to fit (Z)");
-    click_at(app, fit.center());
+    ribbon::run_command(app, "zoom_fit");
     case.note("zoom to fit");
 }
 

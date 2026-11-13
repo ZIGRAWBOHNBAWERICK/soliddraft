@@ -1,12 +1,12 @@
 //! Workspace lifetime, recovery and the frame loop.
 
 use crate::document::{Document, Selection};
+use crate::file;
 use crate::panels::{Layout, Side};
 use crate::state::{AppAction, AppState, NoteKind};
 use crate::theme;
 use crate::viewport::look::{Preset, Tier};
 use crate::viewport::render::{DisplayMode, ViewportRenderer};
-use crate::{file, ribbon};
 use egui_dock::DockState;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -46,7 +46,6 @@ pub struct SolidDraftApp {
     /// The middle dock: the part and the drawing.
     pub(super) dock: DockState<Tab>,
     pub(super) tree_dock: DockState<Tab>,
-    pub(super) suite_tree_dock: DockState<Tab>,
     /// The panel layout as last written to disk.
     saved_layout: Layout,
     /// The command line's chips and session height as last written to disk.
@@ -85,11 +84,7 @@ impl SolidDraftApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
-        theme::install_for_layout(
-            &cc.egui_ctx,
-            automation.theme.unwrap_or_else(|| crate::settings::appearance().theme),
-            crate::settings::frame_layout(),
-        );
+        theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
         if let Some(rs) = cc.wgpu_render_state.as_ref() {
             let tier = Tier::of(rs.adapter.get_info().backend);
             let renderer = ViewportRenderer::new(&rs.device, &rs.queue, rs.target_format, tier);
@@ -105,7 +100,7 @@ impl SolidDraftApp {
         state.viewport.preset = preset;
         state.viewport.references = view.references;
         state.viewport.grid_style = view.grid;
-        state.viewport.scene = (state.frame_layout == crate::settings::FrameLayout::EditSuite).then_some(view.scene);
+        state.viewport.scene = Some(view.scene);
         if !preset.shows_edges() {
             state.viewport.display = DisplayMode::Shaded;
         }
@@ -139,7 +134,6 @@ impl SolidDraftApp {
             state,
             dock: center_dock(),
             tree_dock: tree_dock(),
-            suite_tree_dock: DockState::new(vec![Tab::Tree, Tab::Values]),
             automation,
             frame: 0,
             bench,
@@ -461,15 +455,8 @@ impl SolidDraftApp {
         }
     }
 
-    fn classic_frame(&mut self, root: &mut egui::Ui) {
-        self.frame_with_tools(root, false);
-    }
-
-    fn frame_with_tools(&mut self, root: &mut egui::Ui, palette: bool) {
-        let edit_suite = palette;
-        // The menu bar is chrome; the ribbon paints its own strip and body.
+    fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
         let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
-        let panel_frame = egui::Frame::new().fill(theme::panel()).inner_margin(egui::Margin::ZERO);
         egui::Panel::top("menu")
             .exact_size(theme::MENU_HEIGHT)
             .frame(chrome_frame)
@@ -478,32 +465,20 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
-            if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                crate::options_bar::panel(root, &mut self.state);
-            } else {
-                egui::Panel::top("ribbon")
-                    .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
-                    .frame(panel_frame)
-                    .show_separator_line(false)
-                    .show(root, |ui| ribbon::show(ui, &mut self.state));
-            }
+            crate::options_bar::panel(root, &mut self.state);
         }
         let status = self.status();
-        if !edit_suite {
+        if start {
             crate::command_line::panel(root, &mut self.state, &status);
-        } else if start {
-            crate::command_line::edit_suite_panel(root, &mut self.state, &status);
         }
         let window_width = root.available_width();
         if !start {
-            if palette {
-                crate::tool_palette::panel(root, &mut self.state);
-                crate::command_line::edit_suite_panel(root, &mut self.state, &status);
-                if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
-                    crate::timeline::panel(root, &mut self.state);
-                }
+            crate::tool_palette::panel(root, &mut self.state);
+            crate::command_line::panel(root, &mut self.state, &status);
+            if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
+                crate::timeline::panel(root, &mut self.state);
             }
-            if self.state.frame_layout == crate::settings::FrameLayout::Classic || self.state.tree_shown() {
+            if self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }
         }
@@ -515,10 +490,6 @@ impl SolidDraftApp {
                 show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
             }
         });
-    }
-
-    fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
-        self.frame_with_tools(root, true);
     }
 
     /// Closes the start page once a document was opened, made or edited.
@@ -559,7 +530,6 @@ impl eframe::App for SolidDraftApp {
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         crate::multibody::show(root.ctx(), &mut self.state);
         let ctx = &root.ctx().clone();
-        theme::set_layout(ctx, self.state.frame_layout);
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
         self.focus_tool_document();
@@ -610,10 +580,7 @@ impl eframe::App for SolidDraftApp {
             .and_then(|sel| self.state.doc.describe(sel));
         self.state.hover_point = self.state.viewport.hover_point;
 
-        match self.state.frame_layout {
-            crate::settings::FrameLayout::Classic => self.classic_frame(root),
-            crate::settings::FrameLayout::EditSuite => self.edit_suite_frame(root),
-        }
+        self.edit_suite_frame(root);
         self.dialogs(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);
         self.apply_actions(ctx);

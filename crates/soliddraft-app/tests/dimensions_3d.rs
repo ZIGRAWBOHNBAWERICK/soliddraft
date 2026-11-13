@@ -7,7 +7,7 @@ use soliddraft_app::viewport::camera::StandardView;
 use soliddraft_app::viewport::dimensions::{DimensionTarget, ShownDimension};
 use soliddraft_model::view::AnnotationKey;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 use ribbon::App;
 
@@ -54,6 +54,7 @@ fn feature_drag_is_model_space_undoable_and_keeps_value_editing() {
     let mut app = ribbon::app(ribbon::plate());
     app.key_press(Key::Z);
     app.run_steps(30);
+    ribbon::run_command(&mut app, "toggle_tree");
     let name = app.state().state.doc.features[0].name.clone();
     let row = app.get_by_label(&name).rect().center();
     ribbon::double_click_at(&mut app, row);

@@ -1,6 +1,6 @@
 //! Section inspection through Inspect and navigation on the real application.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{accesskit::Role, pos2};

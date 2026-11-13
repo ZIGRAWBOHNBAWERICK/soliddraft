@@ -1,6 +1,6 @@
 //! Rectangle placement, persistent relations, refusal, history and reopen.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Pos2};
@@ -43,7 +43,7 @@ fn preview_ink(app: &App, image: &image::RgbaImage, p: P2) -> bool {
             let x = (at.x.round() as i32 + dx).clamp(0, image.width() as i32 - 1) as u32;
             let y = (at.y.round() as i32 + dy).clamp(0, image.height() as i32 - 1) as u32;
             let [r, g, b, _] = image.get_pixel(x, y).0;
-            i16::from(b) - i16::from(r) > 40 && i16::from(b) - i16::from(g) > 20
+            i16::from(r) - i16::from(b) > 80 && i16::from(g) - i16::from(b) > 40
         })
     })
 }

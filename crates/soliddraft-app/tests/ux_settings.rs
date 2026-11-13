@@ -1,6 +1,6 @@
 //! Settings through the app's command line, menu and saved navigation choices.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::accesskit::Role;

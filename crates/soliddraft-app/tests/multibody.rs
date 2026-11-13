@@ -1,12 +1,11 @@
 //! Several-body modelling through application commands and the Combine dialog.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui_kittest::kittest::Queryable;
 use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
 use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureStatus, ProfileKind, Selection};
-use soliddraft_app::settings::FrameLayout;
 use soliddraft_kernel_api::BooleanOp;
 
 fn block(doc: &mut Document, width: f64, depth: f64) -> u64 {
@@ -37,7 +36,6 @@ fn editing_combine_refuses_export_until_the_dialog_is_finished() {
     use soliddraft_exchange::Format;
 
     let case = ribbon::case("combine-export-gate");
-    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
     let mut doc = pair();
     let id = doc.combine(0, 1, BooleanOp::Union).unwrap().unwrap();
     let name = doc.feature(id).unwrap().name.clone();
@@ -171,7 +169,6 @@ fn new_body_and_combine_are_available_in_the_application() {
     let mut doc = Document::new("Several bodies", soliddraft_app::kernel());
     block(&mut doc, 10.0, 10.0);
     let mut app = ribbon::app(doc);
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
     case.run(&mut app, |app| {
         ribbon::run_command(app, "new_body");
         assert_eq!(app.state().state.doc.active_body, 1);
@@ -352,7 +349,6 @@ fn a_refused_first_feature_in_a_new_body_keeps_the_existing_body_visible() {
 fn a_body_context_menu_targets_the_body_that_was_clicked() {
     let case = ribbon::case("multibody-context-target");
     let mut app = ribbon::app(pair());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
     app.state_mut().state.show_tree(true);
     app.state_mut().state.doc.select_body(1);
     app.run_steps(8);

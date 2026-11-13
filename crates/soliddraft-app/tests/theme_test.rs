@@ -1,4 +1,4 @@
-//! Classic and Edit Suite themes through the real app and wgpu pipeline.
+//! Edit Suite appearance settings through the real app and wgpu pipeline.
 //! Bracket frames are written under the temporary directory for review.
 //!
 //! The mode is process-wide (`theme::set_mode`), so switches run light then dark
@@ -10,7 +10,7 @@ use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use soliddraft_app::app::{Automation, SolidDraftApp};
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::AppAction;
 use soliddraft_app::theme::{self, Mode};
 use std::path::PathBuf;
@@ -51,16 +51,6 @@ fn the_bracket_in_light_and_dark() {
     harness.key_press(Key::Z);
     harness.run_steps(30);
 
-    for mode in Mode::ALL {
-        harness.state_mut().state.push(AppAction::SetTheme(mode));
-        harness.run_steps(6);
-        assert_eq!(theme::mode(), mode);
-        let image = harness.render().expect("render");
-        let path = out_dir().join(format!("theme-{}.png", mode.label().to_lowercase()));
-        image.save(&path).expect("save png");
-        eprintln!("wrote {}", path.display());
-    }
-    harness.state_mut().state.frame_layout = FrameLayout::EditSuite;
     for mode in Mode::ALL {
         harness.state_mut().state.push(AppAction::SetTheme(mode));
         harness.run_steps(6);
@@ -109,13 +99,13 @@ fn the_bracket_in_light_and_dark() {
         eprintln!("{} keyboard focus contrast: {contrast:.2}:1", mode.label());
         assert!(contrast >= 3.0, "{}: keyboard focus contrast is {contrast:.2}:1 ({ring:?} / {fill:?})", mode.label());
     }
-    harness.state_mut().state.frame_layout = FrameLayout::Classic;
+
     harness.run_steps(6);
-    assert_eq!(theme::palette(), &theme::DARK, "returning to classic restores its saved dark mode");
+    assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
     harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
     harness.run_steps(2);
-    assert_eq!(theme::palette(), &theme::LIGHT);
-    assert!(!harness.ctx.global_style().visuals.dark_mode);
+    assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
+    assert!(harness.ctx.global_style().visuals.dark_mode);
     let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
     assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
     let _ = std::fs::remove_dir_all(config);

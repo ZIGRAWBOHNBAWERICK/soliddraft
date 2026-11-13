@@ -53,6 +53,11 @@ fn settle(h: &mut App<'_>) {
 }
 
 fn button(h: &mut App<'_>, name: &str) {
+    if name == "Interference" {
+        h.state_mut().state.run_command(soliddraft_app::commands::get("assembly_interference").unwrap());
+        h.run_steps(8);
+        return;
+    }
     h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().click();
     h.run_steps(4);
 }

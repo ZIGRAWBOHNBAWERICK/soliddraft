@@ -1,5 +1,5 @@
 //! Linked and dynamic mirror through the rendered sketch editor.
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 use egui::{Key, Modifiers, Pos2};
 use ribbon::App;
@@ -25,11 +25,13 @@ fn screen(app: &App, at: P2) -> Pos2 {
     pos
 }
 fn hover(app: &mut App, at: P2) {
+    ribbon::close_options(app);
     let pos = screen(app, at);
     app.hover_at(pos);
     app.run_steps(5);
 }
 fn pick(app: &mut App, at: P2, ctrl: bool) {
+    ribbon::close_options(app);
     let pos = screen(app, at);
     if ctrl {
         app.hover_at(pos);
@@ -52,24 +54,7 @@ fn pick(app: &mut App, at: P2, ctrl: bool) {
     }
 }
 fn control(app: &mut App, label: &str) {
-    for attempt in 0..14 {
-        if let Some(p) = ribbon::painted(app).into_iter().find(|p| p.text == label && p.rect.contains_rect(p.full)) {
-            ribbon::click_at(app, p.rect.center());
-            app.run_steps(6);
-            return;
-        }
-        let view = app.state().state.viewport.rect;
-        app.hover_at(egui::pos2(view.left() - 15.0, view.bottom() - 50.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, if attempt == 0 { 10000.0 } else { -100.0 }),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(6);
-    }
-    proof(app, "missing-control");
-    panic!("visible {label}");
+    ribbon::click_option(app, label);
 }
 fn proof(app: &mut App, name: &str) {
     if let Some(dir) = std::env::var_os("SOLIDDRAFT_MIRROR_PROOF_DIR") {
@@ -175,10 +160,10 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
             let angle = f64::from(*i) * std::f64::consts::TAU / 120.0;
             let at = screen(&app, p(-12.0 + 3.0 * angle.cos(), 3.0 * angle.sin())) * ppp;
             let pixel = image.get_pixel(at.x.floor() as u32, at.y.floor() as u32);
-            i16::from(pixel[2]) > i16::from(pixel[0]) + 40 && i16::from(pixel[2]) > i16::from(pixel[1]) + 20
+            i16::from(pixel[0]) > i16::from(pixel[1]) + 40 && i16::from(pixel[1]) > i16::from(pixel[2]) + 20
         })
         .count();
-    assert!((31..105).contains(&covered), "a construction preview has visible dash gaps, blue samples={covered}/120");
+    assert!((31..105).contains(&covered), "a construction preview has visible dash gaps, amber samples={covered}/120");
     control(&mut app, "Apply");
     assert!(session(&app).sketch.entity(3).unwrap().construction);
     reopen(&mut app, id, "construction");

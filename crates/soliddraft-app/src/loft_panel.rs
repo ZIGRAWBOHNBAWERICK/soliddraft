@@ -1,6 +1,5 @@
 //! Ordered sketch and face selection for the loft property page.
 
-use soliddraft_kernel_api::LoftShape;
 use soliddraft_model::{LoftFeature, LoftProfile};
 
 pub(crate) fn profiles(ui: &mut egui::Ui, loft: &mut LoftFeature, choices: &[(LoftProfile, String)]) {
@@ -48,14 +47,6 @@ pub(crate) fn profiles(ui: &mut egui::Ui, loft: &mut LoftFeature, choices: &[(Lo
             }
         }
     });
-}
-
-pub(crate) fn page(ui: &mut egui::Ui, loft: &mut LoftFeature, choices: &[(LoftProfile, String)]) {
-    profiles(ui, loft, choices);
-    ui.add_space(8.0);
-    crate::theme::section_label(ui, "Sides");
-    ui.radio_value(&mut loft.shape, LoftShape::Ruled, "Ruled");
-    ui.radio_value(&mut loft.shape, LoftShape::Smooth, "Smooth");
 }
 
 pub(crate) fn choices(doc: &crate::document::Document, target: usize) -> Vec<(LoftProfile, String)> {

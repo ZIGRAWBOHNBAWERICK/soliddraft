@@ -1,6 +1,6 @@
 //! Options bar acceptance through the real app, pointer, command dispatcher and renderer.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -9,7 +9,7 @@ use egui::{Key, Rect, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::document::{PlaneKind, Reference, Selection};
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::{EditorParams, Tool};
 use soliddraft_app::theme::{self, Mode};
 use soliddraft_app::viewport::{PickFilter, render::DisplayMode};
@@ -32,7 +32,6 @@ fn text(app: &App, expected: &str) {
 }
 
 fn edit_suite(app: &mut App) {
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
     app.state_mut().state.doc.selection = None;
     settle(app);
 }
@@ -42,8 +41,7 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
     let mut case = Case::new("options-bar-views");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
-        assert!(app.query_all_by_label("Active tool: Select").next().is_none(), "classic has no options bar");
-        case.frame(app, "classic");
+        assert!(app.query_all_by_label("Active tool: Select").next().is_some());
         edit_suite(app);
         text(app, "Select");
         assert_eq!(bar(app).top(), theme::MENU_HEIGHT, "the bar follows the title");
@@ -94,7 +92,7 @@ fn toggle_filter(app: &mut App, label: &str) {
 }
 
 #[test]
-fn pick_filters_control_real_picks_without_restricting_tools_or_classic() {
+fn pick_filters_control_real_picks_without_restricting_tools() {
     let mut case = Case::new("options-bar-pick-filter");
     let mut app = launch(ribbon::plate(), STANDARD);
     edit_suite(&mut app);
@@ -152,11 +150,6 @@ fn pick_filters_control_real_picks_without_restricting_tools_or_classic() {
         app.key_press(Key::Escape);
         settle(app);
 
-        app.state_mut().state.frame_layout = FrameLayout::Classic;
-        settle(app);
-        ribbon::click_world(app, face);
-        settle(app);
-        assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "classic ignores the Edit Suite filter");
         let after = ribbon::fingerprint(app);
         assert_eq!(before.features, after.features);
         assert_eq!(before.undo_depth, after.undo_depth);

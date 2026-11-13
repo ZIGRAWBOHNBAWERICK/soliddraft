@@ -248,6 +248,10 @@ fn own_config_dir(name: &str) -> PathBuf {
 
 /// Clicks a feature row in the tree, scrolling it into view first.
 fn click_row(harness: &mut App<'_>, name: &str) {
+    if !harness.state().state.tree_shown() {
+        harness.key_press(Key::F9);
+        harness.run_steps(6);
+    }
     harness.get_by_role_and_label(egui::accesskit::Role::Button, name).scroll_to_me();
     harness.run_steps(3);
     harness.get_by_role_and_label(egui::accesskit::Role::Button, name).click();
@@ -256,6 +260,20 @@ fn click_row(harness: &mut App<'_>, name: &str) {
 
 /// Clicks the first button with this label; ribbon items come before panel buttons.
 fn click_button(harness: &mut App<'_>, label: &str) {
+    if let Some(id) = match label {
+        "Edit feature" => Some("edit_feature"),
+        "Suppress" => Some("suppress"),
+        _ => None,
+    } {
+        harness.state_mut().state.run_command(soliddraft_app::commands::get(id).unwrap());
+        harness.run_steps(8);
+        return;
+    }
+    let label = match label {
+        "Sketch" if !harness.state().state.in_sketch() => "Start sketch",
+        "Exit" if harness.state().state.in_sketch() => "Close sketch",
+        _ => label,
+    };
     harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
@@ -376,6 +394,8 @@ fn open_extrude_orbit_click_face() {
     save(&mut harness, "05-face-selected");
 
     // The tree row selects the whole feature.
+    harness.key_press(Key::F9);
+    harness.run_steps(6);
     harness.get_by_role_and_label(egui::accesskit::Role::Button, "Boss-Extrude1").click();
     harness.run_steps(3);
     assert_eq!(harness.state().state.doc.selection, Some(Selection::Feature(1)));

@@ -171,8 +171,12 @@ fn drawing_opens_pinned_rebuilds_repairs_and_lists_locations() {
     save(&mut harness, "r01-newer-version");
     drawing(&mut harness, DrawingAction::Select(Some(DrawingSel::Model)));
     settle(&mut harness);
+    harness.get_by_label("Drawing options").click();
+    harness.run_steps(8);
     assert!(harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Replace model…").count() >= 1);
     save(&mut harness, "r07-model-reference");
+    harness.get_by_label("Close options").click();
+    harness.run_steps(8);
     drawing(&mut harness, DrawingAction::Select(None));
 
     // 4. Rebuild: the views move to the current revision, as one undo step.

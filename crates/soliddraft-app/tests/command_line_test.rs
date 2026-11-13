@@ -79,6 +79,8 @@ fn settle(harness: &mut App<'_>) {
 
 /// Types a line at the prompt, which has the keyboard, and presses a key after it.
 fn type_line(harness: &mut App<'_>, line: &str, then: Key) {
+    harness.get_by_label("Command line").click();
+    harness.run_steps(2);
     harness.get_by_label("Command line").type_text(line);
     harness.run_steps(2);
     harness.key_press(then);
@@ -181,11 +183,12 @@ fn typed_commands_run_and_the_session_talks_to_the_assistant() {
     assert_eq!(input(&harness), "");
 
     // The AI command opens the session at the same prompt.
+    let closed_viewport = harness.state().state.viewport.rect;
     type_line(&mut harness, AI_COMMAND, Key::Enter);
     settle(&mut harness);
     assert!(harness.state().state.command_line.session_open);
     let viewport = harness.state().state.viewport.rect;
-    assert!(viewport.bottom() < 900.0 - 250.0, "the session grows upward: {viewport:?}");
+    assert_eq!(viewport, closed_viewport, "the session overlays history without resizing the viewport");
     assert!(viewport.right() >= 1439.0, "and leaves the viewport its width");
     save(&mut harness, "c03-session-welcome");
 
@@ -230,7 +233,7 @@ fn typed_commands_run_and_the_session_talks_to_the_assistant() {
 }
 
 #[test]
-fn the_chip_row_reorders_takes_ribbon_buttons_and_comes_back_next_run() {
+fn the_chip_row_reorders_takes_palette_buttons_and_comes_back_next_run() {
     if !gpu_available() {
         eprintln!("skipped: no GPU adapter");
         return;

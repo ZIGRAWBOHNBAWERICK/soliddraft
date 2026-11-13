@@ -102,7 +102,6 @@ impl SolidDraftApp {
 
     pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         let st = &mut self.state;
-        let edit_suite = st.frame_layout == crate::settings::FrameLayout::EditSuite;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let (brand, _) = ui.allocate_exact_size(vec2(96.0, theme::MENU_HEIGHT), Sense::hover());
@@ -122,7 +121,7 @@ impl SolidDraftApp {
             );
             ui.add_space(6.0);
 
-            if edit_suite && ui.max_rect().width() < 1280.0 {
+            if ui.max_rect().width() < 1280.0 {
                 ui.menu_button("Menu", |ui| main_menus(ui, st));
             } else {
                 main_menus(ui, st);
@@ -132,7 +131,7 @@ impl SolidDraftApp {
             if !st.drawing.is_active() && !st.assembly.is_active() {
                 quick_access(ui, st);
             }
-            if edit_suite && st.start.is_none() {
+            if st.start.is_none() {
                 workspace_switch(ui, st);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -203,12 +202,7 @@ impl SolidDraftApp {
         };
         let mut shown = self.state.tree_shown();
         let mut open_requested = false;
-        let dock = match side {
-            Side::Tree if self.state.frame_layout == crate::settings::FrameLayout::EditSuite => {
-                &mut self.suite_tree_dock
-            }
-            Side::Tree => &mut self.tree_dock,
-        };
+        let dock = &mut self.tree_dock;
         if std::mem::take(&mut self.state.values.tree_focus)
             && let Some(at) = dock.find_tab(&docks::Tab::Tree)
         {
@@ -655,17 +649,17 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
             }
         }
         ui.separator();
-        if st.frame_layout == crate::settings::FrameLayout::EditSuite {
-            if ui.button("Tree").clicked() {
-                st.show_tree(true);
-                st.values.tree_focus = true;
-                ui.close();
-            }
-            if ui.button("Values").clicked() {
-                st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
-                ui.close();
-            }
+
+        if ui.button("Tree").clicked() {
+            st.show_tree(true);
+            st.values.tree_focus = true;
+            ui.close();
         }
+        if ui.button("Values").clicked() {
+            st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
+            ui.close();
+        }
+
         for side in Side::ALL {
             let shown = st.tree_shown();
             let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
@@ -704,12 +698,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
     ui.menu_button("Window", |ui| {
         menu_command(ui, st, "reset_layout", "Reset panel layout");
         menu_command(ui, st, "show_drawing", "Open drawings");
-        menu_command(
-            ui,
-            st,
-            "ask",
-            if st.frame_layout == crate::settings::FrameLayout::EditSuite { "AI session" } else { "Assistant" },
-        );
+        menu_command(ui, st, "ask", "AI session");
         menu_command(ui, st, "command_palette", "Command palette");
     });
     ui.menu_button("Help", |ui| {
@@ -718,7 +707,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
     });
 }
 
-/// The same workspace ids as the classic ribbon, in the Edit Suite title bar.
+/// Stable workspace ids in the title bar.
 fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
     let locked = st.in_sketch() && !st.drawing.is_active() && !st.assembly.is_active();
     if locked {

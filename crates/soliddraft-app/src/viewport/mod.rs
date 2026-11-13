@@ -164,7 +164,7 @@ pub struct ViewportState {
     pub display: DisplayMode,
     pub section_active: bool,
     pub preset: Preset,
-    /// Named background in Edit Suite; classic keeps the theme fade.
+    /// Named background; offscreen views can use the theme fade.
     pub scene: Option<scenes::Scene>,
     pub(crate) context_menus: bool,
     context_pick: Option<ContextPick>,
@@ -469,7 +469,7 @@ impl ViewportState {
                 rect,
                 &response,
                 spacing,
-                theme::is_edit_suite() && self.scene.is_some_and(scenes::Scene::is_dark),
+                self.scene.is_some_and(scenes::Scene::is_dark),
             );
             ui.ctx().request_repaint();
         }
@@ -608,7 +608,9 @@ impl ViewportState {
     }
 
     fn grid(&self, rect: Rect, plane: &GridPlane) -> Option<GridFrame> {
-        let ink = self.grid_style.color.unwrap_or_else(theme::ink);
+        let ink = self.grid_style.color.unwrap_or_else(|| {
+            if self.scene.is_some_and(scenes::Scene::is_dark) { theme::ink() } else { theme::edit_suite::FULLY_DEFINED }
+        });
         let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
     }
@@ -915,83 +917,19 @@ impl ViewportState {
         sketch_dimensions: Option<bool>,
         allow_dimensions: bool,
     ) {
-        if theme::is_edit_suite() {
-            self.navigation_bar.show(
-                ui,
-                rect,
-                &mut self.camera,
-                self.display,
-                self.scene.unwrap_or_default(),
-                &mut self.references,
-                &mut self.all_dimensions,
-                sketch_dimensions,
-                allow_dimensions,
-                self.section_active,
-                events,
-            );
-            return;
-        }
-        let height = 30.0;
-        let items: Vec<HudItem> = vec![
-            HudItem::Icon(Icon::Home, "Isometric view (I)"),
-            HudItem::Icon(Icon::Fit, "Zoom to fit (Z)"),
-            HudItem::Text("F", "Front view (F)"),
-            HudItem::Text("T", "Top view (T)"),
-            HudItem::Text("R", "Right view (R)"),
-            HudItem::Sep,
-            HudItem::Icon(Icon::Display, "Display style"),
-            HudItem::Icon(Icon::Section, "Section view"),
-            HudItem::Icon(Icon::Measure, "Coming soon"),
-        ];
-        let width: f32 = items.iter().map(|i| i.width()).sum::<f32>() + 10.0;
-        let hud = Rect::from_center_size(pos2(rect.center().x, rect.top() + 12.0 + height / 2.0), vec2(width, height));
-        ui.painter().rect(
-            hud,
-            CornerRadius::same(9),
-            theme::hud_bg(),
-            Stroke::new(1.0, theme::line()),
-            StrokeKind::Inside,
+        self.navigation_bar.show(
+            ui,
+            rect,
+            &mut self.camera,
+            self.display,
+            self.scene.unwrap_or_default(),
+            &mut self.references,
+            &mut self.all_dimensions,
+            sketch_dimensions,
+            allow_dimensions,
+            self.section_active,
+            events,
         );
-        let mut x = hud.left() + 5.0;
-        for (idx, item) in items.iter().enumerate() {
-            let w = item.width();
-            let r = Rect::from_min_size(pos2(x, hud.top() + 3.0), vec2(w, height - 6.0));
-            x += w;
-            match item {
-                HudItem::Sep => {
-                    ui.painter().vline(r.center().x, r.y_range().shrink(5.0), Stroke::new(1.0, theme::line()));
-                    continue;
-                }
-                HudItem::Icon(icon, tip) | HudItem::IconText(icon, tip) => {
-                    let enabled = !matches!(icon, Icon::Measure) && (*icon != Icon::Section || allow_dimensions);
-                    let resp = hud_button(ui, r, idx, enabled, tip, |p, c| icons::paint(p, *icon, r.shrink(5.0), c));
-                    if resp.clicked() {
-                        match idx {
-                            0 => events.set_view = Some(StandardView::Isometric),
-                            1 => events.fit = true,
-                            7 => events.actions.push(AppAction::ToggleSection),
-                            6 => {
-                                let i = DisplayMode::ALL.iter().position(|m| *m == self.display).unwrap_or(0);
-                                events.set_display = Some(DisplayMode::ALL[(i + 1) % DisplayMode::ALL.len()]);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                HudItem::Text(label, tip) => {
-                    let resp = hud_button(ui, r, idx, true, tip, |p, c| {
-                        p.text(r.center(), Align2::CENTER_CENTER, label, theme::font_semibold(12.0), c);
-                    });
-                    if resp.clicked() {
-                        events.set_view = Some(match *label {
-                            "F" => StandardView::Front,
-                            "T" => StandardView::Top,
-                            _ => StandardView::Right,
-                        });
-                    }
-                }
-            }
-        }
     }
 
     fn paint_view_cube(&mut self, ui: &mut egui::Ui, rect: Rect, events: &mut ViewportEvents) {
@@ -1050,7 +988,7 @@ impl ViewportState {
     }
 
     fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>) {
-        let rect = if theme::is_edit_suite() { Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0)) } else { rect };
+        let rect = Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0));
         let proj = if self.camera.orthographic { "Orthographic" } else { "Perspective" };
         let text =
             format!("mm · {} · {} · {} · {}", self.camera.view_name, self.display.label(), self.preset.label(), proj);
@@ -1090,43 +1028,6 @@ impl ViewportState {
         painter.rect(r, CornerRadius::same(99), theme::hud_bg(), Stroke::new(1.0, theme::line()), StrokeKind::Inside);
         painter.galley(r.center() - galley.size() / 2.0, galley, color);
     }
-}
-
-enum HudItem {
-    Icon(Icon, &'static str),
-    #[allow(dead_code)]
-    IconText(Icon, &'static str),
-    Text(&'static str, &'static str),
-    Sep,
-}
-
-impl HudItem {
-    fn width(&self) -> f32 {
-        match self {
-            HudItem::Sep => 9.0,
-            _ => 28.0,
-        }
-    }
-}
-
-fn hud_button(
-    ui: &mut egui::Ui,
-    rect: Rect,
-    idx: usize,
-    enabled: bool,
-    tip: &str,
-    draw: impl FnOnce(&egui::Painter, Color32),
-) -> egui::Response {
-    let id = ui.id().with(("hud", idx));
-    let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
-    let painter = ui.painter();
-    if enabled && resp.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(6), theme::hover());
-    }
-    let color = if enabled { theme::ink() } else { theme::muted().gamma_multiply(0.5) };
-    draw(painter, color);
-    resp.on_hover_text(tip)
 }
 
 fn point_in_convex(p: Pos2, poly: &[Pos2]) -> bool {

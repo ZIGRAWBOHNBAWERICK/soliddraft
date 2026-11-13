@@ -1,21 +1,21 @@
-//! Native spline refusal preserves the rendered part in both application frames.
+//! Native spline refusal preserves the rendered part in Edit Suite.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use serde_json::Value;
-use soliddraft_app::{app_tools::AppTools, settings::FrameLayout};
+use soliddraft_app::app_tools::AppTools;
 use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
 
 #[test]
-fn native_spline_fillet_refusal_keeps_the_visible_loft_in_both_frames() {
+fn native_spline_fillet_refusal_keeps_the_visible_loft_in_edit_suite() {
     let case = ribbon::case("native-spline-display-refusal");
     let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/loft-edge-fillet.json")).unwrap();
     let caller = Caller::Mcp { client: "native-spline-display-ui".into() };
-    for layout in [FrameLayout::Classic, FrameLayout::EditSuite] {
+    {
+        let layout = "edit_suite";
         let mut app = ribbon::app(soliddraft_app::new_document());
-        app.state_mut().state.frame_layout = layout;
         case.run(&mut app, |app| {
             for step in scenario["steps"].as_array().unwrap().iter().take(3) {
                 let name = step["tool"].as_str().unwrap();

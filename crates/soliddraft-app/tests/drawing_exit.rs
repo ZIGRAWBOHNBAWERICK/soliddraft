@@ -466,7 +466,8 @@ fn bracket_drawing_dimensioned_exported_updated_and_repaired() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     harness.get_all_by_label("Note text").last().expect("the note editor").type_text("DEBURR AFTER MACHINING");
     harness.run_steps(2);
-    click_button(&mut harness, "Apply text");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run_steps(4);
     let notes: Vec<String> = session(&harness)
         .sheet()
         .annotations

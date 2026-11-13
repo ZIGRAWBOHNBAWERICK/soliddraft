@@ -23,7 +23,7 @@ fn old_and_current_frame_settings_open_edit_suite_and_the_command_palette() {
             assert_eq!(app.ctx.global_style().visuals.panel_fill, palette.panel);
             assert!(app.state().state.viewport.rect.is_positive());
             assert!(app.query_all_by_label("Extrude").next().is_some());
-            assert!(app.query_all_by_label("Edit Suite").next().is_none(), "the switch stays internal");
+            assert!(app.query_all_by_label("Edit Suite").next().is_none(), "no layout switch is offered");
             for tab in ["Solid tab", "Sketch tab", "Assembly tab", "Inspect tab", "View tab"] {
                 assert!(app.query_all_by_label(tab).next().is_some(), "{setting}: {tab} remains available");
             }

@@ -15,6 +15,11 @@ mod ribbon;
 type App = Harness<'static, SolidDraftApp>;
 
 fn button(app: &mut App, label: &str) {
+    if label == "Edit feature" {
+        app.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
+        app.run_steps(8);
+        return;
+    }
     if app.state().state.doc.features.iter().any(|f| f.name == label) && !app.state().state.tree_shown() {
         app.key_press(Key::F9);
         app.run_steps(8);

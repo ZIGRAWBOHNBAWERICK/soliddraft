@@ -86,7 +86,7 @@ pub struct Proposal {
     pub question: String,
     /// The source entities involved, such as `#12`.
     pub entities: Vec<String>,
-    /// `seam_close`, `body_gap` or `opening`.
+    /// `seam_close`, `planar_incidence`, `body_gap` or `opening`.
     pub kind: String,
     /// The certified lower bound of the gap, in millimetres.
     pub distance_min_mm: String,
@@ -245,7 +245,7 @@ pub struct SourceIncidence {
 /// The change record of one import, including source cleanup certificates.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepairRecord {
-    /// Always [`REPAIR_FORMAT`].
+    /// The versioned record format, including source cleanup or mesh admission.
     pub format: String,
     /// The source file.
     pub source: RepairSource,

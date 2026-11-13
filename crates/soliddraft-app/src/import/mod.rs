@@ -106,9 +106,9 @@ fn plain(error: KernelError) -> String {
     }
 }
 
-/// Whether a repair the kernel asks about can be approved. Only a seam can close.
+/// Repairs the kernel can certify after an explicit tolerance approval.
 fn approvable(proposal: &Proposal) -> bool {
-    proposal.kind == "seam_close"
+    matches!(proposal.kind.as_str(), "seam_close" | "planar_incidence")
 }
 
 fn gap_name(proposal: &Proposal) -> String {
@@ -119,6 +119,7 @@ fn gap_name(proposal: &Proposal) -> String {
 fn kind_name(kind: &str) -> &'static str {
     match kind {
         "seam_close" => "seam",
+        "planar_incidence" => "source mismatch",
         "body_gap" => "gap between bodies",
         _ => "opening",
     }
@@ -312,7 +313,7 @@ pub fn record_rows(record: &RepairRecord) -> Vec<(String, String)> {
             format!("up to {} mm", face.source_to_result_upper_mm),
         ));
     }
-    if !record.changes.is_empty() || !record.source_incidence.is_empty() {
+    if !record.changes.is_empty() || !record.source_incidence.is_empty() || !record.face_tolerances.is_empty() {
         rows.push(("Repair figures".into(), "Cover the import only. Each export reports its own error.".into()));
     }
     rows

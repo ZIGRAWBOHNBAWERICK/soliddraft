@@ -214,3 +214,28 @@ fn mesh_refusals_are_plain_and_do_not_change_the_part() {
     assert!(doc.features.is_empty());
     assert_eq!(doc.revision(), 0);
 }
+
+#[test]
+fn asked_source_cleanup_uses_the_existing_tolerance_and_approver_review() {
+    let mut doc = Document::new("Reviewed cleanup", soliddraft_app::kernel());
+    let source = include_str!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step")
+        .replace("(0.000001,0,1)", "(0.003,0,1)");
+    let preview = Preview::from_bytes(&doc, "tilted.step", source.into_bytes()).unwrap();
+    let summary = preview.summary();
+    let asked: Vec<_> = summary["proposals"].as_array().unwrap().iter().filter(|p| p["disposition"] == "ask").collect();
+    assert!(!asked.is_empty(), "{summary}");
+    assert!(asked.iter().all(|p| p["kind"] == "planar_incidence"));
+    assert!(commit(&mut doc, &preview, &Review::default()).is_err());
+    let accept = asked
+        .iter()
+        .map(|p| soliddraft_app::import::Approved {
+            id: p["id"].as_str().unwrap().into(),
+            tolerance_mm: p["tolerance_mm"].as_str().unwrap().into(),
+            approver: "Cleanup reviewer".into(),
+        })
+        .collect();
+    let id = commit(&mut doc, &preview, &Review { decline: Vec::new(), accept }).unwrap();
+    let record = doc.model().import_record(soliddraft_model::FeatureId(id as u32)).unwrap();
+    assert!(record.changes.iter().any(|change| change.approver.as_deref() == Some("Cleanup reviewer")));
+    assert!(!record.source_incidence.is_empty());
+}

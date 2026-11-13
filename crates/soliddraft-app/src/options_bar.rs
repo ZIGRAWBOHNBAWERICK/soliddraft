@@ -55,6 +55,25 @@ fn command(ui: &mut egui::Ui, state: &mut AppState, id: &str) {
 }
 
 fn show(ui: &mut egui::Ui, state: &mut AppState) {
+    if state.assembly.is_active() && state.assembly.mate.open {
+        crate::mates::panel::show_suite(ui, state);
+        return;
+    }
+    if state.drawing.is_active()
+        && let Some(anchor) = crate::drawing::properties_drawing::sheet_bar(ui, state)
+    {
+        details_sheet(ui, state, anchor);
+        return;
+    }
+    if state.assembly.is_active() || state.drawing.is_active() || state.drawing.new.is_some() {
+        let response = ui.button(if state.assembly.is_active() { "Assembly options" } else { "Drawing options" });
+        if response.clicked() {
+            state.options_details = !state.options_details;
+        }
+        details_sheet(ui, state, response.rect);
+        return;
+    }
+
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (icon, label, prompt) = active_tool(state);
@@ -83,16 +102,15 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if let Some(sketch) = &state.sketch
-                        && let Some(info) = state.doc.describe(Selection::Feature(sketch.feature))
+                    if let Some(session) = &state.sketch
+                        && let Some(info) = state.doc.describe(Selection::Feature(session.feature))
                     {
-                        let plane = info
-                            .details
-                            .iter()
-                            .find(|(label, _)| label == "Plane")
-                            .map(|(_, value)| value.as_str())
-                            .unwrap_or("Sketch plane");
-                        ui.label(egui::RichText::new(format!("{} · {plane}", info.title)).color(theme::accent()));
+                        let plane =
+                            info.details.iter().find(|(label, _)| label == "Plane").map(|(_, value)| value.as_str());
+                        ui.label(
+                            egui::RichText::new(format!("{} · {}", info.title, plane.unwrap_or("Sketch plane")))
+                                .color(theme::accent()),
+                        );
                         ui.separator();
                     }
                     if state.in_sketch() || state.editor.is_some() || state.measure.open {
@@ -197,4 +215,37 @@ fn feature_dimensions(ui: &mut egui::Ui, state: &AppState, id: FeatureId, named:
         let label = if named { format!("{} · {label}", feature.name) } else { label };
         value_label(ui, &label, &value);
     }
+}
+
+fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
+    if !state.options_details {
+        return;
+    }
+    let screen = ui.ctx().input(|input| input.content_rect());
+    let width = 380.0_f32.min(screen.width() - 16.0);
+    let left = anchor.left().clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
+    egui::Area::new(egui::Id::new("document_options_details"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(egui::pos2(left, anchor.bottom() + 8.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(theme::panel())
+                .stroke(egui::Stroke::new(1.0, theme::line()))
+                .corner_radius(theme::RADIUS)
+                .inner_margin(8)
+                .show(ui, |ui| {
+                    ui.set_width(width - 16.0);
+                    ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
+                    if ui.button("Close options").clicked() {
+                        state.options_details = false;
+                    }
+                    if state.assembly.is_active() {
+                        crate::assembly::properties(ui, state);
+                    } else if state.drawing.new.is_some() && !state.drawing.is_active() {
+                        crate::drawing::properties_drawing::new_drawing(ui, state);
+                    } else if state.drawing.is_active() {
+                        crate::drawing::properties_drawing::show(ui, state);
+                    }
+                });
+        });
 }

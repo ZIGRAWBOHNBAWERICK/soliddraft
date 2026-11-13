@@ -796,6 +796,43 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_loft_verbs(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
+        if [
+            "view_isometric",
+            "view_front",
+            "view_top",
+            "view_right",
+            "view_back",
+            "view_left",
+            "view_bottom",
+            "display_shaded_edges",
+            "display_shaded",
+            "display_wireframe",
+            "orthographic",
+            "scene_white",
+            "scene_studio",
+            "scene_faded",
+            "scene_spot",
+            "scene_graphite",
+        ]
+        .contains(&id.as_str())
+        {
+            assert_eq!(
+                current["availability"]["assembly"]["offered"], true,
+                "3D view commands are available in assemblies"
+            );
+            assert_eq!(current["workspace"], "Model");
+            current["workspace"] = row["workspace"].clone();
+            current["availability"]["assembly"]["offered"] = row["availability"]["assembly"]["offered"].clone();
+        }
+        if ["drawing_check_sheet", "drawing_propose_dimensions", "drawing_find_issues", "drawing_explain"]
+            .contains(&id.as_str())
+        {
+            assert!(commands::get(id).unwrap().action.is_some(), "drawing AI commands open the session");
+            current["agents"] = row["agents"].clone();
+            for (fixture, observed) in current["availability"].as_object_mut().unwrap() {
+                observed["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

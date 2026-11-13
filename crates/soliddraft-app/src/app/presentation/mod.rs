@@ -7,7 +7,7 @@ use crate::commands;
 use crate::file;
 use crate::icons::{self, Icon};
 use crate::panels::{self, Side};
-use crate::state::{AppAction, AppState, EditorParams, NoteKind, RibbonTab};
+use crate::state::{AppAction, AppState, EditorParams, NoteKind};
 use crate::theme;
 use crate::viewport::look::Preset;
 use crate::viewport::render::DisplayMode;
@@ -102,9 +102,7 @@ impl SolidDraftApp {
 
     pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         let st = &mut self.state;
-        let edit_suite = st.frame_layout == crate::settings::FrameLayout::EditSuite
-            && !st.drawing.is_active()
-            && !st.assembly.is_active();
+        let edit_suite = st.frame_layout == crate::settings::FrameLayout::EditSuite;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let (brand, _) = ui.allocate_exact_size(vec2(96.0, theme::MENU_HEIGHT), Sense::hover());
@@ -143,15 +141,23 @@ impl SolidDraftApp {
                     // The start page has no document to name.
                     return;
                 }
-                let name = match &st.doc.path {
-                    Some(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                    None => format!("{}.{}", st.doc.name, file::EXTENSION),
-                };
-                let text = if st.doc.dirty { format!("{name} •") } else { name };
+                let (name, dirty, path) =
+                    if let Some(session) = st.assembly.session.as_ref().filter(|_| st.assembly.is_active()) {
+                        (session.doc.assembly().name.clone(), session.doc.is_dirty(), session.doc.path())
+                    } else if let Some(session) = st.drawing.session.as_ref().filter(|_| st.drawing.is_active()) {
+                        (session.title(), session.doc.dirty, session.doc.path.as_deref())
+                    } else {
+                        let name = match &st.doc.path {
+                            Some(path) => {
+                                path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+                            }
+                            None => format!("{}.{}", st.doc.name, file::EXTENSION),
+                        };
+                        (name, st.doc.dirty, st.doc.path.as_deref())
+                    };
+                let text = if dirty { format!("{name} •") } else { name };
                 ui.add(egui::Label::new(egui::RichText::new(text).size(12.0).color(theme::muted())).truncate())
-                    .on_hover_text(
-                        st.doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or("Not saved yet".into()),
-                    );
+                    .on_hover_text(path.map(|p| p.display().to_string()).unwrap_or("Not saved yet".into()));
             });
         });
     }
@@ -195,9 +201,15 @@ impl SolidDraftApp {
             Side::Tree if self.state.drawing.is_active() => "Drawing tree",
             _ => side.title(),
         };
-        let mut shown = self.state.layout.panel(side).shown;
+        let mut shown = self.state.tree_shown();
         let mut open_requested = false;
         let dock = match side {
+            Side::Tree
+                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && (self.state.assembly.is_active() || self.state.drawing.is_active()) =>
+            {
+                &mut self.document_tree_dock
+            }
             Side::Tree => &mut self.tree_dock,
         };
         if std::mem::take(&mut self.state.values.focus)
@@ -213,8 +225,8 @@ impl SolidDraftApp {
                 open_requested = true;
             }
         });
+        self.state.show_tree(shown || open_requested);
         let panel = self.state.layout.panel_mut(side);
-        panel.shown = shown || open_requested;
         if let Some(s) = egui::PanelState::load(root.ctx(), side.panel_id()) {
             panel.width = s.outer_rect.width();
         }
@@ -611,18 +623,18 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
             ui,
             st,
             "orthographic",
-            if st.viewport.camera.orthographic { "Perspective" } else { "Orthographic" },
+            if st.active_viewport().camera.orthographic { "Perspective" } else { "Orthographic" },
         );
         ui.separator();
         for m in DisplayMode::ALL {
-            if ui.radio(st.viewport.display == m, m.label()).clicked() {
+            if ui.radio(st.active_viewport().display == m, m.label()).clicked() {
                 st.push(AppAction::SetDisplay(m));
                 ui.close();
             }
         }
         ui.separator();
         for p in Preset::ALL {
-            if ui.radio(st.viewport.preset == p, p.label()).clicked() {
+            if ui.radio(st.active_viewport().preset == p, p.label()).clicked() {
                 st.push(AppAction::SetPreset(p));
                 ui.close();
             }
@@ -636,7 +648,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         }
         ui.separator();
         for side in Side::ALL {
-            let shown = st.layout.panel(side).shown;
+            let shown = st.tree_shown();
             let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
             if ui.add(egui::Button::selectable(shown, side.title()).shortcut_text(key)).clicked() {
                 st.push(AppAction::TogglePanel(side));
@@ -673,7 +685,12 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
     ui.menu_button("Window", |ui| {
         menu_command(ui, st, "reset_layout", "Reset panel layout");
         menu_command(ui, st, "show_drawing", "Open drawings");
-        menu_command(ui, st, "ask", "Assistant");
+        menu_command(
+            ui,
+            st,
+            "ask",
+            if st.frame_layout == crate::settings::FrameLayout::EditSuite { "AI session" } else { "Assistant" },
+        );
         menu_command(ui, st, "command_palette", "Command palette");
     });
     ui.menu_button("Help", |ui| {
@@ -684,13 +701,17 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
 
 /// The same workspace ids as the classic ribbon, in the Edit Suite title bar.
 fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
-    let locked = st.in_sketch();
+    let locked = st.in_sketch() && !st.drawing.is_active() && !st.assembly.is_active();
     if locked {
-        st.ribbon_tab = RibbonTab::Sketch;
+        st.ribbon_tab = crate::state::RibbonTab::Sketch;
     }
-    let widths = RibbonTab::ALL.map(|tab| {
-        ui.painter().layout_no_wrap(tab.label().to_owned(), theme::font_medium(12.5), theme::ink()).size().x + 28.0
-    });
+    let tabs = st.workspaces();
+    let widths: Vec<_> = tabs
+        .iter()
+        .map(|tab| {
+            ui.painter().layout_no_wrap(tab.label().to_owned(), theme::font_medium(12.5), theme::ink()).size().x + 28.0
+        })
+        .collect();
     let gap = 1.0;
     let width = widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32 + 4.0;
     let centered = ui.max_rect().center().x - width / 2.0;
@@ -698,11 +719,11 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(6), theme::panel_header());
     let mut x = rect.left() + 2.0;
-    for (tab, width) in RibbonTab::ALL.into_iter().zip(widths) {
+    for (tab, width) in tabs.into_iter().zip(widths) {
         let bounds = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 22.0));
         x += width + gap;
-        let selected = st.ribbon_tab == tab;
-        let enabled = !locked || tab == RibbonTab::Sketch;
+        let selected = st.workspace() == tab;
+        let enabled = !locked || selected;
         let response = ui.interact(
             bounds,
             ui.id().with(("workspace", tab.id())),
@@ -734,7 +755,7 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
             );
         }
         if enabled && response.clicked() {
-            st.ribbon_tab = tab;
+            st.select_workspace(tab);
         }
         if !enabled {
             response.on_hover_text("Close sketch to change workspace");

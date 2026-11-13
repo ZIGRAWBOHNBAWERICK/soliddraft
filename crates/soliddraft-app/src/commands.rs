@@ -50,9 +50,21 @@ pub enum Tab {
     Drawing(DrawingTab),
     /// The assembly's commands, on the assembly's one tab and on the part's Assembly tab.
     Assembly,
+    AssemblyInspect,
+    AssemblyView,
 }
 
 impl Tab {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Part(tab) => tab.id(),
+            Self::Drawing(tab) => tab.id(),
+            Self::Assembly => "assembly",
+            Self::AssemblyInspect => "inspect",
+            Self::AssemblyView => "view",
+        }
+    }
+
     /// Every tab with commands, the part's, then the drawing's. The assembly's is among
     /// the part's.
     pub fn all() -> Vec<Tab> {
@@ -61,6 +73,7 @@ impl Tab {
             .map(Tab::from)
             .filter(|t| !panels(*t).is_empty())
             .chain(DrawingTab::ALL.into_iter().map(Tab::Drawing))
+            .chain([Self::AssemblyInspect, Self::AssemblyView])
             .collect()
     }
 
@@ -69,6 +82,18 @@ impl Tab {
             Tab::Part(t) => t.label(),
             Tab::Drawing(t) => t.label(),
             Tab::Assembly => "Assembly",
+            Tab::AssemblyInspect => "Inspect",
+            Tab::AssemblyView => "View",
+        }
+    }
+}
+
+impl From<crate::assembly::Workspace> for Tab {
+    fn from(workspace: crate::assembly::Workspace) -> Self {
+        match workspace {
+            crate::assembly::Workspace::Assembly => Self::Assembly,
+            crate::assembly::Workspace::Inspect => Self::AssemblyInspect,
+            crate::assembly::Workspace::View => Self::AssemblyView,
         }
     }
 }
@@ -103,6 +128,8 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
         Tab::Drawing(D::View) => &["Zoom", "Sheet", "Documents", "Panels"],
         Tab::Drawing(D::Assistant) => &["Chat", "Drawing"],
         Tab::Assembly => &["Edit", "Component", "File", "View"],
+        Tab::AssemblyInspect => &["Check"],
+        Tab::AssemblyView => &["Orientation", "Display", "Projection", "Scene", "Panels"],
     }
 }
 
@@ -110,6 +137,8 @@ pub fn panels(tab: Tab) -> &'static [&'static str] {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Workspace {
     Part,
+    /// A 3D view command for a part or an assembly.
+    Model,
     Drawing,
     Assembly,
     /// Every workspace.
@@ -121,6 +150,7 @@ impl Workspace {
     pub fn applies(self, c: Context) -> bool {
         match self {
             Workspace::Part => !c.drawing && !c.assembly,
+            Workspace::Model => !c.drawing,
             Workspace::Drawing => c.drawing,
             Workspace::Assembly => c.assembly,
             Workspace::Both => true,
@@ -509,6 +539,11 @@ impl CommandSpec {
         self
     }
 
+    fn model(mut self) -> Self {
+        self.workspace = Workspace::Model;
+        self
+    }
+
     fn both(mut self) -> Self {
         self.workspace = Workspace::Both;
         self
@@ -621,7 +656,7 @@ impl CommandSpec {
             Workspace::Both => Scope::App,
             Workspace::Drawing => Scope::Drawing,
             Workspace::Assembly => Scope::Assembly,
-            Workspace::Part => {
+            Workspace::Part | Workspace::Model => {
                 if !self.ribbon.is_empty() && self.ribbon.iter().all(|p| p.tab == Tab::Part(RibbonTab::Sketch)) {
                     Scope::Sketch
                 } else {
@@ -639,7 +674,8 @@ impl CommandSpec {
             .filter(|c| c.in_app() && c.id != self.id && c.label == self.label)
             .any(|c| c.is_working() == self.is_working());
         if shared
-            && (!matches!(self.workspace, Workspace::Part | Workspace::Both) || self.default_scope() == Scope::Sketch)
+            && (!matches!(self.workspace, Workspace::Part | Workspace::Model | Workspace::Both)
+                || self.default_scope() == Scope::Sketch)
         {
             format!("{} ({})", self.label, self.default_scope().label())
         } else {
@@ -2177,6 +2213,8 @@ fn registry() -> Vec<CommandSpec> {
             .on(Inspect, "Surface quality", Small),
         // View.
         cmd("view_isometric", "Isometric", Icon::Glyph("iso"), "Isometric view")
+            .model()
+            .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Large)
             .key(Scope::Model, none, Key::I)
             .run(|_| AppAction::SetView(StandardView::Isometric))
@@ -2186,6 +2224,7 @@ fn registry() -> Vec<CommandSpec> {
             .on(View, "Orientation", Large)
             .on(DrawingTab::View, "Zoom", Large)
             .on(Tab::Assembly, "View", Large)
+            .on(Tab::AssemblyView, "Orientation", Large)
             .key(Scope::Part, none, Key::Z)
             .key(Scope::Drawing, none, Key::Z)
             .key(Scope::Drawing, none, Key::F)
@@ -2201,16 +2240,22 @@ fn registry() -> Vec<CommandSpec> {
             })
 .app_only(CAMERA),
         cmd("view_front", "Front", Icon::Glyph("iso"), "Front view")
+            .model()
+            .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Small)
             .key(Scope::Model, none, Key::F)
             .run(|_| AppAction::SetView(StandardView::Front))
 .app_only(CAMERA),
         cmd("view_top", "Top", Icon::Glyph("iso"), "Top view")
+            .model()
+            .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Small)
             .key(Scope::Model, none, Key::T)
             .run(|_| AppAction::SetView(StandardView::Top))
 .app_only(CAMERA),
         cmd("view_right", "Right", Icon::Glyph("iso"), "Right view")
+            .model()
+            .on(Tab::AssemblyView, "Orientation", Small)
             .on(View, "Orientation", Small)
             .key(Scope::Model, none, Key::R)
             .run(|_| AppAction::SetView(StandardView::Right))
@@ -2222,47 +2267,71 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::NormalTo)
 .app_only(CAMERA),
         cmd("view_back", "Back", Icon::Glyph("iso"), "Back view").run(|_| AppAction::SetView(StandardView::Back))
+            .model()
 .app_only(CAMERA),
         cmd("view_left", "Left", Icon::Glyph("iso"), "Left view").run(|_| AppAction::SetView(StandardView::Left))
+            .model()
 .app_only(CAMERA),
         cmd("view_bottom", "Bottom", Icon::Glyph("iso"), "Bottom view").run(|_| AppAction::SetView(StandardView::Bottom))
+            .model()
 .app_only(CAMERA),
         cmd("display_shaded_edges", "Shaded, edges", Icon::Views, "Shaded with edges")
+            .model()
+            .on(Tab::AssemblyView, "Display", Small)
             .on(View, "Display", Large)
             .run(|_| AppAction::SetDisplay(DisplayMode::ShadedWithEdges))
-            .lit(|s| s.viewport.display == DisplayMode::ShadedWithEdges)
+            .lit(|s| s.active_viewport().display == DisplayMode::ShadedWithEdges)
 .app_only(LOOK),
         cmd("display_shaded", "Shaded", Icon::Display, "Shaded")
+            .model()
+            .on(Tab::AssemblyView, "Display", Small)
             .on(View, "Display", Large)
             .run(|_| AppAction::SetDisplay(DisplayMode::Shaded))
-            .lit(|s| s.viewport.display == DisplayMode::Shaded)
+            .lit(|s| s.active_viewport().display == DisplayMode::Shaded)
 .app_only(LOOK),
         cmd("display_wireframe", "Wireframe", Icon::Wireframe, "Wireframe")
+            .model()
+            .on(Tab::AssemblyView, "Display", Small)
             .on(View, "Display", Large)
             .run(|_| AppAction::SetDisplay(DisplayMode::Wireframe))
-            .lit(|s| s.viewport.display == DisplayMode::Wireframe)
+            .lit(|s| s.active_viewport().display == DisplayMode::Wireframe)
 .app_only(LOOK),
         cmd("scene_white", "Plain white", Icon::Display, "Set the viewport background to Plain white")
+            .model()
+            .on(Tab::AssemblyView, "Scene", Small)
+            .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::White)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::White))
             .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
 .app_only(LOOK),
         cmd("scene_studio", "Studio fade", Icon::Display, "Set the viewport background to Studio fade")
+            .model()
+            .on(Tab::AssemblyView, "Scene", Small)
+            .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Studio)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Studio))
             .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
 .app_only(LOOK),
         cmd("scene_faded", "3 point faded", Icon::Display, "Set the viewport background to 3 point faded")
+            .model()
+            .on(Tab::AssemblyView, "Scene", Small)
+            .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Faded)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Faded))
             .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
 .app_only(LOOK),
         cmd("scene_spot", "Soft spotlight", Icon::Display, "Set the viewport background to Soft spotlight")
+            .model()
+            .on(Tab::AssemblyView, "Scene", Small)
+            .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Spot)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Spot))
             .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
 .app_only(LOOK),
         cmd("scene_graphite", "Graphite", Icon::Display, "Set the viewport background to Graphite")
+            .model()
+            .on(Tab::AssemblyView, "Scene", Small)
+            .lit(|state| state.active_viewport().scene.unwrap_or_default() == crate::viewport::scenes::Scene::Graphite)
             .run(|_| AppAction::SetScene(crate::viewport::scenes::Scene::Graphite))
             .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
@@ -2293,17 +2362,20 @@ fn registry() -> Vec<CommandSpec> {
             .lit(|_| crate::theme::mode() == crate::theme::Mode::Dark)
 .app_only(LOOK),
         cmd("orthographic", "Orthographic", Icon::OnPlane, "Toggle perspective and orthographic projection")
+            .model()
+            .on(Tab::AssemblyView, "Projection", Small)
             .on(View, "Projection", Large)
             .run(|_| AppAction::ToggleProjection)
-            .lit(|s| s.viewport.camera.orthographic)
+            .lit(|s| s.active_viewport().camera.orthographic)
 .app_only(CAMERA),
         cmd("toggle_tree", "Feature tree", Icon::Tree, "Show or hide the feature tree")
             .both()
             .on(View, "Panels", Large)
             .on(DrawingTab::View, "Panels", Large)
+            .on(Tab::AssemblyView, "Panels", Large)
             .key_anytime(Scope::App, none, Key::F9)
             .run(|_| AppAction::TogglePanel(Side::Tree))
-            .lit(|s| s.layout.tree.shown)
+            .lit(AppState::tree_shown)
             .label_now(|s| s.drawing.is_active().then(|| "Drawing tree".to_owned()))
 .app_only(PANELS),
         cmd(
@@ -2898,7 +2970,9 @@ fn drawing_registry() -> Vec<CommandSpec> {
         cmd("drawing_explain", "Explain", Icon::Chat, "Ask the assistant to explain the selected annotation")
             .on(Views, "Assistant", Small)
             .on(Annotate, "Assistant", Small)
-            .on(Assistant, "Chat", Large),
+            .on(Assistant, "Chat", Large)
+            .run(|_| AppAction::Ask("Explain the selected drawing annotation and its references.".into()))
+            .app_only(CHAT),
         // Annotate.
         drawing_tool!(
             "drawing_smart_dimension", "Smart dimension", Icon::SmartDim,
@@ -3010,7 +3084,7 @@ fn drawing_registry() -> Vec<CommandSpec> {
         // Sheet.
         cmd("drawing_sheet_properties", "Sheet properties", Icon::Props, "Name, size, scale, projection angle and title block")
             .on(Sheet, "Sheet", Large)
-            .run(|_| AppAction::Drawing(DrawingAction::Select(None)))
+            .run(|_| AppAction::Drawing(DrawingAction::SheetProperties))
 .app_only(PANEL),
         cmd(
             "drawing_add_sheet",
@@ -3097,11 +3171,17 @@ fn drawing_registry() -> Vec<CommandSpec> {
 .agents(Agents::Mcp, "Unsaved changes to the drawing are dropped.", Vec::new).undo(Undo::Replaces),
         // Assistant.
         cmd("drawing_check_sheet", "Check sheet", Icon::Check, "Ask the assistant to check the sheet")
-            .on(Assistant, "Drawing", Large),
+            .on(Assistant, "Drawing", Large)
+            .run(|_| AppAction::Ask("Check this drawing sheet for missing dimensions, stale references and annotation problems.".into()))
+            .app_only(CHAT),
         cmd("drawing_propose_dimensions", "Propose dimensions", Icon::SmartDim, "Ask the assistant to dimension the views")
-            .on(Assistant, "Drawing", Small),
+            .on(Assistant, "Drawing", Small)
+            .run(|_| AppAction::Ask("Propose dimensions for the views on this drawing sheet.".into()))
+            .app_only(CHAT),
         cmd("drawing_find_issues", "Find issues", Icon::Warning, "Ask the assistant for problems on the sheet")
-            .on(Assistant, "Drawing", Small),
+            .on(Assistant, "Drawing", Small)
+            .run(|_| AppAction::Ask("Find problems on this drawing sheet and explain how to fix them.".into()))
+            .app_only(CHAT),
         // Keys.
         drawing_tool!(
             "drawing_select", "Select", Icon::Sketch, "Select and drag views and annotations",

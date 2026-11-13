@@ -178,7 +178,7 @@ fn circular_cut_uses_quarter_turns_and_preserves_the_part_on_exact_parameter_ref
 
 #[path = "support/ribbon.rs"]
 mod ribbon;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use soliddraft_app::state::{AppAction, EditorParams};
 
 fn field(app: &mut ribbon::App, label: &str, value: &str) {
@@ -264,7 +264,7 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
         app.run_steps(2);
         app.get_by_label("Back").click();
         app.run_steps(4);
-        assert_eq!(app.get_by_label("Thicken side").accesskit_node().value(), Some("Back"));
+        assert_eq!(app.get_by_label("Thicken side").accesskit_node().value().as_deref(), Some("Back"));
         app.get_by_label("OK (Enter)").click();
         app.run_steps(10);
         volume(&app.state().state, 80.0);
@@ -282,7 +282,7 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
             panic!("Pattern editor")
         };
         assert_eq!(p.source, Some(soliddraft_model::FeatureId(source as u32)));
-        assert_eq!(app.get_by_label("Pattern source").accesskit_node().value(), Some("Cut-Extrude1"));
+        assert_eq!(app.get_by_label("Pattern source").accesskit_node().value().as_deref(), Some("Cut-Extrude1"));
         case.frame(app, "selected-feature-pattern");
         app.get_by_label("OK (Enter)").click();
         app.run_steps(10);

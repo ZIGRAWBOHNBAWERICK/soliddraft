@@ -2042,9 +2042,14 @@ impl Line {
                 (format!("Grade {feature}"), format!("{start} to {end} along {} from {from} to {to} mm", axis.name()))
             }
             Line::Offset { distance } => ("Offset".into(), format!("{distance} mm")),
-            Line::Thicken { faces, thickness, side } => {
-                ("Thicken".into(), format!("{} faces, {thickness} mm, {side:?}", faces.len()))
-            }
+            Line::Thicken { faces, thickness, side } => (
+                "Thicken".into(),
+                format!(
+                    "{} {}, {thickness} mm, {side:?}",
+                    faces.len(),
+                    if faces.len() == 1 { "face" } else { "faces" }
+                ),
+            ),
             Line::EditOffset { feature, distance } => ("Edit offset".into(), format!("{feature}, {distance} mm")),
             Line::EditThicken { feature, thickness, side } => {
                 ("Edit thicken".into(), format!("{feature}, {thickness} mm, {side:?}"))

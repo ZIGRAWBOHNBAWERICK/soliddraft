@@ -794,7 +794,12 @@ impl Feature {
             FeatureKind::Draft(d) => format!("{}°", fmt_mm(d.angle)),
             FeatureKind::Shell(s) => format!("{} mm wall", fmt_mm(s.thickness)),
             FeatureKind::Offset(s) => format!("{} mm", fmt_mm(s.distance)),
-            FeatureKind::Thicken(s) => format!("{} faces, {} mm", s.faces.len(), fmt_mm(s.thickness)),
+            FeatureKind::Thicken(s) => format!(
+                "{} {}, {} mm",
+                s.faces.len(),
+                if s.faces.len() == 1 { "face" } else { "faces" },
+                fmt_mm(s.thickness)
+            ),
             FeatureKind::ImportStep(i) => i.source_name.clone(),
             FeatureKind::Lattice(l) => format!("unproved preview · ±{} mm", fmt_mm(l.accuracy_mm)),
             FeatureKind::Gyroid(g) => format!("unproved preview · ±{} mm", fmt_mm(g.accuracy_mm)),

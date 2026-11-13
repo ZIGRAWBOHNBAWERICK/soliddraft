@@ -256,6 +256,18 @@ pub fn save_scene(scene: Scene) -> Result<(), NotKept> {
     save_view_keys(serde_json::json!({ "scene": scene }))
 }
 
+/// The scene gallery favourites, with the approved first five on a fresh installation.
+pub fn scene_favourites() -> Vec<Scene> {
+    let saved = serde_json::from_value::<Vec<Scene>>(stored()["view"]["scene_favourites"].clone());
+    let chosen = saved.unwrap_or_else(|_| Scene::ALL[..5].to_vec());
+    Scene::ALL.into_iter().filter(|scene| chosen.contains(scene)).collect()
+}
+
+/// Saves favourites without replacing other viewport preferences.
+pub fn save_scene_favourites(scenes: &[Scene]) -> Result<(), NotKept> {
+    save_view_keys(serde_json::json!({ "scene_favourites": scenes }))
+}
+
 /// Saves how the grid looks.
 pub fn save_grid_style(style: &GridStyle) -> Result<(), NotKept> {
     save_view_keys(serde_json::json!({ "grid": style.to_json() }))

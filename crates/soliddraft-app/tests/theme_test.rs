@@ -65,7 +65,7 @@ fn the_bracket_in_light_and_dark() {
         harness.run_steps(6);
         assert_eq!(theme::mode(), mode, "the appearance preference is retained");
         assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
-        let style = harness.ctx.style();
+        let style = harness.ctx.global_style();
         assert!(style.visuals.dark_mode, "Edit Suite has dark chrome in either mode");
         assert_eq!(style.visuals.panel_fill, egui::Color32::from_rgb(0x30, 0x33, 0x38));
         assert_eq!(style.visuals.selection.stroke.color, egui::Color32::from_rgb(0xf5, 0xa5, 0x24));
@@ -82,7 +82,7 @@ fn the_bracket_in_light_and_dark() {
     harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
     harness.run_steps(2);
     assert_eq!(theme::palette(), &theme::LIGHT);
-    assert!(!harness.ctx.style().visuals.dark_mode);
+    assert!(!harness.ctx.global_style().visuals.dark_mode);
     let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
     assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
     let _ = std::fs::remove_dir_all(config);

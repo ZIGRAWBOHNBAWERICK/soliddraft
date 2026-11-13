@@ -22,7 +22,7 @@ fn both_frame_settings_open_the_workspace_and_command_palette() {
                 FrameLayout::EditSuite => &theme::edit_suite::PALETTE,
             };
             assert_eq!(theme::palette(), palette, "{setting}: startup installs the frame's tokens");
-            assert_eq!(app.ctx.style().visuals.panel_fill, palette.panel);
+            assert_eq!(app.ctx.global_style().visuals.panel_fill, palette.panel);
             assert!(app.state().state.viewport.rect.is_positive());
             assert!(app.query_all_by_label("Extrude").next().is_some());
             assert!(app.query_all_by_label("Edit Suite").next().is_none(), "the switch stays internal");

@@ -187,7 +187,7 @@
         },
         {
           "pointer": "/result/report/tier",
-          "equals": "certified_mesh"
+          "equals": "exact_and_certified_mesh"
         },
         {
           "pointer": "/result/report/chord_mm",
@@ -277,11 +277,11 @@
         },
         {
           "pointer": "/result/report/touching_or_undecided",
-          "equals": 1
+          "equals": 0
         },
         {
           "pointer": "/result/report/results/0/outcome",
-          "equals": "touching_or_undecided"
+          "equals": "touching"
         },
         {
           "pointer": "/result/report/results/0/contact/0/mate",
@@ -306,6 +306,18 @@
             "step": 14,
             "pointer": "/summary/assembly/accepted_state"
           }
+        },
+        {
+          "pointer": "/result/report/touching",
+          "equals": 1
+        },
+        {
+          "pointer": "/result/report/results/0/overlap_mm3/hi",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/results/0/contact_faces/a/0",
+          "equals": "Boss-Extrude1 \u00b7 End cap"
         }
       ]
     },
@@ -368,6 +380,11 @@
             "step": 17,
             "pointer": "/summary/assembly/accepted_state"
           }
+        },
+        {
+          "pointer": "/result/report/results/0/overlap_mm3/value",
+          "approx": 200,
+          "tolerance": 1e-08
         }
       ]
     },

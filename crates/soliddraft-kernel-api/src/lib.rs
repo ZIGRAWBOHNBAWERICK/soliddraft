@@ -34,6 +34,8 @@ pub use assembly_measure::{
 };
 pub use measure::{Certainty, Measurement, PairEndpoint, PairQuantity, PointProof};
 mod assembly_measure;
+mod body_relation;
+pub use body_relation::{BodyContactFaces, BodyDistance, BodyQueryRefusal, BodyRelation, OverlapVolume, PlacedBody};
 mod edit;
 mod field;
 mod geometry;
@@ -790,6 +792,13 @@ pub type KernelResult<T> = Result<T, KernelError>;
 /// Implementations are thread-safe; a backend that needs a single kernel thread
 /// serialises calls internally.
 pub trait Kernel: Send + Sync {
+    /// Compares two solids at their accepted assembly placements without changing either.
+    /// Refused quantities remain independent of successful answers.
+    /// Clearance uses its shortest round-trip decimal, like authored lengths.
+    fn body_relation(&self, _a: PlacedBody, _b: PlacedBody, _clearance: Option<f64>) -> KernelResult<BodyRelation> {
+        Err(KernelError::Unsupported("Exact checks between placed parts are unavailable".into()))
+    }
+
     /// Which backend this is.
     fn backend(&self) -> BackendInfo;
 

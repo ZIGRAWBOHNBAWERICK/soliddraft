@@ -1,0 +1,314 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "canonical-p5",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "operations": [
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 8,
+                "v": 0
+              },
+              "b": {
+                "u": 22,
+                "v": 0
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 22,
+                "v": 0
+              },
+              "b": {
+                "u": 22,
+                "v": 5
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 22,
+                "v": 5
+              },
+              "b": {
+                "u": 12,
+                "v": 5
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 12,
+                "v": 5
+              },
+              "b": {
+                "u": 12,
+                "v": 30
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 12,
+                "v": 30
+              },
+              "b": {
+                "u": 8,
+                "v": 30
+              }
+            }
+          },
+          {
+            "tool": "add",
+            "construction": false,
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 8,
+                "v": 30
+              },
+              "b": {
+                "u": 8,
+                "v": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "tool": "revolve",
+      "arguments": {
+        "sketch": "Sketch1",
+        "axis_origin": [
+          0,
+          0,
+          0
+        ],
+        "axis_direction": [
+          0,
+          1,
+          0
+        ],
+        "angle_deg": 360
+      },
+      "label": "P5 housing",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12880.529879718,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "hole",
+      "arguments": {
+        "face": "Revolve1 \u00b7 Side of line 3",
+        "points": [
+          [
+            17,
+            5,
+            0
+          ],
+          [
+            0,
+            5,
+            17
+          ],
+          [
+            -17,
+            5,
+            0
+          ],
+          [
+            0,
+            5,
+            -17
+          ]
+        ],
+        "diameter": 4,
+        "countersink": {
+          "diameter": 8,
+          "angle": 90
+        }
+      },
+      "label": "P5 drilled",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12495.161180877803,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Revolve1 \u00b7 Edge 4"
+        ],
+        "radius": 2
+      },
+      "label": "original",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12558.681699123754,
+          "tolerance": 0.005
+        }
+      ],
+      "exports": [
+        {
+          "format": "step"
+        },
+        {
+          "format": "stl",
+          "refused": "mesh.precision-or-budget",
+          "sentinel": "previous accepted STL"
+        }
+      ]
+    },
+    {
+      "tool": "lattice",
+      "arguments": {
+        "cell": "cubic",
+        "cell_size": 10,
+        "radius": 1,
+        "accuracy": 0.1,
+        "min_detail": 0.5
+      },
+      "label": "field-refused",
+      "refused": "measure.unsupported-surface",
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12558.681699123754,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 2.5
+      },
+      "label": "edited",
+      "exports": [
+        {
+          "format": "step"
+        },
+        {
+          "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "label": "undo",
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12558.681699123754,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "label": "redo",
+      "same_geometry_as_step": 6,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/canonical-p5.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/canonical-p5.dwprt"
+      },
+      "label": "reopened",
+      "fresh_process": true,
+      "same_geometry_as_step": 6,
+      "exports": [
+        {
+          "format": "step"
+        },
+        {
+          "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 3.5
+      },
+      "label": "refused",
+      "refused": "shapes.rolling-envelope",
+      "same_geometry_as_step": 10,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

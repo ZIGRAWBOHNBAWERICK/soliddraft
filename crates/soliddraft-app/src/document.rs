@@ -355,7 +355,7 @@ pub struct FilletParams {
 impl FilletParams {
     /// The model's fillet these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature { edges: self.edges.clone(), size: self.radius }
+        model::BlendFeature { edges: self.edges.clone(), size: self.radius, other_distance: None }
     }
 }
 
@@ -363,12 +363,14 @@ impl FilletParams {
 pub struct ChamferParams {
     pub edges: Vec<EdgeRef>,
     pub distance: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_distance: Option<f64>,
 }
 
 impl ChamferParams {
     /// The model's chamfer these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature { edges: self.edges.clone(), size: self.distance }
+        model::BlendFeature { edges: self.edges.clone(), size: self.distance, other_distance: self.other_distance }
     }
 }
 
@@ -656,9 +658,11 @@ impl FeatureKind {
             model::FeatureKind::Fillet(b) => {
                 FeatureKind::Fillet(FilletParams { edges: b.edges.clone(), radius: b.size })
             }
-            model::FeatureKind::Chamfer(b) => {
-                FeatureKind::Chamfer(ChamferParams { edges: b.edges.clone(), distance: b.size })
-            }
+            model::FeatureKind::Chamfer(b) => FeatureKind::Chamfer(ChamferParams {
+                edges: b.edges.clone(),
+                distance: b.size,
+                other_distance: b.other_distance,
+            }),
             model::FeatureKind::Hole(h) => FeatureKind::Hole(h.clone()),
             model::FeatureKind::Pattern(p) => FeatureKind::Pattern(p.clone()),
             model::FeatureKind::Mirror(m) => FeatureKind::Mirror(m.clone()),
@@ -850,6 +854,9 @@ pub struct NamedFace {
     pub feature: FeatureId,
     pub label: String,
     pub surface: SurfaceKind,
+    pub accuracy: soliddraft_kernel_api::FaceAccuracy,
+    /// Immutable entity name in the imported source, when present.
+    pub imported_key: Option<String>,
     pub area: f64,
     pub centroid: Vec3,
 }
@@ -912,7 +919,10 @@ impl Feature {
                 }
             ),
             FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
-            FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
+            FeatureKind::Chamfer(c) => match c.other_distance {
+                Some(other) => format!("{} × {} mm", fmt_mm(c.distance), fmt_mm(other)),
+                None => format!("{} mm", fmt_mm(c.distance)),
+            },
             FeatureKind::Hole(h) => {
                 format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter))
             }
@@ -1473,7 +1483,7 @@ pub struct Document {
     /// The immutable body `meshes` and `picks` show.
     shown: Option<BodyId>,
     /// Assignments used by the currently shown mesh.
-    shading: model::PartMaterials,
+    shading: (model::PartMaterials, Option<soliddraft_document::ConfigurationId>),
     /// Bodies shown before, latest last, kept while the part keeps them.
     recent: Vec<Shown>,
     model: model::Document,
@@ -1534,7 +1544,7 @@ impl Document {
             edit_request: None,
             picks: Vec::new(),
             shown: None,
-            shading: model.materials().clone(),
+            shading: (model.materials().clone(), model.active_configuration().cloned()),
             recent: Vec::new(),
             quality: DisplayQuality::new(model.kernel().clone()),
             model,
@@ -2826,7 +2836,8 @@ impl Document {
             return;
         }
         if next.is_some() && next == self.shown && !self.meshes.is_empty() {
-            if self.shading != *self.model.materials() {
+            if self.shading.0 != *self.model.materials() || self.shading.1.as_ref() != self.model.active_configuration()
+            {
                 self.apply_appearances();
                 self.mesh_version += 1;
             }
@@ -2908,9 +2919,48 @@ impl Document {
         self.mesh_version += 1;
     }
 
-    /// Applies an appearance to the part, a feature's faces or one face, or removes the
-    /// one there with `None`, in every configuration, as one undo entry. Only the colours
-    /// change: the meshes keep their geometry and the kernel is not asked for anything.
+    /// The effective material of the configuration shown by the app.
+    pub fn material(&self) -> Option<&soliddraft_materials::Material> {
+        self.model.material(self.model.active_configuration())
+    }
+
+    fn material_scope(&self) -> soliddraft_document::ConfigScope {
+        match self.model.active_configuration() {
+            Some(id) => soliddraft_document::ConfigScope::Only(vec![id.clone()]),
+            None => soliddraft_document::ConfigScope::All,
+        }
+    }
+
+    /// The assignment owned by the current configuration, or the part default.
+    /// None in a configuration means it inherits a broader assignment.
+    pub fn material_assignment(&self) -> Option<&soliddraft_materials::MaterialId> {
+        let scope = self.material_scope();
+        self.model
+            .materials()
+            .material
+            .iter()
+            .find(|assignment| assignment.scope == scope)
+            .map(|assignment| &assignment.material)
+    }
+
+    /// Assigns a material to the current configuration, or sets the part default.
+    /// Clearing a configuration assignment restores its inherited material.
+    pub fn set_material(
+        &mut self,
+        material: Option<soliddraft_materials::Material>,
+        default_appearance: Option<Appearance>,
+    ) -> Result<(), String> {
+        let scope = self.material_scope();
+        self.model
+            .execute(model::Command::SetMaterial { material, default_appearance, scope })
+            .map_err(|e| e.to_string())?;
+        self.touch();
+        self.apply_appearances();
+        self.mesh_version += 1;
+        Ok(())
+    }
+
+    /// Applies an appearance as one undo entry.
     pub fn set_appearance(
         &mut self,
         target: model::AppearanceTarget,
@@ -2925,10 +2975,10 @@ impl Document {
     }
 
     /// Fills each display mesh's appearance table and per-vertex index from the part's
-    /// appearance assignments, resolved by the model for its default configuration.
+    /// appearance assignments, resolved for the visible configuration.
     fn apply_appearances(&mut self) {
-        self.shading = self.model.materials().clone();
-        let resolved = self.model.appearance_table(None);
+        self.shading = (self.model.materials().clone(), self.model.active_configuration().cloned());
+        let resolved = self.model.appearance_table(self.model.active_configuration());
         let table: Vec<Shading> = resolved.appearances.iter().map(Appearance::shading).collect();
         for mesh in self.meshes.values_mut() {
             if mesh.appearances == table
@@ -3553,6 +3603,20 @@ impl Document {
         })
     }
 
+    /// The measured source deviation of an unchanged imported face. The record
+    /// covers the import body only, so a later modified body never inherits it.
+    pub fn import_face_tolerance(&self, id: FaceId) -> Option<&soliddraft_kernel_api::FaceTolerance> {
+        let named = self.named_face(id)?;
+        let feature = self.feature(named.feature)?;
+        let body = self.display_body()?;
+        if feature.body != Some(body) || !matches!(feature.kind, FeatureKind::ImportStep(_)) {
+            return None;
+        }
+        let key = named.imported_key.as_ref()?;
+        let record = self.model.import_record(model_id(named.feature))?;
+        record.face_tolerances.iter().find(|tolerance| &tolerance.face == key)
+    }
+
     pub fn named_face(&self, id: FaceId) -> Option<&NamedFace> {
         self.faces.iter().find(|f| f.id == id)
     }
@@ -3665,6 +3729,9 @@ impl Document {
                     FeatureKind::Chamfer(p) => {
                         details.push(("Edges".to_owned(), p.edges.len().to_string()));
                         details.push(("Distance".to_owned(), format!("{} mm", fmt_mm(p.distance))));
+                        if let Some(other) = p.other_distance {
+                            details.push(("Second distance".into(), format!("{} mm", fmt_mm(other))));
+                        }
                     }
                     FeatureKind::Hole(h) => {
                         details.push(("Face".to_owned(), h.face.label.clone()));
@@ -3727,7 +3794,7 @@ impl Document {
                 {
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));
-                    let material = self.model().material(self.model().active_configuration());
+                    let material = self.material();
                     let mass = soliddraft_materials::mass::of_body(&mp, material);
                     details.push((
                         "Mass".into(),
@@ -3780,9 +3847,27 @@ impl Document {
                 let details = vec![
                     ("Feature".to_owned(), name.clone()),
                     ("Surface".to_owned(), surface.to_owned()),
+                    (
+                        "Carrier accuracy".into(),
+                        match nf.accuracy {
+                            soliddraft_kernel_api::FaceAccuracy::Exact => "Exact".into(),
+                            soliddraft_kernel_api::FaceAccuracy::Fitted { max_deviation_mm } => {
+                                format!("Fitted, deviation ≤ {max_deviation_mm:e} mm")
+                            }
+                            soliddraft_kernel_api::FaceAccuracy::Unknown => "Unknown".into(),
+                        },
+                    ),
                     ("Area".to_owned(), format!("{:.1} mm²", nf.area)),
                     ("Centroid".to_owned(), format!("{:.2}, {:.2}, {:.2}", c.x, c.y, c.z)),
                 ];
+                let mut details = details;
+                if let Some(tolerance) = self.import_face_tolerance(fid) {
+                    details.push((
+                        "Import deviation".into(),
+                        format!("≤ {} mm from source", tolerance.deviation_upper_mm),
+                    ));
+                    details.push(("Approved import limit".into(), format!("{} mm", tolerance.approved_tolerance_mm)));
+                }
                 Some(EntityInfo { title: format!("{} · {}", name, nf.label), feature: f.map(|f| f.id), details })
             }
             Selection::Edge(eid) => {
@@ -3830,6 +3915,11 @@ fn named_entities(model: &model::Document, body: BodyId, topology: &Topology) ->
                 feature,
                 label,
                 surface: face.surface,
+                accuracy: face.accuracy,
+                imported_key: face.origins.iter().find_map(|origin| match &origin.role {
+                    soliddraft_kernel_api::FaceRole::Imported { key } => Some(key.clone()),
+                    _ => None,
+                }),
                 area: face.area,
                 centroid: kv(face.centroid),
             }

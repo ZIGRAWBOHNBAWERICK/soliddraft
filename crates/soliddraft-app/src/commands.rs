@@ -1976,7 +1976,7 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Chamfer needs a body".into())))
             .agents(Agents::Verb, "", tools::chamfer_params)
 .undo(Undo::Step),
-        cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal cubic lattice")
+        cmd("lattice", "Lattice", Icon::Cad("lattice"), "Make a terminal lattice")
             .on(Solid, "Modify", Small)
             .run(|_| AppAction::StartLattice)
             .when(|s| has_body(s) && field_open(s))
@@ -1984,7 +1984,7 @@ fn registry() -> Vec<CommandSpec> {
             .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Lattice needs a body".into())))
             .agents(Agents::Verb, "Density is the constant beam radius. The preview is unproved; export certifies the mesh.", tools::lattice_params)
             .undo(Undo::Step),
-        cmd("edit_lattice", "Edit lattice", Icon::Cad("lattice"), "Change lattice density and output settings")
+        cmd("edit_lattice", "Edit lattice", Icon::Cad("lattice"), "Change lattice cell, density and output settings")
             .agents(Agents::Verb, "Only supplied settings change.", tools::edit_lattice_params)
             .undo(Undo::Step),
         cmd("gyroid", "Gyroid", Icon::Cad("lattice"), "Make a terminal network gyroid")
@@ -2207,6 +2207,19 @@ fn registry() -> Vec<CommandSpec> {
              Editing and model_summary report previously requested body properties. Tracked rows are standing requests for their own entity proofs.",
             tools::feature_params,
         ),
+        cmd("material", "Material", Icon::Material, "Assign a part material and calculate mass from its density")
+            .on(Inspect, "Measure", Small)
+            .in_menu()
+            .outside_sketch()
+            .run(|_| AppAction::ShowMaterial)
+            .when(|s| {
+                s.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && s.doc.display_body().is_some()
+                    && s.editor.is_none()
+                    && !s.in_sketch()
+            })
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Check the body for geometry faults").on(Inspect, "Check", Large),
         cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane").on(Inspect, "Check", Small),
         cmd("draft_check", "Draft check", Icon::Cad("draft_check"), "Show which faces have enough draft")
@@ -2555,7 +2568,6 @@ fn registry() -> Vec<CommandSpec> {
         cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch(),
         cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch(),
         cmd("appearance", "Appearance", Icon::Display, COMING_SOON).in_menu().outside_sketch(),
-        cmd("material", "Material", Icon::Material, COMING_SOON).in_menu().outside_sketch(),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
             .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))

@@ -117,7 +117,10 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         right_click(app, row, false);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
         groups(app, &["Body"]);
-        dismiss(app);
+        menu_command(app, "material");
+        app.run_steps(6);
+        app.get_by_label("Part material");
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
 
         let empty = app.state().state.viewport.rect.left_bottom() + egui::vec2(45.0, -50.0);
         right_click(app, empty, true);

@@ -415,11 +415,13 @@ pub enum Line {
         /// Unite the reflection with the original.
         keep_original: bool,
     },
-    /// Replaces the finished body with a terminal cubic lattice.
+    /// Replaces the finished body with a terminal lattice.
     Lattice { cell: soliddraft_kernel_api::LatticeCell, cell_size: f64, radius: f64, accuracy: f64, min_detail: f64 },
     /// Edits only the supplied lattice settings.
     EditLattice {
         feature: String,
+        #[serde(default)]
+        cell: Option<soliddraft_kernel_api::LatticeCell>,
         #[serde(default)]
         cell_size: Option<f64>,
         #[serde(default)]
@@ -488,6 +490,8 @@ pub enum Line {
         edges: Vec<String>,
         /// Distance, mm.
         distance: f64,
+        #[serde(default)]
+        other_distance: Option<f64>,
     },
     /// Changes an extrude's depth or direction.
     EditExtrude {
@@ -522,6 +526,8 @@ pub enum Line {
         feature: String,
         /// New distance, mm.
         distance: f64,
+        #[serde(default)]
+        other_distance: Option<f64>,
     },
     /// Changes a hole's diameter and depth.
     EditHole {
@@ -897,7 +903,7 @@ pub fn mirror_params() -> Vec<(&'static str, Value)> {
 /// The `lattice` verb's parameters.
 pub fn lattice_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("cell", constant("cubic")),
+        ("cell", json!({"type":"string", "enum":["cubic", "body_centred", "face_centred", "octet"]})),
         ("cell_size", number("Cell size in millimetres")),
         ("radius", number("Density as beam radius in millimetres")),
         ("accuracy", number("Certified export accuracy in millimetres")),
@@ -908,9 +914,7 @@ pub fn lattice_params() -> Vec<(&'static str, Value)> {
 /// The `edit_lattice` verb's parameters.
 pub fn edit_lattice_params() -> Vec<(&'static str, Value)> {
     let mut params = vec![feature_param()];
-    params.extend(
-        lattice_params().into_iter().filter(|(key, _)| *key != "cell").map(|(key, value)| (key, optional(value))),
-    );
+    params.extend(lattice_params().into_iter().map(|(key, value)| (key, optional(value))));
     params
 }
 
@@ -1032,7 +1036,11 @@ pub fn fillet_params() -> Vec<(&'static str, Value)> {
 
 /// The `chamfer` verb's parameters.
 pub fn chamfer_params() -> Vec<(&'static str, Value)> {
-    vec![edges_param(), ("distance", number("Distance, mm, greater than 0"))]
+    vec![
+        edges_param(),
+        ("distance", number("Distance, mm, greater than 0")),
+        ("other_distance", optional(number("Second distance in mm; omit for equal distances"))),
+    ]
 }
 
 /// The `edit_extrude` verb's parameters.
@@ -1061,7 +1069,11 @@ pub fn edit_fillet_params() -> Vec<(&'static str, Value)> {
 
 /// The `edit_chamfer` verb's parameters.
 pub fn edit_chamfer_params() -> Vec<(&'static str, Value)> {
-    vec![feature_param(), ("distance", number("Distance, mm, greater than 0"))]
+    vec![
+        feature_param(),
+        ("distance", number("Distance, mm, greater than 0")),
+        ("other_distance", optional(number("Second distance in mm; omit for equal distances"))),
+    ]
 }
 
 /// The `suppress` verb's parameters.
@@ -1726,12 +1738,14 @@ impl Line {
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Lattice(lattice)))?;
             }
-            Line::EditLattice { feature, cell_size, radius, accuracy, min_detail } => {
+            Line::EditLattice { feature, cell, cell_size, radius, accuracy, min_detail } => {
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Lattice(mut lattice)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a lattice"));
                 };
-                lattice.cell = Some(soliddraft_kernel_api::LatticeCell::Cubic);
+                if let Some(cell) = cell {
+                    lattice.cell = Some(*cell);
+                }
                 if let Some(v) = cell_size {
                     lattice.cell_size_mm = Some(positive("cell size", *v)?);
                 }
@@ -1865,9 +1879,13 @@ impl Line {
                 let params = FilletParams { edges, radius: positive("radius", *radius)? };
                 run.apply(doc, Command::AddFillet { params })?;
             }
-            Line::Chamfer { edges, distance } => {
+            Line::Chamfer { edges, distance, other_distance } => {
                 let edges = edges.iter().map(|e| edge_ref(doc, e)).collect::<Result<Vec<_>, _>>()?;
-                let params = ChamferParams { edges, distance: positive("distance", *distance)? };
+                let params = ChamferParams {
+                    edges,
+                    distance: positive("distance", *distance)?,
+                    other_distance: other_distance.map(|d| positive("second distance", d)).transpose()?,
+                };
                 run.apply(doc, Command::AddChamfer { params })?;
             }
             Line::EditExtrude { feature, depth, flip } => {
@@ -1957,12 +1975,16 @@ impl Line {
                 let params = FilletParams { radius: positive("radius", *radius)?, ..p };
                 run.apply(doc, Command::EditFillet { id, params })?;
             }
-            Line::EditChamfer { feature, distance } => {
+            Line::EditChamfer { feature, distance, other_distance } => {
                 let id = feature_by_name(doc, feature)?;
                 let Some(FeatureKind::Chamfer(p)) = doc.feature(id).map(|f| f.kind.clone()) else {
                     return Err(format!("{feature} is not a chamfer"));
                 };
-                let params = ChamferParams { distance: positive("distance", *distance)?, ..p };
+                let params = ChamferParams {
+                    distance: positive("distance", *distance)?,
+                    other_distance: other_distance.map(|d| positive("second distance", d)).transpose()?,
+                    ..p
+                };
                 run.apply(doc, Command::EditChamfer { id, params })?;
             }
             Line::Suppress { feature, suppressed } => {
@@ -2160,9 +2182,10 @@ impl Line {
             Line::Mirror { plane, keep_original } => {
                 ("Mirror".into(), format!("in {plane}{}", if *keep_original { ", keeping the original" } else { "" }))
             }
-            Line::Lattice { cell_size, radius, .. } => {
-                ("Lattice".into(), format!("Cubic cell {} mm, beam radius {} mm", fmt_mm(*cell_size), fmt_mm(*radius)))
-            }
+            Line::Lattice { cell, cell_size, radius, .. } => (
+                "Lattice".into(),
+                format!("{} cell {} mm, beam radius {} mm", cell.label(), fmt_mm(*cell_size), fmt_mm(*radius)),
+            ),
             Line::EditLattice { feature, .. } => (format!("Edit {feature}"), "Change lattice settings".into()),
             Line::Gyroid { period, level, .. } => {
                 ("Gyroid".into(), format!("Network, period {} mm, level {}", fmt_mm(*period), fmt_mm(*level)))
@@ -2226,8 +2249,8 @@ impl Line {
             Line::Fillet { edges, radius } => {
                 ("Fillet".into(), format!("R{} on {}", fmt_mm(*radius), edges.join(", ")))
             }
-            Line::Chamfer { edges, distance } => {
-                ("Chamfer".into(), format!("{} mm on {}", fmt_mm(*distance), edges.join(", ")))
+            Line::Chamfer { edges, distance, other_distance } => {
+                ("Chamfer".into(), format!("{} mm on {}", chamfer_size(*distance, *other_distance), edges.join(", ")))
             }
             Line::AddConfiguration { name } => ("Add configuration".into(), name.clone()),
             Line::SetConfigurationValue { configuration, name, expression } => {
@@ -2244,7 +2267,9 @@ impl Line {
                 (format!("Edit {feature}"), end(*through_all, *depth, *flip))
             }
             Line::EditFillet { feature, radius } => (format!("Edit {feature}"), format!("R{}", fmt_mm(*radius))),
-            Line::EditChamfer { feature, distance } => (format!("Edit {feature}"), format!("{} mm", fmt_mm(*distance))),
+            Line::EditChamfer { feature, distance, other_distance } => {
+                (format!("Edit {feature}"), format!("{} mm", chamfer_size(*distance, *other_distance)))
+            }
             Line::Suppress { feature, suppressed } => {
                 (if *suppressed { "Suppress" } else { "Unsuppress" }.into(), feature.clone())
             }
@@ -2701,6 +2726,7 @@ fn face_json(doc: &Document, face: FaceId) -> Value {
         return json!({
             "name": name_of_face(doc, face),
             "surface": "field display region",
+            "accuracy": soliddraft_kernel_api::FaceAccuracy::Unknown,
             "area_mm2": null,
             "centroid": null,
             "measured": "field_mass proves the field's moments; the display region has none",
@@ -2709,6 +2735,8 @@ fn face_json(doc: &Document, face: FaceId) -> Value {
     let mut v = json!({
         "name": name_of_face(doc, face),
         "surface": format!("{:?}", nf.surface).to_lowercase(),
+        "accuracy": nf.accuracy,
+        "import_tolerance": doc.import_face_tolerance(face),
         "area_mm2": round(nf.area),
         "centroid": vec3(nf.centroid),
     });
@@ -2840,7 +2868,9 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             json!({"type":"revolve","sketch":name(r.sketch.0 as u64),"axis_origin":r.axis_origin,"axis_direction":r.axis_direction,"angle_deg":r.angle_deg})
         }
         FeatureKind::Fillet(p) => json!({ "type": "fillet", "edges": labels(&p.edges), "radius": p.radius }),
-        FeatureKind::Chamfer(p) => json!({ "type": "chamfer", "edges": labels(&p.edges), "distance": p.distance }),
+        FeatureKind::Chamfer(p) => {
+            json!({ "type": "chamfer", "edges": labels(&p.edges), "distance": p.distance, "other_distance": p.other_distance })
+        }
         FeatureKind::Hole(h) => {
             let mut v = json!({
                 "type": "hole", "face": h.face.label, "holes": h.points.len(), "diameter": h.diameter,
@@ -3304,6 +3334,13 @@ pub fn board_bracket() -> Document {
     }
     doc.selection = None;
     doc
+}
+
+fn chamfer_size(distance: f64, other: Option<f64>) -> String {
+    match other {
+        Some(other) => format!("{} × {}", fmt_mm(distance), fmt_mm(other)),
+        None => fmt_mm(distance),
+    }
 }
 
 fn pattern_source(doc: &Document, source: Option<&str>) -> Result<Option<soliddraft_model::FeatureId>, String> {

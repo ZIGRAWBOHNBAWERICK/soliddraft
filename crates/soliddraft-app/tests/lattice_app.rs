@@ -153,3 +153,58 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     );
     app.render().unwrap().save(image).unwrap();
 }
+
+#[test]
+fn ridealong_edit_suite_exposes_all_lattice_cells() {
+    let temporary = std::env::temp_dir().join(format!("soliddraft-cells-{}", std::process::id()));
+    soliddraft_app::file::set_config_dir(Some(temporary.join("config")));
+    let mut doc = Document::new("Lattice cells", soliddraft_app::kernel());
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams {
+            profile: ProfileKind::Rectangle { width: 25.0, height: 15.0 },
+            depth: 10.0,
+            ..Default::default()
+        },
+        via_assistant: false,
+    })
+    .unwrap();
+    let mut doc = Some(doc);
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_render_every_step(true)
+        .wgpu()
+        .build_eframe(move |cc| SolidDraftApp::new(cc, doc.take().unwrap(), Automation::default()));
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.run_steps(5);
+    button(&mut app, "Lattice");
+    for choice in [
+        soliddraft_kernel_api::LatticeCell::BodyCentred,
+        soliddraft_kernel_api::LatticeCell::FaceCentred,
+        soliddraft_kernel_api::LatticeCell::Octet,
+    ] {
+        app.get_by_label("Cell type").click();
+        app.run_steps(3);
+        app.get_by_label(choice.label()).click();
+        app.run_steps(3);
+        let soliddraft_app::state::EditorParams::Lattice(lattice) = &app.state().state.editor.as_ref().unwrap().params
+        else {
+            panic!("lattice editor")
+        };
+        assert_eq!(lattice.cell, Some(choice));
+    }
+    let folder = std::env::var_os("SOLIDDRAFT_TEST_OUT").map(std::path::PathBuf::from).unwrap_or(temporary);
+    std::fs::create_dir_all(&folder).unwrap();
+    app.render().unwrap().save(folder.join("ridealong-lattice-editor.png")).unwrap();
+    button(&mut app, "OK (Enter)");
+    app.run_steps(30);
+    let start = std::time::Instant::now();
+    while app.state().state.doc.features.last().unwrap().status == soliddraft_app::document::FeatureStatus::Pending {
+        assert!(start.elapsed().as_secs() < 60, "lattice proof did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
+    let FeatureKind::Lattice(lattice) = &app.state().state.doc.features.last().unwrap().kind else { panic!("lattice") };
+    assert_eq!(lattice.cell, Some(soliddraft_kernel_api::LatticeCell::Octet));
+    assert_eq!(app.state().state.doc.features.last().unwrap().status, soliddraft_app::document::FeatureStatus::Ok);
+    app.render().unwrap().save(folder.join("ridealong-octet.png")).unwrap();
+}

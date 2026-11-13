@@ -215,6 +215,7 @@ impl Kernel for BoxKernel {
                     FaceInfo {
                         id,
                         surface: SurfaceKind::Plane,
+                        accuracy: soliddraft_kernel_api::FaceAccuracy::Unknown,
                         area: s.dot(u).abs() * s.dot(v).abs(),
                         centroid: centre,
                         bbox: Aabb { min: b.min, max: b.max },

@@ -838,3 +838,201 @@ fn proof_folder() -> std::path::PathBuf {
     std::fs::create_dir_all(&folder).unwrap();
     folder
 }
+
+#[test]
+fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
+    use soliddraft_app::state::{AppAction, RibbonTab};
+    let _gpu = gpu();
+    let mut app = harness(box_document());
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.run_steps(4);
+    click_world(&mut app, glam::Vec3::new(0.0, -20.0, 20.0));
+    button(&mut app, "Chamfer");
+    assert!(!soliddraft_app::commands::get("material").unwrap().is_enabled(&app.state().state));
+    app.get_by_label("Two distances").click();
+    app.run_steps(4);
+    type_field(&mut app, "Distance value", "1");
+    type_field(&mut app, "Distance 2 value", "-1");
+    ok(&mut app);
+    assert!(app.state().state.editor.is_some(), "a refused second distance keeps the editor open");
+    assert_eq!(app.state().state.doc.features.len(), 1);
+    type_field(&mut app, "Distance 2 value", "3");
+    assert!(app.state().state.note.as_ref().is_none_or(|note| note.kind != NoteKind::Error));
+    app.render().unwrap().save(proof_folder().join("ridealong-chamfer-editor.png")).unwrap();
+    ok(&mut app);
+    let state = &app.state().state;
+    assert!(state.editor.is_none());
+    let FeatureKind::Chamfer(chamfer) = &state.doc.features.last().unwrap().kind else { panic!("chamfer") };
+    assert_eq!(chamfer.other_distance, Some(3.0));
+    assert!((volume(&state.doc) - (48000.0 - 90.0)).abs() < 1e-6);
+    button(&mut app, "Material");
+    assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
+    app.get_by_label("Part material");
+    app.state_mut().state.ribbon_tab = RibbonTab::Inspect;
+    app.run_steps(4);
+    button(&mut app, "Material");
+    app.get_by_label("Part material").click();
+    app.run_steps(4);
+    app.get_by_label("Steel, generic").click();
+    app.run_steps(4);
+    app.get_by_label("Density: 7900 kg/m³");
+    button(&mut app, "Calculate mass");
+    let start = std::time::Instant::now();
+    while app.state().state.doc.kernel().cached_mass_properties(app.state().state.doc.display_body().unwrap()).is_none()
+    {
+        assert!(start.elapsed().as_secs() < 60);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
+    app.run_steps(4);
+    app.get_by_label(&format!("Mass: {:.6} kg", (48000.0 - 90.0) * 7900e-9));
+    app.render().unwrap().save(proof_folder().join("ridealong-material.png")).unwrap();
+    let face = app.state().state.doc.faces[0].id;
+    app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
+    app.run_steps(4);
+    app.get_by_label("Carrier accuracy");
+    app.get_by_label("Exact");
+    app.render().unwrap().save(proof_folder().join("ridealong-accuracy.png")).unwrap();
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::Classic;
+    app.run_steps(4);
+    assert!(app.query_by_label("Carrier accuracy").is_none());
+}
+
+#[test]
+fn ridealong_edit_suite_displays_fitted_face_deviation() {
+    use soliddraft_app::app_tools::AppTools;
+    use soliddraft_app::state::{AppAction, AppState};
+    use soliddraft_assistant::{Caller, tools::call_checked};
+    use soliddraft_kernel_api::FaceAccuracy;
+    let _gpu = gpu();
+    let scenario: serde_json::Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/ring-fillet.json")).unwrap();
+    let mut state = AppState::new(Document::new("Fitted face", soliddraft_app::kernel()));
+    for step in scenario["steps"].as_array().unwrap().iter().take(5) {
+        let out = call_checked(
+            &mut AppTools { state: &mut state },
+            step["tool"].as_str().unwrap(),
+            step["arguments"].clone(),
+            &Caller::Mcp { client: "ridealong".into() },
+        );
+        assert!(!out.is_error, "{}", out.content);
+    }
+    let (face, bound) = state
+        .doc
+        .faces
+        .iter()
+        .find_map(|face| match face.accuracy {
+            FaceAccuracy::Fitted { max_deviation_mm } => Some((face.id, max_deviation_mm)),
+            _ => None,
+        })
+        .expect("the ring fillet has a fit bound");
+    let mut app = harness(state.doc);
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
+    app.run_steps(4);
+    app.get_by_label(&format!("Fitted, deviation ≤ {bound:e} mm"));
+    app.render().unwrap().save(proof_folder().join("ridealong-fitted-face.png")).unwrap();
+}
+
+#[test]
+fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
+    use soliddraft_app::state::AppAction;
+    let _gpu = gpu();
+    let mut doc = Document::new("Repaired face", soliddraft_app::kernel());
+    let source = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
+    let proposal = doc.kernel().propose_import(source, &Default::default()).unwrap().proposals.remove(0);
+    let imported = soliddraft_model::ImportStepFeature::new("seam.step", source.to_vec()).accepted(
+        &proposal.question,
+        "0.03",
+        "Fixture reviewer",
+    );
+    doc.apply(Command::AddFeature(FeatureKind::ImportStep(imported))).unwrap();
+    let face = doc.faces.iter().find(|face| doc.import_face_tolerance(face.id).is_some()).unwrap().id;
+    let mut app = harness(doc);
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
+    app.run_steps(4);
+    app.get_by_label("Import deviation");
+    app.get_by_label("≤ 0.02 mm from source");
+    app.get_by_label("Approved import limit");
+    app.get_by_label("0.03 mm");
+    app.render().unwrap().save(proof_folder().join("ridealong-imported-face.png")).unwrap();
+}
+
+#[test]
+fn ridealong_material_uses_the_visible_configuration() {
+    use soliddraft_app::state::AppAction;
+    use soliddraft_document::ConfigScope;
+    use soliddraft_model::Command as ModelCommand;
+    let _gpu = gpu();
+    let mut model =
+        soliddraft_model::Document::from_bytes(&box_document().model().to_bytes().unwrap(), soliddraft_app::kernel())
+            .unwrap();
+    let mut base = soliddraft_materials::Material::new("fixture-base", "Base material");
+    base.density_kg_m3 = Some(1000.0);
+    model
+        .execute(ModelCommand::SetMaterial {
+            material: Some(base.clone()),
+            default_appearance: None,
+            scope: ConfigScope::All,
+        })
+        .unwrap();
+    model.execute(ModelCommand::AddConfiguration { name: "Variant".into() }).unwrap();
+    model.execute(ModelCommand::ActivateConfiguration { name: "Variant".into() }).unwrap();
+    let configuration = model.active_configuration().unwrap().clone();
+    let mut variant = soliddraft_materials::Material::new("fixture-variant", "Variant material");
+    variant.density_kg_m3 = Some(2000.0);
+    model
+        .execute(ModelCommand::SetMaterial {
+            material: Some(variant),
+            default_appearance: None,
+            scope: ConfigScope::Only(vec![configuration.clone()]),
+        })
+        .unwrap();
+    let mut app = harness(Document::from_model(model));
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::ShowMaterial);
+    app.run_steps(4);
+    app.render().unwrap().save(proof_folder().join("ridealong-configuration-material.png")).unwrap();
+    app.get_by_label("Density: 2000 kg/m³");
+    button(&mut app, "Calculate mass");
+    let start = std::time::Instant::now();
+    while app.state().state.doc.kernel().cached_mass_properties(app.state().state.doc.display_body().unwrap()).is_none()
+    {
+        assert!(start.elapsed().as_secs() < 60);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
+    app.run_steps(4);
+    app.get_by_label("Mass: 0.096000 kg");
+    app.get_by_label("Part material").click();
+    app.run_steps(3);
+    app.get_by_label("Steel, generic").click();
+    app.run_steps(4);
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.model().material(Some(&configuration)).unwrap().id.0, "steel-generic");
+    assert_eq!(doc.model().material(None).unwrap().id, base.id);
+    let expected = doc.model().part_appearance(Some(&configuration)).shading();
+    assert_eq!(doc.meshes[&doc.display_body().unwrap()].appearances[0], expected);
+    app.get_by_label("Mass: 0.379200 kg");
+    for (name, density) in [("Default", 1000), ("Variant", 7900)] {
+        app.state_mut()
+            .state
+            .doc
+            .run_journal_command(serde_json::json!({
+                "op":"execute", "command":ModelCommand::ActivateConfiguration { name:name.into() },
+            }))
+            .unwrap();
+        app.run_steps(4);
+        app.get_by_label(&format!("Density: {density} kg/m³"));
+        let doc = &app.state().state.doc;
+        let expected = doc.model().part_appearance(doc.model().active_configuration()).shading();
+        assert_eq!(doc.meshes[&doc.display_body().unwrap()].appearances[0], expected);
+    }
+    app.get_by_label("Part material").click();
+    app.run_steps(3);
+    app.get_by_label("Use inherited material").click();
+    app.run_steps(4);
+    app.get_by_label("Density: 1000 kg/m³");
+    assert!(app.state().state.doc.material_assignment().is_none());
+}

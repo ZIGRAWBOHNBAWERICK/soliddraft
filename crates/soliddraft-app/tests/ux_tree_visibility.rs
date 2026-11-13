@@ -347,8 +347,7 @@ fn row_selected(app: &App, label: &str) -> bool {
         == Some(egui::accesskit::Toggled::True)
 }
 
-/// Clicks a ribbon command by its label. A narrow window folds its group into one
-/// button, which opens the group's row first.
+/// Opens the tree's origin group.
 fn open_origin(app: &mut App) {
     if app.query_by_label("Origin").is_none() {
         click_row_name(app, "Origin, planes and axes");

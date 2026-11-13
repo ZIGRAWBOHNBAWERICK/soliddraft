@@ -940,9 +940,19 @@ pub fn assert_top_view_grid(
     when: &str,
 ) -> (Family, Family, (f32, f32)) {
     let spacing = readout(app).unwrap_or_else(|| panic!("{when}: no grid readout"));
+    let (x, y) = assert_top_view_grid_spacing(app, frames, spacing, when);
+    (x, y, spacing)
+}
+
+pub fn assert_top_view_grid_spacing(
+    app: &App,
+    frames: (&image::RgbaImage, &image::RgbaImage),
+    spacing: (f32, f32),
+    when: &str,
+) -> (Family, Family) {
     let x = assert_family(app, frames, spacing, true, &format!("{when}, lines of constant X"));
     let y = assert_family(app, frames, spacing, false, &format!("{when}, lines of constant Y"));
-    (x, y, spacing)
+    (x, y)
 }
 
 /// A lattice in world space: `origin + i * step * u + j * step * v`.

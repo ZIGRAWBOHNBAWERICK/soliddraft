@@ -9,7 +9,7 @@ use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle,
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-/// Which column of the palette the interface reads.
+/// The saved appearance preference.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {

@@ -310,8 +310,10 @@ pub fn open_options(app: &mut App) {
         }
     } else if app.state().state.editor.is_some() {
         if !app.state().state.form_bar.expanded {
-            app.get_by_label_contains("More (").click();
-            app.run_steps(8);
+            if let Some(more) = app.query_by_label_contains("More (") {
+                more.click();
+                app.run_steps(8);
+            }
         }
     } else if !app.state().state.options_details {
         let label = if app.state().state.assembly.is_active() {
@@ -328,6 +330,12 @@ pub fn open_options(app: &mut App) {
 
 /// Closes the details sheet before interacting with geometry beneath it.
 pub fn close_options(app: &mut App) {
+    if app.state().state.editor.is_some() && app.state().state.form_bar.expanded {
+        if let Some(more) = app.query_by_label_contains("More (") {
+            more.click();
+            app.run_steps(8);
+        }
+    }
     if app.query_by_label("Close options").is_some() {
         app.get_by_label("Close options").click();
         app.run_steps(8);

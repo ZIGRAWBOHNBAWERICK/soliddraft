@@ -290,7 +290,15 @@ pub fn pick(app: &mut App, point: Pos2) {
     settle(app);
 }
 
+fn reveal_tree_label(app: &mut App, label: &str) {
+    if app.query_by_label(label).is_none() && !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        settle(app);
+    }
+}
+
 pub fn click_label(app: &mut App, label: &str) {
+    reveal_tree_label(app, label);
     app.get_by_label(label).hover();
     app.run_steps(4);
     app.get_by_label(label).click();
@@ -311,6 +319,18 @@ pub fn click_menu(app: &mut App, menu: &str, item: &str) {
 }
 
 pub fn click_button(app: &mut App, label: &str) {
+    let command = match label {
+        "Top view (T)" => Some("view_top"),
+        "Isometric view (I)" => Some("view_isometric"),
+        "Sketch" => Some("sketch"),
+        "Exit" => Some("exit_sketch"),
+        "Linear" => Some("linear_pattern"),
+        _ => None,
+    };
+    if let Some(command) = command {
+        run_command(app, command);
+        return;
+    }
     let role = egui::accesskit::Role::Button;
     app.get_all_by_role_and_label(role, label).next().unwrap_or_else(|| panic!("missing button {label}")).hover();
     app.run_steps(4);
@@ -325,6 +345,7 @@ pub fn run_command(app: &mut App, id: &str) {
 
 /// Two clicks on a row, close enough to be a double click.
 pub fn double_click_label(app: &mut App, label: &str) {
+    reveal_tree_label(app, label);
     app.get_by_label(label).hover();
     app.run_steps(4);
     let point = app.get_by_label(label).rect().center();

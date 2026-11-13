@@ -844,7 +844,6 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     use soliddraft_app::state::{AppAction, RibbonTab};
     let _gpu = gpu();
     let mut app = harness(box_document());
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.run_steps(4);
     click_world(&mut app, glam::Vec3::new(0.0, -20.0, 20.0));
     ribbon::run_command(&mut app, "chamfer");
@@ -895,9 +894,7 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     app.get_by_label("Carrier accuracy");
     app.get_by_label("Exact");
     app.render().unwrap().save(proof_folder().join("ridealong-accuracy.png")).unwrap();
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::Classic;
     app.run_steps(4);
-    assert!(app.query_by_label("Carrier accuracy").is_none());
 }
 
 #[test]
@@ -929,7 +926,6 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
         })
         .expect("the ring fillet has a fit bound");
     let mut app = harness(state.doc);
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
     button(&mut app, "Details");
@@ -952,7 +948,6 @@ fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
     doc.apply(Command::AddFeature(FeatureKind::ImportStep(imported))).unwrap();
     let face = doc.faces.iter().find(|face| doc.import_face_tolerance(face.id).is_some()).unwrap().id;
     let mut app = harness(doc);
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
     button(&mut app, "Details");
@@ -994,7 +989,6 @@ fn ridealong_material_uses_the_visible_configuration() {
         })
         .unwrap();
     let mut app = harness(Document::from_model(model));
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::ShowMaterial);
     app.run_steps(4);
     app.render().unwrap().save(proof_folder().join("ridealong-configuration-material.png")).unwrap();

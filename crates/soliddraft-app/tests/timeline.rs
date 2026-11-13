@@ -186,7 +186,7 @@ fn tree_button_toggles_the_shared_pane_and_remembers_the_choice() {
 }
 
 #[test]
-fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
+fn chips_include_absorbed_sketches() {
     let case = ribbon::case("timeline-layout");
     let mut doc = ribbon::sketch();
     let sketch = doc.features[0].id;
@@ -196,7 +196,7 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
     })
     .unwrap();
     let mut app = ribbon::app(doc);
-    assert!(app.query_all_by_label("Sketch1 in history").next().is_none());
+    assert!(app.query_all_by_label("Sketch1 in history").next().is_some());
 
     app.state_mut().state.show_tree(false);
     app.run_steps(8);

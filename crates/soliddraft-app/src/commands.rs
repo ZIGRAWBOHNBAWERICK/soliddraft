@@ -2209,12 +2209,10 @@ fn registry() -> Vec<CommandSpec> {
             .outside_sketch()
             .run(|_| AppAction::ShowMaterial)
             .when(|s| {
-                s.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && s.doc.display_body().is_some()
+                s.doc.display_body().is_some()
                     && s.editor.is_none()
                     && !s.in_sketch()
             })
-            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
             .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Check the body for geometry faults").on(Inspect, "Check", Large),
         cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane").on(Inspect, "Check", Small),

@@ -181,7 +181,6 @@ fn ridealong_edit_suite_exposes_all_lattice_cells() {
         .with_render_every_step(true)
         .wgpu()
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc.take().unwrap(), Automation::default()));
-    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.run_steps(5);
     ribbon::run_command(&mut app, "lattice");
     for choice in [

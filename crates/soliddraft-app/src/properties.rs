@@ -1082,11 +1082,6 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         theme::section_label(ui, kind);
         egui::Grid::new("props").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
             for (k, v) in &info.details {
-                if matches!(k.as_str(), "Carrier accuracy" | "Import deviation" | "Approved import limit")
-                    && state.frame_layout != crate::settings::FrameLayout::EditSuite
-                {
-                    continue;
-                }
                 ui.label(egui::RichText::new(k).size(12.0).color(theme::muted()));
                 let color = match k.as_str() {
                     "Error" => theme::error(),
@@ -1097,7 +1092,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             }
         });
-        if state.frame_layout == crate::settings::FrameLayout::EditSuite && sel == Selection::Body {
+        if sel == Selection::Body {
             ui.add_space(8.0);
             material_panel(ui, state);
         }
@@ -1200,6 +1195,27 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         });
         let _ = fmt_mm(0.0);
     });
+}
+
+fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let inner = egui::Frame::new()
+        .fill(theme::chip())
+        .stroke(Stroke::new(1.0, theme::line().gamma_multiply(0.4)))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 6 })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (bar, _) = ui.allocate_exact_size(vec2(3.0, 13.0), Sense::hover());
+                ui.painter().rect_filled(bar, CornerRadius::same(2), theme::accent());
+                ui.label(egui::RichText::new(title).family(theme::semibold()).size(11.5).color(theme::ink()));
+            });
+            ui.add_space(2.0);
+            add(ui)
+        })
+        .inner;
+    ui.add_space(8.0);
+    inner
 }
 
 fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {

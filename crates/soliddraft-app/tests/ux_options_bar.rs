@@ -41,8 +41,7 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
     let mut case = Case::new("options-bar-views");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
-        assert!(app.query_all_by_label("Active tool: Select").next().is_none(), "classic has no options bar");
-        case.frame(app, "classic");
+        assert!(app.query_all_by_label("Active tool: Select").next().is_some());
         edit_suite(app);
         text(app, "Select");
         assert_eq!(bar(app).top(), theme::MENU_HEIGHT, "the bar follows the title");
@@ -93,7 +92,7 @@ fn toggle_filter(app: &mut App, label: &str) {
 }
 
 #[test]
-fn pick_filters_control_real_picks_without_restricting_tools_or_classic() {
+fn pick_filters_control_real_picks_without_restricting_tools() {
     let mut case = Case::new("options-bar-pick-filter");
     let mut app = launch(ribbon::plate(), STANDARD);
     edit_suite(&mut app);

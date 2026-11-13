@@ -152,7 +152,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
         let material = state.doc.material();
-        let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
         let can_assign = crate::commands::get("material").is_some_and(|command| command.is_enabled(state));
         let material_row = row(
             ui,
@@ -160,8 +159,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 indent: 0,
                 icon: Icon::Material,
                 name: "Material",
-                sub: material.map_or(if edit_suite { "Unassigned" } else { "Coming soon" }, |m| m.name.as_str()),
-                dim: edit_suite && !can_assign,
+                sub: material.map_or("Unassigned", |m| m.name.as_str()),
+                dim: !can_assign,
                 ..RowSpec::plain()
             },
         );

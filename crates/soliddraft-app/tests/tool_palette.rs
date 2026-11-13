@@ -100,7 +100,7 @@ fn plane_picking_is_temporary_and_cancel_drops_the_pending_tool() {
 fn sketch_tools_accept_viewport_planes_and_flat_faces() {
     let case = ribbon::case("tool-palette-viewport-plane");
     let mut app = ribbon::app(ribbon::blank());
-    assert!(!commands::get("sketch_circle").unwrap().is_enabled(&app.state().state));
+    assert!(commands::get("sketch_circle").unwrap().is_enabled(&app.state().state));
 
     app.state_mut().state.viewport.references.show_origin_planes = false;
     app.run_steps(8);

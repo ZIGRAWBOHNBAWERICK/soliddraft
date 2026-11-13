@@ -66,8 +66,8 @@ pub fn session_id() -> egui::Id {
     egui::Id::new("command_session")
 }
 
-/// The prompt's text field, in the bar and in the session alike, so focus stays on it
-/// when the session opens or closes.
+/// The bar's prompt id. The classic session shares it; the Edit Suite overlay has
+/// its own id because it draws on a different layer.
 pub fn input_id() -> egui::Id {
     egui::Id::new("command_line_input")
 }
@@ -710,7 +710,11 @@ fn status_details(ui: &mut egui::Ui, status: &Status) {
 
 /// The prompt's text field, with Tab, Up, Down, Enter and Escape taken before it sees them.
 fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
-    let id = input_id();
+    let id = if session && state.frame_layout == crate::settings::FrameLayout::EditSuite {
+        input_id().with("overlay")
+    } else {
+        input_id()
+    };
     let focused = ui.memory(|m| m.has_focus(id));
     let none = Modifiers::NONE;
     let (tab, up, down, enter, escape) = if focused {

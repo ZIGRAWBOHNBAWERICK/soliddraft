@@ -1,4 +1,4 @@
-//! The Studio theme switches and persists through the real app and wgpu pipeline.
+//! Classic and Edit Suite themes through the real app and wgpu pipeline.
 //! Bracket frames are written under the temporary directory for review.
 //!
 //! The mode is process-wide (`theme::set_mode`), so switches run light then dark
@@ -9,6 +9,7 @@
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use soliddraft_app::app::{Automation, SolidDraftApp};
+use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::AppAction;
 use soliddraft_app::theme::{self, Mode};
 use std::path::PathBuf;
@@ -58,8 +59,30 @@ fn the_bracket_in_light_and_dark() {
         image.save(&path).expect("save png");
         eprintln!("wrote {}", path.display());
     }
+    harness.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    for mode in Mode::ALL {
+        harness.state_mut().state.push(AppAction::SetTheme(mode));
+        harness.run_steps(6);
+        assert_eq!(theme::mode(), mode, "the appearance preference is retained");
+        assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
+        let style = harness.ctx.style();
+        assert!(style.visuals.dark_mode, "Edit Suite has dark chrome in either mode");
+        assert_eq!(style.visuals.panel_fill, egui::Color32::from_rgb(0x30, 0x33, 0x38));
+        assert_eq!(style.visuals.selection.stroke.color, egui::Color32::from_rgb(0xf5, 0xa5, 0x24));
+        assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
+        let image = harness.render().expect("Edit Suite renders");
+        assert_eq!(image.get_pixel(2, 200).0, [0x30, 0x33, 0x38, 255], "the palette paints charcoal");
+        let path = out_dir().join(format!("edit-suite-{}.png", mode.label().to_lowercase()));
+        image.save(&path).expect("save Edit Suite png");
+        eprintln!("wrote {}", path.display());
+    }
+    harness.state_mut().state.frame_layout = FrameLayout::Classic;
+    harness.run_steps(6);
+    assert_eq!(theme::palette(), &theme::DARK, "returning to classic restores its saved dark mode");
     harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
     harness.run_steps(2);
+    assert_eq!(theme::palette(), &theme::LIGHT);
+    assert!(!harness.ctx.style().visuals.dark_mode);
     let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
     assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
     let _ = std::fs::remove_dir_all(config);

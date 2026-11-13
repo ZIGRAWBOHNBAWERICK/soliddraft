@@ -265,6 +265,7 @@ impl SolidDraftApp {
         crate::drawing::reference::window(ctx, &mut self.state);
         crate::locations::window(ctx, &mut self.state);
         crate::import::window(ctx, &mut self.state);
+        crate::scan::window(ctx, &mut self.state);
         crate::recovery::window(ctx, &mut self.state);
         #[cfg(target_arch = "wasm32")]
         crate::journal_browser::window(ctx, &mut self.state);
@@ -524,6 +525,8 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         menu_command(ui, st, "import_step", "Import STEP…");
         menu_command(ui, st, "import_iges", "Import IGES…");
         menu_command(ui, st, "import_mesh", "Import mesh solid…");
+        menu_command(ui, st, "import_scan", "Import scan reference…");
+        menu_command(ui, st, "scan_workspace", "Scan workspace");
         menu_command(ui, st, "make_drawing", "New drawing from part…");
         menu_command(ui, st, "new_assembly", "New assembly");
         menu_command(ui, st, "make_assembly", "Make assembly from part");

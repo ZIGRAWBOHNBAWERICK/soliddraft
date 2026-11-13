@@ -22,6 +22,7 @@ mod lattice;
 mod loft;
 mod measure;
 mod native;
+mod scan;
 mod shell;
 mod step;
 mod sweep;
@@ -311,7 +312,9 @@ impl State {
     fn sources(&self, steps: &BTreeMap<u64, Value>) -> KernelResult<BTreeMap<String, Arc<[u8]>>> {
         steps
             .values()
-            .filter(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
+            .filter(|step| {
+                matches!(step["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh" | "scan_fit"))
+            })
             .map(|step| {
                 let sha = step["file"]["sha256"].as_str().unwrap_or_default();
                 let bytes = self.files.get(sha).ok_or_else(|| {
@@ -380,7 +383,15 @@ impl CatallaxKernel {
             || stored.steps.values().any(|s| {
                 matches!(
                     s["op"].as_str(),
-                    Some("import_step" | "import_iges" | "import_mesh" | "loft" | "native_profile" | "feature_pattern")
+                    Some(
+                        "scan_fit"
+                            | "import_step"
+                            | "import_iges"
+                            | "import_mesh"
+                            | "loft"
+                            | "native_profile"
+                            | "feature_pattern"
+                    )
                 )
             })
         {
@@ -439,7 +450,7 @@ impl CatallaxKernel {
         }
         let Evaluated { app, names, steps, mut history, parents, seq, result } = evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
-        let tags: BTreeMap<String, OpTag> = names
+        let mut tags: BTreeMap<String, OpTag> = names
             .into_iter()
             .filter_map(|(name, id)| {
                 let n: u64 = name.strip_prefix("op_")?.split('_').next()?.parse().ok()?;
@@ -447,6 +458,20 @@ impl CatallaxKernel {
                 Some((id.as_str().to_owned(), tag))
             })
             .collect();
+        for (key, source) in &steps {
+            if source["op"] == "scan_fit" {
+                let prefix = format!("op_{key}");
+                let fitted_tag = if *key == seq { tag.clone() } else { history[key].tag.clone() };
+                let scan_ids: Vec<_> = tags
+                    .keys()
+                    .filter(|id| id.as_str() == prefix || id.starts_with(&format!("{prefix}_scan_")))
+                    .cloned()
+                    .collect();
+                for id in scan_ids {
+                    tags.insert(format!("{id}__scan_origin"), fitted_tag.clone());
+                }
+            }
+        }
         if is_empty(&app) {
             if op == OpKind::Sweep {
                 return Err(KernelError::InvalidInput("Sweep path must leave the profile plane".into()));
@@ -645,8 +670,20 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     // An import has no counterpart there. A unit block stands in for it, built from a
     // stand-in profile that is dropped again once the import step is back.
     let mut imports = Vec::new();
+    let mut scan_fits = Vec::new();
     let steps = legacy["steps"].as_array_mut().expect("generated recipe steps");
     for index in (0..steps.len()).rev() {
+        if steps[index]["op"] == "scan_fit" {
+            let tag = steps[index]["id"].as_str().expect("generated fit id").to_owned();
+            scan_fits.push((tag.clone(), steps[index]["recipe"].clone()));
+            let profile = format!("{tag}_fit_profile");
+            steps[index] = json!({"id":tag,"op":"extrude","profile":profile,"distance":1.0});
+            steps.insert(
+                index,
+                json!({"id":profile,"op":"profile","plane":"XY","rectangle":{"width":1,"height":1,"center":[0,0]}}),
+            );
+            continue;
+        }
         if !matches!(steps[index]["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")) {
             continue;
         }
@@ -708,6 +745,9 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
         let id = &converted.steps[&tag];
         let step = converted.recipe.steps.iter_mut().find(|s| &s.id == id).expect("converted import step");
         step.op = native;
+    }
+    for (tag, recipe) in scan_fits {
+        scan::expand(&mut converted, &tag, recipe)?;
     }
     // Start in the newest format so adding a limited sweep or an all-faces shell does not
     // discard an otherwise identical target checkpoint merely to upgrade its recipe version.
@@ -944,6 +984,40 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
 }
 
 impl Kernel for CatallaxKernel {
+    fn scan_reference(
+        &self,
+        source: &soliddraft_kernel_api::scan::ScanSource,
+    ) -> KernelResult<soliddraft_kernel_api::scan::ScanReference> {
+        self.observe("scan_reference", || scan::reference(source))
+    }
+
+    fn fit_scan(
+        &self,
+        source: &soliddraft_kernel_api::scan::ScanSource,
+    ) -> KernelResult<soliddraft_kernel_api::scan::ScanFit> {
+        self.observe("fit_scan", || scan::fit(source))
+    }
+
+    fn build_scan_fit(
+        &self,
+        tag: &OpTag,
+        source: &soliddraft_kernel_api::scan::ScanSource,
+        fit: &soliddraft_kernel_api::scan::ScanFit,
+    ) -> KernelResult<OpResult> {
+        self.observe("build_scan_fit", || {
+            scan::validate(source, fit)?;
+            let mut state = self.state()?;
+            state.files.entry(source.sha256.clone()).or_insert_with(|| source.bytes.clone().into());
+            self.operation(
+                state,
+                tag,
+                OpKind::ScanFit,
+                &[],
+                json!({"op":"scan_fit","file":{"sha256":source.sha256},"recipe":fit.recipe}),
+            )
+        })
+    }
+
     fn body_relation(&self, a: PlacedBody, b: PlacedBody, clearance: Option<f64>) -> KernelResult<BodyRelation> {
         self.observe("body_relation", || body_relation::relation(self, a, b, clearance))
     }

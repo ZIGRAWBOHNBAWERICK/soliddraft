@@ -676,6 +676,11 @@ impl Document {
             {
                 Err(CommandError::Invalid("gyroid accuracy and minimum detail must be positive".into()))
             }
+            FeatureKind::Scan(s)
+                if s.source.bytes.is_empty() || crate::sha256_hex(&s.source.bytes) != s.source.sha256 =>
+            {
+                Err(CommandError::Invalid("The saved scan does not match its original file.".into()))
+            }
             FeatureKind::ImportStep(i) if i.source.is_empty() => {
                 Err(CommandError::Invalid("the imported file is empty".into()))
             }

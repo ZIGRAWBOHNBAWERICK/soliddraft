@@ -48,6 +48,7 @@ pub mod properties;
 pub mod recent;
 pub mod recovery;
 mod ring_menu;
+pub mod scan;
 pub mod scene_import;
 pub mod section;
 pub mod settings;

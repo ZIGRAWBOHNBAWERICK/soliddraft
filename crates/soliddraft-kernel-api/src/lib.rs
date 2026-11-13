@@ -44,6 +44,7 @@ mod ids;
 mod iges;
 mod import;
 mod profile;
+pub mod scan;
 mod sweep;
 
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
@@ -904,6 +905,21 @@ pub type KernelResult<T> = Result<T, KernelError>;
 /// Implementations are thread-safe; a backend that needs a single kernel thread
 /// serialises calls internally.
 pub trait Kernel: Send + Sync {
+    /// Reads an open mesh or point cloud without turning it into a solid.
+    fn scan_reference(&self, _source: &scan::ScanSource) -> KernelResult<scan::ScanReference> {
+        Err(KernelError::Unsupported("Coming soon".into()))
+    }
+
+    /// Fits supported analytic surfaces, retaining both sampled deviation maps.
+    fn fit_scan(&self, _source: &scan::ScanSource) -> KernelResult<scan::ScanFit> {
+        Err(KernelError::Unsupported("Coming soon".into()))
+    }
+
+    /// Rebuilds the exact saved recipe without fitting the source again.
+    fn build_scan_fit(&self, _tag: &OpTag, _source: &scan::ScanSource, _fit: &scan::ScanFit) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Coming soon".into()))
+    }
+
     /// Compares two solids at their accepted assembly placements without changing either.
     /// Refused quantities remain independent of successful answers.
     /// Clearance uses its shortest round-trip decimal, like authored lengths.

@@ -45,6 +45,9 @@ impl SolidDraftApp {
             let _ = self.state.doc.rebuild();
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
+        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+            self.state.layout.tree.shown = true;
+        }
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
     }
 

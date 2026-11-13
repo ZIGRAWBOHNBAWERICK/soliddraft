@@ -490,7 +490,9 @@ impl SolidDraftApp {
             if palette {
                 crate::tool_palette::panel(root, &mut self.state);
             }
-            self.side_panel(root, Side::Tree, window_width);
+            if !palette || self.state.layout.tree.shown {
+                self.side_panel(root, Side::Tree, window_width);
+            }
             if palette {
                 crate::timeline::panel(root, &mut self.state);
             }

@@ -1,7 +1,8 @@
 //! Edit Suite history. Chips share the tree's document actions, with a horizontal rollback bar.
 
 use crate::document::{Command, FeatureId, FeatureStatus, Selection};
-use crate::icons;
+use crate::icons::{self, Icon};
+use crate::panels::Side;
 use crate::state::{AppAction, AppState, Rename};
 use crate::{theme, tree};
 use egui::{Align2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
@@ -47,7 +48,33 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let mut gaps = Vec::new();
     let mut bounds = Rect::NOTHING;
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("History").font(theme::font_medium(11.0)).color(theme::muted()));
+        ui.vertical(|ui| {
+            ui.set_width(62.0);
+            ui.label(egui::RichText::new("History").font(theme::font_medium(11.0)).color(theme::muted()));
+            let shown = state.layout.tree.shown;
+            let (rect, response) = ui.allocate_exact_size(vec2(54.0, 20.0), Sense::click());
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, shown, "Tree"));
+            if response.hovered() || shown {
+                ui.painter().rect_filled(rect, 4, if shown { theme::selection_bg() } else { theme::hover() });
+            }
+            let ink = if shown { theme::accent() } else { theme::ink() };
+            icons::paint(
+                ui.painter(),
+                Icon::Tree,
+                Rect::from_center_size(rect.left_center() + vec2(9.0, 0.0), vec2(13.0, 13.0)),
+                ink,
+            );
+            ui.painter().text(
+                rect.left_center() + vec2(21.0, 0.0),
+                Align2::LEFT_CENTER,
+                "Tree",
+                theme::font(11.0),
+                ink,
+            );
+            if response.on_hover_text("Show or hide the Tree and Values pane").clicked() {
+                actions.push(AppAction::TogglePanel(Side::Tree));
+            }
+        });
         egui::ScrollArea::horizontal().id_salt("timeline_scroll").auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal(|ui| {

@@ -72,8 +72,41 @@ fn sketches() -> Document {
 fn edit_suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);
     app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.state_mut().state.layout.tree.shown = false;
     app.run_steps(8);
     app
+}
+
+#[test]
+fn tree_button_toggles_the_shared_pane_and_remembers_the_choice() {
+    let case = ribbon::case("timeline-tree");
+    std::fs::write(case.path("config").join("settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let mut app = ribbon::app(ribbon::plate());
+    case.run(&mut app, |app| {
+        assert!(!app.state().state.layout.tree.shown);
+        let wide = app.state().state.viewport.rect.width();
+        let tree = ribbon::control(app, "Tree", bounds(app));
+        assert!(!tree.selected);
+        case.frame(app, "hidden-by-default");
+        ribbon::click_at(app, tree.rect.center());
+        app.run_steps(12);
+        assert!(app.state().state.layout.tree.shown);
+        assert!(ribbon::control(app, "Tree", bounds(app)).selected);
+        assert!(app.state().state.viewport.rect.width() < wide - 200.0);
+        assert!(ribbon::painted(app).iter().any(|p| p.text == "Values"));
+        case.frame(app, "tree-and-values");
+        let tree = ribbon::control(app, "Tree", bounds(app)).rect;
+        ribbon::click_at(app, tree.center());
+        app.run_steps(12);
+        assert!(!app.state().state.layout.tree.shown);
+        assert!((app.state().state.viewport.rect.width() - wide).abs() < 1.0);
+        app.key_press(Key::F9);
+        app.run_steps(12);
+        assert!(app.state().state.layout.tree.shown);
+        assert!(ribbon::control(app, "Tree", bounds(app)).selected);
+    });
+    let reopened = ribbon::app(ribbon::plate());
+    assert!(reopened.state().state.layout.tree.shown);
 }
 
 #[test]
@@ -89,6 +122,7 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
     let mut app = ribbon::app(doc);
     assert!(app.query_all_by_label("Sketch1 in history").next().is_none());
     app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.state_mut().state.layout.tree.shown = false;
     app.run_steps(8);
     case.run(&mut app, |app| {
         for name in ["Sketch1", "Boss-Extrude1"] {
@@ -112,6 +146,7 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
         let editor = app.state().state.editor.as_ref().expect("the feature editor opens");
         assert_eq!(editor.target, Some(app.state().state.doc.features[1].id));
         assert!(matches!(editor.params, soliddraft_app::state::EditorParams::Extrude(_)));
+        assert!(app.state().state.layout.tree.shown, "the feature form is reachable");
     });
 }
 

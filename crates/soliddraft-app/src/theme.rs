@@ -196,6 +196,8 @@ pub mod edit_suite {
     pub const ON_DANGER: Color32 = Color32::WHITE;
     pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);
     pub const FULLY_DEFINED: Color32 = rgb(0x0b, 0x0d, 0x11);
+    pub const CONSTRUCTION: Color32 = rgb(0x5b, 0x6b, 0x86);
+    pub const DIMENSION: Color32 = rgb(0x24, 0x56, 0xc4);
     pub const SKETCH_SHEET: Color32 = rgb(0xf1, 0xf3, 0xf7);
 
     pub const PALETTE: Palette = Palette {
@@ -256,12 +258,14 @@ pub mod edit_suite {
     pub const FIELD_RADIUS: u8 = 4;
     pub const TOOL_RADIUS: u8 = 5;
     pub const FLOATING_RADIUS: u8 = 10;
+    pub const NAV_SHADOW: egui::Shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: rgba(0, 0, 0, 77) };
 }
 
 static MODE: AtomicU8 = AtomicU8::new(0);
 static LAYOUT: AtomicU8 = AtomicU8::new(0);
 
-fn is_edit_suite() -> bool {
+/// Whether the internal Edit Suite frame is active.
+pub fn is_edit_suite() -> bool {
     LAYOUT.load(Ordering::Relaxed) == 1
 }
 

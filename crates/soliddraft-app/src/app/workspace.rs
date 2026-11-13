@@ -490,9 +490,13 @@ impl SolidDraftApp {
         let window_width = root.available_width();
         if !start {
             if palette {
+                crate::tool_palette::plane_picker_panel(root, &mut self.state);
                 crate::tool_palette::panel(root, &mut self.state);
+                crate::timeline::panel(root, &mut self.state);
             }
-            self.side_panel(root, Side::Tree, window_width);
+            if !palette || self.state.layout.tree.shown {
+                self.side_panel(root, Side::Tree, window_width);
+            }
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {
@@ -551,6 +555,7 @@ impl eframe::App for SolidDraftApp {
         self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
         self.state.frame_ms = if self.state.frame_ms == 0.0 { dt } else { self.state.frame_ms * 0.9 + dt * 0.1 };
+        self.state.viewport.overlay_input(ctx);
         self.shortcuts(ctx);
         crate::drawing::frame(&mut self.state, &mut self.dock);
         crate::assembly::frame(&mut self.state, &mut self.dock, ctx);

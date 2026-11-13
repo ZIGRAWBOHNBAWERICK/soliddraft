@@ -1,0 +1,192 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "canonical-p4",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 0,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 40,
+            "height": 30
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 12,
+        "flip": false
+      }
+    },
+    {
+      "tool": "shell",
+      "arguments": {
+        "open_faces": [
+          "Boss-Extrude1 \u00b7 End cap"
+        ],
+        "thickness": 2
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": -1,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              -1
+            ],
+            "width": 60,
+            "height": 60
+          },
+          {
+            "shape": "circle",
+            "center": [
+              0,
+              0,
+              -1
+            ],
+            "diameter": 46
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 14,
+        "through_all": false,
+        "flip": true
+      },
+      "label": "original",
+      "exports": [
+        {
+          "format": "step"
+        },
+        {
+          "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4831.253636666586,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 1.5
+      },
+      "label": "edited",
+      "exports": [
+        {
+          "format": "step"
+        },
+        {
+          "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "label": "undo",
+      "same_geometry_as_step": 5,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4831.253636666586,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "label": "redo",
+      "same_geometry_as_step": 6,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/canonical-p4.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/canonical-p4.dwprt"
+      },
+      "label": "reopened",
+      "fresh_process": true,
+      "same_geometry_as_step": 6,
+      "exports": [
+        {
+          "format": "step"
+        },
+        {
+          "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 0
+      },
+      "label": "refused",
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 10,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

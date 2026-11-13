@@ -7,6 +7,10 @@ pub mod panel;
 pub(crate) mod registry;
 pub(crate) mod tools;
 
+/// Work allowance for requested body mass properties in the desktop and its evidence captures.
+/// The oblique rim used 97.4M at f335a6c; keep roughly twice that allowance.
+pub const MASS_WORK_LIMIT: u64 = 200_000_000;
+
 use crate::document::{Document, Selection};
 use serde_json::{Value, json};
 use soliddraft_kernel_api::{PairEndpoint, PairQuantity};

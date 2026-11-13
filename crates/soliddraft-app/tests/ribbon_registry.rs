@@ -740,6 +740,15 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();
         }
+        if let Some(key) = match id.as_str() {
+            "sketch_trim" => Some("T"),
+            "sketch_offset" => Some("O"),
+            "sketch_move" => Some("M"),
+            _ => None,
+        } {
+            assert_eq!(current["keys"], json!([{"scope": "Sketch", "chord": key, "while_typing": false}]));
+            current["keys"] = row["keys"].clone();
+        }
         if id == "sweep" {
             assert_eq!(current["agents"], "verb");
             assert_eq!(current["undo"], "step");

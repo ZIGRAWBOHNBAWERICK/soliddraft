@@ -51,10 +51,7 @@ fn tree_row(app: &mut App, name: &str) -> Pos2 {
 fn menu_command(app: &mut App, id: &str) {
     let command = soliddraft_app::commands::get(id).unwrap();
     let state = &app.state().state;
-    let mut label = command.label_in(state);
-    if let Some(shortcut) = state.shortcuts.shortcut_text(id) {
-        label = format!("{label} {shortcut}");
-    }
+    let label = command.label_in(state);
     // The popup follows same-named property buttons in the accessibility tree.
     let point =
         app.query_all_by_label(&label).last().unwrap_or_else(|| panic!("missing menu command {label}")).rect().center();
@@ -64,7 +61,7 @@ fn menu_command(app: &mut App, id: &str) {
 fn groups(app: &App, expected: &[&str]) {
     let painted = ribbon::painted(app);
     for label in expected {
-        assert!(painted.iter().any(|text| text.text == *label), "missing group {label}");
+        assert!(painted.iter().any(|text| text.text == label.to_uppercase()), "missing group {label}");
     }
 }
 
@@ -85,6 +82,11 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
     set_frame(&case, "edit_suite");
     let mut app = ribbon::app(ribbon::plate());
     case.run(&mut app, |app| {
+        assert!(!app.state().state.layout.tree.shown);
+        let tree = app.get_by_label("Tree").rect().center();
+        ribbon::click_at(app, tree);
+        app.run_steps(6);
+        assert!(app.state().state.layout.tree.shown);
         let feature = app.state().state.doc.features[0].id;
         let name = app.state().state.doc.features[0].name.clone();
         let face = world(app, Vec3::new(0.0, 0.0, 20.0));

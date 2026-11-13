@@ -18,6 +18,7 @@ fn both_frame_settings_open_the_workspace_and_command_palette() {
         let mut app = ribbon::app(ribbon::plate());
         case.run(&mut app, |app| {
             assert_eq!(app.state().state.frame_layout, layout);
+            assert_eq!(app.state().state.layout.tree.shown, layout == FrameLayout::Classic);
             let palette = match layout {
                 FrameLayout::Classic => &theme::LIGHT,
                 FrameLayout::EditSuite => &theme::edit_suite::PALETTE,

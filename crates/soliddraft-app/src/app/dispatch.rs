@@ -45,6 +45,9 @@ impl SolidDraftApp {
             let _ = self.state.doc.rebuild();
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
+        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+            self.state.layout.tree.shown = true;
+        }
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
     }
 
@@ -208,14 +211,26 @@ impl SolidDraftApp {
                     None => {
                         self.open_editor(None, EditorParams::PickPlane);
                         self.state.origin_open = true;
-                        self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
+                        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                            self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                            self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
+                        } else {
+                            self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
+                        }
                     }
                 }
             }
             AppAction::StartSketchOn(plane) => {
-                self.close_editor();
+                let tool = self.close_editor().and_then(|editor| editor.pending_sketch_tool);
                 match self.state.doc.apply(Command::AddSketch { plane }) {
-                    Ok(Some(id)) => self.open_sketch(id),
+                    Ok(Some(id)) => {
+                        self.open_sketch(id);
+                        if let Some(tool) = tool
+                            && let Some(session) = &mut self.state.sketch
+                        {
+                            session.set_tool(tool);
+                        }
+                    }
                     Ok(None) => {}
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }
@@ -887,6 +902,17 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SketchTool(tool) => {
+                if !self.state.in_sketch()
+                    && self.state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && crate::commands::Context::of(&self.state).part()
+                {
+                    self.apply(ctx, AppAction::StartSketch);
+                    if let Some(editor) = &mut self.state.editor
+                        && matches!(editor.params, EditorParams::PickPlane)
+                    {
+                        editor.pending_sketch_tool = Some(tool);
+                    }
+                }
                 if let Some(s) = self.state.sketch.as_mut() {
                     s.set_tool(tool);
                 }
@@ -1018,7 +1044,15 @@ impl SolidDraftApp {
                 if let Some(id) = self.state.selected_feature()
                     && let Some(f) = self.state.doc.feature(id)
                 {
-                    self.state.rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
+                    let rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
+                    if self.state.frame_layout == crate::settings::FrameLayout::EditSuite
+                        && !self.state.drawing.is_active()
+                        && !self.state.assembly.is_active()
+                    {
+                        self.state.timeline.rename = rename;
+                    } else {
+                        self.state.rename = rename;
+                    }
                 }
             }
             AppAction::SetView(v) => self.state.viewport.camera.set_view(v),
@@ -1050,6 +1084,29 @@ impl SolidDraftApp {
                     viewport.display = if p.shows_edges() { DisplayMode::ShadedWithEdges } else { DisplayMode::Shaded };
                 }
                 viewport.preset = p;
+            }
+            AppAction::SetBodyVisible(show) => {
+                if crate::tree_visibility::visible(&self.state).body != show {
+                    let feature = self
+                        .state
+                        .doc
+                        .features
+                        .iter()
+                        .find(|feature| !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_)))
+                        .map(|feature| feature.id);
+                    if let Some(feature) = feature {
+                        crate::tree_visibility::toggle(&mut self.state, crate::document::ViewItem::Feature(feature));
+                    }
+                }
+            }
+            AppAction::SetReferenceDisplay(display) => {
+                let _ = self.state.set_reference_display(display);
+            }
+            AppAction::SketchRelationSet(kinds) => {
+                if let Some(sketch) = self.state.sketch.as_mut() {
+                    let action = crate::sketcher::add_relations(sketch, &kinds);
+                    self.apply(ctx, action);
+                }
             }
             AppAction::SetScene(scene) => {
                 if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {

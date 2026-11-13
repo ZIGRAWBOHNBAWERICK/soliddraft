@@ -1015,4 +1015,24 @@ fn ridealong_material_uses_the_visible_configuration() {
     let expected = doc.model().part_appearance(Some(&configuration)).shading();
     assert_eq!(doc.meshes[&doc.display_body().unwrap()].appearances[0], expected);
     app.get_by_label("Mass: 0.379200 kg");
+    for (name, density) in [("Default", 1000), ("Variant", 7900)] {
+        app.state_mut()
+            .state
+            .doc
+            .run_journal_command(serde_json::json!({
+                "op":"execute", "command":ModelCommand::ActivateConfiguration { name:name.into() },
+            }))
+            .unwrap();
+        app.run_steps(4);
+        app.get_by_label(&format!("Density: {density} kg/m³"));
+        let doc = &app.state().state.doc;
+        let expected = doc.model().part_appearance(doc.model().active_configuration()).shading();
+        assert_eq!(doc.meshes[&doc.display_body().unwrap()].appearances[0], expected);
+    }
+    app.get_by_label("Part material").click();
+    app.run_steps(3);
+    app.get_by_label("Use inherited material").click();
+    app.run_steps(4);
+    app.get_by_label("Density: 1000 kg/m³");
+    assert!(app.state().state.doc.material_assignment().is_none());
 }

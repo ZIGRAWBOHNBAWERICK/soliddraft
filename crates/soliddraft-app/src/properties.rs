@@ -1964,15 +1964,23 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
 fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
     static CATALOG: std::sync::OnceLock<soliddraft_materials::Catalog> = std::sync::OnceLock::new();
     let catalog = CATALOG.get_or_init(soliddraft_materials::Catalog::built_in);
-    let current = state.doc.model().material(None);
-    let mut selected = current.map(|m| m.id.clone());
+    let current = state.doc.material();
+    let mut selected = state.doc.material_assignment().cloned();
     let before = selected.clone();
     let mut error = None;
     section(ui, "Material", |ui| {
         egui::ComboBox::from_label("Part material")
             .selected_text(current.map_or("Unassigned", |m| m.name.as_str()))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut selected, None, "Unassigned");
+                ui.selectable_value(
+                    &mut selected,
+                    None,
+                    if state.doc.model().active_configuration().is_some() {
+                        "Use inherited material"
+                    } else {
+                        "Unassigned"
+                    },
+                );
                 for (_, material) in catalog.materials() {
                     ui.selectable_value(&mut selected, Some(material.id.clone()), &material.name);
                 }
@@ -1997,7 +2005,7 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
             {
                 ui.label(format!("Volume: {:.3} mm³", properties.volume));
-                match soliddraft_materials::mass::of_body(&properties, state.doc.model().material(None)) {
+                match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {
                     Ok(mass) => {
                         ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
                     }

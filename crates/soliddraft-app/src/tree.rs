@@ -152,7 +152,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(AppAction::Select(Some(reference)));
             }
         }
-        let material = state.doc.model().material(state.doc.model().active_configuration());
+        let material = state.doc.material();
         let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
         let can_assign = crate::commands::get("material").is_some_and(|command| command.is_enabled(state));
         let material_row = row(

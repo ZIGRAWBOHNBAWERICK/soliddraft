@@ -89,6 +89,7 @@ fn a_face_section_keeps_its_plane_when_another_or_empty_body_is_active() {
     doc.select_body(0);
     let face = doc.faces.iter().find(|f| f.centroid.x < 0.0 && (f.centroid.z - 10.0).abs() < 1e-5).unwrap();
     let (face, label) = (face.id, face.label.clone());
+    let entry = doc.faces.iter().filter(|f| f.label == label).position(|f| f.id == face).unwrap();
     let mut app = ribbon::app(doc);
     case.run(&mut app, |app| {
         click(app, "Inspect tab");
@@ -96,7 +97,7 @@ fn a_face_section_keeps_its_plane_when_another_or_empty_body_is_active() {
         ready(app);
         app.get_by_label("Face plane").click();
         app.run_steps(3);
-        app.get_by_label(&label).click();
+        app.query_all_by_label(&label).nth(entry).unwrap().click();
         app.run_steps(3);
         ready(app);
         assert_eq!(app.state().state.section.plane, SectionPlane::Face(face));

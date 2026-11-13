@@ -84,7 +84,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     body(ui, state, state.ribbon_tab.into());
 }
 
-/// The part workspace strip, shared while the Edit Suite title bar is built.
+/// The classic part workspace strip.
 pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
     let locked = state.frame_layout == crate::settings::FrameLayout::EditSuite && state.in_sketch();
     if locked {

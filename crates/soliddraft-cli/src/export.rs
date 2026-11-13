@@ -137,7 +137,7 @@ fn build(a: &Args) -> Result<Vec<Export>, String> {
         None => {
             let text = std::fs::read_to_string(&a.input).map_err(|e| at(e.to_string()))?;
             let recipe = soliddraft_recipe::parse(&text).map_err(|e| at(e.to_string()))?;
-            let (_, body) = soliddraft_recipe::build(kernel.as_ref(), &recipe).map_err(|e| at(e.to_string()))?;
+            let body = soliddraft_recipe::build_body(kernel.as_ref(), &recipe).map_err(|e| at(e.to_string()))?;
             a.outputs
                 .iter()
                 .map(|(_, f)| {

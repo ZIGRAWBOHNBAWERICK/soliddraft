@@ -147,3 +147,72 @@ fn an_iges_refusal_leaves_the_whole_batch_untouched() {
     assert_eq!(std::fs::read(iges).unwrap(), sentinel);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn bracket_step_and_print_batch_fits_the_shared_request_allowance() {
+    let dir =
+        std::env::temp_dir().join(format!("soliddraft-cli-print-batch-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let recipe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes/bracket.json");
+    let mut command = Process::new(env!("CARGO_BIN_EXE_soliddraft"));
+    command.arg("export").arg(recipe).arg("--json");
+    for extension in ["step", "stl", "3mf", "obj"] {
+        command.arg("--out").arg(dir.join(format!("bracket.{extension}")));
+    }
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let reports: Vec<Value> =
+        String::from_utf8(output.stdout).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(reports.len(), 4);
+    for report in reports {
+        assert_eq!(report["request_work"]["limit"], 20_000_000);
+        assert_eq!(report["request_work"]["exhausted"], false);
+        assert!(report["request_work"]["used"].as_u64().unwrap() <= 20_000_000);
+        assert!(std::path::Path::new(report["file"].as_str().unwrap()).is_file());
+        if report["format"] == "step" {
+            assert_eq!(report["report"]["within_tolerance"], true);
+        } else {
+            assert_eq!(report["report"]["print_check"]["requested_accuracy_mm"], 0.01);
+            assert!(report["report"]["print_check"]["certified_accuracy_mm"].as_f64().unwrap() <= 0.01);
+            assert_eq!(report["report"]["closed"], true);
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn export_recipe_build_skips_discarded_replay_measurements() {
+    let kernel = CatallaxKernel::with_operation_log();
+    let recipe = soliddraft_recipe::parse(include_str!("../../../recipes/box.json")).unwrap();
+    let body = soliddraft_recipe::build_body(&kernel, &recipe).unwrap();
+    let evidence = kernel.take_diagnostics().unwrap();
+    let calls = evidence["calls"].as_array().unwrap();
+    assert!(!calls.is_empty());
+    for call in calls {
+        assert!(
+            !matches!(call["operation"].as_str(), Some("mass_properties" | "topology" | "tessellate" | "validate")),
+            "{call}"
+        );
+    }
+    use soliddraft_kernel_api::Kernel;
+    assert!(kernel.validate(body).unwrap().valid);
+    kernel.release(body).unwrap();
+}
+
+#[test]
+fn export_recipe_build_preserves_expected_refusals() {
+    let recipe = soliddraft_recipe::parse(include_str!("../../../recipes/failing-fillet.json")).unwrap();
+    let reference = CatallaxKernel::new();
+    let (report, reference_body) = soliddraft_recipe::build(&reference, &recipe).unwrap();
+    assert!(
+        report.steps.iter().any(|step| matches!(step.outcome, soliddraft_recipe::StepOutcome::ExpectedError { .. }))
+    );
+    let kernel = CatallaxKernel::new();
+    let body = soliddraft_recipe::build_body(&kernel, &recipe).unwrap();
+    let summary = soliddraft_recipe::summarize(&kernel, body).unwrap();
+    assert_eq!(summary.digest, report.result.digest);
+    assert!(summary.valid);
+    use soliddraft_kernel_api::Kernel;
+    kernel.release(body).unwrap();
+    reference.release(reference_body).unwrap();
+}

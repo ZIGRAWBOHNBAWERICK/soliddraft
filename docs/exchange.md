@@ -62,6 +62,10 @@ from display meshes. Repeated formats reuse that certificate. Changed geometry o
 accuracy needs a new qualification. The desktop runs these checks off the interface thread. The browser runs them
 synchronously with the same construction and per-prefix work limits.
 
+CLI recipe export builds the result without collecting unused replay mass or display
+summaries. Recipe validation and expected-error input checks still run. Opening the
+input, rebuilding it and preparing every output share the same 20,000,000-unit allowance.
+
 ## Refusals
 
 A part with a feature that needs a repair, is blocked or failed is refused, so no file shows a body the part does not have. Suppressed and rolled-back features are fine; the export is the body the tree shows. A refused export writes no file. The CLI also refuses a batch containing any over-tolerance STEP report before creating or replacing any destination, including other formats in that batch.

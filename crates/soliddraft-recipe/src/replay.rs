@@ -207,9 +207,24 @@ pub fn replay(kernel: &dyn Kernel, recipe: &Recipe) -> Result<ReplayReport, Reci
 /// Replays a recipe like [`replay`] but keeps the result body, which the caller then
 /// owns and releases. Every other body the replay creates is released.
 pub fn build(kernel: &dyn Kernel, recipe: &Recipe) -> Result<(ReplayReport, BodyId), RecipeError> {
+    let (report, body) = build_with_report(kernel, recipe, true)?;
+    Ok((report.expect("replay report requested"), body))
+}
+
+/// Builds and retains only the result body, without unrequested display or mass summaries.
+/// Expected refusals still check that their inputs remain unchanged.
+pub fn build_body(kernel: &dyn Kernel, recipe: &Recipe) -> Result<BodyId, RecipeError> {
+    build_with_report(kernel, recipe, false).map(|(_, body)| body)
+}
+
+fn build_with_report(
+    kernel: &dyn Kernel,
+    recipe: &Recipe,
+    summaries: bool,
+) -> Result<(Option<ReplayReport>, BodyId), RecipeError> {
     check(recipe)?;
     let mut run = Run { kernel, bodies: BTreeMap::new(), profiles: BTreeMap::new() };
-    let result = run.all(recipe).map(|report| (report, run.body(&recipe.result)));
+    let result = run.all(recipe, summaries).map(|report| (report, run.body(&recipe.result)));
     let keep = result.as_ref().ok().map(|(_, body)| *body);
     for body in run.bodies.values() {
         if Some(*body) != keep {
@@ -226,7 +241,7 @@ struct Run<'k> {
 }
 
 impl Run<'_> {
-    fn all(&mut self, recipe: &Recipe) -> Result<ReplayReport, RecipeError> {
+    fn all(&mut self, recipe: &Recipe, summaries: bool) -> Result<Option<ReplayReport>, RecipeError> {
         if matches!(
             recipe.steps.iter().find(|s| s.id == recipe.result).map(|s| &s.command),
             Some(Command::Profile { .. })
@@ -278,6 +293,9 @@ impl Run<'_> {
             let report = match (step.expect, outcome) {
                 (Outcome::Ok, Ok((op, result))) => {
                     self.bodies.insert(step.id.clone(), result.body);
+                    if !summaries {
+                        continue;
+                    }
                     let body = self.summary(&step.id)?;
                     StepReport {
                         id: step.id.clone(),
@@ -314,14 +332,17 @@ impl Run<'_> {
             };
             steps.push(report);
         }
+        if !summaries {
+            return Ok(None);
+        }
         let result = self.summary(&recipe.result)?;
-        Ok(ReplayReport {
+        Ok(Some(ReplayReport {
             recipe: recipe.name.clone(),
             backend: self.kernel.backend(),
             steps,
             result_step: recipe.result.clone(),
             result,
-        })
+        }))
     }
 
     fn snapshot(&self, id: &str) -> Result<String, RecipeError> {

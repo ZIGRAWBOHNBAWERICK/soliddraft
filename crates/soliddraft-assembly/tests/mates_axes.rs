@@ -108,7 +108,7 @@ fn new_tabs(path: &Path, angle: f64) {
     });
     extrude(&mut doc, s, ExtrudeOp::Cut, 5.0);
     let layout = PatternSpec::Circular { axis_origin: Vec3::ZERO, axis_direction: Vec3::Z, count: 2, angle };
-    add(&mut doc, FeatureKind::Pattern(PatternFeature { layout }));
+    add(&mut doc, FeatureKind::Pattern(PatternFeature { layout, source: None }));
     doc.save(path).unwrap();
 }
 

@@ -732,7 +732,7 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, format!("{} tab", tab.label()))
         });
-        if selected || response.hovered() || response.has_focus() {
+        if selected || (enabled && (response.hovered() || response.has_focus())) {
             ui.painter().rect_filled(
                 bounds,
                 CornerRadius::same(4),
@@ -746,7 +746,7 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
             theme::font_medium(12.5),
             if selected { theme::selection_ink() } else { theme::muted() },
         );
-        if response.has_focus() {
+        if enabled && response.has_focus() {
             ui.painter().rect_stroke(
                 bounds,
                 CornerRadius::same(4),
@@ -754,8 +754,11 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
                 egui::StrokeKind::Inside,
             );
         }
-        if response.clicked() {
+        if enabled && response.clicked() {
             st.select_workspace(tab);
+        }
+        if !enabled {
+            response.on_hover_text("Close sketch to change workspace");
         }
     }
     ui.add_space(8.0);

@@ -4,9 +4,8 @@ use crate::document::{Document, FeatureId};
 use soliddraft_kernel_api::BodyId;
 use std::sync::mpsc;
 
-// The oblique rim uses up to 97.4M work at f335a6c; keep roughly twice that allowance.
 #[cfg(not(target_arch = "wasm32"))]
-const MASS_WORK_LIMIT: u64 = 200_000_000;
+use super::MASS_WORK_LIMIT;
 
 #[derive(Clone, Copy, PartialEq)]
 struct Request {

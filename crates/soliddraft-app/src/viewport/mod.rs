@@ -9,6 +9,7 @@ pub mod dimensions;
 pub mod environment;
 pub mod grid;
 pub mod look;
+mod navigation_bar;
 pub mod offscreen;
 pub mod pick;
 pub mod planes;
@@ -181,6 +182,9 @@ pub struct ViewportState {
     pub router: Router,
     pick: Arc<Mutex<PickSample>>,
     cube_hover: Option<StandardView>,
+    navigation_bar: navigation_bar::NavigationBar,
+    /// Shows feature dimensions without selecting the body.
+    pub all_dimensions: bool,
 }
 
 impl Default for ViewportState {
@@ -203,6 +207,8 @@ impl Default for ViewportState {
             router: Router::new(&NavigationSettings::new(crate::settings::InstallKind::Existing), false),
             pick: Arc::new(Mutex::new(PickSample::default())),
             cube_hover: None,
+            navigation_bar: navigation_bar::NavigationBar::default(),
+            all_dimensions: false,
         }
     }
 }
@@ -306,6 +312,7 @@ impl ViewportState {
         let preview = preview.filter(|shown| visible.body || !is_provisional(shown));
         let preview_pickable = preview.as_ref().is_some_and(is_provisional);
         let sketching = sketch.is_some();
+        let sketch_dimensions = sketch.as_ref().map(|s| s.show_dimensions);
         let menu_ready = self.context_menus && sketch.as_ref().is_none_or(|s| s.tool == crate::state::Tool::Select);
         let mut events = ViewportEvents::default();
         let rect = ui.available_rect_before_wrap();
@@ -442,7 +449,16 @@ impl ViewportState {
         }
         if let Some(session) = sketch {
             let spacing = Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style);
-            events.actions = crate::sketcher::run(ui, session, doc, &self.camera, rect, &response, spacing);
+            events.actions = crate::sketcher::run(
+                ui,
+                session,
+                doc,
+                &self.camera,
+                rect,
+                &response,
+                spacing,
+                theme::is_edit_suite() && self.scene.is_some_and(scenes::Scene::is_dark),
+            );
             ui.ctx().request_repaint();
         }
         if doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok())) {
@@ -473,7 +489,7 @@ impl ViewportState {
                 rect,
                 doc,
                 pointer,
-                selection == Some(Selection::Body) && visible.body,
+                (self.all_dimensions || selection == Some(Selection::Body)) && visible.body,
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
             )
@@ -515,7 +531,7 @@ impl ViewportState {
             }
         }
         self.dimensions = dims;
-        self.paint_hud(ui, rect, &mut events);
+        self.paint_hud(ui, rect, &mut events, sketch_dimensions, true);
         self.paint_view_cube(ui, rect, &mut events);
         self.paint_pills(ui, rect, hover_label);
         events
@@ -560,7 +576,7 @@ impl ViewportState {
             let painter = ui.painter().with_clip_rect(rect);
             self.paint_origin_axes(&painter, self.camera.distance * 0.25, rect, [true; 3]);
         }
-        self.paint_hud(ui, rect, &mut events);
+        self.paint_hud(ui, rect, &mut events, None, false);
         self.paint_view_cube(ui, rect, &mut events);
         let label = hover_label.unwrap_or("Hover a component");
         self.paint_pills(ui, rect, Some(label));
@@ -577,6 +593,11 @@ impl ViewportState {
         let ink = self.grid_style.color.unwrap_or_else(theme::ink);
         let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
+    }
+
+    /// Closes a viewport dialog before the app handles Escape underneath it.
+    pub fn overlay_input(&mut self, ctx: &egui::Context) {
+        self.navigation_bar.consume_escape(ctx);
     }
 
     /// A copy of the latest id-buffer sample.
@@ -868,7 +889,29 @@ impl ViewportState {
         }
     }
 
-    fn paint_hud(&mut self, ui: &mut egui::Ui, rect: Rect, events: &mut ViewportEvents) {
+    fn paint_hud(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        events: &mut ViewportEvents,
+        sketch_dimensions: Option<bool>,
+        allow_dimensions: bool,
+    ) {
+        if theme::is_edit_suite() {
+            self.navigation_bar.show(
+                ui,
+                rect,
+                &mut self.camera,
+                self.display,
+                self.scene.unwrap_or_default(),
+                &mut self.references,
+                &mut self.all_dimensions,
+                sketch_dimensions,
+                allow_dimensions,
+                events,
+            );
+            return;
+        }
         let height = 30.0;
         let items: Vec<HudItem> = vec![
             HudItem::Icon(Icon::Home, "Isometric view (I)"),
@@ -987,6 +1030,7 @@ impl ViewportState {
     }
 
     fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>) {
+        let rect = if theme::is_edit_suite() { Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0)) } else { rect };
         let proj = if self.camera.orthographic { "Orthographic" } else { "Perspective" };
         let text =
             format!("mm · {} · {} · {} · {}", self.camera.view_name, self.display.label(), self.preset.label(), proj);

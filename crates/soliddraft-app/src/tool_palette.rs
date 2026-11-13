@@ -2,25 +2,46 @@
 
 use crate::commands::{self, CommandSpec, Tab};
 use crate::icons;
-use crate::state::{AppState, RibbonTab};
+use crate::state::{AppAction, AppState, EditorParams, RibbonTab};
 use crate::theme::{self, edit_suite as tokens};
 use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
+const COMPACT_WIDTH: f32 = 48.0;
+
 pub fn panel(root: &mut egui::Ui, state: &mut AppState) {
+    let compact = root.available_width() < theme::COMPACT_WIDTH;
     egui::Panel::left("tool_palette")
-        .exact_size(tokens::PALETTE_WIDTH)
+        .exact_size(if compact { COMPACT_WIDTH } else { tokens::PALETTE_WIDTH })
         .resizable(false)
         .frame(egui::Frame::new().fill(theme::panel()).inner_margin(4))
-        .show(root, |ui| show(ui, state));
+        .show(root, |ui| show_mode(ui, state, compact));
 }
 
-fn group_label(label: &str, tab: Tab) -> &str {
-    match label {
-        "Modify" if tab == Tab::Part(RibbonTab::Sketch) => "Edit entities",
-        "Modify" => "Edit features",
-        "Transform" => "Arrange entities",
-        label => label,
+pub fn plane_picker_panel(root: &mut egui::Ui, state: &mut AppState) {
+    if !state.editor.as_ref().is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane)) {
+        return;
     }
+    egui::Panel::top("sketch_plane_picker")
+        .exact_size(38.0)
+        .frame(egui::Frame::new().fill(theme::panel()).inner_margin(6))
+        .show(root, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Sketch plane");
+                for plane in crate::document::PlaneKind::ALL {
+                    let name = state.doc.model().datum_name(plane.to_model());
+                    if ui.button(name).clicked() {
+                        state.push(AppAction::StartSketchOn(crate::document::SketchPlane::Reference {
+                            plane,
+                            offset: 0.0,
+                        }));
+                    }
+                }
+                ui.label(egui::RichText::new("or pick a flat face").color(theme::muted()));
+                if ui.button("Cancel").clicked() {
+                    state.push(AppAction::CancelEditor);
+                }
+            });
+        });
 }
 
 fn label(command: &CommandSpec, state: &AppState) -> String {
@@ -32,7 +53,11 @@ fn label(command: &CommandSpec, state: &AppState) -> String {
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
-    let tab: Tab = state.ribbon_tab.into();
+    show_mode(ui, state, false);
+}
+
+fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
+    let tab: Tab = if state.in_sketch() { RibbonTab::Sketch.into() } else { state.ribbon_tab.into() };
     let mut pending = None;
     let mut relations_anchor = ui.max_rect();
     egui::ScrollArea::vertical().id_salt(("palette", tab.label())).auto_shrink([false; 2]).show(ui, |ui| {
@@ -41,7 +66,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         if start {
             let command = commands::get("sketch").expect("the registry has Start sketch");
             let width = ui.available_width();
-            let response = tile(ui, state, command, width, 30.0);
+            let response = tile(ui, state, command, width, 30.0, compact);
+            if response.clicked() {
+                pending = Some(command);
+            }
+        }
+        if tab == Tab::Part(RibbonTab::Sketch) {
+            let command = commands::get("smart_dimension").expect("the registry has Smart Dimension");
+            let response = tile(ui, state, command, ui.available_width(), 30.0, compact);
             if response.clicked() {
                 pending = Some(command);
             }
@@ -50,26 +82,38 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let commands: Vec<_> = commands
                 .into_iter()
                 .map(|(command, _)| command)
-                .filter(|command| (command.shown)(state) && !(start && command.id == "sketch"))
+                .filter(|command| {
+                    (command.shown)(state) && !(start && command.id == "sketch") && command.id != "smart_dimension"
+                })
                 .collect();
             if commands.is_empty() {
                 continue;
             }
             ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(group_label(group, tab))
-                    .font(theme::font_medium(tokens::SMALL_SIZE))
-                    .color(theme::muted()),
-            );
-            let width = (ui.available_width() - tokens::COLUMN_GAP) / 2.0;
-            for row in commands.chunks(2) {
+            if compact {
+                ui.separator();
+            } else {
+                ui.label(
+                    egui::RichText::new(commands::palette_group(group, tab))
+                        .font(theme::font_medium(tokens::SMALL_SIZE))
+                        .color(theme::muted()),
+                );
+            }
+            let width = if compact { ui.available_width() } else { (ui.available_width() - tokens::COLUMN_GAP) / 2.0 };
+            for row in commands.chunks(if compact { 1 } else { 2 }) {
                 let height = row
                     .iter()
-                    .map(|command| text(ui, state, command, width).size().y + 2.0 * tokens::TOOL_PADDING)
+                    .map(|command| {
+                        if compact {
+                            28.0
+                        } else {
+                            text(ui, state, command, width).size().y + 2.0 * tokens::TOOL_PADDING
+                        }
+                    })
                     .fold(24.0, f32::max);
                 ui.horizontal(|ui| {
                     for command in row {
-                        let response = tile(ui, state, command, width, height);
+                        let response = tile(ui, state, command, width, height, compact);
                         if command.id == "relations" {
                             relations_anchor = response.rect;
                         }
@@ -106,7 +150,14 @@ fn text(ui: &egui::Ui, state: &AppState, command: &CommandSpec, width: f32) -> s
     )
 }
 
-fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, width: f32, height: f32) -> egui::Response {
+fn tile(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    command: &'static CommandSpec,
+    width: f32,
+    height: f32,
+    compact: bool,
+) -> egui::Response {
     let enabled = command.is_enabled(state);
     let active = (command.active)(state);
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
@@ -115,8 +166,9 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     response.dnd_set_drag_payload(crate::command_line::ToolDrag { id: command.id });
     response
         .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, label(command, state)));
-    let wide = command.id == "sketch" && !state.in_sketch();
-    let fill = if wide && enabled {
+    let primary = !compact && command.id == "sketch" && !state.in_sketch();
+    let wide = primary || (!compact && command.id == "smart_dimension");
+    let fill = if primary && enabled {
         if response.hovered() { tokens::PRIMARY_HOVER } else { theme::accent() }
     } else if active {
         theme::selection_bg()
@@ -128,13 +180,15 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
         theme::panel()
     };
     let focus = if response.has_focus() {
-        Stroke::new(if wide { 2.0 } else { 1.0 }, if wide { theme::on_accent() } else { theme::accent() })
+        Stroke::new(if primary { 2.0 } else { 1.0 }, if primary { theme::on_accent() } else { theme::accent() })
     } else {
         Stroke::NONE
     };
     ui.painter().rect(rect, CornerRadius::same(tokens::TOOL_RADIUS), fill, focus, StrokeKind::Inside);
-    let galley = text(ui, state, command, width);
-    let x = if wide {
+    let galley = text(ui, state, command, if compact { tokens::PALETTE_WIDTH } else { width });
+    let x = if compact {
+        rect.center().x - tokens::ICON_SIZE / 2.0
+    } else if wide {
         rect.center().x - (tokens::ICON_SIZE + tokens::TOOL_PADDING + galley.size().x) / 2.0
     } else {
         rect.left() + tokens::TOOL_PADDING
@@ -146,7 +200,7 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     let treatment = if enabled { icons::Treatment::Normal } else { icons::Treatment::Disabled };
     let ink = if !enabled {
         theme::muted()
-    } else if wide {
+    } else if primary {
         theme::on_accent()
     } else if active {
         theme::selection_ink()
@@ -155,6 +209,8 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     };
     icons::paint_as(ui.painter(), command.icon, icon, ink, treatment);
     let at = pos2(x + tokens::ICON_SIZE + tokens::TOOL_PADDING, rect.center().y - galley.size().y / 2.0);
-    ui.painter().galley(at, galley, theme::ink());
-    response.on_hover_text(command.tip(state))
+    if !compact {
+        ui.painter().galley(at, galley, theme::ink());
+    }
+    response.on_hover_text(format!("{}\n{}", label(command, state), command.tip(state)))
 }

@@ -1,0 +1,592 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "canonical-p1",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 0,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              30,
+              20,
+              0
+            ],
+            "width": 60,
+            "height": 40
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch1",
+        "depth": 5,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 5,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              30,
+              2.5,
+              5
+            ],
+            "width": 60,
+            "height": 5
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch2",
+        "depth": 25,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 5,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              30,
+              25,
+              5
+            ],
+            "diameter": 16
+          }
+        ]
+      }
+    },
+    {
+      "tool": "extrude",
+      "arguments": {
+        "sketch": "Sketch3",
+        "depth": 10,
+        "flip": false
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": -1,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              30,
+              25,
+              -1
+            ],
+            "diameter": 8
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch4",
+        "depth": 17,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": -1,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              12,
+              -1
+            ],
+            "diameter": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch5",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": -1,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              50,
+              12,
+              -1
+            ],
+            "diameter": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch6",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": -1,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              10,
+              32,
+              -1
+            ],
+            "diameter": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch7",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": -1,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              50,
+              32,
+              -1
+            ],
+            "diameter": 4
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch8",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              23,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch9",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              25,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch10",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              27,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch11",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              29,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch12",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              31,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch13",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              33,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch14",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              35,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch15",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "circle",
+            "center": [
+              37,
+              6,
+              18
+            ],
+            "diameter": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch16",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "front",
+        "offset": -6,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              30,
+              6,
+              18
+            ],
+            "width": 14,
+            "height": 6
+          }
+        ]
+      }
+    },
+    {
+      "tool": "cut",
+      "arguments": {
+        "sketch": "Sketch17",
+        "depth": 7,
+        "through_all": false,
+        "flip": true
+      },
+      "label": "original",
+      "exports": [
+        {
+          "format": "step",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STEP"
+        },
+        {
+          "format": "stl",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STL"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 19943.937979737195,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "drive",
+      "arguments": {
+        "sketch": "Sketch3",
+        "dimension": 1,
+        "expression": "18"
+      },
+      "label": "edited",
+      "exports": [
+        {
+          "format": "step",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STEP"
+        },
+        {
+          "format": "stl",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STL"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "label": "undo",
+      "same_geometry_as_step": 34,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 19943.937979737195,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "label": "redo",
+      "same_geometry_as_step": 35,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/canonical-p1.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/canonical-p1.dwprt"
+      },
+      "label": "reopened",
+      "fresh_process": true,
+      "same_geometry_as_step": 35,
+      "exports": [
+        {
+          "format": "step",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STEP"
+        },
+        {
+          "format": "stl",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STL"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_extrude",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "depth": 0,
+        "flip": false
+      },
+      "label": "refused",
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 39,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
+      ]
+    }
+  ]
+}

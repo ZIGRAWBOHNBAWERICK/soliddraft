@@ -84,7 +84,11 @@ pub fn save_layout(layout: &Layout) -> Result<(), NotKept> {
 }
 
 fn layout_from(all: &Value) -> Layout {
-    serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped()
+    let mut layout = serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped();
+    if frame_layout_from(all) == FrameLayout::EditSuite && all["layout"]["tree"]["shown"].as_bool().is_none() {
+        layout.tree.shown = false;
+    }
+    layout
 }
 
 /// The panel layout in the settings file at `file`.
@@ -250,6 +254,18 @@ pub fn save_reference_display(references: &ReferenceDisplay) -> Result<(), NotKe
 /// Saves the named background without changing the other view settings.
 pub fn save_scene(scene: Scene) -> Result<(), NotKept> {
     save_view_keys(serde_json::json!({ "scene": scene }))
+}
+
+/// The scene gallery favourites, with the approved first five on a fresh installation.
+pub fn scene_favourites() -> Vec<Scene> {
+    let saved = serde_json::from_value::<Vec<Scene>>(stored()["view"]["scene_favourites"].clone());
+    let chosen = saved.unwrap_or_else(|_| Scene::ALL[..5].to_vec());
+    Scene::ALL.into_iter().filter(|scene| chosen.contains(scene)).collect()
+}
+
+/// Saves favourites without replacing other viewport preferences.
+pub fn save_scene_favourites(scenes: &[Scene]) -> Result<(), NotKept> {
+    save_view_keys(serde_json::json!({ "scene_favourites": scenes }))
 }
 
 /// Saves how the grid looks.

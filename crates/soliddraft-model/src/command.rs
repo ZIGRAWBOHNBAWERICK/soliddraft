@@ -953,8 +953,7 @@ impl Document {
                     }
                 }
                 let old = std::mem::replace(&mut self.features[i].name, name.clone());
-                // Messages that name the feature are made again; every build is reused.
-                self.touch(i);
+                self.refresh_names();
                 Ok(Applied {
                     inverse: Command::RenameFeature { id, name: old.clone() },
                     redo: Command::RenameFeature { id, name: name.clone() },

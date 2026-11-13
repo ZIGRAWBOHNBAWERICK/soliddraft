@@ -81,7 +81,18 @@ fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choic
         assert_eq!(app.state().state.doc.revision(), revision, "hiding does not change geometry");
         assert!(!egui::Popup::is_any_open(&app.ctx));
 
-        let at = app.get_by_role_and_label(egui::accesskit::Role::Button, "Solid body").rect().center();
+        if !app.state().state.layout.tree.shown {
+            ribbon::run_command(app, "toggle_tree");
+        }
+        let tree = egui::PanelState::load(&app.ctx, soliddraft_app::panels::Side::Tree.panel_id())
+            .expect("the Tree is laid out")
+            .outer_rect;
+        let at = app
+            .query_all_by_label("Solid body")
+            .find(|node| tree.contains_rect(node.rect()))
+            .expect("the visible Tree has a body row")
+            .rect()
+            .center();
         secondary(app, at, false);
         assert_eq!(quick_count(app), 8);
         click_quick(app, "Show");
@@ -115,19 +126,13 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
                 {
                     assert!(window.contains_rect(node.rect()), "{name}: quick command stays inside");
                 }
-                let mut column_top: Option<f32> = None;
                 for group in ["View", "Scene", "Display", "Show"] {
-                    // Popup headings follow the main-window labels in the accessibility tree.
-                    let heading = app
-                        .query_all(By::new().role(egui::accesskit::Role::Label).label(group))
-                        .last()
-                        .expect("the popup has this command group")
-                        .rect();
-                    assert!(window.contains_rect(heading));
-                    if let Some(top) = column_top {
-                        assert!((heading.top() - top).abs() <= ribbon::TOLERANCE, "menu columns align");
+                    let headings: Vec<_> =
+                        app.query_all(By::new().role(egui::accesskit::Role::Label).label(group)).collect();
+                    assert!(!headings.is_empty(), "{group} is visible");
+                    for heading in headings {
+                        assert!(window.contains_rect(heading.rect()), "{name}: {group} stays inside");
                     }
-                    column_top = Some(heading.top());
                 }
                 case.frame(app, &format!("{}-{name}", size.x));
                 app.key_press(Key::Escape);

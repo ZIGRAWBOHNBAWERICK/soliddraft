@@ -84,8 +84,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     body(ui, state, state.ribbon_tab.into());
 }
 
-/// The part workspace strip, shared while the Edit Suite title bar is built.
+/// The classic part workspace strip.
 pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
+    let locked = state.frame_layout == crate::settings::FrameLayout::EditSuite && state.in_sketch();
+    if locked {
+        state.ribbon_tab = RibbonTab::Sketch;
+    }
     // Tab strip.
     let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme::RIBBON_TABS_HEIGHT), Sense::hover());
     ui.painter().rect_filled(strip, CornerRadius::ZERO, theme::chrome());
@@ -95,11 +99,16 @@ pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
         let w = galley.size().x + 24.0;
         let r = Rect::from_min_size(pos2(x, strip.top() + 4.0), vec2(w, strip.height() - 4.0));
         x += w + 2.0;
-        let resp = ui.interact(r, ui.id().with(("ribbon_tab", tab.label())), Sense::click());
+        let enabled = !locked || tab == RibbonTab::Sketch;
+        let resp = ui.interact(
+            r,
+            ui.id().with(("ribbon_tab", tab.label())),
+            if enabled { Sense::click() } else { Sense::hover() },
+        );
         resp.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Button,
-                true,
+                enabled,
                 state.ribbon_tab == tab,
                 format!("{} tab", tab.label()),
             )
@@ -114,7 +123,7 @@ pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
                 StrokeKind::Inside,
             );
             ui.painter().hline(r.x_range().shrink(1.0), r.bottom() - 0.5, Stroke::new(1.5, theme::panel()));
-        } else if resp.hovered() {
+        } else if enabled && resp.hovered() {
             ui.painter().rect_filled(
                 r,
                 CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 },
@@ -126,6 +135,23 @@ pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
         if resp.clicked() {
             state.ribbon_tab = tab;
         }
+        if !enabled {
+            resp.on_hover_text("Close sketch to change workspace");
+        }
+    }
+    if locked
+        && let Some(session) = &state.sketch
+        && let Some(info) = state.doc.describe(crate::document::Selection::Feature(session.feature))
+    {
+        let plane = info.details.iter().find(|(label, _)| label == "Plane").map(|(_, value)| value.as_str());
+        let name = format!("{} · {}", info.title, plane.unwrap_or("Sketch plane"));
+        let rect = Rect::from_min_max(pos2(x + 8.0, strip.top()), strip.right_bottom() - vec2(8.0, 0.0));
+        ui.put(
+            rect,
+            egui::Label::new(egui::RichText::new(&name).font(theme::font_medium(12.0)).color(theme::accent()))
+                .truncate(),
+        )
+        .on_hover_text(name);
     }
     ui.painter().hline(strip.x_range(), strip.bottom() - 0.5, Stroke::new(1.0, theme::line()));
     // Redraw the active tab's bottom edge so it merges into the body.
@@ -215,7 +241,13 @@ pub(crate) fn relations(ui: &egui::Ui, state: &mut AppState, tab: commands::Tab,
             return;
         }
         let mut open = s.relations_open;
+        let align = if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+            egui::RectAlign::RIGHT_START
+        } else {
+            egui::RectAlign::BOTTOM_START
+        };
         let action = egui::Popup::new(ui.id().with("sketch_relations"), ui.ctx().clone(), anchor, ui.layer_id())
+            .align(align)
             .kind(egui::PopupKind::Menu)
             .open_bool(&mut open)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)

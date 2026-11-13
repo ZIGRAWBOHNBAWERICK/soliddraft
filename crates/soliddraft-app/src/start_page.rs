@@ -80,21 +80,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(mut page) = state.start.take() else { return };
     page.poll();
     egui::ScrollArea::vertical().id_salt("start_page").auto_shrink([false, false]).show(ui, |ui| {
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(40, 32)).show(ui, |ui| {
+        let margin = if ui.available_width() < 900.0 { 16 } else { 40 };
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(margin, 32)).show(ui, |ui| {
             ui.label(egui::RichText::new("Start").font(theme::font_semibold(24.0)).color(theme::ink()));
             ui.add_space(14.0);
+            let tile_width = TILE.x.min(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
-                if tile(ui, "New part", "A solid body from sketches and features").clicked() {
+                if tile(ui, "New part", "A solid body from sketches and features", tile_width).clicked() {
                     state.push(AppAction::NewPart);
                 }
-                if tile(ui, "New assembly", "Parts placed and mated together").clicked() {
+                if tile(ui, "New assembly", "Parts placed and mated together", tile_width).clicked() {
                     run(state, "new_assembly");
                 }
-                if tile(ui, "New drawing", "Sheets with views of a part").clicked() {
+                if tile(ui, "New drawing", "Sheets with views of a part", tile_width).clicked() {
                     state.push(AppAction::NewDrawing);
                 }
-                if tile(ui, "Open…", "A part, assembly or drawing file").clicked() {
+                if tile(ui, "Open…", "A part, assembly or drawing file", tile_width).clicked() {
                     run(state, "open");
                 }
             });
@@ -151,8 +153,8 @@ fn open(state: &mut AppState, doc: &RecentDoc) {
 }
 
 /// One of the four large buttons at the top.
-fn tile(ui: &mut egui::Ui, title: &str, caption: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(TILE, Sense::click());
+fn tile(ui: &mut egui::Ui, title: &str, caption: &str, width: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, TILE.y), Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
     let painter = ui.painter_at(rect);
@@ -173,7 +175,7 @@ fn recovery_banner(ui: &mut egui::Ui, state: &mut AppState) {
         .corner_radius(6)
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let text = if cfg!(target_arch = "wasm32") {
                     "Changes from an earlier visit were not saved. They can be recovered."
                 } else {

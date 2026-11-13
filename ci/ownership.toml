@@ -309,6 +309,13 @@ paths = ["crates/soliddraft-app/src/options_bar.rs"]
 module = ["options_bar"]
 
 [[areas]]
+name = "app.timeline"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/timeline.rs"]
+module = ["timeline"]
+
+[[areas]]
 name = "app.tool_palette"
 owner = "core"
 crate = "soliddraft-app"
@@ -584,3 +591,10 @@ owner = "B7"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/interference/"]
 module = ["interference"]
+
+[[areas]]
+name = "app.canonical_parts"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/tests/canonical_parts.rs"]
+module = []

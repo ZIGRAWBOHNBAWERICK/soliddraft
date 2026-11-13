@@ -237,6 +237,8 @@ impl RibbonTab {
 pub struct FeatureEditor {
     pub target: Option<FeatureId>,
     pub params: EditorParams,
+    /// The sketch tool to arm after this plane picker completes. Closing it drops the tool.
+    pub pending_sketch_tool: Option<Tool>,
     pub preview: Preview,
     pub error: Option<String>,
     /// The document's rollback before the editor rolled the display back to the
@@ -285,6 +287,7 @@ impl FeatureEditor {
         Self {
             target,
             params,
+            pending_sketch_tool: None,
             preview: Preview::default(),
             error: None,
             saved_rollback,
@@ -1062,6 +1065,7 @@ pub struct AppState {
     /// Bumped when File locations are saved, so cached lookups refresh.
     pub locations_epoch: u64,
     pub rename: Option<Rename>,
+    pub timeline: crate::timeline::State,
     /// The tree row being dragged for reordering.
     pub drag_feature: Option<FeatureId>,
     /// The feature dimension being dragged, with its previews.
@@ -1134,6 +1138,7 @@ impl AppState {
             locations_dialog: None,
             locations_epoch: 0,
             rename: None,
+            timeline: Default::default(),
             drag_feature: None,
             drag_preview: None,
             dimension_edit: None,
@@ -1332,7 +1337,10 @@ impl AppState {
                 ("Preview", NoteKind::Info)
             });
         }
-        self.doc.proof_pending().then_some(("Proof pending", NoteKind::Info))
+        if self.doc.proof_pending() {
+            return Some(("Proof pending", NoteKind::Info));
+        }
+        self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
     }
 
     /// Exports only the committed revision. A live dimension edit cannot export
@@ -1340,6 +1348,9 @@ impl AppState {
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
+        }
+        if self.doc.proof_state().answered_within_bound {
+            return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
         if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {
             return Err("The requested revision has not passed proof".into());

@@ -71,6 +71,7 @@ pub struct Palette {
     pub selection_ink: Color32,
     pub hover: Color32,
     pub ok: Color32,
+    pub bounded: Color32,
     pub warn: Color32,
     pub error: Color32,
     /// Notice fills behind warn and error text.
@@ -126,6 +127,7 @@ pub const LIGHT: Palette = Palette {
     selection_ink: rgb(0x0e, 0x2a, 0x66),
     hover: rgb(0xe2, 0xe6, 0xed),
     ok: rgb(0x17, 0x6b, 0x39),
+    bounded: rgb(0x76, 0x35, 0xa8),
     warn: rgb(0x89, 0x50, 0x06),
     error: rgb(0xb5, 0x2b, 0x32),
     warn_soft: rgb(0xfd, 0xf6, 0xe3),
@@ -161,6 +163,7 @@ pub const DARK: Palette = Palette {
     selection_ink: rgb(0xcf, 0xe0, 0xff),
     hover: rgb(0x3a, 0x40, 0x49),
     ok: rgb(0x5b, 0xd2, 0x7a),
+    bounded: rgb(0xd2, 0xa0, 0xff),
     warn: rgb(0xe3, 0xa0, 0x3c),
     error: rgb(0xff, 0x6b, 0x6b),
     warn_soft: rgba(0xe3, 0xa0, 0x3c, 46),
@@ -196,6 +199,8 @@ pub mod edit_suite {
     pub const ON_DANGER: Color32 = Color32::WHITE;
     pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);
     pub const FULLY_DEFINED: Color32 = rgb(0x0b, 0x0d, 0x11);
+    pub const CONSTRUCTION: Color32 = rgb(0x5b, 0x6b, 0x86);
+    pub const DIMENSION: Color32 = rgb(0x24, 0x56, 0xc4);
     pub const SKETCH_SHEET: Color32 = rgb(0xf1, 0xf3, 0xf7);
 
     pub const PALETTE: Palette = Palette {
@@ -212,6 +217,7 @@ pub mod edit_suite {
         selection_ink: rgb(0xf5, 0xa5, 0x24),
         hover: POPUP_HOVER,
         ok: rgb(0x63, 0xd6, 0x8f),
+        bounded: super::DARK.bounded,
         warn: rgb(0xf5, 0xa5, 0x24),
         error: rgb(0xff, 0xb4, 0xad),
         warn_soft: rgba(245, 165, 36, 51),
@@ -256,12 +262,14 @@ pub mod edit_suite {
     pub const FIELD_RADIUS: u8 = 4;
     pub const TOOL_RADIUS: u8 = 5;
     pub const FLOATING_RADIUS: u8 = 10;
+    pub const NAV_SHADOW: egui::Shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: rgba(0, 0, 0, 77) };
 }
 
 static MODE: AtomicU8 = AtomicU8::new(0);
 static LAYOUT: AtomicU8 = AtomicU8::new(0);
 
-fn is_edit_suite() -> bool {
+/// Whether the internal Edit Suite frame is active.
+pub fn is_edit_suite() -> bool {
     LAYOUT.load(Ordering::Relaxed) == 1
 }
 
@@ -341,6 +349,9 @@ pub fn hover() -> Color32 {
 }
 pub fn ok() -> Color32 {
     palette().ok
+}
+pub fn bounded() -> Color32 {
+    palette().bounded
 }
 pub fn warn() -> Color32 {
     palette().warn
@@ -424,6 +435,8 @@ pub const MENU_HEIGHT: f32 = 30.0;
 pub const RIBBON_TABS_HEIGHT: f32 = 26.0;
 pub const RIBBON_BODY_HEIGHT: f32 = 92.0;
 pub const COMMAND_LINE_HEIGHT: f32 = 32.0;
+/// Keep room for the model and an optional pane in a narrow Edit Suite window.
+pub const COMPACT_WIDTH: f32 = 1100.0;
 pub const ROW_HEIGHT: f32 = 22.0;
 
 pub const FONT_REGULAR: &str = "Inter";

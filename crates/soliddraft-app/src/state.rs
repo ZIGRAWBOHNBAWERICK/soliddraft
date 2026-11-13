@@ -48,6 +48,7 @@ pub enum AppAction {
     StartCut,
     StartFillet,
     StartChamfer,
+    ShowMaterial,
     StartHole,
     StartPattern {
         circular: bool,
@@ -333,7 +334,7 @@ impl FeatureEditor {
             self.marked = (self.edges().to_vec(), before);
             self.marks = doc.edge_paths(&self.marked.0, before);
         }
-        if self.feedback.size.is_some() {
+        if self.feedback.size.is_some() || self.feedback.second_size.is_some() {
             self.preview = Preview::default();
             self.error = None;
             self.last = None;

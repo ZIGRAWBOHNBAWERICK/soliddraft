@@ -920,6 +920,17 @@ impl Kernel for CatallaxKernel {
     }
 
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult> {
+        self.chamfer_distances(tag, body, edges, distance, None)
+    }
+
+    fn chamfer_distances(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        distance: f64,
+        other_distance: Option<f64>,
+    ) -> KernelResult<OpResult> {
         self.observe("chamfer", || {
             let state = self.state()?;
             let solid = state.solid(body)?;
@@ -931,7 +942,7 @@ impl Kernel for CatallaxKernel {
                 body: state.step(body)?,
                 edges: catallax_recipe::EdgeSelection::Refs(refs),
                 distance: native::number(distance, "chamfer distance")?,
-                other_distance: None,
+                other_distance: other_distance.map(|d| native::number(d, "second chamfer distance")).transpose()?,
             };
             self.native(state, tag, OpKind::Chamfer, body, &[body], native, None, edges)
         })

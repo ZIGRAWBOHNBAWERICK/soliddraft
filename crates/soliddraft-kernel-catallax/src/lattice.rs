@@ -180,6 +180,9 @@ impl CatallaxKernel {
         let spec = LatticeSpec {
             cell: match params.cell {
                 LatticeCell::Cubic => catallax_recipe::LatticeCell::Cubic,
+                LatticeCell::BodyCentred => catallax_recipe::LatticeCell::BodyCentred,
+                LatticeCell::FaceCentred => catallax_recipe::LatticeCell::FaceCentred,
+                LatticeCell::Octet => catallax_recipe::LatticeCell::Octet,
             },
             size: native::number(params.cell_size_mm, "cell size")?,
             frame: match params.frame {
@@ -267,6 +270,7 @@ impl CatallaxKernel {
             faces: vec![FaceInfo {
                 id: face,
                 surface: SurfaceKind::Other,
+                accuracy: soliddraft_kernel_api::FaceAccuracy::Unknown,
                 area: 0.0,
                 centroid: (bbox.min + bbox.max) * 0.5,
                 bbox,

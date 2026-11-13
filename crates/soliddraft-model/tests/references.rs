@@ -171,7 +171,7 @@ fn merged_cap_edges_keep_their_construction_pair_through_blends_edits_and_reload
             let actual = if face.generator == Generator::EndCap { merged } else { wall };
             assert_eq!(face.fingerprint, soliddraft_model::FaceFingerprint::of(actual));
         }
-        let blend = BlendFeature { edges: vec![saved.clone()], size: 0.5 };
+        let blend = BlendFeature { edges: vec![saved.clone()], size: 0.5, other_distance: None };
         let kind = if fillet { FeatureKind::Fillet(blend) } else { FeatureKind::Chamfer(blend) };
         let downstream = add(&mut doc, "Blend", kind);
         assert_eq!(doc.status(downstream), Some(&FeatureStatus::Ok), "{}", report(&doc));

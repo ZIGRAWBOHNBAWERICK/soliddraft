@@ -707,6 +707,7 @@ mod tests {
         FaceInfo {
             id: FaceId::from_raw(id),
             surface: SurfaceKind::Plane,
+            accuracy: soliddraft_kernel_api::FaceAccuracy::Unknown,
             area: 1.0,
             centroid: Vec3::new(id as f64, 0.0, z),
             bbox: Aabb { min: Vec3::ZERO, max: Vec3::ZERO },

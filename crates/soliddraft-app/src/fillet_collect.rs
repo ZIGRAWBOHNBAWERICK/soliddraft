@@ -16,6 +16,8 @@ pub struct Feedback {
     /// A typed radius or distance that is not a size. The parameters keep the last
     /// accepted one, but nothing previews or commits until it is corrected.
     pub size: Option<String>,
+    /// A refused second chamfer distance, independent of the first field.
+    pub second_size: Option<String>,
 }
 
 /// Takes a viewport pick into the open Fillet or Chamfer panel.

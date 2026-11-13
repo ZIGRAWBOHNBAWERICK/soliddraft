@@ -2082,6 +2082,12 @@ fn registry() -> Vec<CommandSpec> {
              Editing and model_summary report previously requested body properties. Tracked rows are standing requests for their own entity proofs.",
             tools::feature_params,
         ),
+        cmd("material", "Material", Icon::Material, "Assign a part material and calculate mass from its density")
+            .on(Inspect, "Measure", Small)
+            .run(|_| AppAction::ShowMaterial)
+            .when(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite && s.doc.display_body().is_some())
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Check the body for geometry faults").on(Inspect, "Check", Large),
         cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane").on(Inspect, "Check", Small),
         cmd("draft_check", "Draft check", Icon::Cad("draft_check"), "Show which faces have enough draft")

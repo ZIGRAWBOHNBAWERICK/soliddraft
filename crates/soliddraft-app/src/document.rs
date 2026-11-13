@@ -355,7 +355,7 @@ pub struct FilletParams {
 impl FilletParams {
     /// The model's fillet these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature { edges: self.edges.clone(), size: self.radius }
+        model::BlendFeature { edges: self.edges.clone(), size: self.radius, other_distance: None }
     }
 }
 
@@ -363,12 +363,14 @@ impl FilletParams {
 pub struct ChamferParams {
     pub edges: Vec<EdgeRef>,
     pub distance: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_distance: Option<f64>,
 }
 
 impl ChamferParams {
     /// The model's chamfer these parameters make.
     pub fn blend(&self) -> model::BlendFeature {
-        model::BlendFeature { edges: self.edges.clone(), size: self.distance }
+        model::BlendFeature { edges: self.edges.clone(), size: self.distance, other_distance: self.other_distance }
     }
 }
 
@@ -643,9 +645,11 @@ impl FeatureKind {
             model::FeatureKind::Fillet(b) => {
                 FeatureKind::Fillet(FilletParams { edges: b.edges.clone(), radius: b.size })
             }
-            model::FeatureKind::Chamfer(b) => {
-                FeatureKind::Chamfer(ChamferParams { edges: b.edges.clone(), distance: b.size })
-            }
+            model::FeatureKind::Chamfer(b) => FeatureKind::Chamfer(ChamferParams {
+                edges: b.edges.clone(),
+                distance: b.size,
+                other_distance: b.other_distance,
+            }),
             model::FeatureKind::Hole(h) => FeatureKind::Hole(h.clone()),
             model::FeatureKind::Pattern(p) => FeatureKind::Pattern(p.clone()),
             model::FeatureKind::Mirror(m) => FeatureKind::Mirror(m.clone()),
@@ -721,6 +725,7 @@ pub struct NamedFace {
     pub feature: FeatureId,
     pub label: String,
     pub surface: SurfaceKind,
+    pub accuracy: soliddraft_kernel_api::FaceAccuracy,
     pub area: f64,
     pub centroid: Vec3,
 }
@@ -772,7 +777,10 @@ impl Feature {
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
             FeatureKind::Sweep(s) => format!("{} mm", fmt_mm(s.path.length())),
             FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
-            FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
+            FeatureKind::Chamfer(c) => match c.other_distance {
+                Some(other) => format!("{} × {} mm", fmt_mm(c.distance), fmt_mm(other)),
+                None => format!("{} mm", fmt_mm(c.distance)),
+            },
             FeatureKind::Hole(h) => {
                 format!("{} × Ø{}", h.points.len(), fmt_mm(h.diameter))
             }
@@ -2588,9 +2596,27 @@ impl Document {
         self.mesh_version += 1;
     }
 
-    /// Applies an appearance to the part, a feature's faces or one face, or removes the
-    /// one there with `None`, in every configuration, as one undo entry. Only the colours
-    /// change: the meshes keep their geometry and the kernel is not asked for anything.
+    /// Assigns or clears the part material in every configuration as one undo entry.
+    /// The part keeps a snapshot with its density and default appearance.
+    pub fn set_material(
+        &mut self,
+        material: Option<soliddraft_materials::Material>,
+        default_appearance: Option<Appearance>,
+    ) -> Result<(), String> {
+        self.model
+            .execute(model::Command::SetMaterial {
+                material,
+                default_appearance,
+                scope: soliddraft_document::ConfigScope::All,
+            })
+            .map_err(|e| e.to_string())?;
+        self.touch();
+        self.apply_appearances();
+        self.mesh_version += 1;
+        Ok(())
+    }
+
+    /// Applies an appearance as one undo entry.
     pub fn set_appearance(
         &mut self,
         target: model::AppearanceTarget,
@@ -3287,6 +3313,9 @@ impl Document {
                     FeatureKind::Chamfer(p) => {
                         details.push(("Edges".to_owned(), p.edges.len().to_string()));
                         details.push(("Distance".to_owned(), format!("{} mm", fmt_mm(p.distance))));
+                        if let Some(other) = p.other_distance {
+                            details.push(("Second distance".into(), format!("{} mm", fmt_mm(other))));
+                        }
                     }
                     FeatureKind::Hole(h) => {
                         details.push(("Face".to_owned(), h.face.label.clone()));
@@ -3396,6 +3425,16 @@ impl Document {
                 let details = vec![
                     ("Feature".to_owned(), name.clone()),
                     ("Surface".to_owned(), surface.to_owned()),
+                    (
+                        "Carrier accuracy".into(),
+                        match nf.accuracy {
+                            soliddraft_kernel_api::FaceAccuracy::Exact => "Exact".into(),
+                            soliddraft_kernel_api::FaceAccuracy::Fitted { max_deviation_mm } => {
+                                format!("Fitted, deviation ≤ {max_deviation_mm:e} mm")
+                            }
+                            soliddraft_kernel_api::FaceAccuracy::Unknown => "Unknown".into(),
+                        },
+                    ),
                     ("Area".to_owned(), format!("{:.1} mm²", nf.area)),
                     ("Centroid".to_owned(), format!("{:.2}, {:.2}, {:.2}", c.x, c.y, c.z)),
                 ];
@@ -3446,6 +3485,7 @@ fn named_entities(model: &model::Document, body: BodyId, topology: &Topology) ->
                 feature,
                 label,
                 surface: face.surface,
+                accuracy: face.accuracy,
                 area: face.area,
                 centroid: kv(face.centroid),
             }

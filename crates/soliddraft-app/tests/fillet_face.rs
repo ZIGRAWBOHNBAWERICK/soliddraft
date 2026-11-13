@@ -838,3 +838,52 @@ fn proof_folder() -> std::path::PathBuf {
     std::fs::create_dir_all(&folder).unwrap();
     folder
 }
+
+#[test]
+fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
+    use soliddraft_app::state::{AppAction, RibbonTab};
+    let _gpu = gpu();
+    let mut app = harness(box_document());
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.run_steps(4);
+    click_world(&mut app, glam::Vec3::new(0.0, -20.0, 20.0));
+    button(&mut app, "Chamfer");
+    app.get_by_label("Two distances").click();
+    app.run_steps(4);
+    type_field(&mut app, "Distance value", "1");
+    type_field(&mut app, "Second distance value", "3");
+    ok(&mut app);
+    let state = &app.state().state;
+    assert!(state.editor.is_none());
+    let FeatureKind::Chamfer(chamfer) = &state.doc.features.last().unwrap().kind else { panic!("chamfer") };
+    assert_eq!(chamfer.other_distance, Some(3.0));
+    assert!((volume(&state.doc) - (48000.0 - 90.0)).abs() < 1e-6);
+    app.state_mut().state.ribbon_tab = RibbonTab::Inspect;
+    app.run_steps(4);
+    button(&mut app, "Material");
+    app.get_by_label("Part material").click();
+    app.run_steps(4);
+    app.get_by_label("Steel, generic").click();
+    app.run_steps(4);
+    app.get_by_label("Density: 7900 kg/m³");
+    button(&mut app, "Calculate mass");
+    let start = std::time::Instant::now();
+    while app.state().state.doc.kernel().cached_mass_properties(app.state().state.doc.display_body().unwrap()).is_none()
+    {
+        assert!(start.elapsed().as_secs() < 60);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
+    app.run_steps(4);
+    app.get_by_label(&format!("Mass: {:.6} kg", (48000.0 - 90.0) * 7900e-9));
+    app.render().unwrap().save(proof_folder().join("ridealong-material.png")).unwrap();
+    let face = app.state().state.doc.faces[0].id;
+    app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
+    app.run_steps(4);
+    app.get_by_label("Carrier accuracy");
+    app.get_by_label("Exact");
+    app.render().unwrap().save(proof_folder().join("ridealong-accuracy.png")).unwrap();
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::Classic;
+    app.run_steps(4);
+    assert!(app.query_by_label("Carrier accuracy").is_none());
+}

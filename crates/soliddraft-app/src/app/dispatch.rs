@@ -310,7 +310,7 @@ impl SolidDraftApp {
             AppAction::StartFillet | AppAction::StartChamfer => {
                 let chamfer = matches!(action, AppAction::StartChamfer);
                 let params = if chamfer {
-                    EditorParams::Chamfer(ChamferParams { edges: Vec::new(), distance: 2.0 })
+                    EditorParams::Chamfer(ChamferParams { edges: Vec::new(), distance: 2.0, other_distance: None })
                 } else {
                     EditorParams::Fillet(FilletParams { edges: Vec::new(), radius: 4.0 })
                 };
@@ -488,7 +488,12 @@ impl SolidDraftApp {
             AppAction::CommitEditor => {
                 // A refused size stays open for correction: OK cannot apply the last
                 // accepted one in its place.
-                if let Some(why) = self.state.editor.as_ref().and_then(|e| e.feedback.size.clone()) {
+                if let Some(why) = self
+                    .state
+                    .editor
+                    .as_ref()
+                    .and_then(|e| e.feedback.size.clone().or_else(|| e.feedback.second_size.clone()))
+                {
                     self.state.note(format!("Not applied: {why}"), NoteKind::Error);
                     return;
                 }
@@ -805,6 +810,10 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ShowMaterial => {
+                self.state.doc.selection = Some(Selection::Body);
+                self.state.layout.tree.shown = true;
+            }
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));
                 if let Some(id) = feature {

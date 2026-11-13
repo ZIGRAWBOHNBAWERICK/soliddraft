@@ -685,7 +685,7 @@ impl Document {
         }
         let tag = OpTag::new(format!("{}.blend", f.id));
         let result = if chamfer {
-            self.kernel.chamfer(&tag, body, &ids, b.size)
+            self.kernel.chamfer_distances(&tag, body, &ids, b.size, b.other_distance)
         } else {
             self.kernel.fillet(&tag, body, &ids, b.size)
         };

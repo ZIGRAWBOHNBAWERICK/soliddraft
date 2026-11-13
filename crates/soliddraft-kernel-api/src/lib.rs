@@ -251,6 +251,27 @@ pub struct Draft {
 pub enum LatticeCell {
     /// Axis-aligned cubic beams.
     Cubic,
+    /// Beams from the cell centre to its eight corners.
+    BodyCentred,
+    /// Beams from each face centre to its four corners.
+    FaceCentred,
+    /// Face-centred beams with links between neighbouring face centres.
+    Octet,
+}
+
+impl LatticeCell {
+    /// Cells available in the lattice editor.
+    pub const ALL: [Self; 4] = [Self::Cubic, Self::BodyCentred, Self::FaceCentred, Self::Octet];
+
+    /// The name shown in the editor.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cubic => "Cubic",
+            Self::BodyCentred => "Body centred",
+            Self::FaceCentred => "Face centred",
+            Self::Octet => "Octet",
+        }
+    }
 }
 
 /// A terminal field is fixed to the part origin and axes.
@@ -469,6 +490,23 @@ pub enum CurveKind {
     Other,
 }
 
+/// How a face's carrier relates to its retained geometric definition. This is
+/// independent of tessellation quality, measurement accuracy and export rounding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FaceAccuracy {
+    /// No approximation of the face's retained surface definition.
+    Exact,
+    /// A checked fit, with a conservative upper bound in millimetres.
+    Fitted {
+        /// Maximum distance to the retained surface definition, rounded up.
+        max_deviation_mm: f64,
+    },
+    /// The backend supplies no carrier accuracy, for example a field preview.
+    #[default]
+    Unknown,
+}
+
 /// One face of a body.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FaceInfo {
@@ -476,6 +514,9 @@ pub struct FaceInfo {
     pub id: FaceId,
     /// Surface type.
     pub surface: SurfaceKind,
+    /// Carrier accuracy reported by the backend.
+    #[serde(default)]
+    pub accuracy: FaceAccuracy,
     /// Area within the trim boundary.
     pub area: f64,
     /// Area centroid.
@@ -821,6 +862,22 @@ pub trait Kernel: Send + Sync {
 
     /// Bevels the given edges with a flat cross section `distance` wide.
     fn chamfer(&self, tag: &OpTag, body: BodyId, edges: &[EdgeId], distance: f64) -> KernelResult<OpResult>;
+
+    /// Bevels edges with independent setbacks on the two adjacent faces. `None`
+    /// uses the first distance on both faces, as in [`Kernel::chamfer`].
+    fn chamfer_distances(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        edges: &[EdgeId],
+        distance: f64,
+        other_distance: Option<f64>,
+    ) -> KernelResult<OpResult> {
+        if other_distance.is_some_and(|other| other != distance) {
+            return Err(KernelError::InvalidInput("two-distance chamfer is unavailable".into()));
+        }
+        self.chamfer(tag, body, edges, distance)
+    }
 
     /// Hollows a solid to wall `thickness`, leaving `open_faces` open.
     fn shell(&self, tag: &OpTag, body: BodyId, open_faces: &[FaceId], thickness: f64) -> KernelResult<OpResult>;

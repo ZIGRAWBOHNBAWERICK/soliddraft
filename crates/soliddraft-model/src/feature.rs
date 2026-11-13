@@ -382,6 +382,10 @@ pub struct BlendFeature {
     pub edges: Vec<EdgeRef>,
     /// Fillet radius or chamfer distance, in millimetres.
     pub size: f64,
+    /// Second chamfer setback in millimetres. Absent for equal-distance chamfers
+    /// and fillets. Old files retain their equal-distance behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_distance: Option<f64>,
 }
 
 /// Holes drilled into a planar face, one per point.

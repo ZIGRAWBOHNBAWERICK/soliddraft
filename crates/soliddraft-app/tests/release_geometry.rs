@@ -466,3 +466,131 @@ fn rendered_real_use_rounds_an_earlier_round_then_shells_an_l_tray() {
     app.render().unwrap().save(dir.join("l-shell-committed.png")).unwrap();
     assert!(app.get_all_by_label("Shell1").next().is_some());
 }
+
+#[test]
+fn ridealong_chamfer_distances_edit_undo_and_reopen() {
+    let mut state = block();
+    let selected = edges(&state, |e| (e.midpoint.z - 12.0).abs() < 1e-8 && (e.length - 40.0).abs() < 1e-8);
+    let edge = selected[0].clone();
+    accepted(&mut state, "chamfer", json!({"edges":[edge], "distance":1.0, "other_distance":3.0}));
+    let volume =
+        |state: &AppState| state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap().volume;
+    assert!((volume(&state) - (14400.0 - 60.0)).abs() < 1e-6);
+    accepted(&mut state, "edit_chamfer", json!({"feature":"Chamfer1", "distance":2.0, "other_distance":3.0}));
+    assert!((volume(&state) - (14400.0 - 120.0)).abs() < 1e-6);
+    state.doc.undo().unwrap();
+    assert!((volume(&state) - (14400.0 - 60.0)).abs() < 1e-6);
+    state.doc.redo().unwrap();
+    let bytes = state.doc.model().to_bytes().unwrap();
+    let reopened = soliddraft_model::Document::from_bytes(&bytes, soliddraft_app::kernel()).unwrap();
+    let soliddraft_model::FeatureKind::Chamfer(chamfer) = &reopened.features().last().unwrap().kind else {
+        panic!("chamfer")
+    };
+    assert_eq!(chamfer.other_distance, Some(3.0));
+    assert!(
+        (reopened.kernel().mass_properties(reopened.body().unwrap()).unwrap().volume - (14400.0 - 120.0)).abs() < 1e-6
+    );
+    let before = state.doc.model().part_json();
+    let out = call_checked(
+        &mut AppTools { state: &mut state },
+        "edit_chamfer",
+        json!({"feature":"Chamfer1", "distance":2.0, "other_distance":0.0}),
+        &Caller::Mcp { client: "ridealong".into() },
+    );
+    assert!(out.is_error);
+    assert_eq!(state.doc.model().part_json(), before);
+    accepted(&mut state, "edit_chamfer", json!({"feature":"Chamfer1", "distance":1.0}));
+    assert!((volume(&state) - (14400.0 - 20.0)).abs() < 1e-6);
+}
+
+#[test]
+fn ridealong_lattice_cells_survive_partial_edits_and_reopen() {
+    use soliddraft_kernel_api::LatticeCell;
+    for cell in LatticeCell::ALL {
+        let mut state = block();
+        accepted(
+            &mut state,
+            "lattice",
+            json!({"cell":cell, "cell_size":5.0, "radius":0.5, "accuracy":0.2, "min_detail":0.5}),
+        );
+        accepted(&mut state, "edit_lattice", json!({"feature":"Lattice1", "radius":0.7}));
+        let soliddraft_app::document::FeatureKind::Lattice(lattice) = &state.doc.features.last().unwrap().kind else {
+            panic!("lattice")
+        };
+        assert_eq!(lattice.cell, Some(cell));
+        assert_eq!(lattice.radius_mm, Some(0.7.into()));
+        let reopened =
+            soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
+                .unwrap();
+        let soliddraft_model::FeatureKind::Lattice(lattice) = &reopened.features().last().unwrap().kind else {
+            panic!("lattice")
+        };
+        assert_eq!(lattice.cell, Some(cell));
+        assert!(reopened.status(reopened.features().last().unwrap().id).unwrap().is_ok());
+        let mesh = reopened.kernel().preview(reopened.body().unwrap(), &Default::default()).unwrap();
+        assert!(!mesh.indices.is_empty());
+        accepted(&mut state, "edit_lattice", json!({"feature":"Lattice1", "cell":"octet"}));
+        let soliddraft_app::document::FeatureKind::Lattice(lattice) = &state.doc.features.last().unwrap().kind else {
+            panic!("lattice")
+        };
+        assert_eq!(lattice.cell, Some(LatticeCell::Octet));
+    }
+}
+
+#[test]
+fn ridealong_material_mass_and_face_accuracy_survive_reopen() {
+    use soliddraft_kernel_api::FaceAccuracy;
+    let mut state = block();
+    assert!(state.doc.faces.iter().all(|face| face.accuracy == FaceAccuracy::Exact));
+    let catalog = soliddraft_materials::Catalog::built_in();
+    let (_, steel) = catalog.material(&soliddraft_materials::MaterialId("steel-generic".into())).unwrap();
+    state.doc.set_material(Some(steel.clone()), catalog.default_appearance_of(steel).cloned()).unwrap();
+    let mass = state.doc.model().mass(None).unwrap();
+    assert!((mass.mass_kg - 14400.0 * 7900e-9).abs() < 1e-10);
+    let reopened =
+        soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
+            .unwrap();
+    assert_eq!(reopened.material(None).unwrap().id, steel.id);
+    assert!((reopened.mass(None).unwrap().mass_kg - mass.mass_kg).abs() < 1e-10);
+    state.doc.undo().unwrap();
+    assert!(state.doc.model().mass(None).is_err());
+    state.doc.redo().unwrap();
+    assert_eq!(state.doc.model().material(None).unwrap().id, steel.id);
+    state.doc.set_material(None, None).unwrap();
+    assert!(state.doc.model().mass(None).is_err());
+}
+
+#[test]
+fn ridealong_fitted_faces_keep_their_own_bounds() {
+    use soliddraft_kernel_api::FaceAccuracy;
+    let mut state = fresh();
+    let scenario: Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/oblique-cylinder-fillet.json")).unwrap();
+    for step in scenario["steps"].as_array().unwrap().iter().take(5) {
+        accepted(&mut state, step["tool"].as_str().unwrap(), step["arguments"].clone());
+    }
+    let fitted: Vec<_> = state
+        .doc
+        .faces
+        .iter()
+        .filter_map(|face| match face.accuracy {
+            FaceAccuracy::Fitted { max_deviation_mm } => Some(max_deviation_mm),
+            _ => None,
+        })
+        .collect();
+    assert!(!fitted.is_empty());
+    assert!(fitted.iter().all(|bound| bound.is_finite() && *bound > 0.0 && *bound < 1.0));
+    assert!(state.doc.faces.iter().any(|face| face.accuracy == FaceAccuracy::Exact));
+    let back = soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
+        .unwrap();
+    let topology = back.kernel().topology(back.body().unwrap()).unwrap();
+    let restored: Vec<_> = topology
+        .faces
+        .iter()
+        .filter_map(|face| match face.accuracy {
+            FaceAccuracy::Fitted { max_deviation_mm } => Some(max_deviation_mm),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fitted, restored);
+}

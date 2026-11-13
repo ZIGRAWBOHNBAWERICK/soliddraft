@@ -629,3 +629,34 @@ fn ridealong_second_distance_is_checked_at_the_document_boundary() {
     let legacy: BlendFeature = serde_json::from_value(json!({"edges":[],"size":1.0})).unwrap();
     assert_eq!(legacy.other_distance, None);
 }
+
+#[test]
+fn ridealong_repaired_faces_show_attained_source_bounds() {
+    use soliddraft_app::document::{Command, Document, FeatureKind, Selection};
+    use soliddraft_model::ImportStepFeature;
+    let mut state = fresh();
+    let source = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
+    let options = soliddraft_kernel_api::ImportOptions::default();
+    let proposal = state.doc.kernel().propose_import(source, &options).unwrap().proposals.remove(0);
+    let imported =
+        ImportStepFeature::new("seam.step", source.to_vec()).accepted(&proposal.question, "0.03", "Fixture reviewer");
+    state.doc.apply(Command::AddFeature(FeatureKind::ImportStep(imported))).unwrap();
+    let check = |doc: &Document| {
+        let repaired: Vec<_> = doc
+            .faces
+            .iter()
+            .filter_map(|face| doc.import_face_tolerance(face.id).map(|tolerance| (face.id, tolerance)))
+            .collect();
+        assert_eq!(repaired.len(), 4);
+        for (face, tolerance) in repaired {
+            assert_eq!(tolerance.deviation_upper_mm, "0.02");
+            assert_eq!(tolerance.approved_tolerance_mm, "0.03");
+            let info = doc.describe(Selection::Face(face)).unwrap();
+            assert!(info.details.contains(&("Import deviation".into(), "≤ 0.02 mm from source".into())));
+        }
+    };
+    check(&state.doc);
+    let back = soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
+        .unwrap();
+    check(&Document::from_model(back));
+}

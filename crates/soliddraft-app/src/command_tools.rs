@@ -2492,6 +2492,7 @@ fn face_json(doc: &Document, face: FaceId) -> Value {
         "name": name_of_face(doc, face),
         "surface": format!("{:?}", nf.surface).to_lowercase(),
         "accuracy": nf.accuracy,
+        "import_tolerance": doc.import_face_tolerance(face),
         "area_mm2": round(nf.area),
         "centroid": vec3(nf.centroid),
     });

@@ -929,3 +929,28 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
     app.get_by_label(&format!("Fitted, deviation ≤ {bound:e} mm"));
     app.render().unwrap().save(proof_folder().join("ridealong-fitted-face.png")).unwrap();
 }
+
+#[test]
+fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
+    use soliddraft_app::state::AppAction;
+    let _gpu = gpu();
+    let mut doc = Document::new("Repaired face", soliddraft_app::kernel());
+    let source = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
+    let proposal = doc.kernel().propose_import(source, &Default::default()).unwrap().proposals.remove(0);
+    let imported = soliddraft_model::ImportStepFeature::new("seam.step", source.to_vec()).accepted(
+        &proposal.question,
+        "0.03",
+        "Fixture reviewer",
+    );
+    doc.apply(Command::AddFeature(FeatureKind::ImportStep(imported))).unwrap();
+    let face = doc.faces.iter().find(|face| doc.import_face_tolerance(face.id).is_some()).unwrap().id;
+    let mut app = harness(doc);
+    app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
+    app.run_steps(4);
+    app.get_by_label("Import deviation");
+    app.get_by_label("≤ 0.02 mm from source");
+    app.get_by_label("Approved import limit");
+    app.get_by_label("0.03 mm");
+    app.render().unwrap().save(proof_folder().join("ridealong-imported-face.png")).unwrap();
+}

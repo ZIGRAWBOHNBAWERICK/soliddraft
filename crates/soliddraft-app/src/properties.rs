@@ -1849,7 +1849,9 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         theme::section_label(ui, kind);
         egui::Grid::new("props").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
             for (k, v) in &info.details {
-                if k == "Carrier accuracy" && state.frame_layout != crate::settings::FrameLayout::EditSuite {
+                if matches!(k.as_str(), "Carrier accuracy" | "Import deviation" | "Approved import limit")
+                    && state.frame_layout != crate::settings::FrameLayout::EditSuite
+                {
                     continue;
                 }
                 ui.label(egui::RichText::new(k).size(12.0).color(theme::muted()));

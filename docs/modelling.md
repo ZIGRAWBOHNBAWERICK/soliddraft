@@ -285,6 +285,9 @@ has no approximation relative to its retained surface definition. Fitted reports
 the producer's measured upper deviation bound in millimetres. Unknown means the
 backend supplied no bound, as for a field's display region. Carrier accuracy is
 separate from viewport quality, measurement accuracy and STEP export rounding.
+An unchanged repaired import also shows Import deviation, its attained whole-face
+bound against the source, and Approved import limit as a separate value. That bound
+covers the original import only and is not copied onto a later modified body.
 
 ## Terminal lattice
 

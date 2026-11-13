@@ -3204,6 +3204,25 @@ impl Document {
         })
     }
 
+    /// The measured source deviation of an unchanged imported face. The record
+    /// covers the import body only, so a later modified body never inherits it.
+    pub fn import_face_tolerance(&self, id: FaceId) -> Option<&soliddraft_kernel_api::FaceTolerance> {
+        let named = self.named_face(id)?;
+        let feature = self.feature(named.feature)?;
+        let body = self.display_body()?;
+        if feature.body != Some(body) || !matches!(feature.kind, FeatureKind::ImportStep(_)) {
+            return None;
+        }
+        let record = self.model.import_record(model_id(named.feature))?;
+        let topology = self.kernel().topology(body).ok()?;
+        let face = topology.faces.iter().find(|face| face.id == id)?;
+        let key = face.origins.iter().find_map(|origin| match &origin.role {
+            soliddraft_kernel_api::FaceRole::Imported { key } => Some(key),
+            _ => None,
+        })?;
+        record.face_tolerances.iter().find(|tolerance| &tolerance.face == key)
+    }
+
     pub fn named_face(&self, id: FaceId) -> Option<&NamedFace> {
         self.faces.iter().find(|f| f.id == id)
     }
@@ -3438,6 +3457,14 @@ impl Document {
                     ("Area".to_owned(), format!("{:.1} mm²", nf.area)),
                     ("Centroid".to_owned(), format!("{:.2}, {:.2}, {:.2}", c.x, c.y, c.z)),
                 ];
+                let mut details = details;
+                if let Some(tolerance) = self.import_face_tolerance(fid) {
+                    details.push((
+                        "Import deviation".into(),
+                        format!("≤ {} mm from source", tolerance.deviation_upper_mm),
+                    ));
+                    details.push(("Approved import limit".into(), format!("{} mm", tolerance.approved_tolerance_mm)));
+                }
                 Some(EntityInfo { title: format!("{} · {}", name, nf.label), feature: f.map(|f| f.id), details })
             }
             Selection::Edge(eid) => {

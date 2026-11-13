@@ -259,7 +259,7 @@ pub fn save_grid_style(style: &GridStyle) -> Result<(), NotKept> {
 
 fn view_from(all: &Value) -> ViewSettings {
     let view = &all["view"];
-    let shown = ReferenceDisplay { always_show_origin_axes: true, ..ReferenceDisplay::default() };
+    let shown = ReferenceDisplay::default();
     let flag = |key: &str, default| view[key].as_bool().unwrap_or(default);
     ViewSettings {
         preset: serde_json::from_value(view["preset"].clone()).unwrap_or_default(),

@@ -27,7 +27,6 @@ struct RowItem {
     status: FeatureStatus,
     suppressed: bool,
     via_assistant: bool,
-    is_sketch: bool,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
@@ -224,7 +223,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 status,
                 suppressed: f.suppressed,
                 via_assistant: f.via_assistant,
-                is_sketch: f.is_sketch(),
             });
             if let Some(c) = child
                 && state.expanded.contains(&f.id)
@@ -240,7 +238,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     status: c.status.clone(),
                     suppressed: c.suppressed,
                     via_assistant: false,
-                    is_sketch: true,
                 });
             }
         }

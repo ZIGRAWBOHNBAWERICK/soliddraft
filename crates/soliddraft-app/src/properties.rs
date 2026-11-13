@@ -1,8 +1,7 @@
 //! Sketch and selection details, plus controls shared with the options bar.
 
 use crate::document::{
-    Command, FeatureId, FeatureKind, FeatureStatus, PlaneKind, Reference, Selection, SketchPlane, fmt_mm,
-    plane_ref_label,
+    Command, FeatureId, FeatureKind, FeatureStatus, Reference, Selection, SketchPlane, fmt_mm, plane_ref_label,
 };
 use crate::drag::Dimension;
 use crate::form_bar::value_cell;
@@ -12,7 +11,6 @@ use crate::sketcher;
 use crate::state::{AppAction, AppState, DragStep, RelationFilter, SketchSel, Tool};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
-use soliddraft_kernel_api::Vec3;
 use soliddraft_model::{DatumPlane, PlaneRef};
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
@@ -410,33 +408,12 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 
 /// A field parameter: one value, or a linear grade between two anchors on a part axis.
 /// `unit` names the values, such as "mm"; the anchors are always millimetres.
-pub(crate) fn grade_field(
-    ui: &mut egui::Ui,
-    label: &str,
-    grade: &mut soliddraft_kernel_api::Grade,
-    unit: &str,
-    speed: f64,
-) {
-    grade_controls(ui, label, grade, unit, speed, true);
-}
-
 pub(crate) fn grade_options(
     ui: &mut egui::Ui,
     label: &str,
     grade: &mut soliddraft_kernel_api::Grade,
     unit: &str,
     speed: f64,
-) {
-    grade_controls(ui, label, grade, unit, speed, false);
-}
-
-fn grade_controls(
-    ui: &mut egui::Ui,
-    label: &str,
-    grade: &mut soliddraft_kernel_api::Grade,
-    unit: &str,
-    speed: f64,
-    constant_value: bool,
 ) {
     use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
@@ -458,7 +435,6 @@ fn grade_controls(
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, info.clone()));
     };
     match grade {
-        Grade::Constant(v) if constant_value => value(ui, "", v, unit),
         Grade::Constant(_) => {}
         Grade::Linear(l) => {
             choice_row(ui, "Axis", |ui, _| {

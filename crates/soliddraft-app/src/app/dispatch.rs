@@ -546,7 +546,16 @@ impl SolidDraftApp {
                         picking_neutral: false,
                     }),
                     // An import has no editor; its repair questions have their own dialog.
-                    FeatureKind::ImportStep(_) | FeatureKind::Scan(_) => return,
+                    FeatureKind::ImportStep(_) => return,
+                    FeatureKind::Scan(_) => {
+                        if self.state.in_sketch() {
+                            self.apply(ctx, AppAction::ExitSketch);
+                        }
+                        self.close_editor();
+                        self.state.doc.selection = Some(Selection::Feature(id));
+                        self.state.scan.open = true;
+                        return;
+                    }
                     // The lattice's controls arrive with its editor slice.
                     FeatureKind::Lattice(l) => EditorParams::Lattice(*l),
                     FeatureKind::Gyroid(g) => EditorParams::Gyroid(*g),

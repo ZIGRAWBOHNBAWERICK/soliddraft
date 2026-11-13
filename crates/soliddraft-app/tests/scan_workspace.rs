@@ -134,12 +134,14 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
     assert!(fit.part_to_scan.max_mm > fit.scan_to_part.max_mm);
     assert!(fit.chord_mm <= 0.001);
     let saved = doc.model().to_bytes().unwrap();
+    let part_sample_count = fit.part_map.len();
+    case.frame(&mut app, "accepted-fit");
     let mut reopened =
         soliddraft_app::file::open_bytes("fitted.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
     assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
     let FeatureKind::Scan(scan) = &reopened.features[0].kind else { panic!("scan") };
     assert_eq!(scan.source.bytes, bytes);
-    assert_eq!(scan.fit.as_ref().unwrap().part_map.len(), fit.part_map.len());
+    assert_eq!(scan.fit.as_ref().unwrap().part_map.len(), part_sample_count);
     assert_eq!(reopened.faces.len(), 6);
     let face = reopened.face_ref(reopened.faces[0].id).expect("named fitted face");
     reopened

@@ -23,7 +23,9 @@ The `loft` and `edit_loft` commands accept `profiles` as an ordered list of sket
 or face labels, and `shape` as `ruled` or `smooth`. For example,
 `{"op":"loft","profiles":["Sketch1","Sketch2"],"shape":"ruled"}`.
 Profile sources, order, and shape are saved in the part and restored by undo and redo.
-`ci/scenarios/loft.json` covers ruled and smooth builds, a refused edit, and reopening.
+`ci/scenarios/loft.json` retains the two-profile checks and adds a bulged Smooth loft
+through square profiles of width 2, 4 and 2 mm at z = 0, 3 and 6 mm. It checks the
+`4596/70 mm³` volume, refused edits, fresh-process reopening and STEP export.
 
 ## Crates
 

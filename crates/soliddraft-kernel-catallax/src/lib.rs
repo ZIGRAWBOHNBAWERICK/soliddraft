@@ -162,7 +162,14 @@ impl Solid {
                 Err(error) => Err(Refusal::new(error.code(), error.to_string())),
             })
             .map(|answer| answer.value)
-            .map_err(|e| query_error("display_result", e))
+            .map_err(|e| {
+                let message = if e.code.contains("budget") || e.code.contains("work-limit") {
+                    "The spline display could not be measured within the work limit. The exact part is retained"
+                } else {
+                    "The spline display could not establish a measured deviation within 0.01 mm over the entire boundary"
+                };
+                KernelError::Unsupported(message.into())
+            })
         })
     }
 
@@ -1343,11 +1350,11 @@ impl Kernel for CatallaxKernel {
     }
 
     fn display_bound(&self, body: BodyId) -> KernelResult<Option<DisplayBound>> {
-        let solid = self.solid(body)?;
-        if !solid.has_splines() {
-            return Ok(None);
-        }
-        Ok(solid.rendering_mesh()?.bounded)
+        self.observe("display_bound", || {
+            let solid = self.solid(body)?;
+            if !solid.has_splines() { return Ok(None); }
+            Ok(solid.rendering_mesh()?.bounded)
+        })
     }
 
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {

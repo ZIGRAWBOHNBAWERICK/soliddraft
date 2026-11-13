@@ -461,5 +461,6 @@ fn preview_mesh(mesh: &printing::Mesh, face: FaceId) -> Mesh {
         triangle_faces: vec![face; mesh.triangles.len()],
         unavailable_controls: vec![],
         unproved: true,
+        bounded: None,
     }
 }

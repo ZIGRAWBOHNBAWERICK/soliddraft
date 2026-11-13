@@ -794,14 +794,17 @@ impl AnswerBound {
     }
 
     pub fn description(&self) -> String {
-        let mut description = format!(
+        if let Some(display) = &self.display {
+            let revision = ContentHash::of_bytes(display.definition.as_bytes());
+            return format!(
+                "Kind: {}\nMeasured bound: {} mm\nRule limit: {} mm\nMeasurement: {}\nKept boundary revision: {}",
+                display.kind, display.measured_mm, display.level_mm, display.method, revision
+            );
+        }
+        format!(
             "Measured bound: {} {}\nRule limit: {} {}\nRule: {}\nKept definition: {}",
             self.measured_bound, self.unit, self.allowed_bound, self.unit, self.rule, self.kept_definition
-        );
-        if let Some(display) = &self.display {
-            description.push_str(&format!("\nKind: {}\nMeasurement: {}", display.kind, display.method));
-        }
-        description
+        )
     }
 }
 

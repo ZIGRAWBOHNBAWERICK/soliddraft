@@ -605,7 +605,9 @@ impl ViewportState {
     }
 
     fn grid(&self, rect: Rect, plane: &GridPlane) -> Option<GridFrame> {
-        let ink = self.grid_style.color.unwrap_or_else(theme::ink);
+        let ink = self.grid_style.color.unwrap_or_else(|| {
+            if self.scene.is_some_and(scenes::Scene::is_dark) { theme::ink() } else { theme::edit_suite::FULLY_DEFINED }
+        });
         let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
     }

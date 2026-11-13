@@ -521,3 +521,22 @@ fn seed_gpu_settings(case: &Case, json: &str) {
     }
     case.seed_settings(&settings.to_string());
 }
+
+#[test]
+fn automatic_grid_ink_is_readable_on_light_and_dark_scenes() {
+    for scene in ["white", "graphite"] {
+        let mut case = Case::gpu(&format!("automatic_grid_{scene}"));
+        case.seed_settings(
+            &serde_json::json!({
+                "view": {"scene": scene, "show_origin_planes": false, "always_show_origin_axes": false},
+                "navigation": {"preset_id": "fusion"}
+            })
+            .to_string(),
+        );
+        let mut app = launch(empty());
+        assert!(app.state().state.viewport.grid_style.color.is_none());
+        to_top_orthographic(&mut app);
+        let (on, off) = grid_frames(&mut case, &mut app, "automatic-ink");
+        assert_top_view_grid(&app, (&on, &off), scene);
+    }
+}

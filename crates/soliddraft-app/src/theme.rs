@@ -215,6 +215,7 @@ pub mod edit_suite {
         selection_ink: rgb(0xf5, 0xa5, 0x24),
         hover: POPUP_HOVER,
         ok: rgb(0x63, 0xd6, 0x8f),
+        bounded: super::DARK.bounded,
         warn: rgb(0xf5, 0xa5, 0x24),
         error: rgb(0xff, 0xb4, 0xad),
         warn_soft: rgba(245, 165, 36, 51),

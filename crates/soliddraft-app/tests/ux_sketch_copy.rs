@@ -1,6 +1,7 @@
 //! Copy placement through the rendered app, using pointer and keyboard input.
 
 use egui::{Key, Modifiers, PointerButton, Pos2};
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::document::{Command, Document, PlaneKind, SketchPlane};
 use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::sketcher::Frame;

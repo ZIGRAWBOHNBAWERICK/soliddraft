@@ -255,7 +255,17 @@ fn grid_density_holds_in_a_small_window() {
 
 #[test]
 fn compact_window_readout_matches_the_rendered_grid_through_zoom() {
-    sweep("grid_readout_compact", vec2(800.0, 600.0), 1.0);
+    let mut case = Case::gpu("grid_readout_compact");
+    seed_gpu_settings(&case, r#"{"view":{}}"#);
+    let mut app = launch_for_frames(empty(), vec2(960.0, 640.0), 1.0);
+    to_top_orthographic(&mut app);
+
+    for sample in 0..=8 {
+        let when = format!("compact zoom out {sample}");
+        let (on, off) = grid_frames(&mut case, &mut app, &when);
+        assert_zoom_grid(&mut case, &app, (&on, &off), &when);
+        wheel(&mut app, -300.0);
+    }
 }
 
 #[test]

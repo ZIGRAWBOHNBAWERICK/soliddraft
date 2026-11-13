@@ -2895,7 +2895,7 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             "display": "unproved preview",
         }),
         FeatureKind::ImportStep(i) => json!({
-            "type": if i.format == soliddraft_kernel_api::ImportFormat::Iges { "import_iges" } else { "import_step" }, "source_name": i.source_name, "sha256": i.sha256,
+            "type": match i.format { soliddraft_kernel_api::ImportFormat::Step => "import_step", soliddraft_kernel_api::ImportFormat::Iges => "import_iges", soliddraft_kernel_api::ImportFormat::Mesh => "import_mesh" }, "source_name": i.source_name, "sha256": i.sha256,
             "bytes": i.source.len(), "decisions": i.decisions,
         }),
     }
@@ -3120,18 +3120,27 @@ impl ToolHost for CommandTools<'_> {
             })(),
             "preview_import" if mcp => (|| {
                 let preview = crate::import::Preview::read_source(self.doc, &crate::import::source_path(&input)?, crate::import::source_format(&input)?)?;
+                let preview = if let Some(feature) = input["feature"].as_str() { preview.replacing(self.doc, feature_by_name(self.doc, feature)?)? } else { preview };
                 Ok(preview.summary())
             })(),
-            "import_step" | "import_iges" if mcp => (|| {
+            "import_step" | "import_iges" | "import_mesh" | "replace_import" if mcp => (|| {
                 let expected = input["preview_token"]
                     .as_str()
                     .filter(|token| !token.is_empty())
                     .ok_or("preview_token is required; review the source with preview_import first")?;
-                let format = if name == "import_iges" { soliddraft_kernel_api::ImportFormat::Iges } else { soliddraft_kernel_api::ImportFormat::Step };
+                let replacement = if name == "replace_import" { Some(feature_by_name(self.doc, input["feature"].as_str().ok_or("Choose the imported feature to replace.")?)?) } else { None };
+                if replacement.is_none() && input.get("feature").is_some() { return Err("Use replace_import to replace an existing feature.".into()); }
+                let format = match name {
+                    "import_iges" => soliddraft_kernel_api::ImportFormat::Iges,
+                    "import_mesh" => soliddraft_kernel_api::ImportFormat::Mesh,
+                    "replace_import" => crate::import::source_format(&input)?,
+                    _ => soliddraft_kernel_api::ImportFormat::Step,
+                };
                 if input.get("format").is_some() && crate::import::source_format(&input)? != format {
                     return Err("The source format does not match the import command. Review the correct format first.".into());
                 }
                 let preview = crate::import::Preview::read_source(self.doc, &crate::import::source_path(&input)?, format)?;
+                let preview = if let Some(id) = replacement { preview.replacing(self.doc, id)? } else { preview };
                 if preview.token() != expected {
                     return Err(
                         "the source or repair questions changed since review; run preview_import again".into()

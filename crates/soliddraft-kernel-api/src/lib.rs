@@ -57,8 +57,9 @@ pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
     Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportFormat, ImportOptions, ImportStepRequest,
-    ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, Proposal, ProposalSet, REPAIR_FORMAT,
-    RepairChange, RepairDerivative, RepairRecord, RepairSource, question_id, question_index,
+    ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, PlanarRepairMethod, Proposal, ProposalSet,
+    REPAIR_FORMAT, RepairChange, RepairDerivative, RepairRecord, RepairSource, SourceIncidence, question_id,
+    question_index,
 };
 pub use profile::{BezierControls, Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
@@ -1206,6 +1207,7 @@ pub trait Kernel: Send + Sync {
         match format {
             ImportFormat::Step => self.propose_import(source, options),
             ImportFormat::Iges => Err(KernelError::Unsupported("IGES import".into())),
+            ImportFormat::Mesh => Err(KernelError::Unsupported("mesh solid import".into())),
         }
     }
 
@@ -1219,6 +1221,7 @@ pub trait Kernel: Send + Sync {
         match format {
             ImportFormat::Step => self.import_step(tag, request),
             ImportFormat::Iges => Err(KernelError::Unsupported("IGES import".into())),
+            ImportFormat::Mesh => Err(KernelError::Unsupported("mesh solid import".into())),
         }
     }
 

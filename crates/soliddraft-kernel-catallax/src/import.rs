@@ -53,8 +53,8 @@ fn step_refusal(error: catallax_import::ImportRefusal) -> KernelError {
         SelfIntersecting { faces, .. } => {
             format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
         }
-        SelfIntersectionNotVerified { faces, reason, .. } => {
-            format!("This STEP solid could not be verified at faces {} and {}: {reason}", faces[0], faces[1])
+        SelfIntersectionNotVerified { faces, .. } => {
+            format!("This STEP solid could not be checked for crossing faces at {} and {}.", faces[0], faces[1])
         }
         ResourceLimit => "This STEP file could not be checked within the available work limit.".into(),
     };
@@ -65,6 +65,7 @@ fn source_format(format: ImportFormat) -> catallax_import::SourceFormat {
     match format {
         ImportFormat::Step => catallax_import::SourceFormat::Step,
         ImportFormat::Iges => catallax_import::SourceFormat::Iges,
+        ImportFormat::Mesh => unreachable!("mesh uses its own reader"),
     }
 }
 
@@ -102,10 +103,15 @@ fn refusal(format: ImportFormat, error: catallax_import::ImportRefusal) -> Kerne
 }
 
 pub(super) fn propose(format: ImportFormat, source: &[u8], input: &ImportOptions) -> KernelResult<ProposalSet> {
+    if format == ImportFormat::Mesh {
+        checked_mesh(source)?;
+        return Ok(ProposalSet { source_sha256: catallax_import::sha256_hex(source), proposals: Vec::new() });
+    }
     let proposals = catallax_import::propose_source(source_format(format), source, &options(input)?)
         .map_err(|error| refusal(format, error))?;
-    if proposals.format != PROPOSALS_FORMAT {
+    if !matches!(proposals.format.as_str(), PROPOSALS_FORMAT | catallax_import::INCIDENCE_PROPOSALS_FORMAT) {
         return Err(match format {
+            ImportFormat::Mesh => unreachable!(),
             ImportFormat::Step => KernelError::Unsupported(format!("STEP import proposal format {}", proposals.format)),
             ImportFormat::Iges => KernelError::InvalidInput(
                 "This IGES file needs a repair that cannot be reviewed yet. Try exporting it as a STEP solid.".into(),
@@ -117,7 +123,7 @@ pub(super) fn propose(format: ImportFormat, source: &[u8], input: &ImportOptions
 
 fn require_repair_format(source: ImportFormat, format: &str) -> KernelResult<()> {
     match format {
-        REPAIR_FORMAT | LEGACY_REPAIR_FORMAT => Ok(()),
+        REPAIR_FORMAT | LEGACY_REPAIR_FORMAT | catallax_import::INCIDENCE_REPAIR_FORMAT => Ok(()),
         _ if source == ImportFormat::Iges => Err(KernelError::InvalidInput(
             "This IGES file needs a repair record that cannot be replayed yet. Try exporting it as a STEP solid."
                 .into(),
@@ -136,6 +142,9 @@ impl CatallaxKernel {
         if catallax_import::sha256_hex(request.source) != request.sha256 {
             return Err(KernelError::InvalidInput("the imported file does not match its sha256".into()));
         }
+        if format == ImportFormat::Mesh {
+            return self.import_mesh_body(tag, request);
+        }
         if let Some(saved) = request.record {
             require_repair_format(format, &saved.format)?;
         }
@@ -151,7 +160,6 @@ impl CatallaxKernel {
             None,
         )
         .map_err(|error| refusal(format, error))?;
-        // Newer records carry source certificates the application's wire type cannot retain.
         require_repair_format(format, &imported.record.format)?;
         let mismatch =
             || KernelError::InvalidInput("the saved import record does not match this file and its decisions".into());
@@ -200,6 +208,41 @@ impl CatallaxKernel {
         if !imported.left_open.is_empty() {
             return Ok(ImportStepResult { bodies: Vec::new(), left_open: imported.left_open, record });
         }
+        let kind = match format {
+            ImportFormat::Step => OpKind::ImportStep,
+            ImportFormat::Iges => OpKind::ImportIges,
+            ImportFormat::Mesh => unreachable!(),
+        };
+        self.build_imported_body(kind, tag, request, record, &imported.bodies[0].0)
+    }
+
+    fn import_mesh_body(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
+        checked_mesh(request.source)?;
+        if !request.decisions.is_empty() {
+            return Err(KernelError::InvalidInput("Mesh solids do not take repair decisions.".into()));
+        }
+        let record = RepairRecord {
+            format: "soliddraft-mesh-import/1".into(),
+            source: RepairSource { name: request.name.into(), sha256: request.sha256.into() },
+            derivative: None,
+            changes: Vec::new(),
+            face_tolerances: Vec::new(),
+            source_incidence: Vec::new(),
+        };
+        if request.record.is_some_and(|saved| saved != &record) {
+            return Err(KernelError::InvalidInput("The saved mesh import does not match this file.".into()));
+        }
+        self.build_imported_body(OpKind::ImportMesh, tag, request, record, request.name)
+    }
+
+    fn build_imported_body(
+        &self,
+        kind: OpKind,
+        tag: &OpTag,
+        request: &ImportStepRequest<'_>,
+        record: RepairRecord,
+        name: &str,
+    ) -> KernelResult<ImportStepResult> {
         let mut state = self.state()?;
         let seq = state.id();
         let result = format!("op_{seq}");
@@ -218,12 +261,12 @@ impl CatallaxKernel {
                 .map_err(|e| KernelError::InvalidInput(e.into()))?;
             saved.insert(question_id(request.sha256, index), answer);
         }
-        let kind = match format {
-            ImportFormat::Step => OpKind::ImportStep,
-            ImportFormat::Iges => OpKind::ImportIges,
-        };
-        let step = json!({"id":result, "op":kind.name(), "file":{"name":request.name,"sha256":request.sha256},
+        let mut step = json!({"id":result, "op":kind.name(), "file":{"name":request.name,"sha256":request.sha256},
             "pose":{"rotation":["1","0","0","0"],"translation":["0","0","0"]}, "decisions":saved});
+        if kind == OpKind::ImportMesh {
+            step.as_object_mut().expect("step object").remove("decisions");
+            step["scale"] = json!("1");
+        }
         // The format that later features convert to, so their builds resume this checkpoint
         // instead of importing the file again.
         let problem = json!({"format":catallax_recipe::FORMAT_V5, "name":"SolidDraft", "steps":[step],"result":result});
@@ -243,7 +286,7 @@ impl CatallaxKernel {
         let app = app.map_err(|_| {
             KernelError::InvalidInput(format!(
                 "This {} body could not be imported and displayed. Try a file with a single closed solid.",
-                format.label()
+                if kind == OpKind::ImportMesh { "mesh" } else { "imported" }
             ))
         })?;
         let display = MeshCache::new();
@@ -273,12 +316,27 @@ impl CatallaxKernel {
             },
         );
         Ok(ImportStepResult {
-            bodies: vec![ImportedBody {
-                name: imported.bodies[0].0.clone(),
-                result: OpResult { body, record: history },
-            }],
+            bodies: vec![ImportedBody { name: name.to_owned(), result: OpResult { body, record: history } }],
             left_open: Vec::new(),
             record,
         })
     }
+}
+
+fn checked_mesh(source: &[u8]) -> KernelResult<()> {
+    let mesh = catallax_import::mesh::ClosedMesh::read(source, &Rational::one(), &mut Decider::default())
+        .map_err(|error| KernelError::InvalidInput(match error.code {
+            "import.mesh-open" => "This mesh has open edges. Close them before importing it as a solid.",
+            "import.mesh-orientation" | "import.mesh-winding" => "This mesh has reversed faces. Orient them outwards before importing it as a solid.",
+            "import.mesh-degenerate" => "This mesh has triangles with no area. Remove them before importing it as a solid.",
+            "import.mesh-crossing" => "This mesh crosses or touches itself. Correct the crossing faces before importing it as a solid.",
+            "import.mesh-too-large" => "This mesh has more than 200,000 triangles. Reduce the triangle count before importing it as a solid.",
+            "import.mesh-nonmanifold-edge" | "import.mesh-pinched-vertex" => "This mesh has edges or vertices shared by separate surfaces. Separate them before importing it as a solid.",
+            "import.mesh-malformed" => "This file could not be read as an STL or OBJ mesh.",
+            _ => "This mesh could not be checked within the available work limit.",
+        }.into()))?;
+    if mesh.lumps().len() != 1 {
+        return Err(KernelError::InvalidInput("Import one closed mesh solid at a time.".into()));
+    }
+    Ok(())
 }

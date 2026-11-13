@@ -1,0 +1,143 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "import-release",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/tetrahedron.obj",
+        "format": "mesh"
+      }
+    },
+    {
+      "tool": "import_mesh",
+      "arguments": {
+        "path": "ci/fixtures/import/tetrahedron.obj",
+        "format": "mesh"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 166.66666666666666,
+          "tolerance": 0.005
+        }
+      ],
+      "arguments_from": {
+        "preview_token": {
+          "step": 1,
+          "pointer": "/result/token"
+        }
+      }
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/mesh-solid.dwprt"
+      }
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/mesh-solid.dwprt"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 166.66666666666666,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "new_part",
+      "arguments": {}
+    },
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-4um.step"
+      }
+    },
+    {
+      "tool": "import_step",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-4um.step"
+      },
+      "arguments_from": {
+        "preview_token": {
+          "step": 6,
+          "pointer": "/result/token"
+        }
+      }
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Import1 \u00b7 Edge 10"
+        ],
+        "radius": 2
+      }
+    },
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step",
+        "feature": "Import1"
+      }
+    },
+    {
+      "tool": "replace_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-20um.step",
+        "feature": "Import1",
+        "accept": [
+          {
+            "id": "g0",
+            "tolerance_mm": "0.03",
+            "approver": "Release reviewer"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/summary/features/0/name",
+          "equals": "Import1"
+        },
+        {
+          "pointer": "/summary/features/0/record/changes/0/approver",
+          "equals": "Release reviewer"
+        }
+      ],
+      "arguments_from": {
+        "preview_token": {
+          "step": 9,
+          "pointer": "/result/token"
+        }
+      },
+      "repair": [
+        "Fillet1"
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 9969.663706,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-4um.step",
+        "format": "mesh"
+      },
+      "refused": "This file could not be read as an STL or OBJ mesh."
+    }
+  ]
+}

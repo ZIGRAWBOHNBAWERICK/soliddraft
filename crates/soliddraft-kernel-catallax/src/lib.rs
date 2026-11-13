@@ -204,11 +204,11 @@ impl State {
         self.bodies.get(&body).ok_or(KernelError::UnknownBody(body))
     }
 
-    /// The STEP sources that the import steps among `steps` read.
+    /// The immutable sources that the import steps among `steps` read.
     fn sources(&self, steps: &BTreeMap<u64, Value>) -> KernelResult<BTreeMap<String, Arc<[u8]>>> {
         steps
             .values()
-            .filter(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges")))
+            .filter(|step| matches!(step["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
             .map(|step| {
                 let sha = step["file"]["sha256"].as_str().unwrap_or_default();
                 let bytes = self.files.get(sha).ok_or_else(|| {
@@ -277,7 +277,7 @@ impl CatallaxKernel {
             || stored.steps.values().any(|s| {
                 matches!(
                     s["op"].as_str(),
-                    Some("import_step" | "import_iges" | "loft" | "native_profile" | "feature_pattern")
+                    Some("import_step" | "import_iges" | "import_mesh" | "loft" | "native_profile" | "feature_pattern")
                 )
             })
         {
@@ -543,7 +543,7 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     let mut imports = Vec::new();
     let steps = legacy["steps"].as_array_mut().expect("generated recipe steps");
     for index in (0..steps.len()).rev() {
-        if !matches!(steps[index]["op"].as_str(), Some("import_step" | "import_iges")) {
+        if !matches!(steps[index]["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")) {
             continue;
         }
         let mut native = steps[index].clone();
@@ -870,6 +870,7 @@ impl Kernel for CatallaxKernel {
         let op = match format {
             ImportFormat::Step => "import_step",
             ImportFormat::Iges => "import_iges",
+            ImportFormat::Mesh => "import_mesh",
         };
         self.observe(op, || self.import_body(format, tag, request))
     }

@@ -227,7 +227,7 @@ impl CatallaxKernel {
             .get(body)?
             .steps
             .values()
-            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges")))
+            .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "import_mesh")))
         {
             return Err(gap(&format!("A {} on an imported body", op.name())));
         }

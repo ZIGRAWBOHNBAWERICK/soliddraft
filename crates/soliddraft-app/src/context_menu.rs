@@ -67,6 +67,7 @@ const FEATURE: Group = Group {
     label: "Feature",
     commands: &[
         "edit_feature",
+        "replace_import",
         "edit_sketch",
         "repair_feature",
         "suppress",

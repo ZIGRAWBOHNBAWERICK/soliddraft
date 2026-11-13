@@ -2429,6 +2429,20 @@ fn registry() -> Vec<CommandSpec> {
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
             .agents(Agents::Mcp, "Review with preview_import using format iges first. Repairs and the unchanged source are saved with the part.", crate::import::params)
             .undo(Undo::Step),
+        cmd("import_mesh", "Import mesh solid", Icon::Import, "Import a closed STL or OBJ mesh as a solid in millimetres")
+            .run(|_| AppAction::ImportMesh(None))
+            .outside_sketch()
+            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32") && s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite)
+            .agents(Agents::Mcp, "Review with preview_import using format mesh first. One closed solid, up to 200,000 triangles, coordinates in millimetres.", crate::import::params)
+            .undo(Undo::Step),
+        cmd("replace_import", "Replace imported file", Icon::Import, "Replace the file behind an imported feature after reviewing it")
+            .run(|s| AppAction::ReplaceImport { feature: s.doc.selection.and_then(|s| match s { crate::document::Selection::Feature(id) => Some(id), _ => None }).unwrap_or_default(), path: None })
+            .outside_sketch()
+            .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32") && s.frame_layout == crate::settings::FrameLayout::EditSuite && s.doc.selection.is_some_and(|sel| matches!(sel, crate::document::Selection::Feature(id) if s.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_))))))
+            .shown(|s| s.frame_layout == crate::settings::FrameLayout::EditSuite && s.doc.selection.is_some_and(|sel| matches!(sel, crate::document::Selection::Feature(id) if s.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_))))))
+            .agents(Agents::Mcp, "Review with preview_import and feature first. Keeps the feature identity; changed source references require repair. Undo restores the old source and references.", crate::import::params)
+            .undo(Undo::Step),
         cmd(
             "import_scene",
             "Import scene",

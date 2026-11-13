@@ -190,7 +190,7 @@ impl CatallaxKernel {
             },
             radius: grade(&params.radius_mm, "density")?,
         };
-        let sampling_radius = (params.cell != LatticeCell::Cubic).then(|| match &params.radius_mm {
+        let sampling_radius = (params.cell != LatticeCell::Cubic).then_some(match &params.radius_mm {
             Grade::Constant(radius) => *radius,
             Grade::Linear(grade) => grade.start.min(grade.end),
         });

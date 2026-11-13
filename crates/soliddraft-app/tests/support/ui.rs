@@ -305,7 +305,11 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
         "smart_dimension" => "Smart Dimension".to_owned(),
         _ => command.label_in(&app.state().state),
     };
-    app.get_by_role_and_label(egui::accesskit::Role::Button, &label).scroll_to_me();
+    let palette = palette_region(app);
+    app.get_all_by_role_and_label(egui::accesskit::Role::Button, &label)
+        .find(|node| palette.x_range().contains(node.rect().center().x))
+        .unwrap_or_else(|| panic!("missing palette command {id}"))
+        .scroll_to_me();
     app.run_steps(24);
     control(app, &label, palette_region(app))
 }

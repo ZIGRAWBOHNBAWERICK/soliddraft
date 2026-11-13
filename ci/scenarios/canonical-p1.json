@@ -469,6 +469,13 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 19943.937979737195,
+          "tolerance": 0.005
+        }
       ]
     },
     {
@@ -486,19 +493,40 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
       ]
     },
     {
       "tool": "undo",
       "arguments": {},
       "label": "undo",
-      "same_geometry_as_step": 34
+      "same_geometry_as_step": 34,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 19943.937979737195,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "redo",
       "arguments": {},
       "label": "redo",
-      "same_geometry_as_step": 35
+      "same_geometry_as_step": 35,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "save",
@@ -520,6 +548,31 @@
         },
         {
           "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_extrude",
+      "arguments": {
+        "feature": "Boss-Extrude1",
+        "depth": 0,
+        "flip": false
+      },
+      "label": "refused",
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 39,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 20478.008730847458,
+          "tolerance": 0.005
         }
       ]
     }

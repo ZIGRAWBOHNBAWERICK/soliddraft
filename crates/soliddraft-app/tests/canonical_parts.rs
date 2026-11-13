@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeSet, path::Path};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use soliddraft_app::{app_tools::AppTools, document::FeatureStatus, state::AppState};
 use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_exchange::{Format, Report};
@@ -64,7 +64,7 @@ fn volume(state: &AppState) -> f64 {
     doc.kernel().mass_properties(doc.body().unwrap()).unwrap().volume
 }
 
-fn exports(state: &AppState, dir: &Path, label: &str) {
+fn exports(state: &mut AppState, dir: &Path, label: &str) {
     for format in [Format::Step, Format::Stl] {
         let output = state.doc.model().export(format).unwrap();
         match &output.report {
@@ -79,7 +79,30 @@ fn exports(state: &AppState, dir: &Path, label: &str) {
             other => panic!("unexpected report: {other:?}"),
         }
         assert!(!output.bytes.is_empty());
-        std::fs::write(dir.join(format!("{label}.{}", format.extension())), &output.bytes).unwrap();
+        let path = dir.join(format!("{label}.{}", format.extension()));
+        let tool = if format == Format::Step { "export_step" } else { "export_stl" };
+        let (out, work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
+            call_checked(
+                &mut AppTools { state },
+                tool,
+                json!({"path": path}),
+                &Caller::Mcp { client: "canonical-exports".into() },
+            )
+        });
+        assert!(!out.is_error && !work.exhausted, "{tool}: {} {work:?}", out.content);
+        assert_eq!(std::fs::read(&path).unwrap(), output.bytes, "public export differs from the model export");
+        if let Report::Step(report) = &output.report {
+            let doc = state.doc.model();
+            let body = doc.body().unwrap();
+            let topology = doc.kernel().topology(body).unwrap();
+            let mass = doc.kernel().mass_properties(body).unwrap();
+            let evidence = json!({"report":report,"body":{"volume":mass.volume,"area":mass.area,"faces":topology.faces.len(),"edges":topology.edges.len()}});
+            std::fs::write(
+                dir.join(format!("{label}.step-report.json")),
+                serde_json::to_vec_pretty(&evidence).unwrap(),
+            )
+            .unwrap();
+        }
         std::fs::write(
             dir.join(format!("{label}.{}.json", format.extension())),
             serde_json::to_vec_pretty(&output.report).unwrap(),
@@ -127,6 +150,8 @@ fn canonical_parts_build_edit_keep_names_reopen_and_export_in_edit_suite() {
                 state = AppState::new(soliddraft_app::new_document());
             }
             eprintln!("{name} step {} {tool}", i + 1);
+            let before = state.doc.model().part_json();
+            let revision = state.doc.revision();
             let (out, work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
                 call_checked(
                     &mut AppTools { state: &mut state },
@@ -136,10 +161,18 @@ fn canonical_parts_build_edit_keep_names_reopen_and_export_in_edit_suite() {
                 )
             });
             assert!(!work.exhausted, "{name} step {} exceeded application allowance: {work:?}", i + 1);
-            assert!(!out.is_error, "{name} step {} {tool}: {}", i + 1, out.content);
+            if let Some(reason) = step["refused"].as_str() {
+                assert!(out.is_error && out.content.contains(reason), "{name}: {}", out.content);
+                assert_eq!(state.doc.model().part_json(), before, "refused edit changed the part");
+                assert_eq!(state.doc.revision(), revision, "refused edit changed the revision");
+                std::fs::write(dir.join(format!("{}.txt", step["label"].as_str().unwrap())), &out.content).unwrap();
+            } else {
+                assert!(!out.is_error, "{name} step {} {tool}: {}", i + 1, out.content);
+            }
             assert!(state.doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
-            let Some(label) =
-                step["label"].as_str().filter(|l| ["original", "edited", "undo", "redo", "reopened"].contains(l))
+            let Some(label) = step["label"]
+                .as_str()
+                .filter(|l| ["original", "edited", "undo", "redo", "reopened", "refused"].contains(l))
             else {
                 continue;
             };
@@ -152,7 +185,10 @@ fn canonical_parts_build_edit_keep_names_reopen_and_export_in_edit_suite() {
                 names = Some(Names::take(&state));
             }
             names.as_ref().unwrap().check(&state, label);
-            exports(&state, &dir, label);
+            assert_eq!(state.doc.displayed_revision(), state.doc.revision(), "{label}: stale display");
+            assert!(state.doc.triangle_count() > 0, "{label}: empty display");
+            assert!(!state.doc.proof_pending(), "{label}: proof is still pending");
+            exports(&mut state, &dir, label);
             let mut app = ribbon::app(state.doc);
             app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
             app.key_press(egui::Key::Z);

@@ -83,6 +83,13 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4831.253636666586,
+          "tolerance": 0.005
+        }
       ]
     },
     {
@@ -99,19 +106,40 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
       ]
     },
     {
       "tool": "undo",
       "arguments": {},
       "label": "undo",
-      "same_geometry_as_step": 5
+      "same_geometry_as_step": 5,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4831.253636666586,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "redo",
       "arguments": {},
       "label": "redo",
-      "same_geometry_as_step": 6
+      "same_geometry_as_step": 6,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "save",
@@ -133,6 +161,30 @@
         },
         {
           "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_shell",
+      "arguments": {
+        "feature": "Shell1",
+        "thickness": 0
+      },
+      "label": "refused",
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 10,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3701.7536366665863,
+          "tolerance": 0.005
         }
       ]
     }

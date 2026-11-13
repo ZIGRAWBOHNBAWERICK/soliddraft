@@ -193,6 +193,26 @@
       ]
     },
     {
+      "tool": "lattice",
+      "arguments": {
+        "cell": "cubic",
+        "cell_size": 10,
+        "radius": 1,
+        "accuracy": 0.1,
+        "min_detail": 0.5
+      },
+      "label": "field-refused",
+      "refused": "fillet.unsupported-overflow",
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12558.681699123754,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
       "tool": "edit_fillet",
       "arguments": {
         "feature": "Fillet1",
@@ -206,19 +226,40 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
       ]
     },
     {
       "tool": "undo",
       "arguments": {},
       "label": "undo",
-      "same_geometry_as_step": 4
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12558.681699123754,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "redo",
       "arguments": {},
       "label": "redo",
-      "same_geometry_as_step": 5
+      "same_geometry_as_step": 6,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "save",
@@ -233,13 +274,37 @@
       },
       "label": "reopened",
       "fresh_process": true,
-      "same_geometry_as_step": 5,
+      "same_geometry_as_step": 6,
       "exports": [
         {
           "format": "step"
         },
         {
           "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 3.5
+      },
+      "label": "refused",
+      "refused": "shapes.rolling-envelope",
+      "same_geometry_as_step": 10,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 12591.90560450861,
+          "tolerance": 0.005
         }
       ]
     }

@@ -118,19 +118,40 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14455.207561827563,
+          "tolerance": 0.005
+        }
       ]
     },
     {
       "tool": "undo",
       "arguments": {},
       "label": "undo",
-      "same_geometry_as_step": 8
+      "same_geometry_as_step": 8,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14428.640126047918,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "redo",
       "arguments": {},
       "label": "redo",
-      "same_geometry_as_step": 9
+      "same_geometry_as_step": 9,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14455.207561827563,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "save",
@@ -152,6 +173,30 @@
         },
         {
           "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14455.207561827563,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0
+      },
+      "label": "refused",
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 13,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 14455.207561827563,
+          "tolerance": 0.005
         }
       ]
     }

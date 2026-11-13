@@ -64,10 +64,6 @@
         }
       ],
       "drawing": true,
-      "export": [
-        "step",
-        "stl"
-      ],
       "exports": [
         {
           "format": "step"
@@ -91,19 +87,40 @@
         {
           "format": "stl"
         }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4029.9761511627316,
+          "tolerance": 0.005
+        }
       ]
     },
     {
       "tool": "undo",
       "arguments": {},
       "label": "undo",
-      "same_geometry_as_step": 3
+      "same_geometry_as_step": 3,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 3998.20025046861,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "redo",
       "arguments": {},
       "label": "redo",
-      "same_geometry_as_step": 4
+      "same_geometry_as_step": 4,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4029.9761511627316,
+          "tolerance": 0.005
+        }
+      ]
     },
     {
       "tool": "save",
@@ -125,6 +142,30 @@
         },
         {
           "format": "stl"
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4029.9761511627316,
+          "tolerance": 0.005
+        }
+      ]
+    },
+    {
+      "tool": "edit_chamfer",
+      "arguments": {
+        "feature": "Chamfer1",
+        "distance": 0
+      },
+      "label": "refused",
+      "refused": "must be greater than 0",
+      "same_geometry_as_step": 8,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 4029.9761511627316,
+          "tolerance": 0.005
         }
       ]
     }

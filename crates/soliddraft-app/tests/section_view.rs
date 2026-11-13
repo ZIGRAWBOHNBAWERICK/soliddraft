@@ -34,6 +34,7 @@ fn click(app: &mut ribbon::App, label: &str) {
 #[test]
 fn inspect_and_navigation_section_drag_flip_face_and_close() {
     let case = ribbon::case("section-view");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
     let mut app = ribbon::app(ribbon::plate());
     case.run(&mut app, |app| {
         let before = app.state().state.doc.model().to_bytes().unwrap();
@@ -50,6 +51,8 @@ fn inspect_and_navigation_section_drag_flip_face_and_close() {
         assert!(app.state().state.section.enabled);
         let mesh = app.state().state.section.mesh(&app.state().state.doc).unwrap();
         assert!((volume(&mesh) - 24_000.0).abs() < 0.1);
+        assert_eq!(app.state().state.export_part(soliddraft_exchange::Format::Stl).unwrap().bytes, export_before);
+        assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
         case.frame(app, "inspect-half-with-cap");
 
         // Drag the actual offset control, then wait for the displayed body to catch up.

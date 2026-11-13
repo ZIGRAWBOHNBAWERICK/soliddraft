@@ -83,7 +83,7 @@ impl State {
     }
 
     fn request(&self, doc: &Document) -> Option<Request> {
-        if !self.enabled || !doc.proof_state().current_proved_display() {
+        if !self.enabled || !self.offset.is_finite() || !doc.proof_state().current_proved_display() {
             return None;
         }
         let mut plane = self.plane.resolve(doc)?;
@@ -198,7 +198,9 @@ impl State {
                 self.flip = !self.flip;
             }
             ui.label(if self.flip { "Keep positive side" } else { "Keep negative side" });
-            if self.request(doc).is_none() {
+            if !self.offset.is_finite() {
+                ui.colored_label(theme::error(), "Enter a finite offset.");
+            } else if self.request(doc).is_none() {
                 ui.label(if matches!(self.plane, SectionPlane::Face(_)) {
                     "Choose a planar face on the current part."
                 } else {
@@ -275,10 +277,25 @@ fn cut_mesh(
         let _ = kernel.release(cut.body);
         mesh.map_err(soliddraft_kernel_api::KernelError::InvalidInput)
     };
-    build().map_err(|error| {
-        log::warn!("Section view: {error}");
-        "Could not cut this part on that plane. Try another plane or offset.".into()
-    })
+    build()
+        .map(|mut mesh| {
+            let display = Arc::make_mut(&mut mesh);
+            display.face_picks.fill(0);
+            for ((point, normal), feature) in
+                display.positions.iter().zip(&display.normals).zip(&mut display.face_features)
+            {
+                let point = Vec3::new(point.x as f64, point.y as f64, point.z as f64);
+                let normal = Vec3::new(normal.x as f64, normal.y as f64, normal.z as f64);
+                if (point - plane.origin).dot(plane.normal).abs() < 1e-5 && normal.dot(plane.normal).abs() > 0.999 {
+                    *feature = crate::document::PREVIEW_MADE;
+                }
+            }
+            mesh
+        })
+        .map_err(|error| {
+            log::warn!("Section view: {error}");
+            "Could not cut this part on that plane. Try another plane or offset.".into()
+        })
 }
 
 #[cfg(test)]
@@ -343,6 +360,8 @@ mod tests {
                     })
                     .sum();
                 assert!(cap_area > 100.0, "the cut has triangles on its plane");
+                assert!(mesh.face_features.contains(&crate::document::PREVIEW_MADE), "the cap has its own tint");
+                assert!(mesh.face_picks.iter().all(|pick| *pick == 0), "temporary faces never select model faces");
             }
         }
         assert_eq!(doc.model().to_bytes().unwrap(), before);
@@ -366,6 +385,39 @@ mod tests {
             .unwrap();
             assert!((volume(&mesh) - expected).abs() < 0.1);
         }
+    }
+
+    #[test]
+    fn a_cap_keeps_the_opening_through_a_hollow_part() {
+        let kernel = crate::kernel();
+        let mut profile = Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 60.0, 40.0);
+        profile.holes.push(Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 20.0, 10.0).outer);
+        let sketch = kernel.create_body_from_profile(&OpTag::new("hollow_profile"), &profile).unwrap();
+        let part = kernel
+            .extrude(&OpTag::new("hollow_part"), sketch.body, &Extrude { distance: 20.0, direction: None })
+            .unwrap();
+        let mesh = cut_mesh(
+            kernel.as_ref(),
+            part.body,
+            Plane::XY.with_origin(Vec3::new(0.0, 0.0, 10.0)),
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        let cap_area: f64 = mesh
+            .indices
+            .chunks_exact(3)
+            .filter_map(|t| {
+                let p = [t[0], t[1], t[2]].map(|i| mesh.positions[i as usize]);
+                p.iter()
+                    .all(|p| (p.z - 10.0).abs() < 1e-5)
+                    .then(|| f64::from((p[1] - p[0]).cross(p[2] - p[0]).length()) / 2.0)
+            })
+            .sum();
+        assert!((cap_area - 2200.0).abs() < 0.1, "the cap excludes the 200 mm² opening");
+        assert!((volume(&mesh) - 22_000.0).abs() < 0.1);
+        kernel.release(part.body).unwrap();
+        kernel.release(sketch.body).unwrap();
     }
 
     #[test]

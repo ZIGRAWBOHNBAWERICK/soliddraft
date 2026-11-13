@@ -33,6 +33,32 @@ fn start_sketch(app: &mut App) {
 }
 
 #[test]
+fn a_sketch_tool_asks_for_a_plane_then_arms_itself() {
+    let case = ribbon::case("tool-palette-plane-pick");
+    let mut app = ribbon::app(ribbon::blank());
+    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.state_mut().state.viewport.references.show_origin_planes = false;
+    app.run_steps(8);
+    case.run(&mut app, |app| {
+        app.get_by_label("Sketch tab").click();
+        app.run_steps(8);
+        click(app, "Line");
+        assert!(!app.state().state.in_sketch());
+        assert!(matches!(
+            app.state().state.editor.as_ref().map(|e| &e.params),
+            Some(soliddraft_app::state::EditorParams::PickPlane)
+        ));
+        case.frame(app, "choose-plane");
+        app.get_by_label("Top plane").click();
+        app.run_steps(8);
+        assert!(app.state().state.in_sketch());
+        assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, Tool::Line);
+        assert!(app.state().state.editor.is_none());
+        case.frame(app, "line-armed");
+    });
+}
+
+#[test]
 fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
     let case = ribbon::case("tool-palette-registry");
     let mut app = ribbon::app_at(ribbon::blank(), vec2(1440.0, 1800.0), 1.0);

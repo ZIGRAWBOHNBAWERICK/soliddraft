@@ -120,7 +120,6 @@ struct OpenMenu {
     target: Target,
     selection: Option<Selection>,
     at: egui::Pos2,
-    open: bool,
 }
 
 /// Opens on a secondary click and retains the clicked target while the pointer moves.
@@ -141,12 +140,14 @@ pub fn show_at(
         return;
     }
     let key = response.id.with("context_target");
+    let popup_id = response.id.with("context_menu");
+    let opening = at.is_some();
     let menu = at
-        .map(|at| OpenMenu { target, selection, at, open: true })
+        .map(|at| OpenMenu { target, selection, at })
         .or_else(|| response.ctx.data(|data| data.get_temp::<OpenMenu>(key)));
-    let Some(mut menu) = menu else { return };
-    if !menu.open {
-        return;
+    let Some(menu) = menu else { return };
+    if opening {
+        egui::Popup::open_id(&response.ctx, popup_id);
     }
     if at.is_some() && !state.in_sketch() {
         // Secondary selection must not feed an editor's primary-click pick collector.
@@ -155,13 +156,13 @@ pub fn show_at(
     let OpenMenu { target, selection, at, .. } = menu;
     let mut chosen = None;
     egui::Popup::new(
-        response.id.with("context_menu"),
+        popup_id,
         response.ctx.clone(),
         egui::Rect::from_min_size(at, egui::Vec2::ZERO),
         response.layer_id,
     )
     .kind(egui::PopupKind::Menu)
-    .open_bool(&mut menu.open)
+    .open_memory(None)
     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
     .layout(egui::Layout::top_down_justified(egui::Align::Min))
     .gap(0.0)
@@ -200,7 +201,7 @@ pub fn show_at(
         state.doc.selection = original;
     });
     if let Some((command, selection)) = chosen {
-        menu.open = false;
+        egui::Popup::close_id(&response.ctx, popup_id);
         if !state.in_sketch() {
             state.doc.selection = selection;
         }

@@ -594,3 +594,38 @@ fn ridealong_fitted_faces_keep_their_own_bounds() {
         .collect();
     assert_eq!(fitted, restored);
 }
+
+#[test]
+fn ridealong_second_distance_is_checked_at_the_document_boundary() {
+    use soliddraft_model::{BlendFeature, Command, CommandError, FeatureKind};
+    let state = block();
+    let edge = state.doc.edge_ref(state.doc.edges[0].id).unwrap();
+    let mut document =
+        soliddraft_model::Document::from_bytes(&state.doc.model().to_bytes().unwrap(), soliddraft_app::kernel())
+            .unwrap();
+    let before = document.part_json();
+    for other in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let result = document.execute(Command::AddFeature {
+            kind: FeatureKind::Chamfer(BlendFeature {
+                edges: vec![edge.clone()],
+                size: 1.0,
+                other_distance: Some(other),
+            }),
+            name: None,
+            position: None,
+            via_assistant: false,
+        });
+        assert!(matches!(result, Err(CommandError::Invalid(_))), "{other}");
+        assert_eq!(document.part_json(), before);
+    }
+    let result = document.execute(Command::AddFeature {
+        kind: FeatureKind::Fillet(BlendFeature { edges: vec![edge], size: 1.0, other_distance: Some(1.0) }),
+        name: None,
+        position: None,
+        via_assistant: false,
+    });
+    assert!(matches!(result, Err(CommandError::Invalid(_))));
+    assert_eq!(document.part_json(), before);
+    let legacy: BlendFeature = serde_json::from_value(json!({"edges":[],"size":1.0})).unwrap();
+    assert_eq!(legacy.other_distance, None);
+}

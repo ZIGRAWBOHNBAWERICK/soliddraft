@@ -58,6 +58,7 @@ impl Built {
 
 fn feature_error(error: KernelError) -> String {
     match error {
+        KernelError::InvalidInput(message) => message,
         KernelError::Unsupported(message) if message.ends_with(" is coming soon.") => message,
         other => other.to_string(),
     }
@@ -237,6 +238,9 @@ impl Document {
                     Err(refused) => return *refused,
                 }
             }
+            FeatureKind::Pattern(p) if p.source.is_some() => {
+                p.source.and_then(|id| self.built_index(id)).map(|i| self.built[i].version)
+            }
             _ => named_plane.and_then(|(id, _)| self.built_index(id).map(|i| self.built[i].version)),
         };
         let key = cache.key(f, current, profile);
@@ -271,6 +275,8 @@ impl Document {
             FeatureKind::Pattern(p) => self.build_pattern(f, p, current),
             FeatureKind::Mirror(m) => self.build_mirror(f, m, current),
             FeatureKind::Draft(d) => self.build_draft(f, d, current),
+            FeatureKind::Offset(o) => self.build_offset(f, o, current),
+            FeatureKind::Thicken(t) => self.build_thicken(f, t, current),
             FeatureKind::Shell(s) => self.build_shell(f, s, current),
             FeatureKind::ImportStep(i) => self.build_import(f, i, current),
             FeatureKind::Lattice(l) => self.build_lattice(f, l, current),
@@ -835,7 +841,23 @@ impl Document {
                 PatternLayout::Circular { axis_origin, axis_direction, count, angle_deg: angle }
             }
         };
-        let result = self.kernel.pattern(&OpTag::new(format!("{}.pattern", f.id)), body, &layout);
+        let tag = OpTag::new(format!("{}.pattern", f.id));
+        let result = if let Some(source) = p.source {
+            let Some(index) = self.built_index(source) else {
+                return Built::failed(current, "The pattern source feature is missing");
+            };
+            let feature = &self.features[index];
+            if feature.suppressed || !feature.kind.can_pattern_feature() {
+                return Built::failed(current, "Select an unsuppressed boss, cut, hole or local treatment to pattern");
+            }
+            let Some(source) = self.built[index].output.filter(|_| self.built[index].status.is_ok()) else {
+                return Built::failed(current, "The pattern source feature has not built");
+            };
+            let before = index.checked_sub(1).and_then(|i| self.built[i].output);
+            self.kernel.pattern_feature(&tag, body, source, before, &layout)
+        } else {
+            self.kernel.pattern(&tag, body, &layout)
+        };
         self.finish(result, current, |r| self.copies(r, body))
     }
 
@@ -877,6 +899,27 @@ impl Document {
             });
             ordinal += 1;
         }
+        let mut feature_faces = r
+            .record
+            .face_roles
+            .iter()
+            .filter_map(|o| match &o.role {
+                FaceRole::FeatureCopy { instance, source } => Some((*instance, source, o.role.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        feature_faces.sort();
+        feature_faces.dedup();
+        let mut counts = HashMap::<u32, u32>::new();
+        for (instance, _, role) in feature_faces {
+            let count = counts.entry(instance).or_default();
+            out.push(NamedFace {
+                origin: Origin { tag: r.record.tag.clone(), role },
+                generator: Generator::Copy { instance },
+                ordinal: *count,
+            });
+            *count += 1;
+        }
         out
     }
 
@@ -906,52 +949,83 @@ impl Document {
             let _ = self.kernel.release(r.body);
             return Built::failed(current, refusal);
         }
-        self.finish(result, current, |r| {
-            let view = self.view_of(body).ok();
-            let names = self.name_map();
-            // Never rank an unnamed face by a transient kernel handle: every source face
-            // must have a name, or the shell face stays unnamed.
-            let labels = |faces: Vec<FaceId>| -> Option<Vec<_>> {
-                let t = view.as_ref()?;
-                let mut labels: Vec<_> = faces
-                    .into_iter()
-                    .map(|face| reference::origin_label(face, &View { topology: t }, &names))
-                    .collect::<Option<_>>()?;
-                labels.sort();
-                labels.dedup();
-                Some(labels)
-            };
-            let edge_faces = |edge: EdgeId| view.as_ref().and_then(|t| t.edge(edge)).map(|e| e.faces.clone());
-            let mut faces: Vec<_> = r
-                .record
-                .face_roles
-                .iter()
-                .filter_map(|o| {
-                    let (generator, sources) = match o.role {
-                        FaceRole::Offset { face } => (Generator::ShellWall, vec![face]),
-                        FaceRole::ShellRound { edge } => (Generator::ShellRound, edge_faces(edge)?),
-                        FaceRole::ShellCorner { vertex } => {
-                            let edges = view.as_ref().and_then(|t| t.vertex(vertex))?.edges.clone();
-                            let faces = edges.into_iter().map(edge_faces).collect::<Option<Vec<_>>>()?;
-                            (Generator::ShellCorner, faces.concat())
-                        }
-                        _ => return None,
-                    };
-                    Some((generator, labels(sources)?, o.role.clone()))
-                })
-                .collect();
-            faces.sort();
-            let mut counts: HashMap<Generator, u32> = HashMap::new();
-            faces
+        self.finish(result, current, |r| self.distance_names(r, body, true))
+    }
+
+    fn build_offset(&self, f: &Feature, o: &crate::OffsetFeature, current: Option<BodyId>) -> Built {
+        let Some(body) = current else { return Built::failed(current, "There is no body to offset") };
+        let result = self.kernel.offset(&OpTag::new(format!("{}.offset", f.id)), body, o.distance);
+        self.finish(result, current, |r| self.distance_names(r, body, false))
+    }
+
+    fn build_thicken(&self, f: &Feature, t: &crate::ThickenFeature, current: Option<BodyId>) -> Built {
+        let Some(body) = current else { return Built::failed(current, "There is no body with faces to thicken") };
+        let mut faces = Vec::new();
+        let mut repairs = Vec::new();
+        for (i, face) in t.faces.iter().enumerate() {
+            match self.resolve_face(face, body) {
+                Ok(id) => faces.push(id),
+                Err(repair) => repairs.push(RepairNeeded { slot: ReferenceSlot::Face { index: i as u32 }, ..repair }),
+            }
+        }
+        if !repairs.is_empty() {
+            return Built::pass(FeatureStatus::RepairNeeded(repairs), current);
+        }
+        let params = soliddraft_kernel_api::Thicken { faces, thickness: t.thickness, side: t.side };
+        let result = self.kernel.thicken(&OpTag::new(format!("{}.thicken", f.id)), body, &params);
+        self.finish(result, current, |r| self.distance_names(r, body, false))
+    }
+
+    fn distance_names(&self, r: &OpResult, body: BodyId, shell: bool) -> Vec<NamedFace> {
+        let view = self.view_of(body).ok();
+        let names = self.name_map();
+        // Never rank an unnamed face by a transient kernel handle: every source face
+        // must have a name, or the shell face stays unnamed.
+        let labels = |faces: Vec<FaceId>| -> Option<Vec<_>> {
+            let t = view.as_ref()?;
+            let mut labels: Vec<_> = faces
                 .into_iter()
-                .map(|(generator, _, role)| {
-                    let n = counts.entry(generator.clone()).or_default();
-                    let ordinal = *n;
-                    *n += 1;
-                    NamedFace { origin: Origin { tag: r.record.tag.clone(), role }, generator, ordinal }
-                })
-                .collect()
-        })
+                .map(|face| reference::origin_label(face, &View { topology: t }, &names))
+                .collect::<Option<_>>()?;
+            labels.sort();
+            labels.dedup();
+            Some(labels)
+        };
+        let edge_faces = |edge: EdgeId| view.as_ref().and_then(|t| t.edge(edge)).map(|e| e.faces.clone());
+        let mut faces: Vec<_> = r
+            .record
+            .face_roles
+            .iter()
+            .filter_map(|o| {
+                let (generator, sources) = match o.role {
+                    FaceRole::Offset { face } => {
+                        (if shell { Generator::ShellWall } else { Generator::OffsetFace }, vec![face])
+                    }
+                    FaceRole::ShellRound { edge } => {
+                        (if shell { Generator::ShellRound } else { Generator::OffsetRound }, edge_faces(edge)?)
+                    }
+                    FaceRole::Rim { edge } => (Generator::ThickenRim, edge_faces(edge)?),
+                    FaceRole::ShellCorner { vertex } => {
+                        let edges = view.as_ref().and_then(|t| t.vertex(vertex))?.edges.clone();
+                        let faces = edges.into_iter().map(edge_faces).collect::<Option<Vec<_>>>()?;
+                        (if shell { Generator::ShellCorner } else { Generator::OffsetCorner }, faces.concat())
+                    }
+                    _ => return None,
+                };
+                Some((generator, labels(sources)?, o.role.clone()))
+            })
+            .collect();
+        faces.sort();
+        let mut counts: HashMap<Generator, u32> = HashMap::new();
+        faces
+            .into_iter()
+            .map(|(generator, _, role)| {
+                let n = counts.entry(generator.clone()).or_default();
+                let ordinal = *n;
+                *n += 1;
+                NamedFace { origin: Origin { tag: r.record.tag.clone(), role }, generator, ordinal }
+            })
+            .collect()
     }
 
     /// What the part says about the self-intersection of imported body `id`. A body with

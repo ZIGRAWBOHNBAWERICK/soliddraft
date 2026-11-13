@@ -470,6 +470,8 @@ pub enum FeatureKind {
     Mirror(model::MirrorFeature),
     Draft(model::DraftFeature),
     Shell(model::ShellFeature),
+    Offset(model::OffsetFeature),
+    Thicken(model::ThickenFeature),
     ImportStep(model::ImportStepFeature),
     Lattice(model::LatticeFeature),
     Gyroid(model::GyroidFeature),
@@ -494,6 +496,8 @@ impl FeatureKind {
             FeatureKind::Mirror(_) => "Mirror",
             FeatureKind::Draft(_) => "Draft",
             FeatureKind::Shell(_) => "Shell",
+            FeatureKind::Offset(_) => "Offset",
+            FeatureKind::Thicken(_) => "Thicken",
             FeatureKind::ImportStep(_) => "Import",
             FeatureKind::Lattice(_) => "Lattice",
             FeatureKind::Gyroid(_) => "Gyroid",
@@ -519,6 +523,8 @@ impl FeatureKind {
             FeatureKind::Mirror(_) => "mirror",
             FeatureKind::Draft(_) => "draft",
             FeatureKind::Shell(_) => "shell",
+            FeatureKind::Offset(_) => "offset",
+            FeatureKind::Thicken(_) => "thicken",
             FeatureKind::ImportStep(_) => "import",
             FeatureKind::Lattice(_) => "lattice",
             FeatureKind::Gyroid(_) => "gyroid",
@@ -569,6 +575,8 @@ impl FeatureKind {
             FeatureKind::Mirror(m) => model::FeatureKind::Mirror(m.clone()),
             FeatureKind::Draft(d) => model::FeatureKind::Draft(d.clone()),
             FeatureKind::Shell(s) => model::FeatureKind::Shell(s.clone()),
+            FeatureKind::Offset(s) => model::FeatureKind::Offset(s.clone()),
+            FeatureKind::Thicken(s) => model::FeatureKind::Thicken(s.clone()),
             FeatureKind::ImportStep(i) => model::FeatureKind::ImportStep(i.clone()),
             FeatureKind::Lattice(l) => model::FeatureKind::Lattice(*l),
             FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(*g),
@@ -651,6 +659,8 @@ impl FeatureKind {
             model::FeatureKind::Mirror(m) => FeatureKind::Mirror(m.clone()),
             model::FeatureKind::Draft(d) => FeatureKind::Draft(d.clone()),
             model::FeatureKind::Shell(s) => FeatureKind::Shell(s.clone()),
+            model::FeatureKind::Offset(s) => FeatureKind::Offset(s.clone()),
+            model::FeatureKind::Thicken(s) => FeatureKind::Thicken(s.clone()),
             model::FeatureKind::ImportStep(i) => FeatureKind::ImportStep(i.clone()),
             model::FeatureKind::Lattice(l) => FeatureKind::Lattice(*l),
             model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(*g),
@@ -783,6 +793,8 @@ impl Feature {
             FeatureKind::Mirror(m) => plane_ref_label(&m.plane),
             FeatureKind::Draft(d) => format!("{}°", fmt_mm(d.angle)),
             FeatureKind::Shell(s) => format!("{} mm wall", fmt_mm(s.thickness)),
+            FeatureKind::Offset(s) => format!("{} mm", fmt_mm(s.distance)),
+            FeatureKind::Thicken(s) => format!("{} faces, {} mm", s.faces.len(), fmt_mm(s.thickness)),
             FeatureKind::ImportStep(i) => i.source_name.clone(),
             FeatureKind::Lattice(l) => format!("unproved preview · ±{} mm", fmt_mm(l.accuracy_mm)),
             FeatureKind::Gyroid(g) => format!("unproved preview · ±{} mm", fmt_mm(g.accuracy_mm)),
@@ -2381,6 +2393,9 @@ impl Document {
                     (model::FeatureKind::Mirror(m), EntityRef::Face(face)) if index == 0 => {
                         m.plane = model::PlaneRef::Face { face };
                     }
+                    (model::FeatureKind::Thicken(s), EntityRef::Face(face)) => {
+                        *s.faces.get_mut(index).ok_or("no such reference")? = face;
+                    }
                     (model::FeatureKind::Shell(s), EntityRef::Face(face)) => {
                         let model::ShellOpenings::Faces(faces) = &mut s.open_faces else {
                             return Err("no such reference".into());
@@ -3057,6 +3072,28 @@ impl Document {
         Ok(Preview { result: Some(mesh?), tool: None, removes: false })
     }
 
+    pub fn preview_offset(&self, offset: &model::OffsetFeature, before: Option<BodyId>) -> Result<Preview, String> {
+        let body = before.ok_or("Offset needs a body")?;
+        let result = self.kernel().offset(&OpTag::new("preview"), body, offset.distance).map_err(plain_kernel_error)?;
+        let mesh = self.mesh_of(result.body);
+        let _ = self.kernel().release(result.body);
+        Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+    }
+
+    pub fn preview_thicken(&self, thicken: &model::ThickenFeature, before: Option<BodyId>) -> Result<Preview, String> {
+        let body = before.ok_or("Thicken needs a body")?;
+        let faces = thicken
+            .faces
+            .iter()
+            .map(|f| self.model.resolve_face(f, body).map_err(|r| r.message))
+            .collect::<Result<Vec<_>, _>>()?;
+        let params = soliddraft_kernel_api::Thicken { faces, thickness: thicken.thickness, side: thicken.side };
+        let result = self.kernel().thicken(&OpTag::new("preview"), body, &params).map_err(plain_kernel_error)?;
+        let mesh = self.mesh_of(result.body);
+        let _ = self.kernel().release(result.body);
+        Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+    }
+
     fn mesh_of(&self, body: BodyId) -> Result<Arc<DisplayMesh>, String> {
         preview_mesh(self.kernel().as_ref(), body, &self.tess_params)
     }
@@ -3296,6 +3333,9 @@ impl Document {
                         if let Some(head) = &h.head {
                             details.push(("Head".to_owned(), hole_head_text(head)));
                         }
+                    }
+                    FeatureKind::Offset(_) | FeatureKind::Thicken(_) => {
+                        details.push(("Size".into(), f.summary()));
                     }
                     FeatureKind::Shell(s) => {
                         let open = match &s.open_faces {
@@ -3590,6 +3630,10 @@ fn view_status(
                         ) => {
                             let label = b.edges.get(index as usize).map(|e| e.label.clone()).unwrap_or_default();
                             (index as usize, RefKind::Edge, label)
+                        }
+                        (model::ReferenceSlot::Face { index }, model::FeatureKind::Thicken(s)) => {
+                            let label = s.faces.get(index as usize).map(|f| f.label.clone()).unwrap_or_default();
+                            (index as usize, RefKind::Face, label)
                         }
                         (model::ReferenceSlot::Face { index }, model::FeatureKind::Shell(s)) => {
                             let faces = s.open_faces.picked();
@@ -3981,5 +4025,12 @@ mod tests {
         assert_eq!(d.display_index(), Some(2));
         d.apply(Command::Rollback(None)).unwrap();
         built(&d);
+    }
+}
+
+fn plain_kernel_error(error: soliddraft_kernel_api::KernelError) -> String {
+    match error {
+        soliddraft_kernel_api::KernelError::InvalidInput(message) => message,
+        other => other.to_string(),
     }
 }

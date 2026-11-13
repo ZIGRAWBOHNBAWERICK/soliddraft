@@ -31,6 +31,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{part.dwprt,command.json,kernel.json,inspect-*.stdout}; work/a.dwprt and work/rig.dwasm"
     },
     {
+      "id": "body-offset",
+      "file": "ci/scenarios/body-offset.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Inward offsets on a 10 x 8 x 6 mm block: -1 mm and -0.5 mm; zero distance refused. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
+      "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
+    },
+    {
       "id": "bored-tray-shell",
       "file": "ci/scenarios/bored-tray-shell.json",
       "acceptance": true,
@@ -346,6 +360,34 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ]
+    },
+    {
+      "id": "face-thicken",
+      "file": "ci/scenarios/face-thicken.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "A planar top face of a 10 x 8 x 6 mm block, front and symmetric thickness; empty selection refused. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
+      "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
+    },
+    {
+      "id": "feature-pattern",
+      "file": "ci/scenarios/feature-pattern.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Repeat a 2 x 2 mm through cut in a 20 x 20 x 2 mm plate at quarter turns; 45-degree saved placement refused. Stock remains fixed. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
+      "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
     },
     {
       "id": "fillet",
@@ -1232,6 +1274,16 @@
       ]
     },
     {
+      "id": "sketch-fillet-chamfer-split",
+      "file": "ci/scenarios/sketch-fillet-chamfer-split.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
       "id": "sketch-fit-spline",
       "file": "ci/scenarios/sketch-fit-spline.json",
       "acceptance": false,
@@ -1264,22 +1316,6 @@
       ]
     },
     {
-      "id": "sketch-mirror",
-      "file": "ci/scenarios/sketch-mirror.json",
-      "acceptance": false,
-      "owners": [
-        "soliddraft-app",
-        "soliddraft-model",
-        "soliddraft-kernel-catallax"
-      ]
-    },
-    {
-      "id": "sketch-fillet-chamfer-split",
-      "file": "ci/scenarios/sketch-fillet-chamfer-split.json",
-      "acceptance": false,
-      "owners": ["soliddraft-app", "soliddraft-model", "soliddraft-kernel-catallax"]
-    },
-    {
       "id": "sketch-linked-offsets",
       "file": "ci/scenarios/sketch-linked-offsets.json",
       "acceptance": false,
@@ -1297,6 +1333,16 @@
         "soliddraft-app",
         "soliddraft-model",
         "soliddraft-sketch",
+        "soliddraft-kernel-catallax"
+      ]
+    },
+    {
+      "id": "sketch-mirror",
+      "file": "ci/scenarios/sketch-mirror.json",
+      "acceptance": false,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
         "soliddraft-kernel-catallax"
       ]
     },

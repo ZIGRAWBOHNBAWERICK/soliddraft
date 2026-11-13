@@ -212,6 +212,13 @@ fn named_origin_for_edges(
     tags: &BTreeMap<String, OpTag>,
     selected_edges: &[EdgeId],
 ) -> Option<soliddraft_kernel_api::Origin> {
+    if let Some((instance, source)) = crate::feature_pattern::instance(origin.step.as_str()) {
+        let original = Origin { step: catallax_recipe::StepId::new(source).ok()?, role: origin.role.clone() };
+        return Some(soliddraft_kernel_api::Origin {
+            tag: tags.get(origin.step.as_str())?.clone(),
+            role: FaceRole::FeatureCopy { instance, source: crate::feature_pattern::source_key(&original, tags)? },
+        });
+    }
     parents
         .iter()
         .find_map(|parent| parent.named.iter().find_map(|(source, named)| (source == origin).then_some(named)))

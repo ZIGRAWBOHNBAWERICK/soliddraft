@@ -11,6 +11,7 @@ mod diagnostics;
 mod distance;
 mod drawing_queries;
 mod edge_control;
+mod feature_pattern;
 mod frames;
 mod identity;
 mod iges;
@@ -269,8 +270,13 @@ impl CatallaxKernel {
         let recipe = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
             "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
         let swept = stored.steps.values().any(|s| s["op"] == "path_sweep");
-        if swept || stored.steps.values().any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges"))) {
-            let op = if swept { OpKind::Sweep } else { OpKind::ImportStep };
+        if swept
+            || stored
+                .steps
+                .values()
+                .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "native" | "feature_pattern")))
+        {
+            let op = stored.history.last().map_or(OpKind::ImportStep, |record| record.op);
             return serde_json::to_value(converted_recipe(&recipe, op)?.recipe)
                 .map_err(|e| KernelError::InvalidInput(e.to_string()));
         }
@@ -328,7 +334,7 @@ impl CatallaxKernel {
         let tags: BTreeMap<String, OpTag> = names
             .into_iter()
             .filter_map(|(name, id)| {
-                let n: u64 = name.strip_prefix("op_")?.parse().ok()?;
+                let n: u64 = name.strip_prefix("op_")?.split('_').next()?.parse().ok()?;
                 let tag = if n == seq { tag.clone() } else { history.get(&n)?.tag.clone() };
                 Some((id.as_str().to_owned(), tag))
             })
@@ -521,6 +527,7 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
     // steps during conversion, then restore their native definitions before building.
     let mut legacy = input.clone();
     let mut natives = Vec::new();
+    let mut patterns = Vec::new();
     // An import has no counterpart there. A unit block stands in for it, built from a
     // stand-in profile that is dropped again once the import step is back.
     let mut imports = Vec::new();
@@ -541,6 +548,12 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
         imports.push((tag, profile, native));
     }
     for step in legacy["steps"].as_array_mut().expect("generated recipe steps") {
+        if step["op"] == "feature_pattern" {
+            patterns.push(step.clone());
+            *step =
+                json!({"id":step["id"], "op":"boolean", "kind":"union", "target":step["base"], "tool":step["base"]});
+            continue;
+        }
         if step["op"] == "path_sweep" {
             let tag = step["id"].as_str().expect("stored sweep id").to_owned();
             let profile = step["profile"].clone();
@@ -629,6 +642,9 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
             converted.recipe.steps.insert(index, path);
         }
     }
+    for pattern in patterns {
+        feature_pattern::expand(&mut converted, &pattern)?;
+    }
     Ok(converted)
 }
 
@@ -694,6 +710,9 @@ fn build_error(op: OpKind, error: Error) -> KernelError {
     }
     if matches!(op, OpKind::Offset | OpKind::Thicken) {
         return distance::refusal(op, error.code());
+    }
+    if op == OpKind::Pattern {
+        return feature_pattern::refusal(error.code());
     }
     let code = error.code();
     if matches!(error, Error::Conversion(catallax_app::soliddraft::ConversionError::NotYet { .. })) {
@@ -1039,6 +1058,40 @@ impl Kernel for CatallaxKernel {
         })
         .map_err(|error| match error {
             KernelError::Unavailable(_) => distance::refusal(OpKind::Thicken, ""),
+            other => other,
+        })
+    }
+
+    fn pattern_feature(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        source: BodyId,
+        before: Option<BodyId>,
+        layout: &PatternLayout,
+    ) -> KernelResult<OpResult> {
+        self.observe("pattern_feature", || {
+            let state = self.state()?;
+            state.solid(body)?;
+            let source_body = state.get(source)?;
+            let before_body = before.map(|id| state.get(id)).transpose()?;
+            let graph = source_body
+                .steps
+                .keys()
+                .filter(|id| before_body.is_none_or(|b| !b.steps.contains_key(id)))
+                .map(|id| format!("op_{id}"))
+                .collect::<Vec<_>>();
+            if graph.is_empty() {
+                return Err(feature_pattern::refusal("pattern.expansion"));
+            }
+            let mut context = vec![source];
+            context.extend(before);
+            let step = json!({"op":"feature_pattern", "base":state.get(body)?.result,
+                "source":source_body.result, "before":before_body.map(|b| &b.result), "graph":graph, "layout":layout});
+            self.operation_reading(state, tag, OpKind::Pattern, &[body], &context, &[], step)
+        })
+        .map_err(|error| match error {
+            KernelError::Unavailable(_) => feature_pattern::refusal(""),
             other => other,
         })
     }

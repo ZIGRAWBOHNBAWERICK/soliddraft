@@ -56,6 +56,8 @@ pub enum AppAction {
     StartReferencePlane,
     StartDraft,
     StartShell,
+    StartOffset,
+    StartThicken,
     StartLattice,
     StartGyroid,
     StartRepair(FeatureId),
@@ -253,6 +255,8 @@ pub enum EditorParams {
     ReferencePlane(soliddraft_model::SketchPlane),
     Draft(DraftParams),
     Shell(soliddraft_model::ShellFeature),
+    Offset(soliddraft_model::OffsetFeature),
+    Thicken(soliddraft_model::ThickenFeature),
     Lattice(soliddraft_model::LatticeFeature),
     Gyroid(soliddraft_model::GyroidFeature),
     /// Picking a plane or planar face for a new sketch.
@@ -298,6 +302,8 @@ impl FeatureEditor {
             EditorParams::ReferencePlane(_) => format!("{edit}Reference Plane"),
             EditorParams::Draft(_) => format!("{edit}Draft"),
             EditorParams::Shell(_) => format!("{edit}Shell"),
+            EditorParams::Offset(_) => format!("{edit}Offset"),
+            EditorParams::Thicken(_) => format!("{edit}Thicken"),
             EditorParams::Lattice(_) => format!("{edit}Lattice"),
             EditorParams::Gyroid(_) => format!("{edit}Gyroid"),
             EditorParams::PickPlane => "Sketch".to_owned(),
@@ -351,6 +357,8 @@ impl FeatureEditor {
             EditorParams::Fillet(f) => doc.preview_rounding(&f.blend(), false, before),
             EditorParams::Chamfer(c) => doc.preview_rounding(&c.blend(), true, before),
             EditorParams::Shell(s) => doc.preview_shell(s, before),
+            EditorParams::Offset(s) => doc.preview_offset(s, before),
+            EditorParams::Thicken(s) => doc.preview_thicken(s, before),
             // These preview once applied; the interface half adds ghosts for them.
             EditorParams::Lattice(_)
             | EditorParams::Gyroid(_)

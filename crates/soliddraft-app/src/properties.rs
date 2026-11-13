@@ -716,6 +716,9 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
         Some(EditorParams::Lattice(_) | EditorParams::Gyroid(_)) => {
             (state.editor.as_ref().unwrap().title(), Icon::Cad("lattice"))
         }
+        Some(EditorParams::Offset(_) | EditorParams::Thicken(_)) => {
+            (state.editor.as_ref().unwrap().title(), Icon::Shell)
+        }
         Some(EditorParams::Shell(_)) => (state.editor.as_ref().unwrap().title(), Icon::Shell),
         Some(EditorParams::PickPlane) => ("Sketch".to_owned(), Icon::Sketch),
         Some(EditorParams::Repair { .. }) => ("Repair references".to_owned(), Icon::Repair),
@@ -748,6 +751,14 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
         .iter()
         .take(target)
         .filter(|f| matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
+        .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
+        .collect();
+    let pattern_choices: Vec<_> = state
+        .doc
+        .features
+        .iter()
+        .take(target)
+        .filter(|f| f.kind.to_model().can_pattern_feature())
         .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
         .collect();
     let sweep_radius = match state.editor.as_ref().map(|e| &e.params) {
@@ -997,6 +1008,20 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 form_note(ui, "Standard angles: 118° drill tips; 82°, 90° and 100° countersinks.");
             }
             EditorParams::Pattern(p) => {
+                section(ui, "Features", |ui| {
+                    choice_row(ui, "Source", |ui, _| {
+                        let name = p
+                            .source
+                            .and_then(|id| pattern_choices.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()))
+                            .unwrap_or("Whole body");
+                        egui::ComboBox::from_id_salt("pattern_source").selected_text(name).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut p.source, None, "Whole body");
+                            for (id, name) in &pattern_choices {
+                                ui.selectable_value(&mut p.source, Some(*id), name);
+                            }
+                        });
+                    });
+                });
                 section(ui, "Layout", |ui| match &mut p.layout {
                     PatternSpec::Linear { direction, spacing, count } => {
                         axis_combo(ui, "pattern_dir", "Direction", direction);
@@ -1012,7 +1037,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 if let Some(err) = &editor.error {
                     error_row(ui, err);
                 }
-                form_note(ui, "Copies the part's body and unites the copies with it.");
+                form_note(ui, "Choose a feature to repeat its operation, or Whole body to copy the part.");
             }
             EditorParams::ReferencePlane(source) => {
                 section(ui, "Source plane", |ui| {
@@ -1089,6 +1114,49 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 if let Some(error) = &editor.error {
                     error_row(ui, error);
                 }
+            }
+            EditorParams::Offset(s) => {
+                section(ui, "Distance", |ui| {
+                    number_row(ui, "Offset", "mm", egui::DragValue::new(&mut s.distance).speed(0.1));
+                    hint(ui, "Positive grows the body; negative shrinks it.");
+                });
+                if let Some(error) = &editor.error {
+                    error_row(ui, error);
+                }
+            }
+            EditorParams::Thicken(s) => {
+                section(ui, "Faces", |ui| {
+                    if let Some(i) =
+                        pick_list(ui, "Click faces to thicken", Icon::Plane, s.faces.iter().map(|f| f.label.as_str()))
+                    {
+                        s.faces.remove(i);
+                    }
+                });
+                section(ui, "Thickness", |ui| {
+                    number_row(ui, "Thickness", "mm", egui::DragValue::new(&mut s.thickness).speed(0.1));
+                    choice_row(ui, "Side", |ui, _| {
+                        use soliddraft_kernel_api::ThickenSide;
+                        egui::ComboBox::from_id_salt("thicken_side")
+                            .selected_text(match s.side {
+                                ThickenSide::Front => "Front",
+                                ThickenSide::Back => "Back",
+                                ThickenSide::Symmetric => "Symmetric",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (side, name) in [
+                                    (ThickenSide::Front, "Front"),
+                                    (ThickenSide::Back, "Back"),
+                                    (ThickenSide::Symmetric, "Symmetric"),
+                                ] {
+                                    ui.selectable_value(&mut s.side, side, name);
+                                }
+                            });
+                    });
+                });
+                if let Some(error) = &editor.error {
+                    error_row(ui, error);
+                }
+                form_note(ui, "Creates a solid from the selected faces at the chosen thickness.");
             }
             EditorParams::Shell(s) => {
                 section(ui, "Open faces", |ui| {
@@ -1782,7 +1850,14 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         (Selection::Feature(_), Some(crate::document::FeatureKind::Pattern(_))) => Icon::LinearPattern,
         (Selection::Feature(_), Some(crate::document::FeatureKind::Mirror(_))) => Icon::Mirror,
         (Selection::Feature(_), Some(crate::document::FeatureKind::Draft(_))) => Icon::Draft,
-        (Selection::Feature(_), Some(crate::document::FeatureKind::Shell(_))) => Icon::Shell,
+        (
+            Selection::Feature(_),
+            Some(
+                crate::document::FeatureKind::Shell(_)
+                | crate::document::FeatureKind::Offset(_)
+                | crate::document::FeatureKind::Thicken(_),
+            ),
+        ) => Icon::Shell,
         (Selection::Feature(_), Some(crate::document::FeatureKind::ImportStep(_))) => Icon::Import,
         (
             Selection::Feature(_),

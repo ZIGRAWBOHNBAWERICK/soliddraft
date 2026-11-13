@@ -563,3 +563,10 @@ owner = "core"
 crate = "soliddraft-kernel-catallax"
 paths = ["crates/soliddraft-kernel-catallax/src/distance.rs", "crates/soliddraft-kernel-catallax/tests/distance.rs"]
 module = ["distance"]
+
+[[areas]]
+name = "kernel_catallax.feature_pattern"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/feature_pattern.rs", "crates/soliddraft-kernel-catallax/tests/feature_pattern.rs"]
+module = ["feature_pattern"]

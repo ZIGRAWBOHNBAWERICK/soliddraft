@@ -299,6 +299,7 @@ impl CatallaxKernel {
                     app,
                     ids,
                     display,
+                    print: MeshCache::new(),
                     previews: MeshCache::new(),
                     rendering: MeshCache::new(),
                     topology: OnceLock::new(),

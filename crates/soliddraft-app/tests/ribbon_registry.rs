@@ -17,7 +17,7 @@ mod configuration_registry;
 use ribbon::App;
 use serde_json::{Map, Value, json};
 use soliddraft_app::commands::{self, Agents, Context, History, Tab};
-use soliddraft_app::state::{AppState, RibbonTab};
+use soliddraft_app::state::{AppAction, AppState, RibbonTab};
 use std::collections::HashSet;
 
 /// A schema without its prose: names, types and requiredness are the contract.
@@ -689,6 +689,16 @@ fn before_ridealong_inputs(id: &str, current: &mut Value) {
     }
 }
 
+fn before_print_accuracy(id: &str, current: &mut Value) {
+    if !["export_stl", "export_3mf", "export_obj"].contains(&id) {
+        return;
+    }
+    let input = current.pointer_mut("/tool/input").expect("mesh export inputs");
+    assert!(!input["required"].as_array().unwrap().iter().any(|field| field == "accuracy_mm"));
+    let added = input["properties"].as_object_mut().unwrap().remove("accuracy_mm").expect("mesh export accuracy");
+    assert_eq!(added, json!({"type": "number"}), "print accuracy is one optional number");
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -835,6 +845,15 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_ridealong_inputs(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
+        before_print_accuracy(id, &mut current);
+        if id == "check" {
+            assert_eq!(current["agents"], "app", "Check opens its own report");
+            current["agents"] = row["agents"].clone();
+            for (fixture, availability) in current["availability"].as_object_mut().unwrap() {
+                assert_eq!(availability["enabled"], true, "Check works in {fixture}");
+                availability["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
         if [
             "view_isometric",
             "view_front",
@@ -958,7 +977,11 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     let first = |query: &str, context: Context| commands::search_here(query, &history, context)[0].command.id;
     assert_eq!(first("check", part), "check");
     assert_eq!(first("check model", part), "check_model");
-    assert!(commands::get("check").unwrap().action.is_none(), "Check is not the assistant's check");
+    let check = commands::get("check").unwrap();
+    let state = AppState::new(ribbon::blank());
+    assert!(check.is_working());
+    assert!(matches!(check.action_now(&state), Some(AppAction::CheckPart)), "Check runs independent construction");
+    assert_ne!(check.tip(&state), "Coming soon");
     assert!(commands::get("check_model").unwrap().action.is_some());
 
     // What left the part's ribbon can still be found where it works.

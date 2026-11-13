@@ -189,8 +189,14 @@
         },
         {
           "format": "stl",
-          "refused": "mesh.precision-or-budget",
-          "sentinel": "previous accepted STL"
+          "attempt": "requested",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous requested STL"
+        },
+        {
+          "format": "stl",
+          "accuracy_mm": 0.08,
+          "attempt": "coarser"
         }
       ]
     },
@@ -226,7 +232,8 @@
           "format": "step"
         },
         {
-          "format": "stl"
+          "format": "stl",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [
@@ -282,7 +289,8 @@
           "format": "step"
         },
         {
-          "format": "stl"
+          "format": "stl",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [

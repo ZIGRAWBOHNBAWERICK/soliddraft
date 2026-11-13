@@ -115,7 +115,13 @@ fn meshes_are_closed_and_within_their_chord_height() {
 
     // A closed mesh within the chord height of every face encloses a volume within area
     // times the chord height of the exact one.
-    let source = k.tessellate(body, &tolerance.params()).unwrap();
+    let qualified = k.print_mesh(body, &tolerance.params()).unwrap().unwrap();
+    assert!(stl.bytes.starts_with(b"CXPRINT1"));
+    assert_eq!(stl.bytes, qualified.stl);
+    let certificate = r.print_check.as_ref().expect("native print certificate");
+    assert!(certificate.certified_accuracy_mm <= tolerance.chord_height);
+    assert_eq!(certificate.route, "brep");
+    let source = qualified.mesh;
     let welded = soliddraft_exchange::mesh::weld(&source);
     assert!((volume(&welded) - exact).abs() <= area * tolerance.chord_height, "{} against {exact}", volume(&welded));
 
@@ -166,7 +172,7 @@ fn meshes_are_closed_and_within_their_chord_height() {
             _ => {}
         }
     }
-    assert_eq!(positions, source.positions, "decimal vertices round-trip to the proven display coordinates");
+    assert_eq!(positions, source.positions, "decimal vertices round-trip to the qualified print coordinates");
     assert_eq!(normals, source.normals, "sharp-face normals survive");
     assert_eq!(positions.len(), obj_report.vertices);
     let expected: Vec<_> = source

@@ -495,9 +495,13 @@ impl SolidDraftApp {
         let window_width = root.available_width();
         if !start {
             if palette {
+                crate::tool_palette::plane_picker_panel(root, &mut self.state);
                 crate::tool_palette::panel(root, &mut self.state);
+                crate::timeline::panel(root, &mut self.state);
             }
-            self.side_panel(root, Side::Tree, window_width);
+            if !palette || self.state.layout.tree.shown {
+                self.side_panel(root, Side::Tree, window_width);
+            }
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {

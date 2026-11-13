@@ -688,6 +688,14 @@ impl CommandSpec {
         self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), p.panel))
     }
 
+    pub fn path_in(&self, state: &AppState) -> Option<String> {
+        if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+            self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), palette_group(p.panel, p.tab)))
+        } else {
+            self.path()
+        }
+    }
+
     /// The agent tool's description: the doc, then the details.
     pub fn description(&self) -> String {
         if self.details.is_empty() { format!("{}.", self.doc) } else { format!("{}. {}", self.doc, self.details) }
@@ -703,6 +711,18 @@ impl CommandSpec {
             description.push_str(undo);
         }
         ToolSpec { name: self.id.into(), description, input_schema: object(&(self.params)()) }
+    }
+}
+
+/// Group names in the Edit Suite palette and its command hints.
+pub fn palette_group(label: &str, tab: Tab) -> &str {
+    match label {
+        "Modify" if tab == Tab::Part(RibbonTab::Sketch) => "Edit",
+        "Modify" => "Edit features",
+        "Transform" => "Move and copy",
+        "Constrain" => "Relations",
+        "Display" if tab == Tab::Part(RibbonTab::Sketch) => "Show",
+        label => label,
     }
 }
 
@@ -1056,6 +1076,21 @@ impl Shortcuts {
                     _ => {}
                 }
             }
+            // Existing assignments predate these defaults, so they keep the key on upgrade.
+            for id in ["sketch_trim", "sketch_offset", "sketch_move"] {
+                let assigned = overrides.get(id).and_then(Value::as_str).and_then(KeyChord::parse).is_some();
+                if s.overrides.contains_key(id) || assigned {
+                    continue;
+                }
+                let claimed = s.preset.keys_of(id).iter().any(|key| {
+                    s.conflicts_for_key(id, *key)
+                        .iter()
+                        .any(|other| s.overrides.get(other.id).is_some_and(Option::is_some))
+                });
+                if claimed {
+                    s.set_raw(id, None);
+                }
+            }
         }
         // Read the whole assignment before checking it: a swap can use two keys that
         // the defaults still own until both overrides have been read.
@@ -1373,6 +1408,10 @@ fn editing(s: &AppState, f: fn(&EditorParams) -> bool) -> bool {
     s.editor.as_ref().is_some_and(|e| f(&e.params))
 }
 
+fn can_sketch_tool(s: &AppState) -> bool {
+    s.in_sketch() || s.frame_layout == crate::settings::FrameLayout::EditSuite && Context::of(s).part() && field_open(s)
+}
+
 fn tool_is(s: &AppState, t: Tool) -> bool {
     s.sketch.as_ref().is_some_and(|k| k.tool == t)
 }
@@ -1507,138 +1546,138 @@ fn registry() -> Vec<CommandSpec> {
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::L)
             .run(|_| AppAction::SketchTool(Tool::Line))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Line))
 .app_only(SKETCHER),
         cmd("sketch_centreline", "Centreline", Icon::Cad("construction"), "Construction line: click points; right-click ends the chain")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Centreline))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Centreline))
 .app_only(SKETCHER),
         cmd("sketch_circle", "Circle", Icon::Cad("circle"), "Circle: centre, then a point on it")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::C)
             .run(|_| AppAction::SketchTool(Tool::Circle))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Circle))
 .app_only(SKETCHER),
         cmd("sketch_perimeter_circle", "Perimeter circle", Icon::Cad("circle"), "Circle through three perimeter points")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::PerimeterCircle))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::PerimeterCircle))
 .app_only(SKETCHER),
         cmd("sketch_ellipse", "Ellipse", Icon::Circle, "Ellipse: centre, first semi-axis, second semi-axis")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Ellipse))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Ellipse))
 .app_only(SKETCHER),
         cmd("sketch_partial_ellipse", "Partial ellipse", Icon::Arc, "Partial ellipse: centre, axes, start, then counterclockwise end")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::PartialEllipse))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::PartialEllipse))
 .app_only(SKETCHER),
         cmd("sketch_fit_spline", "Fit-point spline", Icon::Arc, "Spline through picked points; double-click or Enter to finish")
             .on(Sketch,"Draw",Small)
             .run(|_| AppAction::SketchTool(Tool::FitSpline))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s,Tool::FitSpline))
 .app_only(SKETCHER),
         cmd("sketch_control_spline", "Control-point spline", Icon::Arc, "Spline from a control polygon; double-click or Enter to finish")
             .on(Sketch,"Draw",Small)
             .run(|_| AppAction::SketchTool(Tool::ControlSpline))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s,Tool::ControlSpline))
 .app_only(SKETCHER),
         cmd("sketch_text", "Sketch text", Icon::Text, "Place editable font outlines on the sketch baseline")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Text))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Text))
 .app_only(SKETCHER),
         cmd("sketch_rectangle", "Rectangle", Icon::Cad("rect"), "Corner rectangle")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::R)
             .run(|_| AppAction::SketchTool(Tool::Rectangle))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Rectangle))
 .app_only(SKETCHER),
         cmd("sketch_centre_rectangle", "Centre rectangle", Icon::Cad("rect"), "Centre and corner")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::CentreRectangle))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::CentreRectangle))
 .app_only(SKETCHER),
         cmd("sketch_three_point_corner_rectangle", "3-point corner rectangle", Icon::Cad("rect"), "First edge, then perpendicular height")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointCornerRectangle))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointCornerRectangle))
 .app_only(SKETCHER),
         cmd("sketch_three_point_centre_rectangle", "3-point centre rectangle", Icon::Cad("rect"), "Centre, side midpoint, then half-width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointCentreRectangle))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointCentreRectangle))
 .app_only(SKETCHER),
         cmd("sketch_parallelogram", "Parallelogram", Icon::Cad("rect"), "Three consecutive corners")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::Parallelogram))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Parallelogram))
 .app_only(SKETCHER),
         cmd("sketch_arc", "Arc", Icon::Cad("arc"), "Centrepoint arc: centre, start, end; choose direction in properties")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::A)
             .run(|_| AppAction::SketchTool(Tool::Arc))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Arc))
 .app_only(SKETCHER),
         cmd("sketch_three_point_arc", "Three-point arc", Icon::Cad("arc"), "Arc: start, end, then a point on the sweep")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointArc))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointArc))
 .app_only(SKETCHER),
         cmd("sketch_tangent_arc", "Tangent arc", Icon::Cad("arc"), "Continue a line or circular arc: endpoint, then new endpoint")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::TangentArc))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::TangentArc))
 .app_only(SKETCHER),
         cmd("sketch_slot", "Slot", Icon::Cad("slot_sketch"), "Straight slot: two centres, then the width")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::S)
             .run(|_| AppAction::SketchTool(Tool::Slot))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Slot))
 .app_only(SKETCHER),
         cmd("sketch_centrepoint_slot", "Centrepoint slot", Icon::Cad("slot_sketch"), "Straight slot: midpoint, end centre, then width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::CentrepointSlot))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::CentrepointSlot))
 .app_only(SKETCHER),
         cmd("sketch_three_point_arc_slot", "Three-point arc slot", Icon::Cad("slot_sketch"), "Arc slot: start, end, point along the arc, then width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::ThreePointArcSlot))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::ThreePointArcSlot))
 .app_only(SKETCHER),
         cmd("sketch_centrepoint_arc_slot", "Centrepoint arc slot", Icon::Cad("slot_sketch"), "Arc slot: arc centre, start, counterclockwise end, then width")
             .on(Sketch, "Draw", Small)
             .run(|_| AppAction::SketchTool(Tool::CentrepointArcSlot))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::CentrepointArcSlot))
 .app_only(SKETCHER),
         cmd("sketch_point", "Point", Icon::Cad("sk_point"), "Point")
             .on(Sketch, "Draw", Small)
             .key(Scope::Sketch, none, Key::P)
             .run(|_| AppAction::SketchTool(Tool::Point))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Point))
 .app_only(SKETCHER),
         // The Modify tools: each previews what it will do and applies it on a click or
@@ -1646,55 +1685,57 @@ fn registry() -> Vec<CommandSpec> {
         cmd("sketch_polygon", "Polygon", Icon::Polygon, "Regular polygon: click the centre, then a vertex")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Polygon))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Polygon))
 .app_only(SKETCHER),
         cmd("sketch_trim", "Trim", Icon::Trim, "Trim a picked piece, power-trim a drag, or choose Corner, Inside or Outside in the tool panel")
             .on(Sketch, "Modify", Small)
+            .key(Scope::Sketch, none, Key::T)
             .run(|_| AppAction::SketchTool(Tool::Trim))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| s.sketch.as_ref().is_some_and(|k| k.tool.trims()))
 .app_only(SKETCHER),
         cmd("sketch_fillet", "Sketch fillet", Icon::Fillet, "Insert a tangent radius between two picked lines or arcs")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Fillet))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Fillet))
 .app_only(SKETCHER),
         cmd("sketch_chamfer", "Sketch chamfer", Icon::Chamfer, "Replace a picked line corner with a setback or distance/angle chamfer")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Chamfer))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Chamfer))
 .app_only(SKETCHER),
         cmd("sketch_split", "Split entities", Icon::Trim, "Split a line or arc at one point, or a circle at two points")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Split))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Split))
 .app_only(SKETCHER),
         cmd("sketch_extend", "Extend", Icon::Extend, "Extend: click the end of a line or arc to lengthen it to the next curve")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Extend))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Extend))
 .app_only(SKETCHER),
         cmd("sketch_offset", "Offset", Icon::Offset, "Offset: copy the selected chain at a distance")
             .on(Sketch, "Modify", Small)
+            .key(Scope::Sketch, none, Key::O)
             .run(|_| AppAction::SketchTool(Tool::Offset))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Offset))
 .app_only(SKETCHER),
         cmd("sketch_mirror", "Mirror entities", Icon::Mirror, "Mirror: copy the selected entities across an axis")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::Mirror))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Mirror))
 .app_only(SKETCHER),
         cmd("sketch_linear_pattern", "Linear pattern", Icon::LinearPattern, "Copy the selected entities along a step")
             .on(Sketch, "Modify", Small)
             .run(|_| AppAction::SketchTool(Tool::LinearPattern))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::LinearPattern))
 .app_only(SKETCHER),
         cmd(
@@ -1705,44 +1746,45 @@ fn registry() -> Vec<CommandSpec> {
         )
         .on(Sketch, "Modify", Small)
         .run(|_| AppAction::SketchTool(Tool::CircularPattern))
-        .when(AppState::in_sketch)
+        .when(can_sketch_tool)
         .lit(|s| tool_is(s, Tool::CircularPattern))
 .app_only(SKETCHER),
         cmd("sketch_move", "Move entities", Icon::Views, "Translate selected geometry with compatible constraints")
             .on(Sketch, "Transform", Small)
+            .key(Scope::Sketch, none, Key::M)
             .run(|_| AppAction::SketchTool(Tool::Move))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Move))
 .app_only(SKETCHER),
         cmd("sketch_copy", "Copy entities", Icon::LinearPattern, "Copy selected geometry from a base point and displacement")
             .on(Sketch, "Transform", Small)
             .run(|_| AppAction::SketchTool(Tool::Copy))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Copy))
 .app_only(SKETCHER),
         cmd("sketch_rotate", "Rotate entities", Icon::CircularPattern, "Rotate or copy selected geometry about a centre")
             .on(Sketch, "Transform", Small)
             .run(|_| AppAction::SketchTool(Tool::Rotate))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Rotate))
 .app_only(SKETCHER),
         cmd("sketch_scale", "Scale entities", Icon::Rectangle, "Uniformly scale selected geometry about a base point")
             .on(Sketch, "Transform", Small)
             .run(|_| AppAction::SketchTool(Tool::Scale))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Scale))
 .app_only(SKETCHER),
         cmd("sketch_select", "Select", Icon::Sketch, "Select and drag sketch geometry")
             .key(Scope::Sketch, none, Key::V)
             .run(|_| AppAction::SketchTool(Tool::Select))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Select))
 .app_only(SKETCHER),
         cmd("smart_dimension", "Smart dim", Icon::Cad("smart_dim"), "Dimension a line, arc, circle, point or pair")
             .on(Sketch, "Constrain", Large)
             .key(Scope::Sketch, none, Key::D)
             .run(|_| AppAction::SketchTool(Tool::Dimension))
-            .when(AppState::in_sketch)
+            .when(can_sketch_tool)
             .lit(|s| tool_is(s, Tool::Dimension))
 .app_only(SKETCHER),
         cmd("construction", "Construction", Icon::Cad("construction"), "Toggle construction geometry on the selection")

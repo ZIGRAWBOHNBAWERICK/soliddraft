@@ -191,28 +191,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if f.is_sketch() && absorbed.contains(&f.id) {
                 continue;
             }
-            let icon = match &f.kind {
-                FeatureKind::ReferencePlane(_) => Icon::Plane,
-                FeatureKind::Sketch(_) => Icon::Sketch,
-                FeatureKind::Extrude(_) => Icon::Extrude,
-                FeatureKind::Revolve(_) => Icon::Revolve,
-                FeatureKind::Sweep(_) => Icon::Sweep,
-                FeatureKind::Loft(_) => Icon::Loft,
-                FeatureKind::Cut(_) => Icon::Cut,
-                FeatureKind::Fillet(_) => Icon::Fillet,
-                FeatureKind::Chamfer(_) => Icon::Chamfer,
-                FeatureKind::Hole(_) => Icon::Hole,
-                FeatureKind::Pattern(p) => match p.layout {
-                    soliddraft_model::PatternSpec::Linear { .. } => Icon::LinearPattern,
-                    soliddraft_model::PatternSpec::Circular { .. } => Icon::CircularPattern,
-                },
-                FeatureKind::Mirror(_) => Icon::Mirror,
-                FeatureKind::Draft(_) => Icon::Draft,
-                FeatureKind::Shell(_) | FeatureKind::Thicken(_) => Icon::Shell,
-                FeatureKind::Offset(_) => Icon::Cad("srf_offset"),
-                FeatureKind::ImportStep(_) => Icon::Import,
-                FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Cad("lattice"),
-            };
+            let icon = feature_icon(&f.kind);
             let child = f.kind.sketch().and_then(|s| state.doc.feature(s));
             let (sub, status) = match &state.drag_preview {
                 Some(drag) if drag.feature() == f.id => {
@@ -716,4 +695,30 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
         return resp.on_hover_text(egui::RichText::new(w).color(theme::ink()));
     }
     resp
+}
+
+/// The same feature icon in the tree and timeline.
+pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {
+    match kind {
+        FeatureKind::ReferencePlane(_) => Icon::Plane,
+        FeatureKind::Sketch(_) => Icon::Sketch,
+        FeatureKind::Extrude(_) => Icon::Extrude,
+        FeatureKind::Revolve(_) => Icon::Revolve,
+        FeatureKind::Sweep(_) => Icon::Sweep,
+        FeatureKind::Loft(_) => Icon::Loft,
+        FeatureKind::Cut(_) => Icon::Cut,
+        FeatureKind::Fillet(_) => Icon::Fillet,
+        FeatureKind::Chamfer(_) => Icon::Chamfer,
+        FeatureKind::Hole(_) => Icon::Hole,
+        FeatureKind::Pattern(p) => match p.layout {
+            soliddraft_model::PatternSpec::Linear { .. } => Icon::LinearPattern,
+            soliddraft_model::PatternSpec::Circular { .. } => Icon::CircularPattern,
+        },
+        FeatureKind::Mirror(_) => Icon::Mirror,
+        FeatureKind::Draft(_) => Icon::Draft,
+        FeatureKind::Shell(_) | FeatureKind::Thicken(_) => Icon::Shell,
+        FeatureKind::Offset(_) => Icon::Cad("srf_offset"),
+        FeatureKind::ImportStep(_) => Icon::Import,
+        FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Cad("lattice"),
+    }
 }

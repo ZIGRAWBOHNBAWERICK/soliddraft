@@ -232,6 +232,8 @@ impl RibbonTab {
 pub struct FeatureEditor {
     pub target: Option<FeatureId>,
     pub params: EditorParams,
+    /// The sketch tool to arm after this plane picker completes. Closing it drops the tool.
+    pub pending_sketch_tool: Option<Tool>,
     pub preview: Preview,
     pub error: Option<String>,
     /// The document's rollback before the editor rolled the display back to the
@@ -282,6 +284,7 @@ impl FeatureEditor {
         Self {
             target,
             params,
+            pending_sketch_tool: None,
             preview: Preview::default(),
             error: None,
             saved_rollback,
@@ -1063,6 +1066,7 @@ pub struct AppState {
     /// Bumped when File locations are saved, so cached lookups refresh.
     pub locations_epoch: u64,
     pub rename: Option<Rename>,
+    pub timeline: crate::timeline::State,
     /// The tree row being dragged for reordering.
     pub drag_feature: Option<FeatureId>,
     /// The feature dimension being dragged, with its previews.
@@ -1135,6 +1139,7 @@ impl AppState {
             locations_dialog: None,
             locations_epoch: 0,
             rename: None,
+            timeline: Default::default(),
             drag_feature: None,
             drag_preview: None,
             dimension_edit: None,

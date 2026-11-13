@@ -305,6 +305,7 @@ fn eye_label(app: &App, name: &str) -> String {
 }
 
 fn click_eye(case: &mut Case, app: &mut App, name: &str) {
+    ribbon::close_options(app);
     reveal(app, name);
     let label = eye_label(app, name);
     let node = app.get_by_label(&label);
@@ -395,7 +396,8 @@ fn menu(case: &mut Case, app: &mut App, path: &[&str]) {
 /// Sets Show origin planes through Preferences. The fixture starts with it off so the image
 /// oracles read a plain backdrop, and the cases about planes turn it on, its own default.
 fn show_planes(case: &mut Case, app: &mut App, on: bool) {
-    menu(case, app, &["Tools", "Preferences…"]);
+    case.note("open grid and plane preferences");
+    ribbon::run_command(app, "settings");
     assert!(app.state().preferences.is_some(), "the menu opened Preferences");
     let press = |app: &mut App, label: &str| {
         app.get_by_label(label).hover();
@@ -1440,8 +1442,7 @@ fn view_choices_survive_undo_and_native_reopen() {
 
 /// For a part other than B20: zooms to fit through the heads-up toolbar.
 fn frame_fixture_any(case: &mut Case, app: &mut App) {
-    let fit = bounds(app, "Zoom to fit (Z)");
-    click_at(app, fit.center());
+    ribbon::run_command(app, "zoom_fit");
     case.note("zoom to fit");
 }
 

@@ -25,6 +25,7 @@ fn screen(app: &App, p: P2) -> Pos2 {
 }
 
 fn click(app: &mut App, p: P2, modifiers: Modifiers) {
+    ribbon::close_options(app);
     let pos = screen(app, p);
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(pos);
@@ -170,6 +171,7 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
     undo_redo(&mut app, &copied, &in_place);
     app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     settle(&mut app);
+    ribbon::open_options(&mut app);
     let checkbox = app.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Copy entities").rect();
     ribbon::click_at(&mut app, checkbox.center());
     settle(&mut app);

@@ -30,6 +30,41 @@ fn bounded_fixture() -> serde_json::Value {
 }
 
 #[test]
+fn rename_cannot_upgrade_a_bounded_answer_or_unlock_export() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Bounded rename", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();
+    doc.features[0].status = FeatureStatus::AnsweredWithinBound(bound.clone());
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    assert!(state.doc.proof_state().answered_within_bound);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+    kernel.rules.lock().unwrap().refuse = vec![25.0];
+    let caller = Caller::Mcp { client: "bounded-rename-regression".into() };
+    let renamed = call_checked(
+        &mut AppTools { state: &mut state },
+        "rename",
+        json!({"feature": "Boss-Extrude1", "name": "Renamed plate"}),
+        &caller,
+    );
+    assert!(!renamed.is_error, "{}", renamed.content);
+    let exported = state.export_part(soliddraft_exchange::Format::Step);
+    assert!(
+        exported.is_err(),
+        "rename unlocked STEP export; status={:?}, proof={:?}",
+        state.doc.feature(id).unwrap().status,
+        state.doc.proof_state()
+    );
+    assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(bound));
+}
+
+#[test]
 fn a_bounded_answer_is_distinct_from_proof_and_keeps_its_definition_and_limit() {
     let case = ribbon::case("edit-suite-bounded");
     let bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();

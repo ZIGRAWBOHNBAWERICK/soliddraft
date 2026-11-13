@@ -34,7 +34,7 @@ type App<'a> = Harness<'a, SolidDraftApp>;
 fn harness() -> App<'static> {
     let config = out_dir().join(format!("config-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
-    std::fs::write(config.join("settings.json"), "{}").unwrap();
+    std::fs::write(config.join("settings.json"), r#"{"view":{"always_show_origin_axes":false}}"#).unwrap();
     soliddraft_app::file::set_config_dir(Some(config));
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))

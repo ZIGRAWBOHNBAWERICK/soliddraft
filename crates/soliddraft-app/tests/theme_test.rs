@@ -1,4 +1,4 @@
-//! The Studio theme switches and persists through the real app and wgpu pipeline.
+//! Classic and Edit Suite themes through the real app and wgpu pipeline.
 //! Bracket frames are written under the temporary directory for review.
 //!
 //! The mode is process-wide (`theme::set_mode`), so switches run light then dark
@@ -6,9 +6,11 @@
 //!
 //! Skips itself when no GPU adapter is available (plain CI runners).
 
-use egui::{Key, vec2};
+use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::app::{Automation, SolidDraftApp};
+use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::AppAction;
 use soliddraft_app::theme::{self, Mode};
 use std::path::PathBuf;
@@ -58,8 +60,57 @@ fn the_bracket_in_light_and_dark() {
         image.save(&path).expect("save png");
         eprintln!("wrote {}", path.display());
     }
+    harness.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    for mode in Mode::ALL {
+        harness.state_mut().state.push(AppAction::SetTheme(mode));
+        harness.run_steps(6);
+        assert_eq!(theme::mode(), mode, "the appearance preference is retained");
+        assert_eq!(theme::palette(), &theme::edit_suite::PALETTE);
+        let style = harness.ctx.global_style();
+        assert!(style.visuals.dark_mode, "Edit Suite has dark chrome in either mode");
+        assert_eq!(style.visuals.panel_fill, egui::Color32::from_rgb(0x30, 0x33, 0x38));
+        assert_eq!(style.visuals.selection.stroke.color, egui::Color32::from_rgb(0xf5, 0xa5, 0x24));
+        assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
+        let image = harness.render().expect("Edit Suite renders");
+        assert_eq!(image.get_pixel(2, 200).0, [0x30, 0x33, 0x38, 255], "the palette paints charcoal");
+        assert_eq!(image.get_pixel(10, 70).0, [0xf5, 0xa5, 0x24, 255], "Start sketch paints solid amber");
+        let path = out_dir().join(format!("edit-suite-{}.png", mode.label().to_lowercase()));
+        image.save(&path).expect("save Edit Suite png");
+        eprintln!("wrote {}", path.display());
+        harness.get_by_label("Start sketch").focus();
+        harness.run_steps(2);
+        harness.key_press(Key::Tab);
+        harness.run_steps(2);
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run_steps(2);
+        assert!(harness.get_by_label("Start sketch").is_focused(), "keyboard navigation returns to Start sketch");
+        let rect = harness.get_by_label("Start sketch").rect();
+        let focused = harness.render().expect("focused Start sketch renders");
+        focused.save(out_dir().join(format!("focus-{}.png", mode.label().to_lowercase()))).unwrap();
+        let ring = focused.get_pixel((rect.left() + 1.0) as u32, rect.center().y as u32).0;
+        let fill = focused.get_pixel((rect.left() + 8.0) as u32, rect.center().y as u32).0;
+        let luminance = |pixel: [u8; 4]| -> f64 {
+            pixel[..3]
+                .iter()
+                .zip([0.2126, 0.7152, 0.0722])
+                .map(|(c, w)| {
+                    let v = f64::from(*c) / 255.0;
+                    w * if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+                })
+                .sum()
+        };
+        let (a, b) = (luminance(ring), luminance(fill));
+        let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+        eprintln!("{} keyboard focus contrast: {contrast:.2}:1", mode.label());
+        assert!(contrast >= 3.0, "{}: keyboard focus contrast is {contrast:.2}:1 ({ring:?} / {fill:?})", mode.label());
+    }
+    harness.state_mut().state.frame_layout = FrameLayout::Classic;
+    harness.run_steps(6);
+    assert_eq!(theme::palette(), &theme::DARK, "returning to classic restores its saved dark mode");
     harness.state_mut().state.push(AppAction::SetTheme(Mode::Light));
     harness.run_steps(2);
+    assert_eq!(theme::palette(), &theme::LIGHT);
+    assert!(!harness.ctx.global_style().visuals.dark_mode);
     let saved = std::fs::read_to_string(config.join("settings.json")).expect("the choice was saved");
     assert!(saved.contains("\"theme\": \"light\""), "the last choice is in the file: {saved}");
     let _ = std::fs::remove_dir_all(config);

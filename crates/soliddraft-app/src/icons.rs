@@ -185,7 +185,7 @@ impl Raster {
 fn paint_raster(painter: &Painter, key: &'static str, glyph: bool, rect: Rect, tint: Color32, treatment: Treatment) {
     let ppp = painter.pixels_per_point();
     let px = (rect.width().min(rect.height()) * ppp).round().max(1.0);
-    let dark = crate::theme::mode().is_dark();
+    let dark = crate::theme::dark_chrome();
     let raster = Raster { key, glyph, px: px as u32, dark, treatment };
     let Some(source) = raster.source() else {
         debug_assert!(false, "no icon {key}");

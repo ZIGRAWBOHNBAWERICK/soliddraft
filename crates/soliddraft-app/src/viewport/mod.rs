@@ -73,6 +73,12 @@ impl PickFilter {
 pub struct ViewportEvents {
     /// A primary click happened; the payload is what was under the cursor.
     pub clicked: Option<Option<Picked>>,
+    /// The viewport response when a right-click is free to open a menu.
+    pub context_response: Option<egui::Response>,
+    /// The model under a secondary click, independent of primary-click gestures.
+    pub secondary_clicked: Option<Option<Picked>>,
+    /// Where a secondary click resolved, including one that waited for a readback.
+    pub context_position: Option<Pos2>,
     /// With a click on no model: the reference it found.
     pub clicked_reference: Option<Reference>,
     pub set_view: Option<StandardView>,
@@ -144,12 +150,22 @@ impl<'a> RoundingOverlay<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ContextPick {
+    at: Pos2,
+    rect: Rect,
+    view: PickView,
+    revision: Option<render::PickRevision>,
+}
+
 pub struct ViewportState {
     pub camera: Camera,
     pub display: DisplayMode,
     pub preset: Preset,
     /// Named background in Edit Suite; classic keeps the theme fade.
     pub scene: Option<scenes::Scene>,
+    pub(crate) context_menus: bool,
+    context_pick: Option<ContextPick>,
     /// What the viewport shows of the part's reference geometry without being asked.
     pub references: ReferenceDisplay,
     /// How the grid looks, as the user chose.
@@ -175,6 +191,8 @@ impl Default for ViewportState {
             display: DisplayMode::default(),
             preset: Preset::default(),
             scene: None,
+            context_menus: false,
+            context_pick: None,
             references: ReferenceDisplay::default(),
             grid_style: GridStyle::default(),
             hover: None,
@@ -298,6 +316,7 @@ impl ViewportState {
         let preview = preview.filter(|shown| visible.body || !is_provisional(shown));
         let preview_pickable = preview.as_ref().is_some_and(is_provisional);
         let sketching = sketch.is_some();
+        let menu_ready = self.context_menus && sketch.as_ref().is_none_or(|s| s.tool == crate::state::Tool::Select);
         let mut events = ViewportEvents::default();
         let rect = ui.available_rect_before_wrap();
         self.rect = rect;
@@ -323,22 +342,39 @@ impl ViewportState {
         }
         let scene = ReferenceScene::new(&visible, sketching, doc.bounds(), &self.camera);
 
+        let pick_view = self.pick_view(rect, ppp);
+        if !menu_ready || sketching || response.clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.context_pick = None;
+        }
+        if menu_ready
+            && !sketching
+            && response.secondary_clicked()
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            self.context_pick = Some(ContextPick { at, rect, view: pick_view, revision: pick_revision });
+        }
+        self.context_pick = self
+            .context_pick
+            .filter(|pick| pick.rect == rect && pick.view == pick_view && pick.revision == pick_revision);
+
         // Hover pick from the last id-buffer readback. The readback lags one
         // frame, so keep repainting briefly while the pointer rests on the view.
         let hover_pos =
             if response.hovered() && !response.dragged() && !sketching { response.hover_pos() } else { None };
-        let cursor_px = hover_pos
-            .map(|p| [((p.x - rect.left()) * ppp).max(0.0) as u32, ((p.y - rect.top()) * ppp).max(0.0) as u32]);
+        let pixel = |p: Pos2| [((p.x - rect.left()) * ppp).max(0.0) as u32, ((p.y - rect.top()) * ppp).max(0.0) as u32];
+        let hover_px = hover_pos.map(pixel);
+        // Keep requesting the clicked pixel even if the pointer leaves it while the GPU catches up.
+        let cursor_px = self.context_pick.map(|pick| pixel(pick.at)).or(hover_px);
         self.hover = None;
         self.hover_reference = None;
         self.hover_point = None;
         let mut can_pick_references = false;
-        if let (Some(px), Some(pos)) = (cursor_px, hover_pos) {
+        if let (Some(px), Some(pos)) = (hover_px, hover_pos) {
             let sample = self.pick.lock().unwrap();
             let on_model = sample.at(px[0], px[1]).and_then(Picked::decode).is_some();
             self.hover =
                 (sample.revision == pick_revision).then(|| decode_pick(&sample, px[0], px[1], pick_filter)).flatten();
-            let current = planes::sample_is_current(&sample, pick_revision, self.pick_view(rect, ppp), px);
+            let current = planes::sample_is_current(&sample, pick_revision, pick_view, px);
             can_pick_references = current;
             drop(sample);
             if let Some(picked) = self.hover {
@@ -352,6 +388,23 @@ impl ViewportState {
         if response.clicked_by(egui::PointerButton::Primary) && !sketching {
             events.clicked = Some(self.hover);
             events.clicked_reference = self.hover_reference;
+        }
+
+        if let Some(pick) = self.context_pick {
+            let sample = self.pick.lock().unwrap();
+            let px = pixel(pick.at);
+            if planes::sample_is_current(&sample, pick.revision, pick.view, px) {
+                events.secondary_clicked = Some(decode_pick(&sample, px[0], px[1], pick_filter));
+                events.context_position = Some(pick.at);
+                self.context_pick = None;
+            }
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        }
+        if menu_ready {
+            if sketching && response.secondary_clicked() {
+                events.context_position = response.interact_pointer_pos();
+            }
+            events.context_response = Some(response.clone());
         }
 
         // Hand the frame to the GPU.

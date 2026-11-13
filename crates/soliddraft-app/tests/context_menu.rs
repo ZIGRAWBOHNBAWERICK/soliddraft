@@ -121,6 +121,8 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         app.run_steps(6);
         app.get_by_label("Part material");
         assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
+        let close = app.get_by_label("Close options").rect().center();
+        ribbon::click_at(app, close);
 
         let empty = app.state().state.viewport.rect.left_bottom() + egui::vec2(45.0, -50.0);
         right_click(app, empty, true);

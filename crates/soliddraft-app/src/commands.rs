@@ -541,7 +541,7 @@ impl CommandSpec {
         self
     }
 
-    fn shown(mut self, shown: fn(&AppState) -> bool) -> Self {
+    pub(crate) fn shown(mut self, shown: fn(&AppState) -> bool) -> Self {
         self.shown = shown;
         self
     }
@@ -596,10 +596,7 @@ impl CommandSpec {
 
     /// Commands whose geometry is waiting for Catallax, in roadmap section 6 order.
     pub fn catallax_wait(&self) -> Option<&'static str> {
-        match self.id {
-            "loft" => Some(COMING_SOON),
-            _ => None,
-        }
+        None
     }
 
     /// Whether the command works in the app now, rather than waiting as Coming soon.
@@ -1809,7 +1806,18 @@ fn registry() -> Vec<CommandSpec> {
         cmd("edit_sweep", "Edit sweep", Icon::Sweep, "Change a sweep path")
             .agents(Agents::Verb, "Preserves the profile. Segments without an `id` keep the saved identity at their position.", tools::edit_sweep_params)
             .undo(Undo::Step),
-        cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft between profiles").on(Solid, "Create", Small),
+        cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft through ordered sketch or face profiles")
+            .on(Solid, "Create", Small)
+            .run(|_| AppAction::StartLoft)
+            .outside_sketch()
+            .when(|s| !s.in_sketch() && field_open(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Loft(_))))
+            .hint(after_field)
+            .agents(Agents::Verb, "Loft through two or more closed sketches or planar faces in the supplied order, with ruled or smooth sides.", tools::loft_params)
+            .undo(Undo::Step),
+        cmd("edit_loft", "Edit loft", Icon::Loft, "Change loft profiles or side shape")
+            .agents(Agents::Verb, "Change the ordered profiles and side shape of an existing loft.", tools::edit_loft_params)
+            .undo(Undo::Step),
         // Cut.
         cmd("cut", "Cut", Icon::Cad("cut"), "Remove material: cut a sketch into the part")
             .on(Solid, "Remove", Large)
@@ -3169,7 +3177,7 @@ mod tests {
     fn sketch_features_are_not_offered_while_a_sketch_is_open() {
         let mut history = History::default();
         let sketch = Context { sketch: true, ..Default::default() };
-        for id in ["extrude", "revolve", "sweep", "cut"] {
+        for id in ["extrude", "revolve", "sweep", "loft", "cut"] {
             let command = get(id).unwrap();
             assert!(command.available(Context::default()), "{id} is offered after closing");
             assert!(!command.available(sketch), "{id} stays out of sketch mode");

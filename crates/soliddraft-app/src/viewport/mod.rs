@@ -34,6 +34,41 @@ use render::{DisplayMode, FrameInput, PickSample, PickView, Picked, ViewportCall
 use soliddraft_kernel_api::Plane;
 use std::sync::{Arc, Mutex};
 
+/// Entity kinds a free viewport click can select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PickFilter {
+    pub faces: bool,
+    /// Edges include their vertices.
+    pub edges: bool,
+    pub bodies: bool,
+}
+
+impl Default for PickFilter {
+    fn default() -> Self {
+        Self { faces: true, edges: true, bodies: true }
+    }
+}
+
+impl PickFilter {
+    fn permits(self, picked: Picked) -> bool {
+        match picked {
+            Picked::Face(_) => self.faces || self.bodies,
+            Picked::Edge(_) | Picked::Vertex(_) => self.edges || self.bodies,
+        }
+    }
+
+    pub fn selection(self, selected: Option<Selection>) -> Option<Selection> {
+        match selected? {
+            selected @ Selection::Face(_) if self.faces => Some(selected),
+            selected @ (Selection::Edge(_) | Selection::Vertex(_)) if self.edges => Some(selected),
+            Selection::Face(_) | Selection::Edge(_) | Selection::Vertex(_) | Selection::Body => {
+                self.bodies.then_some(Selection::Body)
+            }
+            selected => Some(selected),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ViewportEvents {
     /// A primary click happened; the payload is what was under the cursor.
@@ -64,6 +99,7 @@ const NO_PART: u64 = u64::MAX - 1;
 
 /// What the viewport draws besides the document this frame.
 pub struct Overlay<'a> {
+    pub pick_filter: PickFilter,
     /// Material a feature adds or removes, with whether it removes.
     pub ghost: Option<(Arc<DisplayMesh>, bool)>,
     /// A body drawn in place of the document's while a feature is previewed.
@@ -260,7 +296,8 @@ impl ViewportState {
         hover_label: Option<&str>,
         nav: &NavigationSettings,
     ) -> ViewportEvents {
-        let Overlay { ghost, preview, sketch, passive_sketches, dimension_edit, visible, rounding } = overlay;
+        let Overlay { pick_filter, ghost, preview, sketch, passive_sketches, dimension_edit, visible, rounding } =
+            overlay;
         let pick_revision = Some((doc.model().id(), doc.mesh_version, doc.display_body()));
         let provisional = doc.provisional_mesh();
         let is_provisional = |shown: &Arc<DisplayMesh>| provisional.as_ref().is_some_and(|b| Arc::ptr_eq(shown, b));
@@ -324,14 +361,16 @@ impl ViewportState {
         let mut can_pick_references = false;
         if let (Some(px), Some(pos)) = (hover_px, hover_pos) {
             let sample = self.pick.lock().unwrap();
-            self.hover = (sample.revision == pick_revision).then(|| decode_pick(&sample, px[0], px[1])).flatten();
+            let on_model = sample.at(px[0], px[1]).and_then(Picked::decode).is_some();
+            self.hover =
+                (sample.revision == pick_revision).then(|| decode_pick(&sample, px[0], px[1], pick_filter)).flatten();
             let current = planes::sample_is_current(&sample, pick_revision, pick_view, px);
             can_pick_references = current;
             drop(sample);
             if let Some(picked) = self.hover {
                 let (o, d) = self.camera.ray(pos, rect);
                 self.hover_point = pick::hit_point(doc, picked, o, d);
-            } else if current {
+            } else if current && !on_model {
                 self.hover_reference = scene.hit(&self.camera, rect, pos);
             }
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -345,7 +384,7 @@ impl ViewportState {
             let sample = self.pick.lock().unwrap();
             let px = pixel(pick.at);
             if planes::sample_is_current(&sample, pick.revision, pick.view, px) {
-                events.secondary_clicked = Some(decode_pick(&sample, px[0], px[1]));
+                events.secondary_clicked = Some(decode_pick(&sample, px[0], px[1], pick_filter));
                 events.context_position = Some(pick.at);
                 self.context_pick = None;
             }
@@ -366,7 +405,7 @@ impl ViewportState {
         let meshes = (doc.mesh_version, shown);
         // The shader compares face pick ids; edges and vertices are highlighted by the painter.
         let hover_id = match self.hover {
-            Some(Picked::Face(p)) => p,
+            Some(Picked::Face(p)) if pick_filter.faces => p,
             _ => 0,
         };
         let selected_id = match selection {
@@ -420,7 +459,7 @@ impl ViewportState {
             self.paint_reference_planes(ui, doc, rect, can_pick_references, &response, &mut events);
         }
         if visible.body {
-            self.paint_highlights(&painter, doc, selection, rect);
+            self.paint_highlights(&painter, doc, selection, rect, pick_filter);
         }
         if let Some(rounding) = &rounding {
             self.paint_rounding(ui, &painter, rect, rounding);
@@ -456,6 +495,7 @@ impl ViewportState {
             response.clone().on_hover_text_at_pointer(format!("{} · drag to move · double-click to edit", d.tip));
         } else if response.double_clicked_by(egui::PointerButton::Primary)
             && !sketching
+            && pick_filter.bodies
             && self.hover.is_some()
             && doc.display_body().is_some()
         {
@@ -666,7 +706,14 @@ impl ViewportState {
         });
     }
 
-    fn paint_highlights(&self, painter: &egui::Painter, doc: &Document, selection: Option<Selection>, rect: Rect) {
+    fn paint_highlights(
+        &self,
+        painter: &egui::Painter,
+        doc: &Document,
+        selection: Option<Selection>,
+        rect: Rect,
+        pick_filter: PickFilter,
+    ) {
         let draw_edge = |pick: u32, stroke: Stroke| {
             for m in doc.meshes.values() {
                 if let Some(e) = m.edges.iter().find(|e| e.pick == pick) {
@@ -700,10 +747,10 @@ impl ViewportState {
             draw_vertex(pos, 5.0, theme::accent());
         }
         match self.hover {
-            Some(Picked::Edge(p)) if selected_edge != Some(p) => {
+            Some(Picked::Edge(p)) if pick_filter.edges && selected_edge != Some(p) => {
                 draw_edge(p, Stroke::new(2.0, theme::accent().gamma_multiply(0.7)))
             }
-            Some(Picked::Vertex(p)) => {
+            Some(Picked::Vertex(p)) if pick_filter.edges => {
                 if let Some(pos) = pick::vertex_position(doc, p)
                     && selected_vertex != Some(pos)
                 {
@@ -1035,12 +1082,13 @@ fn point_in_convex(p: Pos2, poly: &[Pos2]) -> bool {
 
 /// Priority: a vertex within 7 px, then an edge within 5 px, then the face
 /// under the cursor.
-fn decode_pick(sample: &PickSample, cx: u32, cy: u32) -> Option<Picked> {
+fn decode_pick(sample: &PickSample, cx: u32, cy: u32, filter: PickFilter) -> Option<Picked> {
     if sample.data.is_empty() {
         return None;
     }
     let mut best_vertex: Option<(i32, u32)> = None;
     let mut best_edge: Option<(i32, u32)> = None;
+    let mut best_face: Option<(i32, u32)> = None;
     for dy in -7i32..=7 {
         for dx in -7i32..=7 {
             let (x, y) = (cx as i32 + dx, cy as i32 + dy);
@@ -1050,8 +1098,13 @@ fn decode_pick(sample: &PickSample, cx: u32, cy: u32) -> Option<Picked> {
             let Some(v) = sample.at(x as u32, y as u32) else { continue };
             let d2 = dx * dx + dy * dy;
             match v >> render::KIND_SHIFT {
-                3 if d2 <= 49 && best_vertex.is_none_or(|(bd, _)| d2 < bd) => best_vertex = Some((d2, v)),
-                2 if d2 <= 25 && best_edge.is_none_or(|(bd, _)| d2 < bd) => best_edge = Some((d2, v)),
+                3 if filter.edges && d2 <= 49 && best_vertex.is_none_or(|(bd, _)| d2 < bd) => {
+                    best_vertex = Some((d2, v))
+                }
+                2 if filter.edges && d2 <= 25 && best_edge.is_none_or(|(bd, _)| d2 < bd) => best_edge = Some((d2, v)),
+                1 if (filter.faces || filter.bodies) && d2 <= 49 && best_face.is_none_or(|(bd, _)| d2 < bd) => {
+                    best_face = Some((d2, v))
+                }
                 _ => {}
             }
         }
@@ -1062,7 +1115,17 @@ fn decode_pick(sample: &PickSample, cx: u32, cy: u32) -> Option<Picked> {
     if let Some((_, v)) = best_edge {
         return Picked::decode(v);
     }
-    sample.at(cx, cy).and_then(Picked::decode)
+    if !filter.edges
+        && filter.faces
+        && let Some((_, v)) = best_face
+    {
+        return Picked::decode(v);
+    }
+    sample
+        .at(cx, cy)
+        .and_then(Picked::decode)
+        .filter(|picked| filter.permits(*picked))
+        .or_else(|| (!filter.edges).then_some(best_face).flatten().and_then(|(_, v)| Picked::decode(v)))
 }
 
 /// How far along the segment from `a`, which is inside `rect`, to `b` it stays inside,

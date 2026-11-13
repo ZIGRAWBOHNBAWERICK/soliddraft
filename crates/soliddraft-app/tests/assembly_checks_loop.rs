@@ -9,14 +9,40 @@ fn call(state: &mut AppState, name: &str, args: Value) -> (bool, Value) {
     (out.is_error, serde_json::from_str(&out.content).unwrap())
 }
 
+fn decimal_clearance() -> Value {
+    let mut spec: Value =
+        serde_json::from_str(include_str!("../../../ci/scenarios/exact-body-relations.json")).unwrap();
+    spec["name"] = json!("exact-decimal-clearance");
+    let steps = spec["steps"].as_array_mut().unwrap();
+    steps.truncate(11);
+    steps[1]["arguments"]["depth"] = json!(0.7);
+    steps[10]["arguments"]["placement"]["translation"] = json!([3, 7, 1]);
+    // The part ends at exactly 0.7 mm; the second starts at exactly 1 mm.
+    for (clearance, below, met) in [("0.3 mm", 1, 0), ("0.299 mm", 0, 1), ("0.301 mm", 1, 0)] {
+        steps.push(json!({
+            "tool": "assembly_check_clearance", "arguments": {"clearance": clearance},
+            "checks": [
+                {"pointer":"/result/report/below", "equals": below},
+                {"pointer":"/result/report/met", "equals": met},
+                {"pointer":"/result/report/undecided", "equals": 0}
+            ]
+        }));
+    }
+    spec
+}
+
 #[test]
 fn interference_clearance_and_hole_alignment_application_loops() {
-    for source in [
+    for spec in [
         include_str!("../../../ci/scenarios/interference-detection.json"),
+        include_str!("../../../ci/scenarios/exact-body-relations.json"),
         include_str!("../../../ci/scenarios/clearance-verification.json"),
         include_str!("../../../ci/scenarios/hole-alignment.json"),
-    ] {
-        let spec: Value = serde_json::from_str(source).unwrap();
+    ]
+    .into_iter()
+    .map(|source| serde_json::from_str::<Value>(source).unwrap())
+    .chain([decimal_clearance()])
+    {
         let name = spec["name"].as_str().unwrap();
         let dir = std::env::temp_dir().join(format!("soliddraft-{name}-loop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -67,6 +93,35 @@ fn interference_clearance_and_hole_alignment_application_loops() {
                 }
             }
             history.push(output);
+        }
+        if name == "exact-body-relations" {
+            let (_, before) = call(&mut state, "model_summary", json!({}));
+            let ((error, refused), work) = soliddraft_kernel_catallax::with_request_allowance(0, || {
+                call(&mut state, "assembly_check_interference", json!({}))
+            });
+            assert!(!error, "{refused}");
+            assert!(work.exhausted);
+            let refusal = &refused["report"]["results"][0]["exact_refused"][0];
+            assert_eq!(refusal["code"], "numbers.operation-budget", "{refused}");
+            assert!(refusal["message"].as_str().unwrap().contains("calculation limit"));
+            let (_, after) = call(&mut state, "model_summary", json!({}));
+            assert_eq!(before["assembly"]["accepted_state"], after["assembly"]["accepted_state"]);
+
+            // A gap below the mesh chord bound is still decided from the exact solids.
+            let part = "4".parse().unwrap();
+            let at = soliddraft_assembly::Placement::translation(glam::DVec3::new(3.0, 7.0, 10.0001));
+            state.assembly.session.as_mut().unwrap().doc.move_to(&[(part, at)]).unwrap();
+            let (error, met) = call(&mut state, "assembly_check_clearance", json!({"clearance":"0.00005 mm"}));
+            assert!(!error, "{met}");
+            assert_eq!(met["report"]["met"], 1, "{met}");
+            assert_eq!(met["report"]["undecided"], 0, "{met}");
+            let (error, below) = call(&mut state, "assembly_check_clearance", json!({"clearance":"0.0002 mm"}));
+            assert!(!error, "{below}");
+            assert_eq!(below["report"]["below"], 1, "{below}");
+            let pair = &below["report"]["results"][0];
+            assert_eq!(pair["outcome"], "clear", "{below}");
+            assert!(pair["distance"]["lo"].as_f64().unwrap() > 0.00005, "{pair}");
+            assert!(pair["distance"]["hi"].as_f64().unwrap() < 0.0002, "{pair}");
         }
         std::fs::remove_dir_all(dir).unwrap();
     }

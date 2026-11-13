@@ -1,6 +1,6 @@
 # Catallax backend gaps
 
-The backend pins Catallax main at revision `9aed0777184353a5f52d1b660f9d2411b97f0fc9`, including ellipse profiles, the fillet campaign, unions of provably disjoint solids and stable construction names. B-rep construction uses `catallax-app`; terminal lattices and network gyroids, constant or graded linearly along a part axis, use `catallax-field::lattice_stage`. Their explicit moments use `catallax_field::mass::properties` on the stage's compiled field, and their mass stand-in uses `catallax_features::stand_in::equivalent_blocks`, `catallax_step::write_stand_in_step` and `catallax_field::mass::surrogate_properties`, checked with the field enclosures' own `contains` and `encloses`, as Catallax's `catallax-stand-in/1` request does. Moments, stand-ins and certified exports run on the caller's work allowance, or on 19,999,999 units when there is none, and a certified export reports the work it used. A STEP write does the same at the 20,000,000-unit application limit. `soliddraft export` holds its whole request, opening and rebuilding included, to that limit and refuses a larger `--max-work`. A larger `mcp --bundle --max-work` does not reach a STEP, field STL or stand-in export, which stops at the limit, and an export inside a caller's larger allowance is refused once the request has used more than the limit. No Catallax code is copied into SolidDraft.
+The backend pins Catallax main at revision `e4e6df4b2c400481068f35fd08ce7a739a2c3b4a`, including ellipse profiles, the fillet campaign, unions of provably disjoint solids and stable construction names. B-rep construction uses `catallax-app`; terminal lattices and network gyroids, constant or graded linearly along a part axis, use `catallax-field::lattice_stage`. Their explicit moments use `catallax_field::mass::properties` on the stage's compiled field, and their mass stand-in uses `catallax_features::stand_in::equivalent_blocks`, `catallax_step::write_stand_in_step` and `catallax_field::mass::surrogate_properties`, checked with the field enclosures' own `contains` and `encloses`, as Catallax's `catallax-stand-in/1` request does. Moments, stand-ins and certified exports run on the caller's work allowance, or on 19,999,999 units when there is none, and a certified export reports the work it used. A STEP write does the same at the 20,000,000-unit application limit. `soliddraft export` holds its whole request, opening and rebuilding included, to that limit and refuses a larger `--max-work`. A larger `mcp --bundle --max-work` does not reach a STEP, field STL or stand-in export, which stops at the limit, and an export inside a caller's larger allowance is refused once the request has used more than the limit. No Catallax code is copied into SolidDraft.
 
 Each solid retains its `IncrementalApplicationBody` and owned `EvaluationCheckpoint`.
 For a new solid, the adapter merges operand and read-only context recipes, selects the
@@ -58,35 +58,14 @@ A full symmetric union of equal crossing cylinders can stop at an ambiguous appl
 
 ## Two-body intersection and distance
 
-Assembly Interference Detection and Clearance Verification ([interference.md](interference.md))
-run on certified meshes today. That tier proves a pair clear, proves it interferes with a
-point inside both parts, or leaves it touching or undecided within the meshes' chord bounds.
-It cannot report an overlap's volume, prove two parts touch without a mate, or measure a gap
-smaller than the bounds. The exact tier needs one Catallax query, called with two parts that
-were built separately, each from its own pinned revision:
+Interference Detection and Clearance Verification now combine certified meshes with exact
+body queries. [Catallax's body-relation queries](https://github.com/BohnBawerick/catallax/pull/537)
+provide overlap-volume enclosures, successful empty intersections and clipped contact faces.
+The adapter combines both retained construction chains in one private model and places them
+with exact isometries derived from the accepted quaternion and translation components.
+Trimmed-face distance queries refine gaps and clearances. See [interference.md](interference.md).
 
-- **Inputs.** Two built bodies, each in its own model and checkpoint, and two rigid motions
-  that place them in one frame. A motion is an exact rotation and a rational translation in
-  millimetres. Rational quaternions cover identity, half-turn and quarter-turn placements
-  and the rational rotations of `docs/RECIPE.md`; a turn by typed degrees needs the algebraic
-  form `Isometry::around_axis` already holds. The caller's allowance bounds the work.
-- **Classification.** Disjoint, touching or overlapping, decided exactly: touching means the
-  regularised intersection is empty and the boundaries meet. An undecided case is a typed
-  refusal, never a guess.
-- **Volume.** The regularised intersection's volume as an enclosure, with an empty result
-  allowed. Today an empty boolean result has no `BodyKind` and the adapter returns
-  `Unsupported` (see the empty-result gap above), so this needs that fix or a query that
-  never makes a body.
-- **Distance.** A proven enclosure of the least distance between the two placed bodies, with
-  a closest point on each and the faces they lie on. `catallax-shapes` already bounds the
-  distance between trimmed analytic surfaces; this needs it between whole placed bodies,
-  and zero when one is inside the other.
-- **Contact.** For touching bodies, the face pairs in contact, so the application can name
-  them as it names mate faces.
-
-The application side is ready for it: each part is rebuilt at its pinned revision already,
-and the mesh tier's results keep their shape, so an exact answer replaces `touching_or_undecided`
-with `clear`, `interferes` or exact touching, and adds the volume. SolidDraft's placements are
-binary64 quaternions, so the exact tier also needs the exact rational placements the general
-rotation batch adds to `assembly.json`; until then it can run exactly on identity and half-turn
-placements, whose quaternions are exact.
+Unsupported intersections, marked geometry and unresolved trimmed-face distance bounds still
+refuse per quantity. The application keeps successful independent proofs and shows a plain
+reason for each refused quantity. Certified-mesh eligibility remains required. Closest-point
+witnesses and clipped-patch geometry are not yet exposed in the report.

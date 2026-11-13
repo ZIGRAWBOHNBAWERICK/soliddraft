@@ -267,6 +267,13 @@ paths = ["crates/soliddraft-app/src/start_page.rs"]
 module = ["start_page"]
 
 [[areas]]
+name = "app.loft_panel"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/loft_panel.rs"]
+module = ["loft_panel"]
+
+[[areas]]
 name = "app.sweep_panel"
 owner = "core"
 crate = "soliddraft-app"
@@ -286,6 +293,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/theme.rs"]
 module = ["theme"]
+
+[[areas]]
+name = "app.options_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/options_bar.rs"]
+module = ["options_bar"]
 
 [[areas]]
 name = "app.tool_palette"

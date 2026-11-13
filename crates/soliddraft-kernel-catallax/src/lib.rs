@@ -5,6 +5,7 @@
 //! origin sets; display estimates never decide topology or operation success.
 
 mod assembly_measure;
+mod body_relation;
 mod construction;
 mod convert;
 mod diagnostics;
@@ -15,6 +16,7 @@ mod identity;
 mod iges;
 mod import;
 mod lattice;
+mod loft;
 mod measure;
 mod native;
 mod shell;
@@ -34,7 +36,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "9aed0777184353a5f52d1b660f9d2411b97f0fc9";
+pub const CATALLAX_REVISION: &str = "e4e6df4b2c400481068f35fd08ce7a739a2c3b4a";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -268,7 +270,12 @@ impl CatallaxKernel {
         let recipe = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft",
             "steps":stored.steps.values().collect::<Vec<_>>(), "result":stored.result});
         let swept = stored.steps.values().any(|s| s["op"] == "path_sweep");
-        if swept || stored.steps.values().any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges"))) {
+        if swept
+            || stored
+                .steps
+                .values()
+                .any(|s| matches!(s["op"].as_str(), Some("import_step" | "import_iges" | "loft" | "native_profile")))
+        {
             let op = if swept { OpKind::Sweep } else { OpKind::ImportStep };
             return serde_json::to_value(converted_recipe(&recipe, op)?.recipe)
                 .map_err(|e| KernelError::InvalidInput(e.to_string()));
@@ -335,6 +342,11 @@ impl CatallaxKernel {
         if is_empty(&app) {
             if op == OpKind::Sweep {
                 return Err(KernelError::InvalidInput("Sweep path must leave the profile plane".into()));
+            }
+            if op == OpKind::Loft {
+                return Err(KernelError::InvalidInput(
+                    "Loft profiles must enclose a solid. Move them onto different planes".into(),
+                ));
             }
             return Err(KernelError::Unsupported(NOTHING_LEFT.into()));
         }
@@ -540,6 +552,20 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
         imports.push((tag, profile, native));
     }
     for step in legacy["steps"].as_array_mut().expect("generated recipe steps") {
+        if step["op"] == "native_profile" {
+            let tag = step["id"].as_str().expect("stored profile id").to_owned();
+            let native: catallax_recipe::Operation = serde_json::from_value(step["native"].clone())
+                .map_err(|_| loft::refusal("loft.incompatible-sections"))?;
+            natives.push((tag.clone(), native, Value::Null));
+            *step = json!({"id":tag,"op":"profile","plane":"XY","rectangle":{"width":1,"height":1,"center":[0,0]}});
+            continue;
+        }
+        if step["op"] == "loft" {
+            let tag = step["id"].as_str().expect("stored loft id").to_owned();
+            let first = step["profiles"][0].clone();
+            *step = json!({"id":tag,"op":"extrude","profile":first,"distance":1.0});
+            continue;
+        }
         if step["op"] == "path_sweep" {
             let tag = step["id"].as_str().expect("stored sweep id").to_owned();
             let profile = step["profile"].clone();
@@ -628,6 +654,15 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
             converted.recipe.steps.insert(index, path);
         }
     }
+    for source in sources.iter().filter(|s| s["op"] == "loft") {
+        let profiles: Vec<String> = serde_json::from_value(source["profiles"].clone())
+            .map_err(|_| loft::refusal("loft.incompatible-sections"))?;
+        let shape: LoftShape =
+            serde_json::from_value(source["shape"].clone()).map_err(|_| loft::refusal("loft.incompatible-sections"))?;
+        let native = loft::operation(&profiles, shape, &converted.recipe)?;
+        let id = &converted.steps[source["id"].as_str().expect("stored loft id")];
+        converted.recipe.steps.iter_mut().find(|s| &s.id == id).expect("converted loft").op = native;
+    }
     Ok(converted)
 }
 
@@ -701,6 +736,9 @@ fn build_error(op: OpKind, error: Error) -> KernelError {
     if op == OpKind::Sweep {
         return sweep::refusal(error.code());
     }
+    if op == OpKind::Loft {
+        return loft::refusal(error.code());
+    }
     let code = error.code();
     if matches!(error, Error::Conversion(catallax_app::soliddraft::ConversionError::NotYet { .. })) {
         return gap(&format!("{op:?}"));
@@ -764,6 +802,10 @@ fn options(params: &TessellationParams) -> KernelResult<MeshOptions> {
 }
 
 impl Kernel for CatallaxKernel {
+    fn body_relation(&self, a: PlacedBody, b: PlacedBody, clearance: Option<f64>) -> KernelResult<BodyRelation> {
+        self.observe("body_relation", || body_relation::relation(self, a, b, clearance))
+    }
+
     fn propose_import(&self, source: &[u8], options: &ImportOptions) -> KernelResult<ProposalSet> {
         self.observe("propose_import", || import::propose(ImportFormat::Step, source, options))
     }
@@ -846,6 +888,53 @@ impl Kernel for CatallaxKernel {
             let step =
                 json!({"op":"extrude","profile":p.result,"distance":params.distance,"direction":params.direction});
             self.operation(state, tag, OpKind::Extrude, &[profile], step)
+        })
+    }
+
+    fn create_profile_from_face(&self, tag: &OpTag, body: BodyId, face: FaceId) -> KernelResult<OpResult> {
+        self.observe("create_profile_from_face", || {
+            let native = loft::face_profile(self.solid(body)?.as_ref(), body, face)?;
+            let mut state = self.state()?;
+            let seq = state.id();
+            let result = format!("op_{seq}");
+            let step = json!({"id":result,"op":"native_profile","native":native});
+            let record = HistoryRecord {
+                seq,
+                tag: tag.clone(),
+                op: OpKind::Profile,
+                faces: EntityChanges::default(),
+                edges: EntityChanges::default(),
+                vertices: EntityChanges::default(),
+                face_roles: vec![],
+            };
+            let body = BodyId::from_raw(state.id());
+            state.bodies.insert(
+                body,
+                Stored { steps: BTreeMap::from([(seq, step)]), result, history: vec![record.clone()], solid: None },
+            );
+            Ok(OpResult { body, record })
+        })
+    }
+
+    fn loft(&self, tag: &OpTag, profiles: &[BodyId], shape: LoftShape) -> KernelResult<OpResult> {
+        self.observe("loft", || {
+            if profiles.len() < 2 {
+                return Err(loft::refusal("loft.sections"));
+            }
+            let state = self.state()?;
+            let mut names = Vec::new();
+            for profile in profiles {
+                let p = state.get(*profile)?;
+                if p.solid.is_some() {
+                    return Err(loft::refusal("loft.incompatible-sections"));
+                }
+                names.push(p.result.clone());
+            }
+            self.operation(state, tag, OpKind::Loft, profiles, json!({"op":"loft","profiles":names,"shape":shape}))
+        })
+        .map_err(|error| match error {
+            KernelError::Unavailable(_) => loft::refusal(""),
+            other => other,
         })
     }
 

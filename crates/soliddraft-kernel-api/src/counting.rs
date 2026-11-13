@@ -61,6 +61,15 @@ impl Counting {
 }
 
 impl Kernel for Counting {
+    fn body_relation(
+        &self,
+        a: crate::PlacedBody,
+        b: crate::PlacedBody,
+        clearance: Option<f64>,
+    ) -> KernelResult<crate::BodyRelation> {
+        self.inner.body_relation(a, b, clearance)
+    }
+
     fn propose_import(&self, source: &[u8], options: &crate::ImportOptions) -> KernelResult<crate::ProposalSet> {
         self.inner.propose_import(source, options)
     }
@@ -109,6 +118,16 @@ impl Kernel for Counting {
     fn extrude(&self, tag: &OpTag, profile: BodyId, params: &Extrude) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.extrude(tag, profile, params)
+    }
+
+    fn create_profile_from_face(&self, tag: &OpTag, body: BodyId, face: FaceId) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.create_profile_from_face(tag, body, face)
+    }
+
+    fn loft(&self, tag: &OpTag, profiles: &[BodyId], shape: crate::LoftShape) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.loft(tag, profiles, shape)
     }
 
     fn sweep(&self, tag: &OpTag, profile: BodyId, params: &crate::Sweep) -> KernelResult<OpResult> {

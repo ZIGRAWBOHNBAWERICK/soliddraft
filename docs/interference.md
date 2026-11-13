@@ -7,12 +7,13 @@ the commands and the Interference panel are in `crates/soliddraft-app/src/interf
 
 ## What this version supports
 
-This is the certified-mesh tier. It needs no exact two-body query from the kernel, so it
-answers less than an exact tier would, and it says so instead of guessing.
+The check combines certified meshes with exact body queries on the pinned part revisions.
+The report tier is `exact_and_certified_mesh`. Mesh bounds settle pairs already proved
+apart. Exact queries refine the remaining pairs and undecided clearances.
 
 | Check | What a pair can be |
 |---|---|
-| Interference | `clear`, `interferes`, or `touching_or_undecided` |
+| Interference | `clear`, `interferes`, `touching`, or unresolved `touching_or_undecided` |
 | Clearance | `met`, `below` (at or under the clearance, overlaps included), or `undecided` |
 
 The scope is the whole assembly or the parts at or under named occurrences: parts,
@@ -91,10 +92,9 @@ bounds, the faces share a point, and the pair's result lists the contact with th
 faces and the shared point. Its distance is then exactly zero, so a clearance check reports
 it `below` any clearance.
 
-The outcome stays `touching_or_undecided`: the mate proves the faces touch, not that the
-parts overlap nowhere else. Proving that needs the exact tier. A pair the meshes prove to
-interfere still interferes, whatever its mates say. Aligned faces on one plane and mates
-inside sub-assemblies add nothing yet.
+The mate alone does not prove the parts overlap nowhere else. An exact zero overlap volume
+and a proved shared boundary settle the pair as `touching`. If an exact query refuses, the
+mesh and mate proofs remain available, with the refused quantity and reason listed.
 
 ## What it refuses
 
@@ -125,14 +125,15 @@ every part in scope is known and compared. A suppressed sub-assembly is out of s
 is a hidden one unless `include_hidden` asks for hidden parts. When a check is not complete,
 the Interference panel says only that the pairs of the checked parts are clear.
 
-Every report also lists what this tier does not report, in `refused`: overlap volumes, and
-exact touching without a mate. Both need the exact tier.
+Each result lists its exact-query refusals in `exact_refused`, with the query, stable code
+and a plain explanation. A refused exact query does not discard a successful mesh proof or
+an independent exact answer. The legacy report-wide `refused` array is empty.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `assembly_check_interference` | Proves each pair clear, interfering, or touching or undecided |
+| `assembly_check_interference` | Checks each pair for separation, overlap or exact touching |
 | `assembly_check_clearance` | Proves each pair to meet `clearance`, such as `0.5 mm`, to be at or under it, or undecided |
 
 Both take `paths` (occurrence paths such as `"4"` or `"6/2"`; every part when left out),
@@ -155,8 +156,37 @@ The same panel also offers Hole alignment. This check reads internal cylindrical
 pinned revisions and uses exact rational comparisons, independently of the mesh tier.
 See [mates.md](mates.md#static-assembly-checks) for its scope, command and limits.
 
-## The exact tier
+## Exact body queries
 
-An exact tier would report overlap volumes, touching without a mate, and distances closer than
-the meshes' bounds. It needs a Catallax query over two bodies under exact rigid motions; see
-[needs-catallax.md](needs-catallax.md#two-body-intersection-and-distance).
+The adapter combines the two retained construction chains in a private model, preserving
+import sources and reusing a matching checkpoint. Each solid is copied through an exact
+isometry. The accepted binary64 quaternion components become exact rationals and are
+normalised by Catallax's quaternion constructor. Translation components become exact
+binary64 rationals. Quarter turns stay exact; the query does not fit a rotation matrix.
+These are proofs of the accepted placements, not of a user's ideal angle before storage.
+
+Catallax's `queries::overlap_volume` returns a volume enclosure. Empty intersections are
+successful zero-volume answers. A positive lower bound proves interference. A zero upper
+bound plus a shared contact patch or a zero minimum distance proves touching without a
+mate. Contact faces retain their source names in two lists because clipped patches do not
+necessarily pair one to one. Edge and point contacts have no area patches and need a distance
+proof to settle touching.
+
+The minimum boundary distance takes the minimum of Catallax's trimmed-face distance bounds
+over every face pair. A positive boundary distance proves separation only after a no-overlap
+proof, so containment is never mistaken for a gap. Clearance decisions compare the rational
+bounds with the requested length's shortest round-trip decimal, matching authored dimensions.
+When an interval crosses the threshold, a native exact predicate on an admitted witness's
+squared distance can prove at-or-under clearance, including equality. Display
+bounds round outward, including zero-width rational intervals between two doubles.
+
+`overlap_mm3` records the volume enclosure; `contact_faces` records the two lists of source
+face labels. Marked answers are refused as exact proofs. Calculation limits and unsupported
+face combinations retain typed refusals. No sampled distance or estimated volume replaces a
+refused quantity. The existing certified-mesh eligibility and scope limits still apply.
+
+`exact-body-relations.json` exercises touching without mates, named contact faces, a zero
+clearance and an invalid-clearance refusal through the real application commands. The
+application-loop and rendered-panel tests also exhaust an exact query's work allowance,
+check its plain refusal, and verify that the accepted assembly remains unchanged. The loop
+checks a 0.0001 mm gap against clearances above and below it.

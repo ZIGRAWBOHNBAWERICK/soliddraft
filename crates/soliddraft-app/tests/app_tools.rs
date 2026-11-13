@@ -668,6 +668,18 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     s.call("redo", json!({}));
     assert_eq!(s.call("model_summary", json!({}))["features"], imported["features"]);
 
+    s.call("new_part", json!({}));
+    for z in [0, 4, 8] {
+        s.call(
+            "sketch",
+            json!({"plane":"top","offset":z,"shapes":[{"shape":"rectangle","center":[0,0,z],"width":2,"height":2}]}),
+        );
+    }
+    assert!(!s.call("loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"})).is_null());
+    assert!(
+        !s.call("edit_loft", json!({"feature":"Loft1","profiles":["Sketch1","Sketch3"],"shape":"smooth"})).is_null()
+    );
+
     let tools: BTreeSet<String> = tool_specs(Surface::Mcp).into_iter().map(|t| t.name).collect();
     let missed: Vec<_> = tools.difference(&s.ran).collect();
     assert!(missed.is_empty(), "this test calls no {missed:?}; add each to it");

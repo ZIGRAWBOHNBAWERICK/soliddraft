@@ -46,7 +46,7 @@ pub struct SolidDraftApp {
     /// The middle dock: the part and the drawing.
     pub(super) dock: DockState<Tab>,
     pub(super) tree_dock: DockState<Tab>,
-    pub(super) document_tree_dock: DockState<Tab>,
+    pub(super) suite_tree_dock: DockState<Tab>,
     /// The panel layout as last written to disk.
     saved_layout: Layout,
     /// The command line's chips and session height as last written to disk.
@@ -139,7 +139,7 @@ impl SolidDraftApp {
             state,
             dock: center_dock(),
             tree_dock: tree_dock(),
-            document_tree_dock: DockState::new(vec![Tab::Tree]),
+            suite_tree_dock: DockState::new(vec![Tab::Tree, Tab::Values]),
             automation,
             frame: 0,
             bench,
@@ -477,7 +477,7 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
-            if palette {
+            if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
                 crate::options_bar::panel(root, &mut self.state);
             } else {
                 egui::Panel::top("ribbon")
@@ -496,16 +496,13 @@ impl SolidDraftApp {
         let window_width = root.available_width();
         if !start {
             if palette {
-                if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
-                    crate::tool_palette::plane_picker_panel(root, &mut self.state);
-                }
                 crate::tool_palette::panel(root, &mut self.state);
                 crate::command_line::edit_suite_panel(root, &mut self.state, &status);
                 if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
                     crate::timeline::panel(root, &mut self.state);
                 }
             }
-            if !palette || self.state.tree_shown() {
+            if self.state.frame_layout == crate::settings::FrameLayout::Classic || self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }
         }

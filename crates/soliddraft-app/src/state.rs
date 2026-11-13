@@ -1119,24 +1119,25 @@ pub struct AppState {
 impl AppState {
     pub fn tree_shown(&self) -> bool {
         if self.frame_layout == crate::settings::FrameLayout::Classic {
-            return self.layout.tree.shown;
-        }
-        if self.assembly.is_active() {
-            !self.assembly.tree_hidden
-        } else if self.drawing.is_active() {
-            !self.drawing.tree_hidden
-        } else {
             self.layout.tree.shown
+        } else if self.assembly.is_active() {
+            self.layout.suite.assembly
+        } else if self.drawing.is_active() || self.drawing.new.is_some() {
+            self.layout.suite.drawing
+        } else {
+            self.layout.suite.part
         }
     }
 
     pub fn show_tree(&mut self, shown: bool) {
-        if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.assembly.is_active() {
-            self.assembly.tree_hidden = !shown;
-        } else if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.drawing.is_active() {
-            self.drawing.tree_hidden = !shown;
-        } else {
+        if self.frame_layout == crate::settings::FrameLayout::Classic {
             self.layout.tree.shown = shown;
+        } else if self.assembly.is_active() {
+            self.layout.suite.assembly = shown;
+        } else if self.drawing.is_active() || self.drawing.new.is_some() {
+            self.layout.suite.drawing = shown;
+        } else {
+            self.layout.suite.part = shown;
         }
     }
 

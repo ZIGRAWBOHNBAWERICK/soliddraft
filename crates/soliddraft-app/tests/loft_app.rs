@@ -121,6 +121,21 @@ mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
 
+fn open_profiles(app: &mut ribbon::App) {
+    use egui_kittest::kittest::Queryable;
+    if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite {
+        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+        let (_, rect) = ribbon::buttons_in(app, bar).into_iter().find(|(name, _)| name.starts_with("More (")).unwrap();
+        ribbon::click_at(app, rect.center());
+        ux_tools::settle(app);
+        assert!(bar.contains_rect(app.get_by_label("OK").rect()), "finish stays on the bar above the profile list");
+    }
+}
+
+fn finish_label(layout: soliddraft_app::settings::FrameLayout) -> &'static str {
+    if layout == soliddraft_app::settings::FrameLayout::EditSuite { "OK" } else { "OK (Enter)" }
+}
+
 #[test]
 fn warmed_loft_completion_disappears_when_a_sketch_opens_in_both_frames() {
     use egui::Key;
@@ -143,7 +158,7 @@ fn warmed_loft_completion_disappears_when_a_sketch_opens_in_both_frames() {
         assert!(app.query_by_label(&loft).is_some(), "Loft is offered before sketch entry");
         let history = app.state().state.command_line.history.clone();
         case.frame(&mut app, &format!("{layout:?}-model-completions"));
-        app.get_by_label("Edit sketch").click();
+        ribbon::run_command(&mut app, "edit_feature");
         ux_tools::settle(&mut app);
         case.frame(&mut app, &format!("{layout:?}-sketch-completions"));
         assert!(app.state().state.in_sketch());
@@ -167,45 +182,53 @@ fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal(
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;
     let mut case = ux_tools::Case::new("loft");
-    let mut doc = profiles();
-    doc.selection = Some(Selection::Feature(doc.features[0].id));
-    let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
-    app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
-    ux_tools::settle(&mut app);
-    ribbon::run_command(&mut app, "loft");
-    ux_tools::settle(&mut app);
-    assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
-    assert!(app.query_by_label("Loft needs at least two profiles in order").is_some());
-    app.get_by_label("OK (Enter)").click();
-    ux_tools::settle(&mut app);
-    assert!(app.state().state.editor.is_some());
-    assert_eq!(app.state().state.doc.features.len(), 3);
-    case.frame(&mut app, "refused");
-    app.query_by_label("Add profile").unwrap().click();
-    ux_tools::settle(&mut app);
-    // The open menu follows the tree row with the same sketch name.
-    app.get_all_by_label("Sketch2").last().unwrap().click();
-    ux_tools::settle(&mut app);
-    assert!(app.state().state.editor.as_ref().unwrap().error.is_none());
-    assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
-    case.frame(&mut app, "preview");
-    app.get_by_label("OK (Enter)").click();
-    ux_tools::settle(&mut app);
-    ux_tools::rebuilt(&mut app);
-    assert!(matches!(app.state().state.doc.features[3].kind, FeatureKind::Loft(_)));
-    assert!((volume(&app.state().state.doc) - 28.0).abs() < 1e-7);
-    case.frame(&mut app, "built");
-    app.state_mut().state.push(soliddraft_app::state::AppAction::StartSketchOn(
-        soliddraft_app::document::SketchPlane::Reference {
-            plane: soliddraft_app::document::PlaneKind::Top,
-            offset: 9.0,
-        },
-    ));
-    ux_tools::settle(&mut app);
-    let loft = soliddraft_app::commands::get("loft").unwrap();
-    assert!(app.state().state.in_sketch());
-    assert!(!(loft.shown)(&app.state().state));
-    assert!(loft.action_now(&app.state().state).is_none());
+    for layout in [soliddraft_app::settings::FrameLayout::Classic, soliddraft_app::settings::FrameLayout::EditSuite] {
+        let mut doc = profiles();
+        doc.selection = Some(Selection::Feature(doc.features[0].id));
+        let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
+        app.state_mut().state.frame_layout = layout;
+        app.state_mut()
+            .state
+            .viewport
+            .camera
+            .fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+        ux_tools::settle(&mut app);
+        ribbon::run_command(&mut app, "loft");
+        ux_tools::settle(&mut app);
+        assert!(matches!(app.state().state.editor.as_ref().unwrap().params, EditorParams::Loft(_)));
+        assert!(app.query_by_label("Loft needs at least two profiles in order").is_some());
+        app.get_by_label(finish_label(layout)).click();
+        ux_tools::settle(&mut app);
+        assert!(app.state().state.editor.is_some());
+        assert_eq!(app.state().state.doc.features.len(), 3);
+        case.frame(&mut app, &format!("{layout:?}-refused"));
+        open_profiles(&mut app);
+        app.query_by_label("Add profile").unwrap().click();
+        ux_tools::settle(&mut app);
+        // The open menu follows the tree row with the same sketch name.
+        app.get_all_by_label("Sketch2").last().unwrap().click();
+        ux_tools::settle(&mut app);
+        assert!(app.state().state.editor.as_ref().unwrap().error.is_none());
+        assert!(app.state().state.editor.as_ref().unwrap().preview.result.is_some());
+        case.frame(&mut app, &format!("{layout:?}-preview"));
+        app.get_by_label(finish_label(layout)).click();
+        ux_tools::settle(&mut app);
+        ux_tools::rebuilt(&mut app);
+        assert!(matches!(app.state().state.doc.features[3].kind, FeatureKind::Loft(_)));
+        assert!((volume(&app.state().state.doc) - 28.0).abs() < 1e-7);
+        case.frame(&mut app, &format!("{layout:?}-built"));
+        app.state_mut().state.push(soliddraft_app::state::AppAction::StartSketchOn(
+            soliddraft_app::document::SketchPlane::Reference {
+                plane: soliddraft_app::document::PlaneKind::Top,
+                offset: 9.0,
+            },
+        ));
+        ux_tools::settle(&mut app);
+        let loft = soliddraft_app::commands::get("loft").unwrap();
+        assert!(app.state().state.in_sketch());
+        assert!(!(loft.shown)(&app.state().state));
+        assert!(loft.action_now(&app.state().state).is_none());
+    }
 }
 
 #[test]
@@ -213,42 +236,54 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
     use egui_kittest::kittest::Queryable;
     use soliddraft_app::state::EditorParams;
     let mut case = ux_tools::Case::new("loft-edit");
-    let mut doc = profiles();
-    call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
-    let id = doc.features.last().unwrap().id;
-    doc.selection = Some(Selection::Feature(id));
-    let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
-    app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
-    ux_tools::settle(&mut app);
-    assert_eq!(app.state().state.doc.rollback, None);
-    app.get_by_label("Edit feature").click();
-    ux_tools::settle(&mut app);
-    assert_eq!(app.state().state.editor.as_ref().unwrap().target, Some(id));
-    assert_eq!(app.state().state.doc.rollback, Some(3));
-    app.get_all_by_label("Remove").last().unwrap().click();
-    ux_tools::settle(&mut app);
-    app.get_by_label("Add profile").click();
-    ux_tools::settle(&mut app);
-    app.get_all_by_label("Sketch3").last().unwrap().click();
-    ux_tools::settle(&mut app);
-    app.get_by_label("Smooth").click();
-    ux_tools::settle(&mut app);
-    let editor = app.state().state.editor.as_ref().unwrap();
-    assert!(matches!(&editor.params, EditorParams::Loft(l)
-        if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
-    assert!(editor.error.is_none(), "existing Loft edit preview: {:?}", editor.error);
-    assert!(editor.preview.result.is_some());
-    assert_eq!(app.state().state.doc.rollback, Some(3));
-    assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
-        if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Ruled));
-    case.frame(&mut app, "edited-preview");
-    app.get_by_label("OK (Enter)").click();
-    ux_tools::settle(&mut app);
-    ux_tools::rebuilt(&mut app);
-    assert!(app.state().state.editor.is_none());
-    assert_eq!(app.state().state.doc.rollback, None);
-    assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
-        if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
-    assert!((volume(&app.state().state.doc) - 24.0).abs() < 1e-7);
-    case.frame(&mut app, "edited-committed");
+    for layout in [soliddraft_app::settings::FrameLayout::Classic, soliddraft_app::settings::FrameLayout::EditSuite] {
+        let mut doc = profiles();
+        call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
+        let id = doc.features.last().unwrap().id;
+        doc.selection = Some(Selection::Feature(id));
+        let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
+        app.state_mut().state.frame_layout = layout;
+        app.state_mut()
+            .state
+            .viewport
+            .camera
+            .fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+        ux_tools::settle(&mut app);
+        assert_eq!(app.state().state.doc.rollback, None);
+        ribbon::run_command(&mut app, "edit_feature");
+        ux_tools::settle(&mut app);
+        assert_eq!(app.state().state.editor.as_ref().unwrap().target, Some(id));
+        assert_eq!(app.state().state.doc.rollback, Some(3));
+        open_profiles(&mut app);
+        app.get_all_by_label("Remove").last().unwrap().click();
+        ux_tools::settle(&mut app);
+        app.get_by_label("Add profile").click();
+        ux_tools::settle(&mut app);
+        app.get_all_by_label("Sketch3").last().unwrap().click();
+        ux_tools::settle(&mut app);
+        if layout == soliddraft_app::settings::FrameLayout::EditSuite {
+            app.get_by_value("Ruled").click();
+            ux_tools::settle(&mut app);
+        }
+        app.get_by_label("Smooth").click();
+        ux_tools::settle(&mut app);
+        let editor = app.state().state.editor.as_ref().unwrap();
+        assert!(matches!(&editor.params, EditorParams::Loft(l)
+            if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+        assert!(editor.error.is_none(), "existing Loft edit preview: {:?}", editor.error);
+        assert!(editor.preview.result.is_some());
+        assert_eq!(app.state().state.doc.rollback, Some(3));
+        assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
+            if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Ruled));
+        case.frame(&mut app, &format!("{layout:?}-edited-preview"));
+        app.get_by_label(finish_label(layout)).click();
+        ux_tools::settle(&mut app);
+        ux_tools::rebuilt(&mut app);
+        assert!(app.state().state.editor.is_none());
+        assert_eq!(app.state().state.doc.rollback, None);
+        assert!(matches!(&app.state().state.doc.feature(id).unwrap().kind, FeatureKind::Loft(l)
+            if l.profiles.len() == 2 && l.shape == soliddraft_kernel_api::LoftShape::Smooth));
+        assert!((volume(&app.state().state.doc) - 24.0).abs() < 1e-7);
+        case.frame(&mut app, &format!("{layout:?}-edited-committed"));
+    }
 }

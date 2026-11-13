@@ -39,7 +39,7 @@ fn scene_commands_persist_and_render_on_both_tiers() {
     for tier in [Tier::Full, Tier::Basic] {
         std::fs::write(
             &config,
-            r#"{"frame_layout":"edit_suite","view":{"show_grid":false,"show_origin_planes":false,"future":"keep"}}"#,
+            r#"{"frame_layout":"edit_suite","view":{"show_grid":false,"show_origin_planes":false,"always_show_origin_axes":false,"future":"keep"}}"#,
         )
         .unwrap();
         let mut app = Harness::builder()
@@ -59,6 +59,7 @@ fn scene_commands_persist_and_render_on_both_tiers() {
             });
         app.run_steps(10);
         case.run(&mut app, |app| {
+            assert!(!app.state().state.viewport.references.always_show_origin_axes, "sample the backdrop without axes");
             assert_eq!(app.state().state.viewport.scene, Some(Scene::White));
             for scene in Scene::ALL {
                 type_line(app, &format!("scene {}", scene.id()));
@@ -105,6 +106,7 @@ fn scene_commands_persist_and_render_on_both_tiers() {
             let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
             assert_eq!(saved["view"]["future"], "keep");
             assert_eq!(saved["view"]["show_grid"], false);
+            assert_eq!(saved["view"]["always_show_origin_axes"], false);
             settings::save_default_preset(soliddraft_app::viewport::look::Preset::Fast).unwrap();
             assert_eq!(settings::view().scene, Scene::White);
         });
@@ -146,7 +148,7 @@ fn bottom_navigation_gallery_and_favourites_work_and_reopen() {
     let config = case.path("config").join("settings.json");
     std::fs::write(
         &config,
-        r#"{"frame_layout":"edit_suite","view":{"show_grid":false,"show_origin_planes":false,"future":"keep"}}"#,
+        r#"{"frame_layout":"edit_suite","view":{"show_grid":false,"show_origin_planes":false,"always_show_origin_axes":false,"future":"keep"}}"#,
     )
     .unwrap();
     let mut app = ribbon::app(ribbon::plate());
@@ -193,6 +195,7 @@ fn bottom_navigation_gallery_and_favourites_work_and_reopen() {
     app.get_by_label("Wireframe").click();
     app.run_steps(4);
     assert_eq!(app.state().state.viewport.display, DisplayMode::Wireframe);
+    assert!(!settings::view().references.always_show_origin_axes);
     app.get_by_label("Origin axes").click();
     app.run_steps(4);
     assert!(settings::view().references.always_show_origin_axes);

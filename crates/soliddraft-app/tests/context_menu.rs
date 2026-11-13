@@ -82,11 +82,11 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
     set_frame(&case, "edit_suite");
     let mut app = ribbon::app(ribbon::plate());
     case.run(&mut app, |app| {
-        assert!(!app.state().state.layout.tree.shown);
+        assert!(!app.state().state.tree_shown());
         let tree = app.get_by_label("Tree").rect().center();
         ribbon::click_at(app, tree);
         app.run_steps(6);
-        assert!(app.state().state.layout.tree.shown);
+        assert!(app.state().state.tree_shown());
         let feature = app.state().state.doc.features[0].id;
         let name = app.state().state.doc.features[0].name.clone();
         let face = world(app, Vec3::new(0.0, 0.0, 20.0));

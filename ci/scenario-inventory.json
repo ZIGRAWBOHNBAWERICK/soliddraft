@@ -1605,6 +1605,33 @@
   ],
   "native_ui_scenarios": [
     {
+      "id": "edit-suite-feature-forms",
+      "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest pointer and keyboard -> application dispatcher -> existing feature editor -> software Vulkan renderer",
+      "evidence": "target/ux-tools/feature-forms, feature-form-edits and feature-form-hole; primary fields, grouped drop sheets, fixed OK/Cancel, commit/undo, refused size text and resizing"
+    },
+    {
+      "id": "edit-suite-panes-and-sketch-close",
+      "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest -> View commands and Close sketch -> application dispatcher",
+      "evidence": "target/ux-tools/edit-suite-panes-sketch and target/ux-tools/edit-suite-document-panes; hidden part pane, Tree/Values tabs, actual assembly/drawing defaults, red Close sketch, display-only (-) prefix and retained classic dock"
+    },
+    {
+      "id": "edit-suite-all-dimensions",
+      "file": "crates/soliddraft-app/tests/ux_feature_forms.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "rendered viewport face/edge picks -> dimension annotations for every built feature",
+      "evidence": "target/ux-tools/edit-suite-all-dimensions; two-feature face and edge picks, current dimension targets; viewport_settings checks the axes default and saved override"
+    },
+    {
       "id": "edit-suite-document-workspaces",
       "file": "crates/soliddraft-app/tests/frame_layout.rs",
       "owners": [

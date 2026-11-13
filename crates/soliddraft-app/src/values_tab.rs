@@ -63,6 +63,7 @@ pub enum ValuesAction {
 pub struct ValuesTab {
     /// Set to bring the tab forward on the next frame.
     pub focus: bool,
+    pub tree_focus: bool,
     table: Option<(u64, ValuesTable)>,
     /// Typed text not yet applied, or refused.
     drafts: BTreeMap<Field, String>,
@@ -509,7 +510,7 @@ pub fn apply(state: &mut AppState, action: ValuesAction) {
     match action {
         ValuesAction::Show => {
             state.values.focus = true;
-            state.layout.tree.shown = true;
+            state.show_tree(true);
         }
         ValuesAction::Commit(key, text) => commit(state, key, text),
         ValuesAction::RemoveGlobal(name) => {

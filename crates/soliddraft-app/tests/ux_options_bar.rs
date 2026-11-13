@@ -175,8 +175,9 @@ fn picked_geometry_shows_dimensions_and_starts_rounding_with_the_pick() {
         ribbon::click_world(app, glam::Vec3::new(0.0, 0.0, 20.0));
         settle(app);
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))));
-        for expected in ["Width", "60 mm", "Height", "40 mm", "Depth", "20 mm", "Area"] {
-            text(app, expected);
+        let feature = app.state().state.doc.features[0].name.clone();
+        for expected in [format!("{feature} · Width"), "60 mm".into(), format!("{feature} · Height"), "40 mm".into(), format!("{feature} · Depth"), "20 mm".into(), "Area".into()] {
+            text(app, &expected);
         }
         assert!(ribbon::buttons_in(app, bar(app)).iter().all(|(name, _)| name != "Wireframe"));
         case.frame(app, "face");
@@ -239,7 +240,8 @@ fn sketch_tools_follow_the_palette_and_the_bar_fits_small_windows() {
                 assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, tool);
                 assert!(app.query_all_by_label(&format!("Active tool: {label}")).next().is_some());
                 text(app, label);
-                for forbidden in ["Fillet", "Chamfer", "Display", "Close sketch"] {
+                text(app, "Close sketch");
+                for forbidden in ["Fillet", "Chamfer", "Display"] {
                     assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == forbidden));
                 }
             }

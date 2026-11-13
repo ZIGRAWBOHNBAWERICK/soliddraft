@@ -85,8 +85,11 @@ pub fn save_layout(layout: &Layout) -> Result<(), NotKept> {
 
 fn layout_from(all: &Value) -> Layout {
     let mut layout = serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped();
-    if frame_layout_from(all) == FrameLayout::EditSuite && all["layout"]["tree"]["shown"].as_bool().is_none() {
-        layout.tree.shown = false;
+    if frame_layout_from(all) == FrameLayout::EditSuite
+        && all["layout"]["suite"].is_null()
+        && let Some(shown) = all["layout"]["tree"]["shown"].as_bool()
+    {
+        layout.suite.part = shown;
     }
     layout
 }
@@ -275,7 +278,10 @@ pub fn save_grid_style(style: &GridStyle) -> Result<(), NotKept> {
 
 fn view_from(all: &Value) -> ViewSettings {
     let view = &all["view"];
-    let shown = ReferenceDisplay::default();
+    let shown = ReferenceDisplay {
+        always_show_origin_axes: frame_layout_from(all) == FrameLayout::EditSuite,
+        ..ReferenceDisplay::default()
+    };
     let flag = |key: &str, default| view[key].as_bool().unwrap_or(default);
     ViewSettings {
         preset: serde_json::from_value(view["preset"].clone()).unwrap_or_default(),

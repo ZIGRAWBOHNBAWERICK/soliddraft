@@ -45,9 +45,6 @@ impl SolidDraftApp {
             let _ = self.state.doc.rebuild();
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
-        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-            self.state.layout.tree.shown = true;
-        }
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
     }
 
@@ -1394,6 +1391,7 @@ impl SolidDraftApp {
                     self.dock.push_to_focused_leaf(Tab::Assembly);
                 }
                 self.tree_dock = tree_dock();
+                self.suite_tree_dock = egui_dock::DockState::new(vec![Tab::Tree, Tab::Values]);
                 self.state.layout = Layout::default();
                 self.state.assembly.tree_hidden = false;
                 self.state.drawing.tree_hidden = false;
@@ -1406,7 +1404,7 @@ impl SolidDraftApp {
                     d.remove::<egui::PanelState>(crate::command_line::session_id());
                 });
             }
-            AppAction::TogglePanel(_side) => {
+            AppAction::TogglePanel(_) => {
                 let shown = self.state.tree_shown();
                 self.state.show_tree(!shown);
             }

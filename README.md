@@ -38,7 +38,7 @@ A desktop CAD app with workspaces in the title bar, tools on the left, an option
 
 SolidDraft is built for [Catallax](https://github.com/BohnBawerick/catallax) and will run only on it. They are one project in two repositories: SolidDraft is the CAD application and Catallax is its kernel. The desktop, browser and command-line application run on Catallax. See the [project website](https://kernel.zigrawbohnbawerick.org/) and the [roadmap](docs/roadmap.md).
 
-![SolidDraft with a rebuilt bracket](docs/screenshots/soliddraft.png)
+![SolidDraft Edit Suite with the demo part](docs/screenshots/soliddraft.png)
 
 ## What works today
 

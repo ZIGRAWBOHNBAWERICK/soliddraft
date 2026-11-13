@@ -123,6 +123,7 @@ fn pick_filters_control_real_picks_without_restricting_tools_or_classic() {
         settle(app);
         toggle_filter(app, "Bodies");
         let at = app.state().state.viewport.camera.project(face, app.state().state.viewport.rect).unwrap();
+        ribbon::render_steps::await_pick(app, at);
         ribbon::double_click_at(app, at);
         settle(app);
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "double-click respects Bodies off");

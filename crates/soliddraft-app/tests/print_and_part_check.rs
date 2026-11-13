@@ -39,7 +39,8 @@ fn inspect_check_reports_independent_coverage_and_invalidates_on_undo() {
     let mut app = ribbon::app(ribbon::plate());
     let before = app.state().state.doc.model().part_json();
     let undo = app.state().state.doc.undo_depth();
-    ribbon::run_command(&mut app, "check");
+    click(&mut app, "Inspect tab");
+    click(&mut app, "Check");
     settle(&mut app);
     let report = app.state().state.part_check.as_ref().unwrap().result.as_ref().unwrap().as_ref().unwrap();
     assert!(report.steps.iter().any(|step| step.boundary_built && step.field_built));

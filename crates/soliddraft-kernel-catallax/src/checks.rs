@@ -73,15 +73,22 @@ impl CatallaxKernel {
     ) -> KernelResult<PrintMesh> {
         let (stl, output, source) = {
             let mut dec = Decider::default();
-            let certified = catallax_app::certify_built(solid.app.checkpoint.built().clone(), None, &mut dec)
-                .map_err(|e| query_error("print_mesh", catallax_numbers::Refusal::new(e.code(), e.to_string())))?;
-            let output = brep::mesh_certified(
-                certified.built(),
-                &Options { tolerance: tolerance.clone(), ..Options::default() },
-                &mut dec,
-            )
+            let exact = solid.app.checkpoint.built();
+            let certified =
+                if exact.model.body(exact.result).marks.is_empty() {
+                    None
+                } else {
+                    Some(catallax_app::certify_built(exact.clone(), None, &mut dec).map_err(|e| {
+                        query_error("print_mesh", catallax_numbers::Refusal::new(e.code(), e.to_string()))
+                    })?)
+                };
+            let options = Options { tolerance: tolerance.clone(), ..Options::default() };
+            let output = match &certified {
+                Some(certified) => brep::mesh_certified(certified.built(), &options, &mut dec),
+                None => brep::mesh(exact, &options, &mut dec),
+            }
             .map_err(|e| query_error("print_mesh", e))?;
-            let built = certified.built().built();
+            let built = certified.as_ref().map_or(exact, |certified| certified.built().built());
             let source = catallax_mesh::mesh_body(
                 &built.model,
                 built.result,

@@ -287,3 +287,27 @@ fn a_refused_first_feature_in_a_new_body_keeps_the_existing_body_visible() {
     assert!(error.contains("no closed region"), "{error}");
     assert_eq!(doc.meshes, before);
 }
+
+#[test]
+fn a_body_context_menu_targets_the_body_that_was_clicked() {
+    let case = ribbon::case("multibody-context-target");
+    let mut app = ribbon::app(pair());
+    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.state_mut().state.show_tree(true);
+    app.state_mut().state.doc.select_body(1);
+    app.run_steps(8);
+    case.run(&mut app, |app| {
+        let pos = app.get_by_label("Body 1").rect().center();
+        for pressed in [true, false] {
+            app.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            app.step();
+        }
+        app.run_steps(4);
+        assert_eq!(app.state().state.doc.active_body, 0);
+    });
+}

@@ -557,6 +557,8 @@ still recorded. Missing timing or feature-count evidence fails closed.
 Timing, rebuild reports and reference-survival assertions remain in the opt-in
 command bundle, scenario runner and CI, not in the model build or normal edit path.
 
+Canonical P1 to P5 scenarios and their parameter edits are described in [canonical target parts](canonical-parts.md).
+
 ## Configuration commands
 
 `add_configuration {"name":"Narrow"}` adds an inactive row. `set_configuration_value {"configuration":"Narrow","name":"plate_w","expression":"120"}` sets an override of an existing value. `activate_configuration {"name":"Narrow"}` switches the part in one undo step. Default is implicit and reserved. Each verb follows the shared proposal, dry-run and document-command route. A refused edit preserves the current document.

@@ -475,6 +475,9 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
+            if palette {
+                crate::options_bar::panel(root, &mut self.state);
+            }
             egui::Panel::top("ribbon")
                 .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
                 .frame(panel_frame)
@@ -553,6 +556,7 @@ impl eframe::App for SolidDraftApp {
         self.focus_tool_document();
         let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
         self.state.frame_ms = if self.state.frame_ms == 0.0 { dt } else { self.state.frame_ms * 0.9 + dt * 0.1 };
+        self.state.viewport.overlay_input(ctx);
         self.shortcuts(ctx);
         crate::drawing::frame(&mut self.state, &mut self.dock);
         crate::assembly::frame(&mut self.state, &mut self.dock, ctx);
@@ -593,6 +597,7 @@ impl eframe::App for SolidDraftApp {
             .hover
             .and_then(|p| selection_of(&self.state.doc, p))
             .or(viewport.hover_reference.map(Selection::Reference))
+            .and_then(|sel| self.state.selection_filter().selection(Some(sel)))
             .and_then(|sel| self.state.doc.describe(sel));
         self.state.hover_point = self.state.viewport.hover_point;
 

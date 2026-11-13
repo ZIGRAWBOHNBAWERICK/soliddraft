@@ -69,6 +69,8 @@ pub enum AppAction {
     FinishSpline,
     /// Opens or closes the sketch relation list.
     SketchRelations(bool),
+    /// Apply a relation offered by the sketch selection's existing relation list.
+    SketchRelationSet(Vec<crate::sketch::ConstraintKind>),
     /// Show closed-region fills in the active sketch.
     SketchShading(bool),
     /// Show and pick dimension annotations in the active sketch.
@@ -98,6 +100,8 @@ pub enum AppAction {
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
+    SetBodyVisible(bool),
+    SetReferenceDisplay(crate::settings::ReferenceDisplay),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
     ToggleProjection,
@@ -1037,6 +1041,7 @@ pub struct AppState {
     pub measure: crate::measure::panel::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
+    pub pick_filter: crate::viewport::PickFilter,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1112,6 +1117,7 @@ impl AppState {
             measure: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
+            pick_filter: Default::default(),
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,
@@ -1152,6 +1158,18 @@ impl AppState {
             start: None,
             drawing_after_open: false,
             actions: Vec::new(),
+        }
+    }
+
+    pub fn selection_filter(&self) -> crate::viewport::PickFilter {
+        if self.frame_layout == crate::settings::FrameLayout::EditSuite
+            && self.editor.is_none()
+            && self.sketch.is_none()
+            && !self.measure.open
+        {
+            self.pick_filter
+        } else {
+            Default::default()
         }
     }
 

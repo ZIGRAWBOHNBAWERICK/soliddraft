@@ -9,6 +9,7 @@ pub mod dimensions;
 pub mod environment;
 pub mod grid;
 pub mod look;
+mod navigation_bar;
 pub mod offscreen;
 pub mod pick;
 pub mod planes;
@@ -33,6 +34,41 @@ use planes::ReferenceScene;
 use render::{DisplayMode, FrameInput, PickSample, PickView, Picked, ViewportCallback};
 use soliddraft_kernel_api::Plane;
 use std::sync::{Arc, Mutex};
+
+/// Entity kinds a free viewport click can select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PickFilter {
+    pub faces: bool,
+    /// Edges include their vertices.
+    pub edges: bool,
+    pub bodies: bool,
+}
+
+impl Default for PickFilter {
+    fn default() -> Self {
+        Self { faces: true, edges: true, bodies: true }
+    }
+}
+
+impl PickFilter {
+    fn permits(self, picked: Picked) -> bool {
+        match picked {
+            Picked::Face(_) => self.faces || self.bodies,
+            Picked::Edge(_) | Picked::Vertex(_) => self.edges || self.bodies,
+        }
+    }
+
+    pub fn selection(self, selected: Option<Selection>) -> Option<Selection> {
+        match selected? {
+            selected @ Selection::Face(_) if self.faces => Some(selected),
+            selected @ (Selection::Edge(_) | Selection::Vertex(_)) if self.edges => Some(selected),
+            Selection::Face(_) | Selection::Edge(_) | Selection::Vertex(_) | Selection::Body => {
+                self.bodies.then_some(Selection::Body)
+            }
+            selected => Some(selected),
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct ViewportEvents {
@@ -64,6 +100,7 @@ const NO_PART: u64 = u64::MAX - 1;
 
 /// What the viewport draws besides the document this frame.
 pub struct Overlay<'a> {
+    pub pick_filter: PickFilter,
     /// Material a feature adds or removes, with whether it removes.
     pub ghost: Option<(Arc<DisplayMesh>, bool)>,
     /// A body drawn in place of the document's while a feature is previewed.
@@ -145,6 +182,9 @@ pub struct ViewportState {
     pub router: Router,
     pick: Arc<Mutex<PickSample>>,
     cube_hover: Option<StandardView>,
+    navigation_bar: navigation_bar::NavigationBar,
+    /// Shows feature dimensions without selecting the body.
+    pub all_dimensions: bool,
 }
 
 impl Default for ViewportState {
@@ -167,6 +207,8 @@ impl Default for ViewportState {
             router: Router::new(&NavigationSettings::new(crate::settings::InstallKind::Existing), false),
             pick: Arc::new(Mutex::new(PickSample::default())),
             cube_hover: None,
+            navigation_bar: navigation_bar::NavigationBar::default(),
+            all_dimensions: false,
         }
     }
 }
@@ -260,7 +302,8 @@ impl ViewportState {
         hover_label: Option<&str>,
         nav: &NavigationSettings,
     ) -> ViewportEvents {
-        let Overlay { ghost, preview, sketch, passive_sketches, dimension_edit, visible, rounding } = overlay;
+        let Overlay { pick_filter, ghost, preview, sketch, passive_sketches, dimension_edit, visible, rounding } =
+            overlay;
         let pick_revision = Some((doc.model().id(), doc.mesh_version, doc.display_body()));
         let provisional = doc.provisional_mesh();
         let is_provisional = |shown: &Arc<DisplayMesh>| provisional.as_ref().is_some_and(|b| Arc::ptr_eq(shown, b));
@@ -269,6 +312,7 @@ impl ViewportState {
         let preview = preview.filter(|shown| visible.body || !is_provisional(shown));
         let preview_pickable = preview.as_ref().is_some_and(is_provisional);
         let sketching = sketch.is_some();
+        let sketch_dimensions = sketch.as_ref().map(|s| s.show_dimensions);
         let menu_ready = self.context_menus && sketch.as_ref().is_none_or(|s| s.tool == crate::state::Tool::Select);
         let mut events = ViewportEvents::default();
         let rect = ui.available_rect_before_wrap();
@@ -324,14 +368,16 @@ impl ViewportState {
         let mut can_pick_references = false;
         if let (Some(px), Some(pos)) = (hover_px, hover_pos) {
             let sample = self.pick.lock().unwrap();
-            self.hover = (sample.revision == pick_revision).then(|| decode_pick(&sample, px[0], px[1])).flatten();
+            let on_model = sample.at(px[0], px[1]).and_then(Picked::decode).is_some();
+            self.hover =
+                (sample.revision == pick_revision).then(|| decode_pick(&sample, px[0], px[1], pick_filter)).flatten();
             let current = planes::sample_is_current(&sample, pick_revision, pick_view, px);
             can_pick_references = current;
             drop(sample);
             if let Some(picked) = self.hover {
                 let (o, d) = self.camera.ray(pos, rect);
                 self.hover_point = pick::hit_point(doc, picked, o, d);
-            } else if current {
+            } else if current && !on_model {
                 self.hover_reference = scene.hit(&self.camera, rect, pos);
             }
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -345,7 +391,7 @@ impl ViewportState {
             let sample = self.pick.lock().unwrap();
             let px = pixel(pick.at);
             if planes::sample_is_current(&sample, pick.revision, pick.view, px) {
-                events.secondary_clicked = Some(decode_pick(&sample, px[0], px[1]));
+                events.secondary_clicked = Some(decode_pick(&sample, px[0], px[1], pick_filter));
                 events.context_position = Some(pick.at);
                 self.context_pick = None;
             }
@@ -366,7 +412,7 @@ impl ViewportState {
         let meshes = (doc.mesh_version, shown);
         // The shader compares face pick ids; edges and vertices are highlighted by the painter.
         let hover_id = match self.hover {
-            Some(Picked::Face(p)) => p,
+            Some(Picked::Face(p)) if pick_filter.faces => p,
             _ => 0,
         };
         let selected_id = match selection {
@@ -403,7 +449,16 @@ impl ViewportState {
         }
         if let Some(session) = sketch {
             let spacing = Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style);
-            events.actions = crate::sketcher::run(ui, session, doc, &self.camera, rect, &response, spacing);
+            events.actions = crate::sketcher::run(
+                ui,
+                session,
+                doc,
+                &self.camera,
+                rect,
+                &response,
+                spacing,
+                theme::is_edit_suite() && self.scene.is_some_and(scenes::Scene::is_dark),
+            );
             ui.ctx().request_repaint();
         }
         if doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok())) {
@@ -420,7 +475,7 @@ impl ViewportState {
             self.paint_reference_planes(ui, doc, rect, can_pick_references, &response, &mut events);
         }
         if visible.body {
-            self.paint_highlights(&painter, doc, selection, rect);
+            self.paint_highlights(&painter, doc, selection, rect, pick_filter);
         }
         if let Some(rounding) = &rounding {
             self.paint_rounding(ui, &painter, rect, rounding);
@@ -434,7 +489,7 @@ impl ViewportState {
                 rect,
                 doc,
                 pointer,
-                selection == Some(Selection::Body) && visible.body,
+                (self.all_dimensions || selection == Some(Selection::Body)) && visible.body,
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
             )
@@ -456,6 +511,7 @@ impl ViewportState {
             response.clone().on_hover_text_at_pointer(format!("{} · drag to move · double-click to edit", d.tip));
         } else if response.double_clicked_by(egui::PointerButton::Primary)
             && !sketching
+            && pick_filter.bodies
             && self.hover.is_some()
             && doc.display_body().is_some()
         {
@@ -475,7 +531,7 @@ impl ViewportState {
             }
         }
         self.dimensions = dims;
-        self.paint_hud(ui, rect, &mut events);
+        self.paint_hud(ui, rect, &mut events, sketch_dimensions, true);
         self.paint_view_cube(ui, rect, &mut events);
         self.paint_pills(ui, rect, hover_label);
         events
@@ -520,7 +576,7 @@ impl ViewportState {
             let painter = ui.painter().with_clip_rect(rect);
             self.paint_origin_axes(&painter, self.camera.distance * 0.25, rect, [true; 3]);
         }
-        self.paint_hud(ui, rect, &mut events);
+        self.paint_hud(ui, rect, &mut events, None, false);
         self.paint_view_cube(ui, rect, &mut events);
         let label = hover_label.unwrap_or("Hover a component");
         self.paint_pills(ui, rect, Some(label));
@@ -537,6 +593,11 @@ impl ViewportState {
         let ink = self.grid_style.color.unwrap_or_else(theme::ink);
         let opacity = self.grid_style.opacity_in(theme::mode().is_dark());
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
+    }
+
+    /// Closes a viewport dialog before the app handles Escape underneath it.
+    pub fn overlay_input(&mut self, ctx: &egui::Context) {
+        self.navigation_bar.consume_escape(ctx);
     }
 
     /// A copy of the latest id-buffer sample.
@@ -666,7 +727,14 @@ impl ViewportState {
         });
     }
 
-    fn paint_highlights(&self, painter: &egui::Painter, doc: &Document, selection: Option<Selection>, rect: Rect) {
+    fn paint_highlights(
+        &self,
+        painter: &egui::Painter,
+        doc: &Document,
+        selection: Option<Selection>,
+        rect: Rect,
+        pick_filter: PickFilter,
+    ) {
         let draw_edge = |pick: u32, stroke: Stroke| {
             for m in doc.meshes.values() {
                 if let Some(e) = m.edges.iter().find(|e| e.pick == pick) {
@@ -700,10 +768,10 @@ impl ViewportState {
             draw_vertex(pos, 5.0, theme::accent());
         }
         match self.hover {
-            Some(Picked::Edge(p)) if selected_edge != Some(p) => {
+            Some(Picked::Edge(p)) if pick_filter.edges && selected_edge != Some(p) => {
                 draw_edge(p, Stroke::new(2.0, theme::accent().gamma_multiply(0.7)))
             }
-            Some(Picked::Vertex(p)) => {
+            Some(Picked::Vertex(p)) if pick_filter.edges => {
                 if let Some(pos) = pick::vertex_position(doc, p)
                     && selected_vertex != Some(pos)
                 {
@@ -821,7 +889,29 @@ impl ViewportState {
         }
     }
 
-    fn paint_hud(&mut self, ui: &mut egui::Ui, rect: Rect, events: &mut ViewportEvents) {
+    fn paint_hud(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        events: &mut ViewportEvents,
+        sketch_dimensions: Option<bool>,
+        allow_dimensions: bool,
+    ) {
+        if theme::is_edit_suite() {
+            self.navigation_bar.show(
+                ui,
+                rect,
+                &mut self.camera,
+                self.display,
+                self.scene.unwrap_or_default(),
+                &mut self.references,
+                &mut self.all_dimensions,
+                sketch_dimensions,
+                allow_dimensions,
+                events,
+            );
+            return;
+        }
         let height = 30.0;
         let items: Vec<HudItem> = vec![
             HudItem::Icon(Icon::Home, "Isometric view (I)"),
@@ -940,6 +1030,7 @@ impl ViewportState {
     }
 
     fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>) {
+        let rect = if theme::is_edit_suite() { Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0)) } else { rect };
         let proj = if self.camera.orthographic { "Orthographic" } else { "Perspective" };
         let text =
             format!("mm · {} · {} · {} · {}", self.camera.view_name, self.display.label(), self.preset.label(), proj);
@@ -1035,12 +1126,13 @@ fn point_in_convex(p: Pos2, poly: &[Pos2]) -> bool {
 
 /// Priority: a vertex within 7 px, then an edge within 5 px, then the face
 /// under the cursor.
-fn decode_pick(sample: &PickSample, cx: u32, cy: u32) -> Option<Picked> {
+fn decode_pick(sample: &PickSample, cx: u32, cy: u32, filter: PickFilter) -> Option<Picked> {
     if sample.data.is_empty() {
         return None;
     }
     let mut best_vertex: Option<(i32, u32)> = None;
     let mut best_edge: Option<(i32, u32)> = None;
+    let mut best_face: Option<(i32, u32)> = None;
     for dy in -7i32..=7 {
         for dx in -7i32..=7 {
             let (x, y) = (cx as i32 + dx, cy as i32 + dy);
@@ -1050,8 +1142,13 @@ fn decode_pick(sample: &PickSample, cx: u32, cy: u32) -> Option<Picked> {
             let Some(v) = sample.at(x as u32, y as u32) else { continue };
             let d2 = dx * dx + dy * dy;
             match v >> render::KIND_SHIFT {
-                3 if d2 <= 49 && best_vertex.is_none_or(|(bd, _)| d2 < bd) => best_vertex = Some((d2, v)),
-                2 if d2 <= 25 && best_edge.is_none_or(|(bd, _)| d2 < bd) => best_edge = Some((d2, v)),
+                3 if filter.edges && d2 <= 49 && best_vertex.is_none_or(|(bd, _)| d2 < bd) => {
+                    best_vertex = Some((d2, v))
+                }
+                2 if filter.edges && d2 <= 25 && best_edge.is_none_or(|(bd, _)| d2 < bd) => best_edge = Some((d2, v)),
+                1 if (filter.faces || filter.bodies) && d2 <= 49 && best_face.is_none_or(|(bd, _)| d2 < bd) => {
+                    best_face = Some((d2, v))
+                }
                 _ => {}
             }
         }
@@ -1062,7 +1159,17 @@ fn decode_pick(sample: &PickSample, cx: u32, cy: u32) -> Option<Picked> {
     if let Some((_, v)) = best_edge {
         return Picked::decode(v);
     }
-    sample.at(cx, cy).and_then(Picked::decode)
+    if !filter.edges
+        && filter.faces
+        && let Some((_, v)) = best_face
+    {
+        return Picked::decode(v);
+    }
+    sample
+        .at(cx, cy)
+        .and_then(Picked::decode)
+        .filter(|picked| filter.permits(*picked))
+        .or_else(|| (!filter.edges).then_some(best_face).flatten().and_then(|(_, v)| Picked::decode(v)))
 }
 
 /// How far along the segment from `a`, which is inside `rect`, to `b` it stays inside,

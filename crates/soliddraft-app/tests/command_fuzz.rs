@@ -578,9 +578,8 @@ proptest! {
 }
 
 /// A floating block and a second one placed on it, with `O` and `Z`, saved.
-fn mated_state() -> AppState {
-    let dir = std::env::temp_dir().join(format!("soliddraft-fuzz-mates-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+fn mated_state(dir: &Path) -> AppState {
+    std::fs::create_dir_all(dir).unwrap();
     let mut state = AppState::new(soliddraft_app::new_document());
     let caller = Caller::Mcp { client: "fuzz".into() };
     let mut run = |state: &mut AppState, tool: &str, input: Value| {
@@ -673,7 +672,8 @@ fn mate_calls() -> BoxedStrategy<Vec<Call>> {
 }
 
 fn run_on_mates(calls: Vec<Call>) {
-    let mut state = mated_state();
+    let dir = std::env::temp_dir().join(format!("soliddraft-fuzz-mates-{}", std::process::id()));
+    let mut state = mated_state(&dir);
     let caller = Caller::Mcp { client: "fuzz".into() };
     for call in &calls {
         let before = AppTools { state: &mut state }.summary()["assembly"]["accepted_state"].clone();
@@ -704,8 +704,8 @@ proptest! {
 /// accepted state, the redo it finds and the files are as they were.
 #[test]
 fn form_refusals_change_nothing() {
-    let mut state = mated_state();
-    let dir = std::env::temp_dir().join(format!("soliddraft-fuzz-mates-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("soliddraft-fuzz-form-refusals-{}", std::process::id()));
+    let mut state = mated_state(&dir);
     let (root, pack) = (dir.join("rig.dwasm"), dir.join("refused.dwasm"));
     let caller = Caller::Mcp { client: "fuzz".into() };
     let form = |paths: Value, path: &Path, origin: Value| json!({ "paths": paths, "path": path, "origin": origin });

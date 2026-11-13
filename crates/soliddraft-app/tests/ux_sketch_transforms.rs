@@ -41,6 +41,7 @@ fn click(app: &mut App, p: P2, modifiers: Modifiers) {
 }
 
 fn hover(app: &mut App, p: P2) {
+    ribbon::close_options(app);
     let pos = screen(app, p);
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(pos);

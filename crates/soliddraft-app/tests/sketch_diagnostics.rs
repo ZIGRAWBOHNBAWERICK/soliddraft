@@ -37,6 +37,7 @@ fn launch_at(mut doc: soliddraft_app::document::Document, mut sketch: Sketch, of
     let mut app = ribbon::app(doc);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
+    ribbon::open_options(&mut app);
     (app, id)
 }
 

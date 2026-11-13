@@ -61,11 +61,7 @@ fn pick(app: &mut App, p: P2, modifiers: Modifiers) {
 }
 
 fn relations_control(app: &mut App) -> ribbon::Control {
-    let window = ribbon::window(app);
-    if app.query_all(By::new().role(egui::accesskit::Role::Button).label("Relations")).next().is_none() {
-        ribbon::click_button(app, "Constrain group", window);
-    }
-    ribbon::control(app, "Relations", window)
+    ribbon::reveal_command(app, "relations")
 }
 
 fn open_menu(app: &mut App) {

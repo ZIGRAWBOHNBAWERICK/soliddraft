@@ -1,19 +1,12 @@
-//! The side area, driven through egui_kittest against the real wgpu pipeline: F9
-//! hides the feature tree, the strip brings it back, the inner edge drags to a new
-//! width, the choices come back in the next run, and the drawing workspace behaves
-//! the same. The assistant has no side area: the viewport runs to the window's right
-//! edge, and Shift+F9 opens the session along the bottom instead. Frames are written to
-//! `target/panels-test/` for review.
-//!
-//! Skips itself when no GPU adapter is available (plain CI runners).
+//! Optional panes keep their width and per-document visibility across runs.
+//! The session overlays history without resizing the viewport.
 
 use egui::{Key, Modifiers, Rect, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::document::Selection;
 use soliddraft_app::drawing::DrawingAction;
-use soliddraft_app::panels::{Layout, STRIP_WIDTH, Side};
+use soliddraft_app::panels::{Layout, Side};
 use soliddraft_app::state::AppAction;
 use soliddraft_app::theme;
 use std::path::PathBuf;
@@ -106,7 +99,6 @@ fn config_dir(name: &str) -> PathBuf {
 #[test]
 fn side_areas_toggle_resize_and_come_back_next_run() {
     if !gpu_available() {
-        eprintln!("skipped: no GPU adapter");
         return;
     }
     let _gpu = gpu_lock();
@@ -114,76 +106,72 @@ fn side_areas_toggle_resize_and_come_back_next_run() {
     let mut harness = harness();
     settle(&mut harness);
     assert_eq!(layout(&harness), Layout::default());
-    let full = viewport_rect(&harness);
-    assert!((full.left() - Side::Tree.default_width()).abs() < 2.0, "tree at its default width: {full:?}");
-    assert!(full.right() >= 1440.0 - 1.0, "nothing right of the viewport: {full:?}");
-    let bottom = 900.0 - theme::COMMAND_LINE_HEIGHT;
-    assert!((full.bottom() - bottom).abs() < 3.0, "the command line sits under the viewport: {full:?}");
+    assert!(!harness.state().state.tree_shown());
+    let wide = viewport_rect(&harness);
+    assert!((wide.left() - theme::edit_suite::PALETTE_WIDTH).abs() < 2.0);
+    assert!(wide.right() >= 1439.0);
+    let history = egui::PanelState::load(&harness.ctx, egui::Id::new("feature_timeline")).unwrap().outer_rect;
+    let command = egui::PanelState::load(&harness.ctx, soliddraft_app::command_line::bar_id()).unwrap().outer_rect;
+    assert!(wide.bottom() <= history.top());
+    assert!(history.bottom() <= command.top() + 1.0);
     save(&mut harness, "p01-default");
 
-    // A selection made before hiding the tree is still there when it comes back.
+    harness.key_press(Key::F9);
+    settle(&mut harness);
+    assert!(harness.state().state.tree_shown());
+    let full = viewport_rect(&harness);
+    assert!((full.left() - wide.left() - Side::Tree.default_width()).abs() < 2.0);
     let plate = harness.state().state.doc.features[0].id;
     harness.state_mut().state.doc.selection = Some(Selection::Feature(plate));
     harness.key_press(Key::F9);
     settle(&mut harness);
-    assert!(!layout(&harness).tree.shown);
-    let wide = viewport_rect(&harness);
-    assert!(wide.left() <= STRIP_WIDTH + 2.0, "the viewport took the tree's space: {wide:?}");
-    assert_eq!(wide.right(), full.right());
+    assert!(!layout(&harness).suite.part);
+    assert_eq!(viewport_rect(&harness), wide);
     save(&mut harness, "p02-tree-hidden");
-
-    harness.get_by_label("Show the feature tree").click();
+    harness.key_press(Key::F9);
     settle(&mut harness);
-    assert!(layout(&harness).tree.shown);
+    assert!(layout(&harness).suite.part);
     assert_eq!(viewport_rect(&harness), full);
     assert_eq!(harness.state().state.doc.selection, Some(Selection::Feature(plate)));
 
-    // Shift+F9 opens the session along the bottom; the viewport keeps its width.
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F9);
     settle(&mut harness);
     assert!(harness.state().state.command_line.session_open);
-    let short = viewport_rect(&harness);
-    assert_eq!((short.left(), short.right()), (full.left(), full.right()));
-    assert!(short.bottom() < full.bottom() - 100.0, "the session takes height, not width: {short:?}");
+    assert_eq!(viewport_rect(&harness), full, "the session overlays history");
     save(&mut harness, "p03-session-open");
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F9);
     settle(&mut harness);
     assert!(!harness.state().state.command_line.session_open);
-    assert_eq!(viewport_rect(&harness), full);
 
-    // Dragging the inner edge resizes the tree, within its range.
     let tree_before = layout(&harness).tree.width;
     drag_edge(&mut harness, Side::Tree, 120.0);
     let tree_after = layout(&harness).tree.width;
-    assert!((tree_after - (tree_before + 120.0)).abs() < 3.0, "tree {tree_before} -> {tree_after}");
-    assert!((viewport_rect(&harness).left() - tree_after).abs() < 2.0);
+    assert!((tree_after - (tree_before + 120.0)).abs() < 3.0);
+    assert!((viewport_rect(&harness).left() - wide.left() - tree_after).abs() < 2.0);
     drag_edge(&mut harness, Side::Tree, 2000.0);
     let cap = layout(&harness).max_width(Side::Tree, 1440.0);
-    assert!((layout(&harness).tree.width - cap).abs() < 3.0, "the tree stops at its maximum");
+    assert!((layout(&harness).tree.width - cap).abs() < 3.0);
     assert!(viewport_rect(&harness).width() >= soliddraft_app::panels::VIEWPORT_MIN_WIDTH - 2.0);
     let back = tree_after - layout(&harness).tree.width;
     drag_edge(&mut harness, Side::Tree, back);
     assert!((layout(&harness).tree.width - tree_after).abs() < 3.0);
     save(&mut harness, "p04-resized");
 
-    // The file holds what the user chose, and the next run starts from it.
     harness.key_press(Key::F9);
     settle(&mut harness);
     let chosen = layout(&harness);
-    assert!(!chosen.tree.shown);
+    assert!(!chosen.suite.part);
     assert_eq!(soliddraft_app::settings::layout(), chosen);
     drop(harness);
     let mut again = self::harness();
     settle(&mut again);
     assert_eq!(layout(&again), chosen);
-    assert!(viewport_rect(&again).left() <= STRIP_WIDTH + 2.0);
+    assert_eq!(viewport_rect(&again), wide);
     save(&mut again, "p05-next-run");
-
-    // Reset panel layout shows the tree again at its default width.
     again.state_mut().state.push(AppAction::ResetLayout);
     settle(&mut again);
     assert_eq!(layout(&again), Layout::default());
-    assert_eq!(viewport_rect(&again), full);
+    assert_eq!(viewport_rect(&again), wide);
     assert_eq!(soliddraft_app::settings::layout(), Layout::default());
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -206,12 +194,12 @@ fn the_drawing_workspace_toggles_the_same_areas() {
 
     harness.key_press(Key::F9);
     settle(&mut harness);
-    assert!(!layout(&harness).tree.shown);
+    assert!(!layout(&harness).suite.drawing);
     assert!(harness.state().state.drawing.is_active(), "hiding the tree keeps the drawing active");
     save(&mut harness, "p06-drawing-tree-hidden");
-    harness.get_by_label("Show the feature tree").click();
+    harness.key_press(Key::F9);
     settle(&mut harness);
-    assert!(layout(&harness).tree.shown);
+    assert!(layout(&harness).suite.drawing);
     assert!(harness.state().state.drawing.is_active());
 
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F9);

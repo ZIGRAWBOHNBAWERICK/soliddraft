@@ -22,57 +22,23 @@ fn p(u: f64, v: f64) -> P2 {
     P2::new(u, v)
 }
 fn pick(app: &mut App, at: P2) {
+    ribbon::close_options(app);
     let st = &app.state().state;
     let pos =
         Frame { plane: session(app).plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(at).unwrap();
     ribbon::click_at(app, pos);
 }
 fn pane(app: &App) -> egui::Rect {
-    let view = app.state().state.viewport.rect;
-    egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()))
+    ribbon::options_region(app)
 }
 fn button(app: &mut App, label: &str) {
-    for _ in 0..10 {
-        let pane = pane(app);
-        if app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| pane.contains_rect(n.rect())) {
-            ribbon::click_button(app, label, pane);
-            app.run_steps(6);
-            return;
-        }
-        app.hover_at(Pos2::new(pane.right() - 15.0, pane.bottom() - 40.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -100.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(6);
-    }
-    panic!("visible button {label}");
+    ribbon::click_option(app, label);
 }
 fn text(app: &mut App, label: &str) {
-    for _ in 0..12 {
-        if let Some(control) =
-            ribbon::painted(app).into_iter().find(|p| p.text == label && p.rect.contains_rect(p.full))
-        {
-            ribbon::click_at(app, control.rect.center());
-            app.run_steps(6);
-            return;
-        }
-        let pane = pane(app);
-        app.hover_at(Pos2::new(pane.right() - 15.0, pane.bottom() - 40.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -100.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(6);
-    }
-    proof(app, "missing-control");
-    panic!("visible {label}");
+    ribbon::click_option(app, label);
 }
 fn distance(app: &mut App, value: f64) {
+    ribbon::open_options(app);
     let rect = app.get_by_role(egui::accesskit::Role::SpinButton).rect();
     proof(app, "distance-field");
     assert!(pane(app).contains_rect(rect), "the distance field must be fully visible before clicking it");

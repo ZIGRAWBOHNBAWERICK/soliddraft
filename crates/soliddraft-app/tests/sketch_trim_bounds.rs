@@ -50,6 +50,7 @@ fn screen(app: &App, p: P2) -> Pos2 {
 }
 
 fn pick(app: &mut App, p: P2) {
+    ribbon::close_options(app);
     let at = screen(app, p);
     ribbon::click_at(app, at);
 }

@@ -48,7 +48,7 @@ fn launch(sketch: Sketch, name: &str) -> (App, FeatureId, PathBuf) {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
-    assert!(!commands::get("sketch_centreline").unwrap().is_enabled(&app.state().state));
+    assert!(commands::get("sketch_centreline").unwrap().is_enabled(&app.state().state));
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     (app, id, dir)
@@ -103,6 +103,7 @@ fn centrepoint_arc_can_place_a_major_sweep() {
         if clockwise {
             app.set_size(egui::vec2(1280.0, 760.0));
             app.run_steps(10);
+            ribbon::open_options(&mut app);
             let rect = app.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Clockwise arc").rect();
             assert!(rect.bottom() <= app.state().state.viewport.rect.bottom(), "active arc input stays visible");
             ribbon::click_at(&mut app, rect.center());
@@ -139,10 +140,11 @@ fn centrepoint_arc_can_place_a_major_sweep() {
     }
 }
 
-fn property_button(app: &App, label: &str) -> egui::Rect {
-    let band = ribbon::palette_region(app);
+fn property_button(app: &mut App, label: &str) -> egui::Rect {
+    ribbon::open_options(app);
+    let band = ribbon::options_region(app);
     app.query_all(By::new().role(egui::accesskit::Role::Button).label(label))
-        .find(|n| n.rect().top() >= band.bottom())
+        .find(|n| band.contains_rect(n.rect()))
         .unwrap_or_else(|| panic!("property tool {label}"))
         .rect()
 }
@@ -220,7 +222,7 @@ fn perimeter_and_three_point_tools_preview_refuse_cancel_and_commit_once() {
         assert!(commands::search(label, &Default::default()).iter().any(|m| m.command.label == label));
         ribbon::run_command(&mut app, command);
         assert_eq!(session(&app).tool, tool);
-        let _ = property_button(&app, label);
+        let _ = property_button(&mut app, label);
         let before = session(&app).sketch.clone();
         for count in [1, 2] {
             for p in &picks[..count] {
@@ -231,7 +233,7 @@ fn perimeter_and_three_point_tools_preview_refuse_cancel_and_commit_once() {
             assert!(session(&app).pending.is_empty());
             assert_eq!(session(&app).sketch, before);
             // Escape selects the selection tool; the property entry can restart placement.
-            let at = property_button(&app, label).center();
+            let at = property_button(&mut app, label).center();
             ribbon::click_at(&mut app, at);
             app.run_steps(5);
         }

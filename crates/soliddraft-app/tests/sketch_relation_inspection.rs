@@ -560,7 +560,9 @@ fn relation_owner_highlight_keeps_definition_and_conflict_colours() {
     assert_eq!(session(&app).selection, vec![SketchSel::Constraint(vertical)]);
     assert!(halo(&app, line));
     assert!(
-        curve_strokes(&app, line).iter().any(|(width, color)| (*width - 1.8).abs() < 0.01 && *color == theme::error()),
+        curve_strokes(&app, line)
+            .iter()
+            .any(|(width, color)| (*width - 1.8).abs() < 0.01 && *color == theme::edit_suite::DANGER),
         "inspection must not hide the conflict colour"
     );
     frame(&mut app, "conflicting-owner");

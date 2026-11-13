@@ -18,6 +18,7 @@ fn session(app: &App) -> &SketchSession {
 }
 
 fn pick(app: &mut App, point: P2) {
+    ribbon::close_options(app);
     let state = &app.state().state;
     let at = Frame { plane: session(app).plane, camera: &state.viewport.camera, rect: state.viewport.rect }
         .screen(point)
@@ -46,29 +47,11 @@ fn preview(app: &mut App, point: P2) {
 }
 
 fn control(app: &mut App, text: &str) {
-    for _ in 0..12 {
-        let left = app.state().state.viewport.rect.left();
-        if let Some(row) = ribbon::painted(app)
-            .into_iter()
-            .find(|p| p.text == text && p.rect.right() < left && p.rect.contains_rect(p.full))
-        {
-            ribbon::click_at(app, row.rect.center());
-            app.run_steps(4);
-            return;
-        }
-        app.hover_at(egui::pos2(left - 20.0, 750.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -100.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(6);
-    }
-    panic!("property control {text} must be reachable");
+    ribbon::click_option(app, text);
 }
 
 fn number(app: &mut App, index: usize, text: &str) {
+    ribbon::open_options(app);
     let controls: Vec<_> = app.get_all_by_role(egui::accesskit::Role::SpinButton).map(|n| n.rect()).collect();
     assert!(controls[index].bottom() < ribbon::band(app).top(), "numeric input must be above the command bar");
     ribbon::double_click_at(app, controls[index].center());

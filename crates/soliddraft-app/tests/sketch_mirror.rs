@@ -25,11 +25,13 @@ fn screen(app: &App, at: P2) -> Pos2 {
     pos
 }
 fn hover(app: &mut App, at: P2) {
+    ribbon::close_options(app);
     let pos = screen(app, at);
     app.hover_at(pos);
     app.run_steps(5);
 }
 fn pick(app: &mut App, at: P2, ctrl: bool) {
+    ribbon::close_options(app);
     let pos = screen(app, at);
     if ctrl {
         app.hover_at(pos);
@@ -52,24 +54,7 @@ fn pick(app: &mut App, at: P2, ctrl: bool) {
     }
 }
 fn control(app: &mut App, label: &str) {
-    for attempt in 0..14 {
-        if let Some(p) = ribbon::painted(app).into_iter().find(|p| p.text == label && p.rect.contains_rect(p.full)) {
-            ribbon::click_at(app, p.rect.center());
-            app.run_steps(6);
-            return;
-        }
-        let view = app.state().state.viewport.rect;
-        app.hover_at(egui::pos2(view.left() - 15.0, view.bottom() - 50.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, if attempt == 0 { 10000.0 } else { -100.0 }),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(6);
-    }
-    proof(app, "missing-control");
-    panic!("visible {label}");
+    ribbon::click_option(app, label);
 }
 fn proof(app: &mut App, name: &str) {
     if let Some(dir) = std::env::var_os("SOLIDDRAFT_MIRROR_PROOF_DIR") {

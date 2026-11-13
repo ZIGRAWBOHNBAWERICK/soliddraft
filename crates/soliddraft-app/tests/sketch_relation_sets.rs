@@ -23,6 +23,7 @@ fn screen(app: &App, p: P2) -> Pos2 {
     Frame { plane: session(app).plane, camera: &st.viewport.camera, rect: st.viewport.rect }.screen(p).unwrap()
 }
 fn pick(app: &mut App, at: P2, add: bool) {
+    ribbon::close_options(app);
     let pos = screen(app, at);
     let modifiers = if add { Modifiers::CTRL } else { Modifiers::NONE };
     app.hover_at(pos);
@@ -61,26 +62,7 @@ fn proof(app: &mut App, name: &str) {
 }
 
 fn panel_click(app: &mut App, label: &str) {
-    let left = app.state().state.viewport.rect.left();
-    for _ in 0..10 {
-        if let Some(row) = ribbon::painted(app)
-            .into_iter()
-            .find(|p| p.text == label && p.rect.right() < left && p.rect.contains_rect(p.full))
-        {
-            ribbon::click_at(app, row.rect.center());
-            return;
-        }
-        app.hover_at(egui::pos2(left - 20.0, 750.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -180.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(12);
-    }
-    proof(app, "missing-property-control");
-    panic!("property control {label} must be reachable");
+    ribbon::click_option(app, label);
 }
 
 #[test]

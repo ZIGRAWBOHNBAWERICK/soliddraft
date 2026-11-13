@@ -6,7 +6,7 @@
 //!
 //! Skips itself when no GPU adapter is available (plain CI runners).
 
-use egui::{Color32, Pos2, Rect, vec2};
+use egui::{Color32, Key, Pos2, Rect, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use glam::Vec3;
@@ -94,6 +94,8 @@ fn origin_axes_show_in_every_part_and_set_directions() {
     assert!(!harness.state().state.doc.features.is_empty(), "the part opened");
     assert_eq!(std::fs::read(&file).unwrap(), before, "opening leaves the file as it was");
 
+    harness.key_press(Key::F9);
+    harness.run_steps(6);
     harness.get_by_label("Origin, planes and axes").click();
     harness.run_steps(3);
     for name in ["Front plane", "Top plane", "Right plane", "X axis", "Y axis", "Z axis"] {

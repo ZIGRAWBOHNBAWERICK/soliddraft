@@ -49,7 +49,7 @@ fn text_command_places_and_edits_one_retained_entity() {
         .unwrap();
     let mut app = ribbon::app_at(document, ribbon::EXPANDED_WINDOW, 1.0);
     let command = commands::get("sketch_text").unwrap();
-    assert!(!command.is_enabled(&app.state().state));
+    assert!(command.is_enabled(&app.state().state));
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(15);
     assert!(command.is_enabled(&app.state().state));

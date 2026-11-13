@@ -92,6 +92,6 @@ fn ellipse_tools_create_cancel_undo_and_reopen_through_the_pointer() {
     app.run_steps(6);
     app.state_mut().state.push(AppAction::Open(Some(path)));
     app.run_steps(12);
-    assert_eq!(app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, saved);
+    ribbon::assert_sketch_close(&app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch, &saved);
     soliddraft_app::file::set_config_dir(None);
 }

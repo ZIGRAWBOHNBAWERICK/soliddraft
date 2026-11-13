@@ -363,13 +363,15 @@ pub fn click_option(app: &mut App, label: &str) {
     app.run_steps(24);
     app.get_by_label(label).click();
     app.run_steps(8);
-    close_options(app);
 }
 
 pub fn run_command(app: &mut App, id: &str) {
     let command = soliddraft_app::commands::get(id).unwrap_or_else(|| panic!("unregistered command {id}"));
     app.state_mut().state.run_command(command);
     settle_command(app);
+    if matches!(id, "sketch_diagnostics" | "check_sketch_feature") && app.state().state.in_sketch() {
+        open_options(app);
+    }
 }
 
 // Projection-based clicks must use the camera pose that will receive them.
@@ -684,4 +686,29 @@ pub fn fingerprint(app: &App) -> Fingerprint {
         history: state.command_line.history.clone(),
         recent: state.commands.recent.clone(),
     }
+}
+
+/// Reopening recomputes curve coordinates; topology and values must survive within 1e-9 mm.
+pub fn assert_sketch_close(actual: &soliddraft_app::sketch::Sketch, expected: &soliddraft_app::sketch::Sketch) {
+    fn compare(actual: &serde_json::Value, expected: &serde_json::Value) {
+        match (actual, expected) {
+            (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
+                assert!((a.as_f64().unwrap() - b.as_f64().unwrap()).abs() <= 1e-9, "{a} != {b}");
+            }
+            (serde_json::Value::Array(a), serde_json::Value::Array(b)) => {
+                assert_eq!(a.len(), b.len());
+                for (a, b) in a.iter().zip(b) {
+                    compare(a, b);
+                }
+            }
+            (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+                assert_eq!(a.keys().collect::<Vec<_>>(), b.keys().collect::<Vec<_>>());
+                for (key, value) in a {
+                    compare(value, &b[key]);
+                }
+            }
+            _ => assert_eq!(actual, expected),
+        }
+    }
+    compare(&serde_json::to_value(actual).unwrap(), &serde_json::to_value(expected).unwrap());
 }

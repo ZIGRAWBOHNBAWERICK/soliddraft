@@ -16,6 +16,10 @@ type App = Harness<'static, SolidDraftApp>;
 static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn button(app: &mut App, label: &str) {
+    if app.state().state.doc.features.iter().any(|f| f.name == label) && !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        app.run_steps(8);
+    }
     app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .unwrap_or_else(|| panic!("missing button {label}"))
@@ -296,6 +300,8 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
     let solid = app.state().state.doc.display_body();
 
     button(&mut app, "Shell");
+    app.get_by_label_contains("More (").click();
+    app.run_steps(8);
     app.get_by_label("Open every face").click();
     app.run_steps(6);
     app.render().unwrap().save(out.join("every-face-chosen.png")).unwrap();
@@ -325,6 +331,8 @@ fn opening_every_face_in_the_editor_leaves_nothing_until_undo() {
 
     button(&mut app, "Shell1");
     button(&mut app, "Edit feature");
+    app.get_by_label_contains("More (").click();
+    app.run_steps(8);
     app.get_by_label("Open every face").click();
     app.run_steps(6);
     button(&mut app, "OK");

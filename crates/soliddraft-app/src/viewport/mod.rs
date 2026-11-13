@@ -131,6 +131,7 @@ pub struct ViewportState {
     pick: Arc<Mutex<PickSample>>,
     cube_hover: Option<StandardView>,
     navigation_bar: navigation_bar::NavigationBar,
+    /// Shows feature dimensions without selecting the body.
     pub all_dimensions: bool,
 }
 

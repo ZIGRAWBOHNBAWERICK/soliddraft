@@ -134,7 +134,8 @@ Night grid, 3 point beige, Blueprint and Lightbox studio. Their backgrounds live
 not the frame palette or the geometric meaning of sketch colours.
 
 The navigation bar holds orbit, pan, zoom, fit, display style, Scene, origin axes
-and all dimensions. A drawing uses pan, zoom, fit, grid and snap instead. The view
+and all dimensions. Drag Orbit, Pan or Zoom to move the camera directly. Favourite
+choices persist across sessions, including an empty gallery. A drawing uses pan, zoom, fit, grid and snap instead. The view
 cube remains at the upper right. View changes animate over about 150 ms.
 Z is up; Front looks from -Y toward +Y, Top down -Z with +Y up, Right along -X,
 and Isometric from +X, -Y, +Z.
@@ -153,8 +154,8 @@ the options bar. It stays visible while a tool or dimension editor is active.
 Sketch geometry uses its own semantic tokens, independent of the amber interface:
 `UNDER_DEFINED` is blue `#1d4fe0`, `FULLY_DEFINED` is black `#0b0d11`, and conflicts
 are red. A dark scene places the sketch on `SKETCH_SHEET`, `#f1f3f7`, so black
-remains black on every scene. Do not derive geometry's definition colours from
-`theme::ink()` or `theme::accent()` when migrating the sketch renderer.
+remains black on every scene. The sketch renderer consumes these geometry tokens rather than the frame's
+`theme::ink()` or `theme::accent()` colours.
 
 Smart Dimension chooses the measurement from the picks and placement. A line
 placed above or below measures its horizontal extent; beside it, its vertical

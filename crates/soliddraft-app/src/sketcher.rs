@@ -1317,8 +1317,10 @@ fn entity_color(s: &SketchSession, e: &Entity) -> Color32 {
         if theme::is_edit_suite() { theme::edit_suite::CONSTRUCTION } else { theme::muted() }
     } else if s.sketch.free.contains(&e.id) {
         if theme::is_edit_suite() { theme::edit_suite::UNDER_DEFINED } else { theme::accent() }
+    } else if theme::is_edit_suite() {
+        theme::edit_suite::FULLY_DEFINED
     } else {
-        if theme::is_edit_suite() { theme::edit_suite::FULLY_DEFINED } else { theme::ink() }
+        theme::ink()
     }
 }
 

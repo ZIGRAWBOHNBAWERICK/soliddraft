@@ -225,7 +225,8 @@ impl Document {
     }
 
     /// The hash of what decides the part's shape: the truth without the part's and
-    /// features' names, value expressions, text properties, repair-prompt labels, provenance, material and appearances. Renaming a feature changes
+    /// features' names, value expressions, text properties, repair-prompt labels, provenance, material, appearances
+    /// and the unused feature-id counter. Renaming a feature changes
     /// the semantic hash and not this one.
     pub fn geometry_hash(&self) -> ContentHash {
         shape_hash(&self.truth())
@@ -384,6 +385,11 @@ impl Document {
         // An imported file is immutable: bytes that no longer match their hash are a damaged
         // file, not a different geometry.
         for f in &recipe.features {
+            if let crate::FeatureKind::Scan(scan) = &f.kind
+                && crate::sha256_hex(&scan.source.bytes) != scan.source.sha256
+            {
+                return Err(FileError::Invalid(format!("{} holds a scan that does not match its sha256", f.id)));
+            }
             if let crate::feature::FeatureKind::ImportStep(i) = &f.kind
                 && !i.hash_matches()
             {
@@ -473,10 +479,13 @@ fn shape_hash(truth: &Value) -> ContentHash {
             map.remove(key);
         }
         if let Some(Value::Array(features)) = map.get_mut("features") {
+            // Preserve the historical hash encoding without including the id counter kept by undo.
+            let next = features.iter().filter_map(|f| f.get("id").and_then(Value::as_u64)).max().unwrap_or(0) + 1;
             for f in features.iter_mut().filter_map(Value::as_object_mut) {
                 f.remove("name");
                 f.remove("via_assistant");
             }
+            map.insert("next_feature".into(), next.into());
         }
     }
     strip_labels(&mut truth);

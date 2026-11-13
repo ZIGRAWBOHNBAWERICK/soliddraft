@@ -476,6 +476,7 @@ pub enum FeatureKind {
     Offset(model::OffsetFeature),
     Thicken(model::ThickenFeature),
     ImportStep(model::ImportStepFeature),
+    Scan(model::ScanFeature),
     Lattice(model::LatticeFeature),
     Gyroid(model::GyroidFeature),
 }
@@ -503,6 +504,7 @@ impl FeatureKind {
             FeatureKind::Offset(_) => "Offset",
             FeatureKind::Thicken(_) => "Thicken",
             FeatureKind::ImportStep(_) => "Import",
+            FeatureKind::Scan(_) => "Scan",
             FeatureKind::Lattice(_) => "Lattice",
             FeatureKind::Gyroid(_) => "Gyroid",
         }
@@ -531,6 +533,7 @@ impl FeatureKind {
             FeatureKind::Offset(_) => "offset",
             FeatureKind::Thicken(_) => "thicken",
             FeatureKind::ImportStep(_) => "import",
+            FeatureKind::Scan(_) => "scan",
             FeatureKind::Lattice(_) => "lattice",
             FeatureKind::Gyroid(_) => "gyroid",
         }
@@ -584,6 +587,7 @@ impl FeatureKind {
             FeatureKind::Offset(s) => model::FeatureKind::Offset(s.clone()),
             FeatureKind::Thicken(s) => model::FeatureKind::Thicken(s.clone()),
             FeatureKind::ImportStep(i) => model::FeatureKind::ImportStep(i.clone()),
+            FeatureKind::Scan(s) => model::FeatureKind::Scan(s.clone()),
             FeatureKind::Lattice(l) => model::FeatureKind::Lattice(*l),
             FeatureKind::Gyroid(g) => model::FeatureKind::Gyroid(*g),
         }
@@ -671,6 +675,7 @@ impl FeatureKind {
             model::FeatureKind::Offset(s) => FeatureKind::Offset(s.clone()),
             model::FeatureKind::Thicken(s) => FeatureKind::Thicken(s.clone()),
             model::FeatureKind::ImportStep(i) => FeatureKind::ImportStep(i.clone()),
+            model::FeatureKind::Scan(s) => FeatureKind::Scan(s.clone()),
             model::FeatureKind::Lattice(l) => FeatureKind::Lattice(*l),
             model::FeatureKind::Gyroid(g) => FeatureKind::Gyroid(*g),
         }
@@ -941,6 +946,11 @@ impl Feature {
                 fmt_mm(s.thickness)
             ),
             FeatureKind::ImportStep(i) => i.source_name.clone(),
+            FeatureKind::Scan(s) => format!(
+                "{} · {}",
+                s.source.name,
+                if s.fit.is_some() { "Fitted part and scan reference" } else { "Scan reference" }
+            ),
             FeatureKind::Lattice(l) => format!("unproved preview · ±{} mm", fmt_mm(l.accuracy_mm)),
             FeatureKind::Gyroid(g) => format!("unproved preview · ±{} mm", fmt_mm(g.accuracy_mm)),
         }
@@ -1849,6 +1859,11 @@ impl Document {
     /// lacking one. The exact model can still be proved and exported.
     pub fn display_failure(&self) -> Option<&str> {
         self.display_failure.as_deref()
+    }
+
+    /// Retains a numbered display refusal from a proposal that never changed this document.
+    pub(crate) fn record_display_refusal(&mut self, message: String) {
+        self.display_failure = Some(message);
     }
 
     /// Background proof answers wake `ctx` instead of waiting for a polled frame.
@@ -3817,6 +3832,21 @@ impl Document {
                         details.push(("Accuracy".to_owned(), format!("{} mm", fmt_mm(g.accuracy_mm))));
                         details.push(("Minimum detail".to_owned(), format!("{} mm", fmt_mm(g.min_detail_mm))));
                     }
+                    FeatureKind::Scan(s) => {
+                        details.push(("File".into(), s.source.name.clone()));
+                        details.push(("SHA-256".into(), s.source.sha256.clone()));
+                        details.push(("Reference".into(), "No volume; original samples retained".into()));
+                        if let Some(fit) = &s.fit {
+                            details.push((
+                                "Scan to part, sampled maximum".into(),
+                                format!("{:.4} mm", fit.scan_to_part.max_mm),
+                            ));
+                            details.push((
+                                "Part to scan, sampled maximum".into(),
+                                format!("{:.4} mm", fit.part_to_scan.max_mm),
+                            ));
+                        }
+                    }
                     FeatureKind::ImportStep(i) => {
                         details.push(("File".to_owned(), i.source_name.clone()));
                         details.push(("SHA-256".to_owned(), i.sha256.clone()));
@@ -3831,6 +3861,7 @@ impl Document {
                     }
                 }
                 if !f.is_sketch()
+                    && !matches!(&f.kind, FeatureKind::Scan(scan) if scan.fit.is_none())
                     && self.current_exact_display()
                     && let Some(body) = f.body
                     && let Some(mp) = self.kernel().cached_mass_properties(body)

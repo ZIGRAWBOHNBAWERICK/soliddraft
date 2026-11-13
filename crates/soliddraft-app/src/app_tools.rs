@@ -697,6 +697,9 @@ impl ToolHost for AppTools<'_> {
                 None => self.part().call(name, input, caller),
             },
         };
+        if out.is_error && out.content.contains("(SD-DISPLAY-") {
+            self.state.doc.record_display_refusal(out.content.clone());
+        }
         if opening_part && !out.is_error {
             self.state.assembly.active = false;
             self.state.drawing.active = false;

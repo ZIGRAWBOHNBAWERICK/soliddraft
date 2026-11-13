@@ -61,6 +61,24 @@ impl Counting {
 }
 
 impl Kernel for Counting {
+    fn scan_reference(&self, source: &crate::scan::ScanSource) -> KernelResult<crate::scan::ScanReference> {
+        self.inner.scan_reference(source)
+    }
+
+    fn fit_scan(&self, source: &crate::scan::ScanSource) -> KernelResult<crate::scan::ScanFit> {
+        self.inner.fit_scan(source)
+    }
+
+    fn build_scan_fit(
+        &self,
+        tag: &OpTag,
+        source: &crate::scan::ScanSource,
+        fit: &crate::scan::ScanFit,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.build_scan_fit(tag, source, fit)
+    }
+
     fn body_relation(
         &self,
         a: crate::PlacedBody,

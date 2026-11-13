@@ -3,7 +3,7 @@
 #[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, Modifiers, PointerButton, Pos2, pos2, vec2};
+use egui::{Key, Modifiers, PointerButton, Pos2, vec2};
 use std::sync::Mutex;
 
 static SERIAL: Mutex<()> = Mutex::new(());

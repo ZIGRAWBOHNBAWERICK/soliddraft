@@ -3,7 +3,7 @@
 #[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, Modifiers, Pos2, Shape, pos2, vec2};
+use egui::{Key, Modifiers, Pos2, Shape, vec2};
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, FeatureId, PlaneKind, SketchPlane},

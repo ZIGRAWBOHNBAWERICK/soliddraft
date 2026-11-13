@@ -3,7 +3,7 @@
 #[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, pos2};
+use egui::Key;
 use egui_kittest::{Harness, kittest::Queryable};
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::settings;

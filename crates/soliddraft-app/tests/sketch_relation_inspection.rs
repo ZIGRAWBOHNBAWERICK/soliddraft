@@ -80,7 +80,7 @@ fn filter_button(app: &mut App) -> (String, Rect) {
     ribbon::open_options(app);
     for _ in 0..6 {
         let painted = ribbon::painted(app);
-        let left = ribbon::options_region(&app).right() + ribbon::TOLERANCE;
+        let left = ribbon::options_region(app).right() + ribbon::TOLERANCE;
         if let Some(head) = painted.iter().find(|p| p.text == "Existing relations" && p.rect.right() < left)
             && let Some(current) = painted.iter().find(|p| {
                 ["Selected", "All", "Conflicting", "Dangling"].contains(&p.text.as_str())
@@ -295,7 +295,7 @@ fn empty_filter_states_and_popup_escape_do_not_leave_the_sketch() {
 fn panel_heading(app: &App, name: &str) -> Rect {
     ribbon::painted(app)
         .into_iter()
-        .find(|t| t.text == name && t.rect.right() < ribbon::options_region(&app).right() + ribbon::TOLERANCE)
+        .find(|t| t.text == name && t.rect.right() < ribbon::options_region(app).right() + ribbon::TOLERANCE)
         .unwrap_or_else(|| panic!("property panel must show {name}"))
         .rect
 }
@@ -304,7 +304,7 @@ fn inspect(app: &mut App, label: &str) {
     ribbon::open_options(app);
     for _ in 0..4 {
         let text = ribbon::painted(app);
-        let left = ribbon::options_region(&app).right() + ribbon::TOLERANCE;
+        let left = ribbon::options_region(app).right() + ribbon::TOLERANCE;
         let top =
             text.iter().find(|t| t.text == "Existing relations" && t.rect.right() < left).map(|t| t.rect.bottom());
         let bottom = text

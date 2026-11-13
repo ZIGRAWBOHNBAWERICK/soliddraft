@@ -114,8 +114,6 @@ const INSPECT: [(&str, &str, &[Family]); 5] = [
 
 const ASSEMBLY: [(&str, &str, &[Family]); 1] = [("Insert component", "insert_comp", &[Body, Added])];
 
-/// The chrome glyphs that follow the text colour.
-
 /// Pairs a user must be able to tell apart.
 const CORE_PAIRS: [(&str, &str); 7] = [
     ("fillet", "chamfer"),
@@ -264,7 +262,6 @@ fn fits_its_view(key: &str, svg: &str) {
     assert!(inside, "{key} reaches past its view: {bounds:?} in {size:?}");
 }
 
-#[derive(Default)]
 /// One sheet of drawings at one size, drawn by the production renderer with nothing else on
 /// it. Each row of `cells` is a drawing, a treatment and the ground under it.
 struct Cell {

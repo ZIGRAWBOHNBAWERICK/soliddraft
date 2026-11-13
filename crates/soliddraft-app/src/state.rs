@@ -67,6 +67,8 @@ pub enum AppAction {
     FinishSpline,
     /// Opens or closes the sketch relation list.
     SketchRelations(bool),
+    /// Apply a relation offered by the sketch selection's existing relation list.
+    SketchRelationSet(Vec<crate::sketch::ConstraintKind>),
     /// Show closed-region fills in the active sketch.
     SketchShading(bool),
     /// Show and pick dimension annotations in the active sketch.
@@ -96,6 +98,8 @@ pub enum AppAction {
     /// Switches the render look (Fast, Studio, Realistic).
     SetPreset(Preset),
     SetScene(crate::viewport::scenes::Scene),
+    SetBodyVisible(bool),
+    SetReferenceDisplay(crate::settings::ReferenceDisplay),
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
     ToggleProjection,
@@ -226,6 +230,8 @@ impl RibbonTab {
 pub struct FeatureEditor {
     pub target: Option<FeatureId>,
     pub params: EditorParams,
+    /// The sketch tool to arm after this plane picker completes. Closing it drops the tool.
+    pub pending_sketch_tool: Option<Tool>,
     pub preview: Preview,
     pub error: Option<String>,
     /// The document's rollback before the editor rolled the display back to the
@@ -274,6 +280,7 @@ impl FeatureEditor {
         Self {
             target,
             params,
+            pending_sketch_tool: None,
             preview: Preview::default(),
             error: None,
             saved_rollback,

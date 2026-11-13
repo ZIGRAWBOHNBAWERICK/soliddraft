@@ -321,6 +321,40 @@ fn spline_scenario_profiles_extrude_and_measure_over_stdio() {
 }
 
 #[test]
+fn mcp_bundle_measures_canonical_p1_with_the_desktop_mass_allowance() {
+    let dir = std::env::temp_dir().join(format!("soliddraft-mcp-p1-mass-{}", soliddraft_document::DocumentId::new()));
+    let mut client = Client::start(&["mcp", "--bundle", dir.to_str().unwrap(), "--max-work", "20000000"]);
+    client.request(
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},
+        "clientInfo":{"name":"p1-mass-regression","version":"1"}}),
+    );
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/canonical-p1.json")).unwrap();
+    let mut commands = 0;
+    for step in scenario["steps"].as_array().unwrap() {
+        let reply = client.call(step["tool"].as_str().unwrap(), step["arguments"].clone());
+        assert_eq!(reply["isError"], false, "{reply}");
+        commands += 1;
+        if step["label"] == "original" {
+            break;
+        }
+    }
+    let measured = client.call("scenario_measure", json!({}));
+    assert_eq!(measured["isError"], false, "{measured}");
+    drop(client);
+    let read = |file: &str| -> Value {
+        serde_json::from_slice(&std::fs::read(dir.join(format!("{commands:04}/{file}"))).unwrap()).unwrap()
+    };
+    let measurement = read("measurement.json");
+    let command = read("command.json");
+    assert_eq!(measurement["request"], command["request"]);
+    assert_eq!(measurement["revision"], command["revision"]);
+    let expected = 19080.0 + 275.0 * std::f64::consts::PI;
+    assert!((measurement["volume_mm3"].as_f64().unwrap() - expected).abs() < 0.005, "{measurement}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn loft_scenario_builds_edits_refuses_and_reopens_over_stdio() {
     let bundle = std::env::temp_dir().join(format!("loft-scenario-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&bundle).unwrap();

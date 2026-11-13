@@ -225,6 +225,13 @@ paths = ["crates/soliddraft-app/src/scene_import.rs"]
 module = ["scene_import"]
 
 [[areas]]
+name = "app.ring_menu"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/ring_menu.rs"]
+module = ["ring_menu"]
+
+[[areas]]
 name = "app.settings"
 owner = "core"
 crate = "soliddraft-app"
@@ -598,3 +605,10 @@ owner = "B7"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/interference/"]
 module = ["interference"]
+
+[[areas]]
+name = "app.canonical_parts"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/tests/canonical_parts.rs"]
+module = []

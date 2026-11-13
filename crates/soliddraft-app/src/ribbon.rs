@@ -145,13 +145,13 @@ pub fn tabs(ui: &mut egui::Ui, state: &mut AppState) {
     {
         let plane = info.details.iter().find(|(label, _)| label == "Plane").map(|(_, value)| value.as_str());
         let name = format!("{} · {}", info.title, plane.unwrap_or("Sketch plane"));
-        let galley =
-            ui.painter().layout(name, theme::font_medium(12.0), theme::accent(), (strip.right() - x - 12.0).max(1.0));
-        ui.painter().with_clip_rect(strip).galley(
-            pos2(x + 8.0, strip.center().y - galley.size().y / 2.0),
-            galley,
-            theme::accent(),
-        );
+        let rect = Rect::from_min_max(pos2(x + 8.0, strip.top()), strip.right_bottom() - vec2(8.0, 0.0));
+        ui.put(
+            rect,
+            egui::Label::new(egui::RichText::new(&name).font(theme::font_medium(12.0)).color(theme::accent()))
+                .truncate(),
+        )
+        .on_hover_text(name);
     }
     ui.painter().hline(strip.x_range(), strip.bottom() - 0.5, Stroke::new(1.0, theme::line()));
     // Redraw the active tab's bottom edge so it merges into the body.

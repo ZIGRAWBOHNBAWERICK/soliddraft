@@ -726,6 +726,8 @@ pub struct NamedFace {
     pub label: String,
     pub surface: SurfaceKind,
     pub accuracy: soliddraft_kernel_api::FaceAccuracy,
+    /// Immutable entity name in the imported source, when present.
+    pub imported_key: Option<String>,
     pub area: f64,
     pub centroid: Vec3,
 }
@@ -3213,13 +3215,8 @@ impl Document {
         if feature.body != Some(body) || !matches!(feature.kind, FeatureKind::ImportStep(_)) {
             return None;
         }
+        let key = named.imported_key.as_ref()?;
         let record = self.model.import_record(model_id(named.feature))?;
-        let topology = self.kernel().topology(body).ok()?;
-        let face = topology.faces.iter().find(|face| face.id == id)?;
-        let key = face.origins.iter().find_map(|origin| match &origin.role {
-            soliddraft_kernel_api::FaceRole::Imported { key } => Some(key),
-            _ => None,
-        })?;
         record.face_tolerances.iter().find(|tolerance| &tolerance.face == key)
     }
 
@@ -3513,6 +3510,10 @@ fn named_entities(model: &model::Document, body: BodyId, topology: &Topology) ->
                 label,
                 surface: face.surface,
                 accuracy: face.accuracy,
+                imported_key: face.origins.iter().find_map(|origin| match &origin.role {
+                    soliddraft_kernel_api::FaceRole::Imported { key } => Some(key.clone()),
+                    _ => None,
+                }),
                 area: face.area,
                 centroid: kv(face.centroid),
             }

@@ -182,6 +182,28 @@ impl Kernel for Counting {
         self.inner.hole(tag, body, params)
     }
 
+    fn offset(&self, tag: &OpTag, body: BodyId, distance: f64) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.offset(tag, body, distance)
+    }
+
+    fn thicken(&self, tag: &OpTag, body: BodyId, params: &crate::Thicken) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.thicken(tag, body, params)
+    }
+
+    fn pattern_feature(
+        &self,
+        tag: &OpTag,
+        body: BodyId,
+        source: BodyId,
+        before: Option<BodyId>,
+        layout: &PatternLayout,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.pattern_feature(tag, body, source, before, layout)
+    }
+
     fn pattern(&self, tag: &OpTag, body: BodyId, layout: &PatternLayout) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.pattern(tag, body, layout)

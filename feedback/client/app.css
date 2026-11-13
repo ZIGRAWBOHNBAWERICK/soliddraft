@@ -16,7 +16,8 @@
 #feedback-launcher {
   position: fixed;
   right: 12px;
-  bottom: 48px;
+  /* Clear the 76px timeline and 32px command/status row, with a 12px gap. */
+  bottom: 120px;
   z-index: 10;
   border: 1px solid var(--mute);
   border-radius: 4px;
@@ -27,7 +28,7 @@
 #feedback-offer {
   position: fixed;
   right: 12px;
-  bottom: 102px;
+  bottom: 174px;
   z-index: 10;
   max-width: min(24rem, calc(100vw - 56px));
   padding: 16px;

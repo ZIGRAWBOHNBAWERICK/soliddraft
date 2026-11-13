@@ -301,6 +301,8 @@ fn a_spacing_step_is_stable_and_a_pan_keeps_the_spacing() {
 #[test]
 fn grid_follows_each_reference_sketch_and_restores_ground() {
     let mut case = Case::gpu("grid_on_sketches");
+    // The dark scene has an opaque sketch sheet; sample the grid over a light scene.
+    case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#30343a"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(sketches());
 
     // Each with the normal the plane gives it, and one offset from its reference.
@@ -342,6 +344,8 @@ fn grid_follows_each_reference_sketch_and_restores_ground() {
 #[test]
 fn face_sketch_grid_is_on_the_face_not_world_zero() {
     let mut case = Case::gpu("grid_on_a_face");
+    // The dark scene has an opaque sketch sheet; sample the grid over a light scene.
+    case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#30343a"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(box_part());
 
     let top = {
@@ -355,9 +359,9 @@ fn face_sketch_grid_is_on_the_face_not_world_zero() {
     let session = app.state().state.sketch.as_ref().expect("a sketch on the face");
     assert!((session.plane.origin.z - 20.0).abs() < 1e-6, "the sketch is at z = 20");
 
-    // Zoom out until the crossings below clear the box's 40 mm depth.
+    // Leave the model clear of the sampled grid crossings in the narrower canvas.
     orbit_off_plane(&mut app, Vec3::Z);
-    while readout(&app).expect("a readout").0 < 10.0 {
+    while readout(&app).expect("a readout").0 < 20.0 {
         wheel(&mut app, -300.0);
     }
     let (minor, _) = readout(&app).expect("a readout");

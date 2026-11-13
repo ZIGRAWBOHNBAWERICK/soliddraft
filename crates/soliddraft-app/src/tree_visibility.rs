@@ -66,7 +66,7 @@ fn tool_wants_an_axis(state: &AppState) -> bool {
 }
 
 /// The body shows unless a feature that shapes it is hidden.
-fn body_shown(doc: &Document) -> bool {
+pub(crate) fn body_shown(doc: &Document) -> bool {
     !doc.features.iter().any(|f| {
         !f.is_sketch()
             && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))

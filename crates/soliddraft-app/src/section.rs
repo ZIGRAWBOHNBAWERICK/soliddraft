@@ -30,10 +30,10 @@ impl SectionPlane {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 struct Request {
     document: soliddraft_document::DocumentId,
-    body: BodyId,
+    bodies: Vec<BodyId>,
     mesh_version: u64,
     plane: Plane,
     flip: bool,
@@ -75,26 +75,35 @@ impl State {
 
     fn centre(&mut self, doc: &Document) {
         if let Some(plane) = self.plane.resolve(doc)
-            && let Some(body) = doc.display_body()
-            && let Ok(topology) = doc.kernel().topology(body)
+            && let Some((lo, hi)) = doc.bounds()
         {
-            self.offset = (topology.bbox.center() - plane.origin).dot(plane.normal);
+            let centre = (lo + hi) * 0.5;
+            let centre = Vec3::new(centre.x as f64, centre.y as f64, centre.z as f64);
+            self.offset = (centre - plane.origin).dot(plane.normal);
         }
     }
 
     fn request(&self, doc: &Document) -> Option<Request> {
-        if !self.enabled || !self.offset.is_finite() || !doc.proof_state().current_proved_display() {
+        if !self.enabled
+            || !self.offset.is_finite()
+            || !doc.proof_state().current_proved_display()
+            || !crate::tree_visibility::body_shown(doc)
+        {
             return None;
         }
         let mut plane = self.plane.resolve(doc)?;
         plane.origin = plane.origin + plane.normal * self.offset;
-        Some(Request {
-            document: doc.model().id(),
-            body: doc.display_body()?,
-            mesh_version: doc.mesh_version,
-            plane,
-            flip: self.flip,
-        })
+        let bodies: Vec<_> = doc
+            .model()
+            .live_bodies()
+            .into_iter()
+            .map(|(_, body)| body)
+            .filter(|body| doc.meshes.contains_key(body))
+            .collect();
+        if bodies.is_empty() {
+            return None;
+        }
+        Some(Request { document: doc.model().id(), bodies, mesh_version: doc.mesh_version, plane, flip: self.flip })
     }
 
     /// One in-flight boolean per window. Dragging coalesces to the latest plane.
@@ -103,8 +112,8 @@ impl State {
         if let Some(pending) = &self.pending {
             match pending.answer.try_recv() {
                 Ok(answer) => {
-                    if Some(pending.request) == wanted {
-                        self.cached = Some((pending.request, answer));
+                    if Some(&pending.request) == wanted.as_ref() {
+                        self.cached = Some((pending.request.clone(), answer));
                     }
                     self.pending = None;
                 }
@@ -112,14 +121,15 @@ impl State {
                     ctx.request_repaint_after(std::time::Duration::from_millis(30));
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    if Some(pending.request) == wanted {
-                        self.cached = Some((pending.request, Err("Could not create the section. Try again.".into())));
+                    if Some(&pending.request) == wanted.as_ref() {
+                        self.cached =
+                            Some((pending.request.clone(), Err("Could not create the section. Try again.".into())));
                     }
                     self.pending = None;
                 }
             }
         }
-        if self.cached.as_ref().is_some_and(|(request, _)| Some(*request) != wanted) {
+        if self.cached.as_ref().is_some_and(|(request, _)| Some(request) != wanted.as_ref()) {
             self.cached = None;
         }
         let Some(request) = wanted else { return };
@@ -132,10 +142,17 @@ impl State {
         {
             let (sender, answer) = mpsc::channel();
             let ctx = ctx.clone();
+            let work_request = request.clone();
             let job = std::thread::Builder::new().name("section-view".into()).spawn(move || {
-                // The fork keeps the source body alive through edits and document switches.
+                // The fork keeps every source body alive through edits and document switches.
                 let (result, work) = soliddraft_kernel_catallax::with_request_allowance(200_000_000, || {
-                    cut_mesh(model.kernel().as_ref(), request.body, request.plane, request.flip, &params)
+                    cut_bodies(
+                        model.kernel().as_ref(),
+                        &work_request.bodies,
+                        work_request.plane,
+                        work_request.flip,
+                        &params,
+                    )
                 });
                 let result =
                     if work.exhausted { Err("This section is too complex. Try another plane.".into()) } else { result };
@@ -149,14 +166,14 @@ impl State {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.cached =
-                Some((request, cut_mesh(model.kernel().as_ref(), request.body, request.plane, request.flip, &params)));
+            let answer = cut_bodies(model.kernel().as_ref(), &request.bodies, request.plane, request.flip, &params);
+            self.cached = Some((request, answer));
         }
     }
 
     pub fn mesh(&self, doc: &Document) -> Option<Arc<DisplayMesh>> {
         let (request, answer) = self.cached.as_ref()?;
-        (Some(*request) == self.request(doc)).then(|| answer.as_ref().ok().cloned()).flatten()
+        (Some(request) == self.request(doc).as_ref()).then(|| answer.as_ref().ok().cloned()).flatten()
     }
 
     pub fn show(&mut self, ctx: &egui::Context, doc: &Document) {
@@ -223,6 +240,32 @@ impl State {
             self.cached = None;
         }
     }
+}
+
+fn cut_bodies(
+    kernel: &dyn Kernel,
+    bodies: &[BodyId],
+    plane: Plane,
+    flip: bool,
+    params: &soliddraft_kernel_api::TessellationParams,
+) -> Answer {
+    if let [body] = bodies {
+        return cut_mesh(kernel, *body, plane, flip, params);
+    }
+    let mut mesh = DisplayMesh::default();
+    for body in bodies {
+        let cut = cut_mesh(kernel, *body, plane, flip, params)?;
+        let offset = mesh.positions.len() as u32;
+        mesh.positions.extend_from_slice(&cut.positions);
+        mesh.normals.extend_from_slice(&cut.normals);
+        mesh.face_picks.extend_from_slice(&cut.face_picks);
+        mesh.face_features.extend_from_slice(&cut.face_features);
+        mesh.face_appearances.extend_from_slice(&cut.face_appearances);
+        mesh.indices.extend(cut.indices.iter().map(|index| index + offset));
+        mesh.edges.extend_from_slice(&cut.edges);
+        mesh.corners.extend_from_slice(&cut.corners);
+    }
+    Ok(Arc::new(mesh))
 }
 
 fn cut_mesh(

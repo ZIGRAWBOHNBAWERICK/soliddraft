@@ -48,6 +48,11 @@ fn section_keeps_every_body_when_the_active_body_changes() {
         app.run_steps(3);
         ready(app);
         assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "selection does not change the section");
+        app.state_mut().state.doc.new_body();
+        app.run_steps(3);
+        ready(app);
+        assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "an empty active body does not hide the section");
+        assert!(soliddraft_app::commands::get("section").unwrap().is_enabled(&app.state().state));
         drag_offset(app, -20.0);
         let offset = app.state().state.section.offset;
         assert!(offset > 0.0 && offset < 10.0);
@@ -57,6 +62,14 @@ fn section_keeps_every_body_when_the_active_body_changes() {
         ready(app);
         assert!((kept + volume(&section(app)) - 6000.0).abs() < 0.1, "both complementary cuts stay visible");
         case.frame(app, "both-bodies-sectioned");
+        let body_feature = app.state().state.doc.features.iter().find(|f| !f.is_sketch()).unwrap().id;
+        let item = soliddraft_app::document::ViewItem::Feature(body_feature);
+        app.state_mut().state.doc.set_view_choice(item, Some(false));
+        app.run_steps(4);
+        assert!(app.state().state.section.mesh(&app.state().state.doc).is_none(), "hidden solids stay hidden");
+        app.state_mut().state.doc.set_view_choice(item, None);
+        app.run_steps(3);
+        ready(app);
         click(app, "Close section");
         assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
         assert_eq!(app.state().state.doc.meshes, meshes);

@@ -41,7 +41,7 @@
       ],
       "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Inward offsets on a 10 x 8 x 6 mm block: -1 mm and -0.5 mm; zero distance refused. Exact volume within 1e-6 mm³. No work allowance increase.",
+      "supported_limits": "Inward offsets on a 10 x 8 x 6 mm block: -1 mm and -0.5 mm; zero distance refused. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
       "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
     },
     {
@@ -388,7 +388,7 @@
       ],
       "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "A planar top face of a 10 x 8 x 6 mm block, front and back thickness; empty selection refused. Exact volume within 1e-6 mm³. No work allowance increase.",
+      "supported_limits": "A planar top face of a 10 x 8 x 6 mm block, front and back thickness; empty selection refused. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
       "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
     },
     {
@@ -402,7 +402,7 @@
       ],
       "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Repeat a 2 x 2 mm through cut in a 20 x 20 x 2 mm plate at quarter turns; 45-degree saved placement refused. Stock remains fixed. Exact volume within 1e-6 mm³. No work allowance increase.",
+      "supported_limits": "Repeat a 2 x 2 mm through cut in a 20 x 20 x 2 mm plate at quarter turns; 45-degree saved placement refused. Stock remains fixed. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
       "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
     },
     {
@@ -1625,10 +1625,10 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
-      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and typed measured-display refusal -> unchanged retained loft -> history, reopen and certified STEP",
-      "supported_limits": "Scaled 0.2 mm ruled loft and radius 0.01 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
-      "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
+      "catallax_revision": "45b0a37f483d0acf3b3525a4961d54a80a056efd",
+      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and numbered measured-display refusal -> unchanged retained loft -> history, reopen and independent certified STEP",
+      "supported_limits": "Scaled 0.2 mm ruled loft and radius 0.01 mm rail fillet. Exact construction completes, but measured display still exhausts the unchanged 20M whole-request allowance at 19,999,956 work units. The SD-DISPLAY-01 refusal retains the prior loft and reports the work and limit in the status chip details. Undo/redo, save/reopen and independent certified STEP verify the retained loft. This fixture has no bounded display success at this pin.",
+      "evidence": "result.json, protocol.json, command/kernel logs, refusal work counters, viewport PNG and SVG; spline_display.rs checks the numbered refusal, unchanged geometry and history, and independent STEP. spline_display_ui.rs checks the status chip details and retained part in both frames."
     },
     {
       "id": "loft-edge-fillet-small-warp",
@@ -1639,10 +1639,10 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
-      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and typed measured-display refusal -> unchanged retained loft -> history, reopen and certified STEP",
-      "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
-      "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
+      "catallax_revision": "45b0a37f483d0acf3b3525a4961d54a80a056efd",
+      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native bounded fillet display -> history, reopen and independent certified STEP",
+      "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Native display answers within the stated 0.01 mm bound and unchanged 20M whole-request allowance. Measured deviation, method and retained boundary remain display evidence, never proof or an export certificate. Undo/redo and save/reopen preserve the fillet; exact STEP is certified independently.",
+      "evidence": "result.json, protocol.json, command/kernel logs, work counters, viewport PNG and SVG; spline_display.rs checks native measured evidence, bounded status, history, independent certified-request refusal and exact STEP. spline_display_ui.rs renders the bounded proof light in both frames."
     }
   ],
   "native_ui_scenarios": [

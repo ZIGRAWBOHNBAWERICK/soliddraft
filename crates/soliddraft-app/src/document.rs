@@ -1880,6 +1880,11 @@ impl Document {
         self.display_failure.as_deref()
     }
 
+    /// Retains a numbered display refusal from a proposal that never changed this document.
+    pub(crate) fn record_display_refusal(&mut self, message: String) {
+        self.display_failure = Some(message);
+    }
+
     /// Background proof answers wake `ctx` instead of waiting for a polled frame.
     pub fn set_repaint(&mut self, ctx: &egui::Context) {
         if self.repaint.is_none() {

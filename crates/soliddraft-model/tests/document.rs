@@ -472,6 +472,37 @@ fn hashes_follow_the_design_and_ids_follow_the_document() {
 }
 
 #[test]
+fn undoing_an_added_feature_restores_geometry_without_reusing_its_id() {
+    let mut d = doc();
+    let (_, extrusion) = block(&mut d);
+    let before = d.truth();
+    let geometry = d.geometry_hash();
+    let body = d.body();
+    let faces = d.generated_faces(extrusion).to_vec();
+    let added = add(
+        &mut d,
+        top_sketch(|s| {
+            s.rectangle(P2::new(0.0, 0.0), 5.0, 5.0).unwrap();
+        }),
+    );
+    d.undo().unwrap();
+    let mut restored = d.truth();
+    assert!(restored["next_feature"].as_u64().unwrap() > before["next_feature"].as_u64().unwrap());
+    restored["next_feature"] = before["next_feature"].clone();
+    assert_eq!(restored, before, "only the next unused id changes across undo");
+    assert_eq!(d.body(), body);
+    assert_eq!(d.generated_faces(extrusion), faces);
+    assert_eq!(d.geometry_hash(), geometry);
+    let replacement = add(
+        &mut d,
+        top_sketch(|s| {
+            s.rectangle(P2::new(0.0, 0.0), 8.0, 8.0).unwrap();
+        }),
+    );
+    assert!(replacement.0 > added.0, "undo must not recycle a persistent feature id");
+}
+
+#[test]
 fn files_with_unknown_required_sections_are_refused() {
     use soliddraft_document::manifest::{Entry, Section, write_package};
     let kernel: Arc<dyn Kernel> = Arc::new(CatallaxKernel::new());

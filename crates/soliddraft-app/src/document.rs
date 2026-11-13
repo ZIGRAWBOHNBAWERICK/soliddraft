@@ -3874,8 +3874,9 @@ impl Document {
             Selection::Body => {
                 self.display_body()?;
                 let end = self.rollback.unwrap_or(self.features.len()).min(self.features.len());
+                let contributing = self.body_features();
                 let built =
-                    self.features[..end].iter().filter(|f| f.body_key == self.active_body && f.body.is_some()).count();
+                    self.features[..end].iter().filter(|f| contributing.contains(&f.id) && f.body.is_some()).count();
                 let details =
                     vec![("Built from".to_owned(), format!("{built} feature{}", if built == 1 { "" } else { "s" }))];
                 Some(EntityInfo { title: self.body_name(self.active_body), feature: None, details })

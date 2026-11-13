@@ -56,10 +56,30 @@ pub fn settle(h: &mut App<'_>) {
         h.run_steps(1);
     }
     h.run_steps(3);
+    if h.state().state.measure.open {
+        open_details(h);
+    }
 }
 
 /// Rests the pointer at `pos` long enough for the id-buffer readback to catch up.
+pub fn close_details(h: &mut App<'_>) {
+    if let Some(close) = h.query_by_label("Close options") {
+        close.click();
+        h.run_steps(8);
+    }
+}
+
+pub fn open_details(h: &mut App<'_>) {
+    if !h.state().state.options_details
+        && let Some(details) = h.query_by_label("Details")
+    {
+        details.click();
+        h.run_steps(8);
+    }
+}
+
 pub fn hover(h: &mut App<'_>, pos: Pos2) {
+    close_details(h);
     h.hover_at(pos);
     h.run_steps(4);
 }
@@ -91,6 +111,13 @@ pub fn sketch_screen(h: &App<'_>, p: P2) -> Pos2 {
 }
 
 pub fn button(h: &mut App<'_>, name: &str) {
+    if h.state().state.doc.features.iter().any(|f| f.name == name) && !h.state().state.tree_shown() {
+        h.key_press(egui::Key::F9);
+        h.run_steps(8);
+    }
+    if h.query_all_by_role_and_label(egui::accesskit::Role::Button, name).next().is_none() {
+        open_details(h);
+    }
     h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().click();
     h.run_steps(3);
 }

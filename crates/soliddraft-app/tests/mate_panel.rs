@@ -48,6 +48,10 @@ fn settle(h: &mut App<'_>) {
         assert!(Instant::now() < until, "the assembly did not settle");
     }
     h.run_steps(12);
+    if !h.state().state.tree_shown() {
+        h.key_press(egui::Key::F9);
+        h.run_steps(8);
+    }
 }
 
 fn click_at(h: &mut App<'_>, pos: Pos2) {
@@ -76,7 +80,7 @@ fn button(h: &mut App<'_>, name: &str) {
             h.run_steps(8);
         }
         let current = h.state().state.assembly.mate.family.label();
-        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, current).click();
+        h.get_by_value(current).click();
         h.run_steps(4);
     }
     if matches!(name, "Opposed" | "Aligned") {

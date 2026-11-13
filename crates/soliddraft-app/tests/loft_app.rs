@@ -300,12 +300,16 @@ fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance
     case.run(&mut app, |case, app| {
         ribbon::run_command(app, "loft");
         ux_tools::settle(app);
+        open_profiles(app);
         for label in ["Sketch2", "Sketch3"] {
             app.get_by_label("Add profile").click();
             ux_tools::settle(app);
             app.get_all_by_label(label).last().unwrap().click();
             ux_tools::settle(app);
         }
+        ribbon::close_options(app);
+        app.get_by_value("Ruled").click();
+        ux_tools::settle(app);
         app.get_by_label("Smooth").click();
         ux_tools::settle(app);
         case.frame(app, "preview");
@@ -315,7 +319,7 @@ fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance
         assert!(editor.error.is_none(), "three-section Smooth preview: {:?}", editor.error);
         assert!(editor.preview.result.is_some());
         assert_eq!(app.state().state.doc.features.len(), 3);
-        app.get_by_label("OK (Enter)").click();
+        app.get_by_label("OK").click();
         ux_tools::settle(app);
         ux_tools::rebuilt(app);
         assert!(app.state().state.editor.is_none());

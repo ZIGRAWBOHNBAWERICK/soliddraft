@@ -32,6 +32,10 @@ fn out_dir() -> PathBuf {
 type App<'a> = Harness<'a, SolidDraftApp>;
 
 fn harness() -> App<'static> {
+    let config = out_dir().join(format!("config-{}", std::process::id()));
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("settings.json"), "{}").unwrap();
+    soliddraft_app::file::set_config_dir(Some(config));
     Harness::builder()
         .with_size(vec2(1440.0, 900.0))
         .with_pixels_per_point(1.0)
@@ -94,8 +98,10 @@ fn origin_axes_show_in_every_part_and_set_directions() {
     assert!(!harness.state().state.doc.features.is_empty(), "the part opened");
     assert_eq!(std::fs::read(&file).unwrap(), before, "opening leaves the file as it was");
 
-    harness.key_press(Key::F9);
-    harness.run_steps(6);
+    if !harness.state().state.tree_shown() {
+        harness.key_press(Key::F9);
+        harness.run_steps(6);
+    }
     harness.get_by_label("Origin, planes and axes").click();
     harness.run_steps(3);
     for name in ["Front plane", "Top plane", "Right plane", "X axis", "Y axis", "Z axis"] {

@@ -51,7 +51,7 @@ fn editing_combine_refuses_export_until_the_dialog_is_finished() {
         app.render().unwrap();
         let error = app.state().state.export_part(Format::Stl).err().expect("the live Combine dialog gates export");
         assert!(error.contains("Finish or cancel"), "{error}");
-        assert!(app.query_all_by_label(format!("{name} proof: Pending")).next().is_some());
+        assert!(app.query_all_by_label(&format!("{name} proof: Pending")).next().is_some());
         let path = case.path("part.stl");
         std::fs::write(&path, b"previous export").unwrap();
         app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
@@ -62,7 +62,7 @@ fn editing_combine_refuses_export_until_the_dialog_is_finished() {
         app.run_steps(8);
         assert!(app.state().state.doc.combine_form.is_none());
         assert!(!app.state().state.export_part(Format::Stl).unwrap().bytes.is_empty());
-        assert!(app.query_all_by_label(format!("{name} proof: Proved")).next().is_some());
+        assert!(app.query_all_by_label(&format!("{name} proof: Proved")).next().is_some());
     });
 }
 

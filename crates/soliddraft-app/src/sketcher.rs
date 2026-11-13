@@ -133,6 +133,13 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
     best.map(|(_, id)| SketchSel::Entity(id))
 }
 
+/// Picks the right-click target without drawing or committing a tool preview.
+pub fn context_pick(s: &SketchSession, camera: &Camera, rect: Rect, pos: Pos2) -> Option<SketchSel> {
+    let frame = Frame { plane: s.plane, camera, rect };
+    let glyphs = if s.show_relations { glyph_rects(&frame, &s.sketch) } else { Vec::new() };
+    hit_test(&frame, &s.sketch, pos, &glyphs)
+}
+
 /// The curve under the pointer, ignoring points and relation glyphs.
 fn ignore_guide_targets(s: &SketchSession) -> bool {
     s.trim_options.ignore_construction && (s.tool == Tool::Trim || (s.tool.bounded_trim() && s.trim_bounds.len() == 2))

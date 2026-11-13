@@ -129,6 +129,53 @@ fn rename_cannot_upgrade_a_bounded_answer_or_unlock_export() {
     assert!(matches!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(_)));
 }
 
+#[test]
+fn model_bound_survives_display_capture_on_rename_and_history() {
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Mixed bound rename", kernel.clone());
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let model_bound: AnswerBound = serde_json::from_value(bounded_fixture()).unwrap();
+    doc.record_answer_within_bound(id, model_bound.clone()).unwrap();
+    let geometry = doc.model().geometry_hash();
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+    kernel.rules.lock().unwrap().display_bound = Some(soliddraft_kernel_api::DisplayBound {
+        kind: "spline display mesh".into(),
+        rule: "spline-display-evaluator-v1".into(),
+        level_mm: 0.01,
+        measured_mm: 0.007,
+        method: "complete surface-cell measurement fixture".into(),
+        definition: format!("retained display boundary {geometry}"),
+    });
+    let caller = Caller::Mcp { client: "mixed-bound-rename-regression".into() };
+    let renamed = call_checked(
+        &mut AppTools { state: &mut state },
+        "rename",
+        json!({"feature":"Boss-Extrude1", "name":"Mixed plate"}),
+        &caller,
+    );
+    assert!(!renamed.is_error, "{}", renamed.content);
+    let export = state.export_part(soliddraft_exchange::Format::Step);
+    assert!(export.is_err(), "display capture unlocked STEP after rename: {:?}", state.doc.proof_state());
+    assert_eq!(state.doc.model().geometry_hash(), geometry);
+    assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(model_bound.clone()));
+    assert!(!state.doc.proof_state().display_only_bound);
+    for action in ["undo", "redo"] {
+        let out = call_checked(&mut AppTools { state: &mut state }, action, json!({}), &caller);
+        assert!(!out.is_error, "{action}: {}", out.content);
+        assert_eq!(state.doc.model().geometry_hash(), geometry);
+        assert_eq!(state.doc.feature(id).unwrap().status, FeatureStatus::AnsweredWithinBound(model_bound.clone()));
+        assert!(!state.doc.proof_state().display_only_bound);
+        assert!(state.export_part(soliddraft_exchange::Format::Step).is_err(), "{action} unlocked export");
+    }
+}
+
 fn settle(doc: &mut Document) {
     let start = std::time::Instant::now();
     while doc.proof_pending() {

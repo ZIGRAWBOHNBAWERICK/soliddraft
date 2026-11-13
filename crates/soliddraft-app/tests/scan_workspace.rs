@@ -32,6 +32,95 @@ fn cloud() -> Vec<u8> {
 }
 
 #[test]
+fn scan_fit_uses_the_reference_owner_after_body_selection_changes() {
+    use soliddraft_app::document::Selection;
+
+    let case = ribbon::case("scan-fit-empty-owner");
+    let path = case.path("cloud.obj");
+    std::fs::write(&path, cloud()).unwrap();
+    let mut doc = ribbon::plate();
+    let stock = doc.model().live_bodies()[0].1;
+    let stock_feature = doc.features[0].id;
+    doc.new_body();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        app.state_mut().state.push(AppAction::ImportScan(Some(path)));
+        app.run_steps(4);
+        app.get_by_label("Accept reference").click();
+        app.run_steps(4);
+        let scan = app.state().state.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Scan(_))).unwrap().id;
+        assert_eq!(app.state().state.doc.feature(scan).unwrap().body_key, 1);
+        assert!(soliddraft_app::scan::can_fit(&app.state().state));
+        let revision = app.state().state.doc.revision();
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(stock_feature))));
+        app.run_steps(2);
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(scan))));
+        app.run_steps(2);
+        assert_eq!(app.state().state.doc.revision(), revision);
+        assert!(soliddraft_app::scan::can_fit(&app.state().state), "the empty scan owner stays eligible");
+        app.get_by_role_and_label(egui::accesskit::Role::Button, "Fit scan to part").click();
+        app.run_steps(2);
+        app.state_mut().state.doc.new_body();
+        let start = Instant::now();
+        loop {
+            app.run_steps(2);
+            if app.query_all_by_label("Accept fitted part").next().is_some() {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(120), "fit did not return");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        app.get_by_label("Accept fitted part").click();
+        app.run_steps(6);
+        let doc = &app.state().state.doc;
+        assert_eq!(doc.feature(scan).unwrap().body_key, 1, "the result retains the reference's body");
+        let bodies = doc.model().live_bodies();
+        assert_eq!(bodies.iter().map(|(key, _)| *key).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(bodies[0].1, stock, "fitting does not rebuild the other solid");
+        let volume = doc.kernel().mass_properties(bodies[1].1).unwrap().volume;
+        assert!((volume - 120.0).abs() < 0.2, "{volume}");
+        let saved = doc.model().to_bytes().unwrap();
+        let reopened =
+            soliddraft_app::file::open_bytes("two-bodies.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        assert_eq!(reopened.feature(scan).unwrap().body_key, 1);
+        assert_eq!(reopened.model().live_bodies().len(), 2);
+        app.state_mut().state.doc.undo().unwrap();
+        app.run_steps(3);
+        assert!(soliddraft_app::scan::can_fit(&app.state().state), "undo returns the scan to its empty owner");
+        app.state_mut().state.doc.redo().unwrap();
+        app.run_steps(3);
+        assert_eq!(app.state().state.doc.feature(scan).unwrap().body_key, 1);
+        assert_eq!(app.state().state.doc.model().live_bodies().len(), 2);
+        case.frame(app, "fitted-body-keeps-owner");
+    });
+}
+
+#[test]
+fn scan_fit_refuses_a_populated_owner_with_an_unrelated_empty_body_active() {
+    let case = ribbon::case("scan-fit-populated-owner");
+    let path = case.path("cloud.obj");
+    std::fs::write(&path, cloud()).unwrap();
+    let mut app = ribbon::app(ribbon::plate());
+    case.run(&mut app, |app| {
+        app.state_mut().state.push(AppAction::ImportScan(Some(path)));
+        app.run_steps(4);
+        app.get_by_label("Accept reference").click();
+        app.run_steps(4);
+        let scan = app.state().state.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Scan(_))).unwrap().id;
+        assert_eq!(app.state().state.doc.feature(scan).unwrap().body_key, 0);
+        app.state_mut().state.doc.new_body();
+        app.run_steps(3);
+        assert!(app.state().state.doc.display_body().is_none());
+        assert!(!soliddraft_app::scan::can_fit(&app.state().state), "another empty body cannot enable this owner");
+        let before = app.state().state.doc.model().to_bytes().unwrap();
+        app.state_mut().state.push(AppAction::FitScan);
+        app.run_steps(3);
+        assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
+        assert!(app.query_all_by_label("Accept fitted part").next().is_none());
+    });
+}
+
+#[test]
 fn open_scan_review_cancel_accept_save_reopen_and_fit_refusal_leave_reference_intact() {
     let case = ribbon::case("scan-reference");
     let path = case.path("open.obj");

@@ -1299,6 +1299,7 @@ pub struct ProofState {
     pub proved_edit: Option<u64>,
     pub transient: bool,
     pub pending: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub answered_within_bound: bool,
     pub failed: bool,
 }
@@ -2594,7 +2595,8 @@ impl Document {
     }
 
     fn after_metadata_change(&mut self) {
-        if !self.model.is_dirty() {
+        // Identical parameter edits dirty the model without changing its geometry.
+        if !self.model.is_dirty() || (self.pending.is_none() && self.proof_failure.is_none()) {
             self.model.rebuild();
         }
         let previous = self.revision;

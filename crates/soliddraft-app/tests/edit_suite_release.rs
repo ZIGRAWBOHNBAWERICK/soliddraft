@@ -30,6 +30,29 @@ fn bounded_fixture() -> serde_json::Value {
 }
 
 #[test]
+fn ordinary_mcp_answers_keep_their_schema_and_bounded_answers_report_their_state() {
+    let mut doc = Document::new("Proof protocol", Arc::new(gated::Gated::default()));
+    let id = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { depth: 25.0, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let mut state = soliddraft_app::state::AppState::new(doc);
+    let caller = Caller::Mcp { client: "proof-protocol-regression".into() };
+    let summary = |state: &mut soliddraft_app::state::AppState| {
+        let result = call_checked(&mut AppTools { state }, "model_summary", json!({}), &caller);
+        assert!(!result.is_error, "{}", result.content);
+        serde_json::from_str::<serde_json::Value>(&result.content).unwrap()
+    };
+    assert!(!summary(&mut state)["edit_state"].as_object().unwrap().contains_key("answered_within_bound"));
+    state.doc.record_answer_within_bound(id, serde_json::from_value(bounded_fixture()).unwrap()).unwrap();
+    assert_eq!(summary(&mut state)["edit_state"]["answered_within_bound"], true);
+    assert!(state.export_part(soliddraft_exchange::Format::Step).is_err());
+}
+
+#[test]
 fn identical_mcp_edits_and_their_history_keep_the_current_proof() {
     let kernel = Arc::new(gated::Gated::default());
     let mut doc = Document::new("Identical edit", kernel);

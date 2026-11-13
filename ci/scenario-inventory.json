@@ -1513,8 +1513,8 @@
       ],
       "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Canonical radius-22 flange and radius-12 housing with radius-8 bore, four diameter-4 holes with diameter-8 90-degree countersinks. B-rep junction radius 2 edited to 2.5. This does not claim field support at radius 2 or freeform Boolean support.",
-      "evidence": "Build, parameter edit, undo, redo, fresh reopen, proven STEP and closed STL exports. canonical_parts also resolves stored face and edge references and renders each checkpoint in Edit Suite."
+      "supported_limits": "Canonical radius-22 flange and radius-12 housing with radius-8 bore, four diameter-4 holes with diameter-8 90-degree countersinks. B-rep junction radius 2 edited to 2.5. This does not claim field support at radius 2 or freeform Boolean support. STL may refuse mesh.precision-or-budget on fitted patches; the application test records that refusal and checks destination preservation.",
+      "evidence": "Build, parameter edit, undo, redo, fresh reopen and proven STEP. STL is either closed or has a recorded mesh.precision-or-budget refusal with the destination and accepted part preserved. Stored references and Edit Suite frames are checked by canonical_parts."
     }
   ]
 }

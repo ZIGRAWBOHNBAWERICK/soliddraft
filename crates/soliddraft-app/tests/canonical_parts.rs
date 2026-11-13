@@ -72,9 +72,42 @@ fn mass(state: &AppState) -> soliddraft_kernel_api::MassProperties {
     result.unwrap()
 }
 
-fn exports(state: &mut AppState, dir: &Path, label: &str) {
+fn exports(state: &mut AppState, dir: &Path, label: &str, allow_mesh_refusal: bool) {
     for format in [Format::Step, Format::Stl] {
-        let output = state.doc.model().export(format).unwrap();
+        let output = match state.doc.model().export(format) {
+            Ok(output) => output,
+            Err(error)
+                if allow_mesh_refusal
+                    && format == Format::Stl
+                    && error.to_string().contains("mesh.precision-or-budget") =>
+            {
+                let path = dir.join(format!("{label}.stl"));
+                let sentinel = b"previous accepted destination";
+                std::fs::write(&path, sentinel).unwrap();
+                let before = state.doc.model().part_json();
+                let revision = state.doc.revision();
+                let out = call_checked(
+                    &mut AppTools { state },
+                    "export_stl",
+                    json!({"path":path}),
+                    &Caller::Mcp { client: "canonical-refusal".into() },
+                );
+                assert!(out.is_error && out.content.contains("mesh.precision-or-budget"), "{}", out.content);
+                assert_eq!(std::fs::read(&path).unwrap(), sentinel);
+                assert_eq!(state.doc.model().part_json(), before);
+                assert_eq!(state.doc.revision(), revision);
+                std::fs::remove_file(path).unwrap();
+                let refusal = json!({"format":"stl","code":"mesh.precision-or-budget",
+                    "reason":out.content,"public_refused":true,"destination_preserved":true,"revision_preserved":true});
+                std::fs::write(
+                    dir.join(format!("{label}.stl-refusal.json")),
+                    serde_json::to_vec_pretty(&refusal).unwrap(),
+                )
+                .unwrap();
+                continue;
+            }
+            Err(error) => panic!("{label} {}: {error}", format.name()),
+        };
         match &output.report {
             Report::Step(r) => {
                 assert!(r.within_tolerance, "{r:?}");
@@ -200,7 +233,7 @@ fn exercise(index: usize) {
         assert_eq!(state.doc.displayed_revision(), state.doc.revision(), "{label}: stale display");
         assert!(state.doc.triangle_count() > 0, "{label}: empty display");
         assert!(!state.doc.proof_pending(), "{label}: proof is still pending");
-        exports(&mut state, &dir, label);
+        exports(&mut state, &dir, label, index == 4);
         let mut app = ribbon::app(state.doc);
         app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
         app.key_press(egui::Key::Z);

@@ -16,7 +16,7 @@ The `canonical_parts` acceptance test runs the commands, captures persistent fac
 
 Refused edits must preserve the accepted document and its revision. P5 also tries a field lattice over the original radius-2 housing and records the field compiler's refusal.
 
-Each checkpoint exports STEP and a closed STL and renders the real application in the internal Edit Suite layout. STEP must report one solid within its requested tolerance. STL must report a closed, nonempty mesh and a finite chord-height bound. The test keeps the files, reports and PNGs under `ribbon-acceptance/canonical-parts` in the Cargo target directory.
+Each checkpoint exports STEP and renders the real application in the internal Edit Suite layout. P1 to P4 must also export a closed STL. P5 may return the kernel's named `mesh.precision-or-budget` refusal. That refusal must preserve both an existing destination and the accepted part; the test retains the reason and removes the sentinel file. A successful P5 STL still has to pass every mesh check. STEP must report one solid within its requested tolerance. STL must report a closed, nonempty mesh and a finite chord-height bound. The test keeps the files, reports and PNGs under `ribbon-acceptance/canonical-parts` in the Cargo target directory.
 
 Run on a machine with a Vulkan adapter, including software Vulkan:
 

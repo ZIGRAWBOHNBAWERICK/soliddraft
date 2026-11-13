@@ -53,6 +53,8 @@ pub enum OpKind {
     ImportStep,
     /// An imported IGES body.
     ImportIges,
+    /// An imported closed mesh solid.
+    ImportMesh,
     /// Terminal field lattice.
     Lattice,
     /// Terminal field gyroid.
@@ -82,6 +84,7 @@ impl OpKind {
             OpKind::Gyroid => "gyroid",
             OpKind::ImportStep => "import_step",
             OpKind::ImportIges => "import_iges",
+            OpKind::ImportMesh => "import_mesh",
         }
     }
 }

@@ -1082,6 +1082,47 @@ impl SolidDraftApp {
                     }
                 }
             }
+            AppAction::ImportMesh(path) => {
+                if self.state.in_sketch() || self.state.doc.proof_pending() {
+                    return;
+                }
+                let path =
+                    path.or_else(|| crate::platform::open_path("Import mesh solid", "STL or OBJ", &["stl", "obj"]));
+                if let Some(path) = path {
+                    match crate::import::Preview::read_source(
+                        &self.state.doc,
+                        &path,
+                        soliddraft_kernel_api::ImportFormat::Mesh,
+                    ) {
+                        Ok(preview) => self.state.import_dialog = Some(preview),
+                        Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
+            AppAction::ReplaceImport { feature, path } => {
+                if self.state.in_sketch() || self.state.doc.proof_pending() {
+                    return;
+                }
+                let Some(FeatureKind::ImportStep(import)) = self.state.doc.feature(feature).map(|f| &f.kind) else {
+                    return;
+                };
+                let format = import.format;
+                let extensions: &[&str] = match format {
+                    soliddraft_kernel_api::ImportFormat::Step => &["step", "stp"],
+                    soliddraft_kernel_api::ImportFormat::Iges => &["iges", "igs"],
+                    soliddraft_kernel_api::ImportFormat::Mesh => &["stl", "obj"],
+                };
+                let path =
+                    path.or_else(|| crate::platform::open_path("Replace imported file", format.label(), extensions));
+                if let Some(path) = path {
+                    match crate::import::Preview::read_source(&self.state.doc, &path, format)
+                        .and_then(|preview| preview.replacing(&self.state.doc, feature))
+                    {
+                        Ok(preview) => self.state.import_dialog = Some(preview),
+                        Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
             AppAction::ImportScene(path) => {
                 let path = path.or_else(|| {
                     crate::platform::open_path(

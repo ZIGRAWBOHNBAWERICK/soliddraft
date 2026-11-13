@@ -19,6 +19,8 @@ pub enum ImportFormat {
     Step,
     /// IGES 5.3 manifold solids.
     Iges,
+    /// Closed STL or OBJ triangles, in millimetres.
+    Mesh,
 }
 
 impl ImportFormat {
@@ -27,6 +29,7 @@ impl ImportFormat {
         match self {
             Self::Step => "STEP",
             Self::Iges => "IGES",
+            Self::Mesh => "mesh solid",
         }
     }
 
@@ -200,7 +203,46 @@ pub struct FaceTolerance {
     pub feature_size_squared_mm2: String,
 }
 
-/// The change record of one import: `catallax-import-repair/2`.
+/// How an inconsistent planar source was made exactly incident.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanarRepairMethod {
+    /// Keep shared vertices and refit planar carriers through their boundary wires.
+    RefitPlanes,
+    /// Keep carriers and project each shared vertex onto all its incident planes.
+    SnapSharedVertices,
+}
+
+/// Source interpretation and complete face bounds for one planar incidence repair.
+///
+/// The source face is its vertex boundary projected onto its declared plane.
+/// The measured discrepancy covers the supplied vertices and finite line-carrier
+/// pieces separately from geometric deviation against that projected patch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceIncidence {
+    /// Source solid entity.
+    pub solid: String,
+    /// Source face entity.
+    pub face: String,
+    /// Candidate construction, selected deterministically for the solid.
+    pub method: PlanarRepairMethod,
+    /// Versioned source interpretation, always `projected_vertex_boundary/1`.
+    pub source_definition: String,
+    /// Lower bound on maximum source-to-projection correspondence displacement.
+    pub source_discrepancy_lower_mm: String,
+    /// Upper bound over the complete source fan and finite boundary pieces.
+    pub source_discrepancy_upper_mm: String,
+    /// Whole-face Hausdorff lower bound from the projected source to the result.
+    pub geometric_deviation_lower_mm: String,
+    /// Whole-face Hausdorff upper bound from the projected source to the result.
+    pub geometric_deviation_upper_mm: String,
+    /// Direct bound against source constraints, not a sum of the preceding bounds.
+    pub source_to_result_upper_mm: String,
+    /// Maximum movement of a supplied vertex, separate from face deviation.
+    pub vertex_movement_upper_mm: String,
+}
+
+/// The change record of one import, including source cleanup certificates.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepairRecord {
     /// Always [`REPAIR_FORMAT`].
@@ -215,6 +257,9 @@ pub struct RepairRecord {
     /// The repaired faces' deviations from the source. A [`LEGACY_REPAIR_FORMAT`] file has none.
     #[serde(default)]
     pub face_tolerances: Vec<FaceTolerance>,
+    /// Whole-face bounds for repairs of inconsistent source definitions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_incidence: Vec<SourceIncidence>,
 }
 
 /// How far from a feature the importer looks for another that might close a gap.

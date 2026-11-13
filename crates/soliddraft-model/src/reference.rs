@@ -70,6 +70,11 @@ pub enum Generator {
     },
     /// Any other face a feature made.
     Other,
+    /// A face from one immutable imported source. A replacement needs new references.
+    Imported {
+        /// Hash of the source that generated this face.
+        sha256: String,
+    },
     /// An inset wall of a shell, ranked by its source face name.
     ShellWall,
     /// A rounded face where a shell's wall turns round a concave edge, ranked by the
@@ -95,7 +100,7 @@ impl fmt::Display for Generator {
             Generator::Blend { edge } => write!(f, "Blend of edge {}", edge + 1),
             Generator::Hole { placement, part } => write!(f, "Hole {} {}", placement + 1, part.label().to_lowercase()),
             Generator::Copy { instance } => write!(f, "Copy {instance} face"),
-            Generator::Other => f.write_str("Face"),
+            Generator::Other | Generator::Imported { .. } => f.write_str("Face"),
             Generator::ShellWall => f.write_str("Inner wall"),
             Generator::ShellRound => f.write_str("Inner round"),
             Generator::ShellCorner => f.write_str("Inner corner"),

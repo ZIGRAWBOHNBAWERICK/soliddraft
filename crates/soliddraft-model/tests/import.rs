@@ -144,6 +144,7 @@ impl Kernel for Importer {
                 derivative: Some(RepairDerivative { sha256: "00".repeat(32) }),
                 changes: vec![change],
                 face_tolerances: Vec::new(),
+                source_incidence: Vec::new(),
             },
         })
     }

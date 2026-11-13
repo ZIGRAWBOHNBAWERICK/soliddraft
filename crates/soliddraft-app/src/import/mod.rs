@@ -37,10 +37,13 @@ pub fn params() -> Vec<(&'static str, Value)> {
 
 pub fn preview_params() -> Vec<(&'static str, Value)> {
     vec![
-        ("path", string("A STEP or IGES source file path.")),
+        ("path", string("A STEP, IGES, STL or OBJ source file path.")),
+        ("feature", optional(string("The imported feature to replace. Omit for a new import."))),
         (
             "format",
-            optional(string("Source format: step (default) or iges. Use the same format for preview and import.")),
+            optional(string(
+                "Source format: step (default), iges or mesh. Mesh coordinates are millimetres. Use the same format for preview and import.",
+            )),
         ),
     ]
 }
@@ -50,7 +53,8 @@ pub fn source_format(input: &Value) -> Result<ImportFormat, String> {
         None => Ok(ImportFormat::Step),
         Some(Value::String(format)) if format == "step" => Ok(ImportFormat::Step),
         Some(Value::String(format)) if format == "iges" => Ok(ImportFormat::Iges),
-        _ => Err("Choose step or iges as the import format.".into()),
+        Some(Value::String(format)) if format == "mesh" => Ok(ImportFormat::Mesh),
+        _ => Err("Choose step, iges or mesh as the import format.".into()),
     }
 }
 
@@ -83,6 +87,7 @@ pub struct Review {
 #[derive(Clone, Debug)]
 pub struct Preview {
     feature: ImportStepFeature,
+    replacement: Option<FeatureId>,
     proposals: ProposalSet,
     revision: u64,
     document: soliddraft_document::DocumentId,
@@ -155,7 +160,27 @@ impl Preview {
         let asked = proposals.proposals.iter().filter(|p| p.disposition == Disposition::Ask);
         let allowed = asked.map(|p| (p.id.clone(), p.tolerance_mm.clone())).collect();
         let approver = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
-        Ok(Self { feature, proposals, revision: doc.revision(), document: doc.model().id(), allowed, approver })
+        Ok(Self {
+            feature,
+            replacement: None,
+            proposals,
+            revision: doc.revision(),
+            document: doc.model().id(),
+            allowed,
+            approver,
+        })
+    }
+
+    /// Review a new source for an existing import, discarding the previous source's decisions.
+    pub fn replacing(mut self, doc: &Document, id: FeatureId) -> Result<Self, String> {
+        let Some(FeatureKind::ImportStep(old)) = doc.feature(id).map(|f| &f.kind) else {
+            return Err("Choose an imported feature to replace.".into());
+        };
+        if old.sha256 == self.feature.sha256 && old.format == self.feature.format {
+            self.feature.source_bound_names = old.source_bound_names;
+        }
+        self.replacement = Some(id);
+        Ok(self)
     }
 
     pub fn token(&self) -> String {
@@ -166,15 +191,17 @@ impl Preview {
             &self.proposals,
         ))
         .expect("import previews serialize");
-        if self.feature.format == ImportFormat::Iges {
-            return sha256_hex(&[b"iges:".as_slice(), &reviewed].concat());
+        if self.replacement.is_some() || self.feature.format != ImportFormat::Step {
+            return sha256_hex(
+                &serde_json::to_vec(&(&self.feature.format, self.replacement, &reviewed)).expect("review serializes"),
+            );
         }
         sha256_hex(&reviewed)
     }
 
     pub fn summary(&self) -> Value {
         json!({"source_name": self.feature.source_name, "source_sha256": self.feature.sha256,
-               "proposals": self.proposals.proposals, "token": self.token()})
+               "proposals": self.proposals.proposals, "replacement": self.replacement, "token": self.token()})
     }
 }
 
@@ -214,11 +241,24 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
     if preview.proposals.proposals.iter().any(|p| p.disposition == Disposition::Ask && !answered(p)) {
         return Err("this repair needs an explicit tolerance approval before it can be imported".into());
     }
-    let command = Command::AddFeature(FeatureKind::ImportStep(feature));
+    let command = match preview.replacement {
+        Some(id) => Command::EditFeature { id, kind: FeatureKind::ImportStep(feature) },
+        None => Command::AddFeature(FeatureKind::ImportStep(feature)),
+    };
     // Keep a refused multibody file out of the part and reuse the accepted trial's build.
     let mut trial = doc.scratch();
     let trial_result = trial.apply(command.clone());
-    let imported = trial.features.last().ok_or("the import made no feature")?;
+    let imported = match preview.replacement {
+        Some(id) => trial.feature(id),
+        None => trial.features.last(),
+    }
+    .ok_or("the import made no feature")?;
+    if preview.replacement.is_some() && imported.status != crate::document::FeatureStatus::Ok {
+        return Err(match &imported.status {
+            crate::document::FeatureStatus::Error(message) => message.clone(),
+            _ => "The replacement could not be built. Restore the full feature tree and review it again.".into(),
+        });
+    }
     let record = trial.model().import_record(soliddraft_model::FeatureId(imported.id as u32));
     let declined = trial_result.is_err()
         && record.is_some_and(|r| {
@@ -238,7 +278,7 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
             let record = doc.model().import_record(soliddraft_model::FeatureId(imported.id as u32));
             if declined && record == declined_record.as_ref() { Ok(imported.id) } else { Err(error) }
         }
-        Ok(None) => Err("the import made no feature".into()),
+        Ok(None) => preview.replacement.ok_or_else(|| "the import made no feature".into()),
     }
 }
 
@@ -258,7 +298,21 @@ pub fn record_rows(record: &RepairRecord) -> Vec<(String, String)> {
     for face in &record.face_tolerances {
         rows.push((format!("Face {} from source", face.face), format!("up to {} mm", face.deviation_upper_mm)));
     }
-    if !record.changes.is_empty() {
+    for face in &record.source_incidence {
+        rows.push((
+            format!("Face {} source discrepancy", face.face),
+            format!("up to {} mm", face.source_discrepancy_upper_mm),
+        ));
+        rows.push((
+            format!("Face {} shape deviation", face.face),
+            format!("up to {} mm", face.geometric_deviation_upper_mm),
+        ));
+        rows.push((
+            format!("Face {} source to result", face.face),
+            format!("up to {} mm", face.source_to_result_upper_mm),
+        ));
+    }
+    if !record.changes.is_empty() || !record.source_incidence.is_empty() {
         rows.push(("Repair figures".into(), "Cover the import only. Each export reports its own error.".into()));
     }
     rows
@@ -311,9 +365,20 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
     let mut choice = None;
     let mut cancelled = false;
     let format = preview.feature.format;
-    egui::Window::new(format!("Import {}", format.label())).collapsible(false).open(&mut open).show(ctx, |ui| {
+    let title = if preview.replacement.is_some() {
+        "Replace imported file".to_owned()
+    } else {
+        format!("Import {}", format.label())
+    };
+    egui::Window::new(title).collapsible(false).open(&mut open).show(ctx, |ui| {
         ui.label(&preview.feature.source_name);
         ui.label("Review repairs before importing. The original file stays unchanged.");
+        if format == ImportFormat::Mesh {
+            ui.label("STL and OBJ coordinates are read in millimetres. The mesh must form one closed solid, up to 200,000 triangles.");
+        }
+        if preview.replacement.is_some() {
+            ui.label("References to a changed file will need repair. You can undo the replacement.");
+        }
         let Preview { proposals, allowed, approver, .. } = &mut preview;
         let asked = || proposals.proposals.iter().filter(|p| p.disposition == Disposition::Ask);
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
@@ -361,7 +426,11 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                 if decline {
                     "Import saved with declined repairs; the solid stays open".into()
                 } else {
-                    format!("Imported {} body", format.label())
+                    if preview.replacement.is_some() {
+                        "Replaced imported file. Check any references marked for repair.".into()
+                    } else {
+                        format!("Imported {} body", format.label())
+                    }
                 },
                 NoteKind::Info,
             ),

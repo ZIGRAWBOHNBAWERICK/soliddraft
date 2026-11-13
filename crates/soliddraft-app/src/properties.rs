@@ -1877,6 +1877,15 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| match sel {
             Selection::Feature(id) => {
+                if state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && state
+                        .doc
+                        .feature(id)
+                        .is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_)))
+                    && ui.button("Replace file...").clicked()
+                {
+                    state.push(AppAction::ReplaceImport { feature: id, path: None });
+                }
                 if is_sketch {
                     if ui.button("Edit sketch").clicked() {
                         state.push(AppAction::EditSketch(id));

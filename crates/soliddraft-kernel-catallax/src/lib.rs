@@ -775,6 +775,7 @@ impl Kernel for CatallaxKernel {
         let op = match format {
             ImportFormat::Step => "import_step",
             ImportFormat::Iges => "import_iges",
+            ImportFormat::Mesh => "import_mesh",
         };
         self.observe(op, || self.import_body(format, tag, request))
     }

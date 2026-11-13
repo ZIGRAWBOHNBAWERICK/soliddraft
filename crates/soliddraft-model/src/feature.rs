@@ -650,6 +650,9 @@ pub struct ImportStepFeature {
     pub format: soliddraft_kernel_api::ImportFormat,
     /// The file name as imported, for display. It is never used as a path.
     pub source_name: String,
+    /// Bind generated reference names to this source hash. Older parts retain legacy names.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub source_bound_names: bool,
     /// The sha256 of `source`, in lowercase hex.
     pub sha256: String,
     /// The file bytes, unchanged.
@@ -670,6 +673,7 @@ impl ImportStepFeature {
         ImportStepFeature {
             format: soliddraft_kernel_api::ImportFormat::Step,
             source_name: source_name.into(),
+            source_bound_names: true,
             sha256: sha256_hex(&source),
             source,
             decisions: BTreeMap::new(),

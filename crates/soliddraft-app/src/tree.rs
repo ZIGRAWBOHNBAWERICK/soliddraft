@@ -410,6 +410,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let needs_repair = matches!(item.status, FeatureStatus::NeedsRepair(_));
             let name = item.name.clone();
             resp.context_menu(|ui| {
+                if state.frame_layout == crate::settings::FrameLayout::EditSuite
+                    && state.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::ImportStep(_)))
+                    && ui.button("Replace file...").clicked()
+                {
+                    actions.push(AppAction::ReplaceImport { feature: id, path: None });
+                    ui.close();
+                }
                 if ui.button(if is_sketch { "Edit sketch" } else { "Edit feature" }).clicked() {
                     actions.push(if is_sketch { AppAction::EditSketch(id) } else { AppAction::EditFeature(id) });
                     ui.close();

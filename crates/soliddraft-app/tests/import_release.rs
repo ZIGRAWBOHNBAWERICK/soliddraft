@@ -1,0 +1,163 @@
+//! Release import flows use the real review, kernel, feature tree and saved source.
+
+#[path = "support/ribbon.rs"]
+mod ribbon;
+
+use egui_kittest::kittest::Queryable;
+use serde_json::{Value, json};
+use soliddraft_app::{
+    command_tools::{CommandTools, ProposalBook, Surface},
+    document::{Document, FeatureKind, FeatureStatus},
+    import::{Preview, Review, commit},
+    settings::FrameLayout,
+    state::AppAction,
+};
+use soliddraft_assistant::{Caller, ToolHost};
+use soliddraft_kernel_api::ImportFormat;
+
+const BLOCK: &[u8] = include_bytes!("../../../ci/fixtures/import/block-seam-4um.step");
+const MESH: &[u8] = include_bytes!("../../../ci/fixtures/import/tetrahedron.obj");
+
+fn call(doc: &mut Document, name: &str, input: Value) -> Result<Value, String> {
+    let output = CommandTools { doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }.call(
+        name,
+        input,
+        &Caller::Mcp { client: "release import".into() },
+    );
+    if output.is_error { Err(output.content) } else { Ok(serde_json::from_str(&output.content).unwrap()) }
+}
+
+fn imported() -> (Document, u64) {
+    let mut doc = Document::new("Replacement", soliddraft_app::kernel());
+    let preview = Preview::from_bytes(&doc, "part.step", BLOCK.to_vec()).unwrap();
+    let id = commit(&mut doc, &preview, &Review::default()).unwrap();
+    (doc, id)
+}
+
+#[test]
+fn replaced_source_keeps_identity_and_marks_old_edge_and_face_references_for_repair() {
+    let (mut doc, id) = imported();
+    call(&mut doc, "fillet", json!({"edges":["Import1 · Edge 10"],"radius":2})).unwrap();
+    call(
+        &mut doc,
+        "sketch",
+        json!({"plane":"Import1 · Face 6","shapes":[{"shape":"circle","center":[10,12.5,10.004],"diameter":6}]}),
+    )
+    .unwrap();
+    let revision = doc.revision();
+    let same = Preview::from_bytes(&doc, "same.step", BLOCK.to_vec()).unwrap().replacing(&doc, id).unwrap();
+    assert_eq!(commit(&mut doc, &same, &Review::default()).unwrap(), id);
+    assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
+    assert!(doc.revision() > revision);
+    let mut changed = BLOCK.to_vec();
+    changed.push(b'\n');
+    let preview = Preview::from_bytes(&doc, "new.step", changed.clone()).unwrap().replacing(&doc, id).unwrap();
+    let untouched = doc.model().to_bytes().unwrap();
+    assert_eq!(commit(&mut doc, &preview, &Review::default()).unwrap(), id);
+    assert_eq!(doc.features.len(), 3);
+    assert_eq!(doc.features[0].name, "Import1");
+    assert_eq!(doc.features[0].status, FeatureStatus::Ok);
+    assert!(matches!(doc.features[1].status, FeatureStatus::NeedsRepair(_)));
+    assert!(matches!(doc.features[2].status, FeatureStatus::NeedsRepair(_)));
+    let FeatureKind::ImportStep(source) = &doc.features[0].kind else { panic!("import") };
+    assert_eq!(source.source, changed);
+    assert!(source.decisions.is_empty());
+    let saved = doc.model().to_bytes().unwrap();
+    let reopened =
+        soliddraft_app::file::open_bytes("replacement.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    assert!(matches!(reopened.features[1].status, FeatureStatus::NeedsRepair(_)));
+    assert!(matches!(reopened.features[2].status, FeatureStatus::NeedsRepair(_)));
+    doc.undo().unwrap();
+    assert_eq!(doc.model().to_bytes().unwrap(), untouched);
+    assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
+    doc.redo().unwrap();
+    assert!(matches!(doc.features[1].status, FeatureStatus::NeedsRepair(_)));
+}
+
+#[test]
+fn replacement_preview_is_bound_to_target_revision_and_reviewed_bytes() {
+    let (mut doc, id) = imported();
+    let preview = Preview::from_bytes(&doc, "new.step", BLOCK.to_vec()).unwrap().replacing(&doc, id).unwrap();
+    assert_ne!(preview.token(), Preview::from_bytes(&doc, "new.step", BLOCK.to_vec()).unwrap().token());
+    assert!(Preview::from_bytes(&doc, "bad.step", b"broken".to_vec()).is_err());
+    assert_eq!(doc.features.len(), 1);
+    call(&mut doc, "rename", json!({"feature":"Import1","name":"Imported part"})).unwrap();
+    assert!(commit(&mut doc, &preview, &Review::default()).unwrap_err().contains("changed"));
+    let original = doc.model().to_bytes().unwrap();
+    let wide = include_bytes!("../../../ci/fixtures/import/block-seam-20um.step");
+    let preview = Preview::from_bytes(&doc, "wide.step", wide.to_vec()).unwrap().replacing(&doc, id).unwrap();
+    assert!(commit(&mut doc, &preview, &Review::default()).is_err());
+    assert_eq!(doc.model().to_bytes().unwrap(), original);
+    assert!(commit(&mut doc, &preview, &Review { decline: vec!["g0".into()], accept: Vec::new() }).is_err());
+    assert_eq!(doc.model().to_bytes().unwrap(), original);
+}
+
+#[test]
+fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid() {
+    let case = ribbon::case("release-mesh-import");
+    let source = case.path("tetrahedron.obj");
+    std::fs::write(&source, MESH).unwrap();
+    let mut app = ribbon::app(Document::new("Mesh solid", soliddraft_app::kernel()));
+    app.run_steps(3);
+    let command = soliddraft_app::commands::get("import_mesh").unwrap();
+    assert!(!(command.shown)(&app.state().state));
+    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.run_steps(3);
+    app.get_by_label("File").click();
+    app.run_steps(3);
+    app.get_by_label("Import mesh solid…");
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
+    app.state_mut().state.push(AppAction::ImportMesh(Some(source.clone())));
+    app.run_steps(4);
+    app.get_by_label("No repairs proposed.");
+    assert!(app.state().state.doc.features.is_empty());
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Cancel").click();
+    app.run_steps(3);
+    assert!(app.state().state.import_dialog.is_none());
+    app.state_mut().state.push(AppAction::ImportMesh(Some(source)));
+    app.run_steps(4);
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+    app.run_steps(8);
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.features[0].status, FeatureStatus::Ok);
+    let body = doc.display_body().unwrap();
+    assert_eq!(doc.kernel().topology(body).unwrap().faces.len(), 4);
+    assert!((doc.kernel().mass_properties(body).unwrap().volume - 1000.0 / 6.0).abs() < 1e-8);
+    assert!(doc.meshes[&body].triangle_count() > 0);
+    case.frame(&mut app, "accepted");
+    let saved = app.state().state.doc.model().to_bytes().unwrap();
+    let mut reopened = soliddraft_app::file::open_bytes("mesh.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let FeatureKind::ImportStep(import) = &reopened.features[0].kind else { panic!("import") };
+    assert_eq!(import.format, ImportFormat::Mesh);
+    assert_eq!(import.source, MESH);
+    let export = reopened.kernel().export_step(reopened.display_body().unwrap(), &Default::default()).unwrap();
+    assert!(export.report.within_tolerance);
+    let preview =
+        Preview::from_bytes(&Document::new("check", soliddraft_app::kernel()), "mesh.step", export.text.into_bytes())
+            .unwrap();
+    assert!(preview.summary()["proposals"].as_array().unwrap().is_empty());
+    reopened.undo().unwrap();
+    assert!(reopened.features.is_empty());
+}
+
+#[test]
+fn mesh_refusals_are_plain_and_do_not_change_the_part() {
+    let doc = Document::new("Refusals", soliddraft_app::kernel());
+    let text = std::str::from_utf8(MESH).unwrap();
+    for (source, fragment) in [
+        (b"broken".to_vec(), "STL or OBJ"),
+        (text.replace("f 2 3 4\n", "").into_bytes(), "open edges"),
+        (text.replace("f 2 3 4", "f 2 4 3").into_bytes(), "reversed faces"),
+        (text.replace("f 2 3 4", "f 2 2 4").into_bytes(), "no area"),
+    ] {
+        let error = Preview::from_source(&doc, "bad.obj", source, ImportFormat::Mesh).unwrap_err();
+        assert!(error.contains(fragment), "{error}");
+    }
+    let mut oversized = vec![0; 84];
+    oversized[80..84].copy_from_slice(&200001_u32.to_le_bytes());
+    let error = Preview::from_source(&doc, "large.stl", oversized, ImportFormat::Mesh).unwrap_err();
+    assert!(error.contains("200,000"), "{error}");
+    assert!(doc.features.is_empty());
+    assert_eq!(doc.revision(), 0);
+}

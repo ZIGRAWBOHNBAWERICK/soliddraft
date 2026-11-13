@@ -540,7 +540,7 @@ module = ["subassembly"]
 name = "v9.import"
 owner = "V9"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/import/"]
+paths = ["crates/soliddraft-app/src/import/", "crates/soliddraft-app/tests/import_release.rs"]
 module = ["import"]
 
 [[areas]]

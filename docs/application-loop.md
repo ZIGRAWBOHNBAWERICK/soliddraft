@@ -220,6 +220,8 @@ A step's `repair` lists the features expected
 to raise the repair prompt; features that wait for them may report it, and every other
 feature must build. `{bundle}` in a string argument is replaced by the run's bundle
 directory, for `save` and `open`.
+Each export probe may set a filename-safe `attempt` identifier.
+It gives that probe its own output file, stdout/stderr labels and export timing entry, so a later same-format export preserves earlier refusal evidence.
 `checked_step_faces` may declare an independent export-face count when STEP splits logical faces into patches.
 The checker then requires both OpenCASCADE and the native report to match that count.
 Without it, the logical-body count, less reported removals, remains required.

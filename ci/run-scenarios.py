@@ -597,8 +597,12 @@ def replay_stand_in(args, directory, path, spec):
 def export_check(args, directory, spec, previous):
     extension = spec["format"]
     stand_in = spec.get("stand_in", False)
-    path = directory / ("stand-in.step" if stand_in else f"part.{extension}")
-    label = "export-stand-in" if stand_in else f"export-{extension}"
+    attempt = spec.get("attempt")
+    if "attempt" in spec and (not isinstance(attempt, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", attempt)):
+        raise ValueError("export attempt must be a nonempty filename-safe identifier")
+    suffix = f"-{attempt}" if attempt is not None else ""
+    path = directory / (f"stand-in{suffix}.step" if stand_in else f"part{suffix}.{extension}")
+    label = ("export-stand-in" if stand_in else f"export-{extension}") + suffix
     # The fresh process runs its whole request, opening and rebuilding the part included, on
     # one allowance and reports what it used. A step may only lower the application's limit.
     ceiling = spec.get("max_work", APP_REQUEST_WORK)
@@ -610,9 +614,13 @@ def export_check(args, directory, spec, previous):
     exported = cli(args.soliddraft, ["export", directory / "part.dwprt", "--json",
                                      "--stand-in" if stand_in else "--out", path, *lowered],
                    directory, label, args.timeout)
+    if attempt is not None:
+        exported["attempt"] = attempt
+        exported["evidence_label"] = label
     if "refused" in spec:
         untouched = path.read_bytes() == sentinel if path.is_file() and sentinel is not None else (
             sentinel is None and not path.exists())
+        exported["destination_unchanged"] = untouched
         exported["pass"] = (exported["exit"] != 0 and untouched and
                             spec["refused"] in (directory / f"{label}.stderr").read_text())
         return exported
@@ -1180,7 +1188,8 @@ def run(args):
             for export_spec in specifications:
                 extension = export_spec["format"]
                 exported = export_check(args, directory, export_spec, exports)
-                entry["intervals"].setdefault("export", {})[extension] = {"elapsed_ms": exported["elapsed_ms"]}
+                interval = f"{extension}-{exported['attempt']}" if "attempt" in exported else extension
+                entry["intervals"].setdefault("export", {})[interval] = {"elapsed_ms": exported["elapsed_ms"]}
                 checks.append(exported)
                 if exported["pass"] and "label" in step and "sha256" in exported:
                     exports[(step["label"], extension)] = exported["sha256"]

@@ -467,13 +467,15 @@
           "format": "step",
           "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STEP"
+          "sentinel": "previous accepted STEP",
+          "attempt": "budget"
         },
         {
           "format": "stl",
           "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STL"
+          "sentinel": "previous accepted STL",
+          "attempt": "budget"
         },
         {
           "format": "step",
@@ -491,7 +493,8 @@
               "pointer": "/report/solids",
               "equals": 1
             }
-          ]
+          ],
+          "attempt": "accepted"
         },
         {
           "format": "stl",
@@ -516,7 +519,8 @@
               "pointer": "/report/vertices",
               "minimum": 4
             }
-          ]
+          ],
+          "attempt": "accepted"
         }
       ],
       "checks": [
@@ -540,13 +544,15 @@
           "format": "step",
           "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STEP"
+          "sentinel": "previous accepted STEP",
+          "attempt": "budget"
         },
         {
           "format": "stl",
           "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STL"
+          "sentinel": "previous accepted STL",
+          "attempt": "budget"
         },
         {
           "format": "step",
@@ -564,7 +570,8 @@
               "pointer": "/report/solids",
               "equals": 1
             }
-          ]
+          ],
+          "attempt": "accepted"
         },
         {
           "format": "stl",
@@ -589,7 +596,8 @@
               "pointer": "/report/vertices",
               "minimum": 4
             }
-          ]
+          ],
+          "attempt": "accepted"
         }
       ],
       "checks": [
@@ -645,13 +653,15 @@
           "format": "step",
           "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STEP"
+          "sentinel": "previous accepted STEP",
+          "attempt": "budget"
         },
         {
           "format": "stl",
           "max_work": 10000000,
           "refused": "numbers.operation-budget",
-          "sentinel": "previous accepted STL"
+          "sentinel": "previous accepted STL",
+          "attempt": "budget"
         },
         {
           "format": "step",
@@ -669,7 +679,8 @@
               "pointer": "/report/solids",
               "equals": 1
             }
-          ]
+          ],
+          "attempt": "accepted"
         },
         {
           "format": "stl",
@@ -694,7 +705,8 @@
               "pointer": "/report/vertices",
               "minimum": 4
             }
-          ]
+          ],
+          "attempt": "accepted"
         }
       ],
       "checks": [

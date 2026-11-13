@@ -2222,7 +2222,8 @@ fn registry() -> Vec<CommandSpec> {
             .app_only("Part material"),
         cmd("check", "Check", Icon::Cad("check"), "Build the part independently with the distance-field model")
             .run(|_| AppAction::CheckPart)
-            .on(Inspect, "Check", Large),
+            .on(Inspect, "Check", Large)
+            .app_only("Part check report"),
         cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane").on(Inspect, "Check", Small),
         cmd("draft_check", "Draft check", Icon::Cad("draft_check"), "Show which faces have enough draft")
             .on(Inspect, "Surface quality", Small),

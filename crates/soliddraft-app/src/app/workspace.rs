@@ -475,6 +475,9 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
+            if palette {
+                crate::options_bar::panel(root, &mut self.state);
+            }
             egui::Panel::top("ribbon")
                 .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
                 .frame(panel_frame)
@@ -593,6 +596,7 @@ impl eframe::App for SolidDraftApp {
             .hover
             .and_then(|p| selection_of(&self.state.doc, p))
             .or(viewport.hover_reference.map(Selection::Reference))
+            .and_then(|sel| self.state.selection_filter().selection(Some(sel)))
             .and_then(|sel| self.state.doc.describe(sel));
         self.state.hover_point = self.state.viewport.hover_point;
 

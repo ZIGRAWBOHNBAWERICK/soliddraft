@@ -846,7 +846,7 @@ fn proof_folder() -> std::path::PathBuf {
 
 #[test]
 fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
-    use soliddraft_app::state::{AppAction, RibbonTab};
+    use soliddraft_app::state::AppAction;
     let _gpu = gpu();
     let mut app = harness(box_document());
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
@@ -870,12 +870,9 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     let FeatureKind::Chamfer(chamfer) = &state.doc.features.last().unwrap().kind else { panic!("chamfer") };
     assert_eq!(chamfer.other_distance, Some(3.0));
     assert!((volume(&state.doc) - (48000.0 - 90.0)).abs() < 1e-6);
+    button(&mut app, "Inspect tab");
     button(&mut app, "Material");
     assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
-    app.get_by_label("Part material");
-    app.state_mut().state.ribbon_tab = RibbonTab::Inspect;
-    app.run_steps(4);
-    button(&mut app, "Material");
     app.get_by_label("Part material").click();
     app.run_steps(4);
     app.get_by_label("Steel, generic").click();

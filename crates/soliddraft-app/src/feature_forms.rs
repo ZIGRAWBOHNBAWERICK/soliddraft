@@ -580,7 +580,8 @@ fn render(
             readout(ui, p.face.as_ref().map(|f| f.label.as_str()).unwrap_or("Click a planar face"))
         }
         (EditorParams::Hole(p), Key::Positions) => {
-            if ui.button(format!("{} positions", p.points.len())).clicked() {
+            if ui.button(format!("{} position{}", p.points.len(), if p.points.len() == 1 { "" } else { "s" })).clicked()
+            {
                 return true;
             }
         }

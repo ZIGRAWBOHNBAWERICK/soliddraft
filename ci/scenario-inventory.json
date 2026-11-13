@@ -1478,7 +1478,7 @@
         "soliddraft-app"
       ],
       "route": "egui_kittest -> View commands and Close sketch -> application dispatcher",
-      "evidence": "target/ux-tools/edit-suite-panes-sketch; hidden part pane, Tree/Values tabs, document defaults, red Close sketch and retained classic dock"
+      "evidence": "target/ux-tools/edit-suite-panes-sketch and target/ux-tools/edit-suite-document-panes; hidden part pane, Tree/Values tabs, actual assembly/drawing defaults, red Close sketch, display-only (-) prefix and retained classic dock"
     },
     {
       "id": "edit-suite-all-dimensions",

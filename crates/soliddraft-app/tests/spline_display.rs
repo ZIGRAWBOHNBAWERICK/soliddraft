@@ -62,6 +62,14 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
     }
     let before = state.doc.model().to_bytes().unwrap();
     let geometry = state.doc.model().geometry_hash();
+    let retained_body = state.doc.display_body();
+    let names = |state: &AppState| {
+        json!({
+            "faces": state.doc.faces.iter().map(|face| state.doc.any_face_ref(face.id).unwrap()).collect::<Vec<_>>(),
+            "edges": state.doc.edges.iter().map(|edge| state.doc.edge_ref(edge.id).unwrap()).collect::<Vec<_>>(),
+        })
+    };
+    let retained_names = names(&state);
     let undo = state.doc.undo_depth();
     let mut arguments = scenario["steps"][3]["arguments"].clone();
     let selected = edge_at(&state, rail);
@@ -135,6 +143,8 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
             assert!(!out.is_error, "{tool}: {}", out.content);
             if tool == "undo" {
                 assert_eq!(state.doc.model().geometry_hash(), geometry);
+                assert_eq!(state.doc.display_body(), retained_body);
+                assert_eq!(names(&state), retained_names);
                 assert!(!state.doc.proof_state().answered_within_bound);
             } else {
                 check(&state);

@@ -865,6 +865,13 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
                 observed["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }
+        if id == "section" {
+            assert_eq!(current["agents"], "app", "Section opens display-only inspection");
+            assert!(commands::get(id).unwrap().action.is_some());
+            assert_eq!(current["availability"]["plate"]["enabled"], true);
+            current["agents"] = row["agents"].clone();
+            current["availability"]["plate"]["enabled"] = row["availability"]["plate"]["enabled"].clone();
+        }
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

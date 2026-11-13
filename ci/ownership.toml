@@ -344,6 +344,13 @@ paths = ["crates/soliddraft-app/src/tree_visibility.rs"]
 module = ["tree_visibility"]
 
 [[areas]]
+name = "app.section"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/section.rs"]
+module = ["section"]
+
+[[areas]]
 name = "app.viewport"
 owner = "core"
 crate = "soliddraft-app"

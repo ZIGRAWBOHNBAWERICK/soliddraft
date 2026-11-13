@@ -49,6 +49,7 @@ pub mod recent;
 pub mod recovery;
 mod ring_menu;
 pub mod scene_import;
+pub mod section;
 pub mod settings;
 pub mod sketch_diagnostics;
 pub mod sketch_tools;

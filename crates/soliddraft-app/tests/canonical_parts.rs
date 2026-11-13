@@ -23,6 +23,7 @@ struct Names {
     faces: Vec<FaceRef>,
     edges: Vec<EdgeRef>,
     labels: BTreeSet<String>,
+    counts: (usize, usize),
 }
 
 impl Names {
@@ -43,7 +44,7 @@ impl Names {
                 format!("{} · {}", state.doc.feature(named.feature).unwrap().name, named.label)
             })
             .collect();
-        Self { faces, edges, labels }
+        Self { faces, edges, labels, counts: (topology.faces.len(), topology.edges.len()) }
     }
 
     fn check(&self, state: &AppState, stage: &str) {
@@ -55,7 +56,9 @@ impl Names {
         for reference in &self.edges {
             doc.resolve_edge(reference, body).unwrap_or_else(|e| panic!("{stage}: {reference:?}: {e:?}"));
         }
-        assert_eq!(Self::take(state).labels, self.labels, "{stage}: generator names changed");
+        let current = Self::take(state);
+        assert_eq!(current.labels, self.labels, "{stage}: generator names changed");
+        assert_eq!(current.counts, self.counts, "{stage}: topology counts changed");
     }
 }
 
@@ -122,9 +125,7 @@ fn tray_area() -> f64 {
     1200.0 - 4.0 * (15.0 * (20.0 - a) - integral(20.0) + integral(a))
 }
 
-#[test]
-fn canonical_parts_build_edit_keep_names_reopen_and_export_in_edit_suite() {
-    let case = ribbon::case("canonical-parts");
+fn exercise(index: usize) {
     let pi = std::f64::consts::PI;
     let expected = [
         (19080.0 + 275.0 * pi, 19080.0 + 445.0 * pi),
@@ -133,68 +134,92 @@ fn canonical_parts_build_edit_keep_names_reopen_and_export_in_edit_suite() {
         (tray_area() * 12.0 - 9360.0, tray_area() * 12.0 - 10489.5),
         (12558.681699123754, 12591.90560450861),
     ];
-    for (source, (original_volume, edited_volume)) in PARTS.iter().zip(expected) {
-        let scenario: Value = serde_json::from_str(source).unwrap();
-        let name = scenario["name"].as_str().unwrap();
-        let dir = case.path(name);
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut state = AppState::new(soliddraft_app::new_document());
-        let mut names = None;
-        for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
-            let tool = step["tool"].as_str().unwrap();
-            let arguments: Value =
-                serde_json::from_str(&step["arguments"].to_string().replace("{bundle}", dir.to_str().unwrap()))
-                    .unwrap();
-            if step["fresh_process"] == true {
-                drop(state);
-                state = AppState::new(soliddraft_app::new_document());
-            }
-            eprintln!("{name} step {} {tool}", i + 1);
-            let before = state.doc.model().part_json();
-            let revision = state.doc.revision();
-            let (out, work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
-                call_checked(
-                    &mut AppTools { state: &mut state },
-                    tool,
-                    arguments,
-                    &Caller::Mcp { client: "canonical-parts".into() },
-                )
-            });
-            assert!(!work.exhausted, "{name} step {} exceeded application allowance: {work:?}", i + 1);
-            if let Some(reason) = step["refused"].as_str() {
-                assert!(out.is_error && out.content.contains(reason), "{name}: {}", out.content);
-                assert_eq!(state.doc.model().part_json(), before, "refused edit changed the part");
-                assert_eq!(state.doc.revision(), revision, "refused edit changed the revision");
-                std::fs::write(dir.join(format!("{}.txt", step["label"].as_str().unwrap())), &out.content).unwrap();
-            } else {
-                assert!(!out.is_error, "{name} step {} {tool}: {}", i + 1, out.content);
-            }
-            assert!(state.doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
-            let Some(label) = step["label"]
-                .as_str()
-                .filter(|l| ["original", "edited", "undo", "redo", "reopened", "refused"].contains(l))
-            else {
-                continue;
-            };
-            assert_volume(
-                volume(&state),
-                if matches!(label, "original" | "undo") { original_volume } else { edited_volume },
-                label,
-            );
-            if label == "original" {
-                names = Some(Names::take(&state));
-            }
-            names.as_ref().unwrap().check(&state, label);
-            assert_eq!(state.doc.displayed_revision(), state.doc.revision(), "{label}: stale display");
-            assert!(state.doc.triangle_count() > 0, "{label}: empty display");
-            assert!(!state.doc.proof_pending(), "{label}: proof is still pending");
-            exports(&mut state, &dir, label);
-            let mut app = ribbon::app(state.doc);
-            app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
-            app.key_press(egui::Key::Z);
-            app.run_steps(5);
-            app.render().unwrap().save(dir.join(format!("{label}.png"))).unwrap();
-            state = AppState::new(std::mem::replace(&mut app.state_mut().state.doc, soliddraft_app::new_document()));
+    let (original_volume, edited_volume) = expected[index];
+    let scenario: Value = serde_json::from_str(PARTS[index]).unwrap();
+    let name = scenario["name"].as_str().unwrap();
+    let case = ribbon::case(&format!("canonical-parts/{name}"));
+    let dir = case.path("");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut state = AppState::new(soliddraft_app::new_document());
+    let mut names = None;
+    for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
+        let tool = step["tool"].as_str().unwrap();
+        let arguments: Value =
+            serde_json::from_str(&step["arguments"].to_string().replace("{bundle}", dir.to_str().unwrap())).unwrap();
+        if step["fresh_process"] == true {
+            drop(state);
+            state = AppState::new(soliddraft_app::new_document());
         }
+        eprintln!("{name} step {} {tool}", i + 1);
+        let before = state.doc.model().part_json();
+        let revision = state.doc.revision();
+        let (out, work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
+            call_checked(
+                &mut AppTools { state: &mut state },
+                tool,
+                arguments,
+                &Caller::Mcp { client: "canonical-parts".into() },
+            )
+        });
+        assert!(!work.exhausted, "{name} step {} exceeded application allowance: {work:?}", i + 1);
+        if let Some(reason) = step["refused"].as_str() {
+            assert!(out.is_error && out.content.contains(reason), "{name}: {}", out.content);
+            assert_eq!(state.doc.model().part_json(), before, "refused edit changed the part");
+            assert_eq!(state.doc.revision(), revision, "refused edit changed the revision");
+            std::fs::write(dir.join(format!("{}.txt", step["label"].as_str().unwrap())), &out.content).unwrap();
+        } else {
+            assert!(!out.is_error, "{name} step {} {tool}: {}", i + 1, out.content);
+        }
+        assert!(state.doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
+        let Some(label) = step["label"]
+            .as_str()
+            .filter(|l| ["original", "edited", "undo", "redo", "reopened", "refused"].contains(l))
+        else {
+            continue;
+        };
+        assert_volume(
+            volume(&state),
+            if matches!(label, "original" | "undo") { original_volume } else { edited_volume },
+            label,
+        );
+        if label == "original" {
+            names = Some(Names::take(&state));
+        }
+        names.as_ref().unwrap().check(&state, label);
+        assert_eq!(state.doc.displayed_revision(), state.doc.revision(), "{label}: stale display");
+        assert!(state.doc.triangle_count() > 0, "{label}: empty display");
+        assert!(!state.doc.proof_pending(), "{label}: proof is still pending");
+        exports(&mut state, &dir, label);
+        let mut app = ribbon::app(state.doc);
+        app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
+        app.key_press(egui::Key::Z);
+        app.run_steps(5);
+        app.render().unwrap().save(dir.join(format!("{label}.png"))).unwrap();
+        state = AppState::new(std::mem::replace(&mut app.state_mut().state.doc, soliddraft_app::new_document()));
     }
+}
+
+#[test]
+fn p1_builds_edits_keeps_names_reopens_and_exports_in_edit_suite() {
+    exercise(0);
+}
+
+#[test]
+fn p2_builds_edits_keeps_names_reopens_and_exports_in_edit_suite() {
+    exercise(1);
+}
+
+#[test]
+fn p3_builds_edits_keeps_names_reopens_and_exports_in_edit_suite() {
+    exercise(2);
+}
+
+#[test]
+fn p4_builds_edits_keeps_names_reopens_and_exports_in_edit_suite() {
+    exercise(3);
+}
+
+#[test]
+fn p5_builds_edits_keeps_names_reopens_and_exports_in_edit_suite() {
+    exercise(4);
 }

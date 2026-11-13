@@ -38,6 +38,17 @@ fn right_click(app: &mut App, pos: Pos2, model: bool) {
     app.run_steps(3);
 }
 
+fn tree_row(app: &mut App, name: &str) -> Pos2 {
+    let visible = app
+        .query_all_by_label(name)
+        .any(|node| node.accesskit_node().role() == egui::accesskit::Role::Button);
+    if !visible {
+        ribbon::run_command(app, "toggle_tree");
+        app.run_steps(12);
+    }
+    ribbon::control(app, name, ribbon::window(app)).rect.center()
+}
+
 fn menu_command(app: &mut App, id: &str) {
     let command = soliddraft_app::commands::get(id).unwrap();
     let state = &app.state().state;
@@ -86,7 +97,7 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         app.run_steps(6);
         assert!(app.state().state.doc.feature(feature).unwrap().suppressed);
 
-        let row = app.get_by_label(&name).rect().center();
+        let row = tree_row(app, &name);
         right_click(app, row, false);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(feature)));
         groups(app, &["Feature", "Body"]);
@@ -101,7 +112,7 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         case.frame(app, "edge");
         dismiss(app);
 
-        let row = app.get_by_label("Solid body").rect().center();
+        let row = tree_row(app, "Solid body");
         right_click(app, row, false);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
         groups(app, &["Body"]);
@@ -187,7 +198,7 @@ fn classic_keeps_its_viewport_and_feature_menu_behavior() {
         assert_eq!(app.state().state.doc.selection, original);
         assert!(app.query_all_by_label("Face").next().is_none());
         let name = app.state().state.doc.features[0].name.clone();
-        let row = app.get_by_label(&name).rect().center();
+        let row = tree_row(app, &name);
         right_click(app, row, false);
         assert!(app.query_all_by_label("Roll back to here").next().is_some());
         assert!(app.query_all_by_label("Repair references…").next().is_none());

@@ -3058,6 +3058,11 @@ impl Document {
         self.selection = None;
     }
 
+    /// The body label used by the tree and the property panel.
+    pub fn body_name(&self, key: u32) -> String {
+        if key == 0 && self.model.next_body() == 1 { BODY_NAME.to_owned() } else { format!("Body {}", key + 1) }
+    }
+
     /// Selects a solid and uses it for subsequent features.
     pub fn select_body(&mut self, key: u32) {
         self.active_body = key;
@@ -3866,15 +3871,7 @@ impl Document {
                     self.features[..end].iter().filter(|f| f.body_key == self.active_body && f.body.is_some()).count();
                 let details =
                     vec![("Built from".to_owned(), format!("{built} feature{}", if built == 1 { "" } else { "s" }))];
-                Some(EntityInfo {
-                    title: if self.active_body == 0 {
-                        BODY_NAME.to_owned()
-                    } else {
-                        format!("Body {}", self.active_body + 1)
-                    },
-                    feature: None,
-                    details,
-                })
+                Some(EntityInfo { title: self.body_name(self.active_body), feature: None, details })
             }
             Selection::Feature(id) => {
                 let f = self.feature(id)?;

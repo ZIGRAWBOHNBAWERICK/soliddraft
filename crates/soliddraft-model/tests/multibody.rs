@@ -123,3 +123,23 @@ fn deleted_and_undone_body_ids_are_not_reused_after_reopening() {
     doc.undo().unwrap();
     assert_eq!(doc.next_body(), 2);
 }
+
+#[test]
+fn deferred_deletion_and_combination_keep_the_previous_body_membership_until_rebuild() {
+    let (mut doc, _, tool) = pair();
+    let before = doc.live_bodies();
+    doc.execute_deferred(Command::DeleteFeature { id: tool }).unwrap();
+    assert_eq!(doc.live_bodies(), before);
+    doc.undo_deferred().unwrap();
+    doc.rebuild();
+    assert_eq!(doc.live_bodies(), before);
+    doc.execute_deferred(Command::AddFeatureInBody {
+        body: 0,
+        kind: FeatureKind::Combine { operation: BooleanOp::Union, tool: 1 },
+        via_assistant: false,
+    })
+    .unwrap();
+    assert_eq!(doc.live_bodies(), before);
+    doc.rebuild();
+    assert_eq!(doc.live_bodies().len(), 1);
+}

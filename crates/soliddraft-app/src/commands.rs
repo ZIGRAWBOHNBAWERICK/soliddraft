@@ -2113,9 +2113,9 @@ fn registry() -> Vec<CommandSpec> {
         )
         .key(Scope::Part, ctrl_shift, Key::D)
         .run(|_| AppAction::Drawing(DrawingAction::MakeDrawing))
-        .when(has_body)
+        .when(|s| has_body(s) && s.doc.model().live_bodies().len() == 1)
         .lit(|s| s.drawing.new.is_some())
-        .hint(|s| (!has_body(s)).then(|| "Make drawing needs a body".into()))
+        .hint(|s| if s.doc.model().live_bodies().len() > 1 { Some("Several-body drawings are coming soon. Combine the bodies first.".into()) } else { (!has_body(s)).then(|| "Make drawing needs a body".into()) })
 .agents(
             Agents::Mcp,
             "With the template's default views (Front, Top, Left and Isometric) fitted to the sheet and centre marks \

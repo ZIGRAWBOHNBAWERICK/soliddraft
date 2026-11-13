@@ -396,15 +396,13 @@ impl Document {
 
     fn body_states(&self, end: usize) -> BTreeMap<u32, BodyId> {
         let mut bodies = BTreeMap::new();
-        for (f, b) in self.features.iter().zip(&self.built).take(end) {
+        for b in self.built.iter().take(end) {
             if let Some(body) = b.output {
-                bodies.insert(f.body, body);
+                bodies.insert(b.body_key, body);
             } else {
-                bodies.remove(&f.body);
+                bodies.remove(&b.body_key);
             }
-            if b.status.is_ok()
-                && let FeatureKind::Combine { tool, .. } = f.kind
-            {
+            if let Some(tool) = b.consumed_tool {
                 bodies.remove(&tool);
             }
         }

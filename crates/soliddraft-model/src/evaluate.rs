@@ -22,6 +22,9 @@ use crate::document::{BuiltSketch, Document, FeatureStatus};
 /// One feature's rebuild result.
 #[derive(Clone, Debug)]
 pub(crate) struct Built {
+    /// Body membership of this retained build, including while definitions are dirty.
+    pub body_key: u32,
+    pub consumed_tool: Option<u32>,
     pub status: FeatureStatus,
     /// The part body after this feature.
     pub output: Option<BodyId>,
@@ -38,8 +41,19 @@ pub(crate) struct Built {
 }
 
 impl Built {
+    fn in_body(mut self, feature: &Feature) -> Self {
+        self.body_key = feature.body;
+        self.consumed_tool = match feature.kind {
+            FeatureKind::Combine { tool, .. } if self.status.is_ok() => Some(tool),
+            _ => None,
+        };
+        self
+    }
+
     fn pass(status: FeatureStatus, current: Option<BodyId>) -> Built {
         Built {
+            body_key: 0,
+            consumed_tool: None,
             status,
             output: current,
             owned: None,
@@ -196,7 +210,8 @@ impl Document {
                 Built::pass(FeatureStatus::Suppressed, current)
             } else {
                 self.build(&f, current, &mut cache)
-            };
+            }
+            .in_body(&f);
             self.built.push(built);
         }
         cache.trim(&self.built);
@@ -360,7 +375,7 @@ impl Document {
             FeatureKind::Lattice(l) => self.build_lattice(f, l, current),
             FeatureKind::Gyroid(g) => self.build_gyroid(f, g, current),
         };
-        cache.insert(key, built, &self.kernel)
+        cache.insert(key, built.in_body(f), &self.kernel)
     }
 
     /// The built sketch an extrusion sweeps, or the extrusion's result when that sketch
@@ -464,6 +479,8 @@ impl Document {
         };
         let regions = s.sketch.regions().map_err(|e| e.to_string());
         Built {
+            body_key: 0,
+            consumed_tool: None,
             status: FeatureStatus::Ok,
             output: current,
             owned: None,
@@ -559,6 +576,8 @@ impl Document {
         };
         match run() {
             Ok(output) => Built {
+                body_key: 0,
+                consumed_tool: None,
                 status: FeatureStatus::Ok,
                 output,
                 owned: mine,
@@ -795,6 +814,8 @@ impl Document {
         };
         match run(&mut mine) {
             Ok(output) => Built {
+                body_key: 0,
+                consumed_tool: None,
                 status: FeatureStatus::Ok,
                 output,
                 owned: mine,
@@ -877,6 +898,8 @@ impl Document {
             })
             .collect();
         Built {
+            body_key: 0,
+            consumed_tool: None,
             status: FeatureStatus::Ok,
             output: Some(result.body),
             owned: Some(result.body),
@@ -930,6 +953,8 @@ impl Document {
     ) -> Built {
         match result {
             Ok(r) => Built {
+                body_key: 0,
+                consumed_tool: None,
                 status: FeatureStatus::Ok,
                 output: Some(r.body),
                 owned: Some(r.body),
@@ -1302,6 +1327,8 @@ impl Document {
                 let result = r.bodies.remove(0).result;
                 let body = result.body;
                 Built {
+                    body_key: 0,
+                    consumed_tool: None,
                     status: FeatureStatus::Ok,
                     output: Some(body),
                     owned: Some(body),

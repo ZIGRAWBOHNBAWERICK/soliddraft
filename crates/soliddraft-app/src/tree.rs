@@ -170,7 +170,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             actions.push(AppAction::ShowMaterial);
         }
         for (key, _) in state.doc.model().live_bodies() {
-            let label = if key == 0 { crate::document::BODY_NAME.to_owned() } else { format!("Body {}", key + 1) };
+            let label = state.doc.body_name(key);
             let r = row(
                 ui,
                 RowSpec {

@@ -125,7 +125,7 @@ fn new_body_and_combine_are_available_in_the_application() {
         assert_picks(&app.state().state.doc);
         app.state_mut().state.show_tree(true);
         app.run_steps(8);
-        app.get_by_label("Solid body").click();
+        app.get_by_label("Body 1").click();
         app.run_steps(4);
         assert_eq!(app.state().state.doc.active_body, 0);
         app.get_by_label("Body 2").click();
@@ -232,4 +232,24 @@ fn a_new_body_can_start_on_an_existing_bodys_face_without_joining_it() {
     assert!((volume(&doc, 0) - 1000.0).abs() < 1e-6);
     assert!((volume(&doc, 1) - 50.0).abs() < 1e-6);
     assert_eq!(doc.features.last().unwrap().body_key, 1);
+}
+
+#[test]
+fn single_body_consumers_explain_the_multi_body_limit() {
+    use soliddraft_assembly::source::{DisplaySource, KernelSource};
+    let doc = pair();
+    let bytes = doc.model().to_bytes().unwrap();
+    let source = KernelSource::new(soliddraft_app::kernel());
+    assert_eq!(
+        source.part_mesh(&bytes).err().unwrap(),
+        "Several-body parts in assemblies are coming soon. Combine the bodies first."
+    );
+    let state = soliddraft_app::state::AppState::new(doc);
+    let make = soliddraft_app::commands::get("make_drawing").unwrap();
+    assert!(!make.is_enabled(&state));
+    assert_eq!(make.tip(&state), "Several-body drawings are coming soon. Combine the bodies first.");
+    assert_eq!(
+        soliddraft_app::drawing::create_drawing(&state, &soliddraft_app::drawing::NewDrawing::new()).err().unwrap(),
+        "Several-body drawings are coming soon. Combine the bodies first."
+    );
 }

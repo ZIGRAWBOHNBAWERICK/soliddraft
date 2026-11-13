@@ -901,6 +901,9 @@ pub fn create_drawing(state: &AppState, new: &NewDrawing) -> Result<DrawingSessi
 }
 
 pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> Result<DrawingSession, String> {
+    if part_doc.model().live_bodies().len() > 1 {
+        return Err("Several-body drawings are coming soon. Combine the bodies first.".into());
+    }
     let ctx = PartContext::new(part_doc).ok_or("The part has no body yet; extrude something first")?;
     let template = library::template(&new.template);
     let model_template = template.template();

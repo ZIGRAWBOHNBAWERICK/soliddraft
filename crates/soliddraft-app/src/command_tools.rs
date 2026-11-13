@@ -2954,7 +2954,7 @@ impl CommandTools<'_> {
         json!({
             "part": doc.name,
             "units": "mm",
-            "bodies": doc.model().live_bodies().iter().map(|(key, _)| json!({"id":key,"name":if *key == 0 { crate::document::BODY_NAME.to_owned() } else { format!("Body {}", key + 1) }})).collect::<Vec<_>>(),
+            "bodies": doc.model().live_bodies().iter().map(|(key, _)| json!({"id":key,"name":doc.body_name(*key)})).collect::<Vec<_>>(),
             "active_body": doc.active_body,
             "values": crate::grid::tools::values(crate::measure::values(doc), doc.model().values().summary()),
             "configurations": doc.model().configuration_summary(),

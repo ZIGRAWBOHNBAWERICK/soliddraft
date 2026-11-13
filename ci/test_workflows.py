@@ -420,7 +420,8 @@ class BladeOwnership(unittest.TestCase):
             config = root / 'system.gitconfig'
             config.touch()
             env = dict(os.environ, GIT_CONFIG_SYSTEM=str(config), GIT_CONFIG_GLOBAL='/dev/null',
-                       GIT_TEST_ASSUME_DIFFERENT_OWNER='1', GITHUB_WORKSPACE=str(source))
+                       GIT_TEST_ASSUME_DIFFERENT_OWNER='1', GITHUB_WORKSPACE=str(source),
+                       LINUX_ARCHIVE_WORKSPACE=str(source))
             probe = ['git', '-C', str(source), 'rev-parse', '--show-toplevel']
             before = subprocess.run(probe, env=env, capture_output=True, text=True)
             self.assertNotEqual(before.returncode, 0)
@@ -446,7 +447,7 @@ class BladeCleanup(unittest.TestCase):
         for block in blocks:
             condition = block.splitlines()[0]
             self.assertIn("always() && startsWith(runner.name, 'blade-sd-')", condition)
-            script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('\n\n', 1)[0])
+            script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('      - ', 1)[0].split('\n\n', 1)[0])
             with tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 (root / 'target').mkdir()
@@ -468,7 +469,7 @@ class BladeCleanup(unittest.TestCase):
                 prune = (root / 'prune.log').read_text()
                 self.assertIn('soliddraft.ci.job=123-fixture', prune)
                 self.assertIn('"dangling":["true"]', prune)
-                self.assertFalse((root / 'portable').exists())
+                self.assertTrue((root / 'portable').exists())
                 self.assertFalse((root / 'target').exists())
                 self.assertEqual((root / 'keep').read_text(), 'source')
                 (root / 'prune.log').unlink()

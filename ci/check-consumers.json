@@ -337,6 +337,17 @@
     ],
     "ci/test_merge_shards.py": [
       "lint"
+    ],
+    "ci/blade-disk.py": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "step-opencascade",
+      "msrv",
+      "application-loop"
+    ],
+    "ci/test_blade_disk.py": [
+      "lint"
     ]
   },
   "patterns": {

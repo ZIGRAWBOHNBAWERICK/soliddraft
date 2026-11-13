@@ -72,6 +72,7 @@ fn the_bracket_in_light_and_dark() {
         assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
         let image = harness.render().expect("Edit Suite renders");
         assert_eq!(image.get_pixel(2, 200).0, [0x30, 0x33, 0x38, 255], "the palette paints charcoal");
+        assert_eq!(image.get_pixel(10, 70).0, [0xf5, 0xa5, 0x24, 255], "Start sketch paints solid amber");
         let path = out_dir().join(format!("edit-suite-{}.png", mode.label().to_lowercase()));
         image.save(&path).expect("save Edit Suite png");
         eprintln!("wrote {}", path.display());

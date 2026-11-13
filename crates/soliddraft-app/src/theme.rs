@@ -191,6 +191,7 @@ pub mod edit_suite {
     pub const CHIP_LINE: Color32 = rgb(0x4a, 0x4e, 0x55);
     pub const POPUP: Color32 = rgb(0x35, 0x38, 0x3e);
     pub const POPUP_HOVER: Color32 = rgba(255, 255, 255, 26);
+    pub const PRIMARY_HOVER: Color32 = rgb(0xff, 0xbc, 0x4d);
     pub const DANGER: Color32 = rgb(0xe0, 0x3a, 0x2e);
     pub const ON_DANGER: Color32 = Color32::WHITE;
     pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);

@@ -88,8 +88,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 fn text(ui: &egui::Ui, state: &AppState, command: &CommandSpec, width: f32) -> std::sync::Arc<egui::Galley> {
+    let wide = command.id == "sketch" && !state.in_sketch();
     let color = if !command.is_enabled(state) {
         theme::muted()
+    } else if wide {
+        theme::on_accent()
     } else if (command.active)(state) {
         theme::selection_ink()
     } else {
@@ -97,7 +100,7 @@ fn text(ui: &egui::Ui, state: &AppState, command: &CommandSpec, width: f32) -> s
     };
     ui.painter().layout(
         label(command, state),
-        theme::font(tokens::TOOL_LABEL_SIZE),
+        if wide { theme::font_semibold(tokens::VALUE_SIZE) } else { theme::font(tokens::TOOL_LABEL_SIZE) },
         color,
         width - tokens::ICON_SIZE - 3.0 * tokens::TOOL_PADDING,
     )
@@ -113,7 +116,9 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     response
         .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, label(command, state)));
     let wide = command.id == "sketch" && !state.in_sketch();
-    let fill = if active {
+    let fill = if wide && enabled {
+        if response.hovered() { tokens::PRIMARY_HOVER } else { theme::accent() }
+    } else if active {
         theme::selection_bg()
     } else if enabled && response.hovered() {
         theme::hover()
@@ -137,6 +142,8 @@ fn tile(ui: &mut egui::Ui, state: &AppState, command: &'static CommandSpec, widt
     let treatment = if enabled { icons::Treatment::Normal } else { icons::Treatment::Disabled };
     let ink = if !enabled {
         theme::muted()
+    } else if wide {
+        theme::on_accent()
     } else if active {
         theme::selection_ink()
     } else {

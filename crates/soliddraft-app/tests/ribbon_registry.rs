@@ -872,6 +872,13 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                 observed["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }
+        if id == "section" {
+            assert_eq!(current["agents"], "app", "Section opens display-only inspection");
+            assert!(commands::get(id).unwrap().action.is_some());
+            assert_eq!(current["availability"]["plate"]["enabled"], true);
+            current["agents"] = row["agents"].clone();
+            current["availability"]["plate"]["enabled"] = row["availability"]["plate"]["enabled"].clone();
+        }
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();

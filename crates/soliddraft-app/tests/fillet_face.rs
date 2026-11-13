@@ -270,14 +270,9 @@ fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(4);
 }
 
-/// Confirms through the active frame's own button.
+/// The panel's own OK button, labelled with its shortcut ("OK (Enter)").
 fn ok(app: &mut App) {
-    let label = if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite {
-        "OK"
-    } else {
-        "OK (Enter)"
-    };
-    app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
+    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK (Enter)")
         .next()
         .expect("the open panel has an OK button")
         .click();
@@ -935,7 +930,6 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
-    button(&mut app, "Details");
     app.get_by_label(&format!("Fitted, deviation ≤ {bound:e} mm"));
     app.render().unwrap().save(proof_folder().join("ridealong-fitted-face.png")).unwrap();
 }
@@ -958,7 +952,6 @@ fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
-    button(&mut app, "Details");
     app.get_by_label("Import deviation");
     app.get_by_label("≤ 0.02 mm from source");
     app.get_by_label("Approved import limit");

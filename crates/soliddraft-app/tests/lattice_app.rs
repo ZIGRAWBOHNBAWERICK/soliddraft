@@ -195,7 +195,7 @@ fn ridealong_edit_suite_exposes_all_lattice_cells() {
     let folder = std::env::var_os("SOLIDDRAFT_TEST_OUT").map(std::path::PathBuf::from).unwrap_or(temporary);
     std::fs::create_dir_all(&folder).unwrap();
     app.render().unwrap().save(folder.join("ridealong-lattice-editor.png")).unwrap();
-    button(&mut app, "OK");
+    button(&mut app, "OK (Enter)");
     app.run_steps(30);
     let start = std::time::Instant::now();
     while app.state().state.doc.features.last().unwrap().status == soliddraft_app::document::FeatureStatus::Pending {

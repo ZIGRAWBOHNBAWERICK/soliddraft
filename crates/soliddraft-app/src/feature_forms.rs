@@ -23,8 +23,6 @@ pub enum Key {
     Edges,
     Radius,
     Distance,
-    TwoDistances,
-    OtherDistance,
     HoleFace,
     Positions,
     PositionList,
@@ -148,17 +146,11 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
             Icon::Fillet,
             vec![field(Edges, "Edges", "Picks", 220.0), field(Radius, "Radius", "Size", 160.0)],
         ),
-        EditorParams::Chamfer(p) => {
-            let mut fields = vec![
-                field(Edges, "Edges", "Picks", 220.0),
-                field(Distance, "Distance", "Size", 170.0),
-                field(TwoDistances, "", "Size", 130.0),
-            ];
-            if p.other_distance.is_some() {
-                fields.push(field(OtherDistance, "Distance 2", "Size", 170.0));
-            }
-            ("chamfer", Icon::Chamfer, fields)
-        }
+        EditorParams::Chamfer(_) => (
+            "chamfer",
+            Icon::Chamfer,
+            vec![field(Edges, "Edges", "Picks", 220.0), field(Distance, "Distance", "Size", 170.0)],
+        ),
         EditorParams::Hole(h) => {
             let mut fields = vec![
                 field(HoleFace, "Face", "Placement", 190.0),
@@ -353,7 +345,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
         .feedback
         .size
         .as_ref()
-        .or(editor.feedback.second_size.as_ref())
         .or(editor.feedback.pick.as_ref())
         .or(editor.error.as_ref())
         .map(|s| crate::geometry_message::for_user(s));
@@ -660,26 +651,6 @@ fn render(
                 egui::Id::new(("feature_size", editor.target, key)),
             );
         }
-        (EditorParams::Chamfer(p), Key::TwoDistances) => {
-            let mut unequal = p.other_distance.is_some();
-            if ui.checkbox(&mut unequal, "Two distances").changed() {
-                p.other_distance = unequal.then_some(p.distance);
-                editor.feedback.second_size = None;
-            }
-        }
-        (EditorParams::Chamfer(p), Key::OtherDistance) => {
-            if let Some(other) = &mut p.other_distance {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
-                properties::size_input(
-                    ui,
-                    "Distance 2",
-                    other,
-                    &mut editor.feedback.second_size,
-                    rect,
-                    egui::Id::new(("feature_size", editor.target, key)),
-                );
-            }
-        }
         (EditorParams::Hole(p), Key::HoleFace) => {
             readout(ui, p.face.as_ref().map(|f| f.label.as_str()).unwrap_or("Click a planar face"))
         }
@@ -894,16 +865,8 @@ fn render(
             number(ui, "Wall thickness", "mm", egui::DragValue::new(&mut p.thickness).speed(0.1))
         }
         (EditorParams::Lattice(p), Key::Cell) => {
-            let cell = p.cell.get_or_insert(LatticeCell::Cubic);
-            let response = egui::ComboBox::from_id_salt("lattice_cell")
-                .width(ui.available_width().max(40.0))
-                .selected_text(cell.label())
-                .show_ui(ui, |ui| {
-                    for choice in LatticeCell::ALL {
-                        ui.selectable_value(cell, choice, choice.label());
-                    }
-                });
-            response.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Cell type"));
+            p.cell = Some(LatticeCell::Cubic);
+            readout(ui, "Cubic");
         }
         (EditorParams::Lattice(p), Key::CellSize) => {
             number(ui, "Cell size", "mm", egui::DragValue::new(p.cell_size_mm.get_or_insert(0.0)).speed(0.1))

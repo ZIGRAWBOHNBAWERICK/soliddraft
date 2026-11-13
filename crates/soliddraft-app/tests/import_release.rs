@@ -126,8 +126,6 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     assert!((doc.kernel().mass_properties(body).unwrap().volume - 1000.0 / 6.0).abs() < 1e-8);
     assert!(doc.meshes[&body].triangle_count() > 0);
     case.frame(&mut app, "accepted");
-    ribbon::run_command(&mut app, "toggle_tree");
-    app.run_steps(6);
     let row = app.query_all_by_label("Import1").next().unwrap().rect().center();
     app.hover_at(row);
     app.run_steps(3);

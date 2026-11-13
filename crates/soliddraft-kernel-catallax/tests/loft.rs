@@ -201,6 +201,7 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     };
     let (view, work) = with_request_allowance(0, || k.view_curves(body.body, &screen));
     let view = view.unwrap();
+    eprintln!("named screen view: {work:?}; curves={}; unproved={}", view.curves.len(), view.unproved);
     assert!(!work.exhausted && view.unproved && !view.curves.is_empty());
     for spec in [
         soliddraft_kernel_api::drawing::ViewSpec { tolerance: 0.005, ..screen },

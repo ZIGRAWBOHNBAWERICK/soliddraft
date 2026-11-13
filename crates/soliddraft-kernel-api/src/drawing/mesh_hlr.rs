@@ -47,7 +47,9 @@ pub fn rendering_view_curves(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec)
     if !spec.preview {
         return Err(KernelError::InvalidInput("Named rendering is only available for screen views".into()));
     }
-    view_curves_impl(kernel, body, spec, true)
+    let mut view = view_curves_impl(kernel, body, spec, true)?;
+    view.unproved = true;
+    Ok(view)
 }
 
 fn view_curves_impl(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec, rendering: bool) -> KernelResult<ViewCurves> {

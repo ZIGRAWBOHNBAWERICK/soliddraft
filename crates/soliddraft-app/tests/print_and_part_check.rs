@@ -11,6 +11,13 @@ use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_exchange::{Format, Report};
 use std::time::{Duration, Instant};
 
+fn counted_plate() -> soliddraft_app::document::Document {
+    let kernel = std::sync::Arc::new(soliddraft_kernel_api::counting::Counting::new(soliddraft_app::kernel()));
+    let mut doc = soliddraft_app::document::Document::new("Checked part", kernel);
+    doc.apply(Command::AddExtrude { params: Default::default(), via_assistant: false }).unwrap();
+    doc
+}
+
 fn click(app: &mut ribbon::App, label: &str) {
     app.get_all_by_role_and_label(Role::Button, label).next().unwrap_or_else(|| panic!("missing {label}")).click();
     app.run_steps(4);
@@ -36,7 +43,7 @@ fn settle(app: &mut ribbon::App) {
 #[test]
 fn inspect_check_reports_independent_coverage_and_invalidates_on_undo() {
     let case = ribbon::case("independent-part-check");
-    let mut app = ribbon::app(ribbon::plate());
+    let mut app = ribbon::app(counted_plate());
     let before = app.state().state.doc.model().part_json();
     let undo = app.state().state.doc.undo_depth();
     click(&mut app, "Inspect tab");
@@ -63,7 +70,7 @@ fn inspect_check_reports_independent_coverage_and_invalidates_on_undo() {
 #[test]
 fn mesh_exports_show_the_native_certificate_before_writing() {
     let case = ribbon::case("print-check-export");
-    let mut app = ribbon::app(ribbon::plate());
+    let mut app = ribbon::app(counted_plate());
     for format in [Format::Stl, Format::ThreeMf, Format::Obj] {
         let path = case.path(&format!("part.{}", format.extension()));
         let previous = b"previous file";

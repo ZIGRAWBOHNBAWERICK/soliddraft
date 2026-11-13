@@ -257,6 +257,19 @@ impl Kernel for Counting {
         self.inner.export_field_stand_in(body, accuracy)
     }
 
+    fn independent_check(&self, body: BodyId) -> KernelResult<crate::IndependentCheck> {
+        self.inner.independent_check(body)
+    }
+
+    fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<crate::PrintMesh>> {
+        self.note(Work::Mesh(body));
+        self.inner.print_mesh(body, params)
+    }
+
+    fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<crate::FieldExport> {
+        self.inner.export_field_stl_at(body, accuracy_mm)
+    }
+
     fn tessellate(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
         self.inner.tessellate(body, params)

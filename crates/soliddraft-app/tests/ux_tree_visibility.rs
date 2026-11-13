@@ -34,8 +34,7 @@ use std::time::Instant;
 #[path = "support/ui.rs"]
 mod ribbon;
 
-#[path = "support/render_steps.rs"]
-mod render_steps;
+use ribbon::render_steps;
 
 use render_steps::HANG_GUARD;
 

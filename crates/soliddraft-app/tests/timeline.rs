@@ -116,7 +116,7 @@ fn keyboard_focus_is_visible_and_distinct_from_history_selection() {
                 assert_eq!(app.state().state.doc.selection, selection, "focus does not select {name}");
                 assert_eq!(app.state().state.layout.tree.shown, tree_shown, "focus does not toggle the Tree");
                 let focused = app.render().expect("focused history renders");
-                focused.save(case.path(format!("{}-{name}-focused.png", mode.label().to_lowercase()))).unwrap();
+                focused.save(case.path(&format!("{}-{name}-focused.png", mode.label().to_lowercase()))).unwrap();
                 let at = if name == "rollback" {
                     pos2(rect.left() + 3.0, rect.center().y)
                 } else {

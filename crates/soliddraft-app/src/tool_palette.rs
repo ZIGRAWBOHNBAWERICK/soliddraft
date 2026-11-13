@@ -58,7 +58,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 .filter(|command| {
                     (command.shown)(state)
                         && !(start && command.id == "sketch")
-                        && !(state.in_sketch() && command.id == "sketch")
+                        && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
                 })
                 .collect();
             if commands.is_empty() {

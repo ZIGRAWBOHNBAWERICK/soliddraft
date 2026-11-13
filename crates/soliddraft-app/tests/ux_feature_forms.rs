@@ -189,6 +189,8 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         settle(app);
         assert!(app.state().state.in_sketch());
         assert!(bar(app).contains_rect(app.get_by_label("Close sketch").rect()));
+        let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
+        assert!(!ribbon::painted_in(app, palette).iter().any(|p| p.text == "Exit"));
         let actions = ribbon::buttons_in(app, bar(app));
         assert!(!actions.iter().any(|(label, _)| matches!(label.as_str(), "OK" | "Cancel")));
         case.frame(app, "close-sketch");

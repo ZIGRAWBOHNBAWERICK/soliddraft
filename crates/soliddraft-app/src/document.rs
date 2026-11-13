@@ -3839,7 +3839,8 @@ fn view_status(
 /// The display mesh of a body that is only previewed: no picks, so nothing in it can be
 /// selected or confused with the document's own body.
 fn display_unavailable(reason: String) -> String {
-    format!("Display unavailable: {reason}")
+    let message = reason.strip_prefix("invalid input: ").unwrap_or(&reason);
+    format!("Display unavailable: {message}")
 }
 
 pub(crate) fn preview_mesh(

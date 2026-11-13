@@ -21,7 +21,7 @@ fn edit_suite_body_text_meets_aa() {
     let p = PALETTE;
     let backgrounds = [p.chrome, p.panel, p.panel_header, p.field_bg, p.chip, p.hud_bg, p.command_line];
     for background in backgrounds {
-        for foreground in [p.ink, p.accent, p.ok, p.warn, p.error] {
+        for foreground in [p.ink, p.muted, p.accent, p.ok, p.warn, p.error] {
             let ratio = contrast(foreground, background);
             assert!(ratio >= 4.5, "text {foreground:?} on {background:?}: {ratio:.2}:1");
         }
@@ -32,11 +32,14 @@ fn edit_suite_body_text_meets_aa() {
 
 #[test]
 fn field_hints_remain_readable() {
-    let ctx = egui::Context::default();
-    soliddraft_app::theme::install(&ctx, soliddraft_app::theme::Mode::Light);
-    let style = ctx.global_style();
-    let hint = style.visuals.weak_text_color();
-    assert_eq!(hint.a(), 255, "hints cannot fade into the field");
-    assert_eq!(hint, PALETTE.muted);
-    assert_eq!(style.visuals.extreme_bg_color, PALETTE.field_bg);
+    for mode in soliddraft_app::theme::Mode::ALL {
+        let ctx = egui::Context::default();
+        soliddraft_app::theme::install(&ctx, mode);
+        let style = ctx.global_style();
+        let hint = style.visuals.weak_text_color();
+        assert_eq!(hint.a(), 255, "hints cannot fade into the field");
+        let ratio = contrast(hint, style.visuals.extreme_bg_color);
+        assert!(ratio >= 4.5, "{mode:?} field hint contrast {ratio:.12}:1 must reach 4.5:1");
+        assert_eq!(style.visuals.extreme_bg_color, PALETTE.field_bg);
+    }
 }

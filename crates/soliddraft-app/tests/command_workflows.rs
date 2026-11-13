@@ -92,3 +92,66 @@ fn reference_plane_on_a_translated_part_is_visible() {
         );
     });
 }
+
+#[test]
+fn status_details_follow_part_drawing_assembly_and_back_to_part() {
+    use soliddraft_drawing::Projection;
+    let case = ribbon::case("active-document-status");
+    let mut app = ribbon::app(ribbon::plate());
+    case.run(&mut app, |app| {
+        ribbon::until(app, "the part proof", |app| !app.state().state.doc.proof_pending());
+        settle(app);
+        let triangles = format!("{} triangles", app.state().state.doc.triangle_count());
+        let part_lines = ribbon::status_lines(app);
+        for text in ["Rebuild OK", "1 feature", "Editing part", triangles.as_str()] {
+            assert!(part_lines.iter().any(|line| line == text), "part status {text}: {part_lines:?}");
+        }
+        case.frame(app, "part-status");
+        ribbon::run_command(app, "make_drawing");
+        ribbon::click_option(app, "Create drawing");
+        settle(app);
+        assert!(app.state().state.drawing.is_active());
+        let (sheet, format, link) = {
+            let session = app.state().state.drawing.session.as_ref().unwrap();
+            let sheet = session.sheet();
+            let projection = match sheet.projection {
+                Projection::FirstAngle => "first angle",
+                Projection::ThirdAngle => "third angle",
+            };
+            (
+                format!("Sheet {} of {}", session.sheet + 1, session.doc.drawing.sheets.len()),
+                format!("{} · {} · {projection}", sheet.size.name, sheet.scale),
+                format!(
+                    "Up to date with {} rev {}",
+                    session.doc.drawing.meta.title,
+                    session.doc.drawing.model.pinned.short()
+                ),
+            )
+        };
+        let drawing_lines = ribbon::status_lines(app);
+        for text in [&sheet, &format, &link] {
+            assert!(drawing_lines.contains(text), "drawing status {text}: {drawing_lines:?}");
+        }
+        assert!(!drawing_lines.iter().any(|line| line == "Editing part" || line == "Rebuild OK"));
+        case.frame(app, "drawing-status");
+        ribbon::run_command(app, "new_assembly");
+        settle(app);
+        assert!(app.state().state.assembly.is_active());
+        let assembly_lines = ribbon::status_lines(app);
+        for text in ["Assembly", "0 components", "0 parts placed", "Editing assembly"] {
+            assert!(assembly_lines.iter().any(|line| line == text), "assembly status {text}: {assembly_lines:?}");
+        }
+        assert!(!assembly_lines.iter().any(|line| line == "Editing part" || line == "Rebuild OK"));
+        assert!(!assembly_lines.iter().any(|line| line == &sheet || line == &link));
+        case.frame(app, "assembly-status");
+        ribbon::document_tab(app, "Ribbon acceptance");
+        settle(app);
+        assert!(!app.state().state.assembly.is_active() && !app.state().state.drawing.is_active());
+        let returned = ribbon::status_lines(app);
+        for text in ["Rebuild OK", "1 feature", "Editing part", triangles.as_str()] {
+            assert!(returned.iter().any(|line| line == text), "returned part status {text}: {returned:?}");
+        }
+        assert!(!returned.iter().any(|line| line == "Editing assembly" || line == &sheet || line == &link));
+        case.frame(app, "returned-part-status");
+    });
+}

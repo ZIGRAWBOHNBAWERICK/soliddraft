@@ -278,3 +278,44 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         case.frame(app, "drawing-properties-960");
     });
 }
+
+#[test]
+fn serialized_classic_tree_choice_migrates_and_later_suite_choices_survive() {
+    let case = ribbon::case("classic-saved-pane");
+    let config = case.path("config/settings.json");
+    for shown in [true, false] {
+        let mut legacy = soliddraft_app::panels::Layout::default();
+        legacy.tree.shown = shown;
+        legacy.tree.width = 333.0;
+        legacy.suite.part = !shown;
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "frame_layout": "classic", "layout": legacy, "future": {"keep": 7}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut app = ribbon::app(ribbon::plate());
+        case.run(&mut app, |app| {
+            assert_eq!(
+                app.state().state.tree_shown(),
+                shown,
+                "the active Classic choice wins over its inactive Suite choice"
+            );
+            assert_eq!(app.state().state.layout.tree.width, 333.0);
+            ribbon::run_command(app, "toggle_tree");
+            app.run_steps(30);
+            assert_eq!(app.state().state.tree_shown(), !shown);
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+            assert_eq!(saved["frame_layout"], "edit_suite", "a layout save completes migration");
+            assert_eq!(saved["future"]["keep"], 7);
+        });
+        drop(app);
+        let mut reopened = ribbon::app(ribbon::plate());
+        case.run(&mut reopened, |app| {
+            assert_eq!(app.state().state.tree_shown(), !shown, "the new-frame choice survives another launch");
+            assert_eq!(app.state().state.layout.tree.width, 333.0);
+        });
+    }
+}

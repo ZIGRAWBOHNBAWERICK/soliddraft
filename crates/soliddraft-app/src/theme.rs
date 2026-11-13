@@ -129,7 +129,7 @@ pub mod edit_suite {
         line: rgb(0x19, 0x1a, 0x1d),
         line_strong: rgb(0x47, 0x4b, 0x52),
         ink: rgb(0xe6, 0xe8, 0xec),
-        muted: rgb(0x9d, 0xa2, 0xab),
+        muted: rgb(0xa3, 0xa8, 0xb1),
         accent: rgb(0xf5, 0xa5, 0x24),
         accent_soft: rgba(245, 165, 36, 51),
         selection_bg: rgba(245, 165, 36, 51),

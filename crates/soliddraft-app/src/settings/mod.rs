@@ -67,7 +67,8 @@ pub fn save_layout(layout: &Layout) -> Result<(), NotKept> {
 
 fn layout_from(all: &Value) -> Layout {
     let mut layout = serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped();
-    if all["layout"]["suite"].is_null()
+    // Classic serialized inactive Suite flags too; keep its active tree choice until a layout save.
+    if (all["frame_layout"] == "classic" || all["layout"]["suite"].is_null())
         && let Some(shown) = all["layout"]["tree"]["shown"].as_bool()
     {
         layout.suite.part = shown;
@@ -455,6 +456,9 @@ fn save_section(key: &str, value: &impl serde::Serialize) -> Result<(), NotKept>
 fn save_section_to(store: &Store, key: &str, value: &impl serde::Serialize) -> Result<(), NotKept> {
     let mut all = store.load();
     all[key] = serde_json::to_value(value).map_err(|e| NotKept::Write(e.to_string()))?;
+    if key == "layout" && all["frame_layout"] == "classic" {
+        all["frame_layout"] = Value::String("edit_suite".into());
+    }
     if key != "navigation" {
         record_install_preset(&mut all);
     }

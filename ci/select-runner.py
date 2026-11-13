@@ -27,9 +27,9 @@ def runners(event, actor, starter, repository, boat_enabled, boat_at, bohn_at, n
     # Blade uses Ubuntu job containers. NixOS remains limited to plain Cargo jobs.
     return {'blade': blade_runner,
             'archive': ['boat-large'] if boat else blade_runner,
-            'plain': ['boat-large'] if boat else ['self-hosted', 'bohn-03'] if bohn else ['ubuntu-latest'],
+            'plain': ['boat-large'] if boat else blade_runner if blade else ['self-hosted', 'bohn-03'] if bohn else ['ubuntu-latest'],
             'application': ['boat-large'] if boat else blade_runner,
-            'plain_jobs': '1' if bohn and not boat else '4'}
+            'plain_jobs': '1' if bohn and not boat and not blade else '4'}
 
 
 def main():

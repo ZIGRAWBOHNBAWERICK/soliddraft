@@ -91,16 +91,17 @@ class RunnerHealth(unittest.TestCase):
         self.assertEqual(fallback['plain_jobs'], '1')
         self.assertEqual(fallback['archive'], ['ubuntu-latest'])
         self.assertEqual(fallback['application'], ['ubuntu-latest'])
-        self.assertEqual(self.select(boat_at='0', bohn_at='0')['plain'], ['ubuntu-latest'])
-        self.assertEqual(self.select(boat_enabled='false')['plain'], ['self-hosted', 'bohn-03'])
+        self.assertEqual(self.select(boat_at='0', bohn_at='0', blade_at='0')['plain'], ['ubuntu-latest'])
+        self.assertEqual(self.select(boat_enabled='false', blade_at='0')['plain'], ['self-hosted', 'bohn-03'])
 
     def test_blade_uses_the_same_health_and_trust_gate(self):
         self.assertEqual(self.select()['blade'], ['self-hosted', 'blade-sd'])
         self.assertEqual(self.select(boat_enabled='false')['blade'], ['self-hosted', 'blade-sd'])
-        for key in ('archive', 'application'):
+        for key in ('archive', 'application', 'plain'):
             self.assertEqual(self.select(boat_enabled='false')[key], ['self-hosted', 'blade-sd'])
             self.assertEqual(self.select(boat_at='0')[key], ['self-hosted', 'blade-sd'])
-            self.assertEqual(self.select(boat_at='0', blade_at='0')[key], ['ubuntu-latest'])
+            self.assertEqual(self.select(boat_at='0', blade_at='0', bohn_at='0')[key], ['ubuntu-latest'])
+        self.assertEqual(self.select(boat_enabled='false')['plain_jobs'], '4')
         for stamp in (None, '', '0', '1002', 'bad', '101'):
             self.assertEqual(self.select(blade_at=stamp)['blade'], ['ubuntu-latest'])
 

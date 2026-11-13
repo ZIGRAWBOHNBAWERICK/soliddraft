@@ -752,18 +752,49 @@ jobs:
     if: contains(fromJSON(needs.select.outputs.selected), 'msrv')
     name: Minimum Rust version (Rust-only crates)
     runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ contains(fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]'), 'blade-sd') && 'ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec' || '' }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    defaults:
+      run:
+        shell: bash
     env:
       CARGO_BUILD_JOBS: ${{ needs.select.outputs.plain_jobs }}
     steps:
+      - name: Prepare Blade Ubuntu container
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          {
+            echo "CARGO_HOME=$GITHUB_WORKSPACE/.ci-cargo"
+            echo "RUSTUP_HOME=$GITHUB_WORKSPACE/.ci-rustup"
+            echo 'CARGO_BUILD_JOBS=4'
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
-        if: needs.select.outputs.plain_jobs != '1'
+        if: needs.select.outputs.plain_jobs != '1' && !startsWith(runner.name, 'blade-sd-')
         with:
           cache-bin: false
           shared-key: native-dev
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check -p soliddraft-kernel-api -p soliddraft-recipe -p soliddraft-drawing -p soliddraft-sketch -p soliddraft-assistant -p soliddraft-materials -p soliddraft-assembly --all-features
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8" "$LINUX_ARCHIVE_WORKSPACE"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          # Only images labelled for this job may be pruned; the pinned base is retained.
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
+
 
   interactive-linux:
     needs: select

@@ -369,14 +369,15 @@ class BladeRouting(unittest.TestCase):
                       triggering_actor='BohnBawerick', event_name='push',
                       needs={'blade_runner': '["self-hosted","blade-sd"]',
                              'archive_runner': '["boat-large"]',
-                             'application_runner': '["boat-large"]'})
+                             'application_runner': '["boat-large"]',
+                             'plain_runner': '["boat-large"]'})
         cases = [(job, {'shard': n}, ['self-hosted', 'blade-sd'] if n % 2 == 0 else ['ubuntu-latest'])
                  for job in ('partition-linux', 'test-linux') for n in range(1, 9)]
         cases += [('application-loop', {'lane': lane},
                    ['self-hosted', 'blade-sd'] if lane == 1 else ['ubuntu-latest'] if lane == 3 else ['boat-large'])
                   for lane in ('proof', 1, 2, 3)]
         cases += [(job, {}, ['self-hosted', 'blade-sd'] if job == 'lint' else ['boat-large'])
-                  for job in ('lint', 'kernel', 'build-linux', 'step-opencascade')]
+                  for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'msrv')]
         for job, matrix, expected in cases:
             runner = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
             image = re.search(r'^      image: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
@@ -391,6 +392,12 @@ class BladeRouting(unittest.TestCase):
                 self.assertIn('shell: bash', jobs[job])
                 self.assertIn('Prepare Blade Ubuntu container', jobs[job])
                 self.assertIn('Clean Blade build output', jobs[job])
+                if job == 'msrv':
+                    for pool in (['self-hosted', 'blade-sd'], ['self-hosted', 'bohn-03'], ['ubuntu-latest']):
+                        fallback = dict(values, needs={**values['needs'], 'plain_runner': json.dumps(pool)})
+                        self.assertEqual(evaluate(runner, **fallback, matrix=matrix), pool)
+                        self.assertEqual(bool(evaluate(image, **fallback, matrix=matrix)), 'blade-sd' in pool)
+
 
 
 class BladeCleanup(unittest.TestCase):

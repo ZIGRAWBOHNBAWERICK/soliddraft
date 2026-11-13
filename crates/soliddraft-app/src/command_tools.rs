@@ -95,6 +95,20 @@ pub enum SweepSegment {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         corner_axis: Option<[f64; 3]>,
     },
+    /// A rational B-spline path.
+    Spline {
+        /// Saved identity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// Polynomial degree.
+        degree: usize,
+        /// Control points, including the path start and end, in millimetres.
+        control_points: Vec<[f64; 3]>,
+        /// Positive weights, one per control point.
+        weights: Vec<f64>,
+        /// Nondecreasing knot vector.
+        knots: Vec<f64>,
+    },
 }
 
 /// The path as a sweep verb spells it: one `end`, or a chain of `segments`.
@@ -122,13 +136,15 @@ impl SweepInput<'_> {
             .iter()
             .enumerate()
             .filter_map(|(index, segment)| {
-                let (SweepSegment::Line { id, .. } | SweepSegment::Arc { id, .. }) = segment;
+                let (SweepSegment::Line { id, .. } | SweepSegment::Arc { id, .. } | SweepSegment::Spline { id, .. }) =
+                    segment;
                 id.clone().or_else(|| kept(index))
             })
             .collect();
         let mut chain = Vec::with_capacity(segments.len());
         for (index, segment) in segments.iter().enumerate() {
-            let (SweepSegment::Line { id, .. } | SweepSegment::Arc { id, .. }) = segment;
+            let (SweepSegment::Line { id, .. } | SweepSegment::Arc { id, .. } | SweepSegment::Spline { id, .. }) =
+                segment;
             let id = id.clone().or_else(|| kept(index)).unwrap_or_else(|| {
                 let id = (1..).map(|n| format!("segment{n}")).find(|c| !taken.contains(c)).expect("a free name");
                 taken.push(id.clone());
@@ -138,6 +154,13 @@ impl SweepInput<'_> {
                 SweepSegment::Line { to, corner_axis, .. } => {
                     PathSegment::Line { id, to: *to, corner_axis: *corner_axis }
                 }
+                SweepSegment::Spline { degree, control_points, weights, knots, .. } => PathSegment::Spline {
+                    id,
+                    degree: *degree,
+                    control_points: control_points.clone(),
+                    weights: weights.clone(),
+                    knots: knots.clone(),
+                },
                 SweepSegment::Arc { centre, axis, turn, corner_axis, .. } => {
                     PathSegment::Arc { id, centre: *centre, axis: *axis, turn: *turn, corner_axis: *corner_axis }
                 }
@@ -674,6 +697,20 @@ fn sweep_segment_schema() -> Value {
             ("corner_axis", corner()),
         ]),
         object(&[
+            ("kind", constant("spline")),
+            ("id", id()),
+            ("degree", integer("Polynomial degree, greater than zero")),
+            (
+                "control_points",
+                non_empty_array(
+                    array(number("component"), "Point [x, y, z], mm"),
+                    "Control points, including path start and end",
+                ),
+            ),
+            ("weights", non_empty_array(number("Positive weight"), "One weight per control point")),
+            ("knots", non_empty_array(number("Knot"), "Nondecreasing clamped knot vector")),
+        ]),
+        object(&[
             ("kind", constant("arc")),
             ("id", id()),
             ("centre", array(number("component"), "Centre [x, y, z], mm")),
@@ -688,10 +725,19 @@ fn sweep_path_params() -> Vec<(&'static str, Value)> {
     vec![
         ("start", array(number("component"), "Path start [x, y, z], mm")),
         ("end", optional(array(number("component"), "End of a one-line path [x, y, z], mm"))),
-        ("segments", optional(non_empty_array(sweep_segment_schema(), "Lines and arcs in order, instead of `end`"))),
+        (
+            "segments",
+            optional(non_empty_array(
+                sweep_segment_schema(),
+                "Lines and arcs, or one spline with fixed orientation, instead of `end`",
+            )),
+        ),
         (
             "orientation",
-            optional(one_of(&["fixed", "follow_path"], "`fixed` keeps the profile's direction and takes lines only")),
+            optional(one_of(
+                &["fixed", "follow_path"],
+                "`fixed` keeps the profile direction along lines or one spline; `follow_path` turns along lines and arcs",
+            )),
         ),
     ]
 }

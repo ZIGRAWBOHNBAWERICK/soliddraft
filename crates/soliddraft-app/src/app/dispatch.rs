@@ -1355,9 +1355,5 @@ fn use_axis(params: &mut EditorParams, axis: AxisKind) {
 
 /// Maps an id-buffer pick to the document entity it stands for.
 pub(super) fn selection_of(doc: &Document, picked: Picked) -> Option<Selection> {
-    match doc.pick(picked.pick())? {
-        crate::document::PickEntry::Face(_, f) => Some(Selection::Face(f)),
-        crate::document::PickEntry::Edge(_, e) => Some(Selection::Edge(e)),
-        crate::document::PickEntry::Vertex(k, _) => Some(Selection::Vertex(k)),
-    }
+    crate::viewport::pick::selection(doc, picked)
 }

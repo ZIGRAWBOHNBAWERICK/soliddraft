@@ -262,7 +262,7 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
         app.get_all_by_label("Sketch3").last().unwrap().click();
         ux_tools::settle(&mut app);
         if layout == soliddraft_app::settings::FrameLayout::EditSuite {
-            app.get_by_label("Ruled").click();
+            app.get_by_value("Ruled").click();
             ux_tools::settle(&mut app);
         }
         app.get_by_label("Smooth").click();

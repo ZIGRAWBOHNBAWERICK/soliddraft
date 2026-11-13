@@ -309,6 +309,10 @@ impl Kernel for Counting {
         self.inner.preview(body, params)
     }
 
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
+        self.inner.measure_work(run)
+    }
+
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn crate::ProofWork>> {
         self.inner.reserve_proof_work()
     }

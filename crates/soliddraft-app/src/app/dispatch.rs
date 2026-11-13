@@ -947,6 +947,7 @@ impl SolidDraftApp {
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);
                 self.state.layout.tree.shown = true;
@@ -1449,7 +1450,7 @@ impl SolidDraftApp {
                 });
                 let Some(path) = path else { return };
                 let exported = self.state.export_part(format);
-                match exported.and_then(|out| crate::platform::write_file(&path, &out.bytes).map(|()| out.report)) {
+                match exported.and_then(|out| out.write_with(&path, crate::platform::write_file).map(|()| out.report)) {
                     Ok(report) => {
                         let kind = match &report {
                             soliddraft_exchange::Report::Step(r) if !r.within_tolerance => NoteKind::Error,

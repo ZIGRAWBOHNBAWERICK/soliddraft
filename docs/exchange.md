@@ -222,3 +222,29 @@ during fitting leaves the original part unchanged.
 The `scan_workspace` application test drives reference review, cancellation,
 acceptance, a fitting refusal, both maps, fit acceptance, save/reopen, downstream
 editing and STEP export through the real application and renderer.
+
+## STEP proof reports
+
+Every STEP file written by the app or `soliddraft export` has two adjacent reports:
+`part.step.proof.txt` for reading and `part.step.proof.json` for tools. The suffix
+preserves the full filename, including `.stp`. Browser exports download all three
+files. A report write failure prevents publication of the new STEP file.
+
+The JSON format is `soliddraft-proof/1`. It records the STEP bytes' SHA-256, the
+export deviation certificate, and each feature's name, id, model answer kind,
+model bound, independent display bound, and work used. Suppressed features and
+features below the rollback bar are inactive and contribute no geometry.
+
+Work counts cover the original retained feature build, including its geometry
+queries. They exclude rendering and STEP export. Cache reuse, undo and renaming
+keep the count with that build. A null count means the backend or input did not
+record it. Raw recipe exports list the contributing operation tags and their build work, excluding replay summary queries.
+
+Pending, refused and model-bounded answers cannot export. Finish or cancel a live
+feature, sketch or dimension preview first. A measured display bound does not
+certify geometry. When the exact model has independent proof, STEP export uses
+that model and includes the display evidence separately in the report.
+
+Reports are written before the STEP file, with an atomic write for each desktop
+file. A later write failure can leave reports for bytes that were not published;
+compare their SHA-256 with the STEP file before relying on them.

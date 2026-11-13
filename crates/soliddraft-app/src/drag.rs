@@ -388,6 +388,17 @@ impl DragPreview {
         changed
     }
 
+    /// Rendering evidence for the current completed drag answer, never model proof.
+    pub fn display_bound(&self) -> Option<soliddraft_kernel_api::DisplayBound> {
+        self.proved_request()?;
+        let proof = self.proof.as_ref()?.as_ref().ok()?;
+        if proof.failure.is_some() {
+            return None;
+        }
+        proof.display.as_ref()?;
+        proof.model.kernel().display_bound(proof.model.body()?).ok().flatten()
+    }
+
     pub fn label(&self) -> (String, bool) {
         if let Shown::Failed { value, message } = &self.shown {
             return (format!("Edit failed · {} {} mm: {message}", self.dimension().label(), fmt_mm(*value)), true);

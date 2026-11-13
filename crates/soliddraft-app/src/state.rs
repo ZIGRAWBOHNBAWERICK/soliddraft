@@ -93,6 +93,8 @@ pub enum AppAction {
     /// Computes mass properties only after the user requests them.
     MeasureMassProperties,
     MeasureEntity,
+    /// Run independent construction checks on the current part.
+    CheckPart,
     SetView(StandardView),
     /// Look straight at the active sketch plane, or the selected planar face.
     NormalTo,
@@ -1050,6 +1052,8 @@ pub struct Rename {
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
+    pub part_check: Option<crate::part_check::Inspection>,
+    pub print_check: Option<crate::print_check::Dialog>,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
@@ -1224,6 +1228,8 @@ impl AppState {
         Self {
             doc,
             measure: Default::default(),
+            part_check: None,
+            print_check: None,
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),
@@ -1454,6 +1460,20 @@ impl AppState {
     /// Exports only the committed revision. A live dimension edit cannot export
     /// the preceding body as if it represented the value currently requested.
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
+        self.export_part_at(format, None)
+    }
+
+    /// Exports at an explicitly chosen accuracy, retaining the current revision guards.
+    pub fn export_part_at(
+        &self,
+        format: soliddraft_exchange::Format,
+        accuracy_mm: Option<f64>,
+    ) -> Result<soliddraft_exchange::Export, String> {
+        self.export_ready()?;
+        self.doc.model().export_at(format, accuracy_mm)
+    }
+
+    pub(crate) fn export_ready(&self) -> Result<(), String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
         }
@@ -1464,7 +1484,7 @@ impl AppState {
         if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {
             return Err("The requested revision has not passed proof".into());
         }
-        self.doc.model().export(format)
+        Ok(())
     }
 
     /// Runs one step of a dimension drag. Only the final value reaches the document, as

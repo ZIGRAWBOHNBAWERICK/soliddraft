@@ -233,6 +233,20 @@ impl Document {
     /// not have; suppressed and rolled-back features are fine. A field part writes only
     /// its labelled STL, or its mass stand-in when that is the format asked for.
     pub fn export(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
+        self.export_at(format, None)
+    }
+
+    /// Exports at an explicit mesh accuracy without changing the document settings.
+    pub fn export_at(
+        &self,
+        format: soliddraft_exchange::Format,
+        accuracy_mm: Option<f64>,
+    ) -> Result<soliddraft_exchange::Export, String> {
+        let mut tolerance = self.settings.export;
+        if let Some(mm) = accuracy_mm {
+            tolerance.chord_height = mm;
+            tolerance.check()?;
+        }
         if format == soliddraft_exchange::Format::StandIn {
             return self.export_stand_in(&FieldMassAccuracy::default());
         }
@@ -245,14 +259,18 @@ impl Document {
         }
         let body = self.built_body()?;
         if field {
-            let output = self.kernel.export_field_stl(body).map_err(|e| e.to_string())?;
+            let output = match accuracy_mm {
+                Some(mm) => self.kernel.export_field_stl_at(body, mm),
+                None => self.kernel.export_field_stl(body),
+            }
+            .map_err(|e| e.to_string())?;
             return Ok(soliddraft_exchange::Export {
                 bytes: output.bytes,
                 report: soliddraft_exchange::Report::FieldMesh(output.report),
             });
         }
 
-        soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &self.settings.export)
+        soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &tolerance)
             .map_err(|e| e.to_string())
     }
 
@@ -297,6 +315,14 @@ impl Document {
             return Err(format!("{} did not build; repair or suppress it before exporting", f.name));
         }
         Ok(self.body().ok_or("the part has no body to export")?)
+    }
+
+    /// Checks every current recipe prefix independently with both representations.
+    pub fn independent_check(&self) -> Result<soliddraft_kernel_api::IndependentCheck, String> {
+        if self.is_dirty() {
+            return Err("Wait for the part to rebuild before checking it".into());
+        }
+        self.kernel.independent_check(self.built_body()?).map_err(|e| e.to_string())
     }
 
     /// The kernel the document builds on.

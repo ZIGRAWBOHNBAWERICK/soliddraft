@@ -73,19 +73,25 @@ pub fn step_path_params() -> Vec<(&'static str, Value)> {
     path_param("The file to write, ending in .step or .stp")
 }
 
+fn mesh_path_params(description: &str) -> Vec<(&'static str, Value)> {
+    let mut params = path_param(description);
+    params.push(("accuracy_mm", soliddraft_assistant::tools::schema::optional(number("Explicit mesh accuracy in millimetres. A larger value is a coarser choice; does not change saved settings."))));
+    params
+}
+
 /// The `export_stl` tool's parameters.
 pub fn stl_path_params() -> Vec<(&'static str, Value)> {
-    path_param("The file to write, ending in .stl")
+    mesh_path_params("The file to write, ending in .stl")
 }
 
 /// The `export_3mf` tool's parameters.
 pub fn three_mf_path_params() -> Vec<(&'static str, Value)> {
-    path_param("The file to write, ending in .3mf")
+    mesh_path_params("The file to write, ending in .3mf")
 }
 
 /// The `export_obj` tool's parameters.
 pub fn obj_path_params() -> Vec<(&'static str, Value)> {
-    path_param("The file to write, ending in .obj")
+    mesh_path_params("The file to write, ending in .obj")
 }
 
 /// The `drawing_export_pdf` tool's parameters.
@@ -409,9 +415,14 @@ impl AppTools<'_> {
         if doc.display_body().is_none() {
             return Err("the part has no body to export".into());
         }
-        let out = self.state.export_part(format)?;
+        let accuracy = input.get("accuracy_mm").and_then(Value::as_f64);
+        let out = self.state.export_part_at(format, accuracy).map_err(|error| {
+            if crate::print_check::is_mesh(format) && crate::print_check::can_coarsen(&error) {
+                format!("{error}. Try an explicit coarser accuracy_mm. A larger value allows more deviation; no file was written.")
+            } else { error }
+        })?;
         crate::platform::write_file(&path, &out.bytes)?;
-        Ok(json!({ "exported": path, "report": out.report.summary() }))
+        Ok(json!({ "exported": path, "report": out.report.summary(), "evidence": out.report }))
     }
 
     fn roll_to_end(&mut self) -> Result<Value, String> {

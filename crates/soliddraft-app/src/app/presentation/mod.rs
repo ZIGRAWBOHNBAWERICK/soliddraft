@@ -235,6 +235,8 @@ impl SolidDraftApp {
     }
 
     pub(super) fn dialogs(&mut self, ctx: &egui::Context) {
+        crate::part_check::show(ctx, &mut self.state);
+        crate::print_check::show(ctx, &mut self.state);
         crate::palette::show(ctx, &mut self.state);
         let st = &mut self.state;
         if st.show_shortcuts {

@@ -8,9 +8,9 @@ SolidDraft exports B-rep parts as STEP AP242, IGES 5.3, STL, 3MF or OBJ. The cod
 |---|---|---|
 | STEP AP242 (`.step`, `.stp`) | the exact B-rep, written by Catallax's exporter | Catallax's proven largest distance between written and exact geometry, rounded up |
 | IGES 5.3 (`.iges`, `.igs`) | supported exact B-rep definitions through Catallax | proven whole-boundary displacement, including every face and trim |
-| STL (`.stl`, binary) | the kernel's mesh at the part's export tolerance | the export chord height |
-| 3MF (`.3mf`, core specification) | the same mesh, which must be closed | the export chord height |
-| OBJ (`.obj`, Wavefront) | the display mesh, retaining face groups and normals | the export chord height |
+| STL (`.stl`, binary) | Catallax's qualified print mesh, with its native certificate header | certified model, tessellation and file-rounding bound |
+| 3MF (`.3mf`, core specification) | the same qualified closed mesh | the same certified bound |
+| OBJ (`.obj`, Wavefront) | the same qualified mesh, retaining face groups and normals | the same certified bound |
 
 STEP writes exact planes, cylinders, cones, spheres, tori, lines and circles. Intersection curves that have no exact STEP form are fitted splines, and the report counts them. A ring fillet between nonparallel cylinders writes one fitted band under a certificate, and the report's `fit_mm` holds its fit to the exact definition. The status line adds that fit to the file's own bound. The certified route refuses a file over the requested tolerance, and a ring with no certificate, such as a patterned copy, writes nothing. The requested tolerance is 0.0000001 mm. If decimal rounding or spline fitting cannot meet it, the CLI refuses the whole export batch before writing any file. The app still writes the file, reports the bound over tolerance with Catallax's warning, and shows the message as an error.
 
@@ -36,13 +36,36 @@ An active lattice or gyroid exports only as binary STL, through the native field
 
 A field's mass stand-in is a separate STEP output, written only when asked for: the Mass stand-in command, the `export_stand_in` tool or `soliddraft export part.dwprt --stand-in mass.step`. It is never the field's boundary and never stands in for a refused field export. The file holds the field's source region as one massless `SHELL_BASED_SURFACE_MODEL` envelope and one or two unit-density `MANIFOLD_SOLID_BREP` proxy blocks, with no density or material metadata. Catallax first proves the field's own moments to 0.01 mm³, 0.001 mm and 0.1 mm⁵; the proxy's exact moments, and then its moments after the file's coordinate rounding, must lie inside those enclosures, or the export is refused (`stand-in.properties-not-matched`, `stand-in.exchange-not-enclosed`) before any byte is written. A field read through a subtracted operand is refused with `field.stand-in-envelope-coverage`. The `stand_in` JSON report is labelled "mass stand-in — not field boundary geometry" and carries the field enclosures, the proxy's exact moments, their exchanged bounds, the inertia residual, the body counts, the file's rounding bound, the deterministic work and the file SHA-256. The proxy's file is the same, byte for byte, as Catallax's public `catallax-stand-in/1` request answers for the field's native recipe. A consumer that sums the mass of the solids alone gets the field's mass properties; the envelope carries none. `soliddraft export --max-work <units>` runs the whole request, opening and rebuilding the part included, on one deterministic allowance, refuses with `numbers.operation-budget` and writes nothing when it runs out, and adds the work used to each `--json` line.
 
+## Print check and independent part check
+
+Desktop mesh export opens Print check before writing a destination. It shows the selected
+print route, requested and certified accuracy, and the model, tessellation and file-rounding
+contributions. The qualification checks closure, vertex connections, outward orientation,
+and preservation of components and cavities. Field exports show their native field verdict,
+minimum detail and certified distance bound.
+
+An accuracy or refinement refusal offers a button labelled with a coarser accuracy. Each
+choice runs a fresh check on the same representation and leaves saved settings unchanged.
+Save checked export writes only the accepted bytes. Cancel and refusals leave an existing
+file alone. Changing or reopening the part invalidates the report. MCP mesh exports accept
+an optional `accuracy_mm` for the same explicit choice and return structured `evidence`
+beside the summary. They never retry with a coarser accuracy automatically.
+
+Inspect > Check independently builds every solid-valued recipe prefix in the boundary
+model and distance field. Its report counts confirmed solid steps, identifies reference
+definitions separately, and lists each representation's refusals. Each prefix receives a
+20,000,000-unit work allowance. This is construction coverage. It does not certify sampled
+surface agreement, whole-boundary agreement or print accuracy. Reports belong to one open
+revision and become stale after edits or undo. The browser shows Coming soon for these
+report windows until their background checks are supported there.
+
 ## Refusals
 
 A part with a feature that needs a repair, is blocked or failed is refused, so no file shows a body the part does not have. Suppressed and rolled-back features are fine; the export is the body the tree shows. A refused export writes no file. The CLI also refuses a batch containing any over-tolerance STEP report before creating or replacing any destination, including other formats in that batch.
 
 ## Where to export
 
-- In the app, File > Export offers STEP AP242, IGES 5.3, STL, 3MF and OBJ. The status bar shows each export's report in one line.
+- In the app, File > Export offers STEP AP242, IGES 5.3, STL, 3MF and OBJ. Mesh formats open Print check for review before saving. The status bar shows the saved export's report in one line.
 - On the command line, `soliddraft export <part.dwprt | recipe.json> --out bracket.step --out bracket.iges --out bracket.3mf --out bracket.obj` writes each file; `--json` prints each export report. It does not measure the body for acceptance checks.
 
 ## The OpenCASCADE check

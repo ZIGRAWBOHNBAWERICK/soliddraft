@@ -257,6 +257,7 @@ mod tests {
                 triangles: 12,
                 vertices: 8,
                 chord_height: 0.01,
+                print_check: None,
                 closed: true,
                 unavailable_controls: Vec::new(),
             }),

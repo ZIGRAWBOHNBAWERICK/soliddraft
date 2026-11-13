@@ -6,6 +6,7 @@
 
 mod assembly_measure;
 mod body_relation;
+mod checks;
 mod construction;
 mod convert;
 mod diagnostics;
@@ -1397,6 +1398,20 @@ impl Kernel for CatallaxKernel {
     fn export_field_stand_in(&self, body: BodyId, accuracy: &FieldMassAccuracy) -> KernelResult<StandInExport> {
         self.observe_export("export_field_stand_in", || {
             self.field(body)?.ok_or(KernelError::UnknownBody(body))?.stand_in(accuracy)
+        })
+    }
+
+    fn independent_check(&self, body: BodyId) -> KernelResult<IndependentCheck> {
+        self.check_independently(body)
+    }
+
+    fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<PrintMesh>> {
+        self.observe_export("print_mesh", || self.qualified_print(body, params).map(Some))
+    }
+
+    fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<FieldExport> {
+        self.observe_export("export_field_stl", || {
+            self.field(body)?.ok_or(KernelError::UnknownBody(body))?.export_at(Some(accuracy_mm))
         })
     }
 

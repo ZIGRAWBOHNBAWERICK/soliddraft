@@ -26,10 +26,10 @@ trait FieldStage: Send + Sync {
     fn recipe(&self) -> &Recipe;
     fn plan(&self) -> &Plan;
     fn settings(&self) -> &Settings;
-    fn export(&self, dec: &mut Decider) -> Result<Output, Refusal>;
+    fn export(&self, accuracy: Option<Rational>, dec: &mut Decider) -> Result<Output, Refusal>;
 }
 
-impl<S: TerminalField + Send + Sync> FieldStage for Stage<S> {
+impl<S: TerminalField + Clone + Send + Sync> FieldStage for Stage<S> {
     fn recipe(&self) -> &Recipe {
         Stage::recipe(self)
     }
@@ -39,8 +39,14 @@ impl<S: TerminalField + Send + Sync> FieldStage for Stage<S> {
     fn settings(&self) -> &Settings {
         Stage::settings(self)
     }
-    fn export(&self, dec: &mut Decider) -> Result<Output, Refusal> {
-        Stage::export(self, dec)
+    fn export(&self, accuracy: Option<Rational>, dec: &mut Decider) -> Result<Output, Refusal> {
+        if let Some(accuracy) = accuracy {
+            let (body, spec, mut settings) = self.clone().return_before_lattice();
+            settings.accuracy = accuracy;
+            Stage::new(&body, spec, settings, dec)?.export(dec)
+        } else {
+            Stage::export(self, dec)
+        }
     }
 }
 
@@ -222,7 +228,7 @@ impl CatallaxKernel {
         sampling_radius: Option<f64>,
     ) -> KernelResult<OpResult>
     where
-        S: TerminalField + Send + Sync + 'static,
+        S: TerminalField + Clone + Send + Sync + 'static,
     {
         if let Some(field) = self.field(body)? {
             // Catallax refuses a stage over a body that already ends in a terminal field.
@@ -327,9 +333,15 @@ impl Field {
             as u64
     }
     pub(super) fn export(&self) -> KernelResult<FieldExport> {
+        self.export_at(None)
+    }
+
+    pub(super) fn export_at(&self, accuracy: Option<f64>) -> KernelResult<FieldExport> {
+        let accuracy =
+            accuracy.map(|mm| native::number(mm, "print accuracy").map(|n| n.value().clone())).transpose()?;
         let operation = "export_field_stl";
         let ((bytes, output), work) = export_allowance(operation, FIELD_ACTION_WORK, || {
-            run(operation, |dec| self.stage.export(dec)?.labelled_stl())
+            run(operation, |dec| self.stage.export(accuracy.clone(), dec)?.labelled_stl())
         })?;
         // Read the encoded bound so the JSON report describes the file exactly.
         let bound = f64::from_le_bytes(bytes[68..76].try_into().expect("labelled header"));
@@ -339,7 +351,7 @@ impl Field {
             label: STL_LABEL.into(),
             approximate: true,
             route: "field".into(),
-            requested_accuracy_mm: settings.accuracy.to_string(),
+            requested_accuracy_mm: accuracy.as_ref().unwrap_or(&settings.accuracy).to_string(),
             minimum_detail_mm: settings.minimum_detail.to_string(),
             deviation_bound_mm: bound,
             closed: verdict.closed,

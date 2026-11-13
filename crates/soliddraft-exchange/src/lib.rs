@@ -103,6 +103,9 @@ pub struct MeshReport {
     /// Requested controls the kernel could not guarantee, in words.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unavailable_controls: Vec<String>,
+    /// Native print qualification of the encoded geometry, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_check: Option<soliddraft_kernel_api::PrintReport>,
 }
 
 /// What an export wrote, by kind.
@@ -158,6 +161,14 @@ impl Report {
             ),
             Report::Mesh(r) => {
                 let mut s = format!("{} triangles; within {} mm of the exact part", r.triangles, r.chord_height);
+                if let Some(check) = &r.print_check {
+                    s = format!(
+                        "{} triangles; certified within {} mm; {} print route",
+                        r.triangles,
+                        bound_mm(check.certified_accuracy_mm),
+                        check.route
+                    );
+                }
                 if !r.closed {
                     s += "; the mesh is not closed";
                 }
@@ -220,12 +231,18 @@ pub fn export(
         }
         Format::Stl | Format::ThreeMf | Format::Obj => {
             tolerance.check().map_err(ExportError::Invalid)?;
-            let mesh = kernel.tessellate(body, &tolerance.params())?;
+            let qualified = kernel.print_mesh(body, &tolerance.params())?;
+            let mesh = match &qualified {
+                Some(output) => output.mesh.clone(),
+                None => kernel.tessellate(body, &tolerance.params())?,
+            };
             let welded = mesh::weld(&mesh);
             let closed = welded.is_closed();
             let bytes = match format {
                 Format::Obj => obj::write(&mesh, name, tolerance.chord_height),
-                Format::Stl => stl::write(&welded, name),
+                Format::Stl => {
+                    qualified.as_ref().map_or_else(|| stl::write(&welded, name), |output| output.stl.clone())
+                }
                 Format::ThreeMf if closed => three_mf::write(&welded, name)?,
                 Format::ThreeMf => return Err(ExportError::NotClosed),
                 Format::Step | Format::Iges | Format::StandIn => unreachable!(),
@@ -236,6 +253,7 @@ pub fn export(
                 chord_height: tolerance.chord_height,
                 closed,
                 unavailable_controls: mesh.unavailable_controls,
+                print_check: qualified.map(|output| output.report),
             };
             Ok(Export { bytes, report: Report::Mesh(report) })
         }
@@ -300,6 +318,7 @@ mod tests {
                     chord_height: 0.1,
                     closed,
                     unavailable_controls: unavailable_controls.clone(),
+                    print_check: None,
                 });
                 let mut expected = "12 triangles; within 0.1 mm of the exact part".to_owned();
                 if !closed {

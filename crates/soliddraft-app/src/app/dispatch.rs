@@ -1400,6 +1400,7 @@ impl SolidDraftApp {
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }
             }
+            AppAction::CheckPart => crate::part_check::start(&mut self.state, ctx),
             AppAction::Export { format, path } => {
                 let path = path.or_else(|| {
                     let name = format!("{}.{}", self.state.doc.name, format.extension());
@@ -1407,6 +1408,10 @@ impl SolidDraftApp {
                     crate::platform::save_path(&title, format.name(), format.extension(), &name)
                 });
                 let Some(path) = path else { return };
+                if crate::print_check::is_mesh(format) {
+                    crate::print_check::start(&mut self.state, format, path, ctx);
+                    return;
+                }
                 let exported = self.state.export_part(format);
                 match exported.and_then(|out| crate::platform::write_file(&path, &out.bytes).map(|()| out.report)) {
                     Ok(report) => {

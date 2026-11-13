@@ -27,6 +27,8 @@ catallax-step = { git = "https://github.com/BohnBawerick/catallax", rev = "7cde4
 catallax-field = { git = "https://github.com/BohnBawerick/catallax", rev = "7cde4119547109994eb685d6ff10187ce0b846fc" }
 catallax-features = { git = "https://github.com/BohnBawerick/catallax", rev = "7cde4119547109994eb685d6ff10187ce0b846fc" }
 
+catallax-compare = { git = "https://github.com/BohnBawerick/catallax", rev = "7cde4119547109994eb685d6ff10187ce0b846fc" }
+
 [dev-dependencies]
 catallax-boolean = { git = "https://github.com/BohnBawerick/catallax", rev = "7cde4119547109994eb685d6ff10187ce0b846fc" }
 soliddraft-model.workspace = true

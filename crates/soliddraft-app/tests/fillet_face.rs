@@ -272,12 +272,7 @@ fn type_field(app: &mut App, label: &str, value: &str) {
 
 /// The panel's own OK button, labelled with its shortcut ("OK (Enter)").
 fn ok(app: &mut App) {
-    let label = if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite {
-        "OK"
-    } else {
-        "OK (Enter)"
-    };
-    app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
+    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK (Enter)")
         .next()
         .expect("the open panel has an OK button")
         .click();
@@ -846,7 +841,7 @@ fn proof_folder() -> std::path::PathBuf {
 
 #[test]
 fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
-    use soliddraft_app::state::AppAction;
+    use soliddraft_app::state::{AppAction, RibbonTab};
     let _gpu = gpu();
     let mut app = harness(box_document());
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
@@ -870,9 +865,12 @@ fn ridealong_edit_suite_chamfer_material_and_accuracy_controls() {
     let FeatureKind::Chamfer(chamfer) = &state.doc.features.last().unwrap().kind else { panic!("chamfer") };
     assert_eq!(chamfer.other_distance, Some(3.0));
     assert!((volume(&state.doc) - (48000.0 - 90.0)).abs() < 1e-6);
-    button(&mut app, "Inspect tab");
     button(&mut app, "Material");
     assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
+    app.get_by_label("Part material");
+    app.state_mut().state.ribbon_tab = RibbonTab::Inspect;
+    app.run_steps(4);
+    button(&mut app, "Material");
     app.get_by_label("Part material").click();
     app.run_steps(4);
     app.get_by_label("Steel, generic").click();
@@ -932,7 +930,6 @@ fn ridealong_edit_suite_displays_fitted_face_deviation() {
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
-    button(&mut app, "Details");
     app.get_by_label(&format!("Fitted, deviation ≤ {bound:e} mm"));
     app.render().unwrap().save(proof_folder().join("ridealong-fitted-face.png")).unwrap();
 }
@@ -955,7 +952,6 @@ fn ridealong_edit_suite_displays_repaired_face_source_deviation() {
     app.state_mut().state.frame_layout = soliddraft_app::settings::FrameLayout::EditSuite;
     app.state_mut().state.push(AppAction::Select(Some(Selection::Face(face))));
     app.run_steps(4);
-    button(&mut app, "Details");
     app.get_by_label("Import deviation");
     app.get_by_label("≤ 0.02 mm from source");
     app.get_by_label("Approved import limit");

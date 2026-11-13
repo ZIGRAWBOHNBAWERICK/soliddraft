@@ -48,6 +48,7 @@ impl NavigationBar {
             .pivot(Align2::CENTER_BOTTOM)
             .fixed_pos(pos2(viewport.center().x, viewport.bottom() - 12.0))
             .show(parent.ctx(), |ui| {
+                ui.set_max_width(if compact { 292.0 } else { 336.0 });
                 egui::Frame::new()
                     .fill(theme::hud_bg())
                     .stroke(Stroke::new(1.0, theme::line_strong()))

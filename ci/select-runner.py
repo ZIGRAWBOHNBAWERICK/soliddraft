@@ -23,11 +23,12 @@ def runners(event, actor, starter, repository, boat_enabled, boat_at, bohn_at, n
     boat = trusted and boat_enabled == 'true' and fresh(boat_at, now)
     bohn = trusted and fresh(bohn_at, now)
     blade = trusted and fresh(blade_at, now)
-    # Nix-linked archives cannot be executed on the Ubuntu test runners.
-    return {'blade': ['self-hosted', 'blade-sd'] if blade else ['ubuntu-latest'],
-            'archive': ['boat-large'] if boat else ['ubuntu-latest'],
+    blade_runner = ['self-hosted', 'blade-sd'] if blade else ['ubuntu-latest']
+    # Blade uses Ubuntu job containers. NixOS remains limited to plain Cargo jobs.
+    return {'blade': blade_runner,
+            'archive': ['boat-large'] if boat else blade_runner,
             'plain': ['boat-large'] if boat else ['self-hosted', 'bohn-03'] if bohn else ['ubuntu-latest'],
-            'application': ['boat-large'] if boat else ['ubuntu-latest'],
+            'application': ['boat-large'] if boat else blade_runner,
             'plain_jobs': '1' if bohn and not boat else '4'}
 
 

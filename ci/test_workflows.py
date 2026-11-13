@@ -25,10 +25,12 @@ def evaluate(expr, **github):
     inputs = github.pop("inputs", {})
     variables = github.pop("variables", {})
     needs = github.pop("needs", {})
+    matrix = github.pop("matrix", {})
     python = re.sub(r"github((?:\.\w+)+)",
                     lambda m: "g" + "".join(f"[{key!r}]" for key in m[1][1:].split('.')),
                     expr).replace("&&", " and ").replace("||", " or ")
     python = re.sub(r"needs\.select\.outputs\.(\w+)", r"n.get('\1', '')", python)
+    python = re.sub(r"matrix\.(\w+)", r"m.get('\1', '')", python)
     python = re.sub(r"vars\.(\w+)", r"v.get('\1', '')", python)
     python = re.sub(r"inputs\.(\w+)", r"i.get('\1', False)", python)
     python = re.sub(r"!(?!=)", " not ", python)
@@ -38,6 +40,8 @@ def evaluate(expr, **github):
         "i": inputs,
         "v": variables,
         "n": needs,
+        "m": matrix,
+        "contains": lambda values, item: item in values,
         "fromJSON": json.loads,
         "startsWith": lambda value, prefix: value.lower().startswith(prefix.lower()),
     })
@@ -328,7 +332,7 @@ class BoatRunners(unittest.TestCase):
     def test_outside_runs_cannot_override_runner_selection(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
-        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop', 'msrv'):
+        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop', 'msrv', 'partition-linux', 'test-linux'):
             expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
             for actor, author, source, starter in (
                     ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
@@ -342,10 +346,11 @@ class BoatRunners(unittest.TestCase):
                                      'head': {'repo': {'full_name': source}}}},
                               needs={k: '["boat-large"]' for k in
                                      ('plain_runner', 'archive_runner', 'application_runner', 'blade_runner')})
+                values['matrix'] = {'shard': 2, 'lane': 1}
                 trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
                 self.assertEqual(evaluate(expression, **values),
                                  ['boat-large'] if trusted else ['ubuntu-latest'])
-        for job in ('select', 'gate', 'test-linux', 'partition-linux'):
+        for job in ('select', 'gate'):
             self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
         self.assertIn('ci/select-runner.py', jobs['select'])
         self.assertIn('needs.select.outputs.plain_runner', jobs['msrv'])
@@ -356,6 +361,38 @@ class BoatRunners(unittest.TestCase):
         self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
 
 
+class BladeRouting(unittest.TestCase):
+    def test_distribution_and_container_follow_the_selected_pool(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
+        values = dict(repository='ZIGRAWBOHNBAWERICK/soliddraft', actor='BohnBawerick',
+                      triggering_actor='BohnBawerick', event_name='push',
+                      needs={'blade_runner': '["self-hosted","blade-sd"]',
+                             'archive_runner': '["boat-large"]',
+                             'application_runner': '["boat-large"]'})
+        cases = [(job, {'shard': n}, ['self-hosted', 'blade-sd'] if n % 2 == 0 else ['ubuntu-latest'])
+                 for job in ('partition-linux', 'test-linux') for n in range(1, 9)]
+        cases += [('application-loop', {'lane': lane},
+                   ['self-hosted', 'blade-sd'] if lane == 1 else ['ubuntu-latest'] if lane == 3 else ['boat-large'])
+                  for lane in ('proof', 1, 2, 3)]
+        cases += [(job, {}, ['self-hosted', 'blade-sd'] if job == 'lint' else ['boat-large'])
+                  for job in ('lint', 'kernel', 'build-linux', 'step-opencascade')]
+        for job, matrix, expected in cases:
+            runner = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
+            image = re.search(r'^      image: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
+            with self.subTest(job=job, matrix=matrix):
+                self.assertEqual(evaluate(runner, **values, matrix=matrix), expected)
+                selected_image = evaluate(image, **values, matrix=matrix)
+                if 'blade-sd' in expected:
+                    self.assertRegex(selected_image, r'^ubuntu@sha256:[0-9a-f]{64}$')
+                else:
+                    self.assertEqual(selected_image, '')
+                self.assertEqual(evaluate(image, **dict(values, actor='outsider'), matrix=matrix), '')
+                self.assertIn('shell: bash', jobs[job])
+                self.assertIn('Prepare Blade Ubuntu container', jobs[job])
+                self.assertIn('Clean Blade build output', jobs[job])
+
+
 class BladeCleanup(unittest.TestCase):
     def test_cleanup_removes_only_this_jobs_build_output(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
@@ -364,14 +401,29 @@ class BladeCleanup(unittest.TestCase):
         for block in blocks:
             condition = block.splitlines()[0]
             self.assertIn("always() && startsWith(runner.name, 'blade-sd-')", condition)
-            script = block.split('        run: ', 1)[1].split('\n', 1)[0]
+            script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('\n\n', 1)[0])
             with tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 (root / 'target').mkdir()
                 (root / 'target/large-build').write_text('build output')
                 (root / 'keep').write_text('source')
-                subprocess.run(['bash', '-e', '-c', script], check=True,
-                               env=dict(os.environ, GITHUB_WORKSPACE=str(root)))
+                marker = root / 'container-marker'
+                marker.touch()
+                (root / 'portable/target').mkdir(parents=True)
+                binary = root / 'bin'
+                binary.mkdir()
+                (binary / 'curl').write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$PRUNE_LOG"\n')
+                (binary / 'curl').chmod(0o755)
+                self.assertIn('test -f /.dockerenv', script)
+                subprocess.run(['bash', '-e', '-c', script.replace('/.dockerenv', str(marker))],
+                               check=True, env=dict(os.environ, GITHUB_WORKSPACE=str(root),
+                                   LINUX_ARCHIVE_WORKSPACE=str(root / 'portable'), RUNNER_TEMP=str(root),
+                                   GITHUB_RUN_ID='123', GITHUB_JOB='fixture', PRUNE_LOG=str(root / 'prune.log'),
+                                   PATH=f'{binary}:{os.environ["PATH"]}'))
+                prune = (root / 'prune.log').read_text()
+                self.assertIn('soliddraft.ci.job=123-fixture', prune)
+                self.assertIn('"dangling":["true"]', prune)
+                self.assertFalse((root / 'portable').exists())
                 self.assertFalse((root / 'target').exists())
                 self.assertEqual((root / 'keep').read_text(), 'source')
 
@@ -446,8 +498,8 @@ class ArchiveWorkspace(unittest.TestCase):
             subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
             self.assertEqual((root / 'sudo.log').read_text().splitlines(), ['called'])
         linux = text.split('\n  build-linux:', 1)[1].split('\n  test-linux:', 1)[0]
-        self.assertEqual(linux.count('working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}'), 2)
-        self.assertIn('run: test "$GITHUB_WORKSPACE" = "$LINUX_ARCHIVE_WORKSPACE"', text)
+        self.assertEqual(linux.count('working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}'), 3)
+        self.assertIn('Prepare the archive consumer workspace', text)
 
 
 class RustCache(unittest.TestCase):

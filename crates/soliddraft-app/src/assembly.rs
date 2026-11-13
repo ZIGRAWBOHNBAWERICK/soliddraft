@@ -814,7 +814,14 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
             "Insert component, or drop part files here, to place parts"
         };
         let painter = ui.painter().with_clip_rect(rect);
-        let galley = painter.layout_no_wrap(text.to_owned(), theme::font_medium(13.0), theme::muted());
+        let mut job = egui::text::LayoutJob::simple(
+            text.to_owned(),
+            theme::font_medium(13.0),
+            theme::muted(),
+            (rect.width() - 40.0).max(1.0),
+        );
+        job.halign = egui::Align::Center;
+        let galley = painter.layout_job(job);
         let r = Rect::from_center_size(rect.center(), galley.size() + vec2(28.0, 14.0));
         painter.rect_filled(r, egui::CornerRadius::same(99), theme::hud_bg());
         painter.rect_stroke(r, egui::CornerRadius::same(99), Stroke::new(1.0, theme::line()), egui::StrokeKind::Inside);

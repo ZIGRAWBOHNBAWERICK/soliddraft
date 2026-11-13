@@ -196,6 +196,17 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
         assert!(bar.contains_rect(app.get_by_label("OK").rect()), "Mate actions fit at 960 points");
         assert!(bar.contains_rect(app.get_by_label("Cancel").rect()));
+        let viewport = app.state().state.active_viewport().rect;
+        let hint = ribbon::painted(app)
+            .into_iter()
+            .find(|text| text.text.starts_with("Insert component, or drop"))
+            .expect("an empty assembly explains how to add parts");
+        assert!(viewport.contains_rect(hint.rect), "the empty assembly hint fits the viewport");
+        let more = app.get_by_label("More (2)").rect();
+        ribbon::click_at(app, more.center());
+        app.run_steps(8);
+        let value = app.get_by_label("Mate value").rect();
+        assert!(ribbon::window(app).contains_rect(value), "overflow fields remain on screen");
         case.frame(app, "assembly-mate-960");
     });
 }
@@ -212,6 +223,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
     app.run_steps(8);
     app.state_mut().state.push(AppAction::Drawing(DrawingAction::CreateDrawing));
     app.run_steps(16);
+    app.state_mut().state.drawing.session.as_mut().unwrap().doc.drawing.meta.designer = "SolidDraft".into();
     case.run(&mut app, |app| {
         assert!(app.state().state.drawing.is_active());
         assert!(app.state().state.tree_shown(), "drawing tree starts open");

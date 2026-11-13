@@ -1166,6 +1166,8 @@ impl AppState {
         if !self.workspaces().contains(&tab) {
             return;
         }
+        self.options_details = false;
+        self.form_bar.expanded = false;
         if self.drawing.is_active() {
             if let crate::commands::Tab::Drawing(tab) = tab {
                 self.push(AppAction::Drawing(crate::drawing::DrawingAction::SetTab(tab)));

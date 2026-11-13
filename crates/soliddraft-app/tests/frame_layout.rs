@@ -182,6 +182,17 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Show));
         app.run_steps(8);
         assert!(ribbon::control(app, "View tab", ribbon::window(app)).selected);
+        app.set_size(vec2(960.0, 700.0));
+        app.run_steps(8);
+        assert!(app.state().state.active_viewport().rect.width() >= 300.0);
+        let assembly_tab = app.get_by_label("Assembly tab").rect();
+        ribbon::click_at(app, assembly_tab.center());
+        app.run_steps(8);
+        click_suite(app, "Mate");
+        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+        assert!(bar.contains_rect(app.get_by_label("OK").rect()), "Mate actions fit at 960 points");
+        assert!(bar.contains_rect(app.get_by_label("Cancel").rect()));
+        case.frame(app, "assembly-mate-960");
     });
 }
 
@@ -234,5 +245,18 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
             app.state_mut().state.command_line.close_session();
         }
         case.frame(app, "drawing-sheet");
+        app.set_size(vec2(960.0, 700.0));
+        app.run_steps(8);
+        assert!(app.state().state.viewport.rect.width() >= 300.0);
+        let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+        let properties = app
+            .get_all_by_label("Sheet properties")
+            .find(|control| bar.contains_rect(control.rect()))
+            .expect("sheet properties is on the bar")
+            .rect();
+        ribbon::click_at(app, properties.center());
+        app.run_steps(8);
+        assert!(app.query_all_by_label("Sheet name field").next().is_some(), "the sheet editor opens in the new frame");
+        case.frame(app, "drawing-properties-960");
     });
 }

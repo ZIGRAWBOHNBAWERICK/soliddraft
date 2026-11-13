@@ -1342,6 +1342,8 @@ impl SolidDraftApp {
                 }
                 self.tree_dock = tree_dock();
                 self.state.layout = Layout::default();
+                self.state.assembly.tree_hidden = false;
+                self.state.drawing.tree_hidden = false;
                 self.state.command_line.settings.session_height = crate::command_line::SESSION_DEFAULT_HEIGHT;
                 // Forget the sizes egui kept, so the defaults apply again.
                 ctx.data_mut(|d| {

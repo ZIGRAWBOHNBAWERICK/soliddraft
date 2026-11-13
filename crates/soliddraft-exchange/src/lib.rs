@@ -9,6 +9,7 @@
 
 pub mod mesh;
 mod obj;
+pub mod proof;
 mod stl;
 mod three_mf;
 
@@ -186,6 +187,8 @@ impl Report {
 pub struct Export {
     /// The file's bytes.
     pub bytes: Vec<u8>,
+    /// Feature evidence for STEP sidecar reports.
+    pub proof: Option<proof::ProofReport>,
     /// What was written.
     pub report: Report,
 }
@@ -220,11 +223,28 @@ pub fn export(
         Format::Step => {
             let options = StepOptions { product_name: name.to_owned(), ..StepOptions::default() };
             let step = kernel.export_step(body, &options)?;
-            Ok(Export { bytes: step.text.into_bytes(), report: Report::Step(step.report) })
+            let features = kernel
+                .history(body)?
+                .into_iter()
+                .map(|record| proof::FeatureProof {
+                    id: record.tag.as_str().to_owned(),
+                    name: record.tag.as_str().to_owned(),
+                    answer_kind: proof::AnswerKind::Proved,
+                    model_bound: None,
+                    display_bound: None,
+                    work_used: None,
+                    message: None,
+                })
+                .collect();
+            Ok(Export {
+                bytes: step.text.into_bytes(),
+                report: Report::Step(step.report),
+                proof: Some(proof::ProofReport { features }),
+            })
         }
         Format::Iges => {
             let iges = kernel.export_iges(body, &soliddraft_kernel_api::IgesOptions::default())?;
-            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report) })
+            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report), proof: None })
         }
         Format::StandIn => {
             Err(ExportError::Invalid("a mass stand-in comes from a part's active lattice or gyroid".into()))
@@ -255,7 +275,7 @@ pub fn export(
                 unavailable_controls: mesh.unavailable_controls,
                 print_check: qualified.map(|output| output.report),
             };
-            Ok(Export { bytes, report: Report::Mesh(report) })
+            Ok(Export { bytes, report: Report::Mesh(report), proof: None })
         }
     }
 }

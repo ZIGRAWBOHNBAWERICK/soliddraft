@@ -411,17 +411,13 @@ impl AppTools<'_> {
         if !format.suits(&path) {
             return Err(format!("the path must end in .{} for {}", format.extension(), format.name()));
         }
-        let doc = &self.state.doc;
-        if doc.display_body().is_none() {
-            return Err("the part has no body to export".into());
-        }
         let accuracy = input.get("accuracy_mm").and_then(Value::as_f64);
         let out = self.state.export_part_at(format, accuracy).map_err(|error| {
             if crate::print_check::is_mesh(format) && crate::print_check::can_coarsen(&error) {
                 format!("{error}. Try an explicit coarser accuracy_mm. A larger value allows more deviation; no file was written.")
             } else { error }
         })?;
-        crate::platform::write_file(&path, &out.bytes)?;
+        out.write_with(&path, crate::platform::write_file)?;
         Ok(json!({ "exported": path, "report": out.report.summary(), "evidence": out.report }))
     }
 

@@ -124,6 +124,9 @@ pub struct StepReport {
     /// What happened.
     #[serde(flatten)]
     pub outcome: StepOutcome,
+    /// Deterministic work for the step build, excluding the summary queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_used: Option<u64>,
 }
 
 /// The outcome of a replay.
@@ -207,23 +210,31 @@ pub fn replay(kernel: &dyn Kernel, recipe: &Recipe) -> Result<ReplayReport, Reci
 /// Replays a recipe like [`replay`] but keeps the result body, which the caller then
 /// owns and releases. Every other body the replay creates is released.
 pub fn build(kernel: &dyn Kernel, recipe: &Recipe) -> Result<(ReplayReport, BodyId), RecipeError> {
-    let (report, body) = build_with_report(kernel, recipe, true)?;
+    let (report, body, _) = build_with_report(kernel, recipe, true)?;
     Ok((report.expect("replay report requested"), body))
 }
 
 /// Builds and retains only the result body, without unrequested display or mass summaries.
 /// Expected refusals still check that their inputs remain unchanged.
 pub fn build_body(kernel: &dyn Kernel, recipe: &Recipe) -> Result<BodyId, RecipeError> {
-    build_with_report(kernel, recipe, false).map(|(_, body)| body)
+    build_with_report(kernel, recipe, false).map(|(_, body, _)| body)
+}
+
+/// Measured build work per recipe step. `None` means the kernel did not provide a counter.
+pub type StepWork = BTreeMap<String, Option<u64>>;
+
+/// Builds the result and retains step work for export evidence, without summary queries.
+pub fn build_body_with_work(kernel: &dyn Kernel, recipe: &Recipe) -> Result<(BodyId, StepWork), RecipeError> {
+    build_with_report(kernel, recipe, false).map(|(_, body, work)| (body, work))
 }
 
 fn build_with_report(
     kernel: &dyn Kernel,
     recipe: &Recipe,
     summaries: bool,
-) -> Result<(Option<ReplayReport>, BodyId), RecipeError> {
+) -> Result<(Option<ReplayReport>, BodyId, StepWork), RecipeError> {
     check(recipe)?;
-    let mut run = Run { kernel, bodies: BTreeMap::new(), profiles: BTreeMap::new() };
+    let mut run = Run { kernel, bodies: BTreeMap::new(), profiles: BTreeMap::new(), step_work: BTreeMap::new() };
     let result = run.all(recipe, summaries).map(|report| (report, run.body(&recipe.result)));
     let keep = result.as_ref().ok().map(|(_, body)| *body);
     for body in run.bodies.values() {
@@ -231,13 +242,14 @@ fn build_with_report(
             let _ = kernel.release(*body);
         }
     }
-    result
+    result.map(|(report, body)| (report, body, run.step_work))
 }
 
 struct Run<'k> {
     kernel: &'k dyn Kernel,
     bodies: BTreeMap<String, BodyId>,
     profiles: BTreeMap<String, (OpTag, Profile)>,
+    step_work: StepWork,
 }
 
 impl Run<'_> {
@@ -277,7 +289,8 @@ impl Run<'_> {
                         return Err(RecipeError::StepFailed { step: step.id.clone(), error: error.into() });
                     }
                 };
-                steps.push(StepReport { id: step.id.clone(), op: OpKind::Profile, outcome });
+                self.step_work.insert(step.id.clone(), Some(0));
+                steps.push(StepReport { id: step.id.clone(), op: OpKind::Profile, outcome, work_used: Some(0) });
                 continue;
             }
             let before: Vec<(String, String)> = if step.expect == Outcome::Error {
@@ -289,7 +302,13 @@ impl Run<'_> {
             } else {
                 Vec::new()
             };
-            let outcome = self.run(&step.id, &tag, &step.command);
+            let kernel = self.kernel;
+            let mut outcome = None;
+            let work_used = kernel
+                .measure_work(&mut || outcome = Some(self.run(&step.id, &tag, &step.command)))
+                .map_err(|error| RecipeError::StepFailed { step: step.id.clone(), error })?;
+            let outcome = outcome.expect("work observation runs the step");
+            self.step_work.insert(step.id.clone(), work_used);
             let report = match (step.expect, outcome) {
                 (Outcome::Ok, Ok((op, result))) => {
                     self.bodies.insert(step.id.clone(), result.body);
@@ -300,6 +319,7 @@ impl Run<'_> {
                     StepReport {
                         id: step.id.clone(),
                         op,
+                        work_used,
                         outcome: StepOutcome::Ok {
                             body,
                             faces_changed: counts(&result.record.faces),
@@ -326,6 +346,7 @@ impl Run<'_> {
                     StepReport {
                         id: step.id.clone(),
                         op: op_kind(&step.command),
+                        work_used,
                         outcome: StepOutcome::ExpectedError { error },
                     }
                 }

@@ -233,9 +233,12 @@ fn bracket_step_and_print_batch_fits_the_shared_request_allowance() {
 
 #[test]
 fn export_recipe_build_skips_discarded_replay_measurements() {
-    let kernel = CatallaxKernel::with_operation_log();
+    let kernel = CatallaxKernel::with_diagnostics(20_000_000);
     let recipe = soliddraft_recipe::parse(include_str!("../../../recipes/box.json")).unwrap();
-    let body = soliddraft_recipe::build_body(&kernel, &recipe).unwrap();
+    let (body, work) = soliddraft_recipe::build_body_with_work(&kernel, &recipe).unwrap();
+    assert_eq!(work.len(), recipe.steps.len());
+    assert_eq!(work["sketch"], Some(0));
+    assert!(work["box"].is_some_and(|used| used > 0));
     let evidence = kernel.take_diagnostics().unwrap();
     let calls = evidence["calls"].as_array().unwrap();
     assert!(!calls.is_empty());
@@ -266,4 +269,36 @@ fn export_recipe_build_preserves_expected_refusals() {
     use soliddraft_kernel_api::Kernel;
     kernel.release(body).unwrap();
     reference.release(reference_body).unwrap();
+}
+
+#[test]
+fn step_from_recipe_writes_proof_reports_with_operation_work() {
+    let dir =
+        std::env::temp_dir().join(format!("soliddraft-cli-step-proof-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let recipe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes/box.json");
+    let path = dir.join("box.step");
+    let out = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .arg("export")
+        .arg(recipe)
+        .arg("--out")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let proof: Value =
+        serde_json::from_slice(&std::fs::read(soliddraft_exchange::proof::sidecar_path(&path, "json")).unwrap())
+            .unwrap();
+    let features = proof["features"].as_array().unwrap();
+    assert!(!features.is_empty());
+    for feature in features {
+        assert_eq!(feature["answer_kind"], "proved");
+        assert!(feature["work_used"].as_u64().is_some(), "{feature}");
+    }
+    assert!(features.iter().any(|feature| feature["work_used"].as_u64().unwrap() > 0));
+    assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
+    assert!(
+        std::fs::read_to_string(soliddraft_exchange::proof::sidecar_path(&path, "txt")).unwrap().contains("Proved")
+    );
+    std::fs::remove_dir_all(dir).unwrap();
 }

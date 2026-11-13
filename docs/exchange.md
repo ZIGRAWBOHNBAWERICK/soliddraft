@@ -67,7 +67,8 @@ accuracy needs a new qualification. The desktop runs these checks off the interf
 synchronously with the same construction and per-prefix work limits.
 
 CLI recipe export builds the result without collecting unused replay mass or display
-summaries. Recipe validation and expected-error input checks still run. Opening the
+summaries. It retains step build counters for STEP proof sidecars. Recipe validation
+and expected-error input checks still run. Opening the
 input, rebuilding it and preparing every output share the same 20,000,000-unit allowance.
 
 ## Refusals
@@ -221,3 +222,29 @@ The root assembly keeps the import record in `import.json`, outside both hashes.
 MCP clients call `import_scene {"path":"washer.glb","out":"washer.dwasm"}`, with `units` and `up` when needed. The reply holds the status line, the import record and the opened assembly's summary, whose occurrences carry their names and kind `mesh`.
 
 The `scene-import` application scenario imports the sand3d bracket as `.usda`, `.glb`, `.urdf`, `.obj` and `.stl`, the sand3d washer as `.usda`, `.glb` and `.urdf`, and NVIDIA's SimReady cardboard box as binary `.usd`. It checks each tree, its names, scale and orientation against the source, and the transforms, colours and joints where the file has them. It saves and reopens the washer in a fresh process. The fixtures and their licences are in `ci/fixtures/scene-import`. `cargo test -p soliddraft-scene` runs the same files through the reader alone, and checks that the washer's three formats agree on every part's box and every joint's axis. `cargo test -p soliddraft-app --test scene_import_app` imports the washer from GLB and the box from USD in the rendered window; set `SOLIDDRAFT_SCENE_IMPORT_PROOF_DIR` to keep its frames.
+
+## STEP proof reports
+
+Every STEP file written by the app or `soliddraft export` has two adjacent reports:
+`part.step.proof.txt` for reading and `part.step.proof.json` for tools. The suffix
+preserves the full filename, including `.stp`. Browser exports download all three
+files. A report write failure prevents publication of the new STEP file.
+
+The JSON format is `soliddraft-proof/1`. It records the STEP bytes' SHA-256, the
+export deviation certificate, and each feature's name, id, model answer kind,
+model bound, independent display bound, and work used. Suppressed features and
+features below the rollback bar are inactive and contribute no geometry.
+
+Work counts cover the original retained feature build, including its geometry
+queries. They exclude rendering and STEP export. Cache reuse, undo and renaming
+keep the count with that build. A null count means the backend or input did not
+record it. Raw recipe exports list the contributing operation tags and their build work, excluding replay summary queries.
+
+Pending, refused and model-bounded answers cannot export. Finish or cancel a live
+feature, sketch or dimension preview first. A measured display bound does not
+certify geometry. When the exact model has independent proof, STEP export uses
+that model and includes the display evidence separately in the report.
+
+Reports are written before the STEP file, with an atomic write for each desktop
+file. A later write failure can leave reports for bytes that were not published;
+compare their SHA-256 with the STEP file before relying on them.

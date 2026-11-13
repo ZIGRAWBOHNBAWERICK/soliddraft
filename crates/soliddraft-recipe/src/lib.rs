@@ -11,6 +11,6 @@ mod replay;
 
 pub use format::{Command, FORMAT, NamedPlane, Outcome, PlaneSpec, Recipe, Selector, Shape, Step};
 pub use replay::{
-    BodySummary, ProfileSummary, RecipeError, ReplayReport, StepOutcome, StepReport, build, build_body, check, parse,
-    replay, summarize,
+    BodySummary, ProfileSummary, RecipeError, ReplayReport, StepOutcome, StepReport, StepWork, build, build_body,
+    build_body_with_work, check, parse, replay, summarize,
 };

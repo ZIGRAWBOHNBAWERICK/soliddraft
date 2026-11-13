@@ -10,6 +10,7 @@ mod convert;
 mod diagnostics;
 mod drawing_queries;
 mod edge_control;
+mod field_preview;
 mod frames;
 mod identity;
 mod iges;

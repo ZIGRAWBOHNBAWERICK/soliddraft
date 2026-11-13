@@ -556,3 +556,10 @@ owner = "B7"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/interference/"]
 module = ["interference"]
+
+[[areas]]
+name = "kernel.field_preview"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/field_preview.rs"]
+module = ["field_preview"]

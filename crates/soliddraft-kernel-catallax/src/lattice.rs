@@ -190,7 +190,11 @@ impl CatallaxKernel {
             },
             radius: grade(&params.radius_mm, "density")?,
         };
-        self.build_field(tag, body, OpKind::Lattice, spec, settings)
+        let sampling_radius = (params.cell != LatticeCell::Cubic).then(|| match &params.radius_mm {
+            Grade::Constant(radius) => *radius,
+            Grade::Linear(grade) => grade.start.min(grade.end),
+        });
+        self.build_field(tag, body, OpKind::Lattice, spec, settings, sampling_radius)
     }
 
     pub(super) fn build_gyroid(&self, tag: &OpTag, body: BodyId, params: &Gyroid) -> KernelResult<OpResult> {
@@ -205,7 +209,7 @@ impl CatallaxKernel {
                 FieldFrame::Part => Pose::identity(),
             },
         };
-        self.build_field(tag, body, OpKind::Gyroid, spec, settings)
+        self.build_field(tag, body, OpKind::Gyroid, spec, settings, None)
     }
 
     fn build_field<S>(
@@ -215,6 +219,7 @@ impl CatallaxKernel {
         op: OpKind,
         spec: S,
         settings: Settings,
+        sampling_radius: Option<f64>,
     ) -> KernelResult<OpResult>
     where
         S: TerminalField + Send + Sync + 'static,
@@ -257,8 +262,12 @@ impl CatallaxKernel {
             }
         }
         let mesh = run("preview", |dec| {
-            let controls = lattice_stage::default_preview_options(stage.plan(), dec)?;
-            Ok(stage.preview(&controls, dec)?.mesh)
+            if let Some(radius) = sampling_radius {
+                crate::field_preview::sample(stage.plan(), bbox, radius, dec)
+            } else {
+                let controls = lattice_stage::default_preview_options(stage.plan(), dec)?;
+                Ok(stage.preview(&controls, dec)?.mesh)
+            }
         })?;
         let mut state = self.state()?;
         let id = BodyId::from_raw(state.id());

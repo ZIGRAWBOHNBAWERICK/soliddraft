@@ -164,7 +164,7 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     assert!(!mesh.unproved);
     assert!(!mesh.indices.is_empty());
     assert_eq!(mesh.triangle_faces.len(), mesh.triangle_count());
-    let faces = k.faces(body.body).unwrap();
+    let faces = k.topology(body.body).unwrap().faces;
     assert_eq!(faces.len(), 6);
     assert!(mesh.triangle_faces.iter().all(|id| faces.iter().any(|face| face.id == *id)));
     // Background mass has its own application request allowance.

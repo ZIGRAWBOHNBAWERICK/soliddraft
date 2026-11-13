@@ -267,6 +267,10 @@ fn export_refuses_to_silently_drop_a_body() {
         doc.model().export(soliddraft_exchange::Format::Step).unwrap_err(),
         "Several-body export is coming soon. Combine the bodies before exporting."
     );
+    assert_eq!(
+        doc.model().export_at(soliddraft_exchange::Format::Stl, Some(0.01)).unwrap_err(),
+        "Several-body export is coming soon. Combine the bodies before exporting."
+    );
 }
 
 #[test]

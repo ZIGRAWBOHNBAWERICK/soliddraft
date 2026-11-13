@@ -77,16 +77,20 @@ pub fn can_import(state: &AppState) -> bool {
     part_active(state) && !cfg!(target_arch = "wasm32") && !state.in_sketch() && !state.doc.proof_pending()
 }
 
+fn reference_has_empty_owner(doc: &Document, id: FeatureId) -> bool {
+    doc.feature(id).is_some_and(|feature| {
+        matches!(&feature.kind, FeatureKind::Scan(scan) if scan.fit.is_none())
+            && !doc.model().live_bodies().iter().any(|(key, _)| *key == feature.body_key)
+    })
+}
+
 pub fn can_fit(state: &AppState) -> bool {
     part_active(state)
         && !cfg!(target_arch = "wasm32")
         && !state.in_sketch()
         && !state.doc.proof_pending()
         && state.scan.fitting.is_none()
-        && selected(&state.doc).is_some_and(|id| {
-            state.doc.feature(id).is_some_and(|f| matches!(&f.kind, FeatureKind::Scan(s) if s.fit.is_none()))
-        })
-        && state.doc.display_body().is_none()
+        && selected(&state.doc).is_some_and(|id| reference_has_empty_owner(&state.doc, id))
 }
 
 pub fn review(state: &mut AppState, name: String, bytes: Vec<u8>) -> Result<(), String> {
@@ -268,6 +272,9 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
 }
 
 pub fn commit_fit(doc: &mut Document, id: FeatureId, scan: soliddraft_model::ScanFeature) -> Result<(), String> {
+    if !reference_has_empty_owner(doc, id) {
+        return Err("Fit scan to part needs a scan reference whose body has no solid.".into());
+    }
     let command = Command::EditFeature { id, kind: FeatureKind::Scan(scan) };
     let mut trial = doc.scratch();
     trial.apply(command.clone())?;

@@ -18,6 +18,12 @@ fn both_frame_settings_open_the_workspace_and_command_palette() {
         let mut app = ribbon::app(ribbon::plate());
         case.run(&mut app, |app| {
             assert_eq!(app.state().state.frame_layout, layout);
+            let palette = match layout {
+                FrameLayout::Classic => &theme::LIGHT,
+                FrameLayout::EditSuite => &theme::edit_suite::PALETTE,
+            };
+            assert_eq!(theme::palette(), palette, "{setting}: startup installs the frame's tokens");
+            assert_eq!(app.ctx.global_style().visuals.panel_fill, palette.panel);
             assert!(app.state().state.viewport.rect.is_positive());
             assert!(app.query_all_by_label("Extrude").next().is_some());
             assert!(app.query_all_by_label("Edit Suite").next().is_none(), "the switch stays internal");
@@ -59,7 +65,7 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
                     assert_eq!(app.query_all_by_label(&label).count(), 1, "one {label}");
                     let control = ribbon::control(app, &label, title);
                     assert!(title.contains_rect(control.rect), "{label} fits in the title bar");
-                    assert!(control.rect.left() > previous, "workspaces keep their order");
+                    assert!(control.rect.left() > previous, "workspaces keep their order: {mode:?} width={width} scale={scale} tab={tab:?} previous_right={previous} current={:?}", control.rect);
                     previous = control.rect.right();
                     ribbon::click_at(app, control.rect.center());
                     app.run_steps(8);

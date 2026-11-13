@@ -1,262 +1,219 @@
 # SolidDraft interface design
 
-SolidDraft uses a light, dense interface with a feature tree, property panel,
-assistant and 3D viewport. This document records the interface and kernel boundary.
-
-![SolidDraft modelling a bracket](screenshots/soliddraft.png)
-
-## Layout
-
-- Menu bar (30 px) and tabbed ribbon (26 + 92 px) are fixed egui panels. The part's tabs are Solid, Sketch, Assembly, Inspect and View. The Assembly tab shows the assembly's commands, off until an assembly is the active document. Undo and Redo sit beside the menus while the part is active; the drawing's and the assembly's ribbons keep an Edit group. Along the bottom runs one bar (32 px) with the command line and the status, see [Command line](#command-line). Between them sit the side area and the viewport. The side area holds the Feature tree with Properties under it (380 px by default); it is an egui side panel with its own small `egui_dock` tree, and the middle is the dock where the drawing tab opens beside the part. The side area hides and shows with F9, from the View menu, from the ribbon's View tab, or from the strip it leaves at its edge; it resizes by dragging its inner edge, between 200 px and what leaves 320 px of viewport. Visibility and width are written to `settings.json` in the config directory and restored at the next start. Window, Reset panel layout restores the default.
-- With the internal `frame_layout: "edit_suite"` setting, a part shows Solid, Sketch, Assembly, Inspect and View as a centred switch in the title bar. The switch uses the same stable tab ids and drives the left tool palette without a second tab row. Below 1280 points wide, the title bar groups the menus under Menu to leave room for every workspace.
-- The property panel lives under the tree, not in a dialog, so the viewport is never covered while a feature is edited. This is the SolidWorks PropertyManager rule and it matters more in a small window than in a large one.
-- A feature form (Boss-Extrude, Cut-Extrude, Fillet, Chamfer, Hole, Shell, Draft, the patterns and the rest) opens with the feature's icon on an accent tile, its title, and OK and Cancel at the right. Its sections are cards with an accent tick before the title. Numbers sit in one table, the Fusion 360 and Onshape layout: captions in a 96-point column, every value field 24 points tall and the full remaining width, the unit inside the field at its right. A field shows the accent border while it has the keyboard, and Tab walks the fields in reading order. Exclusive choices (Rectangle or Circle, Through or Blind, the hole head) are one segmented control. Picks are accent chips with a remove button, under a count; an empty list shows the prompt for the first pick. Past four picks the list scrolls in a box of its own, as a CAD selection box does, with half a chip showing at its edge, so the parameters under it stay in view in a short panel. A refusal sits on a red strip under the control it is about. The fillet form asks only for the edges and the radius. What the fillet does where it meets a neighbouring face, and how it closes a corner where only some edges are filleted, are the kernel's to settle, so the form offers no choice of them.
-- Every ribbon command is a tile with its label under its icon, on at most two lines. Main verbs have a 26-point icon and their variants a 22-point one. The whole tile is the button. A window too narrow for every group collapses groups from the right, each to a button with its name and a chevron. Clicking one opens its tiles in a row under the ribbon, which goes when a command is chosen, with a click elsewhere or with Escape. Escape closes the row and leaves any open editor alone. The group never runs a command by itself, and the ribbon stays in its 118-point band. The drawing's ribbon uses the same tiles and collapse.
-- The ribbon shows every command of the first usable version, including the ones later phases deliver. Those are drawn disabled with a tooltip naming the phase. Hiding them would make the layout look finished when it is not; showing them enabled would lie.
-
-## Colour and type
-
-- The Studio look has three materials: the window chrome (menu bar, ribbon tab strip) `#e9ecf0`, the panels and the ribbon body a step lighter at `#f7f8fa` with panel headers `#eef0f4`, and the modelling space fading from `#f2f4f7` to a pale grey floor `#d8dfe8`. Ink `#0c1420`, muted `#465264`, lines `#737f90`, accent `#1d4ed8`, selection `#d4e2fc`, 4 px corners, 22 px rows. The dark palette is unchanged (chrome `#2a2e35`, panels `#31363e`, lines `#3e444d`, ink `#e4e7ec`, accent `#6fa0ff`, viewport `#4a505a` to `#22262c`). The View menu chooses the theme, saved as `appearance.theme` in `settings.json`, or started with `--theme dark`. The AI session's terminal is a dark console (`#14181f`) in both modes. The two palettes are `theme::LIGHT` and `theme::DARK`; every custom widget reads the active one through the accessors in `theme.rs` (`theme::ink()`, `theme::panel()`, ...), so the egui style, the dock style, the hand-painted widgets and the viewport backdrop agree.
-- Light text tokens meet WCAG AA's 4.5:1 contrast on the shared panel, selection, hover, notice and backdrop tones. Control borders and origin axes meet 3:1. Success, warning and error text use darker green, amber and red. Field hints use opaque muted ink, and floating value pills have an opaque background so the part beneath cannot wash out their text. Grid strength remains the separate `view.grid.strength` preference, independent of the theme.
-- Inter (Regular, Medium, SemiBold) is bundled so the three platforms look the same. egui's bundled fonts stay as fallbacks for symbols.
-- Body text is 12.5 px, ribbon labels 11 px, group labels 10.5 px. Dense, but every label is a real word, never an abbreviation.
-- The viewport background is the theme's fade, handed to the blit pass as a uniform, and the ground shadow darkens whatever tone lies under it, so it lands on the floor; a part with no appearance assigned is the blue-grey of `Appearance::default_part`, lit by a key, fill and rim that follow the camera so curved faces read without edges. Hover tints a face 22 percent toward the accent, selection 55 percent, mixed in after tone mapping so they look the same in every look. Edges are 90 percent ink, 1.3 points wide, pulled slightly toward the camera so they win the depth test on their faces.
-
-## Icons
-
-Operations use the catalogue under `crates/soliddraft-app/assets/icons`: 65 CAD drawings and 36 line glyphs, original art with nothing to license. `scripts/generate_cad_icons.py` writes it, and `--check` fails CI if a committed file differs, so nobody edits an SVG by hand. `icons.rs` rasterizes a drawing with resvg at the physical size it is shown at and keeps the texture, so no frame shows a blank. Colour says what a command does: grey the part, blue what it adds, coral what it removes, amber the sketch, teal reference geometry, violet a surface. A disabled drawing fades to grey. On a dark panel only the colours that sit on the bare background get lighter: arrows, axes, lattice struts and point clouds. Commands name their art in the registry with `Icon::Cad` or `Icon::Glyph`, and a line glyph follows the text colour. Everything else is drawn with the egui painter on a 16 by 16 grid (`icons.rs`).
-
-## Viewport and navigation
-
-- Z is up. Front is the viewer standing on -Y looking at +Y; Top looks down -Z with +Y up on screen; Right looks along -X. Isometric is the viewer at (+X, -Y, +Z), the SolidWorks default.
-- The mouse follows the navigation preset in `settings.json` (`navigation.preset_id`, `src/navigation/`): a new installation starts on Fusion 360 (middle drag pans, Shift + middle drag orbits), an existing one on SolidDraft's original controls (left drag orbits, right or middle drag pans, Shift + left drag pans). The wheel zooms toward the cursor. A click with no drag selects.
-- View changes animate over about 150 ms so a keyboard user can see which way the model turned.
-- The view cube in the top right is drawn with the painter from the camera's rotation. Visible faces are clickable; the hovered face highlights.
-- The heads-up toolbar is a single floating strip: isometric, fit, F, T, R, then display style. Section and measure are present but disabled until phase 2.
-- A units and view pill in the lower left and a hover label in the lower right that names what is under the cursor.
-- Double-clicking a solid or a blind extrude's tree row shows the dimensions that build the body. Every visible closed sketch also shows its dimensions, without requiring body selection. Labels stay upright and viewer-facing while their extension lines and leaders follow model-space geometry.
-- Untouched multi-value features, such as holes and patterns, arrange their labels in a view-plane stack with constant screen spacing in perspective and orthographic views. Top and Bottom views keep the values separate. Dragging a label gives it an authored model-space position; automatic layout never moves that position.
-- Closed-sketch dimension defaults avoid occupied label rectangles in the view plane, including when separate sketch loops project onto the same point. Authored labels from every visible sketch are reserved before any sketch defaults and keep their model-space positions. The viewport paints dimension value backgrounds and text after the complete set of dimension lines.
-- Drag a dimension value to reposition it on the view plane through its current anchor. Rotate the model and drag again to move it in another spatial direction. A label drag takes precedence over camera navigation, commits one undo step on release, and cancels with Escape. Double-click still opens the existing value editor.
-- Free 3D annotation placement lasts for the current document session, including selection changes, hide/show, and geometry edits. The part format has no 3D annotation-placement section, so reopen restores default placement. The existing sketch-plane label positions in sketch definitions are unchanged.
-- A grid lies on the ground, or on the open sketch's plane, in every look and with no part open. By default minor lines stay 16 to 40 points apart in steps of 1, 2 and 5 mm times a power of ten, every fifth line is a major line, and a pill beside the view pill gives both spacings. The lines are lighter than the first grid: major lines at 24% opacity (was 36%) and minor lines at 13% (was 16%), and under half that in the dark theme, where light lines on a dark floor stand out more. Faces hide it, and it takes no clicks.
-- The origin planes are finite squares through the part origin, with a fill, an outline and a name near one corner. They reach a quarter past the part and step aside for an open sketch. They draw only where no face did, so they never tint a part, and a click finds a plane only where no model is under the pointer. A click on one selects it; only the Sketch command turns a pick into a sketch.
-- The origin axes are off at rest. Selecting the origin, a reference plane or an origin axis shows them, and Always show origin axes keeps them on. Clearing the selection hides them again.
-- The origin, an axis and a plane are picked with the camera's ray in `viewport/planes.rs`, not the id buffer, from the same scene the renderer draws. The origin beats an axis, and an axis beats a plane. The id buffer must show the current frame before a click can say no model is there.
-- Preferences > Viewport > Grid and planes holds Show grid, Show origin planes and Always show origin axes, and the grid's strength, spacing (follow the zoom with a smallest gap between lines, or fixed in millimetres), major line interval and colour (the theme's, or a custom one). They are saved in the `view` section of the settings, the grid's under `view.grid`. A slider shows its value while it is dragged and is saved when it is let go.
-
-## Picking
-
-Two mechanisms handle picking:
-
-1. An id buffer. The scene is rendered a second time, without multisampling, into an `Rg32Uint` target. The second channel is the entity: faces write `1 << 30 | face id`, edges `2 << 30 | edge id`, vertices (expanded to 7 px squares) `3 << 30 | vertex id`. The first channel is 0 for the open part and, for an assembly, the occurrence's row plus one (see [assemblies.md](assemblies.md#rendering-and-picking)). Every frame a 64 by 32 texel window around the cursor is copied to a mappable buffer. The copy is read the next frame, so hover lags one frame; while the pointer rests on the view the app repaints once more to close that gap.
-2. Priority in the window: nearest vertex within 7 px, else nearest edge within 5 px, else the face under the cursor. That is what makes a corner or an edge clickable without aiming at one pixel.
-3. A CPU ray against the tessellation of the picked face, edge or vertex gives the exact 3D point for the status and for later features (sketch on face, measure).
-
-## Render looks
-
-The viewport has three looks, render settings rather than display modes: **Fast** (appearance colours, metallic-roughness shading, the studio environment, tone mapping, edges), **Studio** (Fast plus soft shadows and light ambient occlusion; the default) and **Realistic** (a stronger shadow light, stronger reflections and occlusion, edges off). The View menu and the command palette switch them; `--preset` on the command line and `?preset=` in the web build's address start in one; `settings.json` holds the default under `view.preset`. `viewport/look.rs` has the values.
-
-- **Shading.** Each face vertex carries an index into its body's appearance table (`soliddraft-materials`' `Shading`, up to 64 per body), filled from the part's own assignments as the model resolves them (`appearance_table`; see [materials.md](materials.md)). Changing an appearance (`Document::set_appearance`) recolours the meshes without asking the kernel for anything. Lighting is linear and metallic-roughness; the environment is a procedural studio (a grey room, an overhead softbox, two strip lights) baked at startup into a 64-texel cube map prefiltered for roughness and nine spherical harmonics for diffuse light (`viewport/environment.rs`), so metals have something to reflect in every look. Each fragment is tone mapped once with Khronos PBR Neutral.
-- **Shadows.** A light fixed above the model, tilted toward the back left of the isometric view so shadows fall forward where they show, casts them onto the parts and onto a ground disc under the model's lowest point. It does not follow the camera, so the 2048 texel shadow map is redrawn only when the geometry changes, not while orbiting; the studio rig that follows the camera stays unshadowed. The ground only darkens: it is invisible where nothing shades it and fades out toward its rim and toward a grazing view.
-- **Ambient occlusion** is a depth and normal prepass, twelve hemisphere samples a pixel and a depth-aware blur.
-- **Depth is reversed** on every camera pass (near 1, far 0, an infinite far plane in perspective) for even precision over a float depth buffer.
-- **Edges are the kernel's**: `tessellate_edges` samples each B-rep edge along its exact curve, and each segment is an instance drawn as a quad of constant pixel width, since WebGL2 draws only one-pixel lines. Seams are not drawn. The mesh's density never changes which edges exist.
-- **Tiers.** WebGPU, Vulkan, Metal and Direct3D 12 run every pass. WebGL2 (and native OpenGL) runs the same shading, shadows and wide lines without the occlusion pass; everything else uses only what WebGL2 has (no storage buffers, no compute).
-
-The colour pass renders into offscreen targets in the callback's `prepare` step and is blitted into egui's render pass in `paint`. This keeps the 3D pipeline independent of how eframe configures its own pass (sample count, depth, format), and the blit shader chooses linear or gamma output from the swapchain format at startup.
-
-## Kernel boundary
-
-The app talks to `soliddraft_kernel_api::Kernel` and nothing else. The backend is chosen in one place, `soliddraft_app::kernel()`, which hands out an `Arc<dyn Kernel>` on Catallax; the document, the viewport and the panels never name a backend.
-
-The document replays its feature list on every change: each extrude is `create_body_from_profile` plus `extrude`, the sheet body is released at once, the previous solids are released before the replay. Kernel ids change on every replay, so a selection is carried across a rebuild by name: the same feature and the same label ("Boss-Extrude1 · End cap"). The labels come from the model's persistent references, which name a face by the origin Catallax records on it ([modelling.md](modelling.md)).
-
-Three things the interface needs were not in the trait in phase 1, so the shell derived them from the labelled display mesh. Phase 2 added all three to the trait (`tessellate_edges`, `VertexId` with history, and `FaceRole` on created faces; see [kernel-bridge.md](kernel-bridge.md)), and the `soliddraft-model` document names faces from them ([modelling.md](modelling.md)). Face names now come from the model, and each face's origins come from Catallax, so no face role is guessed from geometry. The viewport draws the kernel's sampled edges (`tessellate_edges`) and takes corners from the topology's vertices where three or more faces meet, keyed by feature and ordinal, so a corner has no identity across operations yet.
-
-## Command line
-
-The bar along the bottom (`command_line.rs`) holds a row of tool chips, a prompt and the status of the active document. The status always shows its headline (`Rebuild OK`) and the units or the pointer's position, adds a fresh note and the other details while there is room, and lists all of it when clicked, the latest note included. A change whose body has no display mesh is rolled back so the part stays on screen, and the headline reads `Display failed` with the kernel's reason beside it. A typed command's id or label runs the registry command, so it does what its ribbon button does; Tab completes the id, Up and Down walk back through what was typed, Enter on an empty line repeats the last line, and a name no command has gets the closest ones in the status. The chips start as the selection tools (Select, Cancel, Measure, Normal to, Fit). Dragging a chip moves it, dragging a ribbon button onto the row adds it, + adds one by name, and right-click removes one or resets the row. The chips and the session's height are written to the `command_line` key of `settings.json`.
-
-`ai` (the `AI_COMMAND` constant), Shift+F9, / or Tools, Assistant, Ask opens the assistant session: a terminal-like pane on a dark ground that grows upward from the bar and resizes by its top edge. Its scrollback shows the assistant's replies, its tool calls and its proposal cards with Preview, Apply, Discard and Undo. At its prompt a line that is a command's name, or starts with `/`, runs the command; anything else goes to the assistant. Esc, `exit`, `close` or the header's close button collapse it back to the bar; Esc stops an answer in progress first. The bar and the session take their colours from named tokens in `theme.rs`.
-
-## Preferences
-
-Tools, Preferences and the command line's `settings` or `Preferences` open the same
-window in every document. It starts on Navigation > Mouse with the saved preset.
-Search finds working controls, navigation presets, bindings and planned categories.
-Selecting a planned category shows its name and Coming soon. Browsing writes no settings.
-The category list and content scroll separately. The mouse gestures and practice area
-sit side by side when there is room and stack in a narrower window. Changes to working
-controls save immediately. When storage refuses a change, the choice still applies for
-the session and the window says it was not saved.
-
-## Shortcuts
-
-F, T, R, I views, N normal to the sketch plane or the selected face. Z zoom to fit. S sketch, E extrude, X cut, F or C fillet or chamfer the selected edge. Enter and Esc apply or cancel the open feature and leave a sketch. Delete removes the selected feature or sketch entity, F2 renames. Ctrl+Z and Ctrl+Y undo and redo, Ctrl+S and Ctrl+O save and open, Ctrl+N new part, Ctrl+Q quit. In a sketch, L R C A S P D pick the line, rectangle, circle, arc, slot, point and smart dimension tools and X toggles construction. / opens the assistant session at its prompt, ? opens the shortcut list, Ctrl+Shift+P opens the command palette. F9 hides or shows the feature tree, Shift+F9 opens or closes the assistant session.
-
-Preferences > Interface > Shortcuts lists the shared command registry, with each app
-command's current key and scope. Search filters by name, description, scope or key.
-Automation-only commands are listed without keyboard controls; unavailable app commands
-show Coming soon. Assign captures the next key press, with Esc to cancel. Clear removes
-a binding, Reset restores that command's preset default, and a conflict offers Swap or
-Cancel before either command changes.
-
-Choosing SolidDraft, SolidWorks or Fusion restores that preset and clears custom keys.
-Reset all restores the currently chosen preset. Mouse gestures are unchanged. Command
-edits take precedence over navigation view-key aliases, and assigned keys work
-immediately. Menus, the command palette and shortcut help show the edited keys.
-The `shortcuts` section uses the same settings store as the other preferences:
-`settings.json` on desktop and the site's localStorage in each browser profile.
-
-## Automation
-
-`--screenshot PATH` saves the window through egui's screenshot command and exits; `--bench` loads a body tessellated to over 10,000 triangles, disables vsync, orbits continuously and prints mean, median, p95, p99 and max frame times. Both exist so the exit test can be rerun on any machine without a human at the keyboard.
-
-## Phase 2: the sketcher
-
-The sketcher draws on the 3D view with the egui painter; the sketch plane maps points both ways through the camera, so there is no second renderer and the sketch sits exactly on the face it was drawn on.
-
-- **Entities own their points.** A line has two, an arc a centre and two ends, a circle a centre and a radius. Points of different entities are joined by coincident relations, the way SolidWorks and the solver model it, so an entity can be deleted without rewriting its neighbours. Joined points are drawn filled, free ends hollow, so an open corner is visible before the solver says so.
-- **Inference is what the user sees.** While the pointer moves, a point within 8 px snaps to an existing point, the middle of a line or a curve; a new line within 6 px of level or plumb with its start snaps exactly. Every snap shows its glyph by the cursor, and every snap that lands a click becomes a relation. Nothing is inferred silently.
-- **Tools are chains.** Line and Centreline continue from the previous endpoint with a stored coincident join, including with Auto relations off. Right-click or double-click ends the chain while keeping the tool selected; the next click starts an independent chain. Landing on an existing point also ends the chain and retains its coincident join. Right-click discards the unfinished preview, while double-click places its final segment on the first click without adding a zero-length segment on the second. Esc discards unfinished placement and returns to Select; a second Esc leaves the sketch. Completed segments remain, with one undo step each. Rectangle, circle, centre-point arc, straight slot and point take two or three clicks. The slot is built from two lines, two arcs, four coincident, four tangent and one equal relation plus a construction centreline, the same relations the user would add by hand, so it stays a slot when dragged.
-- **Construction and centrelines.** Construction entities render dashed and stay out of profiles while their relations and driving dimensions continue to solve. X toggles construction on selected entities without changing their IDs or constraints; an empty selection leaves the drawing preference unchanged. Draw construction controls ordinary drawing tools for the current edit session. Centreline in Draw, the property tools and the command palette uses the line chain and its inference, but always creates construction lines with dashed previews. Its checked, disabled Draw construction control reflects that requirement without changing the ordinary preference. L or another drawing tool restores that preference. Escape or right-click cancels unfinished placement; each placed segment has one undo step. Saved entities retain construction flags and relations; drawing preferences reset on reopen.
-- **Smart dimension places by position.** One pick and a placement click. A line dimensioned above or below it gets its horizontal extent, left or right of it the vertical one, inside its box the length; two points work the same way; two lines give an angle, or a distance when parallel; an arc gives a radius and a circle a diameter. Point-to-line and parallel-line defaults use the perpendicular distance to the supporting line, not a clamped endpoint. Driving dimensions enter the solver and open their value pill for typing at once. The compact popup keeps its original display text, so unchanged Enter, OK or focus loss does not round the target, move geometry or add history. Creation, label double-click and shown-dimension editing use the same initializer.
-- **Linked values.** Select driving dimension labels and open Link values from Tools or the command palette. The anchored form creates a named global from the first selected value or joins an existing name. Its inline name list supports Tab, arrow keys and Enter; Escape closes the list before closing the form. Double-clicking a directly linked member opens the shared form, so editing a literal shared value updates every member. Formulas remain read-only here and editable in Values. The form warns before replacing selected expressions. Shared names belong to the part. Named configurations receive local binding and value overrides; Default bindings and values are inherited unless overridden, including Default unlink operations. Linking, shared edits and unlinking are atomic, undoable commands using existing saved globals and bindings. Unlink retains current numbers and does not delete the global. Reference dimensions, mixed angle/length selections and invalid targets are refused. All Values paths reject non-positive sketch lengths before mutation; signed and zero angles remain valid. Direct headless numeric edits retain their driver guards and callers can use the existing named-value API.
-- **Reference dimensions.** Smart dimension's Reference dimensions choice creates an annotation without a solver equation or numeric popup. A selected dimension's Reference dimension checkbox changes mode while preserving its ID and label. Parenthesized values come from current geometry, including while editing or dragging it, and cannot be typed over. Missing or invalid targets show an unavailable value instead of zero. Switching to driving uses the current measurement in an atomic trial solve and refuses invalid lengths or unresolved conflicts. Expression-bound dimensions cannot silently lose their bindings. Changing mode does not renumber later D inputs; reference annotations stay out of editable inputs. A value-free saved constraint type keeps old driving JSON unchanged; older readers reject the new reference type instead of treating it as a driving equation. Creation choice is session-local, annotations persist, and label drags retain their original press anchor. Equation sources from references and automatic vendor-style overdefinition prompts are not implemented.
-- **Three colours.** Entities that can still move are accent blue, fully defined ones ink black, the ones in a conflicting relation red, with the status pill naming the state and the number of conflicts. The solver's own answer drives this: which variables are still free and which relations it could not satisfy.
-- **Relations are in the ribbon.** Relations opens the full list of supported relation types. Incompatible choices stay visible with a selection hint; an already-applied relation is disabled. Adding a relation uses the property panel's solve and undo path. Show all relations hides or reveals the glyphs, including coincidence, without changing constraints, dimensions or automatic inference. Hidden glyphs cannot be picked. The display choice lasts for the current sketch edit session. Escape closes the list before changing tools or leaving the sketch, and the list also works under the collapsed Constrain group.
-- **Inspect relations.** Selecting a relation in Existing relations or at its glyph highlights its owner entities and directly referenced points, including the origin. The geometry keeps its definition and conflict colours under the highlight. Existing relations also covers selected points and stays available while a listed relation is selected. The owners do not become selected geometry. Delete and the row button remove only the relation. Undo restores it.
-- **Sketch diagnostics.** The Tools control and command palette open a read-only, session-local report. It reuses profile endpoint grouping and the 1e-6 mm join tolerance to locate open ends, overlaps, branching junctions and invalid curves. Analytic pair checks also find interior T/X junctions and positive-length line or circular overlaps. Missing and wrong-kind relation targets keep their authored rows and get an explicit reason. Inspect relation selects only that constraint for the existing edit/delete controls. Previous/Next changes the highlighted fault without selecting geometry. Locate uses the sketch plane and current camera, with range checks before focus. Edits suppress stale highlights until refresh. Escape closes diagnostics before leaving the sketch, after cancelling any active tool or value edit. Reports are not saved. This is not automatic gap closing, curve merging or a kernel validity check, and it does not alter the existing four relation-filter scopes.
-- **Profile nesting.** Containment uses analytic lines, arcs and circles, not their display chords. Arc crossings split at vertical extrema and use the line test's half-open endpoint rule. Nesting preserves loop source IDs, deterministic ordering, orientation and hole/island depth. Display outlines still sample curves. Overlapping or touching loops are not a supported nesting case.
-- **Intended-feature preflight.** Diagnostics offers Boss extrude and Cut extrude usage choices. The Check sketch for feature palette command opens Boss preflight directly. Both choices reuse the property panel's existing closed-profile conversion result; Cut also checks the current model body. Profile counts do not certify the final feature. Depth, direction, end conditions, body intersection and kernel validity remain in the feature editor. Unused open curves retain the converter's existing behavior and remain listed as warnings. Target changes do not edit the document or select geometry. Refresh preserves the target; a new diagnostics session resets it. Other feature types and thin/open-profile operations are not checked.
-- **Filter relations.** Existing relations remains available with no selection. Selected retains the current owner context. All lists the whole sketch. Conflicting lists the solver's reported constraint IDs. Dangling finds missing entities or directly referenced points, including invalid point indices. Rows show their status in the error colour and identify owners in hover text. Inspect conflicts opens that scope and reveals the list from the status summary. Scope changes keep the selector and its first result or empty hint visible in compact windows. Changing scope neither selects geometry nor edits the document. The filter is session-local and does not depend on glyph visibility. External geometric-reference status is not represented, and there is no automatic repair command.
-- **The solver is one function.** `sketch::solve::solve` (in the `soliddraft-sketch` crate, which also holds the sketch model and its profiles) turns the sketch into ezpz requests and writes the answer back; everything else sees only the sketch and its status. Dragging a point adds a low-priority wish for its position, so the real relations win and the rest of the sketch follows. Signed distances keep the side the user drew on.
-- **Sketches on faces** use a frame with u to the right and v up when the face is looked at from outside, and the model origin projected onto the face as origin. A sketch therefore does not move when the face's outline changes, and a bore sketched on a boss reads as x, y of the part.
-- **Entering a sketch** looks straight at the plane, switches to orthographic, and fits the body or, with nothing built yet, a 200 mm workspace. Leaving it restores the projection. The ribbon jumps to the Sketch tab and back.
-
-The Sketch tab's **Modify** group holds polygon, trim, extend, offset, mirror and the linear and circular patterns. They share the analytic operations in `soliddraft_sketch::tools`; `sketch_geometry` exposes the click and copy operations headlessly, while a power-trim drag uses `Sketch::trim_stroke` and its per-cut checkpoints. Each tool shows what it will do before it does it: added geometry in the accent, removed geometry in the error colour. Escape or a right-click puts a tool down and returns to Select; a second Escape leaves the sketch. Coordinates are in the sketch plane, in millimetres. These tools use the existing `f64` sketch model, solver and joining tolerances. The kernel geometry is exact after the existing Catallax recipe conversion; the sketch calculations are not exact rational arithmetic.
-
-- **Polygon** is two clicks: the centre, then a point that sets the size and turn. In **Inscribed** mode the point is the first vertex and all vertices lie on the construction circle. In **Circumscribed** mode it is the first side's midpoint and every side touches the circle. The polygon follows the pointer between clicks. The property panel chooses the number of sides and mode. Placement retains a construction circle, coincident corners, equal-length sides and point-on-circle or tangent relations. Centre snaps are retained in both modes; vertex snaps are retained in Inscribed mode. The guide never becomes a profile unless explicitly converted to ordinary geometry.
-- Selecting a polygon side or its guide exposes **Regular polygon** parameters. Draft **Sides**, **Radius** and mode changes take effect together with **Apply polygon**, as one undo step. Radius always measures the construction circle, so changing mode keeps that radius and the placement direction, rather than the polygon's overall width. The circle and surviving side IDs remain stable. Centre coincidences/fixes survive parameter edits. External edge relations, external circle relations other than centre coincidence/fix, and a conflicting driving circle radius must be released before applying parameters; refusal leaves everything unchanged. A driving radius/diameter dimension on the guide can instead resize the polygon through the ordinary solver. Removing a side, guide or defining relation releases retained parameter editing; the surviving entities keep the existing ordinary trim/delete relation policy. Mirror/pattern copies remain ordinary copies under their existing relation rules. Saved files retain the original polygon group. Older sketches without a group remain ordinary edges.
-- **Trim** removes the clicked interval of a line, arc or circle between its nearest crossings, or the whole curve when nothing crosses it. A circle becomes the remaining arc without an artificial cut at the angle seam. The piece that would go is drawn in the error colour before the click. Dragging from empty space power-trims every crossed interval, even between pointer samples, with a trail and a red marker for each cut. Retracing a marker or pressing Undo while dragging restores cuts one at a time. Within each sampled segment, restores and new crossings run in travel order. Grabbing a line or arc and dragging extends it freely along its natural path. Releasing records the gesture as one undo step; Escape or right-click cancels it. A fully retraced gesture records no change.
-- **Trim corner** is a mode in the existing Trim panel. Pick the portions of two lines or circular arcs to keep. The preview shows removed tails in the error colour and the resulting curves in the accent. Both curves meet at the intersection nearest the combined picks. Tied intersections are refused. The operation preserves entity IDs and construction flags and adds coincidence at the joint. Intersection round-off does not move an existing shared endpoint. Relations touching a changed target follow the existing trim policy. Other relations stay in place. Escape or right-click cancels an unfinished corner. Both endpoint edits and the joint form one undo step. The same operation is available headlessly as `trim_corner` with entity IDs `a`, `b` and plane points `keep_a`, `keep_b`.
-- **Inside and Outside** are Trim modes. Pick two bounding curves, then open target lines or arcs. Inside removes between the selected crossings. Outside keeps that interval. Other curves do not supply cuts. The bounds stay selected for repeated targets and mode changes. "Choose bounds again" replaces them. Each bound must cross the target exactly once. Closed-circle targets, missing or multiple crossings, tangencies and coincident crossings are refused rather than assigned an inferred region. The preview paints removed portions in the error colour. Each target edit is one undo step. Escape or right-click clears the bounds without applying a preview. History changes clear them when the sketch geometry changes. Headless `trim_bounded` takes `entity`, bounding IDs `a` and `b`, and an `outside` boolean.
-- **Trim construction options** are session-local checkboxes shared by all Trim modes. Both start off. Keep trimmed pieces as construction retains removed intervals as dashed, non-profile guides. A wholly trimmed entity becomes construction in place and keeps its relations. Partial edits follow the existing stale-relation policy. Keeping a single target that is already construction makes no edit. Ignore construction targets protects guides from trimming and grabbed extension, but still lets them bound regular targets. Corner can use an unchanged protected guide and refuses if it would change one. Guide previews replace the original solid stroke so their dash gaps remain visible. Power retracing, live Undo and cancellation restore guide flags, new IDs and retained relations. Saved geometry retains its construction flags, while reopened sessions start with both options off. Headless trim operations accept an optional `options` object with `keep_as_construction` and `ignore_construction` booleans, both defaulting to false.
-- **Extend** lengthens the end of the line or arc nearer the pointer to the nearest curve beyond it, with no boundary to pick; the new length and the curve it meets are drawn before the click.
-- **Offset, Mirror entities, Linear pattern and Circular pattern** work on the selection. The pointer keeps selecting while they are active, entities picked before the tool stay selected, and the property panel holds the distance, axis, step, centre, angle and count. The copies they would add are drawn as the values change, and Apply adds them as one undo step. A refusal is shown in the panel in the tool's own words and changes nothing. Placing their values with the pointer is the next slice.
-
-Trim removes the picked interval between intersections with bounded sketch curves. Extend moves the selected start or end to the nearest intersection beyond it with the selected boundary. Both preserve the target entity id when a piece remains and discard its old relations, so an old dimension cannot restore the trimmed or extended geometry. A refused operation leaves the sketch unchanged.
-
-The Sketch tab’s **Transform** group offers Move entities, Copy entities, Rotate entities and Scale entities. Select entities or their points, then enter numeric values or place the base/centre in the viewport. Move and Copy take a base and destination; Rotate takes a signed angle and an optional independent-copy switch; Scale takes a positive uniform factor. Apply commits the preview as one undo step. In-place transforms keep entity IDs and all authored relations/dimensions and reject any result the solver cannot retain within the sketch tolerance without moving unselected geometry. Driving dimensions are never silently rescaled. Independent copies follow the existing construction and endpoint-joining policy below.
-
-Offset copies a connected chain selected in walking order, starting in the first entity's direction. Positive distance is to the left, negative to the right. Adjacent offset lines and arcs meet at miter intersections. Collapsed radii, consumed edges and self-intersections are refused. The originals remain, so offsetting a closed loop makes a nested profile. Mirror reverses reflected arc endpoints to retain the sketch model's counter-clockwise arc convention. Copies preserve construction status and get coincident relations at matching new endpoints, but do not inherit driving dimensions. Patterns are independent copies, with counts including the seed. Polygon sides are limited to 3 through 1000; pattern counts to 2 through 1000.
-
-Polygon centres and placement points must be finite and distinct by more than 1e-6 mm. Every generated side must also exceed 1e-6 mm; a high side count can therefore refuse a tiny radius. Invalid counts, non-finite/overflowing geometry and nonpositive or degenerate parameter radii refuse without mutation. Headless `regular_polygon` takes `center`, `point`, `sides` and optional `mode` (`inscribed` by default, or `circumscribed`), returning sides followed by the guide circle. `edit_polygon` takes that `circle` ID, `sides`, `radius` and `mode`. The earlier `polygon` operation retains its independent-edge behavior for existing scenarios.
-
-Polygon and circular-pattern rotations preserve exact degree-specified right angles with coordinate swaps and signs. Other angles retain their trigonometric values, without a near-angle snapping tolerance. This avoids introducing tiny nonzero coordinates at 90-degree increments that can make the rational arc converter refuse an otherwise valid profile. Each pattern instance computes its transform once for all copied points.
-
-Pointer placement of the offset distance, the mirror axis, the pattern step and the pattern centre remains interface-design work; those four tools take their values from the property panel. Ellipse, spline and text profiles still wait for Catallax stage 5.
-
-
-## Phase 2: one body, references and repair
-
-- **One running body.** Each extrude merges with the body so far, each cut subtracts a tool through it, fillets and chamfers round its edges. A cut defaults to going against the sketch normal, into a face; a boss along it. "Through all" reaches past the far side of the body.
-- **Faces are named by the feature that made them and the part of it that did**: start cap, end cap, the side of a given sketch line or arc, the wall of a circle, the blend of an edge. The names come from the model's persistent names (see [modelling.md](modelling.md)); edges are numbered per feature. The hover label, the property panel and the repair messages all use these names.
-- **References are origin plus fingerprint.** A face is named by the feature that generated it, its generator and an ordinal; an edge by the two faces it separates. On rebuild the names are followed through the kernel history; a base made thicker moves the inside corner and the fillet follows it. When a name finds no entity, several, or one whose type or facing changed, the feature stops with a repair request instead of guessing, the tree marks it, and the body passes through unchanged so the rest of the part still builds.
-- **Repair is a pick.** The property panel lists each missing reference with a strike-through, the viewport takes the replacement click, and OK rewrites the reference. The feature then rebuilds like any other.
-- **Editing rolls back.** Opening a feature for editing rolls the display back to the body before it, so the edges a fillet works on are the ones you can click. The rollback bar shows where the display stands; commit or cancel rolls forward again.
-- **Feature-editor previews replace the body in the colour pass only.** A fillet or cut editor preview is drawn in place of the body, tinted toward the accent, while its edge picking still runs on the original. A fillet or chamfer preview marks the faces it makes and draws them half way to the accent, and a pill at the top of the view reads its size and edge count ("R 5 mm · 2 edges"). While no rounded body can be shown, such as for a refused radius, the pill says so and the picked edges are drawn in the accent instead. Scalar construction previews are different: their displayed faces are pickable by revision-bound origins, never by an old exact handle.
-- **Desktop scalar edits construct first and prove separately.** The selected boss, blind cut, fillet or chamfer exposes depth, radius or distance in its controls. A coalescing construction worker uses the requested definition and retained build; an exact worker uses the same request's reserved proof allowance. A slow earlier proof does not hold up a newer construction display. The newest applicable request alone may publish. Releasing a drag records one command and adopts its existing proof job rather than rebuilding the value synchronously. Escape drops the transient request and resumes any committed proof it temporarily hid.
-- **Requested, displayed and proved revisions are distinct.** Pending state belongs in the feature controls and tree, not a permanent canvas label. A current exact success replaces its provisional mesh and resolves a selected face only through unambiguous origins from the same request. A failure restores the whole last proved part, keeps the failed definition red with a reason in text, and blocks export. Late success or failure cannot replace a newer request. Pending definitions can be saved, but never as a proved body or serialized preview certificate. Exact measurements and new geometric references wait for proof. The browser shares these guards but still performs construction and proof on its interface thread; it does not provide the desktop's responsive-worker guarantee.
-- **Undo is the model's command stack**: every panel command becomes one model command, or one batch of them, labelled by the panel's own words, so the Edit menu says what it will undo. Kernel state is never part of it. Interactive scalar undo and redo schedule the requested revision through the same proof worker; stale results cannot publish over either.
-- **The tree nests an absorbed sketch under its feature**, marks suppressed features and the ones past the rollback bar in grey, and shows a red dot for an error and an amber triangle for a missing reference. A second click on a selected row renames it; dragging a row moves it; the bar between rows is the rollback bar. Every feature, plane and axis row ends in an eye: one click on it shows or hides the item without selecting it, and a hidden row and its eye turn grey. A hidden solid feature hides the part's body; a hidden sketch hides its wires. An item never chosen follows the defaults (the body shows, a plane follows Show origin planes and shows while it is selected, the axes show while a reference is selected, while a Revolve or Pattern editor is open or when kept on), and a choice wins over them. The choices are saved in the part file.
-- **Files are the model's part files** (`.dwprt`, see [modelling.md](modelling.md); `.dwpart` files still open and save as `.dwprt`); the File menu, Ctrl+S and the recent-files list work on them. Recents live in the platform configuration directory, and the start page lists them with their thumbnails.
-
-### The document behind the panels
-
-The part is `soliddraft_model::Document`: features, commands, undo and redo, rebuild, persistent references and files. The app's `document.rs` is the layer the panels read: it turns their commands into model commands, mirrors the model's tree as the feature list after every change, and keeps what only the interface needs (display meshes, picking, selection, previews).
-
-## Phase D2: drawings
-
-A drawing is its own document that opens as a tab beside the part.
-
-### Documents and the shell
-
-- **Make drawing** is File, New drawing from part (Ctrl+Shift+D). It opens the New drawing PropertyManager in the property panel: template, sheet scale (auto fits the part), projection angle from the template, units, and the views to place as tiles with Front, Top, Left and Isometric ticked. Create drawing projects the ticked views at scale 1, picks the largest template scale at which the orthographic group fits beside the pictorial, places them (first angle: top below front, side view to the right; third angle the other way), gives the pictorial the next smaller scale, inserts centre marks for every circle seen face-on and the template's general notes, and opens the tab.
-- **One window, two documents.** The drawing tab lives in the same dock leaf as the part; whichever is active drives the ribbon, the tree panel, the property panel, the status and the shortcuts. The hooks into the shell are small on purpose: `Tab::Drawing` in `app/presentation/docks.rs`, one arm at the top of `ribbon.rs`, one `AppAction::Drawing` variant and one `DrawingState` field in `state.rs`. Everything else is under `src/drawing/`.
-- **The drawing has its own undo stack**, a snapshot per command labelled by it, like the part's. Ctrl+Z goes to whichever document is active.
-- **Status:** "Up to date with Bracket rev 3f2a9c1b" (the first digits of the part revision the drawing is pinned at), then sheet number, size, scale, projection angle and view count; or the number of dangling and changed annotations, or that the views are older than the part. The document tab carries a dot while the drawing has stale views or annotations needing attention.
-
-### Views, alignment and placement
-
-- Views fold off a selected view: eight direction dots around the parent, the orthographic four give folded views (the sheet's projection angle decides which face: in first angle, right of Front gives the Left view) and the diagonals give pictorials. The ghost of the view follows the pointer, dashed accent guides show the alignment that will be kept, a hover card names the resulting orientation and says to hold Ctrl to break alignment. The projection for each direction is computed once per direction and cached while the tool is active.
-- An aligned view slides only along its guide; dragging a parent drags its aligned children; Break alignment and Align are in the Arrange group, the context menu and the view's PropertyManager.
-- Scale per view: sheet, parent or custom. Changing the sheet scale rescales every view that inherits it, including Parent-scale descendants on other sheets, by transforming cached paths and annotation points without going back to the kernel. Custom-scale views keep their scale. "SCALE 1:2" is captioned under views whose scale differs from the sheet.
-- Hidden lines are kept in the cached geometry and switched on and off per view by the display style, so no re-projection is needed. Tangent edges are passed to the kernel as a request; the backend does not yet tell smooth edges apart in its output, so they draw like other edges.
-
-### Dimensions and annotations
-
-- **Smart dimension** reads the pick, as the sketcher does: one line gives its length, a circle a diameter, an arc a radius, two parallel lines a distance, two other lines an angle, a round and a line the distance from the centre, two ends a point-to-point distance. Clicking near the end of a curve picks that end. The placement decides a linear dimension's orientation: above or below the span measures horizontally, beside it vertically, inside it along the line. Picking rule when curves overlap: annotations win over curves, visible curves over hidden ones, and of two curves at the same distance the shorter one, so a hole's edge wins over the long edge it lies on.
-- The **dimension palette** opens on the selected dimension: symmetric or deviation tolerance with its value, precision, diameter or radius, parentheses and the text. Every change is one command on the undo stack.
-- **Hole callout** reads the hole feature: count of holes of that size in the feature (by distinct centre, since the far circle of a through hole lies under the near one), diameter, THRU for a through-all cut or the depth symbol with the depth. **Centre marks** are inserted automatically on view creation and on demand. **Notes** take a leader when placed on an edge and are typed in the property panel. **Model items** imports extrude depths into a view that sees the extrusion edge-on and circle diameters into a view that sees the circle face-on, skipping what the sheet already shows; sketch distance dimensions are not imported yet.
-- The PropertyManager of a dimension lists what each end references in the part's own words (feature, role, edge or face, which point of it), so a user can predict what survives a change.
-- Dimension text uses the template's style file: ISO places the value above an unbroken line with filled arrowheads; ASME breaks the line. Text is laid out by cap height (ISO 3098 lettering heights) so 3.5 mm on the sheet is 3.5 mm.
-
-### When the part changes
-
-- Both documents are in one window, so the drawing sees every rebuild. With automatic update on (the default, stored in the drawing), the views regenerate and every annotation re-resolves its references; while a feature editor is open or the part is rolled back the update waits, because the displayed body is not the part. With it off, the views keep their geometry, their boundary turns hatched, the status says so and Update views (U) regenerates.
-- **References are the part's own.** An anchor carries the model crate's persistent name for its entity (a face by feature, generator and ordinal; an edge by the two faces it separates; both checked by fingerprint), the same name a fillet stores for its edge, so a drawing dimension follows an edge the way a fillet does: a plate made 2 mm thicker moves the end edge and the dimension reads 12. The drawing type's placeholder reference gained one optional field for it; its words (feature and role) stay beside it so a lost reference can still be described after its feature is gone. A face's silhouette is found again as the nearest silhouette of that face in the new view.
-- **Nothing is deleted silently.** A reference that resolves to nothing leaves the annotation on the sheet in red with an × at the lost end and a card in the **Needs attention** list with the cause in words ("Both references were edges of Slot, which no longer exists") and three repairs: Reattach (one pick per lost end), Delete, Keep as note (the text frozen with a reference mark). A value that moved beyond its shown precision is highlighted on the sheet and listed under Changed values until accepted. The banner over the canvas says what changed in the part, how many views updated, how many values changed and how many dimensions lost their references, with Review and Undo update (one undo step).
-- The whole update is one command: undoing it restores every view's geometry and every anchor, and the drawing is then older than the part again.
-
-### Templates and styles as data
-
-The sheet formats and drafting styles are TOML files a drawing office can edit, in `crates/soliddraft-drawing/templates/` (ISO A3 and A4 first angle, ANSI A and B third angle: paper, margins, zone grid, ISO 128 line widths, scales, the title block as rules and fields with `${property}` links, the projection symbol, default general notes) and `crates/soliddraft-drawing/styles/` (ISO 129-1 and ASME Y14.5 dimension styles: text heights and placement, arrows, extension line gaps and overshoots, symbols, centre mark sizes; hatch patterns; arrowhead definitions; sheet fonts). They are compiled in and parsed once; the drawing crate's `library` module turns each into the model's `Template`.
-
-### Export
-
-PDF, DXF and SVG are written from the same display list the canvas paints, so what you see is what you export. The PDF is one page per sheet at the paper size with vector paths, widths and dash patterns, and its text in an embedded subset of Inter with a Unicode map, so it can be searched and copied (every weight prints as Regular). The DXF is R2000 in millimetres with LINE, ARC, CIRCLE, SOLID (arrowheads) and TEXT entities on VISIBLE, HIDDEN, PHANTOM, CENTER, DIMENSION, TEXT, HATCH and FORMAT layers with line types; curves go through a lines-and-arcs fit within 0.01 mm, so it has no splines. Native DXF dimensions keep measurement placeholders, precision and tolerances. Their DIMSTYLE uses DIMLFAC to convert sheet-space definition points to model millimetres, including mixed view scales, so downstream edits remeasure instead of retaining a frozen number. Explicit literal text overrides stay literal. A true 3D length whose projected anchors coincide also stays literal because the display list has no 3D definition points. The SVG is the paper in millimetres.
-
-### Where the code lives
-
-Projection, sheet layout and auto scale, alignment, measurement, Model items, associativity with its repairs, the commands and undo stack, the display list, the template library, the exporters and the drawing file are in `crates/soliddraft-drawing`, shared with the headless `soliddraft draw`. The app adds two thin modules: `drawing/part.rs` presents the part document as the crate's `Part` and names entities with the model's persistent references (and reads hole features for callouts), and `drawing/document.rs` holds the open drawing with its undo stack, file path and the views' transforms for picking. A drawing file is a zip (`.dwdrw`; `.dwdrawing` files still open) with a manifest, the drawing, each view's cached line work and a thumbnail; its part reference is described in [documents.md](documents.md). Updates still run on the interface thread .
-
-### Screenshots
-
-
-## Phase D3: the rest of the view set and the tables
-
-Section and detail tools follow SolidWorks's gestures. Every view and symbol is made by `soliddraft-drawing` (`derived`, the symbol rules, the commands); the app collects clicks, previews the result and pushes commands.
-
-### Derived views
-
-- **Section**: the first click on a view starts the cutting line (circle centres snap, so a cut through a boss lands on its axis); moving the pointer picks horizontal or vertical; the second click finishes the line, and the kernel's section is projected at once. The ghost then follows the pointer along the alignment the projection angle gives (first angle: where the arrows point; third angle: where the eye is); F flips the direction and recomputes, Ctrl frees the view, the third click places it. The letter comes from the drawing's counter (I, O and Q skipped). The view's PropertyManager edits the letter, flips the direction, picks the hatch pattern (the library's `hatch.toml`), and can redraw the cutting line with the same two clicks.
-- **Detail**: a click for the centre and one for the radius, or, with Profile chosen, a click per corner closed on the first corner, a double-click or Enter. The magnification (2× the parent by default) and the sheet the view goes to are chosen in the PropertyManager; a detail sent to another sheet is placed there at once and the canvas switches to it. Magnification after placing goes through the view's scale, so its annotations rescale with it.
-- **Auxiliary**: click an edge; the view unfolds square to it from the side away from the parent's centre; F looks from the other side.
-- **Crop** takes two corners; **Broken-out** a centre, a radius and a depth from the PropertyManager. Both and their removal are on the view's PropertyManager, as are the view's location labels (sheet and zone of the view and of its mark) and a Sheet choice that moves the view to another sheet at a free place.
-- Hidden lines and tangent edges are per view in the PropertyManager and in a Display group on the Views tab; a tangent edge change remakes that one view through the kernel rather than updating the whole drawing, and the view's transform is remembered again so later picks on it land.
-
-### Dimension sets and symbols
-
-- **Ordinate, baseline and chain**: pick the origin and the points (edge ends and circle centres snap, an edge's middle otherwise), then a click away from the edges places the set at that distance. Points on one line take the direction that fits them; otherwise the PropertyManager's choice holds. The values are measured from the picks' cached points at the view's scale and re-resolved by the crate on update like any anchor.
-- **Geometric tolerance** is built in the PropertyManager before placing: characteristic, zone (diameter, value, material condition) and up to three datum references with modifiers, with the frame's text previewed. A click on an edge anchors it with a leader, the next click places it; a click away from the edges stands it free. **Datum** and **surface finish** need an edge; **revision symbol** marks the drawing's current revision unless another is typed. Every symbol's PropertyManager edits it afterwards through `EditAnnotation`.
-- **Revision table**: the Annotate tab's Revision table and the tree row open the panel: the rows so far and a form for the next (revision defaults to the next letter, date to today). The first row makes the table at the top right of the drawing area; the drawing's revision follows the row; the ZONE column lists the zones of the symbols that carry the revision. The table is selectable on the sheet (it has its own display owner now).
-
-### Sheets
-
-Sheet tabs under the canvas, as SolidWorks shows them: click to switch, double-click or the context menu to rename, Move left and right to reorder, Delete when no view elsewhere is made from the sheet's views, and a plus for a new sheet from the first sheet's template. The sheet PropertyManager has the same. Reordering needed one plumbing addition, `Command::MoveSheet`; views keep their ids, so location labels pick up the new sheet numbers by themselves. Export: the PDF now carries every sheet as a page (`bracket.pdf`); DXF and SVG stay one sheet each.
-
-### Screenshots
-
-
-## Phase 0: documents and references
-
-### A drawing and its part
-
-- A drawing is its own file that references its part by id and pins the revision it was saved against. Opening it shows that revision whatever the part has become since; the part's current revision comes from the open part or from its file, and the difference is the **newer version available** marker: in the drawing tree (the model row under the document carries the SolidWorks out-of-date glyph and the pinned revision), the status, a bar over the sheet, the hatched view borders and the Model reference panel. Nothing updates by itself on open.
-- **Rebuild** is where SolidWorks keeps it: Edit > Rebuild drawing (Ctrl+B), the Model group of the Views tab, the bar over the sheet. It brings the views to the current part, re-resolves every annotation, re-pins the reference and binds it to where the part was found, as one undo step. When the part is not open, Rebuild opens its file in the part tab first.
-- **A missing part is repaired, never guessed.** The repair dialog says what was wrong at the stored path and that nothing with the id was in reach, lists the parts in reach as cards in the Needs attention language (the same name first), takes a path by hand, and links to File locations. A same-named file with another id is a candidate, not a match; taking it is Replace model. The pinned revision stays, so the sheet keeps showing what it showed.
-- **File locations** (Tools menu) is one page for every kind of reference file: material and appearance libraries, part, assembly and drawing templates, sheet formats and title blocks, drafting styles, configuration tables, and the folders searched for moved references. Built-in content is listed read-only; the user's folders and files are added, removed and reordered under it. The schema and the lookup order are in [documents.md](documents.md).
-
-### Screenshots
+The release interface is Edit Suite, approved in the L00 merged prototype on
+13 November 2026. It combines B3's frame, sketch mode and tool palette with A2's
+right-click ring, navigation bar and scene gallery. This guide records that target.
+It does not claim that every panel below has shipped.
+
+The internal `frame_layout` setting selects `classic` or `edit_suite`. Classic
+remains the default during the rebuild. It retains its ribbon, docked tree and
+Properties panel, light and dark Studio palettes, and saved panel layout. New frame
+work belongs behind `edit_suite` until the release switches the default.
+
+## Frame
+
+One frame holds parts, assemblies and drawings. At the 1440 by 900 reference size,
+the title bar is 34 px tall, the options bar below it is 46 px, and the tool palette
+is 250 px wide at the left. The viewport fills the remaining space. A 58 px timeline
+sits above a 30 px command line at the bottom, both to the right of the palette.
+These measurements exclude the prototype's guide strip, which is review furniture.
+
+The title bar holds menus at the left, workspaces in the centre and open document
+tabs at the right. The part switch keeps the stable Solid, Sketch, Assembly, Inspect
+and View ids and drives the palette without a second tab row. Below 1280 points
+wide, Menu groups the menus to leave room for all five workspaces. It has no search field. There is no Surface workspace.
+
+| Document | Workspaces | Bottom strip | Tree and Values pane |
+|---|---|---|---|
+| Part | Solid, Sketch, Assembly, Inspect, View | Feature history | Hidden by default |
+| Assembly | Assembly, Inspect, View | Components and mates | Open by default |
+| Drawing | Views, Annotate, Sheet, View | Sheets and the active sheet's views | Open by default |
+
+The palette exposes named commands in two columns. Every tool remains reachable by
+scrolling at shorter window heights. Keep the name visible beside its icon. Smart
+Dimension, Move entities, Copy entities, Rotate entities and Scale entities are
+visible tools. Do not hide sketch tools inside Modify or Transform dropdowns.
+Unavailable commands say "Coming soon" in the public UI, including their tooltips.
+Do not show implementation details or ticket numbers there.
+
+## Options and forms
+
+The options bar follows the active tool, selection or feature editor. With nothing
+selected, it holds pick filters and view controls. Display style belongs on the
+viewport navigation bar.
+
+A feature form puts model picks and its main size on the bar. OK and Cancel stay at
+the right. Enter accepts and Escape cancels. A More button with a count opens a
+sheet below the bar for the remaining fields. The sheet never contains the only
+way to finish the operation. Short forms such as Extrude and Fillet need no sheet.
+Fillet asks for edges and radius; corner treatment belongs to the kernel.
+
+Use the same bar and sheet pattern for Mate, drawing sheet properties, Repair and
+plane picking. Start sketch offers the three origin planes in the viewport and on
+the bar, and accepts a flat face. Choosing a sketch tool outside a sketch first
+asks for its plane and then arms that tool.
+
+Tree and Values share a 236 px pane between the palette and viewport. Open it from
+the View workspace, View menu or Tree button beside the timeline. There is no
+separate Properties pane in Edit Suite. The tree holds structure, origin planes,
+visibility and the Material row. Values holds named inputs and expressions.
+
+## Theme tokens
+
+`crates/soliddraft-app/src/theme.rs` is the source of shared colours, bundled fonts
+and egui styling. `theme::edit_suite` contains the approved prototype values.
+`theme::palette()` and the existing accessors choose that palette for Edit Suite.
+`theme::LIGHT` and `theme::DARK` remain the classic palettes.
+
+Edit Suite's charcoal chrome and amber accent do not change with the saved light
+or dark appearance preference. The preference is retained for Classic. Viewport
+scenes are a separate choice; a dark frame does not imply a dark modelling space.
+
+| Role | Token | Value |
+|---|---|---|
+| Options bar and command line | `PALETTE.chrome` | `#2a2c30` |
+| Title bar, timeline and recessed strips | `BAR`, `PALETTE.panel_header` | `#222427` |
+| Palette and tree pane | `PALETTE.panel` | `#303338` |
+| Frame separators | `PALETTE.line` | `#191a1d` |
+| Strong borders | `PALETTE.line_strong` | `#474b52` |
+| Primary text | `PALETTE.ink` | `#e6e8ec` |
+| Secondary text | `PALETTE.muted` | `#9da2ab` |
+| Active tool, focus and command prompt | `PALETTE.accent` | `#f5a524` |
+| Selected fill | `PALETTE.selection_bg`, `PALETTE.accent_soft` | Amber at 20% |
+| Selected text | `PALETTE.selection_ink` | `#f5a524` |
+| Text on filled amber actions | `PALETTE.on_accent` | `#231600` |
+| Hovered amber action | `PRIMARY_HOVER` | `#ffbc4d` |
+| Fields and raised chips | `PALETTE.field_bg`, `PALETTE.chip` | `#3a3d43` |
+| Chip and popup borders | `CHIP_LINE` | `#4a4e55` |
+| Menus and dialogs | `POPUP` | `#35383e` |
+| Hover wash | `POPUP_HOVER` | White at 10% |
+| Viewport toolbar | `PALETTE.hud_bg` | `#2a2c30` at 95% |
+| Successful state | `PALETTE.ok` | `#63d68f` |
+| Destructive action and Close sketch | `DANGER`, `ON_DANGER` | `#e03a2e`, white |
+| Error text on charcoal | `PALETTE.error` | `#ffb4ad` |
+| AI session | `PALETTE.terminal_bg`, `PALETTE.terminal_ink` | `#17181b`, `#e6e9ee` |
+| AI links and prompt | `PALETTE.terminal_accent` | `#f5a524` |
+| Drawing surround | `PALETTE.canvas_bg` | `#565a62` |
+
+The dark red action fill and pale red error text are separate roles. Use dark ink
+on amber actions and white on red actions. Keep focus visible with an amber stroke.
+Hover, focus and selection must remain distinguishable without changing a label.
+
+Inter Regular, Medium and SemiBold are bundled. Use `theme::font`,
+`theme::font_medium` and `theme::font_semibold`; egui's fonts supply missing symbols.
+Use `theme::mono` for entered values, measurements and the command prompt.
+
+| Type role | Size |
+|---|---|
+| Body | `BODY_SIZE`, 12.5 px |
+| Palette tool label | `TOOL_LABEL_SIZE`, 11.5 px |
+| Secondary label | `SMALL_SIZE`, 10.5 px |
+| Numeric value and prompt | `VALUE_SIZE`, 12 px |
+| Palette group caption | `GROUP_LABEL_SIZE`, 9 px |
+
+The frame constants in `edit_suite` name title, options, palette, pane, timeline and
+command-line dimensions. `TOOL_HEIGHT` is 23 px, `ROW_HEIGHT` is 25 px and
+`CONTROL_HEIGHT` is 28 px. `ICON_SIZE` is 16 px. Palette columns have a 2 px gap,
+tools have 5 px horizontal padding, and options groups have a 12 px gap. Allow a
+wrapped label more height instead of clipping its name.
+
+Use 6 px corners for ordinary controls and popups, 4 px for value fields, 5 px for
+palette tools and 10 px for the floating navigation bar. These are `RADIUS`,
+`FIELD_RADIUS`, `TOOL_RADIUS` and `FLOATING_RADIUS`. The classic constants at the
+module root remain unchanged. New panels should consume these tokens rather than
+copying prototype literals.
+
+## Viewport scenes and navigation
+
+The Scene gallery opens above the Scene button on the bottom-centred navigation
+bar. It shows favourites as thumbnails. Manage favourites lists all nine scenes.
+There is no second backdrop grid in the palette or swatch row on the options bar.
+The empty-space context menu and command line also offer scenes.
+
+The scenes are Plain white, Studio fade, 3 point faded, Soft spotlight, Graphite,
+Night grid, 3 point beige, Blueprint and Lightbox studio. Their backgrounds live in
+`viewport/scenes.rs`. Plain white is the default. A scene changes the backdrop,
+not the frame palette or the geometric meaning of sketch colours.
+
+The navigation bar holds orbit, pan, zoom, fit, display style, Scene, origin axes
+and all dimensions. A drawing uses pan, zoom, fit, grid and snap instead. The view
+cube remains at the upper right. View changes animate over about 150 ms.
+Z is up; Front looks from -Y toward +Y, Top down -Z with +Y up, Right along -X,
+and Isometric from +X, -Y, +Z.
+
+Mouse gestures follow the saved navigation preset. A fresh installation uses
+Fusion 360: middle drag pans and Shift plus middle drag orbits. The wheel zooms
+toward the cursor. A click without a drag selects. Grid, reference visibility,
+projection and rendering quality retain their existing preferences.
+
+## Sketch mode
+
+An open sketch locks the workspace switch to its sketch and plane. The palette
+contains sketch tools only. A red Close sketch action occupies the right end of
+the options bar. It stays visible while a tool or dimension editor is active.
+
+Sketch geometry uses its own semantic tokens, independent of the amber interface:
+`UNDER_DEFINED` is blue `#1d4fe0`, `FULLY_DEFINED` is black `#0b0d11`, and conflicts
+are red. A dark scene places the sketch on `SKETCH_SHEET`, `#f1f3f7`, so black
+remains black on every scene. Do not derive geometry's definition colours from
+`theme::ink()` or `theme::accent()` when migrating the sketch renderer.
+
+Smart Dimension chooses the measurement from the picks and placement. A line
+placed above or below measures its horizontal extent; beside it, its vertical
+extent; inside its bounds, its length. Circles give diameters, arcs give radii,
+and two lines give an angle or parallel distance. A new driving dimension opens
+its value editor. Reference dimensions show measured values without driving the
+solver. Solver results determine definition and conflict colours.
+
+Tools preview their result before committing. Escape cancels the unfinished step
+before leaving a tool or sketch. Line and Centreline retain their existing chain
+rules. Relations, dimensions, construction flags and undo remain document behavior;
+changing the frame must not change them. See [modelling.md](modelling.md) for the
+model and persistent-reference rules.
+
+## Right-click and history
+
+Right-click opens eight commands around the cursor and the full grouped list below.
+A face offers Face, Feature and Body columns; an edge offers Edge, Feature and Body.
+The menu follows the picked context and stays inside the window near an edge.
+It uses the same charcoal, amber, text and popup tokens as the rest of the frame.
+
+The timeline is history. Clicking a chip selects; double-clicking edits;
+right-clicking opens its context menu. Clicking between chips moves the rollback
+marker and displays that history position. An under-defined sketch carries a
+`(-)` prefix. Suppression, missing references and failed or pending proofs retain
+text explanations alongside their status marks. Visibility choices remain saved
+with the document.
+
+## Command line and assistant
+
+The bottom line holds tool chips, a command prompt and document status. Tab
+completes commands, Up and Down recall history, and a typed command runs the same
+registry action as its button. Status details remain available when the line is
+short of room.
+
+Typing `ai` opens a session above the timeline. Its dark console uses the terminal
+tokens. Preview, Apply, Discard and Undo retain their existing proposal semantics.
+After 30 seconds idle the session folds into an `ai · 1 turn` chip; its countdown
+stays visible. There is no docked Assistant pane or drawing Assistant workspace.
+
+## Shared behavior and implementation boundaries
+
+Menus, palette entries, shortcuts and the command line use the same command
+registry. Preferences keeps Navigation and Interface shortcut settings shared
+across document types. Unavailable settings categories say "Coming soon".
+Keyboard focus and edited bindings remain visible in menus and shortcut help.
+
+Icons come from `assets/icons` and `icons.rs`. The catalogue generator owns the
+SVG files. Use registry icons or the shared painter instead of text glyphs.
+Raster treatments follow the actual chrome brightness, including Edit Suite when
+the retained appearance preference is Light.
+
+The frame does not change the kernel boundary. The app talks through
+`soliddraft_kernel_api::Kernel`; geometry, proof, persistent references, undo and
+file formats keep their current contracts. Picking retains vertex, edge and face
+priority. Rendering quality and display style remain separate from scenes.
+See [kernel-bridge.md](kernel-bridge.md), [documents.md](documents.md),
+[assemblies.md](assemblies.md), [materials.md](materials.md) and [web.md](web.md)
+for those contracts. Drawings retain their model references, explicit repair and
+vector export behavior while adopting the shared frame.

@@ -13,6 +13,17 @@ fn refusal() -> KernelError {
     KernelError::Unsupported("requested maximum edge length cannot survive f32 display rounding".into())
 }
 
+/// Bounds every displayed coordinate by the exact body box plus the mesh's chord
+/// error. Round each conversion and the sum outward before computing f32 growth.
+pub(crate) fn display_extent(min: &[Rational; 3], max: &[Rational; 3], chord: &Rational) -> KernelResult<f64> {
+    let extent = min.iter().chain(max).fold(0.0_f64, |m, v| m.max(v.to_f64_nearest().abs().next_up()));
+    let padded = (extent + chord.to_f64_nearest().next_up()).next_up();
+    if !padded.is_finite() {
+        return Err(refusal());
+    }
+    Ok(padded)
+}
+
 /// Native options for a body whose coordinates have magnitude at most `extent`. A
 /// requested edge length is reduced by the f32 rounding growth; the cache stays keyed
 /// by the request, so the reduced limit never stands in for another request.
@@ -97,6 +108,19 @@ mod tests {
 
     fn requested(edge: Option<&str>) -> MeshOptions {
         MeshOptions { max_edge_length: edge.map(rational), ..MeshOptions::default() }
+    }
+
+    #[test]
+    fn exact_box_and_chord_round_outward_for_display_coordinates() {
+        let min = [Rational::from_ratio(-7, 3).unwrap(), Rational::from_ratio(-1, 3).unwrap(), Rational::zero()];
+        let max = [Rational::from_ratio(1, 3).unwrap(), Rational::from_ratio(2, 3).unwrap(), rational("1")];
+        let chord = rational("0.005");
+        let extent = display_extent(&min, &max, &chord).unwrap();
+        let exact_extent = &Rational::from_ratio(7, 3).unwrap() + &chord;
+        assert!(Rational::from_f64_exact(extent).unwrap() >= exact_extent);
+        assert!(extent < 2.34);
+        let huge = [rational("1e400"), Rational::zero(), Rational::zero()];
+        assert!(display_extent(&min, &huge, &chord).is_err());
     }
 
     #[test]

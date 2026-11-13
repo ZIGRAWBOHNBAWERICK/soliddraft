@@ -157,13 +157,24 @@ impl Solid {
                     },
                 );
             }
-            // The default mesh spans the body; pad it by both chord bounds so the
-            // rounding allowance for a requested edge length covers every vertex.
-            let pad =
-                MeshOptions::default().chord_tolerance.to_f64_nearest() + options.chord_tolerance.to_f64_nearest();
-            let default_mesh = self.display(&MeshOptions::default(), query)?;
-            let extent = default_mesh.positions.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs())) + pad;
-            let native = edge_control::native_options(options, extent)?;
+            let native = if options.max_edge_length.is_some() {
+                let built = self.app.checkpoint.built();
+                let bounds = numerical("display_bounding_box", |dec| {
+                    catallax_measure::bounding_box(
+                        &built.model,
+                        built.result,
+                        &catallax_measure::Accuracy::default(),
+                        dec,
+                    )
+                })
+                .map_err(|e| query_error(query, e))?
+                .value
+                .ok_or_else(|| KernelError::InvalidInput("an empty body has no display bounds".into()))?;
+                let extent = edge_control::display_extent(&bounds.min, &bounds.max, &options.chord_tolerance)?;
+                edge_control::native_options(options, extent)?
+            } else {
+                options.clone()
+            };
             let mesh = numerical(query, |dec| {
                 self.app.display(&native, dec).map_err(|error| match error {
                     Error::Display(refusal) => refusal,

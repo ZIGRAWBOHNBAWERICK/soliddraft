@@ -13,10 +13,7 @@ use soliddraft_app::state::{RibbonTab, Tool};
 use soliddraft_app::theme::{self, Mode};
 
 fn palette(app: &App) -> Rect {
-    Rect::from_min_max(
-        pos2(0.0, theme::MENU_HEIGHT + theme::RIBBON_TABS_HEIGHT),
-        pos2(250.0, ribbon::window(app).bottom() - 32.0),
-    )
+    Rect::from_min_max(pos2(0.0, theme::MENU_HEIGHT), pos2(250.0, ribbon::window(app).bottom() - 32.0))
 }
 
 fn click(app: &mut App, label: &str) {

@@ -470,18 +470,12 @@ impl SolidDraftApp {
             .show(root, |ui| self.menu_bar(ui));
         self.leave_start_page();
         let start = self.state.start.is_some();
-        if !start {
+        if !start && !palette {
             egui::Panel::top("ribbon")
-                .exact_size(theme::RIBBON_TABS_HEIGHT + if palette { 0.0 } else { theme::RIBBON_BODY_HEIGHT })
+                .exact_size(theme::RIBBON_TABS_HEIGHT + theme::RIBBON_BODY_HEIGHT)
                 .frame(panel_frame)
                 .show_separator_line(false)
-                .show(root, |ui| {
-                    if palette {
-                        ribbon::tabs(ui, &mut self.state);
-                    } else {
-                        ribbon::show(ui, &mut self.state);
-                    }
-                });
+                .show(root, |ui| ribbon::show(ui, &mut self.state));
         }
         let status = self.status();
         crate::command_line::panel(root, &mut self.state, &status);

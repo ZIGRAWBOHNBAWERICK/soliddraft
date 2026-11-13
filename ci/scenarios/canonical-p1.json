@@ -464,10 +464,14 @@
       "label": "original",
       "exports": [
         {
-          "format": "step"
+          "format": "step",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STEP"
         },
         {
-          "format": "stl"
+          "format": "stl",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STL"
         }
       ],
       "checks": [
@@ -488,10 +492,14 @@
       "label": "edited",
       "exports": [
         {
-          "format": "step"
+          "format": "step",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STEP"
         },
         {
-          "format": "stl"
+          "format": "stl",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STL"
         }
       ],
       "checks": [
@@ -544,10 +552,14 @@
       "same_geometry_as_step": 35,
       "exports": [
         {
-          "format": "step"
+          "format": "step",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STEP"
         },
         {
-          "format": "stl"
+          "format": "stl",
+          "refused": "numbers.operation-budget",
+          "sentinel": "previous accepted STL"
         }
       ],
       "checks": [

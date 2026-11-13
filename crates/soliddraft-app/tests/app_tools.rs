@@ -662,7 +662,7 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let imported = s.call("import_mesh", json!({"path": source, "format": "mesh", "preview_token": preview["token"]}));
     assert_eq!(imported["features"][0]["type"], "import_mesh");
     let mass = s.call("mass_properties", json!({"name": "Import1"}));
-    assert!((mass["volume_mm3"].as_f64().unwrap() - 1000.0 / 6.0).abs() < 0.001);
+    assert_eq!(mass["volume_mm3"], json!(166.67));
     s.call("undo", json!({}));
     assert!(s.state.doc.features.is_empty());
     s.call("redo", json!({}));

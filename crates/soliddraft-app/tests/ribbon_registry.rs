@@ -573,7 +573,7 @@ fn before_loft_verbs(id: &str, current: &mut Value) {
         .pointer_mut("/tool/input/properties/commands/items/anyOf")
         .and_then(Value::as_array_mut)
         .expect("proposal variants");
-    let profiles = json!({"type":"array","items":{"type":"string"},"minItems":2});
+    let profiles = json!({"type":"array","items":{"type":"string"},"minItems":1});
     let shape = json!({"type":"string","enum":["ruled","smooth"]});
     for (op, required) in
         [("loft", json!(["op", "profiles"])), ("edit_loft", json!(["op", "feature", "profiles", "shape"]))]
@@ -758,7 +758,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                     "name":"loft", "input":{
                         "type":"object", "additionalProperties":false, "required":["profiles"],
                         "properties":{
-                            "profiles":{"type":"array","items":{"type":"string"},"minItems":2},
+                            "profiles":{"type":"array","items":{"type":"string"},"minItems":1},
                             "shape":{"type":"string","enum":["ruled","smooth"]}
                         }
                     }

@@ -713,8 +713,16 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
             Align2::CENTER_CENTER,
             tab.label(),
             theme::font_medium(12.5),
-            if selected { theme::ink() } else { theme::muted() },
+            if selected { theme::selection_ink() } else { theme::muted() },
         );
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                bounds,
+                CornerRadius::same(4),
+                egui::Stroke::new(1.0, theme::accent()),
+                egui::StrokeKind::Inside,
+            );
+        }
         if response.clicked() {
             st.ribbon_tab = tab;
         }

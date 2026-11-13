@@ -74,9 +74,10 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
                 app.run_steps(8);
                 let palette = Rect::from_min_max(pos2(0.0, theme::MENU_HEIGHT), pos2(250.0, 850.0));
                 assert!(
-                    ribbon::control(app, "Smart Dimension", palette).rect.top() < theme::MENU_HEIGHT + 60.0,
+                    ribbon::control(app, "Start sketch", palette).rect.top() < theme::MENU_HEIGHT + 60.0,
                     "the palette begins directly under the title bar"
                 );
+                ribbon::control(app, "Smart Dimension", palette);
                 assert_eq!(RibbonTab::ALL.map(|tab| tab.id()), ["solid", "sketch", "assembly", "inspect", "view"]);
                 if width < 1280.0 {
                     let menu = app.get_by_label("Menu").rect();

@@ -188,7 +188,9 @@
           "format": "step"
         },
         {
-          "format": "stl"
+          "format": "stl",
+          "refused": "mesh.precision-or-budget",
+          "sentinel": "previous accepted STL"
         }
       ]
     },

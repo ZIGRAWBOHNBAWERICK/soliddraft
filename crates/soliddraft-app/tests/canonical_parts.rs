@@ -65,9 +65,10 @@ impl Names {
 fn mass(state: &AppState) -> soliddraft_kernel_api::MassProperties {
     let doc = state.doc.model();
     // Use the desktop mass worker's allowance, separate from construction and export.
-    let (result, work) = soliddraft_kernel_catallax::with_request_allowance(200_000_000, || {
-        doc.kernel().mass_properties(doc.body().unwrap())
-    });
+    let (result, work) =
+        soliddraft_kernel_catallax::with_request_allowance(soliddraft_app::measure::MASS_WORK_LIMIT, || {
+            doc.kernel().mass_properties(doc.body().unwrap())
+        });
     assert!(!work.exhausted, "mass oracle exhausted the desktop allowance: {work:?}");
     result.unwrap()
 }

@@ -587,7 +587,7 @@ impl CommandSpec {
         self
     }
 
-    /// Whether the app runs it: it has an action, or it holds a place on the ribbon.
+    /// Whether the app offers it as an action, ribbon tile or planned context command.
     pub fn in_app(&self) -> bool {
         self.action.is_some() || !self.ribbon.is_empty() || self.in_menu
     }
@@ -1390,8 +1390,12 @@ fn key_of(id: &str) -> String {
 fn menu_relation(s: &AppState, name: &str) -> Option<Vec<crate::sketch::ConstraintKind>> {
     let sketch = s.sketch.as_ref()?;
     let (_, kinds) = crate::sketcher::applicable_relation_sets(&sketch.sketch, &sketch.selection)
-        .into_iter().find(|(label, _)| *label == name)?;
-    kinds.iter().any(|kind| !sketch.sketch.constraints.iter().any(|constraint| constraint.kind == *kind)).then_some(kinds)
+        .into_iter()
+        .find(|(label, _)| *label == name)?;
+    kinds
+        .iter()
+        .any(|kind| !sketch.sketch.constraints.iter().any(|constraint| constraint.kind == *kind))
+        .then_some(kinds)
 }
 
 fn registry() -> Vec<CommandSpec> {

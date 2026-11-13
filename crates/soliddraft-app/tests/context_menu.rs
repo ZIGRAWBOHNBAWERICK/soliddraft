@@ -41,10 +41,7 @@ fn right_click(app: &mut App, pos: Pos2, model: bool) {
 fn menu_command(app: &mut App, id: &str) {
     let command = soliddraft_app::commands::get(id).unwrap();
     let state = &app.state().state;
-    let mut label = command.label_in(state);
-    if let Some(shortcut) = state.shortcuts.shortcut_text(id) {
-        label = format!("{label} {shortcut}");
-    }
+    let label = command.label_in(state);
     // The popup follows same-named property buttons in the accessibility tree.
     let point =
         app.query_all_by_label(&label).last().unwrap_or_else(|| panic!("missing menu command {label}")).rect().center();
@@ -54,7 +51,7 @@ fn menu_command(app: &mut App, id: &str) {
 fn groups(app: &App, expected: &[&str]) {
     let painted = ribbon::painted(app);
     for label in expected {
-        assert!(painted.iter().any(|text| text.text == *label), "missing group {label}");
+        assert!(painted.iter().any(|text| text.text == label.to_uppercase()), "missing group {label}");
     }
 }
 

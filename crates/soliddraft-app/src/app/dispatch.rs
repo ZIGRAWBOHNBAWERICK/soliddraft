@@ -992,9 +992,13 @@ impl SolidDraftApp {
             }
             AppAction::SetBodyVisible(show) => {
                 if crate::tree_visibility::visible(&self.state).body != show {
-                    let feature = self.state.doc.features.iter().find(|feature| {
-                        !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_))
-                    }).map(|feature| feature.id);
+                    let feature = self
+                        .state
+                        .doc
+                        .features
+                        .iter()
+                        .find(|feature| !feature.is_sketch() && !matches!(feature.kind, FeatureKind::ReferencePlane(_)))
+                        .map(|feature| feature.id);
                     if let Some(feature) = feature {
                         crate::tree_visibility::toggle(&mut self.state, crate::document::ViewItem::Feature(feature));
                     }

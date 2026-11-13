@@ -162,7 +162,9 @@ impl TabViewer for Panels<'_> {
                         Some((f.plane?, &f.sketch()?.sketch))
                     })
                     .collect();
+                let pick_filter = st.selection_filter();
                 let overlay = Overlay {
+                    pick_filter,
                     ghost,
                     preview,
                     sketch: st.sketch.as_mut(),
@@ -183,7 +185,7 @@ impl TabViewer for Panels<'_> {
                 if let Some(picked) = events.clicked {
                     let reference = events.clicked_reference.map(Selection::Reference);
                     let sel = picked.and_then(|p| selection_of(&st.doc, p)).or(reference);
-                    st.push(AppAction::Select(sel));
+                    st.push(AppAction::Select(pick_filter.selection(sel)));
                 }
                 if let Some(v) = events.set_view {
                     st.push(AppAction::SetView(v));

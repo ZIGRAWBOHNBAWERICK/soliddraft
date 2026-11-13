@@ -42,22 +42,12 @@ fn active_tool(state: &AppState) -> (Icon, String, String) {
     (Icon::Glyph("cursor"), "Select".into(), "".into())
 }
 
-fn command(ui: &mut egui::Ui, state: &mut AppState, id: &str, compact: bool) {
+fn command(ui: &mut egui::Ui, state: &mut AppState, id: &str) {
     let command = commands::get(id).expect("options bar commands are registered");
     let enabled = command.is_enabled(state);
     let selected = (command.active)(state);
-    let response = if compact {
-        let response = ui.add_enabled(enabled, egui::Button::new("").min_size(vec2(28.0, 28.0)).selected(selected));
-        let ink = if enabled { theme::ink() } else { theme::muted() };
-        let rect = egui::Rect::from_center_size(response.rect.center(), vec2(18.0, 18.0));
-        icons::paint(ui.painter(), command.icon, rect, ink);
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, command.label_in(state))
-        });
-        response
-    } else {
-        ui.add_enabled(enabled, egui::Button::new(command.label_in(state)).min_size(vec2(0.0, 28.0)).selected(selected))
-    };
+    let response = ui
+        .add_enabled(enabled, egui::Button::new(command.label_in(state)).min_size(vec2(0.0, 28.0)).selected(selected));
     if response.clicked() {
         state.run_command(command);
     }
@@ -98,14 +88,15 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     } else if let Some(selection) = state.doc.selection {
                         selection_options(ui, state, selection);
                     } else {
-                        ui.label(egui::RichText::new("Display").color(theme::muted()));
-                        for id in ["display_shaded_edges", "display_shaded", "display_wireframe"] {
-                            command(ui, state, id, true);
-                        }
+                        ui.label(egui::RichText::new("Pick").color(theme::muted()));
+                        ui.checkbox(&mut state.pick_filter.faces, "Faces").on_hover_text("Pick faces");
+                        ui.checkbox(&mut state.pick_filter.edges, "Edges").on_hover_text("Pick edges and vertices");
+                        ui.checkbox(&mut state.pick_filter.bodies, "Bodies")
+                            .on_hover_text("Pick the whole body when face or edge picking is off");
                         ui.separator();
                         ui.label(egui::RichText::new("View").color(theme::muted()));
                         for id in ["view_isometric", "zoom_fit", "view_front", "view_top", "view_right", "normal_to"] {
-                            command(ui, state, id, false);
+                            command(ui, state, id);
                         }
                     }
                 });
@@ -120,7 +111,7 @@ fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selecti
     };
     if matches!(selection, Selection::Edge(_) | Selection::Face(_) | Selection::Feature(_) | Selection::Body) {
         for id in ["fillet", "chamfer"] {
-            command(ui, state, id, false);
+            command(ui, state, id);
         }
         ui.separator();
     }

@@ -12,7 +12,7 @@ use soliddraft_app::document::{PlaneKind, Reference, Selection};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::{EditorParams, Tool};
 use soliddraft_app::theme::{self, Mode};
-use soliddraft_app::viewport::render::DisplayMode;
+use soliddraft_app::viewport::PickFilter;
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
@@ -38,7 +38,7 @@ fn edit_suite(app: &mut App) {
 }
 
 #[test]
-fn empty_selection_controls_change_the_real_display_and_camera() {
+fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
     let mut case = Case::new("options-bar-views");
     let mut app = launch(ribbon::plate(), STANDARD);
     case.run(&mut app, |case, app| {
@@ -49,15 +49,19 @@ fn empty_selection_controls_change_the_real_display_and_camera() {
         assert_eq!(bar(app).top(), theme::MENU_HEIGHT, "the bar follows the title");
         assert_eq!(bar(app).height(), soliddraft_app::options_bar::HEIGHT);
         let before = ribbon::fingerprint(app);
-        for (label, display) in [
-            ("Wireframe", DisplayMode::Wireframe),
-            ("Shaded", DisplayMode::Shaded),
-            ("Shaded, edges", DisplayMode::ShadedWithEdges),
-        ] {
-            click(app, label);
-            assert_eq!(app.state().state.viewport.display, display);
-            assert!(ribbon::control(app, label, bar(app)).selected);
+        for label in ["Pick", "Faces", "Edges", "Bodies"] {
+            text(app, label);
         }
+        assert_eq!(app.state().state.pick_filter, PickFilter::default());
+        for forbidden in ["Display", "Wireframe", "Shaded", "Shaded, edges", "Scene"] {
+            assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == forbidden));
+        }
+        let display = app.state().state.viewport.display;
+        let navigation_display = app.get_by_label("Display style").rect();
+        assert!(app.state().state.viewport.rect.contains_rect(navigation_display));
+        ribbon::click_at(app, navigation_display.center());
+        settle(app);
+        assert_ne!(app.state().state.viewport.display, display, "navigation keeps the working display control");
         click(app, "Front");
         let front = ribbon::fingerprint(app).camera;
         click(app, "Top");
@@ -70,6 +74,83 @@ fn empty_selection_controls_change_the_real_display_and_camera() {
         assert_eq!(before.dirty, after.dirty);
         assert_eq!(after.selection, None);
         case.frame(app, "no-selection");
+    });
+}
+
+fn toggle_filter(app: &mut App, label: &str) {
+    let checkbox = app.get_by_label(label).rect();
+    assert!(bar(app).contains_rect(checkbox));
+    ribbon::click_at(app, checkbox.center());
+    settle(app);
+}
+
+#[test]
+fn pick_filters_control_real_picks_without_restricting_tools_or_classic() {
+    let mut case = Case::new("options-bar-pick-filter");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    edit_suite(&mut app);
+    case.run(&mut app, |case, app| {
+        click(app, "Fit");
+        let before = ribbon::fingerprint(app);
+        let face = glam::Vec3::new(0.0, 0.0, 20.0);
+        let edge = app.state().state.doc.edges.iter().find(|e| (e.midpoint.z - 20.0).abs() < 1e-9).unwrap().clone();
+
+        toggle_filter(app, "Faces");
+        toggle_filter(app, "Bodies");
+        ribbon::click_world(app, face);
+        settle(app);
+        assert_eq!(app.state().state.doc.selection, None, "a disabled face does not pick a plane behind it");
+        ribbon::click_world(app, edge.midpoint);
+        settle(app);
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Edge(edge.id)));
+        app.state_mut().state.doc.selection = None;
+        settle(app);
+
+        toggle_filter(app, "Edges");
+        toggle_filter(app, "Bodies");
+        ribbon::click_world(app, face);
+        settle(app);
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Body));
+        case.frame(app, "body-only");
+        app.state_mut().state.doc.selection = None;
+        settle(app);
+
+        toggle_filter(app, "Faces");
+        ribbon::click_world(app, edge.midpoint);
+        settle(app);
+        assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "faces remain reachable at an edge");
+        app.state_mut().state.doc.selection = None;
+        settle(app);
+        toggle_filter(app, "Bodies");
+        let at = app.state().state.viewport.camera.project(face, app.state().state.viewport.rect).unwrap();
+        ribbon::double_click_at(app, at);
+        settle(app);
+        assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "double-click respects Bodies off");
+        app.state_mut().state.doc.selection = None;
+        settle(app);
+
+        toggle_filter(app, "Faces");
+        assert_eq!(app.state().state.pick_filter, PickFilter { faces: false, edges: false, bodies: false });
+        ribbon::click_world(app, face);
+        settle(app);
+        assert_eq!(app.state().state.doc.selection, None);
+        ribbon::run_command(app, "fillet");
+        settle(app);
+        ribbon::click_world(app, edge.midpoint);
+        settle(app);
+        assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Fillet(p)) if p.edges.len() == 1));
+        app.key_press(Key::Escape);
+        settle(app);
+
+        app.state_mut().state.frame_layout = FrameLayout::Classic;
+        settle(app);
+        ribbon::click_world(app, face);
+        settle(app);
+        assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))), "classic ignores the Edit Suite filter");
+        let after = ribbon::fingerprint(app);
+        assert_eq!(before.features, after.features);
+        assert_eq!(before.undo_depth, after.undo_depth);
+        assert_eq!(before.dirty, after.dirty);
     });
 }
 
@@ -119,7 +200,7 @@ fn picked_geometry_shows_dimensions_and_starts_rounding_with_the_pick() {
         case.frame(app, "body");
         app.state_mut().state.doc.selection = None;
         settle(app);
-        text(app, "Display");
+        text(app, "Pick");
         assert!(!ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == "60 mm"), "selection values clear");
     });
 }

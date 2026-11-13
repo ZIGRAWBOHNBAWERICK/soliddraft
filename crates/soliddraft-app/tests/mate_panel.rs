@@ -68,10 +68,40 @@ fn click_at(h: &mut App<'_>, pos: Pos2) {
 /// Clicks a button, first scrolling it into view: a button clipped out of the panel takes
 /// no click, and egui animates the scroll.
 fn button(h: &mut App<'_>, name: &str) {
-    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().scroll_to_me();
+    use soliddraft_app::mates::panel::Family;
+    use soliddraft_assembly::Alignment;
+    if Family::ALL.iter().any(|family| family.label() == name) {
+        if h.state().state.form_bar.expanded {
+            h.get_by_label_contains("More (").click();
+            h.run_steps(8);
+        }
+        let current = h.state().state.assembly.mate.family.label();
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, current).click();
+        h.run_steps(4);
+    }
+    if matches!(name, "Opposed" | "Aligned") {
+        let aligned = h.state().state.assembly.mate.alignment == Alignment::Aligned;
+        if aligned != (name == "Aligned") {
+            h.get_by_label("Flip").click();
+            h.run_steps(4);
+        }
+        return;
+    }
+    let label = if name == "Add mate" { "OK" } else { name };
+    if h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none()
+        && !h.state().state.form_bar.expanded
+    {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap().scroll_to_me();
     h.run_steps(24);
-    let pos = h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().rect().center();
+    let pos = h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap().rect().center();
     click_at(h, pos);
+    if matches!(name, "Add mate" | "Clear faces") && h.state().state.form_bar.expanded {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
 }
 
 /// Replaces what a panel field holds, by typing into it.
@@ -84,7 +114,20 @@ fn type_into(h: &mut App<'_>, label: &str, text: &str) {
         "Value name" => d.value_name.clear(),
         _ => d.value_expression.clear(),
     }
+    let label = if label == "Mate distance"
+        && matches!(
+            h.state().state.assembly.mate.family,
+            soliddraft_app::mates::panel::Family::Distance | soliddraft_app::mates::panel::Family::ProfileCenter
+        ) {
+        "Mate value"
+    } else {
+        label
+    };
     h.run_steps(2);
+    if h.query_by_label(label).is_none() && !h.state().state.form_bar.expanded {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
     h.get_by_label(label).focus();
     h.run_steps(2);
     h.get_by_label(label).type_text(text);

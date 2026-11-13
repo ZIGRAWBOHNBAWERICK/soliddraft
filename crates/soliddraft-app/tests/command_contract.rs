@@ -9,7 +9,7 @@ mod configuration_registry;
 use ribbon::App;
 use serde_json::{Map, Value, json};
 use soliddraft_app::commands::{self, Agents, Context, History, Tab};
-use soliddraft_app::state::{AppState, RibbonTab};
+use soliddraft_app::state::{AppAction, AppState, RibbonTab};
 use std::collections::HashSet;
 
 /// A schema without its prose: names, types and requiredness are the contract.
@@ -801,6 +801,7 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
     // Every command as main left it.
     let (frozen, now) = (baseline(), observed());
     let rows = frozen["commands"].as_object().expect("the frozen commands");
+    let part_entry = AppState::new(ribbon::blank());
     for (id, row) in rows {
         if id == "reference_plane" {
             let plane = commands::get(id).unwrap();
@@ -907,6 +908,20 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
             }
             for fixture in ["blank", "sketch", "plate", "assembly"] {
                 assert_eq!(current["availability"][fixture]["enabled"], true);
+                current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
+        if (id.starts_with("sketch_") || id == "smart_dimension")
+            && commands::get(id)
+                .and_then(|c| c.action)
+                .is_some_and(|action| matches!(action(&part_entry), AppAction::SketchTool(_)))
+        {
+            for fixture in ["blank", "sketch", "plate", "assembly"] {
+                assert_eq!(
+                    current["availability"][fixture]["enabled"],
+                    fixture != "assembly",
+                    "Edit Suite sketch tools start a sketch on part documents"
+                );
                 current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }

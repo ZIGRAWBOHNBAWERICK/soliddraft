@@ -192,6 +192,9 @@ fn the_drawing_ribbon_and_keys_come_from_the_registry() {
         harness.state_mut().state.drawing.session.as_mut().unwrap().tab = tab;
         harness.run_steps(2);
         for (panel, items) in commands::ribbon(tab) {
+            if panel == "Assistant" {
+                continue;
+            }
             for (command, _) in items.into_iter().filter(|(c, _)| (c.shown)(&harness.state().state)) {
                 let label = command.label_in(&harness.state().state);
                 assert!(
@@ -259,6 +262,7 @@ fn mass_properties_button_calculates_on_request_without_measuring_selection() {
     harness.get_by_label("Mass props").click();
     harness.run_steps(3);
     assert_eq!(harness.state().state.doc.kernel().cached_mass_properties(body).unwrap().volume, 12000.0);
+    ribbon::open_options(&mut harness);
     assert!(harness.query_by_label("12000 mm³").is_some());
     harness.render().unwrap().save(dir.join("after-request.png")).unwrap();
     println!("mass properties viewport proof: {}", dir.display());

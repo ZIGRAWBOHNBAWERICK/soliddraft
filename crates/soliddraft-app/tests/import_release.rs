@@ -99,7 +99,7 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     let mut app = ribbon::app(Document::new("Mesh solid", soliddraft_app::kernel()));
     app.run_steps(3);
     let command = soliddraft_app::commands::get("import_mesh").unwrap();
-    assert!(!(command.shown)(&app.state().state));
+    assert!((command.shown)(&app.state().state));
     app.run_steps(3);
     app.get_by_label("File").click();
     app.run_steps(3);

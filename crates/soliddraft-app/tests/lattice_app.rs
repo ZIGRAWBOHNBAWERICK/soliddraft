@@ -23,6 +23,10 @@ fn button(app: &mut App, label: &str) {
 }
 
 fn field(app: &mut App, label: &str, text: &str) {
+    if app.query_by_label(label).is_none() && !app.state().state.form_bar.expanded {
+        app.get_by_label_contains("More (").click();
+        app.run_steps(8);
+    }
     app.get_by_label(label).click();
     app.run_steps(2);
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -69,7 +73,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_lattice() {
     l.radius_mm = Some(2.0.into());
     app.run_steps(2);
     field(&mut app, "Cell size value", "5");
-    field(&mut app, "Beam radius (mm), controls density value", "1");
+    field(&mut app, "Beam radius value", "1");
     assert!(app.query_by_label("unproved preview").is_some());
     button(&mut app, "OK");
     app.run_steps(12);
@@ -129,7 +133,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
     g.level = 0.5.into();
     app.run_steps(2);
     field(&mut app, "Period value", "10");
-    field(&mut app, "Network level (dimensionless) value", "0");
+    field(&mut app, "Network level value", "0");
     assert!(app.query_by_label("unproved preview").is_some());
     button(&mut app, "OK");
     app.run_steps(12);
@@ -142,7 +146,7 @@ fn ribbon_and_editor_create_a_terminal_unproved_gyroid() {
 
     button(&mut app, "Gyroid1");
     button(&mut app, "Edit feature");
-    field(&mut app, "Network level (dimensionless) value", "0.5");
+    field(&mut app, "Network level value", "0.5");
     button(&mut app, "OK");
     app.run_steps(12);
     let last = app.state().state.doc.features.last().unwrap();

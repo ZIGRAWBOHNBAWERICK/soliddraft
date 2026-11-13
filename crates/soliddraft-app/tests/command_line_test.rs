@@ -79,6 +79,8 @@ fn settle(harness: &mut App<'_>) {
 
 /// Types a line at the prompt, which has the keyboard, and presses a key after it.
 fn type_line(harness: &mut App<'_>, line: &str, then: Key) {
+    harness.get_by_label("Command line").click();
+    harness.run_steps(2);
     harness.get_by_label("Command line").type_text(line);
     harness.run_steps(2);
     harness.key_press(then);

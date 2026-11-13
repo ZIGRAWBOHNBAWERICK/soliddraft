@@ -379,6 +379,8 @@ fn navigation_drag_does_not_select_or_open_a_secondary_click_path() {
         release(app, PointerButton::Secondary, top, Modifiers::NONE);
     });
     assert_eq!(r_click, NOTHING, "a right click does not move the camera");
+    app.key_press(Key::Escape);
+    app.run_steps(4);
 
     // A click without a drag still selects what is under the pointer.
     let top = {

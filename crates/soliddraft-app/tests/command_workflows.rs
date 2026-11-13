@@ -44,7 +44,7 @@ fn reference_plane_editor_creates_a_plane_and_attaches_a_sketch() {
         let eye = app.get_by_label("Show Plane1").rect();
         ribbon::click_at(app, eye.center());
         settle(app);
-        let row = app.get_by_label("Plane1").rect();
+        let row = app.get_by_role_and_label(egui::accesskit::Role::Button, "Plane1").rect();
         ribbon::click_at(app, row.center());
         ribbon::run_command(app, "sketch");
         ribbon::until(app, "the attached sketch", |a| a.state().state.sketch.is_some());

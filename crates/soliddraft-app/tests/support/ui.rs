@@ -296,7 +296,7 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
         "smart_dimension" => "Smart Dimension".to_owned(),
         _ => command.label_in(&app.state().state),
     };
-    app.get_by_label(&label).scroll_to_me();
+    app.get_by_role_and_label(egui::accesskit::Role::Button, &label).scroll_to_me();
     app.run_steps(24);
     control(app, &label, palette_region(app))
 }
@@ -314,7 +314,14 @@ pub fn open_options(app: &mut App) {
             app.run_steps(8);
         }
     } else if !app.state().state.options_details {
-        app.get_by_label("Options").click();
+        let label = if app.state().state.assembly.is_active() {
+            "Assembly options"
+        } else if app.state().state.drawing.is_active() || app.state().state.drawing.new.is_some() {
+            "Drawing options"
+        } else {
+            "Details"
+        };
+        app.get_by_label(label).click();
         app.run_steps(8);
     }
 }

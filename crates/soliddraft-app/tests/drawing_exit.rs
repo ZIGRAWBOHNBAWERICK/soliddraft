@@ -102,6 +102,13 @@ fn make_drawing(harness: &mut App<'_>) {
 }
 
 fn click_button(harness: &mut App<'_>, label: &str) {
+    if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none()
+        && !harness.state().state.options_details
+        && (harness.state().state.drawing.is_active() || harness.state().state.drawing.new.is_some())
+    {
+        harness.get_by_label("Drawing options").click();
+        harness.run_steps(8);
+    }
     harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
@@ -574,6 +581,8 @@ fn fixture_drawing_renders_with_attention_list() {
     settle(&mut harness);
     assert!(harness.state().state.drawing.is_active());
     assert_eq!(session(&harness).doc.attention_count(), 2);
+    harness.get_by_label("Drawing options").click();
+    harness.run_steps(8);
     assert!(harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Reattach…").count() >= 1);
     save(&mut harness, "d10-fixture");
     push(&mut harness, DrawingAction::Select(Some(DrawingSel::Annotation(soliddraft_drawing::AnnotationId(5)))));

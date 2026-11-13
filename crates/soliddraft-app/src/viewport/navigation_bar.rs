@@ -236,7 +236,7 @@ fn thumbnail(ui: &mut egui::Ui, scene: Scene, selected: bool) -> egui::Response 
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, scene.label()));
     let image = Rect::from_min_size(rect.min, vec2(96.0, 52.0));
     let texture = preview_texture(ui.ctx(), scene);
-    ui.painter().image(texture.id(), image, Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+    egui::Image::new((texture.id(), image.size())).corner_radius(6).paint_at(ui, image);
     let ink = if scene.is_dark() { Color32::WHITE } else { Color32::from_rgb(40, 45, 55) };
     icons::paint(ui.painter(), Icon::Home, Rect::from_center_size(image.center(), vec2(24.0, 24.0)), ink);
     ui.painter().rect_stroke(

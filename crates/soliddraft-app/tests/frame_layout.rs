@@ -156,6 +156,10 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
             app.state().state.assembly.mate.error.is_some(),
             "Mate validates missing picks through the existing action"
         );
+        ribbon::type_command(app, "ai");
+        assert!(app.state().state.command_line.session_open, "Mate leaves the command line's Enter key alone");
+        app.state_mut().state.command_line.close_session();
+        app.run_steps(8);
         let inspect = app.get_by_label("Inspect tab").rect();
         ribbon::click_at(app, inspect.center());
         app.run_steps(8);
@@ -227,6 +231,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
             ribbon::control(app, command, suite_palette(app));
             assert!(!ribbon::painted_in(app, suite_palette(app)).iter().any(|text| text.text == "Assistant"));
         }
+        case.frame(app, "drawing-views");
         let sheet = app.get_by_label("Sheet tab").rect();
         ribbon::click_at(app, sheet.center());
         app.run_steps(8);
@@ -250,7 +255,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         assert!(app.state().state.drawing.session.as_ref().unwrap().canvas_rect.width() >= 300.0);
         let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
         let properties = app
-            .get_all_by_label("Sheet properties")
+            .query_all_by_label("Sheet properties")
             .find(|control| bar.contains_rect(control.rect()))
             .expect("sheet properties is on the bar")
             .rect();

@@ -577,7 +577,7 @@ pub fn show_suite(ui: &mut egui::Ui, state: &mut AppState) {
                     let (cell, _) =
                         ui.allocate_exact_size(egui::vec2(ui.available_width().min(130.0), 24.0), egui::Sense::hover());
                     let response = crate::form_bar::value_cell(ui, cell, "", |ui, inner| {
-                        ui.put(inner, egui::TextEdit::singleline(&mut draft.distance).frame(false))
+                        ui.put(inner, egui::TextEdit::singleline(&mut draft.distance).frame(egui::Frame::NONE))
                     });
                     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Mate value"));
                 }

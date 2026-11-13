@@ -19,6 +19,11 @@ fn chip(app: &App, name: &str) -> Rect {
     ribbon::control(app, &format!("{name} in history"), bounds(app)).rect
 }
 
+fn menu_bounds(app: &App) -> Rect {
+    let window = ribbon::window(app);
+    Rect::from_min_max(pos2(window.left(), theme::MENU_HEIGHT + 1.0), window.max)
+}
+
 fn open_menu(app: &mut App, name: &str) {
     let pos = chip(app, name).center();
     app.hover_at(pos);
@@ -37,7 +42,7 @@ fn open_menu(app: &mut App, name: &str) {
 
 fn menu(app: &mut App, name: &str, command: &str) {
     open_menu(app, name);
-    let control = ribbon::control(app, command, ribbon::window(app));
+    let control = ribbon::control(app, command, menu_bounds(app));
     assert!(control.enabled, "{command} is enabled");
     ribbon::click_at(app, control.rect.center());
     app.run_steps(8);
@@ -97,6 +102,16 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
             assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(expected)));
         }
         case.frame(app, "absorbed-sketch");
+        app.key_press(Key::F2);
+        app.run_steps(4);
+        assert!(app.state().state.timeline.rename.is_some());
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+        assert!(app.state().state.timeline.rename.is_none());
+        menu(app, "Boss-Extrude1", "Edit");
+        let editor = app.state().state.editor.as_ref().expect("the feature editor opens");
+        assert_eq!(editor.target, Some(app.state().state.doc.features[1].id));
+        assert!(matches!(editor.params, soliddraft_app::state::EditorParams::Extrude(_)));
     });
 }
 
@@ -107,7 +122,7 @@ fn context_actions_rename_suppress_rollback_edit_and_delete() {
     case.run(&mut app, |app| {
         open_menu(app, "Sketch2");
         for label in ["Edit", "Repair", "Rename", "Suppress", "Roll back to here", "Delete"] {
-            let control = ribbon::control(app, label, ribbon::window(app));
+            let control = ribbon::control(app, label, menu_bounds(app));
             assert_eq!(control.enabled, label != "Repair");
         }
         case.frame(app, "context-menu");
@@ -174,19 +189,19 @@ fn chip_and_playhead_drags_change_document_order_and_rollback() {
 #[test]
 fn sketch_double_click_dims_later_chips_in_both_themes() {
     let case = ribbon::case("timeline-sketch");
-    let mut app = edit_suite(sketches());
     for mode in [Mode::Light, Mode::Dark] {
+        let mut app = edit_suite(sketches());
         theme::set_mode(&app.ctx, mode);
         app.run_steps(4);
         let rect = chip(&app, "Sketch1");
         ribbon::double_click_at(&mut app, rect.center());
         app.run_steps(8);
-        assert!(app.state().state.in_sketch());
+        assert!(app.state().state.in_sketch(), "double-click opens the sketch in {mode:?}");
         let later = chip(&app, "Sketch2");
         let text = ribbon::painted_in(&app, later).into_iter().find(|p| p.text == "Sketch2").unwrap();
         assert_eq!(text.color, theme::muted());
         open_menu(&mut app, "Sketch2");
-        assert!(!ribbon::control(&app, "Delete", ribbon::window(&app)).enabled);
+        assert!(!ribbon::control(&app, "Delete", menu_bounds(&app)).enabled);
         app.key_press(Key::Escape);
         app.run_steps(4);
         case.frame(&mut app, &format!("{mode:?}-editing"));

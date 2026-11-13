@@ -808,7 +808,17 @@ pub trait Kernel: Send + Sync {
 
     /// Turns a profile body about an axis into a solid.
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult>;
-    /// Sweeps a polygon profile along a chain of lines and arcs.
+    /// Retains the exact boundary of a planar face as a profile for a later operation.
+    fn create_profile_from_face(&self, _tag: &OpTag, _body: BodyId, _face: FaceId) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("This face cannot be used as a loft profile yet".into()))
+    }
+
+    /// Joins ordered profile bodies with exact ruled or smooth side faces.
+    fn loft(&self, _tag: &OpTag, _profiles: &[BodyId], _shape: LoftShape) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Loft is coming soon.".into()))
+    }
+
+    /// Sweeps a polygon profile along lines and arcs, or one fixed rational spline.
     fn sweep(&self, _tag: &OpTag, _profile: BodyId, _params: &Sweep) -> KernelResult<OpResult> {
         Err(KernelError::Unsupported("Sweep is coming soon.".into()))
     }
@@ -1173,4 +1183,15 @@ pub trait Kernel: Send + Sync {
         let _ = (body, options);
         Err(KernelError::Unsupported("export_step".into()))
     }
+}
+
+/// How the sides of a loft pass through its ordered profiles.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoftShape {
+    /// Straight between each consecutive pair of profiles.
+    #[default]
+    Ruled,
+    /// A smooth curve through every profile.
+    Smooth,
 }

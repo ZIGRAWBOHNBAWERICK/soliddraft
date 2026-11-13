@@ -14,6 +14,7 @@ pub mod command_line;
 #[macro_use]
 pub mod command_tools;
 pub mod commands;
+pub mod context_menu;
 pub mod dimension_edit;
 pub mod display_quality;
 pub mod document;
@@ -32,6 +33,7 @@ pub mod journal;
 #[cfg(target_arch = "wasm32")]
 pub mod journal_browser;
 pub mod locations;
+mod loft_panel;
 pub mod mates;
 pub mod measure;
 pub mod navigation;

@@ -56,6 +56,11 @@ edits the run, undoes and redoes, refuses an oblique join, a zero-length line an
 reversal with no turn axis without changing the body, measures a face by name, saves,
 reopens in a fresh process and exports checked STEP.
 
+`spline-sweep.json` sweeps a polygon along a spatial cubic spline with fixed
+orientation. It edits the controls, undoes and redoes, refuses a returning path
+without changing the part, then saves and reopens in a fresh process. The spline
+control points, weights, knots and segment identity stay in the saved feature.
+
 `sphere-revolve.json` and `torus-revolve.json` retain their construction, drawing
 and independent STEP checks, then edit the sphere's angle or the torus's tube
 diameter. They check undo, redo, rename, suppress and restore, reuse of the exact

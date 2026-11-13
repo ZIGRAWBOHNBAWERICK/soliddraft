@@ -10,7 +10,7 @@ use crate::{numerical, query_error};
 
 /// Writes the exact body as STEP. The deviation is Catallax's proven bound on the file
 /// against the represented body, rounded up to a decimal and to the next `f64`, never down.
-/// A fitted rolling carrier's own fit to its exact definition is reported beside it. A body
+/// A fitted carrier's own fit to its exact definition is reported beside it. A body
 /// with a ring band is written only under its certificate, so a ring without one is refused.
 pub(super) fn export(app: &EvaluatedApplicationBody, options: &StepOptions) -> KernelResult<StepExport> {
     if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
@@ -78,10 +78,11 @@ fn has_ring_band(built: &Built) -> bool {
     surfaces(built).any(|surface| matches!(surface, Surface::BSpline(SplineSupport::RollingSaddle(_))))
 }
 
-/// The worst fit of the body's rolling envelopes. A ring band's fit comes from its certificate.
+/// The worst carrier fit. A ring band's fit comes from its certificate.
 fn carrier_fit(built: &Built) -> Rational {
     surfaces(built).fold(Rational::zero(), |worst, surface| match surface {
         Surface::BSpline(SplineSupport::RollingEnvelope(envelope)) => worst.max(envelope.bound().upper.clone()),
+        Surface::BSpline(SplineSupport::SplineFillet(fillet)) => worst.max(fillet.bound().upper.clone()),
         _ => worst,
     })
 }

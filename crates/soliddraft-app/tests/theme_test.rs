@@ -8,7 +8,7 @@
 
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::app::{Automation, SolidDraftApp};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::AppAction;
@@ -101,6 +101,7 @@ fn the_bracket_in_light_and_dark() {
         };
         let (a, b) = (luminance(ring), luminance(fill));
         let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+        eprintln!("{} keyboard focus contrast: {contrast:.2}:1", mode.label());
         assert!(contrast >= 3.0, "{}: keyboard focus contrast is {contrast:.2}:1 ({ring:?} / {fill:?})", mode.label());
     }
     harness.state_mut().state.frame_layout = FrameLayout::Classic;

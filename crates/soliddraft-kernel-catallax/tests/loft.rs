@@ -115,9 +115,12 @@ fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plain
     let rounded = k.fillet(&OpTag::new("round"), loft.body, &[edge], 0.1).unwrap();
     assert!(rounded.record.face_roles.iter().any(|face| face.role == FaceRole::Blend { edge }));
     assert!(k.validate(rounded.body).unwrap().valid);
-    let exported = k.export_step(rounded.body, &StepOptions::default()).unwrap();
+    let options = StepOptions::default();
+    let exported = k.export_step(rounded.body, &options).unwrap();
     assert_eq!(exported.report.faces, 7);
+    assert_eq!(exported.report.fitted_curves, 2);
     assert!(exported.report.within_tolerance);
+    assert!(exported.report.max_deviation_mm <= options.tolerance, "{:?}", exported.report);
     assert!(exported.report.fit_mm > 0.0 && exported.report.fit_mm <= 0.0001, "{:?}", exported.report);
     let before = k.body_recipe(rounded.body).unwrap();
     let error = k.fillet(&OpTag::new("again"), rounded.body, &[neighbour], 0.1).unwrap_err();

@@ -637,7 +637,7 @@ def export_check(args, directory, spec, previous):
             bound = proof.get("certified_accuracy_mm")
             exported["checks"].append({"check": "explicit print accuracy certified", "requested_mm": requested,
                 "proof": proof, "pass": proof.get("requested_accuracy_mm") == requested
-                    and isinstance(bound, (int, float)) and 0 <= bound <= requested})
+                    and type(bound) in (int, float) and 0 <= bound <= requested})
         exported["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
         # A B-rep report states no work of its own; its request's allowance is the evidence.
         if value["report"].get("kind") not in ("step", "mesh"):

@@ -1363,6 +1363,29 @@ class Trends(unittest.TestCase):
 
 
 class ExportAttemptEvidence(unittest.TestCase):
+    def test_explicit_coarser_export_requires_its_own_matching_certificate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            args = argparse.Namespace(soliddraft="soliddraft", timeout=5)
+            for proof, expected in [
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": 0.05}, True),
+                ({"requested_accuracy_mm": 0.01, "certified_accuracy_mm": 0.005}, False),
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": 0.09}, False),
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": -1}, False),
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": False}, False),
+                ({}, False),
+            ]:
+                def export(command, **kwargs):
+                    self.assertEqual(command[command.index("--accuracy-mm") + 1], "0.08")
+                    pathlib.Path(command[command.index("--out") + 1]).write_bytes(b"mesh")
+                    value = {"report": {"kind": "mesh", "print_check": proof}, "request_work": {
+                        "limit": scenarios.APP_REQUEST_WORK, "used": 5, "exhausted": False}}
+                    return scenarios.subprocess.CompletedProcess(command, 0, json.dumps(value), "")
+
+                with self.subTest(proof=proof), mock.patch.object(scenarios.subprocess, "run", side_effect=export):
+                    result = scenarios.export_check(args, directory, {"format": "stl", "accuracy_mm": 0.08}, {})
+                    self.assertEqual(result["pass"], expected)
+
     def test_attempt_identifiers_cannot_escape_or_replace_other_evidence(self):
         for attempt in ["", "../part", "dir/name", None, True, 3]:
             with self.subTest(attempt=attempt), self.assertRaises(ValueError):

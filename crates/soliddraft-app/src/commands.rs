@@ -1809,7 +1809,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("loft", "Loft", Icon::Cad("loft"), "Add material: loft through ordered sketch or face profiles")
             .on(Solid, "Create", Small)
             .run(|_| AppAction::StartLoft)
-            .shown(|s| !s.in_sketch())
+            .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Loft(_))))
             .hint(after_field)

@@ -260,10 +260,11 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
         assert_eq!(s.faces.len(), 1);
         assert!(editor.preview.result.is_some(), "{:?}", editor.error);
         field(app, "Thickness value", "1");
-        app.get_by_label("Front").click();
+        app.get_by_label("Thicken side").click();
         app.run_steps(2);
         app.get_by_label("Back").click();
         app.run_steps(4);
+        assert_eq!(app.get_by_label("Thicken side").accesskit_node().value(), Some("Back"));
         app.get_by_label("OK (Enter)").click();
         app.run_steps(10);
         volume(&app.state().state, 80.0);
@@ -281,7 +282,7 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
             panic!("Pattern editor")
         };
         assert_eq!(p.source, Some(soliddraft_model::FeatureId(source as u32)));
-        assert!(app.query_all_by_label("Cut-Extrude1").next().is_some());
+        assert_eq!(app.get_by_label("Pattern source").accesskit_node().value(), Some("Cut-Extrude1"));
         case.frame(app, "selected-feature-pattern");
         app.get_by_label("OK (Enter)").click();
         app.run_steps(10);

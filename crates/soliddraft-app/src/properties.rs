@@ -1013,11 +1013,18 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                             .source
                             .and_then(|id| pattern_choices.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()))
                             .unwrap_or("Whole body");
-                        egui::ComboBox::from_id_salt("pattern_source").selected_text(name).show_ui(ui, |ui| {
-                            ui.selectable_value(&mut p.source, None, "Whole body");
-                            for (id, name) in &pattern_choices {
-                                ui.selectable_value(&mut p.source, Some(*id), name);
-                            }
+                        let response =
+                            egui::ComboBox::from_id_salt("pattern_source").selected_text(name).show_ui(ui, |ui| {
+                                ui.selectable_value(&mut p.source, None, "Whole body");
+                                for (id, name) in &pattern_choices {
+                                    ui.selectable_value(&mut p.source, Some(*id), name);
+                                }
+                            });
+                        response.response.widget_info(|| {
+                            let mut info =
+                                egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Pattern source");
+                            info.current_text_value = Some(name.into());
+                            info
                         });
                     });
                 });
@@ -1135,16 +1142,21 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     number_row(ui, "Thickness", "mm", egui::DragValue::new(&mut s.thickness).speed(0.1));
                     choice_row(ui, "Side", |ui, _| {
                         use soliddraft_kernel_api::ThickenSide;
-                        egui::ComboBox::from_id_salt("thicken_side")
-                            .selected_text(match s.side {
-                                ThickenSide::Front => "Front",
-                                ThickenSide::Back => "Back",
-                            })
-                            .show_ui(ui, |ui| {
+                        let name = match s.side {
+                            ThickenSide::Front => "Front",
+                            ThickenSide::Back => "Back",
+                        };
+                        let response =
+                            egui::ComboBox::from_id_salt("thicken_side").selected_text(name).show_ui(ui, |ui| {
                                 for (side, name) in [(ThickenSide::Front, "Front"), (ThickenSide::Back, "Back")] {
                                     ui.selectable_value(&mut s.side, side, name);
                                 }
                             });
+                        response.response.widget_info(|| {
+                            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Thicken side");
+                            info.current_text_value = Some(name.into());
+                            info
+                        });
                     });
                 });
                 if let Some(error) = &editor.error {

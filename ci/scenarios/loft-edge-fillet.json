@@ -165,23 +165,34 @@
         ],
         "radius": 0.01
       },
-      "refused": "Spline display limit (SD-DISPLAY-01)",
-      "same_geometry_as_step": 3,
       "checks": [
         {
-          "pointer": "/summary/body/faces",
-          "equals": 6
+          "pointer": "/summary/edit_state/answered_within_bound",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/edit_state/display_only_bound",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/features/3/display_answer/display/kind",
+          "equals": "spline display mesh"
+        },
+        {
+          "pointer": "/summary/features/3/display_answer/display/level_mm",
+          "equals": 0.01
         }
       ]
     },
     {
       "tool": "undo",
-      "arguments": {}
+      "arguments": {},
+      "same_geometry_as_step": 3
     },
     {
       "tool": "redo",
       "arguments": {},
-      "same_geometry_as_step": 3
+      "same_geometry_as_step": 4
     },
     {
       "tool": "save",
@@ -198,7 +209,7 @@
         "path": "{bundle}/loft-fillet.dwprt"
       },
       "fresh_process": true,
-      "same_geometry_as_step": 3,
+      "same_geometry_as_step": 4,
       "exports": [
         {
           "format": "step",
@@ -213,6 +224,24 @@
               "equals": 1
             }
           ]
+        }
+      ],
+      "checks": [
+        {
+          "pointer": "/summary/edit_state/answered_within_bound",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/edit_state/display_only_bound",
+          "equals": true
+        },
+        {
+          "pointer": "/summary/features/3/display_answer/display/kind",
+          "equals": "spline display mesh"
+        },
+        {
+          "pointer": "/summary/features/3/display_answer/display/level_mm",
+          "equals": 0.01
         }
       ]
     }

@@ -174,3 +174,148 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
     app.state_mut().state.doc.redo().unwrap();
     assert!(app.state().state.doc.display_body().is_some());
 }
+
+fn open_other_document(app: &mut ribbon::App, case: &ribbon::Case, assembly: bool) {
+    if assembly {
+        app.state_mut().state.push(AppAction::Assembly(soliddraft_app::assembly::AssemblyAction::New));
+    } else {
+        let path = case.path("other.dwdrw");
+        soliddraft_app::drawing::DrawingDoc::new(soliddraft_drawing::fixture::bracket_a3())
+            .save(&path, "catallax")
+            .unwrap();
+        app.state_mut().state.push(AppAction::Drawing(soliddraft_app::drawing::DrawingAction::OpenFile(path)));
+    }
+    app.run_steps(4);
+    assert!(if assembly { app.state().state.assembly.is_active() } else { app.state().state.drawing.is_active() });
+}
+
+fn return_to_part(app: &mut ribbon::App, assembly: bool) {
+    app.state_mut().state.push(if assembly {
+        AppAction::Assembly(soliddraft_app::assembly::AssemblyAction::ShowPart)
+    } else {
+        AppAction::Drawing(soliddraft_app::drawing::DrawingAction::ShowPart)
+    });
+    app.run_steps(4);
+}
+
+fn reference_review_on_other_document(assembly: bool) {
+    let case = ribbon::case(if assembly { "scan-assembly-isolation" } else { "scan-drawing-isolation" });
+    let path = case.path("reference.obj");
+    std::fs::write(&path, b"v 0 0 0\nv 10 0 0\nv 0 10 0\nf 1 2 3\n").unwrap();
+    let mut app = ribbon::app(Document::new("Retained part", soliddraft_app::kernel()));
+    app.state_mut().state.push(AppAction::ImportScan(Some(path.clone())));
+    app.run_steps(4);
+    app.get_by_label("Accept reference");
+    let before = app.state().state.doc.model().to_bytes().unwrap();
+    open_other_document(&mut app, &case, assembly);
+    if let Some(accept) = app.query_all_by_label("Accept reference").next() {
+        accept.click();
+    }
+    app.run_steps(3);
+    assert_eq!(
+        app.state().state.doc.model().to_bytes().unwrap(),
+        before,
+        "accepting a scan must not edit an inactive part"
+    );
+    assert!(app.query_all_by_label("Accept reference").next().is_none());
+    for id in ["import_scan", "fit_scan", "scan_workspace"] {
+        let command = soliddraft_app::commands::get(id).unwrap();
+        assert!(!(command.shown)(&app.state().state), "{id} must be hidden outside the part");
+        assert!(command.action_now(&app.state().state).is_none(), "{id} must be disabled outside the part");
+    }
+    app.state_mut().state.push(AppAction::ImportScan(Some(path)));
+    app.state_mut().state.push(AppAction::ShowScan);
+    app.run_steps(3);
+    assert!(app.query_all_by_label("Accept reference").next().is_none());
+    return_to_part(&mut app, assembly);
+    app.get_by_label("Accept reference").click();
+    app.run_steps(4);
+    assert_eq!(app.state().state.doc.features.len(), 1);
+}
+
+#[test]
+fn review_reference_cannot_edit_the_part_from_a_new_assembly() {
+    reference_review_on_other_document(true);
+}
+
+#[test]
+fn review_reference_cannot_edit_the_part_from_an_open_drawing() {
+    reference_review_on_other_document(false);
+}
+
+#[test]
+fn review_fitted_part_cannot_be_accepted_from_a_drawing() {
+    let case = ribbon::case("scan-fit-drawing-isolation");
+    let path = case.path("cloud.obj");
+    std::fs::write(&path, cloud()).unwrap();
+    let mut app = ribbon::app(Document::new("Retained fit", soliddraft_app::kernel()));
+    app.state_mut().state.push(AppAction::ImportScan(Some(path)));
+    app.run_steps(4);
+    app.get_by_label("Accept reference").click();
+    app.run_steps(4);
+    app.get_by_label("Fit scan to part").click();
+    let start = Instant::now();
+    loop {
+        app.run_steps(2);
+        if app.query_all_by_label("Accept fitted part").next().is_some() {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(120));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let before = app.state().state.doc.model().to_bytes().unwrap();
+    open_other_document(&mut app, &case, false);
+    if let Some(accept) = app.query_all_by_label("Accept fitted part").next() {
+        accept.click();
+    }
+    app.run_steps(3);
+    assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before, "a fit must not replace an inactive part");
+    assert!(app.query_all_by_label("Accept fitted part").next().is_none());
+    return_to_part(&mut app, false);
+    app.get_by_label("Accept fitted part").click();
+    app.run_steps(4);
+    assert!(app.state().state.doc.display_body().is_some());
+}
+
+#[test]
+fn review_counting_preserves_scan_admission_fit_and_saved_replay() {
+    use soliddraft_kernel_api::{
+        Kernel,
+        counting::{Counting, Work},
+        scan::ScanSource,
+    };
+    use std::sync::Arc;
+    let mut bytes = cloud();
+    bytes.extend_from_slice(b"f 1 2 3\n");
+    let source = ScanSource { name: "mixed-scan.obj".into(), sha256: soliddraft_model::sha256_hex(&bytes), bytes };
+    let raw = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+    let counting = Arc::new(Counting::new(raw.clone()));
+    let reference = counting.scan_reference(&source).expect("Counting must forward scan admission");
+    assert_eq!(reference.points, raw.scan_reference(&source).unwrap().points);
+    let fit = counting.fit_scan(&source).expect("Counting must forward fitting");
+    assert_eq!(fit.scan_map.len(), 6000);
+    assert_eq!(fit.scan_to_part.samples, 6003, "statistics also include triangle-interior probes");
+    assert_eq!(fit.part_map.len(), fit.part_to_scan.samples);
+    assert!(counting.take().is_empty(), "read and fit do not publish a body");
+    let mut doc = Document::new("Counted fit", counting.clone());
+    doc.apply(soliddraft_app::document::Command::AddFeature(FeatureKind::Scan(soliddraft_model::ScanFeature {
+        source,
+        fit: Some(fit),
+    })))
+    .unwrap();
+    assert_eq!(doc.features[0].status, FeatureStatus::Ok);
+    assert_eq!(
+        counting.take().into_iter().filter(|work| matches!(work, Work::Operation(_))).collect::<Vec<_>>(),
+        vec![Work::Operation("F1.scan".into())]
+    );
+    assert!((counting.mass_properties(doc.display_body().unwrap()).unwrap().volume - 120.0).abs() < 0.2);
+    let saved = doc.model().to_bytes().unwrap();
+    let fresh = Arc::new(Counting::new(soliddraft_app::kernel()));
+    let reopened = soliddraft_app::file::open_bytes("counted-fit.dwprt", &saved, fresh.clone(), None).unwrap();
+    assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
+    assert!(reopened.display_body().is_some());
+    assert_eq!(
+        fresh.take().into_iter().filter(|work| matches!(work, Work::Operation(_))).collect::<Vec<_>>(),
+        vec![Work::Operation("F1.scan".into())]
+    );
+}

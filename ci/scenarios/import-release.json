@@ -127,6 +127,14 @@
           "tolerance": 0.005
         }
       ]
+    },
+    {
+      "tool": "preview_import",
+      "arguments": {
+        "path": "ci/fixtures/import/block-seam-4um.step",
+        "format": "mesh"
+      },
+      "refused": "This file could not be read as an STL or OBJ mesh."
     }
   ]
 }

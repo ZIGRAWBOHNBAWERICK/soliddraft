@@ -55,7 +55,7 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 ## STEP import
 
-The next feature batch adds clean single-body analytic STEP import. This addition is not part of 0.2.0. A self-authored block and cylinder exercise preview, acceptance, the rendered coarse, standard and fine display levels, source preservation, save/reopen and checked STEP export. General cone angles, sphere and torus poles and spline files remain outside this STEP coverage. Unsupported geometry gets a plain message and leaves the part unchanged.
+STEP import accepts single-body analytic solids, including spheres, tori and general cone angles, and spline files the kernel can certify. Binary-noise cleanup and planar source cleanup keep their measured bounds in the saved import record. Unsupported geometry gets a plain message and leaves the part unchanged.
 
 File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. Files with several solids are refused because a part holds one body.
 
@@ -65,9 +65,42 @@ Features build on an imported body as on any other: fillet, chamfer, extrude, cu
 
 Selecting the import shows the record. Each gap has its answer, its approved limit and its vertex movement, and each repaired face has its attained distance from the source. These are separate numbers and are never added up: the limit is what was allowed, and the attained figure is what the repair proved over the whole face. They describe the import only, so later features are not covered. Output error belongs to each export, whose report is measured against the repaired body. No repair goes past a tenth of the nearest feature, even when approved.
 
-MCP clients use `preview_import {"path":"source.step"}` to read the preview, then pass its token to `import_step {"path":"source.step","preview_token":"<token>","decline":["g0"]}` to decline a gap. The token binds the source digest and the repair questions shown. A changed file or changed questions require another preview. An empty decline list applies automatic repairs. A repair that asks for approval goes in `accept`, as `{"id":"g0","tolerance_mm":"0.02","approver":"Ana"}`. Coverage is one planar AP214 body whose repaired faces are straight, strictly convex polygons with one boundary. Curved repairs and nonconvex or holed faces show Coming soon.
+MCP clients use `preview_import {"path":"source.step"}` to read the preview, then pass its token to `import_step {"path":"source.step","preview_token":"<token>","decline":["g0"]}` to decline a gap. The token binds the source digest and the repair questions shown. A changed file or changed questions require another preview. An empty decline list applies automatic repairs. A repair that asks for approval goes in `accept`, as `{"id":"g0","tolerance_mm":"0.02","approver":"Ana"}`. The kernel admits only repairs it can certify. Source cleanup records keep the source discrepancy, geometric deviation and direct source-to-result bound separately. Repairs outside the supported set show Coming soon.
 
 The focused rollout check is `CARGO_BUILD_JOBS=3 cargo test -p soliddraft-app --test step_import_rollout -- --test-threads=1`. Set `SOLIDDRAFT_STEP_IMPORT_PROOF_DIR` to keep its source files, saved parts, display screenshots, measured f32 mesh bounds and checked export reports outside the checkout. The test uses the real import dialog and renderer. It also takes an approved seam through the dialog, renderer, save, reopen and export. It does not independently validate the export in another CAD application; the `import-repair` scenario does.
+
+## Replace an imported file
+
+In the Edit Suite frame, select an imported feature and choose Replace file in its
+properties or right-click menu. Review the replacement through the same import
+dialog. Cancel or a refused replacement leaves the part unchanged. Acceptance
+keeps the feature's identity and name, replaces its saved source and repair answers,
+and rebuilds later features. Undo restores the previous source and references.
+
+An unchanged source keeps its references. Changed source bytes give the import new
+reference names, so existing face and edge references ask for repair. A source
+entity number or face order cannot silently redirect an old reference. Exports
+remain unavailable while a feature needs repair.
+
+MCP clients preview with `feature` naming the import, then call `replace_import`
+with the same `feature`, `path`, `format`, preview token and reviewed answers.
+
+## Closed mesh solids
+
+In the Edit Suite frame, File > Import mesh solid accepts binary STL, ASCII STL and
+OBJ. Coordinates are millimetres. The mesh must bound one solid, with at most
+200,000 triangles. The kernel checks closed edges, consistent outward winding,
+nonzero triangle areas and crossings without adding a tolerance or repairing the
+mesh. Open, crossing, reversed or unreadable meshes receive plain messages before
+the part changes.
+
+Accept saves the source bytes and digest as an import feature and builds an exact
+polyhedral solid with coplanar triangles merged into planar faces. The solid has
+volume and mass properties and can be saved, reopened and exported. Import scene
+continues to load reference meshes into assemblies.
+
+MCP clients use `preview_import` with `format: "mesh"`, then `import_mesh` with
+the same path and preview token. Mesh solids take no repair answers.
 
 ## IGES import
 

@@ -127,7 +127,7 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     assert!(doc.meshes[&body].triangle_count() > 0);
     case.frame(&mut app, "accepted");
     let saved = app.state().state.doc.model().to_bytes().unwrap();
-    let mut reopened = soliddraft_app::file::open_bytes("mesh.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let reopened = soliddraft_app::file::open_bytes("mesh.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
     let FeatureKind::ImportStep(import) = &reopened.features[0].kind else { panic!("import") };
     assert_eq!(import.format, ImportFormat::Mesh);
     assert_eq!(import.source, MESH);
@@ -137,8 +137,61 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
         Preview::from_bytes(&Document::new("check", soliddraft_app::kernel()), "mesh.step", export.text.into_bytes())
             .unwrap();
     assert!(preview.summary()["proposals"].as_array().unwrap().is_empty());
-    reopened.undo().unwrap();
-    assert!(reopened.features.is_empty());
+    app.state_mut().state.doc.undo().unwrap();
+    assert!(app.state().state.doc.features.is_empty());
+}
+
+#[test]
+fn source_cleanup_certificate_is_visible_and_survives_a_saved_part() {
+    let mut doc = Document::new("Source cleanup", soliddraft_app::kernel());
+    let source = include_bytes!("../../soliddraft-kernel-catallax/tests/fixtures/planar-source-incidence.step");
+    let preview = Preview::from_bytes(&doc, "incidence.step", source.to_vec()).unwrap();
+    let id = commit(&mut doc, &preview, &Review::default()).unwrap();
+    let record = doc.model().import_record(soliddraft_model::FeatureId(id as u32)).unwrap();
+    assert_eq!(record.format, "catallax-import-repair/3");
+    assert_eq!(record.source_incidence.len(), 1);
+    let rows = soliddraft_app::import::record_rows(record);
+    assert!(rows.iter().any(|(name, _)| name.ends_with("source to result")));
+    let saved = doc.model().to_bytes().unwrap();
+    let reopened = soliddraft_app::file::open_bytes("cleanup.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    assert_eq!(reopened.model().import_record(soliddraft_model::FeatureId(id as u32)), Some(record));
+    assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
+}
+
+#[test]
+fn ascii_and_binary_stl_take_the_same_review_and_saved_solid_path() {
+    let vertices = [[0.0_f32, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]];
+    let triangles = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
+    let mut ascii = "solid tetrahedron\n".to_owned();
+    let mut binary = vec![0_u8; 80];
+    binary.extend_from_slice(&4_u32.to_le_bytes());
+    for triangle in triangles {
+        ascii.push_str("facet normal 0 0 0\nouter loop\n");
+        binary.extend_from_slice(&[0; 12]);
+        for i in triangle {
+            let [x, y, z] = vertices[i];
+            ascii.push_str(&format!("vertex {x} {y} {z}\n"));
+            for v in [x, y, z] {
+                binary.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        ascii.push_str("endloop\nendfacet\n");
+        binary.extend_from_slice(&[0; 2]);
+    }
+    ascii.push_str("endsolid tetrahedron\n");
+    for bytes in [ascii.into_bytes(), binary] {
+        let mut doc = Document::new("STL solid", soliddraft_app::kernel());
+        let preview = Preview::from_source(&doc, "tetrahedron.stl", bytes.clone(), ImportFormat::Mesh).unwrap();
+        commit(&mut doc, &preview, &Review::default()).unwrap();
+        assert!(
+            (doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap().volume - 1000.0 / 6.0).abs() < 1e-8
+        );
+        let saved = doc.model().to_bytes().unwrap();
+        let reopened = soliddraft_app::file::open_bytes("stl.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        let FeatureKind::ImportStep(source) = &reopened.features[0].kind else { panic!("import") };
+        assert_eq!(source.source, bytes);
+        assert_eq!(reopened.features[0].status, FeatureStatus::Ok);
+    }
 }
 
 #[test]

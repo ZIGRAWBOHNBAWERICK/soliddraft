@@ -812,9 +812,15 @@ impl Document {
     fn edit_feature_definition(
         &mut self,
         id: FeatureId,
-        kind: FeatureKind,
+        mut kind: FeatureKind,
         restoring: bool,
     ) -> Result<Applied, CommandError> {
+        if !restoring
+            && let (Some(FeatureKind::ImportStep(old)), FeatureKind::ImportStep(new)) =
+                (self.feature(id).map(|f| &f.kind), &mut kind)
+        {
+            new.source_bound_names = old.source_bound_names || old.sha256 != new.sha256 || old.format != new.format;
+        }
         Self::check_kind(&kind)?;
         if !restoring {
             self.check_inputs(&kind)?;

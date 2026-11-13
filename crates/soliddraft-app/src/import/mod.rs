@@ -425,12 +425,10 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             Ok(_) => state.note(
                 if decline {
                     "Import saved with declined repairs; the solid stays open".into()
+                } else if preview.replacement.is_some() {
+                    "Replaced imported file. Check any references marked for repair.".into()
                 } else {
-                    if preview.replacement.is_some() {
-                        "Replaced imported file. Check any references marked for repair.".into()
-                    } else {
-                        format!("Imported {} body", format.label())
-                    }
+                    format!("Imported {} body", format.label())
                 },
                 NoteKind::Info,
             ),

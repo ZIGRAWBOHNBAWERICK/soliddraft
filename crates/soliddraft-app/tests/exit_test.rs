@@ -260,7 +260,11 @@ fn click_row(harness: &mut App<'_>, name: &str) {
 
 /// Clicks the first button with this label; ribbon items come before panel buttons.
 fn click_button(harness: &mut App<'_>, label: &str) {
-    let label = if label == "Sketch" && !harness.state().state.in_sketch() { "Start sketch" } else { label };
+    let label = match label {
+        "Sketch" if !harness.state().state.in_sketch() => "Start sketch",
+        "Exit" if harness.state().state.in_sketch() => "Close sketch",
+        _ => label,
+    };
     harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()

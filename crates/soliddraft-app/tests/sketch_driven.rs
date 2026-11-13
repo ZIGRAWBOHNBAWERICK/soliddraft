@@ -46,7 +46,14 @@ fn session(app: &App) -> &SketchSession {
 }
 
 fn control(app: &mut App, label: &str) {
-    ribbon::click_option(app, label);
+    if label == "Link values" {
+        ribbon::run_command(app, "link_values");
+    } else {
+        ribbon::click_option(app, label);
+        if matches!(label, "Reference dimensions" | "Reference dimension") {
+            ribbon::close_options(app);
+        }
+    }
 }
 
 fn screen(app: &App, p: P2) -> Pos2 {

@@ -331,6 +331,8 @@ pub fn open_options(app: &mut App) {
     } else if !app.state().state.options_details {
         let label = if app.state().state.assembly.is_active() {
             "Assembly options"
+        } else if app.query_by_label("Sheet properties").is_some() {
+            "Sheet properties"
         } else if app.state().state.drawing.is_active() || app.state().state.drawing.new.is_some() {
             "Drawing options"
         } else {
@@ -380,7 +382,9 @@ pub fn options_region(app: &App) -> Rect {
 }
 
 pub fn click_option(app: &mut App, label: &str) {
-    open_options(app);
+    if app.query_by_label(label).is_none() {
+        open_options(app);
+    }
     app.get_by_label(label).scroll_to_me();
     app.run_steps(24);
     app.get_by_label(label).click();

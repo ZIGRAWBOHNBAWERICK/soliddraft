@@ -330,9 +330,10 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
         let centers = [frame.screen(P2::new(0.0, 24.0)).unwrap(), frame.screen(P2::new(0.0, -24.0)).unwrap()];
         let image = app.render().unwrap();
         image.save(case.path(&format!("sketch-{}.png", scene.id()))).unwrap();
-        let viewport = app.state().state.viewport.rect;
-        let overlay = image.get_pixel((viewport.left() + 155.0) as u32, (viewport.top() + 65.0) as u32).0;
-        let text = ribbon::painted(&app).into_iter().find(|p| p.text == "Auto relations").unwrap().color;
+        let label = ribbon::painted(&app).into_iter().find(|p| p.text == "Auto relations").unwrap();
+        let beside = label.rect.right_center() + egui::vec2(2.0, 0.0);
+        let overlay = image.get_pixel(beside.x as u32, beside.y as u32).0;
+        let text = label.color;
         let overlay_contrast = (luminance([text.r(), text.g(), text.b()]) + 0.05)
             / (luminance([overlay[0], overlay[1], overlay[2]]) + 0.05);
         assert!(overlay_contrast >= 4.5, "{}: sketch switches contrast is {overlay_contrast}:1", scene.label());

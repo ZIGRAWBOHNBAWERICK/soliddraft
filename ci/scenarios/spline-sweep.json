@@ -1,0 +1,274 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "spline-sweep",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 11,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              9,
+              -2,
+              11
+            ],
+            "width": 4,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sweep",
+      "arguments": {
+        "sketch": "Sketch1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "orientation": "fixed",
+        "segments": [
+          {
+            "kind": "spline",
+            "id": "rail",
+            "degree": 3,
+            "control_points": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                0,
+                10
+              ],
+              [
+                2,
+                2,
+                20
+              ],
+              [
+                0,
+                2,
+                30
+              ]
+            ],
+            "weights": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "knots": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 240,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "segments": [
+          {
+            "kind": "spline",
+            "id": "rail",
+            "degree": 3,
+            "control_points": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                0,
+                20
+              ],
+              [
+                2,
+                2,
+                40
+              ],
+              [
+                0,
+                2,
+                60
+              ]
+            ],
+            "weights": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "knots": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 480,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 240,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 2
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 480,
+          "tolerance": 0.001
+        },
+        {
+          "pointer": "/rebuild/operations",
+          "equals": 0
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "edit_sweep",
+      "arguments": {
+        "feature": "Sweep1",
+        "start": [
+          0,
+          0,
+          0
+        ],
+        "segments": [
+          {
+            "kind": "spline",
+            "id": "rail",
+            "degree": 3,
+            "control_points": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                0,
+                10
+              ],
+              [
+                2,
+                2,
+                20
+              ],
+              [
+                0,
+                0,
+                0
+              ]
+            ],
+            "weights": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "knots": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "refused": "path may turn back or cross itself",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 480,
+          "tolerance": 0.001
+        }
+      ],
+      "same_geometry_as_step": 3
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/spline-sweep.dwprt"
+      },
+      "files": [
+        "{bundle}/spline-sweep.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/spline-sweep.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 3,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 480,
+          "tolerance": 0.001
+        }
+      ]
+    }
+  ]
+}

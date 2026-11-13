@@ -66,6 +66,10 @@ fn every_combine_operation_consumes_only_its_tool_and_survives_history_and_files
         let before = doc.live_bodies();
         let combine = add(&mut doc, 0, FeatureKind::Combine { operation, tool: 1 });
         assert_eq!(doc.status(combine), Some(&FeatureStatus::Ok));
+        let contributing = doc.body_features(0);
+        assert!(contributing.contains(&tool));
+        assert!(contributing.contains(&combine));
+        assert!(!contributing.contains(&other));
         assert_eq!(doc.live_bodies().len(), 2);
         assert!(doc.live_bodies().contains(&(2, untouched)));
         assert!((volume(&doc, 0) - expected).abs() < 1e-6);

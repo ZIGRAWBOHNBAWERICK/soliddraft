@@ -131,6 +131,12 @@ fn new_body_and_combine_are_available_in_the_application() {
         app.get_by_label("Body 2").click();
         app.run_steps(4);
         assert_eq!(app.state().state.doc.active_body, 1);
+        let selected = app.state().state.doc.features[1].id;
+        assert!(!app.state().state.viewport.dimensions.is_empty());
+        assert!(
+            app.state().state.viewport.dimensions.iter().all(|dimension| dimension.target
+                == soliddraft_app::viewport::dimensions::DimensionTarget::Feature(selected))
+        );
         case.frame(app, "two-bodies");
         ribbon::run_command(app, "combine");
         app.run_steps(4);

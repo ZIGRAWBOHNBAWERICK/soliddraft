@@ -388,6 +388,25 @@ impl Document {
         self.index_of(id).map(|end| self.body_states(end).into_iter().collect()).unwrap_or_default()
     }
 
+    /// Features contributing to a body, including tools consumed by Combine.
+    pub fn body_features(&self, key: u32) -> Vec<FeatureId> {
+        let mut bodies = std::collections::BTreeSet::from([key]);
+        let mut features = Vec::new();
+        for feature in self.features.iter().take(self.active_count()).rev() {
+            if !bodies.contains(&feature.body) {
+                continue;
+            }
+            features.push(feature.id);
+            if let FeatureKind::Combine { tool, .. } = feature.kind
+                && self.status(feature.id) == Some(&FeatureStatus::Ok)
+            {
+                bodies.insert(tool);
+            }
+        }
+        features.reverse();
+        features
+    }
+
     /// The next unused body identity.
     pub fn next_body(&self) -> u32 {
         self.next_body

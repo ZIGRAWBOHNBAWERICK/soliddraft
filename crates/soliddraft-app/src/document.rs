@@ -3060,6 +3060,11 @@ impl Document {
         self.selection = None;
     }
 
+    /// Features whose dimensions contribute to the selected body.
+    pub fn body_features(&self) -> std::collections::BTreeSet<FeatureId> {
+        self.model.body_features(self.active_body).into_iter().map(app_id).collect()
+    }
+
     /// The body label used by the tree and the property panel.
     pub fn body_name(&self, key: u32) -> String {
         if key == 0 && self.model.next_body() == 1 { BODY_NAME.to_owned() } else { format!("Body {}", key + 1) }

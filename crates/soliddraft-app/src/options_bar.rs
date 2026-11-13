@@ -225,10 +225,11 @@ fn selection_options(ui: &mut egui::Ui, state: &mut AppState, selection: Selecti
         }
     }
     let features: Vec<_> = if matches!(selection, Selection::Body | Selection::Face(_) | Selection::Edge(_)) {
+        let contributing = state.doc.body_features();
         let end = state.doc.rollback.unwrap_or(state.doc.features.len()).min(state.doc.features.len());
         state.doc.features[..end]
             .iter()
-            .filter(|f| !f.suppressed && f.status != FeatureStatus::Inactive)
+            .filter(|f| contributing.contains(&f.id) && !f.suppressed && f.status != FeatureStatus::Inactive)
             .map(|f| f.id)
             .collect()
     } else {

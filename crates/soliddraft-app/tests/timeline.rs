@@ -8,6 +8,7 @@ use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, Selection, SketchPlane};
 use soliddraft_app::settings::FrameLayout;
+use soliddraft_app::state::AppAction;
 use soliddraft_app::theme::{self, Mode};
 
 fn bounds(app: &App) -> Rect {
@@ -75,6 +76,79 @@ fn edit_suite(doc: Document) -> App {
     app.state_mut().state.layout.tree.shown = false;
     app.run_steps(8);
     app
+}
+
+#[test]
+fn keyboard_focus_is_visible_and_distinct_from_history_selection() {
+    let case = ribbon::case("timeline-keyboard-focus");
+    for mode in Mode::ALL {
+        let mut app = edit_suite(ribbon::plate());
+        theme::set_mode(&app.ctx, mode);
+        app.run_steps(8);
+        let selected = chip(&app, "Boss-Extrude1").center();
+        ribbon::click_at(&mut app, selected);
+        let view = app.state().state.viewport.rect;
+        app.hover_at(view.center());
+        app.run_steps(8);
+        case.run(&mut app, |app| {
+            for (label, name) in [
+                ("Tree", "tree"),
+                ("Boss-Extrude1 in history", "selected-chip"),
+                ("History rollback bar", "rollback"),
+                ("Boss-Extrude1 in history", "unselected-chip"),
+            ] {
+                if name == "unselected-chip" {
+                    app.state_mut().state.push(AppAction::Select(None));
+                    app.run_steps(4);
+                }
+                app.get_by_label(label).focus();
+                app.run_steps(2);
+                app.key_press(Key::Tab);
+                app.run_steps(2);
+                assert!(!app.get_by_label(label).is_focused(), "Tab leaves {name}");
+                let rect = app.get_by_label(label).rect();
+                let selection = app.state().state.doc.selection;
+                let tree_shown = app.state().state.layout.tree.shown;
+                let before = app.render().expect("unfocused history renders");
+                app.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+                app.run_steps(2);
+                assert!(app.get_by_label(label).is_focused(), "Shift+Tab returns to {name}");
+                assert_eq!(app.state().state.doc.selection, selection, "focus does not select {name}");
+                assert_eq!(app.state().state.layout.tree.shown, tree_shown, "focus does not toggle the Tree");
+                let focused = app.render().expect("focused history renders");
+                focused.save(case.path(&format!("{}-{name}-focused.png", mode.label().to_lowercase()))).unwrap();
+                let at = if name == "rollback" {
+                    pos2(rect.left() + 3.0, rect.center().y)
+                } else {
+                    pos2(rect.center().x, rect.top() + 3.0)
+                };
+                let old = before.get_pixel(at.x as u32, at.y as u32).0;
+                let new = focused.get_pixel(at.x as u32, at.y as u32).0;
+                let luminance = |pixel: [u8; 4]| -> f64 {
+                    pixel[..3]
+                        .iter()
+                        .zip([0.2126, 0.7152, 0.0722])
+                        .map(|(c, w)| {
+                            let v = f64::from(*c) / 255.0;
+                            w * if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+                        })
+                        .sum()
+                };
+                let (a, b) = (luminance(old), luminance(new));
+                let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                assert!(contrast >= 3.0, "{} {name} has no distinct focus paint: {contrast:.2}:1", mode.label());
+                if name.ends_with("chip") {
+                    assert_eq!(ribbon::control(app, label, bounds(app)).selected, name == "selected-chip");
+                    let at = pos2(rect.center().x, rect.top());
+                    assert_eq!(
+                        before.get_pixel(at.x as u32, at.y as u32),
+                        focused.get_pixel(at.x as u32, at.y as u32),
+                        "focus leaves the selection border unchanged"
+                    );
+                }
+            }
+        });
+    }
 }
 
 #[test]

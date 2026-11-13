@@ -262,11 +262,23 @@
       "checks": [
         {
           "pointer": "/result/report/undecided",
+          "equals": 0
+        },
+        {
+          "pointer": "/result/report/below",
           "equals": 1
         },
         {
           "pointer": "/result/report/results/0/clearance",
-          "equals": "undecided"
+          "equals": "below"
+        },
+        {
+          "pointer": "/result/report/results/0/distance/lo",
+          "equals": 20
+        },
+        {
+          "pointer": "/result/report/results/0/distance/hi",
+          "equals": 20
         }
       ]
     },

@@ -657,6 +657,21 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     w.get_by_role_and_label(Role::RadioButton, "SolidWorks").click();
     w.run_steps(3);
     let shortcut = |w: &Window, id| w.state().shortcuts.shortcut_text(id).unwrap();
+    let sketch_keys = |w: &Window| {
+        for (id, key) in [
+            ("sketch_line", "L"),
+            ("sketch_rectangle", "R"),
+            ("sketch_circle", "C"),
+            ("sketch_arc", "A"),
+            ("smart_dimension", "D"),
+            ("sketch_trim", "T"),
+            ("sketch_offset", "O"),
+            ("sketch_move", "M"),
+        ] {
+            assert_eq!(shortcut(w, id), key);
+        }
+    };
+    sketch_keys(&w);
     assert_eq!(shortcut(&w, "zoom_fit"), "F");
     assert_eq!(shortcut(&w, "view_front"), "Ctrl+1");
     assert_eq!(shortcut(&w, "view_isometric"), "Ctrl+7");
@@ -669,6 +684,7 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(shortcut(&w, "zoom_fit"), "F6");
     assert_eq!(shortcut(&w, "view_front"), "F");
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "fusion");
+    sketch_keys(&w);
 
     click(&mut w, "Clear search");
     w.get_by_role_and_label(Role::TextInput, "Search commands").click();
@@ -686,6 +702,7 @@ fn shortcuts_page_lists_registry_searches_assigns_clears_resets_swaps_and_preset
     assert_eq!(shortcut(&w, "view_front"), "F");
     assert_eq!(shortcut(&w, "normal_to"), "N");
     assert_eq!(file_json(&dir)["shortcuts"]["preset"], "soliddraft");
+    sketch_keys(&w);
     assert_eq!(file_json(&dir)["theme"], "dark", "other settings keys stay");
 }
 

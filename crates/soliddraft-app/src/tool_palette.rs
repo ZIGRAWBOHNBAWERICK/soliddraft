@@ -41,17 +41,6 @@ pub fn plane_picker_panel(root: &mut egui::Ui, state: &mut AppState) {
         });
 }
 
-fn group_label(label: &str, tab: Tab) -> &str {
-    match label {
-        "Modify" if tab == Tab::Part(RibbonTab::Sketch) => "Edit",
-        "Modify" => "Edit features",
-        "Transform" => "Move and copy",
-        "Constrain" => "Relations",
-        "Display" if tab == Tab::Part(RibbonTab::Sketch) => "Show",
-        label => label,
-    }
-}
-
 fn label(command: &CommandSpec, state: &AppState) -> String {
     match command.id {
         "sketch" if !state.in_sketch() => "Start sketch".to_owned(),
@@ -95,7 +84,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             ui.add_space(6.0);
             ui.label(
-                egui::RichText::new(group_label(group, tab))
+                egui::RichText::new(commands::palette_group(group, tab))
                     .font(theme::font_medium(tokens::SMALL_SIZE))
                     .color(theme::muted()),
             );

@@ -100,7 +100,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                     let button = egui::Button::selectable(i == palette.selected, c.label_in(state))
                         .shortcut_text(state.shortcuts.shortcut_text(c.id).unwrap_or_default());
                     let r = ui.add_enabled(c.is_enabled(state), button);
-                    let r = match c.path() {
+                    let r = match c.path_in(state) {
                         Some(path) => r.on_hover_text(path),
                         None => r,
                     };

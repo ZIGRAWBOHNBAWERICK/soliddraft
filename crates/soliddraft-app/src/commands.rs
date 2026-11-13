@@ -681,6 +681,14 @@ impl CommandSpec {
         self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), p.panel))
     }
 
+    pub fn path_in(&self, state: &AppState) -> Option<String> {
+        if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+            self.ribbon.first().map(|p| format!("{} › {}", p.tab.label(), palette_group(p.panel, p.tab)))
+        } else {
+            self.path()
+        }
+    }
+
     /// The agent tool's description: the doc, then the details.
     pub fn description(&self) -> String {
         if self.details.is_empty() { format!("{}.", self.doc) } else { format!("{}. {}", self.doc, self.details) }
@@ -696,6 +704,18 @@ impl CommandSpec {
             description.push_str(undo);
         }
         ToolSpec { name: self.id.into(), description, input_schema: object(&(self.params)()) }
+    }
+}
+
+/// Group names in the Edit Suite palette and its command hints.
+pub fn palette_group(label: &str, tab: Tab) -> &str {
+    match label {
+        "Modify" if tab == Tab::Part(RibbonTab::Sketch) => "Edit",
+        "Modify" => "Edit features",
+        "Transform" => "Move and copy",
+        "Constrain" => "Relations",
+        "Display" if tab == Tab::Part(RibbonTab::Sketch) => "Show",
+        label => label,
     }
 }
 

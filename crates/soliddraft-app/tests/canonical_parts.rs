@@ -144,8 +144,10 @@ fn exercise(index: usize) {
     let mut names = None;
     for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
         let tool = step["tool"].as_str().unwrap();
-        let arguments: Value =
-            serde_json::from_str(&step["arguments"].to_string().replace("{bundle}", dir.to_str().unwrap())).unwrap();
+        let mut arguments = step["arguments"].clone();
+        if let Some(path) = arguments.get_mut("path") {
+            *path = path.as_str().unwrap().replace("{bundle}", dir.to_str().unwrap()).into();
+        }
         if step["fresh_process"] == true {
             drop(state);
             state = AppState::new(soliddraft_app::new_document());

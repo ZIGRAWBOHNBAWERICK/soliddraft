@@ -38,6 +38,19 @@ pub(crate) const DEPTH_TOL_CHORDS: f64 = 30.0;
 /// Approximate view curves of `body`, from a fine tessellation and edge polylines.
 /// Sheet bodies are refused, as on the exact backends.
 pub fn view_curves(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
+    view_curves_impl(kernel, body, spec, false)
+}
+
+/// An on-screen view from a named rendering rule. The caller sets its tolerance to
+/// that rule's stated level; explicit controls and exported views use `view_curves`.
+pub fn rendering_view_curves(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec) -> KernelResult<ViewCurves> {
+    if !spec.preview {
+        return Err(KernelError::InvalidInput("Named rendering is only available for screen views".into()));
+    }
+    view_curves_impl(kernel, body, spec, true)
+}
+
+fn view_curves_impl(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec, rendering: bool) -> KernelResult<ViewCurves> {
     let frame =
         spec.frame().ok_or_else(|| KernelError::InvalidInput("view direction is zero or parallel to up".into()))?;
     let topology = kernel.topology(body)?;
@@ -55,7 +68,9 @@ pub fn view_curves(kernel: &dyn Kernel, body: BodyId, spec: &ViewSpec) -> Kernel
         ..Default::default()
     };
     // A view for the screen may come from the preview mesh; an exported one never does.
-    let (mesh, polylines) = if spec.preview {
+    let (mesh, polylines) = if rendering {
+        (kernel.rendering(body, &params)?, kernel.rendering_edges(body, &params)?)
+    } else if spec.preview {
         (kernel.preview(body, &params)?, kernel.preview_edges(body, &params)?)
     } else {
         (kernel.tessellate(body, &params)?, kernel.tessellate_edges(body, &params)?)

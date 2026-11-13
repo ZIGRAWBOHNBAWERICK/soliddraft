@@ -89,9 +89,6 @@ impl Kernel for Gated {
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult> {
         self.inner.revolve(tag, profile, params)
     }
-    fn sweep(&self, tag: &OpTag, profile: BodyId, params: &Sweep) -> KernelResult<OpResult> {
-        self.inner.sweep(tag, profile, params)
-    }
     fn boolean(&self, tag: &OpTag, op: BooleanOp, target: BodyId, tool: BodyId) -> KernelResult<OpResult> {
         self.inner.boolean(tag, op, target, tool)
     }

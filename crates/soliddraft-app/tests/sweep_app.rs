@@ -501,7 +501,7 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         assert_eq!(doc.features[1].kind, before);
         check_spline(&doc, 48.0);
     }
-    // Owner decision 13 Nov: the general measured display rule now accepts this former display refusal.
+    // Owner decision 13 Nov: certified-first display now accepts this former display refusal as proved.
     let mut detailed = spline_controls(3.0);
     detailed[0]["control_points"][3] = json!([0, 1, 6]);
     let (accepted, work) =
@@ -516,20 +516,14 @@ fn spline_sweep_edits_reopens_and_refuses_a_return_without_changing_the_part() {
         mesh.bounded.as_ref().map(|bound| (&bound.kind, bound.measured_mm, bound.level_mm))
     );
     assert!(!work.exhausted && work.used > 0 && work.used <= 20_000_000, "{work:?}");
-    let bound = mesh.bounded.as_ref().expect("the detailed sweep retains the native measured answer kind");
-    bound.validate().unwrap();
-    assert_eq!(bound.kind, "spline display mesh");
-    assert_eq!(bound.level_mm, 0.01);
-    assert!(bound.measured_mm >= 0.0 && bound.measured_mm <= 0.01);
+    assert!(mesh.bounded.is_none() && !mesh.unproved, "the native proved answer must stay proved");
     assert!(!mesh.positions.is_empty() && !mesh.indices.is_empty());
-    assert!(mesh.unproved);
-    assert!(doc.proof_state().answered_within_bound && !doc.proof_state().current_proved_display());
-    let display = serde_json::to_value(doc.display_answer(doc.features[1].id).unwrap()).unwrap();
-    assert_eq!(display["display"], serde_json::to_value(bound).unwrap());
+    assert!(doc.proof_state().current_proved_display());
+    assert!(doc.display_answer(doc.features[1].id).is_none());
     let (export, _) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
         doc.kernel().tessellate(body, &Default::default())
     });
-    assert!(export.is_err(), "measured rendering cannot replace independent certified tessellation");
+    assert!(export.is_err(), "a named screen result cannot replace an independent certified request");
     call(&mut doc, "undo", json!({}));
     assert_eq!(doc.features[1].kind, before);
     check_spline(&doc, 48.0);
@@ -615,46 +609,4 @@ fn pinned_sweep_hides_during_sketch_and_returns_in_both_frames() {
             case.frame(app, &format!("{layout:?}-sweep-after-close"));
         });
     }
-}
-
-#[path = "gated/mod.rs"]
-mod gated;
-
-#[test]
-fn a_sweep_edit_rejects_excessive_display_evidence_and_keeps_the_accepted_part() {
-    let kernel = std::sync::Arc::new(gated::Gated::default());
-    let mut doc = Document::new("Sweep display limit", kernel.clone());
-    call(
-        &mut doc,
-        "sketch",
-        json!({"plane":"top","offset":11,
-        "shapes":[{"shape":"rectangle","center":[9,-2,11],"width":4,"height":2}]}),
-    );
-    call(
-        &mut doc,
-        "sweep",
-        json!({"sketch":"Sketch1", "start":[0,0,0],
-        "orientation":"fixed", "segments":spline_controls(6.0)}),
-    );
-    let before = doc.model().to_bytes().unwrap();
-    let undo = doc.undo_depth();
-    // A controlled backend record tests the app's admission boundary over a real native sweep.
-    kernel.rules.lock().unwrap().display_bound = Some(soliddraft_kernel_api::DisplayBound {
-        kind: "spline display mesh".into(),
-        rule: "spline-display-evaluator-v1".into(),
-        level_mm: 0.01,
-        measured_mm: 0.010000001,
-        method: "whole-surface measurement fixture".into(),
-        definition: "retained sweep boundary fixture".into(),
-    });
-    let refused =
-        CommandTools { doc: &mut doc, book: &mut ProposalBook::default(), surface: Surface::Mcp, drawing: None }.call(
-            "edit_sweep",
-            json!({"feature":"Sweep1", "start":[0,0,0], "segments":spline_controls(8.0)}),
-            &Caller::Mcp { client: "sweep excessive display bound".into() },
-        );
-    assert!(refused.is_error && refused.content.contains("0.01 mm"), "{}", refused.content);
-    assert_eq!(doc.model().to_bytes().unwrap(), before);
-    assert_eq!(doc.undo_depth(), undo);
-    assert!(!doc.proof_state().answered_within_bound);
 }

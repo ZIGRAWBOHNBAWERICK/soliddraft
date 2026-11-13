@@ -195,6 +195,20 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     let faces = k.topology(body.body).unwrap().faces;
     assert_eq!(faces.len(), 6);
     assert!(mesh.triangle_faces.iter().all(|id| faces.iter().any(|face| face.id == *id)));
+    let screen = soliddraft_kernel_api::drawing::ViewSpec {
+        preview: true,
+        ..soliddraft_kernel_api::drawing::ViewSpec::standard(soliddraft_kernel_api::drawing::StandardView::Isometric)
+    };
+    let (view, work) = with_request_allowance(0, || k.view_curves(body.body, &screen));
+    let view = view.unwrap();
+    assert!(!work.exhausted && view.unproved && !view.curves.is_empty());
+    for spec in [
+        soliddraft_kernel_api::drawing::ViewSpec { tolerance: 0.005, ..screen },
+        soliddraft_kernel_api::drawing::ViewSpec { preview: false, ..screen },
+    ] {
+        let (view, work) = with_request_allowance(0, || k.view_curves(body.body, &spec));
+        assert!(view.is_err() && work.exhausted, "named screen geometry cannot satisfy independent view controls");
+    }
     // Background mass has its own application request allowance.
     let (mass, mass_work) = with_request_allowance(APP_REQUEST_WORK, || k.mass_properties(body.body));
     eprintln!("three-section Smooth mass: {mass_work:?}; refusal: {:?}", mass.as_ref().err());

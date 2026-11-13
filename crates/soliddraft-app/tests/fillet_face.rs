@@ -270,9 +270,14 @@ fn type_field(app: &mut App, label: &str, value: &str) {
     app.run_steps(4);
 }
 
-/// The panel's own OK button, labelled with its shortcut ("OK (Enter)").
+/// Confirms through the active frame's own button.
 fn ok(app: &mut App) {
-    app.get_all_by_role_and_label(egui::accesskit::Role::Button, "OK (Enter)")
+    let label = if app.state().state.frame_layout == soliddraft_app::settings::FrameLayout::EditSuite {
+        "OK"
+    } else {
+        "OK (Enter)"
+    };
+    app.get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .expect("the open panel has an OK button")
         .click();

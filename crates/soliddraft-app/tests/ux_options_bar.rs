@@ -61,6 +61,8 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
         assert!(app.state().state.viewport.rect.contains_rect(navigation_display));
         ribbon::click_at(app, navigation_display.center());
         settle(app);
+        app.get_by_label("Wireframe").click();
+        settle(app);
         assert_ne!(app.state().state.viewport.display, display, "navigation keeps the working display control");
         click(app, "Front");
         let front = ribbon::fingerprint(app).camera;

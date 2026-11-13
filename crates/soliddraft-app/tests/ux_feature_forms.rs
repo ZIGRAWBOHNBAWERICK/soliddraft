@@ -286,6 +286,11 @@ fn plane_picker_and_repair_use_the_same_bar_and_sheet() {
         settle(app);
         assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickPlane)));
         assert!(app.query_all_by_label("OK").next().is_none());
+        assert_eq!(
+            app.get_all_by_role_and_label(egui::accesskit::Role::Button, "Top plane").count(),
+            1,
+            "plane selection has one set of controls on the options bar"
+        );
         case.frame(app, "plane-picker");
         click_bar(app, "Cancel");
         app.state_mut().state.editor = Some(FeatureEditor::new(

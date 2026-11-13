@@ -497,7 +497,6 @@ impl SolidDraftApp {
         let window_width = root.available_width();
         if !start {
             if palette {
-                crate::tool_palette::plane_picker_panel(root, &mut self.state);
                 crate::tool_palette::panel(root, &mut self.state);
                 crate::timeline::panel(root, &mut self.state);
             }

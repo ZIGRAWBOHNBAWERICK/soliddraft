@@ -81,7 +81,11 @@ fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choic
         assert_eq!(app.state().state.doc.revision(), revision, "hiding does not change geometry");
         assert!(!egui::Popup::is_any_open(&app.ctx));
 
-        let at = app.get_by_label("Solid body").rect().center();
+        if !app.state().state.tree_shown() {
+            ribbon::run_command(app, "toggle_tree");
+            app.run_steps(8);
+        }
+        let at = ribbon::control(app, "Solid body", ribbon::window(app)).rect.center();
         secondary(app, at, false);
         assert_eq!(quick_count(app), 8);
         click_quick(app, "Show");
@@ -96,7 +100,7 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
     edit_suite(&case);
     for size in [ribbon::WINDOW, vec2(1280.0, 720.0)] {
         let mut app = ribbon::app_at(ribbon::plate(), size, 1.0);
-        if app.state().state.layout.tree.shown {
+        if app.state().state.tree_shown() {
             ribbon::run_command(&mut app, "toggle_tree");
         }
         case.run(&mut app, |app| {
@@ -117,7 +121,12 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
                 }
                 for group in ["View", "Scene", "Display", "Show"] {
                     assert!(
-                        window.contains_rect(app.get(By::new().role(egui::accesskit::Role::Label).label(group)).rect())
+                        window.contains_rect(
+                            app.query_all(By::new().role(egui::accesskit::Role::Label).label(group))
+                                .last()
+                                .expect("the popup follows any same-named options-bar label")
+                                .rect()
+                        )
                     );
                 }
                 case.frame(app, &format!("{}-{name}", size.x));

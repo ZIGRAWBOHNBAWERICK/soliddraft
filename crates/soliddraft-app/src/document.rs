@@ -1704,6 +1704,45 @@ impl Document {
         self.bounded_answers.get(&self.geometry)?.get(&id)?.display.as_ref()
     }
 
+    /// Feature answers for export, keeping model and display bounds independent.
+    pub fn proof_report(&self) -> soliddraft_exchange::proof::ProofReport {
+        use soliddraft_exchange::proof::AnswerKind;
+        let mut report = self.model.proof_report();
+        for (answer, feature) in report.features.iter_mut().zip(&self.features) {
+            if answer.answer_kind == AnswerKind::Inactive {
+                continue;
+            }
+            match &feature.status {
+                FeatureStatus::Pending => answer.answer_kind = AnswerKind::Pending,
+                FeatureStatus::Error(message) => {
+                    answer.answer_kind =
+                        if matches!(self.model.status(model_id(feature.id)), Some(model::FeatureStatus::Blocked(_))) {
+                            AnswerKind::Pending
+                        } else {
+                            AnswerKind::Refused
+                        };
+                    answer.message = Some(crate::geometry_message::for_user(message));
+                }
+                FeatureStatus::NeedsRepair(_) => {
+                    answer.answer_kind = AnswerKind::Refused;
+                    answer.message = Some("A reference needs repair".into());
+                }
+                _ => {}
+            }
+            if let Some(bounds) = self.bounded_answers.get(&self.geometry).and_then(|answers| answers.get(&feature.id))
+            {
+                if let Some(bound) = &bounds.model {
+                    answer.answer_kind = AnswerKind::WithinStatedBound;
+                    answer.model_bound = Some(serde_json::to_value(bound).expect("validated finite bound"));
+                }
+                if let Some(bound) = &bounds.display {
+                    answer.display_bound = Some(serde_json::to_value(bound).expect("validated finite bound"));
+                }
+            }
+        }
+        report
+    }
+
     fn bounded_state(&self) -> (bool, bool) {
         let Some(answers) = self.bounded_answers.get(&self.geometry) else { return (false, false) };
         self.model.features().iter().take(self.model.active_count()).filter(|feature| !feature.suppressed).fold(
@@ -2883,9 +2922,13 @@ impl Document {
                     name: f.name.clone(),
                     kind: FeatureKind::from_model(&f.kind),
                     status: if index >= pending_from && index < active && !inactive {
-                        self.proof_failure
-                            .as_ref()
-                            .map_or(FeatureStatus::Pending, |message| FeatureStatus::Error(message.clone()))
+                        if index == pending_from {
+                            self.proof_failure
+                                .as_ref()
+                                .map_or(FeatureStatus::Pending, |message| FeatureStatus::Error(message.clone()))
+                        } else {
+                            FeatureStatus::Pending
+                        }
                     } else {
                         match view_status(&f.kind, status, &names) {
                             FeatureStatus::Ok if !inactive => bounded

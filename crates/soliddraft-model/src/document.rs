@@ -254,11 +254,17 @@ impl Document {
             return Ok(soliddraft_exchange::Export {
                 bytes: output.bytes,
                 report: soliddraft_exchange::Report::FieldMesh(output.report),
+                proof: None,
             });
         }
 
-        soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &self.settings.export)
-            .map_err(|e| e.to_string())
+        let mut out =
+            soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &self.settings.export)
+                .map_err(|e| e.to_string())?;
+        if out.proof.is_some() {
+            out.proof = Some(self.proof_report());
+        }
+        Ok(out)
     }
 
     /// The active field's explicit mass stand-in: a STEP file holding the field's source
@@ -271,7 +277,49 @@ impl Document {
         Ok(soliddraft_exchange::Export {
             bytes: output.bytes,
             report: soliddraft_exchange::Report::StandIn(Box::new(output.report)),
+            proof: Some(self.proof_report()),
         })
+    }
+
+    /// Current feature answers and retained build work, without rendering claims.
+    pub fn proof_report(&self) -> soliddraft_exchange::proof::ProofReport {
+        use soliddraft_exchange::proof::{AnswerKind, FeatureProof, ProofReport};
+        let active = self.active_count();
+        ProofReport {
+            features: self
+                .features
+                .iter()
+                .enumerate()
+                .map(|(index, feature)| {
+                    let (answer_kind, message) = if feature.suppressed || index >= active {
+                        (AnswerKind::Inactive, Some("Suppressed or past the rollback bar".into()))
+                    } else if index >= self.dirty {
+                        (AnswerKind::Pending, Some("Waiting for proof".into()))
+                    } else {
+                        match self.status(feature.id) {
+                            Some(FeatureStatus::Ok) => (AnswerKind::Proved, None),
+                            Some(FeatureStatus::Failed(reason)) => (AnswerKind::Refused, Some(reason.clone())),
+                            Some(FeatureStatus::RepairNeeded(_)) => {
+                                (AnswerKind::Refused, Some("A reference needs repair".into()))
+                            }
+                            Some(FeatureStatus::Blocked(input)) => {
+                                (AnswerKind::Pending, Some(format!("Waiting for {input} to build")))
+                            }
+                            _ => (AnswerKind::Pending, Some("Waiting for proof".into())),
+                        }
+                    };
+                    FeatureProof {
+                        id: feature.id.to_string(),
+                        name: feature.name.clone(),
+                        answer_kind,
+                        model_bound: None,
+                        display_bound: None,
+                        work_used: self.feature_work(feature.id),
+                        message,
+                    }
+                })
+                .collect(),
+        }
     }
 
     /// Proven unit-density moments of the active field's own definition, on request only.
@@ -351,6 +399,12 @@ impl Document {
     /// A feature's state after the last rebuild.
     pub fn status(&self, id: FeatureId) -> Option<&FeatureStatus> {
         self.built_index(id).map(|i| &self.built[i].status)
+    }
+
+    /// Work used to build the current feature result, excluding display and export.
+    /// A reused build keeps its original work count. Unsupported backends return `None`.
+    pub fn feature_work(&self, id: FeatureId) -> Option<u64> {
+        self.built_index(id).and_then(|i| self.built[i].work_used)
     }
 
     /// Every feature's id and state, in tree order.

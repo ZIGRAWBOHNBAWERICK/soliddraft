@@ -1,6 +1,6 @@
 //! Opt-in observations of the kernel calls the application actually executes.
 
-use std::{cell::RefCell, sync::Mutex, time::Instant};
+use std::{cell::RefCell, collections::HashMap, sync::Mutex, thread::ThreadId, time::Instant};
 
 use catallax_numbers::{
     BoundKind, MarkLog, OperationEntry, OperationWork, current_operation_work, operation_budget_active,
@@ -24,12 +24,24 @@ impl Drop for Scope {
 pub(crate) struct Diagnostics {
     max_work: Option<u64>,
     calls: Mutex<Vec<Value>>,
+    work: Mutex<HashMap<ThreadId, u64>>,
     capture_thread: std::thread::ThreadId,
 }
 
 impl Diagnostics {
     pub(crate) fn new(max_work: Option<u64>) -> Self {
-        Self { max_work, calls: Mutex::new(Vec::new()), capture_thread: std::thread::current().id() }
+        Self {
+            max_work,
+            calls: Mutex::new(Vec::new()),
+            work: Mutex::new(HashMap::new()),
+            capture_thread: std::thread::current().id(),
+        }
+    }
+
+    /// Completed outer calls on this thread, independent of draining the evidence log.
+    pub(crate) fn work_used(&self) -> Option<u64> {
+        self.max_work
+            .map(|_| *self.work.lock().expect("diagnostic work lock").get(&std::thread::current().id()).unwrap_or(&0))
     }
 
     pub(crate) fn take(&self) -> Vec<Value> {
@@ -86,6 +98,11 @@ impl Diagnostics {
         if work.is_some_and(|w| w.exhausted) && !matches!(result, Err(KernelError::DisplayLimit { .. })) {
             result =
                 Err(KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into()));
+        }
+        if let Some(work) = work {
+            let mut totals = self.work.lock().expect("diagnostic work lock");
+            let total = totals.entry(std::thread::current().id()).or_default();
+            *total = total.saturating_add(work.used);
         }
         self.calls.lock().expect("diagnostics lock").push(json!({
             "operation":operation, "log_scope":operation,"nested":false, "status":if result.is_ok() {"answered"} else {"refused"},
@@ -237,5 +254,42 @@ mod tests {
         let calls = diagnostics.take();
         assert_eq!(calls[0]["work"]["used"], 4);
         assert_eq!(calls[1]["work"]["exhausted"], true);
+    }
+}
+
+#[cfg(test)]
+mod feature_work_tests {
+    use crate::CatallaxKernel;
+    use catallax_numbers::OperationAllowance;
+    use soliddraft_kernel_api::Kernel;
+
+    #[test]
+    fn feature_work_uses_diagnostic_allowances_without_nesting_them() {
+        let kernel = CatallaxKernel::with_diagnostics(100);
+        let work = kernel
+            .measure_work(&mut || {
+                for cost in [3, 4] {
+                    kernel
+                        .observe("feature-work", || {
+                            OperationAllowance::reserve(cost).unwrap();
+                            Ok(())
+                        })
+                        .unwrap();
+                }
+            })
+            .unwrap();
+        assert_eq!(work, Some(7));
+        assert_eq!(kernel.diagnostics.as_ref().unwrap().take().len(), 2);
+        let work = kernel
+            .measure_work(&mut || {
+                kernel
+                    .observe("next-feature", || {
+                        OperationAllowance::reserve(5).unwrap();
+                        Ok(())
+                    })
+                    .unwrap();
+            })
+            .unwrap();
+        assert_eq!(work, Some(5));
     }
 }

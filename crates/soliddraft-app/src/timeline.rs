@@ -71,6 +71,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 theme::font(11.0),
                 ink,
             );
+            focus_ring(ui, rect, response.has_focus());
             if response.on_hover_text("Show or hide the Tree and Values pane").clicked() {
                 actions.push(AppAction::TogglePanel(Side::Tree));
             }
@@ -120,12 +121,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         rect,
                         6,
                         fill,
-                        Stroke::new(
-                            1.0,
-                            if active || response.has_focus() { theme::accent() } else { theme::line_strong() },
-                        ),
+                        Stroke::new(1.0, if active { theme::accent() } else { theme::line_strong() }),
                         StrokeKind::Inside,
                     );
+                    focus_ring(ui, rect, response.has_focus());
                     let ink = if dim { theme::muted() } else { theme::ink() };
                     icons::paint(
                         ui.painter(),
@@ -248,9 +247,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
+fn focus_ring(ui: &egui::Ui, rect: Rect, focused: bool) {
+    if focused {
+        ui.painter().rect_stroke(rect.shrink(2.0), 4, Stroke::new(2.0, theme::ink()), StrokeKind::Inside);
+    }
+}
+
 fn playhead(ui: &mut egui::Ui, state: &mut AppState, enabled: bool, actions: &mut Vec<AppAction>) {
     let (rect, response) = ui.allocate_exact_size(vec2(18.0, 46.0), Sense::click_and_drag());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, enabled, "History rollback bar"));
+    focus_ring(ui, rect, response.has_focus());
     let x = rect.center().x;
     let color = if enabled { theme::accent() } else { theme::muted() };
     ui.painter().vline(x, rect.y_range().shrink(4.0), Stroke::new(3.0, color));

@@ -44,6 +44,7 @@ pub mod properties;
 pub mod recent;
 pub mod recovery;
 pub mod ribbon;
+mod ring_menu;
 pub mod scene_import;
 pub mod settings;
 pub mod sketch_diagnostics;

@@ -25,10 +25,11 @@ fn edge_at(state: &AppState, wanted: soliddraft_kernel_api::Vec3) -> String {
 }
 
 #[test]
-fn native_scaled_fillet_display_answers_within_the_stated_bound() {
+fn native_scaled_fillet_display_refuses_with_measured_work_and_preserves_the_part() {
     check_fillet_display(
         include_str!("../../../ci/scenarios/loft-edge-fillet.json"),
         soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1),
+        false,
     );
 }
 
@@ -37,10 +38,11 @@ fn native_small_warp_fillet_display_answers_within_the_stated_bound() {
     check_fillet_display(
         include_str!("../../../ci/scenarios/loft-edge-fillet-small-warp.json"),
         soliddraft_kernel_api::Vec3::new(1.0, -0.9995, 1.0),
+        true,
     );
 }
 
-fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3) {
+fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded: bool) {
     static CONFIG: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir =
@@ -70,57 +72,76 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3) {
         call_checked(&mut AppTools { state: &mut state }, "fillet", arguments, &caller)
     });
     eprintln!("F04 display: {work:?}; {}", out.content);
-    assert!(!out.is_error && !work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
-    assert_ne!(state.doc.model().to_bytes().unwrap(), before);
-    assert_eq!(state.doc.undo_depth(), undo + 1);
-    let feature = state.doc.features.last().unwrap().id;
-    assert_eq!(state.doc.features.last().unwrap().name, "Fillet1");
-    let body = state.doc.display_body().unwrap();
-    let mesh = state.doc.kernel().rendering(body, &soliddraft_kernel_api::TessellationParams::default()).unwrap();
-    let bound = mesh.bounded.as_ref().expect("native F04 is a bounded display answer");
-    bound.validate().unwrap();
-    assert!(mesh.unproved && !mesh.indices.is_empty());
-    assert_eq!(bound.kind, "spline display mesh");
-    assert_eq!(bound.rule, "spline-display-evaluator-v1");
-    assert_eq!(bound.level_mm, 0.01);
-    assert!(bound.measured_mm > 0.0 && bound.measured_mm <= 0.01);
-    assert!(!bound.method.is_empty() && !bound.definition.is_empty());
-    let native = serde_json::to_value(bound).unwrap();
-    let check = |state: &AppState| {
-        let proof = state.doc.proof_state();
-        assert!(proof.answered_within_bound && proof.display_only_bound);
-        assert!(proof.current_proved_model());
-        assert!(!proof.current_proved_display());
-        let answer = serde_json::to_value(state.doc.display_answer(feature).unwrap()).unwrap();
-        assert_eq!(answer["display"], native);
-        assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
-    };
-    check(&state);
-    for chord_height in [0.01, 0.005] {
-        let (certified, work) = with_request_allowance(0, || {
-            state
-                .doc
-                .kernel()
-                .tessellate(body, &soliddraft_kernel_api::TessellationParams { chord_height, ..Default::default() })
-        });
-        assert!(certified.is_err() && work.exhausted, "display evidence cannot answer an independent export request");
-    }
-    for (tool, arguments) in [
-        ("undo", json!({})),
-        ("redo", json!({})),
-        ("save", json!({"path": dir.join("fillet.dwprt")})),
-        ("open", json!({"path": dir.join("fillet.dwprt")})),
-    ] {
-        let out = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
-        assert!(!out.is_error, "{tool}: {}", out.content);
-        if tool == "undo" {
-            assert_eq!(state.doc.model().geometry_hash(), geometry);
-            assert!(!state.doc.proof_state().answered_within_bound);
-        } else {
-            check(&state);
+    if !bounded {
+        assert!(out.is_error && work.exhausted, "{}; {work:?}", out.content);
+        assert_eq!(work.used, 19_999_956);
+        for expected in ["SD-DISPLAY-01", "0.01 mm", "19999956 work units", "20000000"] {
+            assert!(out.content.contains(expected), "missing {expected}: {}", out.content);
+        }
+        for forbidden in ["kernel", "step op_", "mesh.spline", "numbers.operation"] {
+            assert!(!out.content.contains(forbidden), "internal detail {forbidden}: {}", out.content);
+        }
+        assert_eq!(state.doc.model().to_bytes().unwrap(), before);
+        assert_eq!(state.doc.undo_depth(), undo);
+        assert!(!state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
+        assert!(!state.doc.proof_state().answered_within_bound);
+    } else {
+        assert!(!out.is_error && !work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
+        assert_ne!(state.doc.model().to_bytes().unwrap(), before);
+        assert_eq!(state.doc.undo_depth(), undo + 1);
+        let feature = state.doc.features.last().unwrap().id;
+        assert_eq!(state.doc.features.last().unwrap().name, "Fillet1");
+        let body = state.doc.display_body().unwrap();
+        let mesh = state.doc.kernel().rendering(body, &soliddraft_kernel_api::TessellationParams::default()).unwrap();
+        let bound = mesh.bounded.as_ref().expect("native F04 is a bounded display answer");
+        bound.validate().unwrap();
+        assert!(mesh.unproved && !mesh.indices.is_empty());
+        assert_eq!(bound.kind, "spline display mesh");
+        assert_eq!(bound.rule, "spline-display-evaluator-v1");
+        assert_eq!(bound.level_mm, 0.01);
+        assert!(bound.measured_mm > 0.0 && bound.measured_mm <= 0.01);
+        assert!(bound.method.contains("Bernstein") && !bound.definition.is_empty());
+        eprintln!("native F04 display bound: {bound:?}");
+        let native = serde_json::to_value(bound).unwrap();
+        let check = |state: &AppState| {
+            let proof = state.doc.proof_state();
+            assert!(proof.answered_within_bound && proof.display_only_bound);
+            assert!(proof.current_proved_model());
+            assert!(!proof.current_proved_display());
+            let answer = serde_json::to_value(state.doc.display_answer(feature).unwrap()).unwrap();
+            assert_eq!(answer["display"], native);
+            assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
+        };
+        check(&state);
+        for chord_height in [0.01, 0.005] {
+            let (certified, work) = with_request_allowance(0, || {
+                state
+                    .doc
+                    .kernel()
+                    .tessellate(body, &soliddraft_kernel_api::TessellationParams { chord_height, ..Default::default() })
+            });
+            assert!(
+                certified.is_err() && work.exhausted,
+                "display evidence cannot answer an independent export request"
+            );
+        }
+        for (tool, arguments) in [
+            ("undo", json!({})),
+            ("redo", json!({})),
+            ("save", json!({"path": dir.join("fillet.dwprt")})),
+            ("open", json!({"path": dir.join("fillet.dwprt")})),
+        ] {
+            let out = call_checked(&mut AppTools { state: &mut state }, tool, arguments, &caller);
+            assert!(!out.is_error, "{tool}: {}", out.content);
+            if tool == "undo" {
+                assert_eq!(state.doc.model().geometry_hash(), geometry);
+                assert!(!state.doc.proof_state().answered_within_bound);
+            } else {
+                check(&state);
+            }
         }
     }
-    let path = dir.join("exact-fillet.step");
+    let path = dir.join("independent-exact.step");
     let out = call_checked(&mut AppTools { state: &mut state }, "export_step", json!({"path":path}), &caller);
     assert!(!out.is_error, "independent exact STEP: {}", out.content);
     assert!(std::fs::metadata(path).unwrap().len() > 0);

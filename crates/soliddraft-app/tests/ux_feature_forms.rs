@@ -206,6 +206,9 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         assert!(!app.state().state.in_sketch());
         assert!(app.state().state.editor.is_none());
         assert_eq!(app.state().state.doc.features.len(), 1, "closing saves the sketch without adding a feature");
+        let chip = app.get_by_label("Sketch1 in history").rect();
+        assert!(ribbon::painted_in(app, chip).iter().any(|p| p.text == "(-) Sketch1"));
+        assert_eq!(app.state().state.doc.features[0].name, "Sketch1", "the prefix is display only");
         app.state_mut().state.frame_layout = FrameLayout::Classic;
         settle(app);
         assert!(ribbon::painted(app).iter().any(|p| p.text == "Properties"), "classic keeps its dock");

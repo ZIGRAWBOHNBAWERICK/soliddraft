@@ -84,7 +84,14 @@ pub fn save_layout(layout: &Layout) -> Result<(), NotKept> {
 }
 
 fn layout_from(all: &Value) -> Layout {
-    serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped()
+    let mut layout = serde_json::from_value::<Layout>(all["layout"].clone()).unwrap_or_default().clamped();
+    if frame_layout_from(all) == FrameLayout::EditSuite
+        && all["layout"]["suite"].is_null()
+        && let Some(shown) = all["layout"]["tree"]["shown"].as_bool()
+    {
+        layout.suite.part = shown;
+    }
+    layout
 }
 
 /// The panel layout in the settings file at `file`.

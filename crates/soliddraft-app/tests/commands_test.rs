@@ -87,6 +87,8 @@ fn every_palette_button_is_a_registry_command() {
     let mut harness = harness();
     harness.set_size(vec2(1920.0, 900.0));
     harness.run_steps(4);
+    // Render each workspace after its scroll animations finish.
+    harness.set_render_every_step(false);
     for tab in RibbonTab::ALL {
         harness.state_mut().state.ribbon_tab = tab;
         harness.run_steps(2);
@@ -106,8 +108,10 @@ fn every_palette_button_is_a_registry_command() {
                 );
             }
         }
+        harness.render().expect("the palette workspace renders");
     }
     // A click runs the command and remembers it as recent.
+    harness.set_render_every_step(true);
     harness.state_mut().state.ribbon_tab = RibbonTab::Solid;
     harness.run_steps(2);
     harness.get_by_label("Extrude").click();

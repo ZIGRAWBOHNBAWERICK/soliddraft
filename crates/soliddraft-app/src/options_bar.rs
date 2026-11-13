@@ -112,6 +112,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             },
         );
         details_sheet(ui, state, sheet_anchor);
+        crate::sketch_values::popup(ui, state);
         return;
     }
     if state.assembly.is_active() || state.drawing.is_active() || state.drawing.new.is_some() {

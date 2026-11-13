@@ -149,7 +149,7 @@ pub fn show<K: Copy + Eq + Hash>(
         state.key = Some(form.key);
     }
     let available = ui.available_rect_before_wrap();
-    let title_width = (available.width() * 0.2).clamp(110.0, 226.0);
+    let title_width = (available.width() * 0.12).clamp(110.0, 190.0);
     let actions_width = if form.can_confirm { 154.0 } else { 76.0 };
     let plan = plan(form.fields, available.width() - title_width - actions_width - 2.0 * GAP);
     let mut anchor = Rect::NOTHING;

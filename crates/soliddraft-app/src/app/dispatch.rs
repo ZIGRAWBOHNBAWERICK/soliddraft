@@ -950,6 +950,9 @@ impl SolidDraftApp {
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);
                 self.state.layout.tree.shown = true;
+                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                    self.state.options_details = true;
+                }
             }
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));

@@ -251,3 +251,42 @@ fn source_cleanup_outside_the_certified_limit_is_refused_before_editing() {
     assert!(doc.features.is_empty());
     assert_eq!(doc.revision(), 0);
 }
+
+#[test]
+fn closed_mesh_downstream_boss_edits_reopens_and_exports_as_a_solid() {
+    use soliddraft_kernel_api::Kernel;
+    use std::sync::Arc;
+
+    let kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+    let mut doc = Document::new("Mesh with boss", kernel.clone());
+    let preview = Preview::from_source(&doc, "tetrahedron.obj", MESH.to_vec(), ImportFormat::Mesh).unwrap();
+    commit(&mut doc, &preview, &Review::default()).unwrap();
+    call(
+        &mut doc,
+        "sketch",
+        json!({"plane":"top","shapes":[{"shape":"rectangle","center":[0,0,0],"width":2,"height":2}]}),
+    )
+    .unwrap();
+    call(&mut doc, "extrude", json!({"sketch":"Sketch1","depth":2,"flip":false})).unwrap();
+    assert!(doc.features.iter().all(|f| f.status == FeatureStatus::Ok));
+    let volume = |doc: &Document| doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap().volume;
+    assert!((volume(&doc) - 518.0 / 3.0).abs() < 1e-6);
+    let recipe = kernel.body_recipe(doc.display_body().unwrap()).unwrap();
+    assert_ne!(recipe["format"], json!("soliddraft-recipe/1"));
+    let imported = recipe["steps"].as_array().unwrap().iter().find(|s| s["op"] == "import_mesh").unwrap();
+    assert_eq!(imported["file"]["sha256"], soliddraft_model::sha256_hex(MESH));
+    let saved = doc.model().to_bytes().unwrap();
+    let mut reopened =
+        soliddraft_app::file::open_bytes("mesh-boss.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    assert!(reopened.features.iter().all(|f| f.status == FeatureStatus::Ok));
+    assert!((volume(&reopened) - 518.0 / 3.0).abs() < 1e-6);
+    call(&mut reopened, "edit_extrude", json!({"feature":"Boss-Extrude1","depth":3,"flip":false})).unwrap();
+    assert!((volume(&reopened) - 527.0 / 3.0).abs() < 1e-6);
+    reopened.undo().unwrap();
+    assert!((volume(&reopened) - 518.0 / 3.0).abs() < 1e-6);
+    reopened.redo().unwrap();
+    assert!((volume(&reopened) - 527.0 / 3.0).abs() < 1e-6);
+    let exported = reopened.kernel().export_step(reopened.display_body().unwrap(), &Default::default()).unwrap();
+    assert!(exported.report.within_tolerance);
+    assert_eq!(exported.report.solids, 1);
+}

@@ -59,7 +59,10 @@ fn check_display(name: &str, source: &str) {
             let proof = doc.proof_state();
             assert!(proof.answered_within_bound && proof.display_only_bound);
             assert!(!proof.current_proved_display());
-            let mesh = &doc.meshes[&doc.display_body().unwrap()];
+            let mesh = doc
+                .kernel()
+                .rendering(doc.display_body().unwrap(), &soliddraft_kernel_api::TessellationParams::default())
+                .unwrap();
             let bound = mesh.bounded.as_ref().unwrap();
             assert!(mesh.unproved && bound.measured_mm <= 0.01);
             assert!(!bound.method.is_empty() && !bound.definition.is_empty());

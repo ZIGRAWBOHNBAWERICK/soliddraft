@@ -75,7 +75,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3) {
     let feature = state.doc.features.last().unwrap().id;
     assert_eq!(state.doc.features.last().unwrap().name, "Fillet1");
     let body = state.doc.display_body().unwrap();
-    let mesh = &state.doc.meshes[&body];
+    let mesh = state.doc.kernel().rendering(body, &soliddraft_kernel_api::TessellationParams::default()).unwrap();
     let bound = mesh.bounded.as_ref().expect("native F04 is a bounded display answer");
     bound.validate().unwrap();
     assert!(mesh.unproved && !mesh.indices.is_empty());

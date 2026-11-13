@@ -1588,5 +1588,16 @@
       "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
       "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
     }
+  ],
+  "native_ui_scenarios": [
+    {
+      "id": "edit-suite-document-workspaces",
+      "file": "crates/soliddraft-app/tests/frame_layout.rs",
+      "owners": [
+        "soliddraft-app"
+      ],
+      "route": "egui_kittest pointer and command line -> document workspace switch -> registry palette -> assembly and drawing actions -> software Vulkan renderer",
+      "evidence": "target/ribbon-acceptance/assembly-workspaces and drawing-workspaces; per-document workspaces, assembly camera and scenes, Mate bar, drawing sheet edits and AI session routing"
+    }
   ]
 }

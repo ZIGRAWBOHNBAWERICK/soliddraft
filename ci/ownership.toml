@@ -316,6 +316,13 @@ paths = ["crates/soliddraft-app/src/timeline.rs"]
 module = ["timeline"]
 
 [[areas]]
+name = "app.form_bar"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/form_bar.rs"]
+module = ["form_bar"]
+
+[[areas]]
 name = "app.tool_palette"
 owner = "core"
 crate = "soliddraft-app"

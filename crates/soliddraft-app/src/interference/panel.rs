@@ -69,6 +69,9 @@ pub fn apply(state: &mut AppState, action: InterferenceAction) {
             if d.open {
                 state.assembly.mate.open = false;
             }
+            if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+                state.options_details = d.open;
+            }
         }
         InterferenceAction::Check => check(state),
         InterferenceAction::Show(a, b) => {

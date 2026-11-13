@@ -19,7 +19,9 @@ sits above a 30 px command line at the bottom, both to the right of the palette.
 These measurements exclude the prototype's guide strip, which is review furniture.
 
 The title bar holds menus at the left, workspaces in the centre and open document
-tabs at the right. It has no search field. There is no Surface workspace.
+tabs at the right. The part switch keeps the stable Solid, Sketch, Assembly, Inspect
+and View ids and drives the palette without a second tab row. Below 1280 points
+wide, Menu groups the menus to leave room for all five workspaces. It has no search field. There is no Surface workspace.
 
 | Document | Workspaces | Bottom strip | Tree and Values pane |
 |---|---|---|---|

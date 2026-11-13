@@ -71,9 +71,25 @@ pub enum AssemblyAction {
     Interference(crate::interference::InterferenceAction),
 }
 
+/// The workspaces of an assembly document in Edit Suite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Workspace {
+    #[default]
+    Assembly,
+    Inspect,
+    View,
+}
+
+impl Workspace {
+    pub const ALL: [Self; 3] = [Self::Assembly, Self::Inspect, Self::View];
+}
+
 /// The open assembly, one being opened, and whether the assembly is the active document.
 #[derive(Default)]
 pub struct AssemblyState {
+    /// A per-document choice; the Edit Suite tree starts open.
+    pub tree_hidden: bool,
+    pub workspace: Workspace,
     pub session: Option<AssemblySession>,
     /// An assembly file whose structure is being read on another thread.
     pub opening: Option<(PathBuf, Opening)>,
@@ -458,7 +474,12 @@ pub fn replace(state: &mut AppState, doc: AssemblyDocument, scene: Scene) {
 
 /// Puts a session in place of the open assembly. A Form subassembly panel belongs to the
 /// assembly it was opened on, so it closes.
-fn install(state: &mut AppState, session: AssemblySession) {
+fn install(state: &mut AppState, mut session: AssemblySession) {
+    state.assembly.workspace = Workspace::Assembly;
+    state.assembly.tree_hidden = false;
+    if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+        session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
+    }
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
@@ -793,11 +814,18 @@ pub fn viewport(ui: &mut egui::Ui, state: &mut AppState) {
             "Insert component, or drop part files here, to place parts"
         };
         let painter = ui.painter().with_clip_rect(rect);
-        let galley = painter.layout_no_wrap(text.to_owned(), theme::font_medium(13.0), theme::muted());
+        let mut job = egui::text::LayoutJob::simple(
+            text.to_owned(),
+            theme::font_medium(13.0),
+            theme::muted(),
+            (rect.width() - 40.0).max(1.0),
+        );
+        job.halign = egui::Align::Center;
+        let galley = painter.layout_job(job);
         let r = Rect::from_center_size(rect.center(), galley.size() + vec2(28.0, 14.0));
         painter.rect_filled(r, egui::CornerRadius::same(99), theme::hud_bg());
         painter.rect_stroke(r, egui::CornerRadius::same(99), Stroke::new(1.0, theme::line()), egui::StrokeKind::Inside);
-        painter.galley(r.center() - galley.size() / 2.0, galley, theme::muted());
+        painter.galley(r.center() - galley.rect.center().to_vec2(), galley, theme::muted());
     }
 }
 

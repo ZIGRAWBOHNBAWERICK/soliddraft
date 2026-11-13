@@ -214,6 +214,9 @@ fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
     ribbon::document_tab(&mut app, "Tree");
     app.state_mut().state.push(AppAction::EditSketch(feature));
     app.run_steps(60);
+    let st = &mut app.state_mut().state;
+    st.viewport.camera.zoom(0.65, None, st.viewport.rect.aspect_ratio());
+    app.run_steps(8);
     assert_eq!(session(&app).sketch, saved);
     let at = label(&app, ids[0]);
     ribbon::double_click_at(&mut app, at);

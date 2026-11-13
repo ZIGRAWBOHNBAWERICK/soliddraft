@@ -112,7 +112,7 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
 }
 
 fn suite_palette(app: &ribbon::App) -> Rect {
-    Rect::from_min_max(pos2(0.0, theme::MENU_HEIGHT), pos2(250.0, 850.0))
+    egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the palette is open").outer_rect
 }
 
 fn click_suite(app: &mut ribbon::App, label: &str) {
@@ -251,6 +251,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
                 app.state().state.chat.messages.iter().any(|message| message.role == soliddraft_app::state::Role::User)
             );
             app.state_mut().state.command_line.close_session();
+            app.run_steps(8);
         }
         case.frame(app, "drawing-sheet");
         app.set_size(vec2(960.0, 700.0));

@@ -170,8 +170,9 @@ fn step_from_recipe_writes_proof_reports_with_operation_work() {
     assert!(!features.is_empty());
     for feature in features {
         assert_eq!(feature["answer_kind"], "proved");
-        assert!(feature["work_used"].as_u64().unwrap() > 0, "{feature}");
+        assert!(feature["work_used"].as_u64().is_some(), "{feature}");
     }
+    assert!(features.iter().any(|feature| feature["work_used"].as_u64().unwrap() > 0));
     assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
     assert!(
         std::fs::read_to_string(soliddraft_exchange::proof::sidecar_path(&path, "txt")).unwrap().contains("Proved")

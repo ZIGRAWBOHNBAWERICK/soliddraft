@@ -52,8 +52,7 @@ const NEEDS_A_BODY: [(&str, &str); 9] = [
 ];
 
 /// What has no action yet, whatever the part holds, and what it says.
-const NOT_YET: [(&str, &str); 4] =
-    [("Loft", "Coming soon"), ("Slot", "Coming soon"), ("Axis", "Coming soon"), ("Point", "Coming soon")];
+const NOT_YET: [(&str, &str); 3] = [("Slot", "Coming soon"), ("Axis", "Coming soon"), ("Point", "Coming soon")];
 
 fn settle(app: &mut App) {
     app.run_steps(30);
@@ -232,7 +231,7 @@ fn solid_groups_and_tabs_are_visible_and_honest() {
 fn pinned_feature_chips_hide_during_sketch_and_return_after_close() {
     let case = ribbon::case("sketch-command-bar");
     let pins = soliddraft_app::command_line::BarSettings {
-        tools: ["sketch_select", "extrude", "zoom_fit", "revolve", "normal_to", "sweep", "cut"]
+        tools: ["sketch_select", "extrude", "zoom_fit", "revolve", "normal_to", "sweep", "loft", "cut"]
             .map(str::to_owned)
             .to_vec(),
         ..Default::default()
@@ -240,7 +239,7 @@ fn pinned_feature_chips_hide_during_sketch_and_return_after_close() {
     soliddraft_app::settings::save_command_line(&pins).unwrap();
     let mut app = ribbon::app_at(ribbon::sketch(), ribbon::EXPANDED_WINDOW, 1.0);
     case.run(&mut app, |app| {
-        let features = ["Extrude", "Revolve", "Sweep", "Cut"];
+        let features = ["Extrude", "Revolve", "Sweep", "Loft", "Cut"];
         for label in features {
             app.get_by_label(&format!("{label} on the command bar"));
         }
@@ -302,7 +301,7 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
 
         for (id, tab) in [("solid", "Solid"), ("sketch", "Sketch")] {
             ribbon::switch_workspace(app, id);
-            for label in ["Extrude", "Revolve", "Sweep", "Cut"] {
+            for label in ["Extrude", "Revolve", "Sweep", "Loft", "Cut"] {
                 assert!(app.query_all_by_label(label).next().is_none(), "{label} is hidden on {tab}");
             }
             assert!(!ribbon::painted(app).iter().any(|p| matches!(p.text.as_str(), "Use sketch" | "Use the sketch")));
@@ -318,7 +317,7 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
             !ribbon::painted(app).iter().any(|p| p.text == "Search commands and features"),
             "the removed title search stays absent while sketching"
         );
-        for id in ["extrude", "revolve", "sweep", "cut"] {
+        for id in ["extrude", "revolve", "sweep", "loft", "cut"] {
             let command = soliddraft_app::commands::get(id).unwrap();
             assert!(!command.is_enabled(&app.state().state));
             assert!(command.action_now(&app.state().state).is_none());
@@ -335,7 +334,13 @@ fn a_sketch_extrudes_through_the_new_categories_and_undoes() {
             app.run_steps(3);
         }
         let revision = app.state().state.doc.revision();
-        for action in [AppAction::StartExtrude, AppAction::StartRevolve, AppAction::StartSweep, AppAction::StartCut] {
+        for action in [
+            AppAction::StartExtrude,
+            AppAction::StartRevolve,
+            AppAction::StartSweep,
+            AppAction::StartLoft,
+            AppAction::StartCut,
+        ] {
             app.state_mut().state.push(action);
             app.run_steps(3);
             let state = &app.state().state;

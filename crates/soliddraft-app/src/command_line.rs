@@ -171,6 +171,8 @@ pub struct ToolDrag {
 struct Completion {
     names: Vec<&'static str>,
     shown: Option<usize>,
+    context: Context,
+    session: bool,
     /// A `/` typed before the name, kept in front of it.
     slash: bool,
 }
@@ -262,6 +264,7 @@ impl CommandLine {
     /// Tab at the prompt. One name that fits completes it; several complete as far as
     /// they agree, and the next Tab steps through them. Only the first word completes.
     pub fn complete(&mut self, context: Context) {
+        self.refresh_completion(context);
         if let Some(c) = self.completion.as_mut().filter(|c| c.names.len() > 1) {
             let next = c.shown.map_or(0, |i| (i + 1) % c.names.len());
             c.shown = Some(next);
@@ -289,10 +292,16 @@ impl CommandLine {
                 if common > typed {
                     self.input = format!("{prefix}{}", &first[..common]);
                 }
-                self.completion = Some(Completion { names, shown: None, slash });
+                self.completion = Some(Completion { names, shown: None, context, session: self.session_open, slash });
             }
         }
         self.cursor_to_end = true;
+    }
+
+    fn refresh_completion(&mut self, context: Context) {
+        if self.completion.as_ref().is_some_and(|c| c.context != context || c.session != self.session_open) {
+            self.completion = None;
+        }
     }
 }
 
@@ -731,6 +740,7 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
         Default::default()
     };
     let context = Context::of(state);
+    state.command_line.refresh_completion(context);
     if up || down {
         state.command_line.browse(up);
     }
@@ -1290,6 +1300,31 @@ mod tests {
         assert!(cl.input.starts_with("/ex"), "the slash stays: {}", cl.input);
         assert!(completions("ex", part(), true).contains(&"exit"));
         assert!(!completions("ex", part(), false).contains(&"exit"));
+    }
+
+    #[test]
+    fn tab_rebuilds_cached_names_after_the_command_context_changes() {
+        for session_open in [false, true] {
+            let mut cl = CommandLine {
+                input: "lo".into(),
+                history: vec!["zoom_fit".into()],
+                session_open,
+                ..Default::default()
+            };
+            cl.complete(part());
+            assert!(cl.completion.as_ref().unwrap().names.contains(&"loft"));
+            let sketch = Context { sketch: true, ..part() };
+            cl.complete(sketch);
+            assert_eq!(cl.input, "look_");
+            let names = cl.completion.as_ref().unwrap().names.clone();
+            assert!(!names.contains(&"loft"));
+            assert!(!names.is_empty());
+            for _ in 0..names.len() * 2 {
+                cl.complete(sketch);
+                assert!(names.contains(&cl.input.as_str()));
+            }
+            assert_eq!(cl.history, ["zoom_fit"]);
+        }
     }
 
     #[test]

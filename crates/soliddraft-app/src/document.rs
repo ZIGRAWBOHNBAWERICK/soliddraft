@@ -462,6 +462,7 @@ pub enum FeatureKind {
     Extrude(ExtrudeParams),
     Revolve(model::RevolveFeature),
     Sweep(model::SweepFeature),
+    Loft(model::LoftFeature),
     Cut(CutParams),
     Fillet(FilletParams),
     Chamfer(ChamferParams),
@@ -483,6 +484,7 @@ impl FeatureKind {
             FeatureKind::Extrude(_) => "Boss-Extrude",
             FeatureKind::Revolve(_) => "Revolve",
             FeatureKind::Sweep(_) => "Sweep",
+            FeatureKind::Loft(_) => "Loft",
             FeatureKind::Cut(_) => "Cut-Extrude",
             FeatureKind::Fillet(_) => "Fillet",
             FeatureKind::Chamfer(_) => "Chamfer",
@@ -508,6 +510,7 @@ impl FeatureKind {
             FeatureKind::Extrude(_) => "extrude",
             FeatureKind::Revolve(_) => "revolve",
             FeatureKind::Sweep(_) => "sweep",
+            FeatureKind::Loft(_) => "loft",
             FeatureKind::Cut(_) => "cut",
             FeatureKind::Fillet(_) => "fillet",
             FeatureKind::Chamfer(_) => "chamfer",
@@ -564,6 +567,7 @@ impl FeatureKind {
             FeatureKind::Chamfer(p) => model::FeatureKind::Chamfer(p.blend()),
             FeatureKind::Revolve(r) => model::FeatureKind::Revolve(r.clone()),
             FeatureKind::Sweep(s) => model::FeatureKind::Sweep(s.clone()),
+            FeatureKind::Loft(l) => model::FeatureKind::Loft(l.clone()),
             FeatureKind::Hole(h) => model::FeatureKind::Hole(h.clone()),
             FeatureKind::Pattern(p) => model::FeatureKind::Pattern(p.clone()),
             FeatureKind::Mirror(m) => model::FeatureKind::Mirror(m.clone()),
@@ -601,6 +605,7 @@ impl FeatureKind {
             }
             model::FeatureKind::Revolve(r) => FeatureKind::Revolve(r.clone()),
             model::FeatureKind::Sweep(s) => FeatureKind::Sweep(s.clone()),
+            model::FeatureKind::Loft(l) => FeatureKind::Loft(l.clone()),
             model::FeatureKind::Extrude(e) => {
                 let (end, depth) = EndKind::from_model(&e.end);
                 let depth = depth.unwrap_or(10.0);
@@ -838,6 +843,14 @@ impl Feature {
             },
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
             FeatureKind::Sweep(s) => format!("{} mm", fmt_mm(s.path.length())),
+            FeatureKind::Loft(l) => format!(
+                "{} profiles, {}",
+                l.profiles.len(),
+                match l.shape {
+                    soliddraft_kernel_api::LoftShape::Ruled => "ruled",
+                    soliddraft_kernel_api::LoftShape::Smooth => "smooth",
+                }
+            ),
             FeatureKind::Fillet(f) => format!("R{}", fmt_mm(f.radius)),
             FeatureKind::Chamfer(c) => format!("{} mm", fmt_mm(c.distance)),
             FeatureKind::Hole(h) => {
@@ -2095,7 +2108,9 @@ impl Document {
 
     /// The feature that consumes a sketch, if any.
     pub fn consumer_of(&self, sketch: FeatureId) -> Option<FeatureId> {
-        self.features.iter().find(|f| f.kind.sketch() == Some(sketch)).map(|f| f.id)
+        self.features.iter().find(|f| f.kind.sketch() == Some(sketch) || matches!(&f.kind,
+            FeatureKind::Loft(l) if l.profiles.iter().any(|p| matches!(p, model::LoftProfile::Sketch { feature } if app_id(*feature) == sketch))
+        )).map(|f| f.id)
     }
 
     pub fn sketch_of(&self, id: FeatureId) -> Option<&SketchFeature> {
@@ -3078,6 +3093,39 @@ impl Document {
         Some((start, (reach * 1.5).ceil().max(5.0)))
     }
 
+    /// Previews a loft with the same rebuild and refusal handling as a committed feature.
+    pub fn preview_loft(&self, params: &model::LoftFeature, target: Option<FeatureId>) -> Result<Preview, String> {
+        let mut fork = self.model.fork();
+        let command = match target {
+            Some(id) => {
+                let index = fork.index_of(model_id(id)).ok_or("Select an existing loft to edit")?;
+                let after = fork.features().get(index + 1).map(|feature| feature.id);
+                // The editor rolls the real document back before this feature.
+                fork.execute_deferred(model::Command::RollTo { before: after }).map_err(|e| e.to_string())?;
+                model::Command::EditFeature { id: model_id(id), kind: model::FeatureKind::Loft(params.clone()) }
+            }
+            None => model::Command::AddFeature {
+                kind: model::FeatureKind::Loft(params.clone()),
+                name: None,
+                position: None,
+                via_assistant: false,
+            },
+        };
+        let executed = fork.execute(command).map_err(|e| e.to_string())?;
+        let id = target.map(model_id).or(executed.created).ok_or("Loft could not be previewed")?;
+        match fork.status(id) {
+            Some(model::FeatureStatus::Ok) => {}
+            Some(model::FeatureStatus::Failed(message)) => return Err(message.clone()),
+            _ => return Err("A loft profile is missing or needs repair. Select it again".into()),
+        }
+        let body = fork.body_after(id).ok_or("Loft did not produce a solid")?;
+        let mesh = self.mesh_of(body).map_err(|error| {
+            log::warn!("Loft preview: {error}");
+            "Loft could not be displayed. Try simpler profiles"
+        })?;
+        Ok(Preview { result: Some(mesh), tool: None, removes: false })
+    }
+
     /// Builds the sweep tool for the editor without changing the document.
     /// Temporary bodies are released on both success and refusal.
     pub fn preview_sweep(&self, params: &model::SweepFeature) -> Result<Preview, String> {
@@ -3442,6 +3490,9 @@ impl Document {
                         };
                         details.push(("Profile".to_owned(), profile));
                         details.push(("Depth".to_owned(), f.summary()));
+                    }
+                    FeatureKind::Loft(_) => {
+                        details.push(("Profiles".into(), f.summary()));
                     }
                     FeatureKind::Sweep(s) => {
                         details.push((

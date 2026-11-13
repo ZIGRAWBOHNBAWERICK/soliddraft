@@ -327,6 +327,23 @@ pub enum Line {
     EditRevolve { feature: String, angle_deg: f64 },
     /// Sweeps a closed polygon along a chain of lines and arcs.
     Sweep(SweepLine),
+    /// Joins ordered sketch or face profiles.
+    Loft {
+        /// Sketch names or face labels in traversal order.
+        profiles: Vec<String>,
+        /// Ruled sides by default.
+        #[serde(default)]
+        shape: soliddraft_kernel_api::LoftShape,
+    },
+    /// Changes a loft while retaining its feature identity.
+    EditLoft {
+        /// The loft's tree name.
+        feature: String,
+        /// Sketch names or face labels in traversal order.
+        profiles: Vec<String>,
+        /// Straight or smooth sides.
+        shape: soliddraft_kernel_api::LoftShape,
+    },
     /// Changes endpoints while retaining the path segment's identity.
     EditSweep(EditSweepLine),
     /// Removes material: cuts a sketch's profiles into the part.
@@ -754,6 +771,33 @@ pub fn edit_sweep_params() -> Vec<(&'static str, Value)> {
     let mut params = vec![feature_param()];
     params.extend(sweep_path_params());
     params
+}
+
+fn loft_profiles_param() -> (&'static str, Value) {
+    (
+        "profiles",
+        non_empty_array(
+            string("Closed sketch name or full face label, such as Boss-Extrude1 · End cap"),
+            "Two or more profiles in order",
+        ),
+    )
+}
+
+/// The `loft` verb's parameters.
+pub fn loft_params() -> Vec<(&'static str, Value)> {
+    vec![
+        loft_profiles_param(),
+        ("shape", optional(one_of(&["ruled", "smooth"], "How the sides pass between profiles; defaults to ruled"))),
+    ]
+}
+
+/// The `edit_loft` verb's parameters.
+pub fn edit_loft_params() -> Vec<(&'static str, Value)> {
+    vec![
+        feature_param(),
+        loft_profiles_param(),
+        ("shape", one_of(&["ruled", "smooth"], "How the sides pass between profiles")),
+    ]
 }
 
 /// The `cut` verb's parameters.
@@ -1481,6 +1525,34 @@ impl Line {
                 };
                 run.apply(doc, Command::AddExtrude { params, via_assistant: true })?;
             }
+            Line::Loft { profiles, shape } | Line::EditLoft { profiles, shape, .. } => {
+                if profiles.len() < 2 {
+                    return Err("Loft needs at least two profiles in order".into());
+                }
+                let profiles = profiles
+                    .iter()
+                    .map(|name| {
+                        if let Ok(id) = run.sketch(doc, name) {
+                            Ok(soliddraft_model::LoftProfile::Sketch {
+                                feature: soliddraft_model::FeatureId(id as u32),
+                            })
+                        } else {
+                            face_ref_by_name(doc, name).map(|face| soliddraft_model::LoftProfile::Face { face })
+                        }
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                let loft = soliddraft_model::LoftFeature { profiles, shape: *shape };
+                let command = if let Line::EditLoft { feature, .. } = self {
+                    let id = feature_by_name(doc, feature)?;
+                    if !matches!(doc.feature(id).map(|f| &f.kind), Some(FeatureKind::Loft(_))) {
+                        return Err(format!("{feature} is not a loft"));
+                    }
+                    Command::EditFeature { id, kind: FeatureKind::Loft(loft) }
+                } else {
+                    Command::AddFeature(FeatureKind::Loft(loft))
+                };
+                run.apply(doc, command)?;
+            }
             Line::Sweep(line) => {
                 let s = soliddraft_model::SweepFeature {
                     sketch: soliddraft_model::FeatureId(run.sketch(doc, &line.sketch)? as u32),
@@ -1822,6 +1894,7 @@ impl Line {
                 | Line::SketchGeometry { .. }
                 | Line::Extrude { .. }
                 | Line::Revolve { .. }
+                | Line::Loft { .. }
                 | Line::Sweep(_)
                 | Line::Cut { .. }
                 | Line::Fillet { .. }
@@ -1850,6 +1923,8 @@ impl Line {
             Line::SketchGeometry { .. } => "sketch_geometry",
             Line::Extrude { .. } => "extrude",
             Line::Revolve { .. } => "revolve",
+            Line::Loft { .. } => "loft",
+            Line::EditLoft { .. } => "edit_loft",
             Line::Sweep(_) => "sweep",
             Line::EditSweep(_) => "edit_sweep",
             Line::EditRevolve { .. } => "edit_revolve",
@@ -1937,6 +2012,10 @@ impl Line {
                     format!("Sketch geometry on {plane}, offset {} mm", fmt_mm(*offset))
                 };
                 (title, format!("{} tool operations", operations.len()))
+            }
+            Line::Loft { profiles, shape } => ("Loft".into(), format!("{}, {shape:?}", profiles.join(", "))),
+            Line::EditLoft { feature, profiles, shape } => {
+                (format!("Edit {feature}"), format!("{}, {shape:?}", profiles.join(", ")))
             }
             Line::Sweep(line) => ("Sweep".into(), format!("{}, {}", line.sketch, line.input().text())),
             Line::EditSweep(line) => (format!("Edit {}", line.feature), line.input().text()),
@@ -2634,6 +2713,10 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
             end_json(&mut v, &p.end());
             v
         }
+        FeatureKind::Loft(l) => json!({"type":"loft", "profiles": l.profiles.iter().map(|p| match p {
+            soliddraft_model::LoftProfile::Sketch { feature } => name(feature.0 as u64),
+            soliddraft_model::LoftProfile::Face { face } => face.label.clone(),
+        }).collect::<Vec<_>>(), "shape":l.shape}),
         FeatureKind::Sweep(s) => {
             json!({"type":"sweep","sketch":name(s.sketch.0 as u64),"path":s.path})
         }

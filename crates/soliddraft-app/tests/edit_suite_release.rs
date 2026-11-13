@@ -633,6 +633,7 @@ fn file_export_action_writes_the_step_and_both_proof_reports() {
         app.state_mut().state.push(AppAction::EditFeature(id));
         app.run_steps(8);
         assert!(app.state().state.editor.is_some());
+        assert!(app.query_all_by_label("Boss-Extrude1 proof: Pending").next().is_some());
         app.state_mut()
             .state
             .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
@@ -643,6 +644,7 @@ fn file_export_action_writes_the_step_and_both_proof_reports() {
         app.key_press(Key::Escape);
         app.run_steps(8);
         assert!(app.state().state.editor.is_none());
+        assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
         app.state_mut()
             .state
             .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });

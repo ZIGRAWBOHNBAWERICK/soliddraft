@@ -1485,6 +1485,9 @@ impl AppState {
                 .unwrap_or_else(|| "The current edit was refused".into());
             return Err(format!("Export requires a proved result. {reason}"));
         }
+        if !proof.current_proved_model() {
+            return Err("The current result has not been proved. Wait for proof before exporting.".into());
+        }
         let mut out = self.doc.model().export(format)?;
         if out.proof.is_some() {
             out.proof = Some(self.doc.proof_report());

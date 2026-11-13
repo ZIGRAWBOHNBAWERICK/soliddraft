@@ -280,6 +280,13 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, chip: Rec
         } else {
             (label, crate::geometry_message::for_user(&reason))
         }
+    } else if let Some(editor) = state.editor.as_ref().filter(|editor| editor.target == Some(id)) {
+        match &editor.error {
+            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+        }
+    } else if state.sketch.as_ref().is_some_and(|sketch| sketch.feature == id) {
+        ("Pending", "Finish or cancel this sketch edit before exporting.".into())
     } else if let Some(soliddraft_model::FeatureStatus::Blocked(input)) =
         state.doc.model().status(soliddraft_model::FeatureId(id as u32))
         && !matches!(feature.status, FeatureStatus::Inactive)

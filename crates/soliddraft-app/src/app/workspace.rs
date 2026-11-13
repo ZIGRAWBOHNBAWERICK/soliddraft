@@ -84,7 +84,11 @@ impl SolidDraftApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>, doc: Document, automation: Automation) -> Self {
         crate::settings::capture_install_kind();
-        theme::install(&cc.egui_ctx, automation.theme.unwrap_or_else(|| crate::settings::appearance().theme));
+        theme::install_for_layout(
+            &cc.egui_ctx,
+            automation.theme.unwrap_or_else(|| crate::settings::appearance().theme),
+            crate::settings::frame_layout(),
+        );
         if let Some(rs) = cc.wgpu_render_state.as_ref() {
             let tier = Tier::of(rs.adapter.get_info().backend);
             let renderer = ViewportRenderer::new(&rs.device, &rs.queue, rs.target_format, tier);
@@ -546,6 +550,7 @@ impl eframe::App for SolidDraftApp {
 
     fn ui(&mut self, root: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        theme::set_layout(ctx, self.state.frame_layout);
         log::debug!("ui frame {}", self.frame);
         self.state.doc.set_repaint(ctx);
         self.focus_tool_document();

@@ -1,4 +1,4 @@
-//! Catallax `path` and `sweep` steps for the application's line and arc chains.
+//! Catallax `path` and `sweep` steps for line, arc and spline paths.
 //!
 //! The chain is checked here so a refusal reads plainly. Catallax still decides the
 //! supported domain: its refusal codes, never its wording, reach the application.
@@ -115,6 +115,40 @@ pub(super) fn path_step(tag: &str, path: &Sweep) -> KernelResult<Value> {
                 previous = to;
                 json!({"kind":"line", "id":id, "to":text(&previous)})
             }
+            PathSegment::Spline { id, degree, control_points, weights, knots } => {
+                let count = control_points.len();
+                if *degree == 0 || *degree >= count {
+                    return Err(invalid("A spline degree must be positive and less than its number of control points"));
+                }
+                if knots.len() != count + degree + 1 {
+                    return Err(invalid("A spline needs one knot per control point plus its degree plus one"));
+                }
+                if weights.len() != count || weights.iter().any(|w| !w.is_finite() || *w <= 0.0) {
+                    return Err(invalid("A spline needs one positive finite weight per control point"));
+                }
+                if knots.iter().any(|k| !k.is_finite())
+                    || knots.windows(2).any(|k| k[0] > k[1])
+                    || knots[..=*degree].iter().any(|k| *k != 0.0)
+                    || knots[count..].iter().any(|k| *k != 1.0)
+                    || knots[degree + 1..count].iter().any(|k| *k <= 0.0 || *k >= 1.0)
+                    || knots[degree + 1..count].windows(degree + 1).any(|k| k[0] == k[*degree])
+                {
+                    return Err(invalid(
+                        "Spline knots must be ordered, start at zero and end at one, with no interior knot repeated more than the degree",
+                    ));
+                }
+                let points = control_points.iter().map(|p| point(*p)).collect::<KernelResult<Vec<_>>>()?;
+                if points.first() != Some(&previous) {
+                    return Err(invalid("A spline must start where the previous path segment ends"));
+                }
+                let values = |values: &[f64]| {
+                    values.iter().map(|v| native::number(*v, "spline path")).collect::<KernelResult<Vec<_>>>()
+                };
+                previous = points.last().cloned().unwrap_or(previous);
+                json!({"kind":"spline", "id":id, "degree":degree,
+                    "control_points":points.iter().map(text).collect::<Vec<_>>(),
+                    "weights":values(weights)?, "knots":values(knots)?})
+            }
             PathSegment::Arc { id, centre, axis, turn, .. } => {
                 let (centre, axis) = (point(*centre)?, vector(*axis)?);
                 previous = arc_end(&previous, &centre, &axis, *turn)?;
@@ -155,6 +189,9 @@ pub(super) fn operation(tag: &str, profile: &Value, stored: &Value) -> KernelRes
 pub(super) fn refusal(code: &str) -> KernelError {
     match code {
         "features.unsupported-path" => gap(UNFINISHED),
+        "sweep.spline-admissibility-unproven" => invalid(
+            "This spline sweep was refused because the path may turn back or cross itself. Use a path that keeps moving away from the profile plane",
+        ),
         "sweep.missing-corner-axis" => invalid("Set a turn axis where the path doubles back"),
         "path.corner-axis" => {
             invalid("A turn axis belongs only where the path doubles back, and must be square to the path")

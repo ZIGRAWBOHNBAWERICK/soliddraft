@@ -49,7 +49,7 @@ fn editing_combine_refuses_export_until_the_dialog_is_finished() {
         assert!(app.state().state.editor.is_none());
         assert!(app.state().state.doc.combine_form.is_some());
         app.render().unwrap();
-        let error = app.state().state.export_part(Format::Stl).err().expect("the live Combine dialog gates export");
+        let error = app.state().state.export_part(Format::Stl).expect_err("the live Combine dialog gates export");
         assert!(error.contains("Finish or cancel"), "{error}");
         assert!(app.query_all_by_label(&format!("{name} proof: Pending")).next().is_some());
         let path = case.path("part.stl");

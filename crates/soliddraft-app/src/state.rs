@@ -1342,7 +1342,8 @@ impl AppState {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
         }
-        if self.doc.proof_state().answered_within_bound {
+        let proof = self.doc.proof_state();
+        if proof.answered_within_bound && !proof.display_only_bound {
             return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
         if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {

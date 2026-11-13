@@ -398,6 +398,34 @@ impl Default for TessellationParams {
     }
 }
 
+/// A measured display result, distinct from a certified mesh or an unmeasured preview.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DisplayBound {
+    pub kind: String,
+    pub rule: String,
+    pub level_mm: f64,
+    pub measured_mm: f64,
+    pub method: String,
+    pub definition: String,
+}
+
+impl DisplayBound {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.kind != "spline display mesh"
+            || self.rule.trim().is_empty()
+            || self.method.trim().is_empty()
+            || self.definition.trim().is_empty()
+            || self.level_mm != 0.01
+            || !self.measured_mm.is_finite()
+            || self.measured_mm < 0.0
+            || self.measured_mm > self.level_mm
+        {
+            return Err("The spline display needs a measured deviation within its stated 0.01 mm bound and a retained definition".into());
+        }
+        Ok(())
+    }
+}
+
 /// A triangle mesh of a body, with each triangle labelled by the face it came from.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Mesh {
@@ -416,6 +444,9 @@ pub struct Mesh {
     /// or quality. A preview is never exported or published as proven.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unproved: bool,
+    /// Native measured display evidence. This geometry remains unproved and is never exported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounded: Option<DisplayBound>,
 }
 
 impl Mesh {
@@ -944,6 +975,11 @@ pub trait Kernel: Send + Sync {
     /// sample it faster than [`tessellate`](Self::tessellate) by claiming no bounds, and
     /// then marks it [`Mesh::unproved`]. Exports and proven results use `tessellate`.
     /// The default returns `tessellate`.
+    /// Measured rendering evidence for this immutable body, never an export certificate.
+    fn display_bound(&self, _body: BodyId) -> KernelResult<Option<DisplayBound>> {
+        Ok(None)
+    }
+
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.tessellate(body, params)
     }

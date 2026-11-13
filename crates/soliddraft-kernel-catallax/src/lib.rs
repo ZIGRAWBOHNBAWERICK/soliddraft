@@ -70,6 +70,7 @@ struct Solid {
     display: MeshCache<catallax_mesh::Mesh>,
     /// `None` where Catallax refused to sample a preview, so it is not asked again.
     previews: MeshCache<Option<PreviewMesh>>,
+    rendering: MeshCache<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>,
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
@@ -144,6 +145,83 @@ impl<T> MeshCache<T> {
 }
 
 impl Solid {
+    fn has_splines(&self) -> bool {
+        let built = self.app.checkpoint.built();
+        built.model.faces_of_body(built.result).iter().any(|face| {
+            matches!(built.model.geom().surface(built.model.face(*face).surface), catallax_shapes::Surface::BSpline(_))
+        })
+    }
+
+    fn rendering(&self) -> KernelResult<Arc<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>> {
+        use catallax_numbers::{Answer, OperationResult, Refusal};
+        self.rendering.get(display_key(&MeshOptions::default()), || {
+            numerical("display_result", |dec| match self.app.display_result(&MeshOptions::default(), dec) {
+                Ok(OperationResult::Refused(refusal)) => Err(refusal),
+                Ok(answer) => Ok(Answer::exact(answer)),
+                Err(Error::Display(refusal)) => Err(refusal),
+                Err(error) => Err(Refusal::new(error.code(), error.to_string())),
+            })
+            .map(|answer| answer.value)
+            .map_err(|e| query_error("display_result", e))
+        })
+    }
+
+    fn rendering_mesh(&self) -> KernelResult<Mesh> {
+        use catallax_numbers::OperationResult;
+        let answer = self.rendering()?;
+        let (display, evidence) = match answer.as_ref() {
+            OperationResult::Proven(answer) => (&answer.value, None),
+            OperationResult::Bounded(answer) => (answer.value(), Some(answer.evidence())),
+            OperationResult::Refused(refusal) => return Err(query_error("display_result", refusal.clone())),
+        };
+        if display.geometry.positions.iter().flatten().any(|value| !(*value as f32).is_finite()) {
+            return Err(KernelError::Unsupported("The display coordinates cannot be represented on screen".into()));
+        }
+        let mut mesh = convert::preview(&display.geometry, &self.ids);
+        if let Some(evidence) = evidence {
+            let rounding = display
+                .geometry
+                .positions
+                .iter()
+                .map(|point| {
+                    point.iter().fold(0.0_f64, |sum, value| {
+                        (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up()
+                    })
+                })
+                .fold(0.0_f64, f64::max);
+            let rounding = Rational::from_f64_exact(rounding).ok_or_else(|| {
+                KernelError::Unsupported("The display coordinates cannot be represented on screen".into())
+            })?;
+            let bound = evidence.measured() + &rounding;
+            if &bound > evidence.level() {
+                return Err(KernelError::Unsupported(
+                    "The measured spline display deviation exceeds the 0.01 mm limit after screen rounding".into(),
+                ));
+            }
+            let mut measured = bound.to_f64_nearest();
+            if Rational::from_f64_exact(measured).is_some_and(|value| value < bound) {
+                measured = measured.next_up();
+            }
+            let definition = evidence.definition();
+            mesh.bounded = Some(DisplayBound {
+                kind: evidence.rule().case_kind.into(),
+                rule: evidence.rule().name.into(),
+                level_mm: evidence.level().to_f64_nearest(),
+                measured_mm: measured,
+                method: display.measurement.method.into(),
+                definition: json!({"revision":definition.revision,"representation":definition.representation,
+                    "target":definition.target,"scope":format!("{:?}", definition.scope)})
+                .to_string(),
+            });
+        } else {
+            mesh.unproved = false;
+        }
+        if let Some(bound) = &mesh.bounded {
+            bound.validate().map_err(KernelError::Unsupported)?;
+        }
+        Ok(mesh)
+    }
+
     /// The certified mesh for these controls, for exports and proven results.
     fn display(&self, options: &MeshOptions, query: &str) -> KernelResult<Arc<catallax_mesh::Mesh>> {
         let key = display_key(options);
@@ -383,6 +461,7 @@ impl CatallaxKernel {
                     ids,
                     display,
                     previews: MeshCache::new(),
+                    rendering: MeshCache::new(),
                     topology: OnceLock::new(),
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),
@@ -1263,12 +1342,24 @@ impl Kernel for CatallaxKernel {
         self.observe("construction_edit", || construction::prepare(self, body, edits, params))
     }
 
+    fn display_bound(&self, body: BodyId) -> KernelResult<Option<DisplayBound>> {
+        let solid = self.solid(body)?;
+        if !solid.has_splines() {
+            return Ok(None);
+        }
+        Ok(solid.rendering_mesh()?.bounded)
+    }
+
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.observe("preview", || {
             if let Some(field) = self.field(body)? {
                 return Ok(field.preview());
             }
             let solid = self.solid(body)?;
+            if solid.has_splines() {
+                options(params)?;
+                return solid.rendering_mesh();
+            }
             // Where Catallax cannot sample a preview, the screen shows the certified mesh.
             let preview = solid.preview(&options(params)?, "preview")?;
             let Some(mesh) = preview.as_ref() else {
@@ -1290,6 +1381,24 @@ impl Kernel for CatallaxKernel {
                 return Ok(vec![]);
             }
             let solid = self.solid(body)?;
+            if solid.has_splines() {
+                let answer = solid.rendering()?;
+                let mesh = match answer.as_ref() {
+                    catallax_numbers::OperationResult::Proven(answer) => &answer.value.geometry,
+                    catallax_numbers::OperationResult::Bounded(answer) => &answer.value().geometry,
+                    catallax_numbers::OperationResult::Refused(refusal) => {
+                        return Err(query_error("preview_edges", refusal.clone()));
+                    }
+                };
+                return Ok(mesh
+                    .edges
+                    .iter()
+                    .map(|edge| EdgePolyline {
+                        edge: solid.ids.edges[&edge.edge],
+                        points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
+                    })
+                    .collect());
+            }
             let preview = solid.preview(&options(params)?, "preview_edges")?;
             let Some(mesh) = preview.as_ref() else {
                 return self.tessellate_edges(body, params);
@@ -1380,6 +1489,20 @@ impl Kernel for CatallaxKernel {
             // Topology uses the original certified display, independent of later mesh requests.
             if let Some(value) = solid.topology.get() {
                 return value.clone();
+            }
+            if solid.has_splines() {
+                let answer = solid.rendering()?;
+                let mesh = match answer.as_ref() {
+                    catallax_numbers::OperationResult::Proven(answer) => &answer.value,
+                    catallax_numbers::OperationResult::Bounded(answer) => answer.value(),
+                    catallax_numbers::OperationResult::Refused(refusal) => {
+                        return Err(query_error("topology", refusal.clone()));
+                    }
+                };
+                return solid
+                    .topology
+                    .get_or_init(|| convert::rendering_topology(&solid.app, &solid.ids, mesh))
+                    .clone();
             }
             let mesh = solid.display(&MeshOptions::default(), "topology")?;
             solid.topology.get_or_init(|| convert::topology(&solid.app, &solid.ids, &mesh, false)).clone()

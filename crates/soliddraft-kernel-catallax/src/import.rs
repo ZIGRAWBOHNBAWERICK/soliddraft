@@ -266,6 +266,7 @@ impl CatallaxKernel {
                     ids,
                     display,
                     previews: MeshCache::new(),
+                    rendering: MeshCache::new(),
                     topology: OnceLock::new(),
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),

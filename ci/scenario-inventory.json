@@ -1559,6 +1559,34 @@
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "Canonical radius-22 flange and radius-12 housing with radius-8 bore, four diameter-4 holes with diameter-8 90-degree countersinks. B-rep junction radius 2 edited to 2.5. This does not claim field support at radius 2 or freeform Boolean support. STL may refuse mesh.precision-or-budget on fitted patches; the application test records that refusal and checks destination preservation. The lattice attempt refuses at source bounding-box measurement with measure.unsupported-surface before field compilation.",
       "evidence": "Build, parameter edit, undo, redo, fresh reopen and proven STEP. STL is either closed or has a recorded mesh.precision-or-budget refusal with the destination and accepted part preserved. Stored references and Edit Suite frames are checked by canonical_parts."
+    },
+    {
+      "id": "loft-edge-fillet",
+      "file": "ci/scenarios/loft-edge-fillet.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
+      "route": "MCP sketches, loft, fillet and edit_fillet -> retained exact body -> native three-way spline display -> save/reopen and independent certified STEP export",
+      "supported_limits": "Scaled rational ruled loft: 0.2 mm section span, 0.01 mm fillet edited to 0.009375 mm. One first fillet on an untrimmed loft side; another edge on an already trimmed side remains refused. Rendering uses the preset 0.01 mm spline-display rule and unchanged 20M request allowance; certified results remain proved, measured rendering keeps its kind, level, whole-surface deviation and measurement method.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; edit, undo/redo, unchanged-state refusal, save and fresh reopen; independent checked STEP export; spline_display.rs verifies native evidence and the separate exact-model proof."
+    },
+    {
+      "id": "loft-edge-fillet-small-warp",
+      "file": "ci/scenarios/loft-edge-fillet-small-warp.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
+      "route": "MCP sketches, loft, fillet and edit_fillet -> retained exact body -> native three-way spline display -> save/reopen and independent certified STEP export",
+      "supported_limits": "Small-warp rational ruled loft: 2 mm section span, 0.1 mm fillet edited to 0.09375 mm. One first fillet on an untrimmed loft side; another edge on an already trimmed side remains refused. Rendering uses the preset 0.01 mm spline-display rule and unchanged 20M request allowance; certified results remain proved, measured rendering keeps its kind, level, whole-surface deviation and measurement method.",
+      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; edit, undo/redo, unchanged-state refusal, save and fresh reopen; independent checked STEP export; spline_display.rs verifies native evidence and the separate exact-model proof."
     }
   ]
 }

@@ -360,11 +360,11 @@ fn display_only(error: &catallax_numbers::Refusal) -> bool {
 }
 
 // A face's display area and area-weighted centre.
-fn display_face(mesh: &catallax_mesh::Mesh, triangles: &[catallax_mesh::Triangle]) -> (f64, Vec3) {
+fn display_face(positions: &[[f64; 3]], triangles: &[catallax_mesh::Triangle]) -> (f64, Vec3) {
     let mut weight_sum = 0.0;
     let mut center = Vec3::ZERO;
     for t in triangles {
-        let [a, b, c] = t.vertices.map(|v| Vec3::from(mesh.positions[v]));
+        let [a, b, c] = t.vertices.map(|v| Vec3::from(positions[v]));
         let weight = (b - a).cross(c - a).length() * 0.5;
         weight_sum += weight;
         center = center + (a + b + c) * (weight / 3.0);
@@ -405,17 +405,70 @@ pub(super) fn topology(
     mesh: &catallax_mesh::Mesh,
     proven: bool,
 ) -> KernelResult<Topology> {
-    let model = &app.checkpoint.built().model;
+    topology_view(
+        app,
+        ids,
+        TopologyMesh {
+            positions: &mesh.positions,
+            triangles: &mesh.triangles,
+            faces: mesh.faces.iter().map(|f| (f.face, f.triangles.clone())).collect(),
+            edges: mesh
+                .edges
+                .iter()
+                .map(|e| (e.edge, e.vertices.as_slice(), e.max_chord_error.to_f64_nearest()))
+                .collect(),
+            chord: catallax_mesh::MeshOptions::default().chord_tolerance.to_f64_nearest(),
+        },
+        proven,
+    )
+}
+
+pub(super) fn rendering_topology(
+    app: &EvaluatedApplicationBody,
+    ids: &Ids,
+    mesh: &catallax_mesh::DisplayMesh,
+) -> KernelResult<Topology> {
     let chord = catallax_mesh::MeshOptions::default().chord_tolerance.to_f64_nearest();
+    let geometry = &mesh.geometry;
+    topology_view(
+        app,
+        ids,
+        TopologyMesh {
+            positions: &geometry.positions,
+            triangles: &geometry.triangles,
+            faces: geometry.faces.iter().map(|f| (f.face, f.triangles.clone())).collect(),
+            edges: geometry.edges.iter().map(|e| (e.edge, e.vertices.as_slice(), chord)).collect(),
+            chord,
+        },
+        false,
+    )
+}
+
+struct TopologyMesh<'a> {
+    positions: &'a [[f64; 3]],
+    triangles: &'a [catallax_mesh::Triangle],
+    faces: Vec<(CatFace, std::ops::Range<usize>)>,
+    edges: Vec<(CatEdge, &'a [usize], f64)>,
+    chord: f64,
+}
+
+fn topology_view(
+    app: &EvaluatedApplicationBody,
+    ids: &Ids,
+    mesh: TopologyMesh<'_>,
+    proven: bool,
+) -> KernelResult<Topology> {
+    let model = &app.checkpoint.built().model;
+    let chord = mesh.chord;
     let accuracy = catallax_measure::Accuracy::default();
     let query = |name: &str, e: catallax_numbers::Refusal| query_error(name, e);
     let mut faces = Vec::new();
     let mut adjacency: BTreeMap<CatEdge, Vec<FaceId>> = BTreeMap::new();
-    for face_mesh in &mesh.faces {
-        let id = face_mesh.face;
+    for (id, range) in &mesh.faces {
+        let id = *id;
         let face = model.face(id);
-        let triangles = &mesh.triangles[face_mesh.triangles.clone()];
-        let (display_area, display_center) = display_face(mesh, triangles);
+        let triangles = &mesh.triangles[range.clone()];
+        let (display_area, display_center) = display_face(mesh.positions, triangles);
         let area = match super::numerical("face_area", |dec| catallax_measure::face_area(model, id, &accuracy, dec)) {
             Ok(area) => midpoint(&area.value),
             Err(e) if display_only(&e) => display_area,
@@ -481,10 +534,10 @@ pub(super) fn topology(
         });
     }
     let mut edges = Vec::new();
-    for e in &mesh.edges {
-        let id = e.edge;
+    for (id, vertices, error) in &mesh.edges {
+        let id = *id;
         let edge = model.edge(id);
-        let points: Vec<Vec3> = e.vertices.iter().map(|v| mesh.positions[*v].into()).collect();
+        let points: Vec<Vec3> = vertices.iter().map(|v| mesh.positions[*v].into()).collect();
         let measured = if proven {
             let length =
                 super::numerical("edge_length", |dec| catallax_measure::edge_length(model, id, &accuracy, dec));
@@ -520,7 +573,7 @@ pub(super) fn topology(
             curve,
             length,
             midpoint: middle,
-            bbox: bounds(points.into_iter(), e.max_chord_error.to_f64_nearest()),
+            bbox: bounds(points.into_iter(), *error),
             faces: adjacency.remove(&id).unwrap_or_default(),
             construction_origins: ids.edge_origins.get(&ids.edges[&id]).cloned(),
             vertices: vertices.into_iter().collect(),

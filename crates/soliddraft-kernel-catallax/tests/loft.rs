@@ -167,26 +167,24 @@ fn three_section_smooth_display_fits_the_application_allowance() {
         })
         .collect();
     let params = TessellationParams { chord_height: 0.01, ..Default::default() };
-    let mut built = None;
     let (answer, work) = with_request_allowance(APP_REQUEST_WORK, || -> KernelResult<_> {
         let body = k.loft(&OpTag::new("smooth"), &profiles, LoftShape::Smooth)?;
-        built = Some(body.body);
-        let mesh = k.tessellate(body.body, &params)?;
+        let mesh = k.preview(body.body, &params)?;
         Ok((body, mesh))
     });
     eprintln!("three-section Smooth display: {work:?}; refusal: {:?}", answer.as_ref().err());
     log_display_work(&k, "build-and-display");
-    if work.exhausted
-        && let Some(body) = built
-    {
-        // Attribute a refused request without spending its body-build work again.
-        let (single, single_work) = with_request_allowance(APP_REQUEST_WORK, || k.tessellate(body, &params));
-        eprintln!("three-section Smooth tessellation alone: {single_work:?}; refusal: {:?}", single.as_ref().err());
-        log_display_work(&k, "display-alone");
-    }
     assert!(!work.exhausted, "{work:?}; {:?}", answer.as_ref().err());
     let (body, mesh) = answer.unwrap();
-    assert!(!mesh.unproved);
+    if let Some(bound) = &mesh.bounded {
+        assert!(mesh.unproved);
+        bound.validate().unwrap();
+        assert_eq!(bound.kind, "spline display mesh");
+        assert_eq!(bound.level_mm, 0.01);
+        assert!(!bound.method.is_empty() && !bound.definition.is_empty());
+    } else {
+        assert!(!mesh.unproved);
+    }
     assert!(!mesh.indices.is_empty());
     assert_eq!(mesh.triangle_faces.len(), mesh.triangle_count());
     let faces = k.topology(body.body).unwrap().faces;

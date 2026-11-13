@@ -718,6 +718,8 @@ pub struct AnswerBound {
     measured_bound: f64,
     allowed_bound: f64,
     unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display: Option<soliddraft_kernel_api::DisplayBound>,
 }
 
 #[derive(Deserialize)]
@@ -727,12 +729,28 @@ struct AnswerBoundFields {
     measured_bound: f64,
     allowed_bound: f64,
     unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display: Option<soliddraft_kernel_api::DisplayBound>,
 }
 
 impl TryFrom<AnswerBoundFields> for AnswerBound {
     type Error = String;
     fn try_from(value: AnswerBoundFields) -> Result<Self, Self::Error> {
-        Self::new(value.rule, value.kept_definition, value.measured_bound, value.allowed_bound, value.unit)
+        let mut answer =
+            Self::new(value.rule, value.kept_definition, value.measured_bound, value.allowed_bound, value.unit)?;
+        if let Some(display) = value.display {
+            display.validate()?;
+            if display.rule != answer.rule
+                || display.definition != answer.kept_definition
+                || display.measured_mm != answer.measured_bound
+                || display.level_mm != answer.allowed_bound
+                || answer.unit != "mm"
+            {
+                return Err("The display bound must match its native measurement record".into());
+            }
+            answer.display = Some(display);
+        }
+        Ok(answer)
     }
 }
 
@@ -755,7 +773,20 @@ impl AnswerBound {
         {
             return Err("The measured bound must be finite, nonnegative and within the rule's limit".into());
         }
-        Ok(Self { rule, kept_definition, measured_bound, allowed_bound, unit })
+        Ok(Self { rule, kept_definition, measured_bound, allowed_bound, unit, display: None })
+    }
+
+    fn from_display(display: soliddraft_kernel_api::DisplayBound) -> Result<Self, String> {
+        display.validate()?;
+        let mut answer = Self::new(
+            display.rule.clone(),
+            display.definition.clone(),
+            display.measured_mm,
+            display.level_mm,
+            "mm".into(),
+        )?;
+        answer.display = Some(display);
+        Ok(answer)
     }
 
     pub fn summary(&self) -> String {
@@ -763,10 +794,14 @@ impl AnswerBound {
     }
 
     pub fn description(&self) -> String {
-        format!(
+        let mut description = format!(
             "Measured bound: {} {}\nRule limit: {} {}\nRule: {}\nKept definition: {}",
             self.measured_bound, self.unit, self.allowed_bound, self.unit, self.rule, self.kept_definition
-        )
+        );
+        if let Some(display) = &self.display {
+            description.push_str(&format!("\nKind: {}\nMeasurement: {}", display.kind, display.method));
+        }
+        description
     }
 }
 
@@ -1314,13 +1349,15 @@ pub struct ProofState {
     pub pending: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub answered_within_bound: bool,
+    /// The exact model is proved independently; only its rendering has a measured bound.
+    pub display_only_bound: bool,
     pub failed: bool,
 }
 
 impl ProofState {
     pub fn current_proved_model(&self) -> bool {
         !self.pending
-            && !self.answered_within_bound
+            && (!self.answered_within_bound || self.display_only_bound)
             && !self.failed
             && !self.transient
             && self.proved_revision == Some(self.requested_revision)
@@ -1329,6 +1366,7 @@ impl ProofState {
 
     pub fn current_proved_display(&self) -> bool {
         self.current_proved_model()
+            && !self.answered_within_bound
             && self.display_ready
             && self.displayed_edit.is_none()
             && self.displayed_revision == self.requested_revision
@@ -1593,12 +1631,34 @@ impl Document {
 
     fn has_bounded_answer(&self) -> bool {
         self.bounded_answers.get(&self.geometry).is_some_and(|answers| {
-            self.model
-                .features()
-                .iter()
-                .take(self.model.active_count())
-                .any(|feature| !feature.suppressed && answers.contains_key(&app_id(feature.id)))
+            self.model.features().iter().take(self.model.active_count()).any(|feature| {
+                !feature.suppressed
+                    && answers.get(&app_id(feature.id)).is_some_and(|answer| {
+                        answer.display.is_none() || self.model.body_after(feature.id) == self.model.body()
+                    })
+            })
         })
+    }
+
+    fn capture_display_bound(&mut self, body: BodyId) -> Result<(), String> {
+        if self.model.is_dirty() || self.model.body() != Some(body) || self.has_model_failure() {
+            return Ok(());
+        }
+        let Some(bound) = self.kernel().display_bound(body).map_err(|error| error.to_string())? else { return Ok(()) };
+        let answer = AnswerBound::from_display(bound)?;
+        let id = self
+            .model
+            .features()
+            .iter()
+            .rev()
+            .find(|feature| {
+                !matches!(feature.kind, model::FeatureKind::Sketch(_) | model::FeatureKind::ReferencePlane(_))
+                    && self.model.body_after(feature.id) == Some(body)
+                    && self.model.status(feature.id) == Some(&model::FeatureStatus::Ok)
+            })
+            .map(|feature| app_id(feature.id))
+            .ok_or("The display has no current feature")?;
+        self.record_answer_within_bound(id, answer)
     }
 
     pub fn proof_state(&self) -> ProofState {
@@ -1617,6 +1677,16 @@ impl Document {
             transient: self.provisional.as_ref().is_some_and(|shown| shown.token.transient),
             pending: self.proof_pending(),
             answered_within_bound: self.has_bounded_answer(),
+            display_only_bound: self.has_bounded_answer()
+                && self.bounded_answers.get(&self.geometry).is_some_and(|answers| {
+                    self.model
+                        .features()
+                        .iter()
+                        .take(self.model.active_count())
+                        .filter(|feature| !feature.suppressed)
+                        .filter_map(|feature| answers.get(&app_id(feature.id)))
+                        .all(|answer| answer.display.is_some())
+                }),
             failed: self.proof_failure.is_some() || self.has_model_failure(),
         }
     }
@@ -1646,7 +1716,7 @@ impl Document {
         if self.model.is_dirty()
             || self.has_model_failure()
             || self.proof_failure.is_some()
-            || self.proof_state().answered_within_bound
+            || (self.proof_state().answered_within_bound && !self.proof_state().display_only_bound)
         {
             return;
         }
@@ -1898,6 +1968,9 @@ impl Document {
                 self.selection = Some(Selection::Feature(feature));
             }
             return Ok(());
+        }
+        if let Some(display) = &proof.display {
+            self.capture_display_bound(display.body)?;
         }
         self.retain_proved_revision();
         let depth = self.edit_depth.take();
@@ -2704,6 +2777,12 @@ impl Document {
     /// geometry and GPU buffers; undo and redo restore recent bodies' meshes and picks.
     fn refresh_display(&mut self) {
         let next = self.display_body();
+        if let Some(body) = next
+            && let Err(message) = self.capture_display_bound(body)
+        {
+            self.display_failure = Some(display_unavailable(message));
+            return;
+        }
         if next.is_some() && next == self.shown && !self.meshes.is_empty() {
             if self.shading != *self.model.materials() {
                 self.apply_appearances();

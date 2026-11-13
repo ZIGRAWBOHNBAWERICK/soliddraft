@@ -1,0 +1,256 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "loft-edge-fillet",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "offset": 0,
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -0.1,
+                "v": -0.1
+              },
+              "b": {
+                "u": 0.1,
+                "v": -0.1
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0.1,
+                "v": -0.1
+              },
+              "b": {
+                "u": 0.1,
+                "v": 0.1
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0.1,
+                "v": 0.1
+              },
+              "b": {
+                "u": -0.1,
+                "v": 0.1
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -0.1,
+                "v": 0.1
+              },
+              "b": {
+                "u": -0.1,
+                "v": -0.1
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sketch_geometry",
+      "arguments": {
+        "plane": "top",
+        "offset": 0.2,
+        "operations": [
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0.0,
+                "v": -0.1
+              },
+              "b": {
+                "u": 0.1,
+                "v": 0.0
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0.1,
+                "v": 0.0
+              },
+              "b": {
+                "u": 0.0,
+                "v": 0.2
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": 0.0,
+                "v": 0.2
+              },
+              "b": {
+                "u": -0.2,
+                "v": 0.0
+              }
+            },
+            "construction": false
+          },
+          {
+            "tool": "add",
+            "kind": {
+              "type": "line",
+              "a": {
+                "u": -0.2,
+                "v": 0.0
+              },
+              "b": {
+                "u": 0.0,
+                "v": -0.1
+              }
+            },
+            "construction": false
+          }
+        ]
+      }
+    },
+    {
+      "tool": "loft",
+      "arguments": {
+        "profiles": [
+          "Sketch1",
+          "Sketch2"
+        ],
+        "shape": "ruled"
+      },
+      "checks": [
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 6
+        }
+      ]
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Loft1 \u00b7 Edge 9"
+        ],
+        "radius": 0.01
+      },
+      "checks": [
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 7
+        }
+      ]
+    },
+    {
+      "tool": "edit_fillet",
+      "arguments": {
+        "feature": "Fillet1",
+        "radius": 0.009375
+      },
+      "checks": [
+        {
+          "pointer": "/summary/body/faces",
+          "equals": 7
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "same_geometry_as_step": 4
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "fillet",
+      "arguments": {
+        "edges": [
+          "Loft1 \u00b7 Edge 11"
+        ],
+        "radius": 0.01
+      },
+      "refusal": "fillet.unsupported-spline",
+      "refused": "Fillet cannot round another edge on this loft face because an earlier fillet has already trimmed it. Choose an edge on an untrimmed face",
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/loft-fillet.dwprt"
+      },
+      "files": [
+        "{bundle}/loft-fillet.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/loft-fillet.dwprt"
+      },
+      "fresh_process": true,
+      "same_geometry_as_step": 5,
+      "exports": [
+        {
+          "format": "step",
+          "raw_valid": true,
+          "checks": [
+            {
+              "pointer": "/report/within_tolerance",
+              "equals": true
+            },
+            {
+              "pointer": "/report/solids",
+              "equals": 1
+            },
+            {
+              "pointer": "/report/fit_mm",
+              "minimum": 1e-20
+            },
+            {
+              "pointer": "/report/fit_mm",
+              "maximum": 0.0001
+            },
+            {
+              "pointer": "/report/fitted_curves",
+              "minimum": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

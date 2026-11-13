@@ -193,3 +193,43 @@ fn classic_keeps_its_viewport_and_feature_menu_behavior() {
         assert!(app.query_all_by_label("Repair references…").next().is_none());
     });
 }
+
+#[test]
+fn secondary_pick_waits_for_the_camera_and_viewport_that_were_clicked() {
+    for change in ["camera", "resize"] {
+        let case = ribbon::case(&format!("context-stale-{change}"));
+        set_frame(&case, "edit_suite");
+        let mut doc = ribbon::plate();
+        doc.selection = None;
+        let mut app = ribbon::app(doc);
+        case.run(&mut app, |app| {
+            let at = world(app, Vec3::new(0.0, 0.0, 20.0));
+            render_steps::await_pick(app, at);
+            let state = &app.state().state;
+            let old_sample = state.viewport.pick_sample();
+            let old_target = soliddraft_app::viewport::pick::selection(&state.doc, state.viewport.hover.unwrap());
+            assert!(matches!(old_target, Some(Selection::Face(_))));
+
+            if change == "camera" {
+                ribbon::run_command(app, "view_front");
+            } else {
+                app.set_size(ribbon::WINDOW + egui::vec2(180.0, 0.0));
+                app.run_steps(3);
+            }
+            let state = &app.state().state;
+            assert_eq!(state.viewport.pick_sample().revision, old_sample.revision, "the model did not change");
+            assert_ne!(state.viewport.pick_view(state.viewport.rect, app.ctx.pixels_per_point()), old_sample.seen);
+            right_click(app, at, false);
+            assert_eq!(app.state().state.doc.selection, None, "a stale {change} sample must not select the old entity");
+            assert!(!egui::Popup::is_any_open(&app.ctx), "an unknown target must not open an empty-space menu");
+
+            render_steps::await_pick(app, at);
+            assert!(egui::Popup::is_any_open(&app.ctx), "the pending click opens after its current sample arrives");
+            if change == "camera" {
+                assert_ne!(app.state().state.doc.selection, old_target, "the old face is no longer under the pointer");
+            }
+            case.frame(app, "resolved");
+            dismiss(app);
+        });
+    }
+}

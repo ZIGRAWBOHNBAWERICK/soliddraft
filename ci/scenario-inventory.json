@@ -1032,7 +1032,7 @@
         "soliddraft-model",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "5821b8e656fb16fee8b667929328b8d3f59f19bd",
+      "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "Two-profile ruled and Smooth prisms, plus a bulged three-profile Smooth loft with square widths 2, 4 and 2 at z=0, 3 and 6. Certified display, fresh-process reopen and checked STEP export stay within the unchanged 20M request allowance. Coplanar profiles refuse without changing the part.",
       "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export; live viewport PNG and kernel view records for every solid state."

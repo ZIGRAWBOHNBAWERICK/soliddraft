@@ -176,6 +176,13 @@ paths = ["crates/soliddraft-app/src/panels.rs"]
 module = ["panels"]
 
 [[areas]]
+name = "app.part_check"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/part_check.rs"]
+module = ["part_check"]
+
+[[areas]]
 name = "app.platform"
 owner = "core"
 crate = "soliddraft-app"
@@ -188,6 +195,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/preferences/"]
 module = ["preferences"]
+
+[[areas]]
+name = "app.print_check"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/print_check.rs"]
+module = ["print_check"]
 
 [[areas]]
 name = "app.properties"

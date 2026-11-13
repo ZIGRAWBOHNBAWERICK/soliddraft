@@ -26,23 +26,50 @@ fn edge_at(state: &AppState, wanted: soliddraft_kernel_api::Vec3) -> String {
 
 #[test]
 fn native_loft_fillet_display_keeps_the_bound_and_plain_trimmed_face_refusal() {
+    check_fillet_display(
+        include_str!("../../../ci/scenarios/loft-edge-fillet.json"),
+        soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1),
+        soliddraft_kernel_api::Vec3::new(0.05, 0.15, 0.1),
+    );
+}
+
+#[test]
+fn native_small_warp_fillet_display_keeps_its_measured_bound() {
+    check_fillet_display(
+        include_str!("../../../ci/scenarios/loft-edge-fillet-small-warp.json"),
+        soliddraft_kernel_api::Vec3::new(1.0, -0.9995, 1.0),
+        soliddraft_kernel_api::Vec3::new(0.9995, 1.0005, 1.0),
+    );
+}
+
+fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, neighbour: soliddraft_kernel_api::Vec3) {
+    static CONFIG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir =
         std::env::temp_dir().join(format!("soliddraft-spline-display-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
-    let mut state = AppState::new(soliddraft_app::new_document());
-    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/loft-edge-fillet.json")).unwrap();
+    let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_operation_log());
+    let mut state = AppState::new(soliddraft_app::document::Document::new("Spline display", kernel.clone()));
+    let scenario: Value = serde_json::from_str(source).unwrap();
     let caller = Caller::Mcp { client: "spline-display-test".into() };
     for step in scenario["steps"].as_array().unwrap().iter().take(4) {
         let name = step["tool"].as_str().unwrap();
         let mut arguments = step["arguments"].clone();
         if name == "fillet" {
-            arguments["edges"] = json!([edge_at(&state, soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1))]);
+            arguments["edges"] = json!([edge_at(&state, rail)]);
         }
         let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
             call_checked(&mut AppTools { state: &mut state }, name, arguments, &caller)
         });
         eprintln!("{name}: {work:?}; {}", out.content);
+        for call in kernel.take_diagnostics().unwrap()["calls"].as_array().unwrap() {
+            for operation in call["operation_log"]["operations"].as_array().unwrap() {
+                let stage = json!({"call":call["operation"],"operation":operation["operation"],
+                    "work":operation["work"],"status":operation["status"],"refusal":operation["refusal"]});
+                eprintln!("native display stage: {}", serde_json::to_string(&stage).unwrap());
+            }
+        }
         assert!(!out.is_error && !work.exhausted, "{name}: {}; {work:?}", out.content);
         if name == "loft" {
             for edge in &state.doc.edges {
@@ -65,7 +92,7 @@ fn native_loft_fillet_display_keeps_the_bound_and_plain_trimmed_face_refusal() {
     let before = state.doc.model().to_bytes().unwrap();
     let undo = state.doc.undo_depth();
     let mut refusal = scenario["steps"][7]["arguments"].clone();
-    refusal["edges"] = json!([edge_at(&state, soliddraft_kernel_api::Vec3::new(0.05, 0.15, 0.1))]);
+    refusal["edges"] = json!([edge_at(&state, neighbour)]);
     let out = call_checked(&mut AppTools { state: &mut state }, "fillet", refusal, &caller);
     assert!(out.is_error && out.content.contains("already trimmed"), "{}", out.content);
     assert_eq!(state.doc.model().to_bytes().unwrap(), before);

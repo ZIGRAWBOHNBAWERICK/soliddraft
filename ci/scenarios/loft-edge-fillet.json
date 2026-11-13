@@ -161,7 +161,7 @@
       "tool": "fillet",
       "arguments": {
         "edges": [
-          "Loft1 \u00b7 Edge 9"
+          "Loft1 \u00b7 Edge 1"
         ],
         "radius": 0.01
       },

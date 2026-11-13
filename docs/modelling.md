@@ -19,6 +19,12 @@ boundaries with an exact frame. Other faces need a closed sketch instead.
 Catallax refuses profiles it cannot verify as a solid without crossing or folding.
 The editor explains the refusal and keeps the existing part.
 
+Spline displays try certification first.
+When the native result instead meets its preset measured display rule, the proof light says "Answered within a stated bound".
+Its tooltip records the 0.01 mm limit, measured surface deviation and measurement method against the retained boundary.
+This display result remains separate from the exact part's proof and from certified exports.
+A deviation above the limit or a request that cannot finish within its work allowance still refuses and retains the part.
+
 The `loft` and `edit_loft` commands accept `profiles` as an ordered list of sketch names
 or face labels, and `shape` as `ruled` or `smooth`. For example,
 `{"op":"loft","profiles":["Sketch1","Sketch2"],"shape":"ruled"}`.

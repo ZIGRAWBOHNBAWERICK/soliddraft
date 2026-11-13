@@ -62,9 +62,14 @@ impl Names {
     }
 }
 
-fn volume(state: &AppState) -> f64 {
+fn mass(state: &AppState) -> soliddraft_kernel_api::MassProperties {
     let doc = state.doc.model();
-    doc.kernel().mass_properties(doc.body().unwrap()).unwrap().volume
+    // Use the desktop mass worker's allowance, separate from construction and export.
+    let (result, work) = soliddraft_kernel_catallax::with_request_allowance(200_000_000, || {
+        doc.kernel().mass_properties(doc.body().unwrap())
+    });
+    assert!(!work.exhausted, "mass oracle exhausted the desktop allowance: {work:?}");
+    result.unwrap()
 }
 
 fn exports(state: &mut AppState, dir: &Path, label: &str) {
@@ -84,21 +89,19 @@ fn exports(state: &mut AppState, dir: &Path, label: &str) {
         assert!(!output.bytes.is_empty());
         let path = dir.join(format!("{label}.{}", format.extension()));
         let tool = if format == Format::Step { "export_step" } else { "export_stl" };
-        let (out, work) = soliddraft_kernel_catallax::with_request_allowance(20_000_000, || {
-            call_checked(
-                &mut AppTools { state },
-                tool,
-                json!({"path": path}),
-                &Caller::Mcp { client: "canonical-exports".into() },
-            )
-        });
-        assert!(!out.is_error && !work.exhausted, "{tool}: {} {work:?}", out.content);
+        let out = call_checked(
+            &mut AppTools { state },
+            tool,
+            json!({"path": path}),
+            &Caller::Mcp { client: "canonical-exports".into() },
+        );
+        assert!(!out.is_error, "{tool}: {}", out.content);
         assert_eq!(std::fs::read(&path).unwrap(), output.bytes, "public export differs from the model export");
         if let Report::Step(report) = &output.report {
             let doc = state.doc.model();
             let body = doc.body().unwrap();
             let topology = doc.kernel().topology(body).unwrap();
-            let mass = doc.kernel().mass_properties(body).unwrap();
+            let mass = mass(state);
             let evidence = json!({"report":report,"body":{"volume":mass.volume,"area":mass.area,"faces":topology.faces.len(),"edges":topology.edges.len()}});
             std::fs::write(
                 dir.join(format!("{label}.step-report.json")),
@@ -157,7 +160,7 @@ fn exercise(index: usize) {
         eprintln!("{name} step {} {tool}", i + 1);
         let before = state.doc.model().part_json();
         let revision = state.doc.revision();
-        // Match MCP's per-kernel-call allowance; an export has its own whole-request check.
+        // Match MCP's per-call allowance; the scenario runner checks whole CLI exports.
         kernel.take_diagnostics().unwrap();
         let out = call_checked(
             &mut AppTools { state: &mut state },
@@ -186,7 +189,7 @@ fn exercise(index: usize) {
             continue;
         };
         assert_volume(
-            volume(&state),
+            mass(&state).volume,
             if matches!(label, "original" | "undo") { original_volume } else { edited_volume },
             label,
         );

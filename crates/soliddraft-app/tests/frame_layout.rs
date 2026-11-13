@@ -78,10 +78,15 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
                 let sketch = app.get_by_label("Sketch tab").rect();
                 ribbon::click_at(app, sketch.center());
                 app.run_steps(8);
-                let palette = Rect::from_min_max(pos2(0.0, theme::MENU_HEIGHT), pos2(250.0, 850.0));
+                let options = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar"))
+                    .expect("the options bar is laid out").outer_rect;
+                let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette"))
+                    .expect("the palette is laid out").outer_rect;
+                assert_eq!(options.top(), title.bottom(), "the options bar follows the title");
+                assert_eq!(palette.top(), options.bottom(), "the palette follows options without a duplicate tab row");
                 assert!(
-                    ribbon::control(app, "Start sketch", palette).rect.top() < theme::MENU_HEIGHT + 60.0,
-                    "the palette begins directly under the title bar"
+                    ribbon::control(app, "Start sketch", palette).rect.top() < palette.top() + 10.0,
+                    "Start sketch begins the palette"
                 );
                 ribbon::control(app, "Smart Dimension", palette);
                 assert_eq!(RibbonTab::ALL.map(|tab| tab.id()), ["solid", "sketch", "assembly", "inspect", "view"]);

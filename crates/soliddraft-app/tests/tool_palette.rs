@@ -13,7 +13,7 @@ use soliddraft_app::state::{RibbonTab, Tool};
 use soliddraft_app::theme::{self, Mode};
 
 fn palette(app: &App) -> Rect {
-    Rect::from_min_max(pos2(0.0, theme::MENU_HEIGHT), pos2(250.0, ribbon::window(app).bottom() - 32.0))
+    egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the palette is laid out").outer_rect
 }
 
 fn click(app: &mut App, label: &str) {

@@ -197,6 +197,12 @@ fn ridealong_edit_suite_exposes_all_lattice_cells() {
     app.render().unwrap().save(folder.join("ridealong-lattice-editor.png")).unwrap();
     button(&mut app, "OK (Enter)");
     app.run_steps(30);
+    let start = std::time::Instant::now();
+    while app.state().state.doc.features.last().unwrap().status == soliddraft_app::document::FeatureStatus::Pending {
+        assert!(start.elapsed().as_secs() < 60, "lattice proof did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.run_steps(1);
+    }
     let FeatureKind::Lattice(lattice) = &app.state().state.doc.features.last().unwrap().kind else { panic!("lattice") };
     assert_eq!(lattice.cell, Some(soliddraft_kernel_api::LatticeCell::Octet));
     assert_eq!(app.state().state.doc.features.last().unwrap().status, soliddraft_app::document::FeatureStatus::Ok);

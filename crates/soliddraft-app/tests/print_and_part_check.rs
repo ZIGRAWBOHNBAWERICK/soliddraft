@@ -111,9 +111,12 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
     tool(
         &mut app,
         "sketch",
-        json!({"plane":"top","offset":1000000.1,"shapes":[{"shape":"rectangle","center":[0,0,1000000.1],"width":6,"height":6}]}),
+        json!({"plane":"top","offset":99900.1,"shapes":[{"shape":"rectangle","center":[0,0,99900.1],"width":6,"height":6}]}),
     );
     tool(&mut app, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
+    let mut export_settings = app.state().state.doc.model().settings().clone();
+    export_settings.export.chord_height = 0.00001;
+    app.state_mut().state.doc.set_settings(export_settings).unwrap();
     let path = case.path("coarser.stl");
     std::fs::write(&path, b"previous file").unwrap();
     let settings = app.state().state.doc.model().settings().clone();

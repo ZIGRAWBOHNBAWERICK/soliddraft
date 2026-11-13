@@ -99,6 +99,7 @@ pub struct Document {
     /// The first feature below the rollback bar.
     pub(crate) rollback: Option<FeatureId>,
     pub(crate) next_id: u32,
+    pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
     pub(crate) materials: PartMaterials,
     /// Viewport quality, export accuracy and whether to save display data: kept in the
@@ -147,6 +148,7 @@ impl Document {
             datum_names: BTreeMap::new(),
             rollback: None,
             next_id: 1,
+            next_body: 1,
             materials: PartMaterials::default(),
             settings: Settings::default(),
             view: Visibility::default(),
@@ -233,6 +235,9 @@ impl Document {
     /// not have; suppressed and rolled-back features are fine. A field part writes only
     /// its labelled STL, or its mass stand-in when that is the format asked for.
     pub fn export(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
+        if self.live_bodies().len() > 1 {
+            return Err("Several-body export is coming soon. Combine the bodies before exporting.".into());
+        }
         if format == soliddraft_exchange::Format::StandIn {
             return self.export_stand_in(&FieldMassAccuracy::default());
         }
@@ -353,9 +358,10 @@ impl Document {
         self.features.iter().zip(&self.built).map(|(f, b)| (f.id, &b.status)).collect()
     }
 
-    /// The part body at the end of the tree (or at the rollback bar).
+    /// The single solid at the rollback bar. Several-body parts use `live_bodies`.
     pub fn body(&self) -> Option<BodyId> {
-        self.live_bodies().last().map(|(_, body)| *body)
+        let bodies = self.live_bodies();
+        (bodies.len() == 1).then(|| bodies[0].1)
     }
 
     /// The part body right after a feature.
@@ -381,7 +387,7 @@ impl Document {
 
     /// The next unused body identity.
     pub fn next_body(&self) -> u32 {
-        self.features.iter().map(|f| f.body).max().unwrap_or(0).saturating_add(1)
+        self.next_body
     }
 
     pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {

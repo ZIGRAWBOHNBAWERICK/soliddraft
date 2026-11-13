@@ -1231,6 +1231,7 @@ struct Shown {
     body: BodyId,
     params: TessellationParams,
     mesh: Arc<DisplayMesh>,
+    meshes: HashMap<BodyId, Arc<DisplayMesh>>,
     picks: Vec<PickEntry>,
     faces: Vec<NamedFace>,
     edges: Vec<NamedEdge>,
@@ -1711,14 +1712,21 @@ impl Document {
                 let Some(bounds) = answers.get(&app_id(feature.id)) else { return (model, display) };
                 (
                     model || bounds.model.is_some(),
-                    display || (bounds.display.is_some() && self.model.body_after(feature.id) == self.model.body()),
+                    display
+                        || (bounds.display.is_some()
+                            && self.model.body_after(feature.id).is_some_and(|body| {
+                                self.model.live_bodies().iter().any(|(_, current)| *current == body)
+                            })),
                 )
             },
         )
     }
 
     fn capture_display_bound(&mut self, body: BodyId) -> Result<(), String> {
-        if self.model.is_dirty() || self.model.body() != Some(body) || self.has_model_failure() {
+        if self.model.is_dirty()
+            || !self.model.live_bodies().iter().any(|(_, current)| *current == body)
+            || self.has_model_failure()
+        {
             return Ok(());
         }
         let Some(bound) = self.kernel().display_bound(body).map_err(|error| error.to_string())? else { return Ok(()) };
@@ -1747,7 +1755,7 @@ impl Document {
             mesh_version: self.mesh_version,
             display_ready: self.provisional.is_some()
                 || self.shown.is_some()
-                || (!self.model.is_dirty() && self.model.body().is_none()),
+                || (!self.model.is_dirty() && self.model.live_bodies().is_empty()),
             proved_revision: self.last_proved.as_ref().map(|proved| proved.revision),
             requested_edit: self.edit_request,
             displayed_edit: self.provisional.as_ref().map(|shown| shown.token.request),
@@ -1790,7 +1798,7 @@ impl Document {
             return;
         }
         if let Some(proved) = &mut self.last_proved
-            && proved.model.body() == self.model.body()
+            && proved.model.live_bodies() == self.model.live_bodies()
             && proved.model.features() == self.model.features()
             && proved.model.active_count() == self.model.active_count()
         {
@@ -2039,7 +2047,9 @@ impl Document {
             return Ok(());
         }
         if let Some(display) = &proof.display {
-            self.capture_display_bound(display.body)?;
+            for body in display.meshes.keys() {
+                self.capture_display_bound(*body)?;
+            }
         }
         self.retain_proved_revision();
         let depth = self.edit_depth.take();
@@ -2371,6 +2381,7 @@ impl Document {
             body,
             params: self.tess_params,
             mesh: self.meshes.get(&body)?.clone(),
+            meshes: self.meshes.clone(),
             picks: self.picks.clone(),
             faces: self.faces.clone(),
             edges: self.edges.clone(),
@@ -2382,8 +2393,7 @@ impl Document {
     /// revision stays the one it was drawn at.
     fn keep_shown(&mut self, shown: Shown, revision: u64) {
         self.recent.retain(|s| s.body != shown.body);
-        self.meshes.clear();
-        self.meshes.insert(shown.body, shown.mesh);
+        self.meshes = shown.meshes;
         self.shown = Some(shown.body);
         self.tess_params = shown.params;
         self.picks = shown.picks;
@@ -2471,6 +2481,9 @@ impl Document {
                 self.after_change();
             }
             let created = done.created.map(app_id);
+            if let Some(feature) = created.and_then(|id| self.feature(id)) {
+                self.active_body = feature.body_key;
+            }
             if !deferred
                 && let Some(id) = created
                 && let Some(FeatureStatus::Error(msg)) = self.feature(id).map(|f| f.status.clone())
@@ -2744,7 +2757,13 @@ impl Document {
     /// Mirrors the model and refreshes the display, keeping the selection by name.
     fn after_change(&mut self) {
         let bodies = self.model.live_bodies();
+        let authored = self.model.features().iter().any(|f| f.body == self.active_body);
+        let consumed = self.model.features().iter().any(|f| {
+            matches!(f.kind, model::FeatureKind::Combine { tool, .. } if tool == self.active_body)
+                && self.model.status(f.id) == Some(&model::FeatureStatus::Ok)
+        });
         if !bodies.iter().any(|(key, _)| *key == self.active_body)
+            && (!authored || consumed)
             && let Some((key, _)) = bodies.first()
         {
             self.active_body = *key;
@@ -2878,6 +2897,26 @@ impl Document {
     /// Shows a new body at the requested level. Unchanged bodies keep their display
     /// geometry and GPU buffers; undo and redo restore recent bodies' meshes and picks.
     fn refresh_display(&mut self) {
+        if (self.model.is_dirty() || self.has_model_failure() || self.proof_failure.is_some())
+            && let Some(proved) = &self.last_proved
+            && proved.model.live_bodies().len() > 1
+        {
+            match ready_display(&proved.model, soliddraft_tessellation::Level::Standard) {
+                Ok(Some(display)) => {
+                    self.tess_params = display.params;
+                    self.meshes = if self.headless { HashMap::new() } else { display.meshes };
+                    self.faces = display.faces;
+                    self.edges = display.edges;
+                    self.picks = display.picks;
+                    self.shown = self.display_body();
+                    self.apply_appearances();
+                    self.mesh_version += 1;
+                }
+                Ok(None) => {}
+                Err(message) => self.display_failure = Some(display_unavailable(message)),
+            }
+            return;
+        }
         if self.model.live_bodies().len() > 1 && !self.model.is_dirty() && !self.has_model_failure() {
             self.refresh_bodies();
             return;
@@ -2889,7 +2928,7 @@ impl Document {
             self.display_failure = Some(display_unavailable(message));
             return;
         }
-        if next.is_some() && next == self.shown && !self.meshes.is_empty() {
+        if next.is_some() && next == self.shown && self.meshes.len() == 1 {
             if self.shading.0 != *self.model.materials() || self.shading.1.as_ref() != self.model.active_configuration()
             {
                 self.apply_appearances();
@@ -2925,6 +2964,7 @@ impl Document {
                 body,
                 params: self.tess_params,
                 mesh,
+                meshes: self.meshes.clone(),
                 picks: std::mem::take(&mut self.picks),
                 faces: std::mem::take(&mut self.faces),
                 edges: std::mem::take(&mut self.edges),
@@ -2975,12 +3015,30 @@ impl Document {
 
     fn refresh_bodies(&mut self) {
         let bodies = self.model.live_bodies();
-        if bodies.len() == self.meshes.len() && bodies.iter().all(|(_, body)| self.meshes.contains_key(body)) {
-            self.apply_appearances();
+        for (_, body) in &bodies {
+            if let Err(message) = self.capture_display_bound(*body) {
+                self.display_failure = Some(display_unavailable(message));
+                return;
+            }
+        }
+        let params = bodies.last().and_then(|(_, body)| self.kernel().topology(*body).ok()).map(|topology| {
+            *soliddraft_tessellation::Levels::new(&self.model.settings().viewport, topology.bbox.diagonal())
+                .params(soliddraft_tessellation::Level::Standard)
+        });
+        if params == Some(self.tess_params)
+            && bodies.len() == self.meshes.len()
+            && bodies.iter().all(|(_, body)| self.meshes.contains_key(body))
+        {
+            if self.shading.0 != *self.model.materials() || self.shading.1.as_ref() != self.model.active_configuration()
+            {
+                self.apply_appearances();
+                self.mesh_version += 1;
+            }
             return;
         }
         match ready_display(&self.model, soliddraft_tessellation::Level::Standard) {
             Ok(Some(display)) => {
+                self.tess_params = display.params;
                 self.meshes = if self.headless { HashMap::new() } else { display.meshes };
                 self.faces = display.faces;
                 self.edges = display.edges;
@@ -2996,7 +3054,7 @@ impl Document {
 
     /// Starts the next additive feature in a separate body.
     pub fn new_body(&mut self) {
-        self.active_body = self.model.next_body();
+        self.active_body = if self.model.features().is_empty() { 0 } else { self.model.next_body() };
         self.selection = None;
     }
 
@@ -3008,6 +3066,9 @@ impl Document {
 
     /// Uses the selected entity's body for subsequent features.
     pub fn target_selection(&mut self, selection: Option<Selection>) {
+        if self.active_body != 0 && !self.model.features().iter().any(|f| f.body == self.active_body) {
+            return;
+        }
         let bodies = self.model.live_bodies();
         let key = match selection {
             Some(Selection::Face(face)) => {
@@ -3801,10 +3862,19 @@ impl Document {
             Selection::Body => {
                 self.display_body()?;
                 let end = self.rollback.unwrap_or(self.features.len()).min(self.features.len());
-                let built = self.features[..end].iter().filter(|f| f.body.is_some()).count();
+                let built =
+                    self.features[..end].iter().filter(|f| f.body_key == self.active_body && f.body.is_some()).count();
                 let details =
                     vec![("Built from".to_owned(), format!("{built} feature{}", if built == 1 { "" } else { "s" }))];
-                Some(EntityInfo { title: BODY_NAME.to_owned(), feature: None, details })
+                Some(EntityInfo {
+                    title: if self.active_body == 0 {
+                        BODY_NAME.to_owned()
+                    } else {
+                        format!("Body {}", self.active_body + 1)
+                    },
+                    feature: None,
+                    details,
+                })
             }
             Selection::Feature(id) => {
                 let f = self.feature(id)?;
@@ -4104,7 +4174,7 @@ pub(crate) fn ready_display(
     model: &model::Document,
     level: soliddraft_tessellation::Level,
 ) -> Result<Option<ReadyDisplay>, String> {
-    let Some(body) = model.body() else { return Ok(None) };
+    let Some((_, body)) = model.live_bodies().last().copied() else { return Ok(None) };
     let kernel = model.kernel();
     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
     let params =
@@ -4121,7 +4191,7 @@ pub(crate) fn ready_display(
             !matches!(
                 model.status(feature.id),
                 Some(model::FeatureStatus::Suppressed | model::FeatureStatus::RolledBack)
-            ) && model.body_after(feature.id).is_some()
+            ) && model.body_after(feature.id) == Some(body)
         })
         .map(|feature| app_id(feature.id))
         .unwrap_or(0);

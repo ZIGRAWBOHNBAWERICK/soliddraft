@@ -82,6 +82,7 @@ impl Document {
             datum_names: self.datum_names.clone(),
             rollback: self.rollback,
             next_id: self.next_id,
+            next_body: self.next_body,
             materials: self.materials.clone(),
             settings: self.settings.clone(),
             view: self.view.clone(),
@@ -278,6 +279,17 @@ impl Document {
                 profiles.push(self.built[index].version);
             }
         }
+        if let FeatureKind::Sketch(SketchFeature {
+            plane: SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. },
+            ..
+        }) = &f.kind
+        {
+            let body =
+                self.feature(face.feature).and_then(|feature| self.body_at(feature.body, self.built.len())).or(current);
+            if let Some(owner) = body.and_then(|body| self.built.iter().find(|b| b.owned == Some(body))) {
+                profiles.push(owner.version);
+            }
+        }
         if let FeatureKind::Combine { tool, .. } = f.kind {
             let end = self.index_of(f.id).unwrap_or(self.built.len());
             if let Some(body) = self.body_at(tool, end)
@@ -396,7 +408,11 @@ impl Document {
                     let r = RepairNeeded { slot: ReferenceSlot::SketchPlane, reason, message, candidates };
                     Err(Box::new(Built::pass(FeatureStatus::RepairNeeded(vec![r]), current)))
                 };
-                let Some(body) = current else {
+                let source_body = self
+                    .feature(face.feature)
+                    .and_then(|feature| self.body_at(feature.body, self.built.len()))
+                    .or(current);
+                let Some(body) = source_body else {
                     return repair(RepairReason::Missing, "there is no part body to sketch on".into(), vec![]);
                 };
                 // A sketch plane needs no mesh of the body before it unless this cannot answer.

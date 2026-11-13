@@ -212,6 +212,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 _ => (f.summary(), f.status.clone()),
             };
+            let sub = if state.doc.model().next_body() > 1 { format!("Body {} · {sub}", f.body_key + 1) } else { sub };
             items.push(RowItem {
                 id: f.id,
                 index: i,

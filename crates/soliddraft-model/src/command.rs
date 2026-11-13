@@ -729,6 +729,7 @@ impl Document {
         Self::check_order(&next)?;
         Self::check_field_last(&next)?;
         self.next_id = self.next_id.max(feature.id.0 + 1);
+        self.next_body = self.next_body.max(feature.body.saturating_add(1));
         self.features = next;
         self.touch(position);
         Ok(())
@@ -783,6 +784,7 @@ impl Document {
         if features.len() != self.features.len()
             || features.iter().zip(&self.features).any(|(a, b)| {
                 a.id != b.id
+                    || a.body != b.body
                     || a.name != b.name
                     || a.suppressed != b.suppressed
                     || a.via_assistant != b.via_assistant

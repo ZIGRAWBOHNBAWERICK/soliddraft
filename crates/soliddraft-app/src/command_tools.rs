@@ -2795,6 +2795,9 @@ fn selection_json(doc: &Document, sel: Selection) -> Value {
     if matches!(sel, Selection::Face(_) | Selection::Edge(_)) {
         mark_estimates(&mut v, topology.as_ref());
     }
+    if matches!(sel, Selection::Body) {
+        v["body_id"] = doc.active_body.into();
+    }
     v["name"] = info.title.into();
     v["kind"] = match sel {
         Selection::Body => "body",
@@ -2951,6 +2954,8 @@ impl CommandTools<'_> {
         json!({
             "part": doc.name,
             "units": "mm",
+            "bodies": doc.model().live_bodies().iter().map(|(key, _)| json!({"id":key,"name":if *key == 0 { crate::document::BODY_NAME.to_owned() } else { format!("Body {}", key + 1) }})).collect::<Vec<_>>(),
+            "active_body": doc.active_body,
             "values": crate::grid::tools::values(crate::measure::values(doc), doc.model().values().summary()),
             "configurations": doc.model().configuration_summary(),
             "edit_state": proof,
@@ -2961,6 +2966,7 @@ impl CommandTools<'_> {
                     let expressions = doc.model().values().expressions(feature);
                     if !expressions.is_empty() { v["expressions"] = json!(expressions); }
                 }
+                v["body_id"] = f.body_key.into();
                 v["id"] = f.id.into();
                 v["name"] = f.name.clone().into();
                 v["status"] = status_text(doc, f.id).into();
@@ -2998,6 +3004,7 @@ impl CommandTools<'_> {
         let id = feature_by_name(doc, name)?;
         let f = doc.feature(id).expect("found by name");
         let mut v = params_json(doc, &f.kind);
+        v["body_id"] = f.body_key.into();
         v["name"] = f.name.clone().into();
         v["status"] = status_text(doc, id).into();
         if let Some(record) = doc.model().import_record(soliddraft_model::FeatureId(id as u32)) {

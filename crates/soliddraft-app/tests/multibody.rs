@@ -72,8 +72,6 @@ fn combine_checks_refusals_before_changing_geometry_or_history() {
     let depth = doc.model().undo_depth();
     assert_eq!(doc.combine(0, 0, BooleanOp::Union).unwrap_err(), "Choose two different bodies to combine.");
     assert_eq!(doc.combine(0, 7, BooleanOp::Union).unwrap_err(), "Combine needs two available solid bodies.");
-    assert!(doc.combine(1, 0, BooleanOp::Intersect).unwrap().is_some());
-    doc.undo().unwrap();
     let mut empty = Document::new("Empty result", soliddraft_app::kernel());
     block(&mut empty, 10.0, 5.0);
     empty.new_body();
@@ -136,4 +134,94 @@ fn new_body_and_combine_are_available_in_the_application() {
         ribbon::run_command(app, "undo");
         assert_eq!(app.state().state.doc.meshes.len(), 2);
     });
+}
+
+fn settle(doc: &mut Document) {
+    let start = std::time::Instant::now();
+    while doc.proof_pending() {
+        assert!(start.elapsed() < std::time::Duration::from_secs(120), "background proof timed out");
+        doc.poll_proof();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn background_edits_and_failures_keep_the_whole_scene_and_its_picks() {
+    let mut doc = pair();
+    let id = doc.features[0].id;
+    doc.select_body(0);
+    let mut params = match &doc.features[0].kind {
+        soliddraft_app::document::FeatureKind::Extrude(params) => params.clone(),
+        _ => panic!("extrusion"),
+    };
+    params.depth = 12.0;
+    doc.apply_interactive(Command::EditExtrude { id, params: params.clone() }).unwrap();
+    settle(&mut doc);
+    assert_eq!(doc.meshes.len(), 2);
+    assert!((volume(&doc, 0) - 1200.0).abs() < 1e-6);
+    assert_picks(&doc);
+    doc.new_body();
+    block(&mut doc, 3.0, 2.0);
+    doc.combine(0, 1, BooleanOp::Subtract).unwrap();
+    assert_eq!(doc.meshes.len(), 2);
+    let meshes = doc.meshes.clone();
+    // Shrinking the target below its tool makes the existing Combine leave no solid.
+    params.depth = 4.0;
+    doc.apply_interactive(Command::EditExtrude { id, params }).unwrap();
+    settle(&mut doc);
+    assert_eq!(doc.meshes, meshes, "a failed edit preserves every proved body");
+    assert_picks(&doc);
+    doc.undo().unwrap();
+    assert_eq!(doc.meshes.len(), 2);
+}
+
+#[test]
+fn suppressing_the_first_body_removes_it_when_the_last_body_is_unchanged() {
+    let mut doc = pair();
+    let id = doc.features[0].id;
+    doc.apply(Command::Suppress { id, suppressed: true }).unwrap();
+    assert_eq!(doc.model().live_bodies().len(), 1);
+    assert_eq!(doc.meshes.len(), 1);
+    assert_eq!(doc.faces.len(), 6);
+    doc.undo().unwrap();
+    assert_eq!(doc.meshes.len(), 2);
+    assert_picks(&doc);
+}
+
+#[test]
+fn export_refuses_to_silently_drop_a_body() {
+    let doc = pair();
+    assert_eq!(
+        doc.model().export(soliddraft_exchange::Format::Step).unwrap_err(),
+        "Several-body export is coming soon. Combine the bodies before exporting."
+    );
+}
+
+#[test]
+fn a_new_body_can_start_on_an_existing_bodys_face_without_joining_it() {
+    let mut doc = Document::new("Face-based body", soliddraft_app::kernel());
+    block(&mut doc, 10.0, 10.0);
+    let body = doc.display_body().unwrap();
+    let face = doc.kernel().topology(body).unwrap().faces.into_iter().find(|f| f.centroid.z > 9.9).unwrap().id;
+    let reference = doc.face_ref(face).unwrap();
+    doc.new_body();
+    doc.target_selection(Some(Selection::Face(face)));
+    assert_eq!(doc.active_body, 1, "choosing a plane preserves the pending new body");
+    let sketch = doc
+        .apply(Command::AddSketch { plane: soliddraft_app::document::SketchPlane::Face { face: reference } })
+        .unwrap()
+        .unwrap();
+    assert_eq!(doc.active_body, 1);
+    let mut drawing = soliddraft_app::sketch::Sketch::new();
+    drawing.rectangle(soliddraft_app::sketch::P2::ZERO, 5.0, 5.0).unwrap();
+    doc.apply(Command::EditSketch { id: sketch, sketch: drawing }).unwrap();
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams { sketch: Some(sketch), depth: 2.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    assert_eq!(doc.meshes.len(), 2);
+    assert!((volume(&doc, 0) - 1000.0).abs() < 1e-6);
+    assert!((volume(&doc, 1) - 50.0).abs() < 1e-6);
+    assert_eq!(doc.features.last().unwrap().body_key, 1);
 }

@@ -73,6 +73,8 @@ fn every_combine_operation_consumes_only_its_tool_and_survives_history_and_files
         assert_eq!(doc.live_bodies(), before);
         doc.redo().unwrap();
         assert!((volume(&doc, 0) - expected).abs() < 1e-6);
+        assert_eq!(doc.truth()["format"], "soliddraft-part/3");
+        assert_eq!(doc.manifest().format, "soliddraft-part/3");
         let hash = doc.geometry_hash();
         let back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
         assert_eq!(back.geometry_hash(), hash);
@@ -97,7 +99,7 @@ fn old_single_body_part_json_and_archive_keep_their_truth_and_shape() {
         "format":"soliddraft-part/2", "name":"Legacy part", "units":"mm", "next_feature":2,
         "features":[{"id":1,"name":"Boss-Extrude1","kind":{"type":"extrude",
             "profile":{"from":"shape","datum":"top","shape":{"type":"rectangle","width":10.0,"height":10.0}},
-            "operation":"boss","end":{"type":"blind","depth":10.0},"reverse":false}}]
+            "operation":"boss","end":{"type":"blind","depth":10.0}}}]
     });
     let doc = Document::from_part_json(&legacy.to_string(), Arc::new(CatallaxKernel::new())).unwrap();
     assert_eq!(doc.features()[0].body, 0);
@@ -108,4 +110,16 @@ fn old_single_body_part_json_and_archive_keep_their_truth_and_shape() {
     assert_eq!(back.semantic_hash(), hash);
     assert_eq!(back.part_json(), doc.part_json());
     assert_eq!(back.features()[0].body, 0);
+}
+
+#[test]
+fn deleted_and_undone_body_ids_are_not_reused_after_reopening() {
+    let (mut doc, _, tool) = pair();
+    doc.execute(Command::DeleteFeature { id: tool }).unwrap();
+    assert_eq!(doc.next_body(), 2);
+    let back = Document::from_bytes(&doc.to_bytes().unwrap(), Arc::new(CatallaxKernel::new())).unwrap();
+    assert_eq!(back.next_body(), 2);
+    let (mut doc, _, _) = pair();
+    doc.undo().unwrap();
+    assert_eq!(doc.next_body(), 2);
 }

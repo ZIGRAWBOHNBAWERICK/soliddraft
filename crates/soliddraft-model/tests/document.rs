@@ -341,7 +341,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
     assert_eq!(back.part_json(), d.part_json());
     assert_eq!(back.to_bytes().unwrap(), bytes);
 
-    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/3");
+    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/4");
     assert!(matches!(Document::from_part_json(&newer, kernel.clone()), Err(FileError::Format { .. })));
     // A truth without a format tag says so, rather than naming a blank one.
     let Err(untagged) = Document::from_part_json("[1, 2]", kernel.clone()) else { panic!("a list is not a part") };
@@ -351,7 +351,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
         Document::from_part_json(&newer, kernel.clone())
             .unwrap_err()
             .to_string()
-            .starts_with("the file is soliddraft-part/3,")
+            .starts_with("the file is soliddraft-part/4,")
     );
     let broken = d.part_json().replace("\"next_feature\": 4", "\"next_feature\": 2");
     assert!(matches!(Document::from_part_json(&broken, kernel.clone()), Err(FileError::Invalid(_))), "{broken}");

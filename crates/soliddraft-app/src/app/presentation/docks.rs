@@ -180,9 +180,10 @@ impl TabViewer for Panels<'_> {
                 if st.frame_layout == crate::settings::FrameLayout::EditSuite
                     && let Some(response) = &events.context_response
                 {
-                    let selection = pick_filter.selection(
-                        events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p)),
-                    );
+                    let picked =
+                        events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p));
+                    st.doc.target_selection(picked);
+                    let selection = pick_filter.selection(picked);
                     let target = if let Some(session) = st.sketch.as_mut() {
                         if let Some(pos) = events.context_position {
                             let picked =

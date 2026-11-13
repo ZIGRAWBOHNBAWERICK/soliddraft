@@ -12,7 +12,7 @@ use soliddraft_app::document::{PlaneKind, Reference, Selection};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_app::state::{EditorParams, Tool};
 use soliddraft_app::theme::{self, Mode};
-use soliddraft_app::viewport::PickFilter;
+use soliddraft_app::viewport::{PickFilter, render::DisplayMode};
 use ux_tools::{Case, Look, STANDARD, launch, settle};
 
 fn bar(app: &App) -> Rect {
@@ -61,7 +61,10 @@ fn empty_selection_has_pick_filters_and_views_with_display_on_navigation() {
         assert!(app.state().state.viewport.rect.contains_rect(navigation_display));
         ribbon::click_at(app, navigation_display.center());
         settle(app);
-        assert_ne!(app.state().state.viewport.display, display, "navigation keeps the working display control");
+        assert_eq!(app.state().state.viewport.display, display, "opening the menu keeps the display mode");
+        app.get_by_label("Wireframe").click();
+        settle(app);
+        assert_eq!(app.state().state.viewport.display, DisplayMode::Wireframe, "navigation applies the chosen mode");
         click(app, "Front");
         let front = ribbon::fingerprint(app).camera;
         click(app, "Top");

@@ -201,6 +201,15 @@ pub fn pick_at(app: &mut App, point: Pos2) {
 
 /// Clicks the one button of that name in a region.
 pub fn click_button(app: &mut App, label: &str, within: Rect) {
+    if app.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none() {
+        if label == "File" && app.query_by_label("Menu").is_some() {
+            app.get_by_label("Menu").click();
+            app.run_steps(8);
+        } else if app.state().state.doc.features.iter().any(|f| f.name == label) && !app.state().state.tree_shown() {
+            app.key_press(Key::F9);
+            app.run_steps(8);
+        }
+    }
     let rect = button_rect(app, label, within);
     click_at(app, rect.center());
 }

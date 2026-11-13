@@ -524,20 +524,9 @@ fn assert_valid_drawn(app: &App, what: &str) {
     assert_eq!(doc.error_count(), 0, "{what}: no errors");
 }
 
-/// Text the last frame painted in the side panel, left of the viewport.
+/// Error text painted by the active form or its details sheet.
 fn panel_text(app: &App) -> Vec<ribbon::Painted> {
-    let left = viewport(app).left();
-    ribbon::painted(app).into_iter().filter(|p| p.rect.right() <= left + ribbon::TOLERANCE).collect()
-}
-
-fn panel_rect(app: &App, exact: &str) -> Rect {
-    panel_text(app)
-        .into_iter()
-        .find(|p| p.text == exact)
-        .unwrap_or_else(|| {
-            panic!("the panel paints {exact:?}: {:?}", panel_text(app).iter().map(|p| &p.text).collect::<Vec<_>>())
-        })
-        .rect
+    ribbon::painted(app).into_iter().filter(|p| p.color == soliddraft_app::theme::error()).collect()
 }
 
 /// A message painted in the panel between two heights: beside the control it is about.
@@ -553,19 +542,14 @@ fn assert_painted_between(case: &Case, app: &App, message: &str, top: f32, botto
     );
 }
 
-/// The band of the panel that holds the picks: from its caption to the parameters.
+/// Form feedback appears below the options bar.
 fn pick_band(app: &App) -> (f32, f32) {
-    (panel_rect(app, "Items to round").bottom(), panel_rect(app, "Fillet parameters").top())
+    let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+    (bar.bottom(), viewport(app).bottom())
 }
 
-/// The band below the Radius field, down to the panel's closing hint.
 fn radius_band(app: &App) -> (f32, f32) {
-    let field = app.get_by_label("Radius value").rect();
-    let hint = panel_text(app)
-        .into_iter()
-        .find(|p| p.text.starts_with("A face adds"))
-        .map_or(viewport(app).bottom(), |p| p.rect.top());
-    (field.top(), hint)
+    pick_band(app)
 }
 
 /// The messages painted in a band of the panel, leaving out a field's own text.

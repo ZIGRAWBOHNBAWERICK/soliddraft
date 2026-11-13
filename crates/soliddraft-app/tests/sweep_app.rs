@@ -110,6 +110,8 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
     assert!(matches!(harness.state().state.doc.features[1].kind, FeatureKind::Sweep(_)));
     harness.key_press(egui::Key::Z);
     harness.run_steps(4);
+    harness.key_press(egui::Key::F9);
+    harness.run_steps(8);
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "Sweep1").next().unwrap().click();
     harness.run_steps(4);
     harness.get_by_label("Edit feature").click();
@@ -560,6 +562,7 @@ fn spline_controls_build_through_the_registry_in_edit_suite() {
         ribbon::click_at(&mut app, rect.center());
         app.run_steps(6);
 
+        ribbon::open_options(&mut app);
         app.get_by_label("Use spline path").scroll_to_me();
         app.run_steps(24);
         app.get_by_label("Use spline path").click();

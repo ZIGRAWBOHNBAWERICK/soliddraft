@@ -260,6 +260,11 @@ fn click_row(harness: &mut App<'_>, name: &str) {
 
 /// Clicks the first button with this label; ribbon items come before panel buttons.
 fn click_button(harness: &mut App<'_>, label: &str) {
+    if label == "Edit feature" {
+        harness.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
+        harness.run_steps(8);
+        return;
+    }
     let label = match label {
         "Sketch" if !harness.state().state.in_sketch() => "Start sketch",
         "Exit" if harness.state().state.in_sketch() => "Close sketch",

@@ -115,22 +115,37 @@ fn open_options(harness: &mut App<'_>) {
 }
 
 fn click_button(harness: &mut App<'_>, label: &str) {
+    if label == "Edit feature" {
+        harness.state_mut().state.run_command(soliddraft_app::commands::get("edit_feature").unwrap());
+        harness.run_steps(8);
+        return;
+    }
     if harness.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none()
         && (harness.state().state.drawing.is_active() || harness.state().state.drawing.new.is_some())
     {
         open_options(harness);
     }
-    harness
+    let button = harness
         .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
         .next()
         .unwrap_or_else(|| panic!("no button labelled {label}"))
-        .click();
+        .rect();
+    let palette = egui::PanelState::load(&harness.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
+    if palette.contains_rect(button) && harness.query_by_label("Close options").is_some() {
+        harness.get_by_label("Close options").click();
+        harness.run_steps(8);
+    }
+    harness.get_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap().click();
     harness.run_steps(4);
 }
 
 /// Clicks a feature row in the tree. Ribbon buttons come first in the tree of nodes and
 /// a feature may share its name with one ("Slot"), so the row is the last match.
 fn click_row(harness: &mut App<'_>, name: &str) {
+    if !harness.state().state.tree_shown() {
+        harness.key_press(Key::F9);
+        harness.run_steps(8);
+    }
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, name).last().expect("a tree row").scroll_to_me();
     harness.run_steps(3);
     harness.get_all_by_role_and_label(egui::accesskit::Role::Button, name).last().expect("a tree row").click();

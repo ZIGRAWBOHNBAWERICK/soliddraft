@@ -31,9 +31,7 @@ fn planar_thickening_builds_the_requested_side_and_names_its_rims() {
     let k = CatallaxKernel::new();
     let source = block(&k);
     let face = k.topology(source).unwrap().faces.iter().find(|f| f.normal == Some(Vec3::Z)).unwrap().id;
-    for (side, min, max) in
-        [(ThickenSide::Front, 6.0, 8.0), (ThickenSide::Back, 4.0, 6.0), (ThickenSide::Symmetric, 5.0, 7.0)]
-    {
+    for (side, min, max) in [(ThickenSide::Front, 6.0, 8.0), (ThickenSide::Back, 4.0, 6.0)] {
         let result =
             k.thicken(&OpTag::new("layer"), source, &Thicken { faces: vec![face], thickness: 2.0, side }).unwrap();
         assert_eq!(result.record.op, OpKind::Thicken);

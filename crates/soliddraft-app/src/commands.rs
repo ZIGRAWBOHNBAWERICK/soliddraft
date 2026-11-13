@@ -1922,7 +1922,7 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::StartThicken)
             .when(|s| !s.in_sketch() && has_body(s) && field_open(s))
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Thicken(_))))
-            .agents(Agents::Verb, "Choose faces, thickness and front, back or symmetric side.", tools::thicken_params)
+            .agents(Agents::Verb, "Choose faces, thickness and front or back side.", tools::thicken_params)
             .undo(Undo::Step),
         cmd("edit_offset", "Edit offset", Icon::Shell, "Change an offset distance")
             .agents(Agents::Verb, "Everything after it rebuilds.", tools::edit_offset_params).undo(Undo::Step),

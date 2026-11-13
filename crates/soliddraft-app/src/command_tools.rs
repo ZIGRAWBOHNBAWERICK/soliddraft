@@ -868,7 +868,7 @@ pub fn thicken_params() -> Vec<(&'static str, Value)> {
     vec![
         ("faces", non_empty_array(string("Face name"), "Selected faces")),
         ("thickness", number("Thickness in mm, greater than zero")),
-        ("side", string("front, back or symmetric")),
+        ("side", string("front or back")),
     ]
 }
 pub fn edit_thicken_params() -> Vec<(&'static str, Value)> {

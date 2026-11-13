@@ -1045,6 +1045,9 @@ impl Kernel for CatallaxKernel {
         })
         .map_err(|error| match error {
             KernelError::Unavailable(_) => distance::refusal(OpKind::Offset, ""),
+            KernelError::Unsupported(message) if message == NOTHING_LEFT => KernelError::InvalidInput(
+                "Offset at this distance would remove the whole body. Use a smaller inward distance".into(),
+            ),
             other => other,
         })
     }

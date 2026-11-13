@@ -372,7 +372,7 @@
       ],
       "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "A planar top face of a 10 x 8 x 6 mm block, front and symmetric thickness; empty selection refused. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
+      "supported_limits": "A planar top face of a 10 x 8 x 6 mm block, front and back thickness; empty selection refused. Exact volume within 1e-6 mm\u00b3. No work allowance increase.",
       "evidence": "Build, edit, undo, redo, refusal preserving the part, save, fresh-process reopen and STEP export; result.json, command.json and saved part."
     },
     {

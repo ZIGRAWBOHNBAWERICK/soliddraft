@@ -161,7 +161,15 @@ impl Ids {
             .flat_map(|face| {
                 let mut roles: Vec<_> = self.origins[face]
                     .iter()
-                    .filter(|origin| origin.step.as_str() == step)
+                    .filter(|origin| {
+                        origin.step.as_str() == step
+                            || (op == OpKind::Pattern
+                                && origin
+                                    .step
+                                    .as_str()
+                                    .strip_prefix(step)
+                                    .is_some_and(|suffix| suffix.starts_with("_copy")))
+                    })
                     .filter_map(|origin| self.named.iter().find(|(source, _)| source == origin))
                     .map(|(_, origin)| origin.role.clone())
                     .collect();

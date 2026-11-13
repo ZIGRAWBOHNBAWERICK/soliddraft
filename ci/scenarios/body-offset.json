@@ -94,6 +94,21 @@
       ]
     },
     {
+      "tool": "edit_offset",
+      "arguments": {
+        "feature": "Offset1",
+        "distance": -10
+      },
+      "refused": "remove the whole body",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 315,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    {
       "tool": "save",
       "arguments": {
         "path": "{bundle}/body-offset.dwprt"

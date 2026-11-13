@@ -1140,14 +1140,9 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                             .selected_text(match s.side {
                                 ThickenSide::Front => "Front",
                                 ThickenSide::Back => "Back",
-                                ThickenSide::Symmetric => "Symmetric",
                             })
                             .show_ui(ui, |ui| {
-                                for (side, name) in [
-                                    (ThickenSide::Front, "Front"),
-                                    (ThickenSide::Back, "Back"),
-                                    (ThickenSide::Symmetric, "Symmetric"),
-                                ] {
+                                for (side, name) in [(ThickenSide::Front, "Front"), (ThickenSide::Back, "Back")] {
                                     ui.selectable_value(&mut s.side, side, name);
                                 }
                             });

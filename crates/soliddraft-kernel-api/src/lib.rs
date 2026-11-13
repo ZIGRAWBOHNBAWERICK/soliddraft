@@ -230,8 +230,6 @@ pub enum ThickenSide {
     Front,
     /// Against the outward face normals.
     Back,
-    /// Half the thickness on each side.
-    Symmetric,
 }
 
 /// A solid made from selected faces at a constant thickness.

@@ -51,7 +51,7 @@
       "arguments": {
         "feature": "Thicken1",
         "thickness": 1,
-        "side": "symmetric"
+        "side": "back"
       },
       "checks": [
         {

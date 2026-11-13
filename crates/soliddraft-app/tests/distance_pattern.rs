@@ -84,15 +84,18 @@ fn thicken_sides_and_persistent_rims_survive_edit_and_reopen() {
         t.faces.iter().map(|f| d.any_face_ref(f.id).expect("every thickened face has a name")).collect::<Vec<_>>()
     };
     assert!(references.iter().any(|f| f.generator == soliddraft_model::Generator::ThickenRim));
-    accept(&mut s, "edit_thicken", json!({"feature":"Thicken1","thickness":1,"side":"symmetric"}));
+    accept(&mut s, "edit_thicken", json!({"feature":"Thicken1","thickness":1,"side":"front"}));
     volume(&s, 80.0);
     let bounds = s.doc.kernel().topology(s.doc.display_body().unwrap()).unwrap().bbox;
-    assert_eq!((bounds.min.z, bounds.max.z), (5.5, 6.5));
+    assert_eq!((bounds.min.z, bounds.max.z), (6.0, 7.0));
     reopen(&mut s, "thicken");
     volume(&s, 80.0);
     for r in references {
         assert!(s.doc.model().resolve_face(&r, s.doc.display_body().unwrap()).is_ok(), "{}", r.label);
     }
+    accept(&mut s, "edit_thicken", json!({"feature":"Thicken1","thickness":1,"side":"back"}));
+    let bounds = s.doc.kernel().topology(s.doc.display_body().unwrap()).unwrap().bbox;
+    assert_eq!((bounds.min.z, bounds.max.z), (5.0, 6.0));
     let body = s.doc.display_body();
     let undo = s.doc.undo_depth();
     for args in
@@ -245,12 +248,12 @@ fn thicken_collects_a_viewport_face_and_pattern_picker_repeats_a_cut() {
         field(app, "Thickness value", "1");
         app.get_by_label("Front").click();
         app.run_steps(2);
-        app.get_by_label("Symmetric").click();
+        app.get_by_label("Back").click();
         app.run_steps(4);
         app.get_by_label("OK (Enter)").click();
         app.run_steps(10);
         volume(&app.state().state, 80.0);
-        case.frame(app, "thicken-symmetric");
+        case.frame(app, "thicken-back");
     });
     drop(app);
     let mut s = blank(20.0, 20.0, 2.0);

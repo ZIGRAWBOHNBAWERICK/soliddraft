@@ -73,6 +73,19 @@ fn incompatible_holes_report_the_typed_refusal_in_plain_words() {
     }
 }
 
+fn log_display_work(k: &CatallaxKernel, request: &str) {
+    let evidence = k.take_diagnostics().unwrap();
+    for call in evidence["calls"].as_array().unwrap() {
+        for operation in call["operation_log"]["operations"].as_array().unwrap() {
+            let stage = serde_json::json!({
+                "request": request, "call": call["operation"], "operation": operation["operation"],
+                "work": operation["work"], "status": operation["status"], "refusal": operation["refusal"],
+            });
+            eprintln!("three-section Smooth stage: {}", serde_json::to_string(&stage).unwrap());
+        }
+    }
+}
+
 #[test]
 fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plainly() {
     let k = CatallaxKernel::with_diagnostics(20_000_000);
@@ -153,14 +166,24 @@ fn three_section_smooth_display_fits_the_application_allowance() {
             .body
         })
         .collect();
+    let params = TessellationParams { chord_height: 0.01, ..Default::default() };
+    let mut built = None;
     let (answer, work) = with_request_allowance(APP_REQUEST_WORK, || -> KernelResult<_> {
         let body = k.loft(&OpTag::new("smooth"), &profiles, LoftShape::Smooth)?;
-        let mesh = k.tessellate(body.body, &TessellationParams { chord_height: 0.01, ..Default::default() })?;
+        built = Some(body.body);
+        let mesh = k.tessellate(body.body, &params)?;
         Ok((body, mesh))
     });
     eprintln!("three-section Smooth display: {work:?}; refusal: {:?}", answer.as_ref().err());
-    let evidence = k.take_diagnostics().unwrap();
-    eprintln!("three-section Smooth operations: {}", evidence["calls"]);
+    log_display_work(&k, "build-and-display");
+    if work.exhausted
+        && let Some(body) = built
+    {
+        // Attribute a refused request without spending its body-build work again.
+        let (single, single_work) = with_request_allowance(APP_REQUEST_WORK, || k.tessellate(body, &params));
+        eprintln!("three-section Smooth tessellation alone: {single_work:?}; refusal: {:?}", single.as_ref().err());
+        log_display_work(&k, "display-alone");
+    }
     assert!(!work.exhausted, "{work:?}; {:?}", answer.as_ref().err());
     let (body, mesh) = answer.unwrap();
     assert!(!mesh.unproved);

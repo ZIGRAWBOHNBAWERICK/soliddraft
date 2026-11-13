@@ -1412,7 +1412,7 @@ impl SolidDraftApp {
                 });
                 let Some(path) = path else { return };
                 let exported = self.state.export_part(format);
-                match exported.and_then(|out| crate::platform::write_file(&path, &out.bytes).map(|()| out.report)) {
+                match exported.and_then(|out| out.write_with(&path, crate::platform::write_file).map(|()| out.report)) {
                     Ok(report) => {
                         let kind = match &report {
                             soliddraft_exchange::Report::Step(r) if !r.within_tolerance => NoteKind::Error,

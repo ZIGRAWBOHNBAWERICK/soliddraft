@@ -28,6 +28,8 @@ pub struct Rules {
     pub refuse_display_above: Option<f64>,
     /// Pair proofs fail, as an incomplete bound would.
     pub refuse_pairs: bool,
+    /// Refuses the next background proof reservation before any feature builds.
+    pub refuse_proof_reservation: bool,
     /// Delays the next drawing view to exercise native request handling.
     pub drawing_delay: std::time::Duration,
 }
@@ -117,6 +119,9 @@ impl Kernel for Gated {
         self.inner.construction_edit(body, edits, params)
     }
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn soliddraft_kernel_api::ProofWork>> {
+        if self.rules.lock().unwrap().refuse_proof_reservation {
+            return Err(KernelError::InvalidInput("This edit could not start its proof. Try the edit again".into()));
+        }
         self.inner.reserve_proof_work()
     }
     fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {

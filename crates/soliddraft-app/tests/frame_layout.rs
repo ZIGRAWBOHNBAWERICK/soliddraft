@@ -110,3 +110,129 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
         }
     }
 }
+
+fn suite_palette(app: &ribbon::App) -> Rect {
+    Rect::from_min_max(pos2(0.0, theme::MENU_HEIGHT), pos2(250.0, 850.0))
+}
+
+fn click_suite(app: &mut ribbon::App, label: &str) {
+    let control = ribbon::control(app, label, suite_palette(app));
+    assert!(control.enabled, "{label} is enabled");
+    ribbon::click_at(app, control.rect.center());
+    app.run_steps(8);
+}
+
+#[test]
+fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
+    use soliddraft_app::assembly::{AssemblyAction, Workspace};
+    use soliddraft_app::state::AppAction;
+    use soliddraft_app::viewport::render::DisplayMode;
+    let case = ribbon::case("assembly-workspaces");
+    let mut app = ribbon::app(ribbon::plate());
+    ribbon::until(&mut app, "the plate proof", |app| !app.state().state.doc.proof_pending());
+    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.run_steps(8);
+    app.state_mut().state.push(AppAction::Assembly(AssemblyAction::New));
+    app.run_steps(12);
+    case.run(&mut app, |app| {
+        assert!(app.state().state.assembly.is_active());
+        assert!(app.state().state.tree_shown(), "assembly tree starts open");
+        assert!(!ribbon::painted(app).iter().any(|text| text.text == "History"), "the part timeline is absent");
+        assert!(app.query_all_by_label("Properties").next().is_none(), "assembly editors live on the options bar");
+        assert_eq!(
+            app.state().state.workspaces().iter().map(|tab| tab.id()).collect::<Vec<_>>(),
+            ["assembly", "inspect", "view"]
+        );
+        for absent in ["Solid tab", "Sketch tab"] {
+            assert!(app.query_all_by_label(absent).next().is_none());
+        }
+        click_suite(app, "Mate");
+        assert!(app.state().state.assembly.mate.open);
+        assert!(app.query_all_by_label("Mate value").next().is_some(), "the Mate fields are on the bar");
+        let confirm = app.get_by_label("OK").rect();
+        ribbon::click_at(app, confirm.center());
+        app.run_steps(8);
+        assert!(
+            app.state().state.assembly.mate.error.is_some(),
+            "Mate validates missing picks through the existing action"
+        );
+        let inspect = app.get_by_label("Inspect tab").rect();
+        ribbon::click_at(app, inspect.center());
+        app.run_steps(8);
+        click_suite(app, "Interference");
+        assert!(app.state().state.assembly.interference.open);
+        let part_camera = app.state().state.viewport.camera.direction();
+        let view = app.get_by_label("View tab").rect();
+        ribbon::click_at(app, view.center());
+        app.run_steps(8);
+        click_suite(app, "Graphite");
+        assert_eq!(app.state().state.active_viewport().scene, Some(soliddraft_app::viewport::scenes::Scene::Graphite));
+        assert_eq!(app.state().state.viewport.scene, Some(soliddraft_app::viewport::scenes::Scene::Graphite));
+        click_suite(app, "Front");
+        assert_eq!(app.state().state.assembly.session.as_ref().unwrap().viewport.camera.view_name, "Front");
+        assert_eq!(app.state().state.viewport.camera.direction(), part_camera);
+        click_suite(app, "Wireframe");
+        assert_eq!(app.state().state.assembly.session.as_ref().unwrap().viewport.display, DisplayMode::Wireframe);
+        assert_ne!(app.state().state.viewport.display, DisplayMode::Wireframe);
+        assert_eq!(app.state().state.assembly.workspace, Workspace::View);
+        case.frame(app, "assembly-view");
+        app.state_mut().state.push(AppAction::Assembly(AssemblyAction::ShowPart));
+        app.run_steps(8);
+        assert_eq!(app.state().state.workspaces().len(), 5);
+        app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Show));
+        app.run_steps(8);
+        assert!(ribbon::control(app, "View tab", ribbon::window(app)).selected);
+    });
+}
+
+#[test]
+fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
+    use soliddraft_app::drawing::DrawingAction;
+    use soliddraft_app::state::AppAction;
+    let case = ribbon::case("drawing-workspaces");
+    let mut app = ribbon::app(ribbon::plate());
+    ribbon::until(&mut app, "the plate proof", |app| !app.state().state.doc.proof_pending());
+    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    app.state_mut().state.push(AppAction::Drawing(DrawingAction::MakeDrawing));
+    app.run_steps(8);
+    app.state_mut().state.push(AppAction::Drawing(DrawingAction::CreateDrawing));
+    app.run_steps(16);
+    case.run(&mut app, |app| {
+        assert!(app.state().state.drawing.is_active());
+        assert!(app.state().state.tree_shown(), "drawing tree starts open");
+        assert!(!ribbon::painted(app).iter().any(|text| text.text == "History"), "the part timeline is absent");
+        assert!(app.query_all_by_label("Properties").next().is_none(), "drawing editors live on the options bar");
+        assert_eq!(
+            app.state().state.workspaces().iter().map(|tab| tab.id()).collect::<Vec<_>>(),
+            ["views", "annotate", "sheet", "view"]
+        );
+        assert!(app.query_all_by_label("Assistant tab").next().is_none());
+        for (workspace, command) in
+            [("Views", "Front"), ("Annotate", "Smart dimension"), ("Sheet", "Add sheet"), ("View", "Fit")]
+        {
+            let tab = app.get_by_label(&format!("{workspace} tab")).rect();
+            ribbon::click_at(app, tab.center());
+            app.run_steps(8);
+            ribbon::control(app, command, suite_palette(app));
+            assert!(!ribbon::painted_in(app, suite_palette(app)).iter().any(|text| text.text == "Assistant"));
+        }
+        let sheet = app.get_by_label("Sheet tab").rect();
+        ribbon::click_at(app, sheet.center());
+        app.run_steps(8);
+        let before = app.state().state.drawing.session.as_ref().unwrap().doc.drawing.sheets.len();
+        click_suite(app, "Add sheet");
+        assert_eq!(app.state().state.drawing.session.as_ref().unwrap().doc.drawing.sheets.len(), before + 1);
+        for id in ["drawing_check_sheet", "drawing_propose_dimensions", "drawing_find_issues", "drawing_explain"] {
+            let command = soliddraft_app::commands::get(id).unwrap();
+            assert!(command.is_enabled(&app.state().state));
+            ribbon::type_command(app, command.label);
+            app.run_steps(8);
+            assert!(app.state().state.command_line.session_open);
+            assert!(
+                app.state().state.chat.messages.iter().any(|message| message.role == soliddraft_app::state::Role::User)
+            );
+            app.state_mut().state.command_line.close_session();
+        }
+        case.frame(app, "drawing-sheet");
+    });
+}

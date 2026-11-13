@@ -71,9 +71,25 @@ pub enum AssemblyAction {
     Interference(crate::interference::InterferenceAction),
 }
 
+/// The workspaces of an assembly document in Edit Suite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Workspace {
+    #[default]
+    Assembly,
+    Inspect,
+    View,
+}
+
+impl Workspace {
+    pub const ALL: [Self; 3] = [Self::Assembly, Self::Inspect, Self::View];
+}
+
 /// The open assembly, one being opened, and whether the assembly is the active document.
 #[derive(Default)]
 pub struct AssemblyState {
+    /// A per-document choice; the Edit Suite tree starts open.
+    pub tree_hidden: bool,
+    pub workspace: Workspace,
     pub session: Option<AssemblySession>,
     /// An assembly file whose structure is being read on another thread.
     pub opening: Option<(PathBuf, Opening)>,
@@ -458,7 +474,12 @@ pub fn replace(state: &mut AppState, doc: AssemblyDocument, scene: Scene) {
 
 /// Puts a session in place of the open assembly. A Form subassembly panel belongs to the
 /// assembly it was opened on, so it closes.
-fn install(state: &mut AppState, session: AssemblySession) {
+fn install(state: &mut AppState, mut session: AssemblySession) {
+    state.assembly.workspace = Workspace::Assembly;
+    state.assembly.tree_hidden = false;
+    if state.frame_layout == crate::settings::FrameLayout::EditSuite {
+        session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
+    }
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;

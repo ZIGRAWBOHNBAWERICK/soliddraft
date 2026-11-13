@@ -1037,6 +1037,8 @@ pub struct AppState {
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
+    pub form_bar: crate::form_bar::State,
+    pub options_details: bool,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1107,6 +1109,98 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn tree_shown(&self) -> bool {
+        if self.frame_layout == crate::settings::FrameLayout::Classic {
+            return self.layout.tree.shown;
+        }
+        if self.assembly.is_active() {
+            !self.assembly.tree_hidden
+        } else if self.drawing.is_active() {
+            !self.drawing.tree_hidden
+        } else {
+            self.layout.tree.shown
+        }
+    }
+
+    pub fn show_tree(&mut self, shown: bool) {
+        if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.assembly.is_active() {
+            self.assembly.tree_hidden = !shown;
+        } else if self.frame_layout == crate::settings::FrameLayout::EditSuite && self.drawing.is_active() {
+            self.drawing.tree_hidden = !shown;
+        } else {
+            self.layout.tree.shown = shown;
+        }
+    }
+
+    /// The workspaces offered by the active document in Edit Suite.
+    pub fn workspaces(&self) -> Vec<crate::commands::Tab> {
+        if self.drawing.is_active() {
+            crate::drawing::DrawingTab::EDIT_SUITE.into_iter().map(Into::into).collect()
+        } else if self.assembly.is_active() {
+            crate::assembly::Workspace::ALL.into_iter().map(Into::into).collect()
+        } else {
+            RibbonTab::ALL.into_iter().map(Into::into).collect()
+        }
+    }
+
+    pub fn workspace(&self) -> crate::commands::Tab {
+        if let Some(session) = self.drawing.session.as_ref().filter(|_| self.drawing.is_active()) {
+            if session.tab == crate::drawing::DrawingTab::Assistant {
+                crate::drawing::DrawingTab::Views.into()
+            } else {
+                session.tab.into()
+            }
+        } else if self.assembly.is_active() {
+            self.assembly.workspace.into()
+        } else if self.in_sketch() {
+            RibbonTab::Sketch.into()
+        } else {
+            self.ribbon_tab.into()
+        }
+    }
+
+    pub fn select_workspace(&mut self, tab: crate::commands::Tab) {
+        if self.in_sketch() && !self.drawing.is_active() && !self.assembly.is_active() {
+            return;
+        }
+        if !self.workspaces().contains(&tab) {
+            return;
+        }
+        if self.drawing.is_active() {
+            if let crate::commands::Tab::Drawing(tab) = tab {
+                self.push(AppAction::Drawing(crate::drawing::DrawingAction::SetTab(tab)));
+            }
+        } else if self.assembly.is_active() {
+            self.assembly.workspace = match tab {
+                crate::commands::Tab::Assembly => crate::assembly::Workspace::Assembly,
+                crate::commands::Tab::AssemblyInspect => crate::assembly::Workspace::Inspect,
+                crate::commands::Tab::AssemblyView => crate::assembly::Workspace::View,
+                _ => return,
+            };
+        } else {
+            self.ribbon_tab = match tab {
+                crate::commands::Tab::Part(tab) => tab,
+                crate::commands::Tab::Assembly => RibbonTab::Assembly,
+                _ => return,
+            };
+        }
+    }
+
+    pub fn active_viewport(&self) -> &ViewportState {
+        match self.assembly.session.as_ref().filter(|_| self.assembly.is_active()) {
+            Some(session) => &session.viewport,
+            None => &self.viewport,
+        }
+    }
+
+    pub fn active_viewport_mut(&mut self) -> &mut ViewportState {
+        if self.assembly.is_active() {
+            &mut self.assembly.session.as_mut().expect("active assembly").viewport
+        } else {
+            &mut self.viewport
+        }
+    }
+
     pub fn new(doc: Document) -> Self {
         Self {
             doc,
@@ -1114,6 +1208,8 @@ impl AppState {
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),
+            form_bar: Default::default(),
+            options_details: false,
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,

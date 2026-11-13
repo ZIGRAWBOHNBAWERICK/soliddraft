@@ -254,7 +254,6 @@ fn source_cleanup_outside_the_certified_limit_is_refused_before_editing() {
 
 #[test]
 fn closed_mesh_downstream_boss_edits_reopens_and_exports_as_a_solid() {
-    use soliddraft_kernel_api::Kernel;
     use std::sync::Arc;
 
     let kernel = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());

@@ -59,8 +59,18 @@ impl CatallaxKernel {
         if tolerance <= Rational::zero() {
             return Err(KernelError::InvalidInput("Print accuracy must be greater than zero".into()));
         }
+        let mut key = display_key(&options(params)?);
+        // Print does not promise either angle control, only whether one was requested.
+        key.1 = Some(Rational::from_i64(if params.curve_angle_deg > 0.0 || params.surface_angle_deg > 0.0 {
+            1
+        } else {
+            0
+        }));
         lattice::export_allowance("print_mesh", lattice::FIELD_ACTION_WORK, || {
-            self.qualified_print_within_allowance(solid, params, tolerance)
+            solid
+                .print
+                .get(key, || self.qualified_print_within_allowance(solid.clone(), params, tolerance))
+                .map(|output| (*output).clone())
         })
         .map(|(output, _)| output)
     }
@@ -145,6 +155,12 @@ impl CatallaxKernel {
         let mut mesh = convert::triangles(&positions, triangles);
         if params.curve_angle_deg > 0.0 || params.surface_angle_deg > 0.0 {
             mesh.unavailable_controls.push("Angle controls are not certified by the print route".into());
+        }
+        if params.max_edge_length > 0.0 {
+            mesh.unavailable_controls.push("Maximum edge length is not certified by the print route".into());
+        }
+        if params.max_aspect_ratio > 0.0 {
+            mesh.unavailable_controls.push("Aspect ratio is not certified by the print route".into());
         }
         Ok(PrintMesh { mesh, stl, report })
     }
@@ -270,5 +286,38 @@ mod tests {
                 assert_eq!(browser.field.construction, desktop.field.construction);
             }
         }
+    }
+    #[test]
+    fn print_certificates_are_reused_only_for_the_same_body_and_controls() {
+        let kernel = CatallaxKernel::new();
+        let profile = kernel
+            .create_body_from_profile(
+                &OpTag::new("profile"),
+                &Profile::rectangle(Plane::XY, Point2::new(0.0, 0.0), 6.0, 6.0),
+            )
+            .unwrap();
+        let body = kernel
+            .extrude(&OpTag::new("block"), profile.body, &Extrude { distance: 10.0, direction: None })
+            .unwrap()
+            .body;
+        let params = TessellationParams { chord_height: 0.01, ..Default::default() };
+        let before = kernel.retained_bytes(body).unwrap();
+        let (first, work) = with_request_allowance(APP_REQUEST_WORK, || kernel.print_mesh(body, &params));
+        let first = first.unwrap().unwrap();
+        assert!(work.used > 0 && !work.exhausted);
+        assert!(kernel.retained_bytes(body).unwrap() > before);
+        let (again, work) = with_request_allowance(APP_REQUEST_WORK, || kernel.print_mesh(body, &params));
+        assert_eq!(again.unwrap().unwrap().stl, first.stl);
+        assert_eq!(work.used, 0);
+        let finer = TessellationParams { chord_height: 0.005, ..params };
+        let (output, work) = with_request_allowance(APP_REQUEST_WORK, || kernel.print_mesh(body, &finer));
+        assert_eq!(output.unwrap().unwrap().report.requested_accuracy_mm, 0.005);
+        assert!(work.used > 0 && !work.exhausted);
+        let changed = kernel
+            .extrude(&OpTag::new("changed"), profile.body, &Extrude { distance: 12.0, direction: None })
+            .unwrap()
+            .body;
+        let (output, work) = with_request_allowance(APP_REQUEST_WORK, || kernel.print_mesh(changed, &params));
+        assert!(output.is_ok() && work.used > 0 && !work.exhausted);
     }
 }

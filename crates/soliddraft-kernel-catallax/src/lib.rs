@@ -72,6 +72,7 @@ struct Solid {
     app: EvaluatedApplicationBody,
     ids: convert::Ids,
     display: MeshCache<catallax_mesh::Mesh>,
+    print: MeshCache<PrintMesh>,
     /// `None` where Catallax refused to sample a preview, so it is not asked again.
     previews: MeshCache<Option<PreviewMesh>>,
     rendering: MeshCache<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>,
@@ -480,6 +481,7 @@ impl CatallaxKernel {
                     app,
                     ids,
                     display,
+                    print: MeshCache::new(),
                     previews: MeshCache::new(),
                     rendering: MeshCache::new(),
                     topology: OnceLock::new(),
@@ -1747,6 +1749,13 @@ impl Kernel for CatallaxKernel {
                 * (solid.ids.faces.len() * FACE + solid.ids.edges.len() * EDGE);
             bytes += brep;
             solid.display.each(|mesh| bytes += mesh_bytes(mesh));
+            solid.print.each(|output| {
+                let mesh = &output.mesh;
+                bytes += output.stl.len()
+                    + (mesh.positions.len() + mesh.normals.len()) * 12
+                    + mesh.indices.len() * 4
+                    + mesh.triangle_faces.len() * 8;
+            });
             solid.previews.each(|m| {
                 let Some(m) = m else { return };
                 bytes += m.positions.len() * 24

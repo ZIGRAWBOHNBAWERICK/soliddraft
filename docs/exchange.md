@@ -57,7 +57,9 @@ model and distance field. Its report counts confirmed solid steps, identifies re
 definitions separately, and lists each representation's refusals. Each prefix receives a
 20,000,000-unit work allowance. This is construction coverage. It does not certify sampled
 surface agreement, whole-boundary agreement or print accuracy. Reports belong to one open
-revision and become stale after edits or undo. The desktop runs these checks off the interface thread. The browser runs them
+revision and become stale after edits or undo. Qualified print geometry is cached per immutable body and export controls, separately
+from display meshes. Repeated formats reuse that certificate. Changed geometry or
+accuracy needs a new qualification. The desktop runs these checks off the interface thread. The browser runs them
 synchronously with the same construction and per-prefix work limits.
 
 ## Refusals

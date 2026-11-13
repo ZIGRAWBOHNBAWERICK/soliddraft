@@ -72,7 +72,7 @@ impl SolidDraftApp {
     /// What "zoom to fit" frames: the body, the open sketch, or with nothing
     /// built yet a 200 mm workspace around the sketch origin.
     pub(super) fn fit_bounds(&self) -> Option<(glam::Vec3, glam::Vec3)> {
-        let mut acc = self.state.doc.bounds();
+        let mut acc = crate::scan::document_bounds(&self.state.doc);
         if let Some(s) = &self.state.sketch {
             let f = crate::sketcher::Frame {
                 plane: s.plane,
@@ -547,6 +547,18 @@ impl SolidDraftApp {
                     }),
                     // An import has no editor; its repair questions have their own dialog.
                     FeatureKind::ImportStep(_) => return,
+                    FeatureKind::Scan(_) => {
+                        if !crate::scan::part_active(&self.state) {
+                            return;
+                        }
+                        if self.state.in_sketch() {
+                            self.apply(ctx, AppAction::ExitSketch);
+                        }
+                        self.close_editor();
+                        self.state.doc.selection = Some(Selection::Feature(id));
+                        self.state.scan.open = true;
+                        return;
+                    }
                     // The lattice's controls arrive with its editor slice.
                     FeatureKind::Lattice(l) => EditorParams::Lattice(*l),
                     FeatureKind::Gyroid(g) => EditorParams::Gyroid(*g),
@@ -1237,6 +1249,7 @@ impl SolidDraftApp {
                 self.state.sketch = None;
                 self.state.chat.preview = None;
                 self.state.import_dialog = None;
+                self.state.scan = Default::default();
                 self.state.doc = crate::new_document();
                 self.state.viewport.camera.fit(None);
                 self.state.note("New part", NoteKind::Info);
@@ -1263,6 +1276,31 @@ impl SolidDraftApp {
                     ) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
                         Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
+            AppAction::ShowScan => {
+                if crate::scan::part_active(&self.state) {
+                    self.state.scan.open = true;
+                }
+            }
+            AppAction::FitScan => crate::scan::start_fit(&mut self.state),
+            AppAction::ImportScan(path) => {
+                if !crate::scan::can_import(&self.state) {
+                    return;
+                }
+                let path =
+                    path.or_else(|| crate::platform::open_path("Import scan reference", "STL or OBJ", &["stl", "obj"]));
+                if let Some(path) = path {
+                    let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
+                        crate::scan::review(
+                            &mut self.state,
+                            path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                            bytes,
+                        )
+                    });
+                    if let Err(e) = result {
+                        self.state.note(e, NoteKind::Error);
                     }
                 }
             }

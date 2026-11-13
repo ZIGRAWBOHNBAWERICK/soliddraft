@@ -143,6 +143,9 @@ pub enum AppAction {
     ImportIges(Option<PathBuf>),
     /// Review a closed STL or OBJ mesh as an exact solid.
     ImportMesh(Option<PathBuf>),
+    ImportScan(Option<PathBuf>),
+    FitScan,
+    ShowScan,
     /// Review a replacement source for an imported feature.
     ReplaceImport {
         feature: FeatureId,
@@ -1072,6 +1075,7 @@ pub struct AppState {
     pub palette: Option<crate::palette::Palette>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
+    pub scan: crate::scan::Workspace,
     pub provider_dialog: Option<crate::chat::ProviderDialog>,
     /// The open File locations page.
     pub locations_dialog: Option<crate::locations::LocationsDialog>,
@@ -1245,6 +1249,7 @@ impl AppState {
             show_shortcuts: false,
             palette: None,
             import_dialog: None,
+            scan: Default::default(),
             provider_dialog: None,
             locations_dialog: None,
             locations_epoch: 0,

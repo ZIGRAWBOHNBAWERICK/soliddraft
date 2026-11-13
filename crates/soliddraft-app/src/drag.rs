@@ -61,6 +61,7 @@ impl Dimension {
             | FeatureKind::Shell(_)
             | FeatureKind::Offset(_)
             | FeatureKind::Thicken(_)
+            | FeatureKind::Scan(_)
             | FeatureKind::ImportStep(_)
             | FeatureKind::Lattice(_)
             | FeatureKind::Gyroid(_)
@@ -122,6 +123,7 @@ pub fn edit_command(id: FeatureId, kind: FeatureKind) -> Option<Command> {
         | FeatureKind::Sweep(_)) => Command::EditFeature { id, kind },
         FeatureKind::ReferencePlane(_)
         | FeatureKind::Sketch(_)
+        | FeatureKind::Scan(_)
         | FeatureKind::ImportStep(_)
         | FeatureKind::Lattice(_)
         | FeatureKind::Gyroid(_) => {

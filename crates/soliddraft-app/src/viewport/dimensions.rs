@@ -315,6 +315,7 @@ fn values(kind: &FeatureKind) -> Vec<(AnnotationValue, String)> {
         | FeatureKind::Mirror(_)
         | FeatureKind::Lattice(_)
         | FeatureKind::Gyroid(_)
+        | FeatureKind::Scan(_)
         | FeatureKind::ImportStep(_) => Vec::new(),
     }
 }

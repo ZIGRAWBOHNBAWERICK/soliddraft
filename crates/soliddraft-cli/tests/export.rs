@@ -147,3 +147,34 @@ fn an_iges_refusal_leaves_the_whole_batch_untouched() {
     assert_eq!(std::fs::read(iges).unwrap(), sentinel);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn step_from_recipe_writes_proof_reports_with_operation_work() {
+    let dir =
+        std::env::temp_dir().join(format!("soliddraft-cli-step-proof-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let recipe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes/box.json");
+    let path = dir.join("box.step");
+    let out = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
+        .arg("export")
+        .arg(recipe)
+        .arg("--out")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let proof: Value =
+        serde_json::from_slice(&std::fs::read(soliddraft_exchange::proof::sidecar_path(&path, "json")).unwrap())
+            .unwrap();
+    let features = proof["features"].as_array().unwrap();
+    assert!(!features.is_empty());
+    for feature in features {
+        assert_eq!(feature["answer_kind"], "proved");
+        assert!(feature["work_used"].as_u64().unwrap() > 0, "{feature}");
+    }
+    assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
+    assert!(
+        std::fs::read_to_string(soliddraft_exchange::proof::sidecar_path(&path, "txt")).unwrap().contains("Proved")
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

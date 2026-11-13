@@ -291,7 +291,7 @@ impl Kernel for Counting {
         self.inner.preview(body, params)
     }
 
-    fn measure_work(&self, run: &mut dyn FnMut()) -> Option<u64> {
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
         self.inner.measure_work(run)
     }
 

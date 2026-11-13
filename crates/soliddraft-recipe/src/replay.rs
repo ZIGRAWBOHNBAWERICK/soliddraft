@@ -124,6 +124,9 @@ pub struct StepReport {
     /// What happened.
     #[serde(flatten)]
     pub outcome: StepOutcome,
+    /// Deterministic work for the step build, excluding the summary queries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_used: Option<u64>,
 }
 
 /// The outcome of a replay.
@@ -262,7 +265,7 @@ impl Run<'_> {
                         return Err(RecipeError::StepFailed { step: step.id.clone(), error: error.into() });
                     }
                 };
-                steps.push(StepReport { id: step.id.clone(), op: OpKind::Profile, outcome });
+                steps.push(StepReport { id: step.id.clone(), op: OpKind::Profile, outcome, work_used: Some(0) });
                 continue;
             }
             let before: Vec<(String, String)> = if step.expect == Outcome::Error {
@@ -274,7 +277,12 @@ impl Run<'_> {
             } else {
                 Vec::new()
             };
-            let outcome = self.run(&step.id, &tag, &step.command);
+            let kernel = self.kernel;
+            let mut outcome = None;
+            let work_used = kernel
+                .measure_work(&mut || outcome = Some(self.run(&step.id, &tag, &step.command)))
+                .map_err(|error| RecipeError::StepFailed { step: step.id.clone(), error })?;
+            let outcome = outcome.expect("work observation runs the step");
             let report = match (step.expect, outcome) {
                 (Outcome::Ok, Ok((op, result))) => {
                     self.bodies.insert(step.id.clone(), result.body);
@@ -282,6 +290,7 @@ impl Run<'_> {
                     StepReport {
                         id: step.id.clone(),
                         op,
+                        work_used,
                         outcome: StepOutcome::Ok {
                             body,
                             faces_changed: counts(&result.record.faces),
@@ -308,6 +317,7 @@ impl Run<'_> {
                     StepReport {
                         id: step.id.clone(),
                         op: op_kind(&step.command),
+                        work_used,
                         outcome: StepOutcome::ExpectedError { error },
                     }
                 }

@@ -137,13 +137,26 @@ fn build(a: &Args) -> Result<Vec<Export>, String> {
         None => {
             let text = std::fs::read_to_string(&a.input).map_err(|e| at(e.to_string()))?;
             let recipe = soliddraft_recipe::parse(&text).map_err(|e| at(e.to_string()))?;
-            let (_, body) = soliddraft_recipe::build(kernel.as_ref(), &recipe).map_err(|e| at(e.to_string()))?;
+            let (replay, body) = soliddraft_recipe::build(kernel.as_ref(), &recipe).map_err(|e| at(e.to_string()))?;
             a.outputs
                 .iter()
                 .map(|(_, f)| {
-                    soliddraft_exchange::export(kernel.as_ref(), body, &recipe.name, *f, &ExportTolerance::default())
+                    let mut out = soliddraft_exchange::export(
+                        kernel.as_ref(),
+                        body,
+                        &recipe.name,
+                        *f,
+                        &ExportTolerance::default(),
+                    )?;
+                    if let Some(proof) = &mut out.proof {
+                        for feature in &mut proof.features {
+                            feature.work_used =
+                                replay.steps.iter().find(|step| step.id == feature.id).and_then(|step| step.work_used);
+                        }
+                    }
+                    Ok(out)
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<Vec<_>, soliddraft_exchange::ExportError>>()
                 .map_err(|e| at(e.to_string()))?
         }
     };

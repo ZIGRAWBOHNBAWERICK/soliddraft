@@ -1439,14 +1439,20 @@ impl Kernel for CatallaxKernel {
         })
     }
 
-    fn measure_work(&self, run: &mut dyn FnMut()) -> Option<u64> {
-        if catallax_numbers::operation_budget_active() {
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
+        let (used, exhausted) = if catallax_numbers::operation_budget_active() {
             let before = catallax_numbers::current_operation_work().used;
             run();
-            Some(catallax_numbers::current_operation_work().used.saturating_sub(before))
+            let after = catallax_numbers::current_operation_work();
+            (after.used.saturating_sub(before), after.exhausted)
         } else {
             let (_, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
-            Some(work.used)
+            (work.used, work.exhausted)
+        };
+        if exhausted {
+            Err(KernelError::Unavailable("numbers.operation-budget: operation work allowance exhausted".into()))
+        } else {
+            Ok(Some(used))
         }
     }
 

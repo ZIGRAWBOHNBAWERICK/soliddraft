@@ -133,3 +133,46 @@ fn model_bounds_refuse_publication_and_display_bounds_keep_independent_model_pro
     soliddraft_app::file::set_config_dir(None);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_first_feature_waiting_for_proof_explains_why_no_export_is_written() {
+    let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dir = std::env::temp_dir().join(format!("soliddraft-first-proof-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    let kernel = Arc::new(gated::Gated::default());
+    struct Release(Arc<gated::Gated>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.rules.lock().unwrap().hold = None;
+            self.0.changed.notify_all();
+        }
+    }
+    let release = Release(kernel.clone());
+    kernel.rules.lock().unwrap().hold = Some(10.0);
+    let mut doc = Document::new("First feature proof", kernel);
+    doc.apply_interactive(Command::AddExtrude {
+        params: ExtrudeParams { depth: 10.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let mut state = AppState::new(doc);
+    assert!(state.doc.proof_pending());
+    let path = dir.join("pending.step");
+    let out = call(&mut state, "export_step", json!({"path":path}));
+    assert!(out.is_error && out.content.contains("pending"), "{}", out.content);
+    for path in [&path, &sidecar_path(&path, "json"), &sidecar_path(&path, "txt")] {
+        assert!(!path.exists());
+    }
+    drop(release);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while state.doc.proof_pending() {
+        assert!(std::time::Instant::now() < deadline, "proof did not settle");
+        state.doc.poll_proof();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    run(&mut state, "export_step", json!({"path":path}));
+    assert_eq!(report(&path)["features"][0]["answer_kind"], "proved");
+    soliddraft_app::file::set_config_dir(None);
+    std::fs::remove_dir_all(dir).unwrap();
+}

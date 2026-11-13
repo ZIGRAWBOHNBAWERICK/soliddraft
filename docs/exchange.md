@@ -203,7 +203,7 @@ features below the rollback bar are inactive and contribute no geometry.
 Work counts cover the original retained feature build, including its geometry
 queries. They exclude rendering and STEP export. Cache reuse, undo and renaming
 keep the count with that build. A null count means the backend or input did not
-record it. Raw recipe exports list operation tags and report work as unavailable.
+record it. Raw recipe exports list the contributing operation tags and their build work, excluding replay summary queries.
 
 Pending, refused and model-bounded answers cannot export. Finish or cancel a live
 feature, sketch or dimension preview first. A measured display bound does not

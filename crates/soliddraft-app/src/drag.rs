@@ -393,7 +393,8 @@ impl DragPreview {
         if proof.failure.is_some() {
             return None;
         }
-        proof.model.kernel().display_bound(proof.display.as_ref()?.body).ok().flatten()
+        proof.display.as_ref()?;
+        proof.model.kernel().display_bound(proof.model.body()?).ok().flatten()
     }
 
     pub fn label(&self) -> (String, bool) {

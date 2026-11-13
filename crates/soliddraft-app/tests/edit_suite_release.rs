@@ -628,11 +628,26 @@ fn file_export_action_writes_the_step_and_both_proof_reports() {
     let mut app = suite(ribbon::plate());
     case.run(&mut app, |app| {
         let path = case.path("plate.step");
+        std::fs::write(&path, b"previous STEP").unwrap();
+        let id = app.state().state.doc.features[0].id;
+        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.run_steps(8);
+        assert!(app.state().state.editor.is_some());
         app.state_mut()
             .state
             .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
         app.run_steps(8);
-        assert!(path.exists());
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous STEP");
+        assert!(!soliddraft_exchange::proof::sidecar_path(&path, "json").exists());
+        assert!(app.state().state.note.as_ref().unwrap().text.contains("Finish or cancel"));
+        app.key_press(Key::Escape);
+        app.run_steps(8);
+        assert!(app.state().state.editor.is_none());
+        app.state_mut()
+            .state
+            .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
+        app.run_steps(8);
+        assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
         let machine: serde_json::Value =
             serde_json::from_slice(&std::fs::read(soliddraft_exchange::proof::sidecar_path(&path, "json")).unwrap())
                 .unwrap();

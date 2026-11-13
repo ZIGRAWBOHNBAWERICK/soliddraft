@@ -1117,9 +1117,9 @@ pub trait Kernel: Send + Sync {
 
     /// Runs one feature build and reports deterministic work units, when supported.
     /// Nested calls keep the caller's allowance. This excludes display and export work.
-    fn measure_work(&self, run: &mut dyn FnMut()) -> Option<u64> {
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
         run();
-        None
+        Ok(None)
     }
 
     /// Prepares exact-proof work when no early representation is requested.

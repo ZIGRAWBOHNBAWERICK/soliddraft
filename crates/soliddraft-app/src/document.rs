@@ -1693,7 +1693,12 @@ impl Document {
             match &feature.status {
                 FeatureStatus::Pending => answer.answer_kind = AnswerKind::Pending,
                 FeatureStatus::Error(message) => {
-                    answer.answer_kind = AnswerKind::Refused;
+                    answer.answer_kind =
+                        if matches!(self.model.status(model_id(feature.id)), Some(model::FeatureStatus::Blocked(_))) {
+                            AnswerKind::Pending
+                        } else {
+                            AnswerKind::Refused
+                        };
                     answer.message = Some(crate::geometry_message::for_user(message));
                 }
                 FeatureStatus::NeedsRepair(_) => {

@@ -327,7 +327,16 @@ impl Document {
             });
         });
         let mut built = result.expect("work observation runs the build");
-        built.work_used = work_used;
+        match work_used {
+            Ok(work) => built.work_used = work,
+            Err(error) if built.status.is_ok() => {
+                if let Some(body) = built.owned {
+                    let _ = self.kernel.release(body);
+                }
+                built = Built::failed(current, feature_error(error));
+            }
+            Err(_) => {}
+        }
         cache.insert(key, built, &self.kernel)
     }
 

@@ -608,13 +608,13 @@ fn before_feature_pattern_source(id: &str, current: &mut Value) {
         assert!(!schema["required"].as_array().unwrap().contains(&json!("source")), "body patterns need no source");
     }
     match id {
-        "linear_pattern" | "circular_pattern" => remove_source(&mut current["tool"]["input"]),
+        "linear_pattern" | "circular_pattern" | "edit_pattern" => remove_source(&mut current["tool"]["input"]),
         "propose" => {
             let variants = current
                 .pointer_mut("/tool/input/properties/commands/items/anyOf")
                 .and_then(Value::as_array_mut)
                 .expect("proposal variants");
-            for op in ["linear_pattern", "circular_pattern"] {
+            for op in ["linear_pattern", "circular_pattern", "edit_pattern"] {
                 let schema = variants.iter_mut().find(|v| v["properties"]["op"]["const"] == op).expect(op);
                 remove_source(schema);
             }

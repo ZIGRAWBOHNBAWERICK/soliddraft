@@ -22,6 +22,12 @@ impl Default for NavigationBar {
 }
 
 impl NavigationBar {
+    pub fn consume_escape(&mut self, ctx: &egui::Context) {
+        if self.manage && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.manage = false;
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
@@ -122,17 +128,22 @@ impl NavigationBar {
         if self.favourites.is_empty() {
             ui.label("Choose scenes in Manage favourites.");
         }
-        egui::Grid::new("scene_thumbnails").num_columns(3).spacing(vec2(8.0, 8.0)).show(ui, |ui| {
-            for (i, scene) in self.favourites.iter().enumerate() {
-                if thumbnail(ui, *scene, current == *scene).clicked() {
-                    events.actions.push(AppAction::SetScene(*scene));
-                    ui.close();
-                }
-                if i % 3 == 2 {
-                    ui.end_row();
-                }
-            }
-        });
+        egui::ScrollArea::vertical().max_height((ui.ctx().content_rect().height() - 160.0).clamp(78.0, 260.0)).show(
+            ui,
+            |ui| {
+                egui::Grid::new("scene_thumbnails").num_columns(3).spacing(vec2(8.0, 8.0)).show(ui, |ui| {
+                    for (i, scene) in self.favourites.iter().enumerate() {
+                        if thumbnail(ui, *scene, current == *scene).clicked() {
+                            events.actions.push(AppAction::SetScene(*scene));
+                            ui.close();
+                        }
+                        if i % 3 == 2 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            },
+        );
         ui.separator();
         if ui.button("Manage favourites").clicked() {
             self.manage = true;

@@ -151,6 +151,7 @@ fn bottom_navigation_gallery_and_favourites_work_and_reopen() {
     .unwrap();
     let mut app = ribbon::app(ribbon::plate());
     let viewport = app.state().state.viewport.rect;
+    case.frame(&mut app, "navigation-initial");
     for label in ["Orbit", "Pan", "Zoom", "Zoom to fit", "Display style", "Scene", "Origin axes", "All dimensions"] {
         let rect = ribbon::button_rect(&app, label, ribbon::window(&app));
         assert!(viewport.contains_rect(rect), "{label} stays in the viewport");
@@ -178,6 +179,7 @@ fn bottom_navigation_gallery_and_favourites_work_and_reopen() {
     app.run_steps(4);
     let preview = ribbon::button_rect(&app, "Night grid", ribbon::window(&app));
     let image = app.render().unwrap();
+    image.save(case.path("six-favourites.png")).unwrap();
     let grid = image.get_pixel((preview.left() + 8.0) as u32, (preview.top() + 10.0) as u32).0;
     let cell = image.get_pixel((preview.left() + 12.0) as u32, (preview.top() + 10.0) as u32).0;
     assert!(grid[0] > cell[0], "the Night thumbnail shows its grid");
@@ -295,6 +297,14 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
     app.get_by_label("All dimensions").click();
     app.run_steps(4);
     assert!(app.state().state.sketch.as_ref().unwrap().show_dimensions);
+    app.get_by_label("Scene").click();
+    app.run_steps(4);
+    app.get_by_label("Manage favourites").click();
+    app.run_steps(4);
+    app.key_press(Key::Escape);
+    app.run_steps(4);
+    assert!(app.state().state.sketch.is_some(), "Escape closes scene management before leaving the sketch");
+    assert!(app.query_all_by_label("Manage favourites").next().is_none());
     let before = app.state().state.sketch.as_ref().unwrap().sketch.clone();
     assert!(before.free.contains(&blue));
     assert!(!before.free.contains(&black));
@@ -319,6 +329,7 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
         let sample = frame.screen(P2::new(40.0, 35.0)).unwrap();
         let centers = [frame.screen(P2::new(0.0, 24.0)).unwrap(), frame.screen(P2::new(0.0, -24.0)).unwrap()];
         let image = app.render().unwrap();
+        image.save(case.path(&format!("sketch-{}.png", scene.id()))).unwrap();
         let p = image.get_pixel(sample.x.round() as u32, sample.y.round() as u32).0;
         let background = [p[0], p[1], p[2]];
         if scene.is_dark() {
@@ -350,5 +361,32 @@ fn sketch_definition_colours_keep_contrast_on_every_scene() {
             before,
             "scene changes do not solve or edit geometry"
         );
+    }
+}
+
+#[test]
+fn navigation_and_gallery_fit_short_and_scaled_windows() {
+    let case = ribbon::case("navigation-window-sizes");
+    std::fs::write(
+        case.path("config").join("settings.json"),
+        r#"{"frame_layout":"edit_suite","view":{"show_grid":false,"show_origin_planes":false}}"#,
+    )
+    .unwrap();
+    for (width, height, scale) in [(960.0, 480.0, 1.0), (1440.0, 900.0, 1.5)] {
+        let mut app = ribbon::app_at(ribbon::plate(), egui::vec2(width, height), scale);
+        let viewport = app.state().state.viewport.rect;
+        for label in ["Orbit", "Pan", "Zoom", "Zoom to fit", "Display style", "Scene", "Origin axes", "All dimensions"]
+        {
+            let rect = ribbon::button_rect(&app, label, ribbon::window(&app));
+            assert!(viewport.contains_rect(rect), "{width} at {scale}: {label} stays inside the viewport");
+        }
+        app.get_by_label("Scene").click();
+        app.run_steps(4);
+        let manage = ribbon::button_rect(&app, "Manage favourites", ribbon::window(&app));
+        assert!(ribbon::window(&app).contains_rect(manage));
+        case.frame(&mut app, &format!("gallery-{width}-{scale}"));
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+        assert!(app.query_all_by_label("Manage favourites").next().is_none());
     }
 }

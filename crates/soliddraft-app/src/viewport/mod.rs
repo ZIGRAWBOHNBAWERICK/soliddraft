@@ -502,6 +502,11 @@ impl ViewportState {
         GridFrame::new(plane, self.grid_spacing(rect)?, &self.camera, ink, opacity)
     }
 
+    /// Closes a viewport dialog before the app handles Escape underneath it.
+    pub fn overlay_input(&mut self, ctx: &egui::Context) {
+        self.navigation_bar.consume_escape(ctx);
+    }
+
     /// A copy of the latest id-buffer sample.
     pub fn pick_sample(&self) -> PickSample {
         self.pick.lock().unwrap().clone()

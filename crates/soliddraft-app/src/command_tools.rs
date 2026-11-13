@@ -2795,7 +2795,7 @@ impl CommandTools<'_> {
             json!({"min": vec3(lo), "max": vec3(hi)})
         };
         let proof = doc.proof_state();
-        let current = proof.current_proved_display();
+        let current = proof.current_proved_display() || (proof.display_only_bound && proof.current_proved_model());
         let mass = if current && doc.model().active_field().is_none() { cached_body_mass(doc) } else { None };
         json!({
             "part": doc.name,
@@ -2813,6 +2813,9 @@ impl CommandTools<'_> {
                 v["id"] = f.id.into();
                 v["name"] = f.name.clone().into();
                 v["status"] = status_text(doc, f.id).into();
+                if let FeatureStatus::AnsweredWithinBound(bound) = &f.status {
+                    v["answer_bound"] = json!(bound);
+                }
                 if let Some(record) = doc.model().import_record(soliddraft_model::FeatureId(f.id as u32)) {
                     v["record"] = json!(record);
                 }

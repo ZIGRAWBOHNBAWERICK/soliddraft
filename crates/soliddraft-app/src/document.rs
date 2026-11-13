@@ -1353,6 +1353,7 @@ pub struct ProofState {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub answered_within_bound: bool,
     /// The exact model is proved independently; only its rendering has a measured bound.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub display_only_bound: bool,
     pub failed: bool,
 }

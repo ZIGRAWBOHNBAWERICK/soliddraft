@@ -5,6 +5,25 @@ use soliddraft_app::{app_tools::AppTools, state::AppState};
 use soliddraft_assistant::{Caller, tools::call_checked};
 use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
 
+fn edge_at(state: &AppState, wanted: soliddraft_kernel_api::Vec3) -> String {
+    let body = state.doc.model().body().unwrap();
+    let kernel = state.doc.model().kernel();
+    let edge = state
+        .doc
+        .edges
+        .iter()
+        .find(|edge| {
+            kernel.edge_midpoint(body, edge.id).is_ok_and(|point| {
+                let [x, y, z] = point.coordinates.map(|coordinate| coordinate.value);
+                soliddraft_kernel_api::Vec3::new(x, y, z).distance(wanted) < 1e-10
+            })
+        })
+        .expect("the intended longitudinal loft edge");
+    let name = format!("Loft1 · {}", edge.label);
+    eprintln!("longitudinal selector at {wanted:?}: {name}");
+    name
+}
+
 #[test]
 fn native_loft_fillet_display_keeps_the_bound_and_plain_trimmed_face_refusal() {
     let dir =
@@ -16,11 +35,20 @@ fn native_loft_fillet_display_keeps_the_bound_and_plain_trimmed_face_refusal() {
     let caller = Caller::Mcp { client: "spline-display-test".into() };
     for step in scenario["steps"].as_array().unwrap().iter().take(4) {
         let name = step["tool"].as_str().unwrap();
+        let mut arguments = step["arguments"].clone();
+        if name == "fillet" {
+            arguments["edges"] = json!([edge_at(&state, soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1))]);
+        }
         let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
-            call_checked(&mut AppTools { state: &mut state }, name, step["arguments"].clone(), &caller)
+            call_checked(&mut AppTools { state: &mut state }, name, arguments, &caller)
         });
         eprintln!("{name}: {work:?}; {}", out.content);
         assert!(!out.is_error && !work.exhausted, "{name}: {}; {work:?}", out.content);
+        if name == "loft" {
+            for edge in &state.doc.edges {
+                eprintln!("named loft edge: {} {:?}", edge.label, edge.midpoint);
+            }
+        }
     }
     let body = state.doc.model().body().unwrap();
     let bound = state.doc.model().kernel().display_bound(body).unwrap().expect("the native bounded spline display");
@@ -36,8 +64,9 @@ fn native_loft_fillet_display_keeps_the_bound_and_plain_trimmed_face_refusal() {
     assert!(matches!(feature.status, soliddraft_app::document::FeatureStatus::AnsweredWithinBound(_)));
     let before = state.doc.model().to_bytes().unwrap();
     let undo = state.doc.undo_depth();
-    let refusal = &scenario["steps"][7];
-    let out = call_checked(&mut AppTools { state: &mut state }, "fillet", refusal["arguments"].clone(), &caller);
+    let mut refusal = scenario["steps"][7]["arguments"].clone();
+    refusal["edges"] = json!([edge_at(&state, soliddraft_kernel_api::Vec3::new(0.05, 0.15, 0.1))]);
+    let out = call_checked(&mut AppTools { state: &mut state }, "fillet", refusal, &caller);
     assert!(out.is_error && out.content.contains("already trimmed"), "{}", out.content);
     assert_eq!(state.doc.model().to_bytes().unwrap(), before);
     assert_eq!(state.doc.undo_depth(), undo);

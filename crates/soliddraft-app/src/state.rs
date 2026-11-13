@@ -5,7 +5,7 @@
 pub use crate::chat::{ChatMessage, ChatState, Role};
 use crate::document::{
     ChamferParams, Command, CutParams, DisplayMesh, Document, DraftParams, EntityInfo, ExtrudeParams, FeatureId,
-    FilletParams, HoleParams, Preview, Selection, SketchPlane,
+    FeatureStatus, FilletParams, HoleParams, Preview, Selection, SketchPlane,
 };
 use crate::document::{EdgeRef, EntityRef};
 use crate::drag::{Dimension, DragPreview, Finish};
@@ -1457,14 +1457,39 @@ impl AppState {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
         }
+        if self.editor.is_some() || self.sketch.is_some() {
+            return Err("Finish or cancel the feature or sketch edit before exporting".into());
+        }
         let proof = self.doc.proof_state();
         if proof.answered_within_bound && !proof.display_only_bound {
             return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
-        if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {
-            return Err("The requested revision has not passed proof".into());
+        if self.doc.proof_pending() {
+            return Err("Proof is pending for the current edit. Wait for proof before exporting.".into());
         }
-        self.doc.model().export(format)
+        if proof.failed {
+            let reason = self
+                .doc
+                .proof_message()
+                .filter(|(_, failed)| *failed)
+                .map(|(message, _)| crate::geometry_message::for_user(message))
+                .or_else(|| {
+                    self.doc.features.iter().find_map(|feature| match &feature.status {
+                        FeatureStatus::Error(message) => {
+                            Some(format!("{}: {}", feature.name, crate::geometry_message::for_user(message)))
+                        }
+                        FeatureStatus::NeedsRepair(_) => Some(format!("{} needs a reference repaired", feature.name)),
+                        _ => None,
+                    })
+                })
+                .unwrap_or_else(|| "The current edit was refused".into());
+            return Err(format!("Export requires a proved result. {reason}"));
+        }
+        let mut out = self.doc.model().export(format)?;
+        if out.proof.is_some() {
+            out.proof = Some(self.doc.proof_report());
+        }
+        Ok(out)
     }
 
     /// Runs one step of a dimension drag. Only the final value reaches the document, as

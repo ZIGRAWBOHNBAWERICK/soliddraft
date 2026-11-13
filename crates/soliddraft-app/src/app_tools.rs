@@ -410,7 +410,7 @@ impl AppTools<'_> {
             return Err("the part has no body to export".into());
         }
         let out = self.state.export_part(format)?;
-        crate::platform::write_file(&path, &out.bytes)?;
+        out.write_with(&path, crate::platform::write_file)?;
         Ok(json!({ "exported": path, "report": out.report.summary() }))
     }
 

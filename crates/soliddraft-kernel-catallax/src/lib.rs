@@ -1439,6 +1439,17 @@ impl Kernel for CatallaxKernel {
         })
     }
 
+    fn measure_work(&self, run: &mut dyn FnMut()) -> Option<u64> {
+        if catallax_numbers::operation_budget_active() {
+            let before = catallax_numbers::current_operation_work().used;
+            run();
+            Some(catallax_numbers::current_operation_work().used.saturating_sub(before))
+        } else {
+            let (_, work) = catallax_numbers::with_operation_budget(catallax_app::DEFAULT_BUILD_WORK, run);
+            Some(work.used)
+        }
+    }
+
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn ProofWork>> {
         construction::reserve_proof_work()
     }

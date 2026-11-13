@@ -172,7 +172,9 @@ fn publish(a: &Args, exports: &[Export], work: RequestWork) -> Result<(), String
 }
 
 fn write(path: &Path, out: &Export) -> Result<(), String> {
-    soliddraft_document::save_atomic(path, &out.bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    out.write_with(path, |path, bytes| {
+        soliddraft_document::save_atomic(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    })
 }
 
 fn report(path: &Path, format: Format, out: &Export, json: bool, work: RequestWork) {
@@ -234,6 +236,7 @@ mod tests {
         let work = RequestWork { used: 1, limit: APP_REQUEST_WORK, exhausted: false };
         let step = |within_tolerance| Export {
             bytes: b"must not be published".to_vec(),
+            proof: Some(soliddraft_exchange::proof::ProofReport::default()),
             report: Report::Step(soliddraft_kernel_api::StepReport {
                 max_deviation: if within_tolerance { "0" } else { "0.001" }.into(),
                 max_deviation_mm: if within_tolerance { 0.0 } else { 0.001 },
@@ -253,6 +256,7 @@ mod tests {
         };
         let mesh = Export {
             bytes: b"mesh must not be published".to_vec(),
+            proof: None,
             report: Report::Mesh(soliddraft_exchange::MeshReport {
                 triangles: 12,
                 vertices: 8,

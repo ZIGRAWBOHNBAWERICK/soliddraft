@@ -34,6 +34,8 @@ pub(crate) struct Built {
     /// Which kept build this is, so a feature that reads it can key on it. Zero for a
     /// result the cache does not keep.
     pub version: u64,
+    /// Work used for the retained build, also retained across cache reuse.
+    pub work_used: Option<u64>,
     pub import_record: Option<soliddraft_kernel_api::RepairRecord>,
 }
 
@@ -47,6 +49,7 @@ impl Built {
             sketch: None,
             plane: None,
             version: 0,
+            work_used: None,
             import_record: None,
         }
     }
@@ -285,42 +288,46 @@ impl Document {
         if let Some(built) = cache.get(&key) {
             return built;
         }
-        let built = match &f.kind {
-            FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
-                Ok((plane, _)) => {
-                    let mut built = Built::pass(FeatureStatus::Ok, current);
-                    built.plane = Some(plane);
-                    built
-                }
-                Err(mut built) => {
-                    if let FeatureStatus::RepairNeeded(items) = &mut built.status {
-                        for item in items {
-                            item.slot = ReferenceSlot::Plane;
-                        }
+        let mut result = None;
+        let work_used = self.kernel.measure_work(&mut || {
+            result = Some(match &f.kind {
+                FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
+                    Ok((plane, _)) => {
+                        let mut built = Built::pass(FeatureStatus::Ok, current);
+                        built.plane = Some(plane);
+                        built
                     }
-                    *built
-                }
-            },
-            FeatureKind::Sketch(s) => self.build_sketch(s, current),
-            FeatureKind::Extrude(e) => self.build_extrude(f, e, current),
-            FeatureKind::Revolve(r) => self.build_revolve(f, r, current),
-            FeatureKind::Sweep(s) => {
-                self.build_profile_tool(f, s.sketch, current, |tag, profile| self.kernel.sweep(tag, profile, &s.path))
-            }
-            FeatureKind::Loft(l) => self.build_loft(f, l, current),
-            FeatureKind::Fillet(b) => self.build_blend(f, b, false, current),
-            FeatureKind::Chamfer(b) => self.build_blend(f, b, true, current),
-            FeatureKind::Hole(h) => self.build_hole(f, h, current),
-            FeatureKind::Pattern(p) => self.build_pattern(f, p, current),
-            FeatureKind::Mirror(m) => self.build_mirror(f, m, current),
-            FeatureKind::Draft(d) => self.build_draft(f, d, current),
-            FeatureKind::Offset(o) => self.build_offset(f, o, current),
-            FeatureKind::Thicken(t) => self.build_thicken(f, t, current),
-            FeatureKind::Shell(s) => self.build_shell(f, s, current),
-            FeatureKind::ImportStep(i) => self.build_import(f, i, current),
-            FeatureKind::Lattice(l) => self.build_lattice(f, l, current),
-            FeatureKind::Gyroid(g) => self.build_gyroid(f, g, current),
-        };
+                    Err(mut built) => {
+                        if let FeatureStatus::RepairNeeded(items) = &mut built.status {
+                            for item in items {
+                                item.slot = ReferenceSlot::Plane;
+                            }
+                        }
+                        *built
+                    }
+                },
+                FeatureKind::Sketch(s) => self.build_sketch(s, current),
+                FeatureKind::Extrude(e) => self.build_extrude(f, e, current),
+                FeatureKind::Revolve(r) => self.build_revolve(f, r, current),
+                FeatureKind::Sweep(s) => self
+                    .build_profile_tool(f, s.sketch, current, |tag, profile| self.kernel.sweep(tag, profile, &s.path)),
+                FeatureKind::Loft(l) => self.build_loft(f, l, current),
+                FeatureKind::Fillet(b) => self.build_blend(f, b, false, current),
+                FeatureKind::Chamfer(b) => self.build_blend(f, b, true, current),
+                FeatureKind::Hole(h) => self.build_hole(f, h, current),
+                FeatureKind::Pattern(p) => self.build_pattern(f, p, current),
+                FeatureKind::Mirror(m) => self.build_mirror(f, m, current),
+                FeatureKind::Draft(d) => self.build_draft(f, d, current),
+                FeatureKind::Offset(o) => self.build_offset(f, o, current),
+                FeatureKind::Thicken(t) => self.build_thicken(f, t, current),
+                FeatureKind::Shell(s) => self.build_shell(f, s, current),
+                FeatureKind::ImportStep(i) => self.build_import(f, i, current),
+                FeatureKind::Lattice(l) => self.build_lattice(f, l, current),
+                FeatureKind::Gyroid(g) => self.build_gyroid(f, g, current),
+            });
+        });
+        let mut built = result.expect("work observation runs the build");
+        built.work_used = work_used;
         cache.insert(key, built, &self.kernel)
     }
 
@@ -428,6 +435,7 @@ impl Document {
             sketch: Some(BuiltSketch { plane, on_face, regions }),
             plane: None,
             version: 0,
+            work_used: None,
             import_record: None,
         }
     }
@@ -523,6 +531,7 @@ impl Document {
                 sketch: None,
                 plane: None,
                 version: 0,
+                work_used: None,
                 import_record: None,
             },
             Err(error) => {
@@ -759,6 +768,7 @@ impl Document {
                 sketch: None,
                 plane: None,
                 version: 0,
+                work_used: None,
                 import_record: None,
             },
             Err(err) => {
@@ -841,6 +851,7 @@ impl Document {
             sketch: None,
             plane: None,
             version: 0,
+            work_used: None,
             import_record: None,
         }
     }
@@ -894,6 +905,7 @@ impl Document {
                 sketch: None,
                 plane: None,
                 version: 0,
+                work_used: None,
                 import_record: None,
             },
             Err(err) => Built::failed(current, feature_error(err)),
@@ -1267,6 +1279,7 @@ impl Document {
                     sketch: None,
                     plane: None,
                     version: 0,
+                    work_used: None,
                     import_record: Some(r.record),
                 }
             }

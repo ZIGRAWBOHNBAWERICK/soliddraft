@@ -1115,6 +1115,13 @@ pub trait Kernel: Send + Sync {
         self.tessellate(body, params)
     }
 
+    /// Runs one feature build and reports deterministic work units, when supported.
+    /// Nested calls keep the caller's allowance. This excludes display and export work.
+    fn measure_work(&self, run: &mut dyn FnMut()) -> Option<u64> {
+        run();
+        None
+    }
+
     /// Prepares exact-proof work when no early representation is requested.
     /// Nested rebuild operations receive the synchronous rebuild's allowances.
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn ProofWork>> {

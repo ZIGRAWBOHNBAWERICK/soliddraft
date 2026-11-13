@@ -295,6 +295,12 @@ pub fn bound_mm(bound: f64) -> String {
     if fraction.is_empty() { whole.to_owned() } else { format!("{whole}.{fraction}") }
 }
 
+/// Preserve the qualified binary32 point exactly in decimal mesh formats.
+pub(crate) fn coordinate(value: f32) -> String {
+    // Every finite binary32 has an exact decimal with at most 149 fractional digits.
+    format!("{:.149}", f64::from(value)).trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
 /// The exact decimal value of a finite, non-negative `value`: its whole part and every
 /// fractional digit. A binary64 has at most 1074 fractional digits, and Rust prints the
 /// requested precision exactly, so nothing here is rounded.
@@ -307,6 +313,15 @@ fn exact_decimal(value: f64) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decimal_coordinates_preserve_the_qualified_binary32_point() {
+        assert_eq!(coordinate(0.1), "0.100000001490116119384765625");
+        assert_eq!(coordinate(-0.1), "-0.100000001490116119384765625");
+        assert_eq!(coordinate(120.0), "120");
+        assert_eq!(coordinate(f32::from_bits(1)).split('.').nth(1).unwrap().len(), 149);
+        assert_eq!(coordinate(f32::MAX).parse::<f64>().unwrap(), f64::from(f32::MAX));
+    }
 
     #[test]
     fn mesh_summary_distinguishes_unavailable_controls_from_open_geometry() {

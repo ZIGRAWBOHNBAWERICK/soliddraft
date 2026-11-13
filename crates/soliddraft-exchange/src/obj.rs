@@ -15,7 +15,7 @@ pub(super) fn write(mesh: &Mesh, name: &str, chord_height: f64) -> Vec<u8> {
     }
     writeln!(out).unwrap();
     for p in &mesh.positions {
-        writeln!(out, "v {} {} {}", p[0], p[1], p[2]).unwrap();
+        writeln!(out, "v {} {} {}", crate::coordinate(p[0]), crate::coordinate(p[1]), crate::coordinate(p[2])).unwrap();
     }
     for n in &mesh.normals {
         writeln!(out, "vn {} {} {}", n[0], n[1], n[2]).unwrap();

@@ -40,7 +40,8 @@ A field's mass stand-in is a separate STEP output, written only when asked for: 
 
 Desktop mesh export opens Print check before writing a destination. It shows the selected
 print route, requested and certified accuracy, and the model, tessellation and file-rounding
-contributions. The qualification checks closure, vertex connections, outward orientation,
+contributions. OBJ and 3MF write each binary32 position as its exact decimal value,
+so text encoding adds no further coordinate error. The qualification checks closure, vertex connections, outward orientation,
 and preservation of components and cavities. Field exports show their native field verdict,
 minimum detail and certified distance bound.
 

@@ -34,7 +34,7 @@ pub fn start(state: &mut AppState, format: Format, path: PathBuf, ctx: &egui::Co
     let requested_mm = match model.active_field().map(|feature| &feature.kind) {
         Some(FeatureKind::Lattice(field)) => field.accuracy_mm,
         Some(FeatureKind::Gyroid(field)) => field.accuracy_mm,
-        _ => model.settings.export.chord_height,
+        _ => model.settings().export.chord_height,
     };
     let mut dialog = Dialog {
         document: state.doc.instance(),

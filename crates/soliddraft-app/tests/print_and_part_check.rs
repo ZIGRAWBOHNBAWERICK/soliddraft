@@ -115,7 +115,7 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
     tool(&mut app, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
     let path = case.path("coarser.stl");
     std::fs::write(&path, b"previous file").unwrap();
-    let settings = app.state().state.doc.model().settings.clone();
+    let settings = app.state().state.doc.model().settings().clone();
     app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
     settle(&mut app);
     assert!(app.state().state.print_check.as_ref().unwrap().result.as_ref().unwrap().is_err());
@@ -142,7 +142,7 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
     );
     let expected = dialog.result.as_ref().unwrap().as_ref().unwrap().bytes.clone();
     case.frame(&mut app, "coarser-confirmed");
-    assert_eq!(app.state().state.doc.model().settings, settings);
+    assert_eq!(app.state().state.doc.model().settings(), &settings);
     click(&mut app, "Save checked export");
     assert_eq!(std::fs::read(&path).unwrap(), expected);
     app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });

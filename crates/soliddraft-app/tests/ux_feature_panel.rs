@@ -254,6 +254,8 @@ fn a_long_pick_list_scrolls_and_keeps_the_radius_in_view() {
         app.run_steps(8);
         let chips = app.query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.starts_with("Remove ")))).count();
         assert_eq!(chips, held, "every pick keeps its chip, in the list's own scroll box");
+        app.get_by_label(&format!("{held} edges")).click();
+        app.run_steps(8);
 
         // The list scrolls in its box, so the radius stays above the status bar.
         let radius = app.get_by_label("Radius value").rect();

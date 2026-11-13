@@ -82,6 +82,7 @@ fn last(app: &App) -> (String, FeatureKind, FeatureStatus) {
 fn the_editor_grades_d0s_beam_radius_along_z() {
     let mut app = renderer();
     region(&mut app, 6.0, 20.0, 10.0);
+    let source = (app.state().state.doc.display_body(), app.state().state.doc.model().undo_depth());
     button(&mut app, "Lattice");
     field(&mut app, "Cell size value", "100");
     assert!(app.query_by_label("Beam radius").is_some(), "the designed label");
@@ -94,7 +95,11 @@ fn the_editor_grades_d0s_beam_radius_along_z() {
     }
     field(&mut app, "Accuracy value", "0.1");
     field(&mut app, "Minimum detail value", "0.1");
-    assert!(app.query_by_label("unproved preview").is_some());
+    assert_eq!(
+        (app.state().state.doc.display_body(), app.state().state.doc.model().undo_depth()),
+        source,
+        "editing a field preview leaves the source body and history unchanged"
+    );
     button(&mut app, "OK");
     app.run_steps(12);
     let (name, kind, status) = last(&app);

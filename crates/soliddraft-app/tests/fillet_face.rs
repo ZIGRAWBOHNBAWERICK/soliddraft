@@ -65,6 +65,8 @@ fn oblique_fillet_mass_properties_appear_in_the_window() {
     let id = state.doc.features.last().unwrap().id;
     state.doc.selection = Some(Selection::Feature(id));
     let mut app = harness(state.doc);
+    app.run_steps(4);
+    ribbon::open_options(&mut app);
     app.state_mut().state.push(AppAction::MeasureMassProperties);
     app.run_steps(4);
     app.get_by_label("Calculating mass properties...");

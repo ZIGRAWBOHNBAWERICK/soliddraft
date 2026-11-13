@@ -48,6 +48,7 @@ fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() 
         ("extrude", false, false),
         ("revolve", true, false),
         ("sweep", true, true),
+        ("loft", true, true),
         ("cut", true, false),
         ("fillet", false, false),
         ("chamfer", false, false),

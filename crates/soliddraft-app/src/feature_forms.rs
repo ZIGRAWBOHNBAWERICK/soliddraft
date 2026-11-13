@@ -59,6 +59,9 @@ pub enum Key {
     PathStart,
     Orientation,
     SweepPath,
+    LoftProfiles,
+    LoftShape,
+    LoftProfileList,
     PlaneDatum(u8),
     PlaneFeature(u64),
     RepairWas,
@@ -114,6 +117,15 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
                 field(PathStart, "Path start", "Path", 210.0),
                 field(Orientation, "Profile", "Path", 200.0),
                 field(SweepPath, "", "Path", 280.0).sheet().count(s.path.segments.len()),
+            ],
+        ),
+        EditorParams::Loft(l) => (
+            "loft",
+            Icon::Loft,
+            vec![
+                field(LoftProfiles, "Profiles", "Profiles", 170.0),
+                field(LoftShape, "Sides", "Sides", 160.0),
+                field(LoftProfileList, "", "Profiles in order", 280.0).sheet().count(l.profiles.len()),
             ],
         ),
         EditorParams::Cut(p) => {
@@ -274,6 +286,7 @@ struct Context {
     planes: Vec<(soliddraft_model::FeatureId, String)>,
     datums: Vec<(crate::document::PlaneKind, String)>,
     sweep_radius: f64,
+    loft_choices: Vec<(soliddraft_model::LoftProfile, String)>,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
@@ -281,6 +294,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
     let Some(editor) = &state.editor else { return };
     let target = editor.target.and_then(|id| state.doc.index_of(id)).unwrap_or(state.doc.features.len());
     let context = Context {
+        loft_choices: if matches!(editor.params, EditorParams::Loft(_)) {
+            crate::loft_panel::choices(&state.doc, target)
+        } else {
+            Vec::new()
+        },
         sketches: state.doc.features.iter().filter(|f| f.is_sketch()).map(|f| (f.id, f.name.clone())).collect(),
         planes: state
             .doc
@@ -449,6 +467,15 @@ fn render(
     let sketch_name =
         |id| context.sketches.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()).unwrap_or("Missing sketch");
     match (&mut editor.params, key) {
+        (EditorParams::Loft(l), Key::LoftProfiles) => {
+            let count = l.profiles.len();
+            readout(ui, format!("{count} {}", if count == 1 { "profile" } else { "profiles" }));
+        }
+        (EditorParams::Loft(l), Key::LoftShape) => {
+            use soliddraft_kernel_api::LoftShape;
+            choice(ui, "loft_shape", &mut l.shape, &[(LoftShape::Ruled, "Ruled"), (LoftShape::Smooth, "Smooth")]);
+        }
+        (EditorParams::Loft(l), Key::LoftProfileList) => crate::loft_panel::profiles(ui, l, &context.loft_choices),
         (EditorParams::Extrude(p), Key::Profile) => match p.sketch {
             Some(id) => readout(ui, sketch_name(id)),
             None => {

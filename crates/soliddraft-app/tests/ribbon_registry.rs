@@ -565,6 +565,34 @@ fn before_retained_polygons(id: &str, current: &mut Value) {
     }
 }
 
+fn before_loft_verbs(id: &str, current: &mut Value) {
+    if id != "propose" {
+        return;
+    }
+    let variants = current
+        .pointer_mut("/tool/input/properties/commands/items/anyOf")
+        .and_then(Value::as_array_mut)
+        .expect("proposal variants");
+    let profiles = json!({"type":"array","items":{"type":"string"},"minItems":1});
+    let shape = json!({"type":"string","enum":["ruled","smooth"]});
+    for (op, required) in
+        [("loft", json!(["op", "profiles"])), ("edit_loft", json!(["op", "feature", "profiles", "shape"]))]
+    {
+        let mut properties = json!({"op":{"type":"string","const":op},"profiles":profiles,"shape":shape});
+        if op == "edit_loft" {
+            properties["feature"] = json!({"type":"string"});
+        }
+        let index = variants.iter().position(|v| v["properties"]["op"]["const"] == op).expect(op);
+        assert_eq!(
+            variants.remove(index),
+            json!({
+                "type":"object", "additionalProperties":false, "properties":properties, "required":required
+            }),
+            "the documented Loft verbs extend the frozen proposal schema"
+        );
+    }
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -707,6 +735,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_retained_patterns(id, &mut current);
         before_retained_polygons(id, &mut current);
         before_circular_placement(id, &mut current);
+        before_loft_verbs(id, &mut current);
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
             current["agents"] = row["agents"].clone();
@@ -718,6 +747,30 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             // Sweep gained a tool and history; its other ribbon contracts stay frozen.
             for field in ["agents", "undo", "tool"] {
                 current[field] = row[field].clone();
+            }
+        }
+        if id == "loft" {
+            assert_eq!(current["agents"], "verb");
+            assert_eq!(current["undo"], "step");
+            assert_eq!(
+                current["tool"],
+                json!({
+                    "name":"loft", "input":{
+                        "type":"object", "additionalProperties":false, "required":["profiles"],
+                        "properties":{
+                            "profiles":{"type":"array","items":{"type":"string"},"minItems":1},
+                            "shape":{"type":"string","enum":["ruled","smooth"]}
+                        }
+                    }
+                })
+            );
+            // Loft gained a tool, document history and an enabled profile editor.
+            for field in ["agents", "undo", "tool"] {
+                current[field] = row[field].clone();
+            }
+            for fixture in ["blank", "sketch", "plate", "assembly"] {
+                assert_eq!(current["availability"][fixture]["enabled"], true);
+                current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }
         assert_eq!(&current, row, "{id} changed");

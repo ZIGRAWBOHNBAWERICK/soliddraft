@@ -1,0 +1,169 @@
+{
+  "format": "soliddraft-scenario/1",
+  "name": "loft",
+  "max_work": 20000000,
+  "steps": [
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 0,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "width": 2,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 4,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              4
+            ],
+            "width": 2,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "sketch",
+      "arguments": {
+        "plane": "top",
+        "offset": 8,
+        "shapes": [
+          {
+            "shape": "rectangle",
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "width": 2,
+            "height": 2
+          }
+        ]
+      }
+    },
+    {
+      "tool": "loft",
+      "arguments": {
+        "profiles": [
+          "Sketch1",
+          "Sketch2"
+        ],
+        "shape": "ruled"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 16,
+          "tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "tool": "edit_loft",
+      "arguments": {
+        "feature": "Loft1",
+        "profiles": [
+          "Sketch1",
+          "Sketch3"
+        ],
+        "shape": "smooth"
+      },
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 32,
+          "tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 16,
+          "tolerance": 1e-05
+        }
+      ],
+      "same_geometry_as_step": 4
+    },
+    {
+      "tool": "redo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 32,
+          "tolerance": 1e-05
+        }
+      ],
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "edit_loft",
+      "arguments": {
+        "feature": "Loft1",
+        "profiles": [
+          "Sketch1",
+          "Sketch1"
+        ],
+        "shape": "ruled"
+      },
+      "refused": "Loft profiles must enclose a solid. Move them onto different planes",
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 32,
+          "tolerance": 1e-05
+        }
+      ],
+      "same_geometry_as_step": 5
+    },
+    {
+      "tool": "save",
+      "arguments": {
+        "path": "{bundle}/loft.dwprt"
+      },
+      "files": [
+        "{bundle}/loft.dwprt"
+      ]
+    },
+    {
+      "tool": "open",
+      "arguments": {
+        "path": "{bundle}/loft.dwprt"
+      },
+      "fresh_process": true,
+      "checks": [
+        {
+          "pointer": "/measurement/volume_mm3",
+          "approx": 32,
+          "tolerance": 1e-05
+        }
+      ],
+      "same_geometry_as_step": 5,
+      "checked_step_export": "{bundle}/loft.dwprt",
+      "checked_step_max_work": 20000000
+    }
+  ]
+}

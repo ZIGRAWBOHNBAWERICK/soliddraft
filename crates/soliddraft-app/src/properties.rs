@@ -698,6 +698,7 @@ fn grade_controls(
 fn editor(ui: &mut egui::Ui, state: &mut AppState) {
     let (title, icon) = match state.editor.as_ref().map(|e| &e.params) {
         Some(EditorParams::Revolve(_)) => (state.editor.as_ref().unwrap().title(), Icon::Revolve),
+        Some(EditorParams::Loft(_)) => (state.editor.as_ref().unwrap().title(), Icon::Loft),
         Some(EditorParams::Sweep(_)) => (state.editor.as_ref().unwrap().title(), Icon::Sweep),
         Some(EditorParams::Extrude(_)) => (state.editor.as_ref().unwrap().title(), Icon::Extrude),
         Some(EditorParams::Cut(_)) => (state.editor.as_ref().unwrap().title(), Icon::Cut),
@@ -748,6 +749,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
         .filter(|f| matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
         .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
         .collect();
+    let loft_choices = crate::loft_panel::choices(&state.doc, target);
     let sweep_radius = match state.editor.as_ref().map(|e| &e.params) {
         Some(EditorParams::Sweep(s)) => state.doc.sweep_anchor(s.sketch.0 as u64).map_or(10.0, |(_, radius)| radius),
         _ => 0.0,
@@ -756,6 +758,14 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(editor) = state.editor.as_mut() else { return };
     egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 8)).show(ui, |ui| match &mut editor.params {
+            EditorParams::Loft(l) => {
+                section(ui, "Profiles in order", |ui| {
+                    crate::loft_panel::page(ui, l, &loft_choices);
+                });
+                if let Some(error) = &editor.error {
+                    error_row(ui, error);
+                }
+            }
             EditorParams::Sweep(s) => {
                 section(ui, "Polygon profile", |ui| {
                     picked_chip(ui, Icon::Sketch, &sketch_name(s.sketch.0 as u64, "Missing sketch"), false);

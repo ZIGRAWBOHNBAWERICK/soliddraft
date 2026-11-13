@@ -1008,6 +1008,20 @@
       "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,viewport.png}; 38-step T1-T13 pair/stale/reopen scenario; measure-pairs-current.dwprt and measure-pairs-stale.dwprt; measure_pairs, measure_panel and measure_guides tests"
     },
     {
+      "id": "loft",
+      "file": "ci/scenarios/loft.json",
+      "acceptance": true,
+      "owners": [
+        "soliddraft-app",
+        "soliddraft-model",
+        "soliddraft-kernel-catallax"
+      ],
+      "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
+      "route": "MCP document commands -> Catallax adapter -> pinned kernel",
+      "supported_limits": "Two-profile ruled square prism edited into a taller two-profile Smooth square prism, with ordered closed sketch regions. Coplanar profiles refuse without changing the part.",
+      "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export; live viewport PNG and kernel view records for every solid state."
+    },
+    {
       "id": "mirror",
       "file": "ci/scenarios/mirror.json",
       "acceptance": false,

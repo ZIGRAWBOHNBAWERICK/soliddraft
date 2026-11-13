@@ -630,7 +630,9 @@ impl CommandSpec {
             .iter()
             .filter(|c| c.in_app() && c.id != self.id && c.label == self.label)
             .any(|c| c.is_working() == self.is_working());
-        if shared && !matches!(self.workspace, Workspace::Part | Workspace::Both) {
+        if shared
+            && (!matches!(self.workspace, Workspace::Part | Workspace::Both) || self.default_scope() == Scope::Sketch)
+        {
             format!("{} ({})", self.label, self.default_scope().label())
         } else {
             self.label.to_owned()

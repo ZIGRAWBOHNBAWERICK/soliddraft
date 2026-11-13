@@ -6,7 +6,9 @@ use soliddraft_app::app_tools::AppTools;
 use soliddraft_app::state::AppState;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::{ToolOutput, call_checked};
-use soliddraft_kernel_catallax::with_request_allowance;
+use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+
+static CONFIG: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn call(state: &mut AppState, name: &str, arguments: Value) -> ToolOutput {
     let caller = Caller::Mcp { client: "test".into() };
@@ -33,6 +35,7 @@ fn assert_refused_then_written(state: &mut AppState, tool: &str, path: &std::pat
 
 #[test]
 fn a_refused_export_leaves_its_destination_alone() {
+    let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = std::env::temp_dir().join(format!("soliddraft-export-allowance-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
@@ -51,4 +54,44 @@ fn a_refused_export_leaves_its_destination_alone() {
     assert!(refusal.is_error && refusal.content.contains("field parts export as meshes"), "{}", refusal.content);
     assert_eq!(std::fs::read(path).unwrap(), b"previous IGES");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn three_section_smooth_loft_exports_the_certified_mesh_through_the_app() {
+    let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_eq!(APP_REQUEST_WORK, 20_000_000);
+    let dir = std::env::temp_dir().join(format!("soliddraft-smooth-export-{}", soliddraft_document::DocumentId::new()));
+    std::fs::create_dir_all(&dir).unwrap();
+    soliddraft_app::file::set_config_dir(Some(dir.join("config")));
+    let mut state = AppState::new(soliddraft_app::new_document());
+    for (size, z) in [(2, 0), (4, 3), (2, 6)] {
+        run(
+            &mut state,
+            "sketch",
+            json!({"plane":"top","offset":z,"shapes":[{"shape":"rectangle","center":[0,0,z],"width":size,"height":size}]}),
+        );
+    }
+    run(&mut state, "loft", json!({"profiles":["Sketch1","Sketch2","Sketch3"],"shape":"smooth"}));
+    let before = state.doc.model().to_bytes().unwrap();
+    let undo = state.doc.undo_depth();
+    let path = dir.join("smooth.stl");
+    let sentinel = b"previous STL";
+    std::fs::write(&path, sentinel).unwrap();
+    let arguments = json!({"path":path});
+    let (refused, work) = with_request_allowance(0, || call(&mut state, "export_stl", arguments.clone()));
+    assert!(refused.is_error && work.exhausted, "{}; {work:?}", refused.content);
+    assert!(refused.content.contains("numbers.operation-budget"), "{}", refused.content);
+    assert_eq!(std::fs::read(&path).unwrap(), sentinel);
+    let (exported, work) = with_request_allowance(APP_REQUEST_WORK, || call(&mut state, "export_stl", arguments));
+    eprintln!("three-section Smooth app export: {work:?}; {}", exported.content);
+    assert!(!exported.is_error && !work.exhausted, "{}; {work:?}", exported.content);
+    let report: Value = serde_json::from_str(&exported.content).unwrap();
+    assert!(report["report"].as_str().unwrap().contains("within 0.01 mm"), "{report}");
+    let stl = std::fs::read(&path).unwrap();
+    let triangles = u32::from_le_bytes(stl[80..84].try_into().unwrap()) as usize;
+    assert!(triangles > 0);
+    assert_eq!(stl.len(), 84 + 50 * triangles);
+    assert_eq!(state.doc.model().to_bytes().unwrap(), before);
+    assert_eq!(state.doc.undo_depth(), undo);
+    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -247,7 +247,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         case.frame(app, "drawing-sheet");
         app.set_size(vec2(960.0, 700.0));
         app.run_steps(8);
-        assert!(app.state().state.viewport.rect.width() >= 300.0);
+        assert!(app.state().state.drawing.session.as_ref().unwrap().canvas_rect.width() >= 300.0);
         let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
         let properties = app
             .get_all_by_label("Sheet properties")

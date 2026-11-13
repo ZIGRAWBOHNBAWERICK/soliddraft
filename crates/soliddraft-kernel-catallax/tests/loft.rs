@@ -96,8 +96,22 @@ fn spline_loft_edge_fillet_keeps_its_proof_and_refuses_a_trimmed_neighbour_plain
     let b = k.create_body_from_profile(&OpTag::new("top"), &top).unwrap().body;
     let loft = k.loft(&OpTag::new("loft"), &[a, b], LoftShape::Ruled).unwrap();
     assert_eq!(loft.record.edges.created.len(), 12);
-    let edge = loft.record.edges.created[8];
-    let neighbour = loft.record.edges.created[10];
+    let at = |wanted: Vec3| {
+        loft.record
+            .edges
+            .created
+            .iter()
+            .copied()
+            .find(|&edge| {
+                k.edge_midpoint(loft.body, edge).is_ok_and(|point| {
+                    let [x, y, z] = point.coordinates.map(|coordinate| coordinate.value);
+                    Vec3::new(x, y, z).distance(wanted) < 1e-10
+                })
+            })
+            .expect("the intended straight loft edge")
+    };
+    let edge = at(Vec3::new(1.0, -0.5, 1.0));
+    let neighbour = at(Vec3::new(0.5, 1.5, 1.0));
     let rounded = k.fillet(&OpTag::new("round"), loft.body, &[edge], 0.1).unwrap();
     assert!(rounded.record.face_roles.iter().any(|face| face.role == FaceRole::Blend { edge }));
     assert!(k.validate(rounded.body).unwrap().valid);

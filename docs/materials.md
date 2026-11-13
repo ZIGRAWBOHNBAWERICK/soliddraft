@@ -5,6 +5,20 @@ faces look. They are two types, as in SolidWorks, Inventor and Fusion. A painted
 stays steel. The code is `crates/soliddraft-materials`, and the part's side of it is
 `crates/soliddraft-model/src/materials.rs`.
 
+## Assigning a material in Edit Suite
+
+With a body open in the internal Edit Suite layout, choose Inspect, then Material.
+The property panel lists the built-in materials and their density in kg/m³. Choose
+Unassigned to clear the default assignment. With a named configuration active,
+assignment affects that configuration; Use inherited material removes its override.
+The panel and mass use the visible configuration. Each assignment is one undo step,
+and the part stores its material and default appearance for reopening.
+
+Calculate mass runs the existing measurement worker while the interface stays
+responsive. The panel shows volume in mm³ and mass in kg, using the stored density.
+A missing material or density leaves mass unknown. A field preview has no measured
+solid volume and cannot supply a density-based mass through this panel.
+
 ## The two types
 
 `Material` holds physical values in SI units, with the unit in each field's name:

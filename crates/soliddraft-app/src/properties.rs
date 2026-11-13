@@ -748,6 +748,7 @@ pub(crate) fn thicken_side(ui: &mut egui::Ui, side: &mut soliddraft_kernel_api::
 }
 
 fn editor(ui: &mut egui::Ui, state: &mut AppState) {
+    let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
     let (title, icon) = match state.editor.as_ref().map(|e| &e.params) {
         Some(EditorParams::Revolve(_)) => (state.editor.as_ref().unwrap().title(), Icon::Revolve),
         Some(EditorParams::Loft(_)) => (state.editor.as_ref().unwrap().title(), Icon::Loft),
@@ -955,7 +956,19 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                     let refused = &mut editor.feedback.size;
                     match &mut editor.params {
                         EditorParams::Fillet(f) => size_field(ui, "Radius", &mut f.radius, refused),
-                        EditorParams::Chamfer(c) => size_field(ui, "Distance", &mut c.distance, refused),
+                        EditorParams::Chamfer(c) => {
+                            size_field(ui, "Distance", &mut c.distance, refused);
+                            if edit_suite {
+                                let mut unequal = c.other_distance.is_some();
+                                if ui.checkbox(&mut unequal, "Two distances").changed() {
+                                    c.other_distance = unequal.then_some(c.distance);
+                                    editor.feedback.second_size = None;
+                                }
+                                if let Some(other) = &mut c.other_distance {
+                                    size_field(ui, "Distance 2", other, &mut editor.feedback.second_size);
+                                }
+                            }
+                        }
                         _ => {}
                     }
                     if let Some(err) = &editor.error {
@@ -1126,7 +1139,16 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             EditorParams::Lattice(l) => {
-                section(ui, "Cubic lattice", |ui| {
+                let title = l.cell.map_or("Lattice".to_owned(), |cell| format!("{} lattice", cell.label()));
+                section(ui, if edit_suite { "Lattice" } else { &title }, |ui| {
+                    if edit_suite {
+                        let cell = l.cell.get_or_insert(soliddraft_kernel_api::LatticeCell::Cubic);
+                        egui::ComboBox::from_label("Cell type").selected_text(cell.label()).show_ui(ui, |ui| {
+                            for choice in soliddraft_kernel_api::LatticeCell::ALL {
+                                ui.selectable_value(cell, choice, choice.label());
+                            }
+                        });
+                    }
                     hint(ui, "Grid at the part origin. Unproved preview; export certifies the mesh.");
                     let v = l.cell_size_mm.get_or_insert(0.0);
                     number_row(ui, "Cell size", "mm", egui::DragValue::new(v).speed(0.1));
@@ -1136,7 +1158,7 @@ fn editor(ui: &mut egui::Ui, state: &mut AppState) {
                         number_row(ui, label, "mm", egui::DragValue::new(v).speed(0.01));
                     }
                 });
-                l.cell = Some(soliddraft_kernel_api::LatticeCell::Cubic);
+
                 ui.label("unproved preview");
                 if let Some(error) = &editor.error {
                     error_row(ui, error);
@@ -1925,6 +1947,11 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         theme::section_label(ui, kind);
         egui::Grid::new("props").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
             for (k, v) in &info.details {
+                if matches!(k.as_str(), "Carrier accuracy" | "Import deviation" | "Approved import limit")
+                    && state.frame_layout != crate::settings::FrameLayout::EditSuite
+                {
+                    continue;
+                }
                 ui.label(egui::RichText::new(k).size(12.0).color(theme::muted()));
                 let color = match k.as_str() {
                     "Error" => theme::error(),
@@ -1935,6 +1962,10 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             }
         });
+        if state.frame_layout == crate::settings::FrameLayout::EditSuite && sel == Selection::Body {
+            ui.add_space(8.0);
+            material_panel(ui, state);
+        }
         if let (Selection::Feature(id), Some(f)) = (sel, feature)
             && f.status != FeatureStatus::Inactive
         {
@@ -2038,4 +2069,74 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         });
         let _ = fmt_mm(0.0);
     });
+}
+
+fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
+    static CATALOG: std::sync::OnceLock<soliddraft_materials::Catalog> = std::sync::OnceLock::new();
+    let catalog = CATALOG.get_or_init(soliddraft_materials::Catalog::built_in);
+    let current = state.doc.material();
+    let mut selected = state.doc.material_assignment().cloned();
+    let before = selected.clone();
+    let mut error = None;
+    section(ui, "Material", |ui| {
+        egui::ComboBox::from_label("Part material")
+            .selected_text(current.map_or("Unassigned", |m| m.name.as_str()))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut selected,
+                    None,
+                    if state.doc.model().active_configuration().is_some() {
+                        "Use inherited material"
+                    } else {
+                        "Unassigned"
+                    },
+                );
+                for (_, material) in catalog.materials() {
+                    ui.selectable_value(&mut selected, Some(material.id.clone()), &material.name);
+                }
+            });
+        if let Some(material) = current {
+            match material.density_kg_m3 {
+                Some(density) => {
+                    ui.label(format!("Density: {density} kg/m³"));
+                }
+                None => {
+                    ui.label("Density: unknown");
+                }
+            }
+        }
+        if let Some(index) = state.doc.display_index() {
+            let id = state.doc.features[index].id;
+            if ui.button("Calculate mass").clicked() {
+                error = state.mass.request(&state.doc, id, ui.ctx()).err();
+            }
+            if state.doc.proof_state().current_proved_display()
+                && let Some(body) = state.doc.display_body()
+                && let Some(properties) = state.doc.kernel().cached_mass_properties(body)
+            {
+                ui.label(format!("Volume: {:.3} mm³", properties.volume));
+                match soliddraft_materials::mass::of_body(&properties, state.doc.material()) {
+                    Ok(mass) => {
+                        ui.label(format!("Mass: {:.6} kg", mass.mass_kg));
+                    }
+                    Err(why) => {
+                        ui.label(format!("Mass: {why}"));
+                    }
+                }
+            }
+            if let Some(message) = state.mass.message(&state.doc, id) {
+                hint(ui, &crate::geometry_message::for_user(message));
+            }
+        }
+    });
+    if let Some(error) = error {
+        state.note(error, crate::state::NoteKind::Error);
+    }
+    if selected != before {
+        let material = selected.as_ref().and_then(|id| catalog.material(id)).map(|(_, m)| m.clone());
+        let appearance = material.as_ref().and_then(|m| catalog.default_appearance_of(m)).cloned();
+        if let Err(error) = state.doc.set_material(material, appearance) {
+            state.note(error, crate::state::NoteKind::Error);
+        }
+    }
 }

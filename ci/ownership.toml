@@ -607,6 +607,13 @@ paths = ["crates/soliddraft-app/src/interference/"]
 module = ["interference"]
 
 [[areas]]
+name = "kernel.field_preview"
+owner = "core"
+crate = "soliddraft-kernel-catallax"
+paths = ["crates/soliddraft-kernel-catallax/src/field_preview.rs"]
+module = ["field_preview"]
+
+[[areas]]
 name = "kernel_catallax.distance"
 owner = "core"
 crate = "soliddraft-kernel-catallax"

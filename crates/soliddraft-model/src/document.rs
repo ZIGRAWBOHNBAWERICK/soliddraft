@@ -511,7 +511,10 @@ impl Document {
         body: BodyId,
     ) -> Result<OpResult, String> {
         if chamfer {
-            return self.kernel.chamfer(tag, body, edges, b.size).map_err(|e| e.to_string());
+            return self
+                .kernel
+                .chamfer_distances(tag, body, edges, b.size, b.other_distance)
+                .map_err(|e| e.to_string());
         }
         self.kernel.fillet(tag, body, edges, b.size).map_err(|e| e.to_string())
     }

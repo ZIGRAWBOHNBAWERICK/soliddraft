@@ -651,6 +651,44 @@ fn before_loft_verbs(id: &str, current: &mut Value) {
     }
 }
 
+// Check the added inputs before comparing the rest of the frozen command contract.
+fn before_ridealong_inputs(id: &str, current: &mut Value) {
+    fn restore(op: &str, schema: &mut Value) {
+        if !matches!(op, "chamfer" | "edit_chamfer" | "lattice" | "edit_lattice") {
+            return;
+        }
+        let required = schema["required"].as_array().expect("required inputs");
+        let added = if op.contains("chamfer") { "other_distance" } else { "cell" };
+        if op != "lattice" {
+            assert!(!required.contains(&json!(added)), "{op}: {added} stays optional");
+        }
+        let properties = schema["properties"].as_object_mut().expect("input properties");
+        if op.contains("chamfer") {
+            assert_eq!(properties.remove(added), Some(json!({"type":"number"})));
+        } else {
+            assert_eq!(
+                properties.remove(added),
+                Some(json!({"type":"string","enum":["cubic","body_centred","face_centred","octet"]}))
+            );
+            if op == "lattice" {
+                properties.insert("cell".into(), json!({"type":"string","const":"cubic"}));
+            }
+        }
+    }
+    if id == "propose" {
+        let variants = current
+            .pointer_mut("/tool/input/properties/commands/items/anyOf")
+            .and_then(Value::as_array_mut)
+            .expect("proposal variants");
+        for schema in variants {
+            let op = schema["properties"]["op"]["const"].as_str().expect("operation").to_owned();
+            restore(&op, schema);
+        }
+    } else if let Some(schema) = current.pointer_mut("/tool/input") {
+        restore(id, schema);
+    }
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -750,7 +788,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     holds(
         "Inspect",
         &[
-            ("Measure", &["measure", "mass_properties"]),
+            ("Measure", &["measure", "mass_properties", "material"]),
             ("Check", &["check", "section"]),
             ("Surface quality", &["draft_check"]),
         ],
@@ -794,6 +832,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_retained_polygons(id, &mut current);
         before_circular_placement(id, &mut current);
         before_loft_verbs(id, &mut current);
+        before_ridealong_inputs(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
         if [

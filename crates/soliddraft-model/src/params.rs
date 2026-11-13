@@ -54,6 +54,8 @@ pub enum Parameter {
     MinDetail,
     /// A chamfer's distance.
     Distance,
+    /// A chamfer's second setback.
+    OtherDistance,
     /// A blind hole's depth.
     Depth,
     /// The distance between linear pattern copies.
@@ -94,6 +96,7 @@ impl Parameter {
             Parameter::Accuracy => "Accuracy",
             Parameter::MinDetail => "MinDetail",
             Parameter::Distance => "Distance",
+            Parameter::OtherDistance => "OtherDistance",
             Parameter::Depth => "Depth",
             Parameter::Spacing => "Spacing",
             Parameter::Count => "Count",
@@ -212,7 +215,12 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
         }
         FeatureKind::Revolve(r) => out.push(param(Parameter::Angle, Unit::Angle, r.angle_deg)),
         FeatureKind::Fillet(b) => out.push(param(Parameter::Radius, Unit::Length, b.size)),
-        FeatureKind::Chamfer(b) => out.push(param(Parameter::Distance, Unit::Length, b.size)),
+        FeatureKind::Chamfer(b) => {
+            out.push(param(Parameter::Distance, Unit::Length, b.size));
+            if let Some(other) = b.other_distance {
+                out.push(param(Parameter::OtherDistance, Unit::Length, other));
+            }
+        }
         FeatureKind::Hole(h) => {
             out.push(param(Parameter::Diameter, Unit::Length, h.diameter));
             if let HoleDepth::Blind { depth } = h.depth {
@@ -350,6 +358,9 @@ fn write_parameter(
         }
         (FeatureKind::Fillet(b), Parameter::Radius) => b.size = positive("radius")?,
         (FeatureKind::Chamfer(b), Parameter::Distance) => b.size = positive("distance")?,
+        (FeatureKind::Chamfer(b), Parameter::OtherDistance) if b.other_distance.is_some() => {
+            b.other_distance = Some(positive("second distance")?);
+        }
         (FeatureKind::Hole(h), Parameter::Diameter) => h.diameter = positive("diameter")?,
         (FeatureKind::Hole(h), Parameter::Depth) => match &mut h.depth {
             HoleDepth::Blind { depth } => *depth = positive("depth")?,

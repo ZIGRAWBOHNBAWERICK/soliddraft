@@ -376,6 +376,33 @@ fn surface_kind(surface: &Surface) -> SurfaceKind {
     }
 }
 
+/// Read the producer's bound, never infer accuracy from the display mesh or area.
+fn face_accuracy(surface: &Surface) -> FaceAccuracy {
+    use catallax_shapes::SplineSupport;
+    let bound = match surface {
+        Surface::BSpline(support) => match support {
+            SplineSupport::EllipticOffset(fit) => Some(&fit.bound().upper),
+            SplineSupport::RollingEnvelope(fit) => Some(&fit.bound().upper),
+            SplineSupport::RollingSaddle(fit) => Some(&fit.bound().upper),
+            SplineSupport::RollingSphere(fit) => Some(&fit.bound().upper),
+            SplineSupport::SplineFillet(fit) => Some(&fit.bound().upper),
+            SplineSupport::BezierExtrusion(_)
+            | SplineSupport::RollingPipe(_)
+            | SplineSupport::ObliqueDraft(_)
+            | SplineSupport::LinearFillet(_)
+            | SplineSupport::RollingMitre(_)
+            | SplineSupport::RationalPatch(_)
+            | SplineSupport::RationalAtlas(_) => None,
+            _ => return FaceAccuracy::Unknown,
+        },
+        _ => None,
+    };
+    match bound {
+        Some(bound) => FaceAccuracy::Fitted { max_deviation_mm: crate::step::f64_up(bound) },
+        None => FaceAccuracy::Exact,
+    }
+}
+
 // A fitted blend's rails and the faces they trim have no single-entity proof.
 // Those entities keep their display estimates, as an unproven topology does.
 fn display_only(error: &catallax_numbers::Refusal) -> bool {
@@ -548,6 +575,7 @@ fn topology_view(
         faces.push(FaceInfo {
             id: ids.faces[&id],
             surface: surface_kind(surface),
+            accuracy: face_accuracy(surface),
             area,
             centroid,
             bbox,

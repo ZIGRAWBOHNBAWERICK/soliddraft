@@ -81,7 +81,7 @@ fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choic
         assert_eq!(app.state().state.doc.revision(), revision, "hiding does not change geometry");
         assert!(!egui::Popup::is_any_open(&app.ctx));
 
-        let at = app.get_by_label("Solid body").rect().center();
+        let at = app.get_by_role_and_label(egui::accesskit::Role::Button, "Solid body").rect().center();
         secondary(app, at, false);
         assert_eq!(quick_count(app), 8);
         click_quick(app, "Show");
@@ -115,10 +115,19 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
                 {
                     assert!(window.contains_rect(node.rect()), "{name}: quick command stays inside");
                 }
+                let mut column_top = None;
                 for group in ["View", "Scene", "Display", "Show"] {
-                    assert!(
-                        window.contains_rect(app.get(By::new().role(egui::accesskit::Role::Label).label(group)).rect())
-                    );
+                    // Popup headings follow the main-window labels in the accessibility tree.
+                    let heading = app
+                        .query_all(By::new().role(egui::accesskit::Role::Label).label(group))
+                        .last()
+                        .expect("the popup has this command group")
+                        .rect();
+                    assert!(window.contains_rect(heading));
+                    if let Some(top) = column_top {
+                        assert!((heading.top() - top).abs() <= ribbon::TOLERANCE, "menu columns align");
+                    }
+                    column_top = Some(heading.top());
                 }
                 case.frame(app, &format!("{}-{name}", size.x));
                 app.key_press(Key::Escape);

@@ -176,6 +176,7 @@ impl TabViewer for Panels<'_> {
                     rounding: st.editor.as_ref().and_then(crate::viewport::RoundingOverlay::of),
                 };
                 let events = st.viewport.show(ui, &st.doc, overlay, selection, hover_label.as_deref(), &st.navigation);
+                crate::scan::paint(ui, st);
                 st.after_viewport(ui, &events);
                 if st.frame_layout == crate::settings::FrameLayout::EditSuite
                     && let Some(response) = &events.context_response

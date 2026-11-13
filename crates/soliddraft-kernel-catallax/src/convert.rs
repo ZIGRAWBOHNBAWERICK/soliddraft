@@ -155,6 +155,19 @@ impl Ids {
             |_, _| false,
         );
         // A merged face keeps every origin this step gave it, so each one keeps its name.
+        if op == OpKind::ScanFit {
+            let face_roles = faces
+                .created
+                .iter()
+                .flat_map(|face| {
+                    self.face_origins[face]
+                        .iter()
+                        .filter(|origin| &origin.tag == tag)
+                        .map(|origin| FaceOrigin { face: *face, role: origin.role.clone() })
+                })
+                .collect();
+            return HistoryRecord { seq, tag: tag.clone(), op, faces, edges, vertices, face_roles };
+        }
         let face_roles = faces
             .created
             .iter()
@@ -220,6 +233,13 @@ fn named_origin_for_edges(
     tags: &BTreeMap<String, OpTag>,
     selected_edges: &[EdgeId],
 ) -> Option<soliddraft_kernel_api::Origin> {
+    if let Some(tag) = tags.get(&format!("{}__scan_origin", origin.step.as_str())) {
+        let step = origin.step.as_str().split_once("_scan_").map_or("result", |(_, suffix)| suffix);
+        return Some(soliddraft_kernel_api::Origin {
+            tag: tag.clone(),
+            role: FaceRole::Imported { key: format!("{step}:{}", serde_json::to_string(&origin.role).ok()?) },
+        });
+    }
     if let Some((instance, source)) = crate::feature_pattern::instance(origin.step.as_str()) {
         let original = Origin { step: catallax_recipe::StepId::new(source).ok()?, role: origin.role.clone() };
         return Some(soliddraft_kernel_api::Origin {

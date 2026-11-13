@@ -54,7 +54,7 @@ fn inspect_check_reports_independent_coverage_and_invalidates_on_undo() {
     assert_eq!(app.state().state.doc.model().part_json(), before);
     assert_eq!(app.state().state.doc.undo_depth(), undo);
     case.frame(&mut app, "confirmed");
-    app.state_mut().state.actions.push(AppAction::Undo);
+    app.state_mut().state.push(AppAction::Undo);
     app.run_steps(5);
     assert!(app.query_by_label("The part changed. This report belongs to an earlier revision.").is_some());
 }
@@ -67,7 +67,7 @@ fn mesh_exports_show_the_native_certificate_before_writing() {
         let path = case.path(&format!("part.{}", format.extension()));
         let previous = b"previous file";
         std::fs::write(&path, previous).unwrap();
-        app.state_mut().state.actions.push(AppAction::Export { format, path: Some(path.clone()) });
+        app.state_mut().state.push(AppAction::Export { format, path: Some(path.clone()) });
         settle(&mut app);
         let output = app.state().state.print_check.as_ref().unwrap().result.as_ref().unwrap().as_ref().unwrap();
         let Report::Mesh(report) = &output.report else { panic!("mesh report") };
@@ -116,7 +116,7 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
     let path = case.path("coarser.stl");
     std::fs::write(&path, b"previous file").unwrap();
     let settings = app.state().state.doc.model().settings().clone();
-    app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+    app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
     settle(&mut app);
     assert!(app.state().state.print_check.as_ref().unwrap().result.as_ref().unwrap().is_err());
     assert_eq!(std::fs::read(&path).unwrap(), b"previous file");
@@ -145,7 +145,7 @@ fn a_refused_accuracy_offers_a_labelled_coarser_choice_and_cancel_preserves_the_
     assert_eq!(app.state().state.doc.model().settings(), &settings);
     click(&mut app, "Save checked export");
     assert_eq!(std::fs::read(&path).unwrap(), expected);
-    app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+    app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
     settle(&mut app);
     assert!(app.state().state.print_check.as_ref().unwrap().result.as_ref().unwrap().is_err());
     click(&mut app, "Cancel");
@@ -158,10 +158,9 @@ fn changing_the_part_prevents_saving_an_earlier_checked_export() {
     let case = ribbon::case("print-check-stale");
     let mut app = ribbon::app(ribbon::plate());
     let path = case.path("stale.stl");
-    app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+    app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
     settle(&mut app);
-    let feature = app.state().state.doc.features[0].id;
-    app.state_mut().state.doc.apply(Command::Rollback(Some(feature))).unwrap();
+    app.state_mut().state.push(AppAction::Command(Command::Rollback(Some(0))));
     app.run_steps(4);
     assert!(app.query_by_label("The part changed. Close this report and export again.").is_some());
     assert!(app.query_all_by_role_and_label(Role::Button, "Save checked export").next().is_none());
@@ -197,7 +196,7 @@ fn a_field_export_reviews_its_native_route_and_verdict_before_saving() {
     tool(&mut app, "extrude", json!({"sketch":"Sketch1","depth":10,"flip":false}));
     tool(&mut app, "lattice", json!({"cell":"cubic","cell_size":100,"radius":1,"accuracy":0.5,"min_detail":0.1}));
     let path = case.path("field.stl");
-    app.state_mut().state.actions.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
+    app.state_mut().state.push(AppAction::Export { format: Format::Stl, path: Some(path.clone()) });
     settle(&mut app);
     let dialog = app.state().state.print_check.as_ref().unwrap();
     let output = dialog.result.as_ref().unwrap().as_ref().unwrap();

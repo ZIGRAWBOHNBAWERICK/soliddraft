@@ -36,6 +36,7 @@ pub use measure::{Certainty, Measurement, PairEndpoint, PairQuantity, PointProof
 mod assembly_measure;
 mod body_relation;
 pub use body_relation::{BodyContactFaces, BodyDistance, BodyQueryRefusal, BodyRelation, OverlapVolume, PlacedBody};
+mod checks;
 mod edit;
 mod field;
 mod geometry;
@@ -47,6 +48,7 @@ mod profile;
 pub mod scan;
 mod sweep;
 
+pub use checks::{IndependentCheck, IndependentStep, PrintMesh, PrintReport};
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
 pub use field::{
     ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, LinearGrade, ProxyMoments,
@@ -1088,6 +1090,24 @@ pub trait Kernel: Send + Sync {
     fn export_field_stand_in(&self, body: BodyId, accuracy: &FieldMassAccuracy) -> KernelResult<StandInExport> {
         let _ = (body, accuracy);
         Err(KernelError::Unsupported("field mass stand-in".into()))
+    }
+
+    /// Independently constructs every recipe prefix with both representations.
+    fn independent_check(&self, body: BodyId) -> KernelResult<IndependentCheck> {
+        let _ = body;
+        Err(KernelError::Unsupported("independent part check".into()))
+    }
+
+    /// Qualified print geometry and its certificate, when the backend supports it.
+    fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<PrintMesh>> {
+        let _ = (body, params);
+        Ok(None)
+    }
+
+    /// Exports a field at an explicit accuracy without changing its saved settings.
+    fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<FieldExport> {
+        let _ = (body, accuracy_mm);
+        Err(KernelError::Unsupported("field export at an explicit accuracy".into()))
     }
 
     /// Triangulates a body within its supported controls. The screen uses [`preview`](Self::preview).

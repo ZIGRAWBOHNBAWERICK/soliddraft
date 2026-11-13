@@ -231,15 +231,22 @@ fn unit_value(
 /// positive number of millimetres is the new size at once; anything else is refused
 /// beside the field and keeps the text, so nothing is silently clamped to another size.
 fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Option<String>) {
-    row(ui, label, |ui, cell| size_input(ui, label, value, refused, cell, ui.make_persistent_id(("size", label))));
+    let id = ui.make_persistent_id(("size", label));
+    row(ui, label, |ui, cell| size_input(ui, label, value, refused, cell, id));
     if let Some(why) = refused {
         error_row(ui, why);
     }
 }
 
-pub(crate) fn size_input(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Option<String>, cell: Rect) {
+pub(crate) fn size_input(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f64,
+    refused: &mut Option<String>,
+    cell: Rect,
+    id: egui::Id,
+) {
     let what = label.to_lowercase();
-    let id = ui.make_persistent_id(("size", label));
     // The typed text outlives the frame; it restarts from the size when it no longer
     // stands for it.
     let kept = ui.data(|d| d.get_temp::<String>(id));
@@ -626,6 +633,27 @@ pub(crate) fn grade_field(
     unit: &str,
     speed: f64,
 ) {
+    grade_controls(ui, label, grade, unit, speed, true);
+}
+
+pub(crate) fn grade_options(
+    ui: &mut egui::Ui,
+    label: &str,
+    grade: &mut soliddraft_kernel_api::Grade,
+    unit: &str,
+    speed: f64,
+) {
+    grade_controls(ui, label, grade, unit, speed, false);
+}
+
+fn grade_controls(
+    ui: &mut egui::Ui,
+    label: &str,
+    grade: &mut soliddraft_kernel_api::Grade,
+    unit: &str,
+    speed: f64,
+    constant_value: bool,
+) {
     use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
     let linear = matches!(grade, Grade::Linear(_));
@@ -646,7 +674,8 @@ pub(crate) fn grade_field(
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, info.clone()));
     };
     match grade {
-        Grade::Constant(v) => value(ui, "", v, unit),
+        Grade::Constant(v) if constant_value => value(ui, "", v, unit),
+        Grade::Constant(_) => {}
         Grade::Linear(l) => {
             choice_row(ui, "Axis", |ui, _| {
                 ui.horizontal_centered(|ui| {

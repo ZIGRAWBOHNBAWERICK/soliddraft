@@ -123,7 +123,7 @@ pub fn keep_valid(path: &mut Sweep) {
     }
 }
 
-/// The path controls. `radius` is the default for a new arc.
+/// Profile directions supported by the saved path.
 pub fn orientation(ui: &mut egui::Ui, path: &mut Sweep) {
     let spline = path.segments.iter().any(|s| matches!(s, PathSegment::Spline { .. }));
     let arcs = path.segments.iter().any(|s| matches!(s, PathSegment::Arc { .. }));
@@ -139,6 +139,7 @@ pub fn orientation(ui: &mut egui::Ui, path: &mut Sweep) {
     }
 }
 
+/// The path controls. `radius` is the default for a new arc.
 pub fn page(
     ui: &mut egui::Ui,
     path: &mut Sweep,

@@ -806,7 +806,7 @@ fn render(
             }
         },
         (EditorParams::Lattice(p), Key::BeamGrade) => {
-            properties::grade_field(ui, "Beam radius", p.radius_mm.get_or_insert(Grade::Constant(0.0)), "mm", 0.1)
+            properties::grade_options(ui, "Beam radius", p.radius_mm.get_or_insert(Grade::Constant(0.0)), "mm", 0.1)
         }
         (EditorParams::Lattice(p), Key::Accuracy) => {
             number(ui, "Accuracy", "mm", egui::DragValue::new(&mut p.accuracy_mm).speed(0.01))
@@ -826,7 +826,7 @@ fn render(
             }
         },
         (EditorParams::Gyroid(p), Key::LevelGrade) => {
-            properties::grade_field(ui, "Network level", &mut p.level, "", 0.01)
+            properties::grade_options(ui, "Network level", &mut p.level, "", 0.01)
         }
         (EditorParams::Gyroid(p), Key::Accuracy) => {
             number(ui, "Accuracy", "mm", egui::DragValue::new(&mut p.accuracy_mm).speed(0.01))

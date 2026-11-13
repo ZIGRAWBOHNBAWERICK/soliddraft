@@ -271,6 +271,7 @@ fn report(ui: &mut egui::Ui, fit: &ScanFit, direction: &mut Direction) {
         ));
     }
     ui.label("Sampled distances, not a bound on the whole surface.");
+    ui.label("Deviation compares the scan with this fitted recipe, before later features.");
     ui.label(format!("Display mesh chord bound: {:.4} mm", fit.chord_mm));
     for warning in &fit.warnings {
         ui.colored_label(crate::theme::error(), warning);

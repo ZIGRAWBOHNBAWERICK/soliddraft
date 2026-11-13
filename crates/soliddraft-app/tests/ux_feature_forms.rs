@@ -201,8 +201,16 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         }
         settle(app);
         assert!(app.state().state.sketch.as_ref().unwrap().sketch.drawn().count() > 0);
-        assert!(ribbon::painted_in(app, bar(app)).iter().any(|p| p.text == "Under defined"));
-        case.frame(app, "close-sketch");
+        let status = ribbon::painted_in(app, bar(app)).into_iter().find(|p| p.text == "Under defined").unwrap();
+        assert_eq!(status.color, soliddraft_app::theme::edit_suite::UNDER_DEFINED_LABEL);
+        let image = case.frame(app, "close-sketch");
+        let close = app.get_by_label("Close sketch").rect();
+        let ppp = app.ctx.pixels_per_point();
+        assert_eq!(
+            image.get_pixel(((close.left() + 6.0) * ppp) as u32, (close.center().y * ppp) as u32).0,
+            soliddraft_app::theme::edit_suite::DANGER.to_array(),
+            "Close sketch keeps the approved red fill on charcoal chrome"
+        );
         click_bar(app, "Close sketch");
         assert!(!app.state().state.in_sketch());
         assert!(app.state().state.editor.is_none());

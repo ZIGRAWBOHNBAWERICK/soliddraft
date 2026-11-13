@@ -195,6 +195,7 @@ pub mod edit_suite {
     pub const DANGER: Color32 = rgb(0xe0, 0x3a, 0x2e);
     pub const ON_DANGER: Color32 = Color32::WHITE;
     pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);
+    pub const UNDER_DEFINED_LABEL: Color32 = rgb(0x7f, 0xb2, 0xff);
     pub const FULLY_DEFINED: Color32 = rgb(0x0b, 0x0d, 0x11);
     pub const SKETCH_SHEET: Color32 = rgb(0xf1, 0xf3, 0xf7);
 

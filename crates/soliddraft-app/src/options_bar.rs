@@ -77,8 +77,8 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 if ui
                     .add_sized(
                         vec2(116.0, 30.0),
-                        egui::Button::new(egui::RichText::new("Close sketch").color(egui::Color32::WHITE))
-                            .fill(theme::error()),
+                        egui::Button::new(egui::RichText::new("Close sketch").color(theme::edit_suite::ON_DANGER))
+                            .fill(theme::edit_suite::DANGER),
                     )
                     .on_hover_text("Close sketch (Enter or Esc)")
                     .clicked()
@@ -88,7 +88,9 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 if let Some(sketch) = &state.sketch {
                     let (text, color) = match &sketch.sketch.status {
                         crate::sketch::SolveStatus::Empty => ("Empty", theme::muted()),
-                        crate::sketch::SolveStatus::UnderDefined => ("Under defined", theme::accent()),
+                        crate::sketch::SolveStatus::UnderDefined => {
+                            ("Under defined", theme::edit_suite::UNDER_DEFINED_LABEL)
+                        }
                         crate::sketch::SolveStatus::FullyDefined => ("Fully defined", theme::ink()),
                         crate::sketch::SolveStatus::OverDefined { .. } => ("Over defined", theme::error()),
                         crate::sketch::SolveStatus::Failed(_) => ("Solver failed", theme::error()),

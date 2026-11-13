@@ -4,6 +4,7 @@
 mod ribbon;
 
 use egui_kittest::kittest::Queryable;
+use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
 use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureStatus, ProfileKind, Selection};
 use soliddraft_app::settings::FrameLayout;
 use soliddraft_kernel_api::BooleanOp;
@@ -35,6 +36,26 @@ fn assert_picks(doc: &Document) {
         let pick = doc.pick_of_face(face.id).expect("each visible face can be picked");
         assert!(matches!(doc.pick(pick), Some(soliddraft_app::document::PickEntry::Face(_, id)) if id == face.id));
     }
+}
+
+#[test]
+fn ordinary_parts_keep_the_legacy_summary_until_a_second_body_is_started() {
+    let mut doc = Document::new("Legacy summary", soliddraft_app::kernel());
+    block(&mut doc, 10.0, 10.0);
+    let mut book = ProposalBook::default();
+    let summary = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None }.summary();
+    assert!(summary.get("active_body").is_none());
+    assert!(summary.get("bodies").is_none());
+    assert!(summary["features"].as_array().unwrap().iter().all(|f| f.get("body_id").is_none()));
+
+    doc.new_body();
+    let summary = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None }.summary();
+    assert_eq!(summary["active_body"], 1);
+    assert_eq!(summary["features"][0]["body_id"], 0);
+    block(&mut doc, 20.0, 5.0);
+    let summary = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None }.summary();
+    assert_eq!(summary["bodies"].as_array().unwrap().len(), 2);
+    assert_eq!(summary["features"][1]["body_id"], 1);
 }
 
 #[test]

@@ -281,6 +281,13 @@ paths = ["crates/soliddraft-app/src/theme.rs"]
 module = ["theme"]
 
 [[areas]]
+name = "app.timeline"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/timeline.rs"]
+module = ["timeline"]
+
+[[areas]]
 name = "app.tool_palette"
 owner = "core"
 crate = "soliddraft-app"

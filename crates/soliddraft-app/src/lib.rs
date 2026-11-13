@@ -54,6 +54,7 @@ pub mod state;
 pub mod subassembly;
 pub mod sweep_panel;
 pub mod theme;
+pub mod timeline;
 pub mod tool_palette;
 pub mod tree;
 pub mod tree_visibility;

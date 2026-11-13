@@ -491,6 +491,9 @@ impl SolidDraftApp {
                 crate::tool_palette::panel(root, &mut self.state);
             }
             self.side_panel(root, Side::Tree, window_width);
+            if palette {
+                crate::timeline::panel(root, &mut self.state);
+            }
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::chrome())).show(root, |ui| {
             if start {

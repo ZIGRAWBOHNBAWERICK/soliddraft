@@ -9,7 +9,7 @@ use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureKind, Pr
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 type App = Harness<'static, SolidDraftApp>;

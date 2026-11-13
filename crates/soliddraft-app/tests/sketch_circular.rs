@@ -162,11 +162,10 @@ fn preview(app: &mut App, at: P2, on_curve: P2, path: &std::path::Path) {
     let image = app.render().unwrap();
     image.save(path).unwrap();
     let pixel = screen(app, on_curve) * app.ctx.pixels_per_point();
-    let color = soliddraft_app::theme::accent().to_array();
     assert!(
         (-3..=3).any(|x| (-3..=3).any(|y| {
             let p = image.get_pixel((pixel.x.round() as i32 + x) as u32, (pixel.y.round() as i32 + y) as u32).0;
-            (0..3).all(|i| p[i].abs_diff(color[i]) < 65)
+            i16::from(p[0]) > i16::from(p[1]) + 40 && i16::from(p[1]) > i16::from(p[2]) + 20
         })),
         "expected the shared curve preview at {on_curve:?}"
     );

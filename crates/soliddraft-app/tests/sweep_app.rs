@@ -126,6 +126,7 @@ fn sweep_ribbon_opens_property_page_commits_and_edits() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join(format!("soliddraft-sweep-proof-{}", std::process::id())));
     std::fs::create_dir_all(&proof).unwrap();
+    ribbon::open_options(&mut harness);
     harness.render().unwrap().save(proof.join("sweep-property-page.png")).unwrap();
     // The property page scrolls; bring the control into view as a user would.
     harness.get_by_label("sweep end Z value").scroll_to_me();

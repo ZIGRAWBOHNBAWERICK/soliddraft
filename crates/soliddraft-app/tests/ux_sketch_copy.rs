@@ -1,7 +1,6 @@
 //! Copy placement through the rendered app, using pointer and keyboard input.
 
 use egui::{Key, Modifiers, PointerButton, Pos2};
-use egui_kittest::kittest::Queryable;
 use soliddraft_app::document::{Command, Document, PlaneKind, SketchPlane};
 use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::sketcher::Frame;
@@ -25,6 +24,7 @@ fn screen(app: &App, p: P2) -> Pos2 {
 }
 
 fn click(app: &mut App, p: P2, modifiers: Modifiers) {
+    ribbon::close_options(app);
     let pos = screen(app, p);
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(pos);
@@ -41,6 +41,7 @@ fn click(app: &mut App, p: P2, modifiers: Modifiers) {
 }
 
 fn hover(app: &mut App, p: P2) {
+    ribbon::close_options(app);
     let pos = screen(app, p);
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(pos);
@@ -49,6 +50,7 @@ fn hover(app: &mut App, p: P2) {
 }
 
 fn drag(app: &mut App, a: P2, b: P2) {
+    ribbon::close_options(app);
     let (a, b) = (screen(app, a), screen(app, b));
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(a);
@@ -78,22 +80,7 @@ fn drag(app: &mut App, a: P2, b: P2) {
 }
 
 fn button(app: &mut App, label: &str) {
-    let view = app.state().state.viewport.rect;
-    let pane = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
-    for _ in 0..6 {
-        if app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| pane.contains_rect(n.rect())) {
-            break;
-        }
-        app.hover_at(egui::pos2(pane.right() - 18.0, pane.bottom() - 60.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -120.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        settle(app);
-    }
-    ribbon::click_button(app, label, pane);
+    ribbon::click_option(app, label);
     settle(app);
 }
 

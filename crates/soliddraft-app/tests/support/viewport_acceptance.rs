@@ -471,10 +471,9 @@ fn press_label(app: &mut App, label: &str) {
     app.run_steps(3);
 }
 
-/// Opens Tools > Preferences and goes to Viewport > Grid and planes. In a sketch the ribbon
-/// has a Tools group too, and the menu bar comes first.
+/// Opens Preferences and goes to Viewport > Grid and planes.
 pub fn open_grid_and_planes(app: &mut App) {
-    click_menu(app, "Tools", "Preferences…");
+    ribbon::run_command(app, "settings");
     assert!(app.state().preferences.is_some(), "the menu opened Preferences");
     press_label(app, "Grid and planes");
 }
@@ -488,7 +487,9 @@ pub fn close_preferences(app: &mut App) {
 
 /// Whether a checkbox of the open window is checked.
 pub fn checked(app: &App, label: &str) -> bool {
-    row_selected(app, label)
+    use egui_kittest::kittest::NodeT;
+    app.get_by_role_and_label(egui::accesskit::Role::CheckBox, label).accesskit_node().toggled()
+        == Some(egui::accesskit::Toggled::True)
 }
 
 /// Sets one choice through the window, leaving it closed.
@@ -639,7 +640,9 @@ pub fn camera(app: &App) -> (Vec3, Vec3, f32, bool, &'static str) {
 
 fn axis_coloured(axis: AxisKind, c: Color32) -> bool {
     match axis {
-        AxisKind::X => c.r() > c.g().saturating_add(60) && c.r() > c.b().saturating_add(60),
+        AxisKind::X => {
+            c.r() > c.g().saturating_add(60) && c.r() > c.b().saturating_add(60) && c.g() < c.b().saturating_add(35)
+        }
         AxisKind::Y => c.g() > c.r().saturating_add(40) && c.g() > c.b().saturating_add(20),
         AxisKind::Z => c.b() > c.r().saturating_add(60) && c.b() > c.g().saturating_add(30),
     }

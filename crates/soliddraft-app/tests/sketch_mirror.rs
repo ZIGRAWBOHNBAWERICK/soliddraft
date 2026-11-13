@@ -160,10 +160,10 @@ fn picked_axis_and_dynamic_drawing_preview_cancel_undo_and_reopen() {
             let angle = f64::from(*i) * std::f64::consts::TAU / 120.0;
             let at = screen(&app, p(-12.0 + 3.0 * angle.cos(), 3.0 * angle.sin())) * ppp;
             let pixel = image.get_pixel(at.x.floor() as u32, at.y.floor() as u32);
-            i16::from(pixel[2]) > i16::from(pixel[0]) + 40 && i16::from(pixel[2]) > i16::from(pixel[1]) + 20
+            i16::from(pixel[0]) > i16::from(pixel[1]) + 40 && i16::from(pixel[1]) > i16::from(pixel[2]) + 20
         })
         .count();
-    assert!((31..105).contains(&covered), "a construction preview has visible dash gaps, blue samples={covered}/120");
+    assert!((31..105).contains(&covered), "a construction preview has visible dash gaps, amber samples={covered}/120");
     control(&mut app, "Apply");
     assert!(session(&app).sketch.entity(3).unwrap().construction);
     reopen(&mut app, id, "construction");

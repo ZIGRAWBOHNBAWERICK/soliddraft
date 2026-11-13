@@ -94,7 +94,7 @@ fn the_grid_shows_in_every_look() {
         ("realistic", "realistic", Preset::Realistic),
     ] {
         let mut case = Case::gpu(&format!("grid_in_look_{name}"));
-        case.seed_settings(&format!(r#"{{"view":{{"preset":"{look}"}}}}"#));
+        seed_gpu_settings(&case, &format!(r#"{{"view":{{"preset":"{look}"}}}}"#));
         let mut app = launch_for_frames(empty(), SIZE, 1.0);
         assert_eq!(app.state().state.viewport.preset, preset);
         let (minor, _) = readout(&app).expect("a readout");
@@ -106,7 +106,8 @@ fn the_grid_shows_in_every_look() {
 #[test]
 fn grid_visibility_is_a_persistent_display_preference() {
     let mut case = Case::gpu("grid_preference");
-    case.seed_settings(
+    seed_gpu_settings(
+        &case,
         r#"{"view":{"preset":"fast","show_origin_planes":false,"always_show_origin_axes":false},"navigation":{"preset_id":"onshape","future":"keep"}}"#,
     );
     let navigation = case.settings_json()["navigation"].clone();
@@ -440,14 +441,14 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
         (app, on, off, x, spacing)
     };
 
-    case.seed_settings(r#"{"view":{"preset":"fast"}}"#);
+    seed_gpu_settings(&case, r#"{"view":{"preset":"fast"}}"#);
     let (_, _, _, light, _) = top(&mut case, "default");
     // The dark theme draws the default in light ink; it reads as a grid there too.
-    case.seed_settings(r#"{"appearance":{"theme":"dark"},"view":{"preset":"fast"}}"#);
+    seed_gpu_settings(&case, r#"{"appearance":{"theme":"dark"},"view":{"preset":"fast"}}"#);
     let (app, _, _, dark, _) = top(&mut case, "default-dark");
     assert!(dark.minor_contrast >= 4.0, "{dark:?}");
     drop(app);
-    case.seed_settings(r#"{"view":{"preset":"fast","grid":{"strength":1.0}}}"#);
+    seed_gpu_settings(&case, r#"{"view":{"preset":"fast","grid":{"strength":1.0}}}"#);
     let (app, _, _, full, _) = top(&mut case, "full-strength");
     assert_eq!(app.state().state.viewport.grid_style.strength, 1.0, "the start read the strength");
     assert!(
@@ -456,7 +457,7 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
     );
     drop(app);
 
-    case.seed_settings(r##"{"view":{"preset":"fast","grid":{"strength":1.0,"color":"#d42020"}}}"##);
+    seed_gpu_settings(&case, r##"{"view":{"preset":"fast","grid":{"strength":1.0,"color":"#d42020"}}}"##);
     let (app, on, off, red, _) = top(&mut case, "red");
     let line = red.majors.first().expect("a major line").at;
     let rect = viewport(&app);
@@ -469,10 +470,23 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
     assert!(dg > 30 && db > 30 && dg > dr * 2 && db > dr * 2, "a red line: {on:?} over {off:?}");
     drop(app);
 
-    case.seed_settings(r#"{"view":{"preset":"fast","grid":{"follow_zoom":false,"fixed_mm":10,"major_every":4}}}"#);
+    seed_gpu_settings(
+        &case,
+        r#"{"view":{"preset":"fast","grid":{"follow_zoom":false,"fixed_mm":10,"major_every":4}}}"#,
+    );
     let (mut app, on, off, _, spacing) = top(&mut case, "fixed-10mm");
     assert_eq!(spacing, (10.0, 40.0), "the readout names the fixed spacing");
     assert_lattice(&on, &off, &app, lattice_on_ground(10.0), "a fixed 10 mm lattice");
     wheel(&mut app, 300.0);
     assert_eq!(readout(&app), Some((10.0, 40.0)), "a fixed spacing stays when zooming");
+}
+
+fn seed_gpu_settings(case: &Case, json: &str) {
+    let mut settings: serde_json::Value = serde_json::from_str(json).unwrap();
+    settings["view"]["scene"] = serde_json::json!("graphite");
+    settings["view"]["always_show_origin_axes"] = serde_json::json!(false);
+    if settings.get("navigation").is_none() {
+        settings["navigation"] = serde_json::json!({"preset_id":"fusion"});
+    }
+    case.seed_settings(&settings.to_string());
 }

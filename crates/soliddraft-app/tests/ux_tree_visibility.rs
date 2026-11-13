@@ -31,6 +31,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
+#[path = "support/ui.rs"]
+mod ribbon;
+
 #[path = "support/render_steps.rs"]
 mod render_steps;
 
@@ -206,6 +209,7 @@ fn launch(case: &mut Case, doc: Document, window: &str) -> App {
     // The fixture's isolated config: the theme, and the view keys the image oracles need.
     let mut settings = manifest()["fixtures"]["config"].clone();
     settings.as_object_mut().expect("the fixture config").remove("note");
+    settings["view"]["always_show_origin_axes"] = serde_json::json!(false);
     settings["appearance"] = serde_json::json!({ "theme": w["theme"] });
     std::fs::write(case.dir.join("config/settings.json"), settings.to_string()).unwrap();
     let size = vec2(f(&w["size"][0]) as f32, f(&w["size"][1]) as f32);
@@ -1183,6 +1187,7 @@ fn hiding_a_solid_hides_its_pending_replacement_body() {
 
         // A real scalar edit: drag the Depth field, with the exact proof held back.
         kernel.rules.lock().unwrap().hold_next = true;
+        ribbon::open_options(app);
         let start = app.get_by_label("Depth value").rect().center();
         render_steps::rendered(app, |app| {
             app.hover_at(start);

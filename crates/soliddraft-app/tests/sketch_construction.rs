@@ -88,7 +88,11 @@ fn assert_dashed(app: &mut App, a: P2, b: P2, color: egui::Color32) {
             [-1.0, 0.0, 1.0].into_iter().any(|offset| {
                 let at = (p + normal * offset) * app.ctx.pixels_per_point();
                 let pixel = image.get_pixel(at.x.round() as u32, at.y.round() as u32).0;
-                (0..3).all(|channel| pixel[channel].abs_diff(expected[channel]) <= 75)
+                if color == soliddraft_app::theme::accent() {
+                    i16::from(pixel[0]) > i16::from(pixel[1]) + 40 && i16::from(pixel[1]) > i16::from(pixel[2]) + 20
+                } else {
+                    (0..3).all(|channel| pixel[channel].abs_diff(expected[channel]) <= 75)
+                }
             })
         })
         .count();

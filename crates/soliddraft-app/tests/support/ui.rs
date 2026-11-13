@@ -205,6 +205,9 @@ pub fn click_button(app: &mut App, label: &str, within: Rect) {
         if label == "File" && app.query_by_label("Menu").is_some() {
             app.get_by_label("Menu").click();
             app.run_steps(8);
+            app.get_by_label("File").click();
+            app.run_steps(8);
+            return;
         } else if app.state().state.doc.features.iter().any(|f| f.name == label) && !app.state().state.tree_shown() {
             app.key_press(Key::F9);
             app.run_steps(8);
@@ -738,25 +741,29 @@ pub fn fingerprint(app: &App) -> Fingerprint {
 
 /// Reopening recomputes curve coordinates; topology and values must survive within 1e-9 mm.
 pub fn assert_sketch_close(actual: &soliddraft_app::sketch::Sketch, expected: &soliddraft_app::sketch::Sketch) {
-    fn compare(actual: &serde_json::Value, expected: &serde_json::Value) {
+    assert_values_close(actual, expected, 1e-9);
+}
+
+pub fn assert_values_close<T: serde::Serialize>(actual: &T, expected: &T, tolerance: f64) {
+    fn compare(actual: &serde_json::Value, expected: &serde_json::Value, tolerance: f64) {
         match (actual, expected) {
             (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
-                assert!((a.as_f64().unwrap() - b.as_f64().unwrap()).abs() <= 1e-9, "{a} != {b}");
+                assert!((a.as_f64().unwrap() - b.as_f64().unwrap()).abs() <= tolerance, "{a} != {b}");
             }
             (serde_json::Value::Array(a), serde_json::Value::Array(b)) => {
                 assert_eq!(a.len(), b.len());
                 for (a, b) in a.iter().zip(b) {
-                    compare(a, b);
+                    compare(a, b, tolerance);
                 }
             }
             (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
                 assert_eq!(a.keys().collect::<Vec<_>>(), b.keys().collect::<Vec<_>>());
                 for (key, value) in a {
-                    compare(value, &b[key]);
+                    compare(value, &b[key], tolerance);
                 }
             }
             _ => assert_eq!(actual, expected),
         }
     }
-    compare(&serde_json::to_value(actual).unwrap(), &serde_json::to_value(expected).unwrap());
+    compare(&serde_json::to_value(actual).unwrap(), &serde_json::to_value(expected).unwrap(), tolerance);
 }

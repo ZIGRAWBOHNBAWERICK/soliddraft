@@ -255,10 +255,11 @@ fn cut_mesh(
             near = near.min(corner.dot(normal));
             far = far.max(corner.dot(normal));
         }
-        if at <= near + 1e-9 * size {
+        // Only conservative outside bounds can skip the cut; tangential size cannot erase a slab.
+        if at <= near {
             return Ok(Arc::new(DisplayMesh::default()));
         }
-        if at >= far - 1e-9 * size {
+        if at >= far {
             return preview_mesh(kernel, body, params).map_err(soliddraft_kernel_api::KernelError::InvalidInput);
         }
         let centre = bbox.center();

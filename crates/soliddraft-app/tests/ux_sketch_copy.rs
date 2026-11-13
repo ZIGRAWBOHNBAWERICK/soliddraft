@@ -180,6 +180,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     assert!(matches!(preview.added[0], EntityKind::Circle { radius, .. } if (radius - 7.0).abs() < 0.08));
     drag(&mut app, P2::new(25.0, 10.0), P2::new(20.0, 10.0));
     assert!((session(&app).modify.distance - 5.0).abs() < 0.08);
+    ribbon::open_options(&mut app);
     let distance = app.get_by_role(egui::accesskit::Role::SpinButton).rect();
     ribbon::double_click_at(&mut app, distance.center());
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);

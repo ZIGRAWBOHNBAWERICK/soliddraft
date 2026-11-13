@@ -205,7 +205,7 @@ pub fn click_button(app: &mut App, label: &str, within: Rect) {
         if label == "File" && app.query_by_label("Menu").is_some() {
             app.get_by_label("Menu").click();
             app.run_steps(8);
-            app.get_by_label("File").click();
+            app.get_by_label_contains("File").click();
             app.run_steps(8);
             return;
         } else if app.state().state.doc.features.iter().any(|f| f.name == label) && !app.state().state.tree_shown() {

@@ -687,7 +687,8 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
     let widths = RibbonTab::ALL.map(|tab| {
         ui.painter().layout_no_wrap(tab.label().to_owned(), theme::font_medium(12.5), theme::ink()).size().x + 28.0
     });
-    let width = widths.iter().sum::<f32>() + 4.0;
+    let gap = 1.0;
+    let width = widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32 + 4.0;
     let centered = ui.max_rect().center().x - width / 2.0;
     ui.add_space((centered - ui.cursor().left()).max(8.0));
     let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
@@ -695,7 +696,7 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
     let mut x = rect.left() + 2.0;
     for (tab, width) in RibbonTab::ALL.into_iter().zip(widths) {
         let bounds = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 22.0));
-        x += width;
+        x += width + gap;
         let selected = st.ribbon_tab == tab;
         let response = ui.interact(bounds, ui.id().with(("workspace", tab.id())), Sense::click());
         response.widget_info(|| {

@@ -1797,14 +1797,14 @@ fn registry() -> Vec<CommandSpec> {
         cmd("edit_revolve", "Edit revolve", Icon::Revolve, "Change a revolution angle")
             .agents(Agents::Verb, "Preserves the sketch and axis.", tools::edit_revolve_params)
             .undo(Undo::Step),
-        cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along lines and arcs")
+        cmd("sweep", "Sweep", Icon::Cad("sweep"), "Add material: sweep a polygon profile along lines, arcs or a spline")
             .on(Solid, "Create", Small)
             .run(|_| AppAction::StartSweep)
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s) && s.selected_sketch().is_some())
             .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_))))
             .hint(|s| after_field(s).or_else(|| s.selected_sketch().is_none().then(|| "Select a closed polygon sketch to sweep".into())))
-            .agents(Agents::Verb, "Sweep a closed polygon sketch along a chain of lines and quarter, half or three-quarter arcs. The profile keeps its placement. `end` is a shorthand for one line.", tools::sweep_params)
+            .agents(Agents::Verb, "Sweep a closed polygon sketch along lines and arcs, or one rational spline with fixed orientation. The profile keeps its placement. `end` is a shorthand for one line.", tools::sweep_params)
             .undo(Undo::Step),
         cmd("edit_sweep", "Edit sweep", Icon::Sweep, "Change a sweep path")
             .agents(Agents::Verb, "Preserves the profile. Segments without an `id` keep the saved identity at their position.", tools::edit_sweep_params)

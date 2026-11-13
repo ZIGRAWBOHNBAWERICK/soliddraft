@@ -1018,8 +1018,8 @@
       ],
       "catallax_revision": "9aed0777184353a5f52d1b660f9d2411b97f0fc9",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "Two-profile ruled square frustum and three-profile smooth square loft, with ordered closed sketch regions. Coplanar profiles refuse without changing the part.",
-      "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export."
+      "supported_limits": "Two-profile ruled square prism edited into a taller two-profile Smooth square prism, with ordered closed sketch regions. Coplanar profiles refuse without changing the part.",
+      "evidence": "Measured volume, edit, undo, redo, refused edit, save, fresh-process reopen and checked STEP export; live viewport PNG and kernel view records for every solid state."
     },
     {
       "id": "mirror",

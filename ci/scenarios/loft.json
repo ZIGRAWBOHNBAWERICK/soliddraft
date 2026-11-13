@@ -26,17 +26,17 @@
       "tool": "sketch",
       "arguments": {
         "plane": "top",
-        "offset": 3,
+        "offset": 4,
         "shapes": [
           {
             "shape": "rectangle",
             "center": [
               0,
               0,
-              3
+              4
             ],
-            "width": 4,
-            "height": 4
+            "width": 2,
+            "height": 2
           }
         ]
       }
@@ -45,14 +45,14 @@
       "tool": "sketch",
       "arguments": {
         "plane": "top",
-        "offset": 6,
+        "offset": 8,
         "shapes": [
           {
             "shape": "rectangle",
             "center": [
               0,
               0,
-              6
+              8
             ],
             "width": 2,
             "height": 2
@@ -72,7 +72,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 28,
+          "approx": 16,
           "tolerance": 1e-05
         }
       ]
@@ -83,7 +83,6 @@
         "feature": "Loft1",
         "profiles": [
           "Sketch1",
-          "Sketch2",
           "Sketch3"
         ],
         "shape": "smooth"
@@ -91,7 +90,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 65.65714285714286,
+          "approx": 32,
           "tolerance": 1e-05
         }
       ]
@@ -102,7 +101,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 28,
+          "approx": 16,
           "tolerance": 1e-05
         }
       ],
@@ -114,7 +113,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 65.65714285714286,
+          "approx": 32,
           "tolerance": 1e-05
         }
       ],
@@ -134,7 +133,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 65.65714285714286,
+          "approx": 32,
           "tolerance": 1e-05
         }
       ],
@@ -158,7 +157,7 @@
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",
-          "approx": 65.65714285714286,
+          "approx": 32,
           "tolerance": 1e-05
         }
       ],

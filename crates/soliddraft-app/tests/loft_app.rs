@@ -38,6 +38,23 @@ fn loft_edit_cache_undo_reopen_and_refusal_preserve_the_exact_part() {
     call(&mut doc, "loft", json!({"profiles":["Sketch1","Sketch2"],"shape":"ruled"}));
     assert!((volume(&doc) - 28.0).abs() < 1e-7);
     let first = doc.display_body().unwrap();
+    for name in ["loft", "edit_loft"] {
+        let before = doc.model().to_bytes().unwrap();
+        let mut book = ProposalBook::default();
+        let mut input = json!({"profiles":["Sketch1"],"shape":"ruled"});
+        if name == "edit_loft" {
+            input["feature"] = json!("Loft1");
+        }
+        let result = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None }.call(
+            name,
+            input,
+            &Caller::Mcp { client: "loft profile count".into() },
+        );
+        assert!(result.is_error, "{name}: {}", result.content);
+        assert!(result.content.contains("Loft needs at least two profiles in order"), "{}", result.content);
+        assert_eq!(before, doc.model().to_bytes().unwrap());
+        assert_eq!(doc.display_body(), Some(first));
+    }
     call(&mut doc, "edit_loft", json!({"feature":"Loft1","profiles":["Sketch1","Sketch2","Sketch3"],"shape":"smooth"}));
     assert!((volume(&doc) - 4596.0 / 70.0).abs() < 1e-7);
     call(&mut doc, "undo", json!({}));

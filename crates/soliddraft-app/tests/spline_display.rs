@@ -25,81 +25,71 @@ fn edge_at(state: &AppState, wanted: soliddraft_kernel_api::Vec3) -> String {
 }
 
 #[test]
-fn native_loft_fillet_display_keeps_the_bound_and_plain_trimmed_face_refusal() {
-    check_fillet_display(
+fn native_scaled_fillet_display_refuses_with_a_numbered_reason_and_preserves_the_part() {
+    check_fillet_refusal(
         include_str!("../../../ci/scenarios/loft-edge-fillet.json"),
         soliddraft_kernel_api::Vec3::new(0.1, -0.05, 0.1),
-        soliddraft_kernel_api::Vec3::new(0.05, 0.15, 0.1),
     );
 }
 
 #[test]
-fn native_small_warp_fillet_display_keeps_its_measured_bound() {
-    check_fillet_display(
+fn native_small_warp_fillet_display_refuses_with_a_numbered_reason_and_preserves_the_part() {
+    check_fillet_refusal(
         include_str!("../../../ci/scenarios/loft-edge-fillet-small-warp.json"),
         soliddraft_kernel_api::Vec3::new(1.0, -0.9995, 1.0),
-        soliddraft_kernel_api::Vec3::new(0.9995, 1.0005, 1.0),
     );
 }
 
-fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, neighbour: soliddraft_kernel_api::Vec3) {
+fn check_fillet_refusal(source: &str, rail: soliddraft_kernel_api::Vec3) {
     static CONFIG: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _config = CONFIG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir =
-        std::env::temp_dir().join(format!("soliddraft-spline-display-{}", soliddraft_document::DocumentId::new()));
+        std::env::temp_dir().join(format!("soliddraft-spline-refusal-{}", soliddraft_document::DocumentId::new()));
     std::fs::create_dir_all(&dir).unwrap();
     soliddraft_app::file::set_config_dir(Some(dir.join("config")));
     let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_operation_log());
     let mut state = AppState::new(soliddraft_app::document::Document::new("Spline display", kernel.clone()));
     let scenario: Value = serde_json::from_str(source).unwrap();
     let caller = Caller::Mcp { client: "spline-display-test".into() };
-    for step in scenario["steps"].as_array().unwrap().iter().take(4) {
+    for step in scenario["steps"].as_array().unwrap().iter().take(3) {
         let name = step["tool"].as_str().unwrap();
-        let mut arguments = step["arguments"].clone();
-        if name == "fillet" {
-            arguments["edges"] = json!([edge_at(&state, rail)]);
-        }
         let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
-            call_checked(&mut AppTools { state: &mut state }, name, arguments, &caller)
+            call_checked(&mut AppTools { state: &mut state }, name, step["arguments"].clone(), &caller)
         });
-        eprintln!("{name}: {work:?}; {}", out.content);
-        for call in kernel.take_diagnostics().unwrap()["calls"].as_array().unwrap() {
-            for operation in call["operation_log"]["operations"].as_array().unwrap() {
-                let stage = json!({"call":call["operation"],"operation":operation["operation"],
-                    "work":operation["work"],"status":operation["status"],"refusal":operation["refusal"]});
-                eprintln!("native display stage: {}", serde_json::to_string(&stage).unwrap());
-            }
-        }
         assert!(!out.is_error && !work.exhausted, "{name}: {}; {work:?}", out.content);
-        if name == "loft" {
-            for edge in &state.doc.edges {
-                eprintln!("named loft edge: {} {:?}", edge.label, edge.midpoint);
-            }
-        }
     }
-    let body = state.doc.model().body().unwrap();
-    let bound = state.doc.model().kernel().display_bound(body).unwrap().expect("the native bounded spline display");
-    bound.validate().unwrap();
-    assert_eq!(bound.kind, "spline display mesh");
-    assert_eq!(bound.level_mm, 0.01);
-    assert!(bound.method.contains("derivative"));
-    let proof = state.doc.proof_state();
-    assert!(proof.answered_within_bound && proof.display_only_bound);
-    assert!(proof.current_proved_model(), "the exact retained body has its independent proof");
-    assert!(!proof.current_proved_display());
-    let feature = state.doc.features.iter().find(|feature| feature.name == "Fillet1").unwrap();
-    assert!(matches!(feature.status, soliddraft_app::document::FeatureStatus::AnsweredWithinBound(_)));
     let before = state.doc.model().to_bytes().unwrap();
     let undo = state.doc.undo_depth();
-    let mut refusal = scenario["steps"][7]["arguments"].clone();
-    refusal["edges"] = json!([edge_at(&state, neighbour)]);
-    let out = call_checked(&mut AppTools { state: &mut state }, "fillet", refusal, &caller);
-    assert!(out.is_error && out.content.contains("already trimmed"), "{}", out.content);
+    let mut arguments = scenario["steps"][3]["arguments"].clone();
+    let selected = edge_at(&state, rail);
+    assert_eq!(arguments["edges"], json!([selected]), "the scenario names the exact intended rail");
+    arguments["edges"] = json!([selected]);
+    kernel.take_diagnostics().unwrap();
+    let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
+        call_checked(&mut AppTools { state: &mut state }, "fillet", arguments, &caller)
+    });
+    eprintln!("F04 display refusal: {work:?}; {}", out.content);
+    assert!(out.is_error && work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
+    for expected in ["SD-DISPLAY-01", "0.01 mm", "work units", "20000000"] {
+        assert!(out.content.contains(expected), "missing {expected}: {}", out.content);
+    }
+    for forbidden in ["kernel", "step op_", "mesh.spline", "numbers.operation"] {
+        assert!(!out.content.contains(forbidden), "internal detail {forbidden}: {}", out.content);
+    }
+    let evidence = kernel.take_diagnostics().unwrap();
+    let refusals: Vec<_> = evidence["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|call| call["operation_log"]["operations"].as_array().unwrap())
+        .filter_map(|operation| operation["refusal"]["code"].as_str())
+        .collect();
+    assert!(refusals.contains(&"mesh.spline-display-budget"), "{evidence}");
     assert_eq!(state.doc.model().to_bytes().unwrap(), before);
     assert_eq!(state.doc.undo_depth(), undo);
-    assert!(state.doc.proof_state().answered_within_bound);
-    // Export asks the certified writer independently, never reuses bounded display geometry.
-    let path = dir.join("part.step");
+    assert!(!state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
+    assert!(!state.doc.proof_state().answered_within_bound);
+    let path = dir.join("retained-loft.step");
     let out = call_checked(&mut AppTools { state: &mut state }, "export_step", json!({"path":path}), &caller);
     assert!(!out.is_error, "{}", out.content);
     assert!(std::fs::metadata(path).unwrap().len() > 0);

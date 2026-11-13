@@ -1570,9 +1570,9 @@
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
-      "route": "MCP sketches, loft, fillet and edit_fillet -> retained exact body -> native three-way spline display -> save/reopen and independent certified STEP export",
-      "supported_limits": "Scaled rational ruled loft: 0.2 mm section span, 0.01 mm fillet edited to 0.009375 mm. One first fillet on an untrimmed loft side; another edge on an already trimmed side remains refused. Rendering uses the preset 0.01 mm spline-display rule and unchanged 20M request allowance; certified results remain proved, measured rendering keeps its kind, level, whole-surface deviation and measurement method.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; edit, undo/redo, unchanged-state refusal, save and fresh reopen; independent checked STEP export; spline_display.rs verifies native evidence and the separate exact-model proof."
+      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and typed measured-display refusal -> unchanged retained loft -> history, reopen and certified STEP",
+      "supported_limits": "Scaled 0.2 mm ruled loft and radius 0.01 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
+      "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
     },
     {
       "id": "loft-edge-fillet-small-warp",
@@ -1584,9 +1584,9 @@
         "soliddraft-kernel-catallax"
       ],
       "catallax_revision": "7cde4119547109994eb685d6ff10187ce0b846fc",
-      "route": "MCP sketches, loft, fillet and edit_fillet -> retained exact body -> native three-way spline display -> save/reopen and independent certified STEP export",
-      "supported_limits": "Small-warp rational ruled loft: 2 mm section span, 0.1 mm fillet edited to 0.09375 mm. One first fillet on an untrimmed loft side; another edge on an already trimmed side remains refused. Rendering uses the preset 0.01 mm spline-display rule and unchanged 20M request allowance; certified results remain proved, measured rendering keeps its kind, level, whole-surface deviation and measurement method.",
-      "evidence": "result.json, protocol.json, commands/NNNN/{command.json,kernel.json,measurement.json,viewport.png,view.svg}; edit, undo/redo, unchanged-state refusal, save and fresh reopen; independent checked STEP export; spline_display.rs verifies native evidence and the separate exact-model proof."
+      "route": "MCP sketches and loft -> exact longitudinal rail selection -> native fillet and typed measured-display refusal -> unchanged retained loft -> history, reopen and certified STEP",
+      "supported_limits": "Small-warp 2 mm ruled loft and radius 0.1 mm rail fillet. Exact fillet construction completes, but measured display exhausts the unchanged 20M whole-request allowance. The application returns the numbered SD-DISPLAY-01 reason in plain words and retains the prior loft; undo/redo, save/reopen and independent certified STEP verify that retained part. Bounded F04 display success is not claimed at this pin.",
+      "evidence": "result.json, protocol.json, command/kernel logs, native refusal code and work counters, viewport PNG and SVG; spline_display.rs checks plain quantified refusal, unchanged bytes and undo depth, and independent STEP of the retained loft."
     }
   ]
 }

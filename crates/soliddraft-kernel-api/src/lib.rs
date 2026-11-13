@@ -814,6 +814,16 @@ pub enum KernelError {
         /// The kernel's or backend's explanation.
         message: String,
     },
+    /// The named spline rendering request exhausted its unchanged work allowance.
+    #[error(
+        "Spline display limit (SD-DISPLAY-01): The 0.01 mm surface check stopped after {used} work units. The application limit is {limit} units. The existing part is retained"
+    )]
+    DisplayLimit {
+        /// Work consumed before the refused reservation.
+        used: u64,
+        /// The application's request allowance.
+        limit: u64,
+    },
     /// The backend does not implement this operation or input.
     #[error("unsupported: {0}")]
     Unsupported(String),
@@ -977,6 +987,18 @@ pub trait Kernel: Send + Sync {
     /// topology order. `params.curve_angle_deg` bounds the turn between samples and
     /// `params.chord_height`, when set, the distance from chord to curve.
     fn tessellate_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>>;
+
+    /// The screen result under a backend's named rendering rule. Its stated level may
+    /// differ from viewport refinement controls; exports use certified tessellation.
+    /// Backends without a named rule retain their existing preview behavior.
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.preview(body, params)
+    }
+
+    /// Physical picking edges of the named rendering result, or the ordinary preview.
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.preview_edges(body, params)
+    }
 
     /// Measured rendering evidence for this immutable body, never an export certificate.
     fn display_bound(&self, _body: BodyId) -> KernelResult<Option<DisplayBound>> {

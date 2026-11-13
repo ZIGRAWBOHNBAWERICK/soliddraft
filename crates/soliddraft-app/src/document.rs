@@ -2872,7 +2872,7 @@ impl Document {
                     self.show_mesh(body, &topology, &mesh);
                     self.shown = next;
                 } else {
-                    match self.kernel().preview(body, &self.tess_params) {
+                    match self.kernel().rendering(body, &self.tess_params) {
                         Ok(mesh) => {
                             self.show_mesh(body, &topology, &mesh);
                             self.quality.made(body, mesh);
@@ -3820,7 +3820,7 @@ pub(crate) fn ready_display(
     let topology = kernel.topology(body).map_err(|error| error.to_string())?;
     let params =
         *soliddraft_tessellation::Levels::new(&model.settings().viewport, topology.bbox.diagonal()).params(level);
-    let kernel_mesh = kernel.preview(body, &params).map_err(|error| error.to_string())?;
+    let kernel_mesh = kernel.rendering(body, &params).map_err(|error| error.to_string())?;
     let edges = edge_polylines(kernel.as_ref(), body, &params);
     let (faces, named_edges) = named_entities(model, body, &topology);
     let makers = faces.iter().map(|face| (face.id, face.feature)).collect();
@@ -3993,7 +3993,11 @@ fn view_status(
 /// The display mesh of a body that is only previewed: no picks, so nothing in it can be
 /// selected or confused with the document's own body.
 fn display_unavailable(reason: String) -> String {
-    let message = reason.strip_prefix("invalid input: ").unwrap_or(&reason);
+    let message =
+        reason.strip_prefix("invalid input: ").or_else(|| reason.strip_prefix("unsupported: ")).unwrap_or(&reason);
+    if message.starts_with("Spline display ") && message.contains("(SD-DISPLAY-") {
+        return message.to_owned();
+    }
     format!("Display unavailable: {message}")
 }
 
@@ -4017,7 +4021,7 @@ fn preview_mesh_marked(
     made: &HashMap<FaceId, FeatureId>,
 ) -> Result<Arc<DisplayMesh>, String> {
     let topology = kernel.topology(body).map_err(|e| e.to_string())?;
-    let mesh = kernel.preview(body, params).map_err(|e| e.to_string())?;
+    let mesh = kernel.rendering(body, params).map_err(|e| e.to_string())?;
     let edges = edge_polylines(kernel, body, params);
     let mut picks = Vec::new();
     Ok(Arc::new(display_mesh(0, &mesh, &edges, &topology, made, &mut picks)))
@@ -4026,7 +4030,7 @@ fn preview_mesh_marked(
 /// The body's edges sampled along their curves. A kernel that cannot sample them
 /// leaves the body without edges rather than without faces.
 fn edge_polylines(kernel: &dyn Kernel, body: BodyId, params: &TessellationParams) -> Vec<EdgePolyline> {
-    kernel.preview_edges(body, params).unwrap_or_else(|e| {
+    kernel.rendering_edges(body, params).unwrap_or_else(|e| {
         log::warn!("edges of body {body:?}: {e}");
         Vec::new()
     })

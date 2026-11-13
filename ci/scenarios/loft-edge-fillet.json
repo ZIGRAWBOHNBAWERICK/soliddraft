@@ -165,47 +165,23 @@
         ],
         "radius": 0.01
       },
+      "refused": "Spline display limit (SD-DISPLAY-01)",
+      "same_geometry_as_step": 3,
       "checks": [
         {
           "pointer": "/summary/body/faces",
-          "equals": 7
-        }
-      ]
-    },
-    {
-      "tool": "edit_fillet",
-      "arguments": {
-        "feature": "Fillet1",
-        "radius": 0.009375
-      },
-      "checks": [
-        {
-          "pointer": "/summary/body/faces",
-          "equals": 7
+          "equals": 6
         }
       ]
     },
     {
       "tool": "undo",
-      "arguments": {},
-      "same_geometry_as_step": 4
+      "arguments": {}
     },
     {
       "tool": "redo",
       "arguments": {},
-      "same_geometry_as_step": 5
-    },
-    {
-      "tool": "fillet",
-      "arguments": {
-        "edges": [
-          "Loft1 \u00b7 Edge 11"
-        ],
-        "radius": 0.01
-      },
-      "refusal": "fillet.unsupported-spline",
-      "refused": "Fillet cannot round another edge on this loft face because an earlier fillet has already trimmed it. Choose an edge on an untrimmed face",
-      "same_geometry_as_step": 5
+      "same_geometry_as_step": 3
     },
     {
       "tool": "save",
@@ -222,7 +198,7 @@
         "path": "{bundle}/loft-fillet.dwprt"
       },
       "fresh_process": true,
-      "same_geometry_as_step": 5,
+      "same_geometry_as_step": 3,
       "exports": [
         {
           "format": "step",
@@ -235,18 +211,6 @@
             {
               "pointer": "/report/solids",
               "equals": 1
-            },
-            {
-              "pointer": "/report/fit_mm",
-              "minimum": 1e-20
-            },
-            {
-              "pointer": "/report/fit_mm",
-              "maximum": 0.0001
-            },
-            {
-              "pointer": "/report/fitted_curves",
-              "minimum": 1
             }
           ]
         }

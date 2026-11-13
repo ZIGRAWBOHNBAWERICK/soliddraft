@@ -119,6 +119,15 @@ impl Kernel for Gated {
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn soliddraft_kernel_api::ProofWork>> {
         self.inner.reserve_proof_work()
     }
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        self.display(body)?;
+        self.inner.rendering(body, params)
+    }
+
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        self.inner.rendering_edges(body, params)
+    }
+
     fn display_bound(&self, _body: BodyId) -> KernelResult<Option<DisplayBound>> {
         Ok(self.rules.lock().unwrap().display_bound.clone())
     }

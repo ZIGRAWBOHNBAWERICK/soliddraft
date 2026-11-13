@@ -169,7 +169,7 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     let params = TessellationParams { chord_height: 0.01, ..Default::default() };
     let (answer, work) = with_request_allowance(APP_REQUEST_WORK, || -> KernelResult<_> {
         let body = k.loft(&OpTag::new("smooth"), &profiles, LoftShape::Smooth)?;
-        let mesh = k.preview(body.body, &params)?;
+        let mesh = k.rendering(body.body, &params)?;
         Ok((body, mesh))
     });
     eprintln!("three-section Smooth display: {work:?}; refusal: {:?}", answer.as_ref().err());
@@ -187,6 +187,11 @@ fn three_section_smooth_display_fits_the_application_allowance() {
     }
     assert!(!mesh.indices.is_empty());
     assert_eq!(mesh.triangle_faces.len(), mesh.triangle_count());
+    let (certified, certificate_work) = with_request_allowance(0, || k.tessellate(body.body, &params));
+    assert!(
+        certified.is_err() && certificate_work.exhausted,
+        "rendering cannot satisfy an independent certified request with different controls"
+    );
     let faces = k.topology(body.body).unwrap().faces;
     assert_eq!(faces.len(), 6);
     assert!(mesh.triangle_faces.iter().all(|id| faces.iter().any(|face| face.id == *id)));

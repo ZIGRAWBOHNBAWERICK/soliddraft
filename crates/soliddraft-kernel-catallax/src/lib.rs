@@ -155,20 +155,25 @@ impl Solid {
     fn rendering(&self) -> KernelResult<Arc<catallax_numbers::OperationResult<catallax_mesh::DisplayMesh>>> {
         use catallax_numbers::{Answer, OperationResult, Refusal};
         self.rendering.get(display_key(&MeshOptions::default()), || {
-            numerical("display_result", |dec| match self.app.display_result(&MeshOptions::default(), dec) {
+            let run = || numerical("display_result", |dec| match self.app.display_result(&MeshOptions::default(), dec) {
                 Ok(OperationResult::Refused(refusal)) => Err(refusal),
                 Ok(answer) => Ok(Answer::exact(answer)),
                 Err(Error::Display(refusal)) => Err(refusal),
                 Err(error) => Err(Refusal::new(error.code(), error.to_string())),
-            })
-            .map(|answer| answer.value)
-            .map_err(|e| {
-                let message = if e.code.contains("budget") || e.code.contains("work-limit") {
-                    "The spline display could not be measured within the work limit. The exact part is retained"
+            });
+            let (result, used) = if catallax_numbers::operation_budget_active() {
+                let result = run();
+                (result, catallax_numbers::current_operation_work().used)
+            } else {
+                let (result, work) = catallax_numbers::with_operation_budget(APP_REQUEST_WORK, run);
+                (result, work.used)
+            };
+            result.map(|answer| answer.value).map_err(|error| {
+                if matches!(error.code, "mesh.spline-display-budget" | "numbers.operation-budget" | "numbers.budget-exhausted" | "application.work-limit") {
+                    KernelError::DisplayLimit { used, limit: APP_REQUEST_WORK }
                 } else {
-                    "The spline display could not establish a measured deviation within 0.01 mm over the entire boundary"
-                };
-                KernelError::Unsupported(message.into())
+                    KernelError::Unsupported("Spline display bound (SD-DISPLAY-02): A measured deviation within 0.01 mm could not be established over the entire boundary. The existing part is retained".into())
+                }
             })
         })
     }
@@ -185,26 +190,27 @@ impl Solid {
             return Err(KernelError::Unsupported("The display coordinates cannot be represented on screen".into()));
         }
         let mut mesh = convert::preview(&display.geometry, &self.ids);
+        let rounding = display
+            .geometry
+            .positions
+            .iter()
+            .map(|point| {
+                point
+                    .iter()
+                    .fold(0.0_f64, |sum, value| (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up())
+            })
+            .fold(0.0_f64, f64::max);
+        let rounding = Rational::from_f64_exact(rounding).ok_or_else(|| {
+            KernelError::Unsupported("The display coordinates cannot be represented on screen".into())
+        })?;
+        let bound = &display.measurement.maximum_deviation + &rounding;
+        let level = MeshOptions::default().chord_tolerance;
+        if bound > level {
+            return Err(KernelError::Unsupported(
+                "Spline display bound (SD-DISPLAY-03): The measured deviation exceeds 0.01 mm after screen-coordinate rounding. The existing part is retained".into(),
+            ));
+        }
         if let Some(evidence) = evidence {
-            let rounding = display
-                .geometry
-                .positions
-                .iter()
-                .map(|point| {
-                    point.iter().fold(0.0_f64, |sum, value| {
-                        (sum + (*value - f64::from(*value as f32)).abs().next_up()).next_up()
-                    })
-                })
-                .fold(0.0_f64, f64::max);
-            let rounding = Rational::from_f64_exact(rounding).ok_or_else(|| {
-                KernelError::Unsupported("The display coordinates cannot be represented on screen".into())
-            })?;
-            let bound = evidence.measured() + &rounding;
-            if &bound > evidence.level() {
-                return Err(KernelError::Unsupported(
-                    "The measured spline display deviation exceeds the 0.01 mm limit after screen rounding".into(),
-                ));
-            }
             let mut measured = bound.to_f64_nearest();
             if Rational::from_f64_exact(measured).is_some_and(|value| value < bound) {
                 measured = measured.next_up();
@@ -1349,6 +1355,47 @@ impl Kernel for CatallaxKernel {
         self.observe("construction_edit", || construction::prepare(self, body, edits, params))
     }
 
+    fn rendering(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
+        if self.field(body)?.is_none() {
+            let solid = self.solid(body)?;
+            if solid.has_splines() {
+                options(params)?;
+                return self.observe("preview", || solid.rendering_mesh());
+            }
+        }
+        self.preview(body, params)
+    }
+
+    fn rendering_edges(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Vec<EdgePolyline>> {
+        if self.field(body)?.is_some() {
+            return self.preview_edges(body, params);
+        }
+        let solid = self.solid(body)?;
+        if solid.has_splines() {
+            options(params)?;
+            return self.observe("preview_edges", || {
+                let answer = solid.rendering()?;
+                let mesh = match answer.as_ref() {
+                    catallax_numbers::OperationResult::Proven(answer) => &answer.value.geometry,
+                    catallax_numbers::OperationResult::Bounded(answer) => &answer.value().geometry,
+                    catallax_numbers::OperationResult::Refused(refusal) => {
+                        return Err(query_error("preview_edges", refusal.clone()));
+                    }
+                };
+                Ok(mesh
+                    .edges
+                    .iter()
+                    .map(|edge| EdgePolyline {
+                        edge: solid.ids.edges[&edge.edge],
+                        points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
+                    })
+                    .collect())
+            });
+        }
+
+        self.preview_edges(body, params)
+    }
+
     fn display_bound(&self, body: BodyId) -> KernelResult<Option<DisplayBound>> {
         self.observe("display_bound", || {
             if self.field(body)?.is_some() {
@@ -1368,10 +1415,6 @@ impl Kernel for CatallaxKernel {
                 return Ok(field.preview());
             }
             let solid = self.solid(body)?;
-            if solid.has_splines() {
-                options(params)?;
-                return solid.rendering_mesh();
-            }
             // Where Catallax cannot sample a preview, the screen shows the certified mesh.
             let preview = solid.preview(&options(params)?, "preview")?;
             let Some(mesh) = preview.as_ref() else {
@@ -1393,24 +1436,6 @@ impl Kernel for CatallaxKernel {
                 return Ok(vec![]);
             }
             let solid = self.solid(body)?;
-            if solid.has_splines() {
-                let answer = solid.rendering()?;
-                let mesh = match answer.as_ref() {
-                    catallax_numbers::OperationResult::Proven(answer) => &answer.value.geometry,
-                    catallax_numbers::OperationResult::Bounded(answer) => &answer.value().geometry,
-                    catallax_numbers::OperationResult::Refused(refusal) => {
-                        return Err(query_error("preview_edges", refusal.clone()));
-                    }
-                };
-                return Ok(mesh
-                    .edges
-                    .iter()
-                    .map(|edge| EdgePolyline {
-                        edge: solid.ids.edges[&edge.edge],
-                        points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
-                    })
-                    .collect());
-            }
             let preview = solid.preview(&options(params)?, "preview_edges")?;
             let Some(mesh) = preview.as_ref() else {
                 return self.tessellate_edges(body, params);

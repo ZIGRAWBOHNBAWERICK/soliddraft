@@ -167,7 +167,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   kernel:
     needs: select
@@ -237,7 +239,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   step-opencascade:
     needs: select
@@ -310,7 +314,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   build-linux:
     needs: select
@@ -392,7 +398,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   partition-linux:
     needs: [select, build-linux]
@@ -472,7 +480,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   test-linux:
     needs: [select, build-linux, partition-linux]
@@ -526,7 +536,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   build-macos:
     needs: select
@@ -1041,7 +1053,9 @@ jobs:
           rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
           chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
           # Only images labelled for this job may be pruned; the pinned base is retained.
-          curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
 
   packaging:
     needs: select

@@ -426,6 +426,14 @@ class BladeCleanup(unittest.TestCase):
                 self.assertFalse((root / 'portable').exists())
                 self.assertFalse((root / 'target').exists())
                 self.assertEqual((root / 'keep').read_text(), 'source')
+                (root / 'prune.log').unlink()
+                unavailable = 'command() { if [[ "$1" == -v && "$2" == curl ]]; then return 1; fi; builtin command "$@"; };\n'
+                subprocess.run(['bash', '-e', '-c', unavailable + script.replace('/.dockerenv', str(marker))],
+                               check=True, env=dict(os.environ, GITHUB_WORKSPACE=str(root),
+                                   LINUX_ARCHIVE_WORKSPACE=str(root / 'portable'), RUNNER_TEMP=str(root),
+                                   GITHUB_RUN_ID='123', GITHUB_JOB='fixture', PRUNE_LOG=str(root / 'prune.log'),
+                                   PATH=f'{binary}:{os.environ["PATH"]}'))
+                self.assertFalse((root / 'prune.log').exists())
 
 
 class BrowserStartup(unittest.TestCase):

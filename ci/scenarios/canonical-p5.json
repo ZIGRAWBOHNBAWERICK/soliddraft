@@ -202,7 +202,7 @@
         "min_detail": 0.5
       },
       "label": "field-refused",
-      "refused": "fillet.unsupported-overflow",
+      "refused": "measure.unsupported-surface",
       "same_geometry_as_step": 4,
       "checks": [
         {

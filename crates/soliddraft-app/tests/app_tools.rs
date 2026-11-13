@@ -640,6 +640,34 @@ fn every_tool_runs_without_a_window_and_undoes_as_its_row_says() {
     let redone = s.call("model_summary", json!({}));
     assert_eq!(redone["features"], imported["features"]);
 
+    let replacement = s.path("replacement.igs");
+    std::fs::write(s.dir.join("replacement.igs"), include_bytes!("../../../ci/fixtures/import/occt-box.igs")).unwrap();
+    let preview = s.call("preview_import", json!({"path": replacement, "format": "iges", "feature": "Import1"}));
+    let replaced = s.call(
+        "replace_import",
+        json!({"path": replacement, "format": "iges", "feature": "Import1", "preview_token": preview["token"]}),
+    );
+    assert_eq!(replaced["features"][0]["id"], imported["features"][0]["id"]);
+    assert_eq!(replaced["features"][0]["source_name"], "replacement.igs");
+    s.call("undo", json!({}));
+    assert_eq!(s.call("model_summary", json!({}))["features"], imported["features"]);
+    s.call("redo", json!({}));
+    assert_eq!(s.call("model_summary", json!({}))["features"], replaced["features"]);
+
+    s.call("new_part", json!({}));
+    let source = s.path("tetrahedron.obj");
+    std::fs::write(s.dir.join("tetrahedron.obj"), include_bytes!("../../../ci/fixtures/import/tetrahedron.obj"))
+        .unwrap();
+    let preview = s.call("preview_import", json!({"path": source, "format": "mesh"}));
+    let imported = s.call("import_mesh", json!({"path": source, "format": "mesh", "preview_token": preview["token"]}));
+    assert_eq!(imported["features"][0]["type"], "import_mesh");
+    let mass = s.call("mass_properties", json!({"name": "Import1"}));
+    assert!((mass["volume_mm3"].as_f64().unwrap() - 1000.0 / 6.0).abs() < 0.001);
+    s.call("undo", json!({}));
+    assert!(s.state.doc.features.is_empty());
+    s.call("redo", json!({}));
+    assert_eq!(s.call("model_summary", json!({}))["features"], imported["features"]);
+
     let tools: BTreeSet<String> = tool_specs(Surface::Mcp).into_iter().map(|t| t.name).collect();
     let missed: Vec<_> = tools.difference(&s.ran).collect();
     assert!(missed.is_empty(), "this test calls no {missed:?}; add each to it");

@@ -51,7 +51,7 @@ fn block(kernel: Arc<dyn Kernel>) -> (Document, FeatureId) {
 fn source(d: &Document) -> Source {
     let t = d.kernel().topology(d.body().unwrap()).unwrap();
     let edge = t.edges.iter().find(|e| (e.bbox.max.z - e.bbox.min.z - 10.0).abs() < 1e-5).unwrap();
-    Source::Edge { reference: d.edge_ref(edge.id).unwrap() }
+    Source::Edge { reference: Box::new(d.edge_ref(edge.id).unwrap()) }
 }
 fn track(d: &mut Document) {
     d.execute(Command::Track { name: "block_edge".into(), source: source(d), check: Some("< 12 mm".into()) }).unwrap();

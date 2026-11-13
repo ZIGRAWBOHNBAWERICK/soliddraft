@@ -22,7 +22,7 @@ pub fn source(doc: &Document, selection: Selection) -> Result<Source, String> {
         Selection::Edge(edge) => {
             let mut reference = doc.model().edge_ref(edge).map_err(|e| e.to_string())?;
             reference.label = label;
-            Ok(Source::Edge { reference })
+            Ok(Source::Edge { reference: Box::new(reference) })
         }
         Selection::Face(face) => {
             let mut reference = doc.model().face_ref(face).map_err(|e| e.to_string())?;
@@ -46,8 +46,8 @@ pub fn measure(doc: &Document, selection: Selection) -> Result<Value, String> {
 /// One end of a pair request, from a picked edge or face.
 fn endpoint(doc: &Document, selection: Selection, midpoint: bool) -> Result<Endpoint, String> {
     match (source(doc, selection)?, midpoint) {
-        (Source::Edge { reference }, true) => Ok(Endpoint::EdgeMidpoint { reference }),
-        (Source::Edge { reference }, false) => Ok(Endpoint::Edge { reference }),
+        (Source::Edge { reference }, true) => Ok(Endpoint::EdgeMidpoint { reference: *reference }),
+        (Source::Edge { reference }, false) => Ok(Endpoint::Edge { reference: *reference }),
         (Source::Face { reference }, false) => Ok(Endpoint::Face { reference }),
         (other, _) => Err(format!("measure.unsupported-pair: {} has no midpoint", other.label())),
     }

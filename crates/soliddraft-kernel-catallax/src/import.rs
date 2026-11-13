@@ -53,8 +53,8 @@ fn step_refusal(error: catallax_import::ImportRefusal) -> KernelError {
         SelfIntersecting { faces, .. } => {
             format!("This STEP solid crosses itself at faces {} and {}.", faces[0], faces[1])
         }
-        SelfIntersectionNotVerified { faces, reason, .. } => {
-            format!("This STEP solid could not be verified at faces {} and {}: {reason}", faces[0], faces[1])
+        SelfIntersectionNotVerified { faces, .. } => {
+            format!("This STEP solid could not be checked for crossing faces at {} and {}.", faces[0], faces[1])
         }
         ResourceLimit => "This STEP file could not be checked within the available work limit.".into(),
     };

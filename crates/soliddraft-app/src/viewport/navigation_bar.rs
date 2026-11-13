@@ -52,6 +52,7 @@ impl NavigationBar {
                     .fill(theme::hud_bg())
                     .stroke(Stroke::new(1.0, theme::line_strong()))
                     .corner_radius(theme::edit_suite::FLOATING_RADIUS)
+                    .shadow(theme::edit_suite::NAV_SHADOW)
                     .inner_margin(egui::Margin::symmetric(6, 4))
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing = vec2(2.0, 0.0);

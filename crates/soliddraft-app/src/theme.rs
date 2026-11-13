@@ -258,6 +258,7 @@ pub mod edit_suite {
     pub const FIELD_RADIUS: u8 = 4;
     pub const TOOL_RADIUS: u8 = 5;
     pub const FLOATING_RADIUS: u8 = 10;
+    pub const NAV_SHADOW: egui::Shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: rgba(0, 0, 0, 77) };
 }
 
 static MODE: AtomicU8 = AtomicU8::new(0);

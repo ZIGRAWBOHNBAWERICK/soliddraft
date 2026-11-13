@@ -16,7 +16,7 @@ fn both_frame_settings_open_the_workspace_and_command_palette() {
         let mut app = ribbon::app(ribbon::plate());
         case.run(&mut app, |app| {
             assert_eq!(app.state().state.frame_layout, layout);
-            assert_eq!(app.state().state.layout.tree.shown, layout == FrameLayout::Classic);
+            assert_eq!(app.state().state.tree_shown(), layout == FrameLayout::Classic);
             assert!(app.state().state.viewport.rect.is_positive());
             assert!(app.query_all_by_label("Extrude").next().is_some());
             assert!(app.query_all_by_label("Edit Suite").next().is_none(), "the switch stays internal");

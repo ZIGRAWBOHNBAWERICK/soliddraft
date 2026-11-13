@@ -194,8 +194,9 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         let actions = ribbon::buttons_in(app, bar(app));
         assert!(!actions.iter().any(|(label, _)| matches!(label.as_str(), "OK" | "Cancel")));
         ribbon::run_command(app, "sketch_line");
-        for point in [glam::Vec3::new(5.0, 5.0, 0.0), glam::Vec3::new(10.0, 5.0, 0.0)] {
-            let at = ux_tools::screen(app, point);
+        let canvas = app.state().state.viewport.rect;
+        for at in [canvas.center() + vec2(-40.0, 40.0), canvas.center() + vec2(40.0, 40.0)] {
+            assert!(canvas.contains(at));
             ribbon::click_at(app, at);
         }
         settle(app);
@@ -209,6 +210,7 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         let chip = app.get_by_label("Sketch1 in history").rect();
         assert!(ribbon::painted_in(app, chip).iter().any(|p| p.text == "(-) Sketch1"));
         assert_eq!(app.state().state.doc.features[0].name, "Sketch1", "the prefix is display only");
+        case.frame(app, "closed-sketch");
         app.state_mut().state.frame_layout = FrameLayout::Classic;
         settle(app);
         assert!(ribbon::painted(app).iter().any(|p| p.text == "Properties"), "classic keeps its dock");

@@ -16,6 +16,9 @@ fn refused(r: Refusal) -> KernelError {
         "reconstruction.no-stock" => "The scan needs six stock faces in three perpendicular pairs. Fit supports block stock, bosses, bores and convex stock-edge rounds.".into(),
         "reconstruction.deviation-too-large" => "The deviation map would exceed 1,000,000 samples. Use a smaller scan or part.".into(),
         "numbers.operation-budget" | "numbers.budget-exhausted" | "numbers.deadline" => "This scan could not be fitted within the available work limit. Try a smaller scan.".into(),
+        "reconstruction.nonfinite-sample" => "The scan coordinates are too large to fit.".into(),
+        "reconstruction.nonfinite-deviation" => "The scan distances could not be measured as finite numbers.".into(),
+        "reconstruction.recipe" | "reconstruction.invalid-part" => "The fitted surfaces could not make a valid solid. The scan reference is retained.".into(),
         "reconstruction.unexplained-region" | "reconstruction.unplaced-surface" => r.detail,
         _ => format!("The scan could not be fitted: {}", r.detail),
     };

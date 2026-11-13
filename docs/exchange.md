@@ -201,8 +201,7 @@ Open Scan workspace from File or the command palette. Fit scan to part runs in
 the background and offers a review before it changes the part. It needs at least
 100 points and an empty solid history. The supported family is block stock with
 bosses, bores and convex rounds on stock edges. Unsupported regions and surfaces
-are listed explicitly, including their sample counts. Free-form fitting shows
-Coming soon when unavailable.
+are listed explicitly, including their sample counts. Free-form regions are reported as unexplained.
 
 The review shows maximum, RMS, 95th percentile and sample count in both
 directions. Scan to part measures the supplied samples against the fitted

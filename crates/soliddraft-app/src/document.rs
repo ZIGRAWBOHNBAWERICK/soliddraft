@@ -3813,6 +3813,7 @@ impl Document {
                     }
                 }
                 if !f.is_sketch()
+                    && !matches!(&f.kind, FeatureKind::Scan(scan) if scan.fit.is_none())
                     && self.current_exact_display()
                     && let Some(body) = f.body
                     && let Some(mp) = self.kernel().cached_mass_properties(body)

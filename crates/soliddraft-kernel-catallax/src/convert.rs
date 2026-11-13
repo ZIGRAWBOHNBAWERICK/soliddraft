@@ -235,9 +235,29 @@ fn named_origin_for_edges(
 ) -> Option<soliddraft_kernel_api::Origin> {
     if let Some(tag) = tags.get(&format!("{}__scan_origin", origin.step.as_str())) {
         let step = origin.step.as_str().split_once("_scan_").map_or("result", |(_, suffix)| suffix);
+        let mut role = serde_json::to_value(&origin.role).ok()?;
+        fn stable(value: &mut serde_json::Value, tags: &BTreeMap<String, OpTag>, tag: &OpTag) {
+            match value {
+                serde_json::Value::String(s) if tags.get(&format!("{s}__scan_origin")) == Some(tag) => {
+                    *s = s.split_once("_scan_").map_or("result", |(_, suffix)| suffix).to_owned();
+                }
+                serde_json::Value::Array(a) => {
+                    for value in a {
+                        stable(value, tags, tag);
+                    }
+                }
+                serde_json::Value::Object(o) => {
+                    for value in o.values_mut() {
+                        stable(value, tags, tag);
+                    }
+                }
+                _ => {}
+            }
+        }
+        stable(&mut role, tags, tag);
         return Some(soliddraft_kernel_api::Origin {
             tag: tag.clone(),
-            role: FaceRole::Imported { key: format!("{step}:{}", serde_json::to_string(&origin.role).ok()?) },
+            role: FaceRole::Imported { key: format!("{step}:{role}") },
         });
     }
     if let Some((instance, source)) = crate::feature_pattern::instance(origin.step.as_str()) {

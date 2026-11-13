@@ -36,16 +36,16 @@ impl Default for Workspace {
 struct Review {
     source: ScanSource,
     reference: Arc<ScanReference>,
-    revision: u64,
+    version: (soliddraft_document::DocumentId, u64),
 }
 struct Pending {
     feature: FeatureId,
-    revision: u64,
+    version: (soliddraft_document::DocumentId, u64),
     result: mpsc::Receiver<Result<ScanFit, String>>,
 }
 struct Fitted {
     feature: FeatureId,
-    revision: u64,
+    version: (soliddraft_document::DocumentId, u64),
     fit: ScanFit,
 }
 
@@ -54,6 +54,10 @@ pub enum Direction {
     #[default]
     ScanToPart,
     PartToScan,
+}
+
+fn version(doc: &Document) -> (soliddraft_document::DocumentId, u64) {
+    (doc.instance(), doc.revision())
 }
 
 pub fn selected(doc: &Document) -> Option<FeatureId> {
@@ -78,7 +82,7 @@ pub fn can_fit(state: &AppState) -> bool {
 pub fn review(state: &mut AppState, name: String, bytes: Vec<u8>) -> Result<(), String> {
     let source = ScanSource { name, sha256: soliddraft_model::sha256_hex(&bytes), bytes };
     let reference = Arc::new(state.doc.kernel().scan_reference(&source).map_err(plain)?);
-    state.scan.review = Some(Review { source, reference, revision: state.doc.revision() });
+    state.scan.review = Some(Review { source, reference, version: version(&state.doc) });
     state.scan.error = None;
     state.scan.open = true;
     Ok(())
@@ -110,7 +114,7 @@ pub fn start_fit(state: &mut AppState) {
         let _ = (kernel, source);
         let _ = tx.send(Err("Coming soon".into()));
     }
-    state.scan.fitting = Some(Pending { feature, revision: state.doc.revision(), result });
+    state.scan.fitting = Some(Pending { feature, version: version(&state.doc), result });
     state.scan.fitted = None;
     state.scan.error = None;
     state.scan.open = true;
@@ -121,14 +125,13 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         match pending.result.try_recv() {
             Ok(result) => {
                 let pending = state.scan.fitting.take().expect("pending fit");
-                if pending.revision != state.doc.revision() {
+                if pending.version != version(&state.doc) {
                     state.scan.error = Some("The part changed while fitting. Fit the scan again.".into());
                 } else {
                     match result {
                         Ok(fit) => {
                             state.scan.show_reference = false;
-                            state.scan.fitted =
-                                Some(Fitted { feature: pending.feature, revision: pending.revision, fit })
+                            state.scan.fitted = Some(Fitted { feature: pending.feature, version: pending.version, fit })
                         }
                         Err(e) => state.scan.error = Some(e),
                     }
@@ -187,7 +190,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         state.scan.fitted = None;
     }
     if accept_reference && let Some(review) = state.scan.review.take() {
-        if review.revision != state.doc.revision() {
+        if review.version != version(&state.doc) {
             state.scan.error = Some("The part changed during review. Import the scan again.".into());
         } else {
             let scan = soliddraft_model::ScanFeature { source: review.source, fit: None };
@@ -217,7 +220,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
         start_fit(state);
     }
     if accept_fit && let Some(fitted) = state.scan.fitted.take() {
-        if fitted.revision != state.doc.revision() {
+        if fitted.version != version(&state.doc) {
             state.scan.error = Some("The part changed during review. Fit the scan again.".into());
         } else if let Some(feature) = state.doc.feature(fitted.feature)
             && let FeatureKind::Scan(scan) = &feature.kind
@@ -340,7 +343,7 @@ pub fn paint(ui: &egui::Ui, state: &mut AppState) {
         .scan
         .fitted
         .as_ref()
-        .filter(|p| p.feature == id && p.revision == state.doc.revision())
+        .filter(|p| p.feature == id && p.version == version(&state.doc))
         .map(|p| &p.fit)
         .or(scan.fit.as_ref());
     if !state.scan.show_reference
@@ -358,10 +361,10 @@ pub fn paint(ui: &egui::Ui, state: &mut AppState) {
             }
         }
     } else {
-        if state.scan.cached.as_ref().is_none_or(|(sha, _)| sha != &scan.source.sha256) {
-            if let Ok(reference) = state.doc.kernel().scan_reference(&scan.source) {
-                state.scan.cached = Some((scan.source.sha256.clone(), Arc::new(reference)));
-            }
+        if state.scan.cached.as_ref().is_none_or(|(sha, _)| sha != &scan.source.sha256)
+            && let Ok(reference) = state.doc.kernel().scan_reference(&scan.source)
+        {
+            state.scan.cached = Some((scan.source.sha256.clone(), Arc::new(reference)));
         }
         if let Some((_, r)) = &state.scan.cached {
             for point in r.points.iter().step_by(r.points.len().div_ceil(30_000).max(1)) {

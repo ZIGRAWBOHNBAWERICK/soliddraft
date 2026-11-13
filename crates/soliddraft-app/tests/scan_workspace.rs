@@ -45,6 +45,12 @@ fn open_scan_review_cancel_accept_save_reopen_and_fit_refusal_leave_reference_in
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Cancel").click();
     app.run_steps(3);
     assert!(app.state().state.doc.features.is_empty());
+    app.state_mut().state.push(AppAction::ImportScan(Some(path.clone())));
+    app.run_steps(3);
+    app.state_mut().state.doc = Document::new("Another part", soliddraft_app::kernel());
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept reference").click();
+    app.run_steps(3);
+    assert!(app.state().state.doc.features.is_empty());
     app.state_mut().state.push(AppAction::ImportScan(Some(path)));
     app.run_steps(3);
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept reference").click();
@@ -128,6 +134,16 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
     assert_eq!(scan.source.bytes, bytes);
     assert_eq!(scan.fit.as_ref().unwrap().part_map.len(), fit.part_map.len());
     assert_eq!(reopened.faces.len(), 6);
+    let face = reopened.face_ref(reopened.faces[0].id).expect("named fitted face");
+    reopened
+        .apply(Command::AddFeature(FeatureKind::ReferencePlane(soliddraft_model::SketchPlane::Face { face })))
+        .unwrap();
+    let saved = reopened.model().to_bytes().unwrap();
+    let kernel = soliddraft_app::kernel();
+    let mut unrelated = Document::new("Unrelated", kernel.clone());
+    soliddraft_app::populate_demo(&mut unrelated);
+    reopened = soliddraft_app::file::open_bytes("named-fit.dwprt", &saved, kernel, None).unwrap();
+    assert!(reopened.features.iter().all(|f| f.status == FeatureStatus::Ok));
     reopened
         .apply(Command::AddExtrude {
             params: ExtrudeParams {

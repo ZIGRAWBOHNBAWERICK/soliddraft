@@ -497,7 +497,11 @@ fn render(
         (EditorParams::Thicken(p), Key::ThickenSide) => properties::thicken_side(ui, &mut p.side),
         (EditorParams::Thicken(p), Key::ThickenFaces) => {
             let count = p.faces.len();
-            let text = if count == 0 { "Click faces to thicken".into() } else { format!("{count} faces") };
+            let text = if count == 0 {
+                "Click faces to thicken".into()
+            } else {
+                format!("{count} {}", if count == 1 { "face" } else { "faces" })
+            };
             ui.menu_button(text, |ui| {
                 ui.set_min_width(240.0);
                 if let Some(index) = properties::pick_list(

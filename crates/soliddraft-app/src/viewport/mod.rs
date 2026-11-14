@@ -601,6 +601,15 @@ impl ViewportState {
         events
     }
 
+    /// The scene behind the model, without its screen grid while the grid is hidden.
+    fn backdrop(&self) -> scenes::Backdrop {
+        let mut backdrop = self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop);
+        if !self.references.show_grid {
+            backdrop.grid = [0.0; 2];
+        }
+        backdrop
+    }
+
     /// The grid's spacing at this frame's zoom, when the grid shows.
     fn grid_spacing(&self, rect: Rect) -> Option<Spacing> {
         Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style)
@@ -650,7 +659,8 @@ impl ViewportState {
             pixels_per_point: ppp,
             display: self.display,
             preset: self.preset,
-            backdrop: self.scene.map_or_else(|| theme::viewport_backdrop().into(), scenes::Scene::backdrop),
+            backdrop: self.backdrop(),
+            floor: self.references.show_floor,
             hover_id: 0,
             selected_id: 0,
             selected_feature: 0,

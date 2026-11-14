@@ -1300,6 +1300,9 @@ impl AppState {
         references: crate::settings::ReferenceDisplay,
     ) -> Result<(), crate::settings::NotKept> {
         self.viewport.references = references;
+        if let Some(session) = self.assembly.session.as_mut() {
+            session.viewport.references = references;
+        }
         crate::settings::save_reference_display(&references).inspect_err(|why| self.not_kept("Viewport settings", why))
     }
 

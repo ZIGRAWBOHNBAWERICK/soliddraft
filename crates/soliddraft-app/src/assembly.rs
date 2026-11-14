@@ -479,6 +479,7 @@ fn install(state: &mut AppState, mut session: AssemblySession) {
     state.assembly.tree_hidden = false;
 
     session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
+    session.viewport.references = state.viewport.references;
 
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();

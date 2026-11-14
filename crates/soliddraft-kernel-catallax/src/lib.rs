@@ -41,7 +41,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "3278c350a142c78f61152cd5353fbf87ca99caa4";
+pub const CATALLAX_REVISION: &str = "1eda6110b62735799872c3ef055b083d8986c748";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -1139,6 +1139,7 @@ impl Kernel for CatallaxKernel {
                 x_direction: native::vector(profile.plane.x_dir, "sketch X direction")?,
                 offset: native::number(support.offset, "sketch offset")?,
                 distance: native::number(distance, "extrusion distance")?,
+                placement: catallax_recipe::Pose::identity(),
             };
             self.native(state, tag, OpKind::Extrude, support.body, &[support.body, sheet.body], native, None, &[])
         });

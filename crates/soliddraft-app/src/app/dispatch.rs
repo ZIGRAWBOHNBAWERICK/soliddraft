@@ -234,7 +234,12 @@ impl SolidDraftApp {
                 };
                 match plane {
                     Some(plane) => self.apply(ctx, AppAction::StartSketchOn(plane)),
-                    None => self.ask_plane(None),
+                    // A feature waiting for its sketch keeps waiting through the new picker,
+                    // as when a sketch tool is chosen before the plane.
+                    None => {
+                        let then = self.state.editor.as_ref().and_then(FeatureEditor::feature_after_sketch);
+                        self.ask_plane(then);
+                    }
                 }
             }
             AppAction::NewSketchFor(feature) => {

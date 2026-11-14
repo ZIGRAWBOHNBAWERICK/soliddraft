@@ -212,3 +212,58 @@ fn new_sketch_button_asks_for_a_plane_and_an_empty_sketch_asks_again() {
         assert!((volume(app) - 48_000.0).abs() < 1.0);
     });
 }
+
+/// Extrude, New sketch, then the palette's Rectangle before a plane: the feature still waits
+/// for the sketch through the plane picker.
+fn rectangle_before_the_plane(app: &mut App) {
+    ribbon::run_command(app, "extrude");
+    settle(app);
+    click_bar(app, "New sketch");
+    let rectangle = ribbon::reveal_command(app, "sketch_rectangle").rect;
+    ribbon::click_at(app, rectangle.center());
+    settle(app);
+    let editor = app.state().state.editor.as_ref().expect("the plane picker is still open");
+    assert_eq!(editor.params, EditorParams::PickPlane);
+    assert_eq!(editor.then_feature, Some(ProfileFeature::Extrude), "the tool keeps the waiting extrude");
+    click_bar(app, "Top plane");
+    let session = app.state().state.sketch.as_ref().expect("a sketch on the Top plane");
+    assert_eq!(session.tool, soliddraft_app::state::Tool::Rectangle);
+    assert_eq!(session.then_feature, Some(ProfileFeature::Extrude));
+}
+
+#[test]
+fn a_sketch_tool_before_the_plane_keeps_the_feature_waiting() {
+    let mut case = Case::new("feature-sketch-order/tool-before-plane");
+    let mut app = launch(ribbon::blank(), STANDARD);
+    case.run(&mut app, |case, app| {
+        rectangle_before_the_plane(app);
+        let sketch = app.state().state.sketch.as_ref().unwrap().feature;
+        click_on_sketch(app, glam::Vec3::new(-20.0, -10.0, 0.0));
+        click_on_sketch(app, glam::Vec3::new(20.0, 10.0, 0.0));
+        settle(app);
+        case.frame(app, "1-rectangle-drawn");
+
+        ribbon::run_command(app, "exit_sketch");
+        settle(app);
+        assert!(
+            matches!(params(app), Some(EditorParams::Extrude(p)) if p.sketch == Some(sketch)),
+            "the extrude continues with the rectangle's sketch: {:?}",
+            params(app)
+        );
+        case.frame(app, "2-extrude-continues");
+    });
+}
+
+#[test]
+fn a_sketch_tool_before_the_plane_then_an_empty_sketch_asks_again() {
+    let mut case = Case::new("feature-sketch-order/tool-before-plane-empty");
+    let mut app = launch(ribbon::blank(), STANDARD);
+    case.run(&mut app, |case, app| {
+        rectangle_before_the_plane(app);
+        ribbon::run_command(app, "exit_sketch");
+        settle(app);
+        assert!(app.state().state.doc.features.is_empty(), "the empty sketch is gone");
+        assert_eq!(params(app), Some(EditorParams::PickSketch(ProfileFeature::Extrude)), "the extrude asks again");
+        case.frame(app, "1-extrude-asks-again");
+    });
+}

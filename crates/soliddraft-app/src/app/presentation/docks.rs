@@ -64,9 +64,11 @@ pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, doc
         let enabled = selected || !state.in_sketch();
         let (dirty, path) = match tab {
             Tab::Viewport => (state.doc.dirty, state.doc.path.as_deref()),
-            Tab::Drawing => {
-                state.drawing.session.as_ref().map_or((false, None), |s| (s.doc.dirty, s.doc.path.as_deref()))
-            }
+            Tab::Drawing => state
+                .drawing
+                .session
+                .as_ref()
+                .map_or((false, None), |s| (s.doc.dirty || s.has_issues(), s.doc.path.as_deref())),
             Tab::Assembly => {
                 state.assembly.session.as_ref().map_or((false, None), |s| (s.doc.is_dirty(), s.doc.path()))
             }

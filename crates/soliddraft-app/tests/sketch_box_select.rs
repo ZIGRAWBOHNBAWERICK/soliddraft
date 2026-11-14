@@ -214,8 +214,10 @@ fn a_box_ends_where_the_button_comes_up() {
             let b = session(app).selection_box.clone().expect("a box is being dragged");
             assert!(b.picks.is_empty(), "the short box holds {:?}", b.picks);
             // The last move and the release arrive in one frame, as a quick flick can.
-            app.event(egui::Event::PointerMoved(right_bottom));
-            app.event(egui::Event::PointerButton {
+            // `event` would run a frame per event, so both go into the next frame's input.
+            let input = app.input_mut();
+            input.events.push(egui::Event::PointerMoved(right_bottom));
+            input.events.push(egui::Event::PointerButton {
                 pos: right_bottom,
                 button: PointerButton::Primary,
                 pressed: false,

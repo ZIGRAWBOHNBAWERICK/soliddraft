@@ -7,7 +7,7 @@ use crate::state::{AppAction, AppState};
 use crate::theme;
 use crate::tree;
 use crate::viewport::Overlay;
-use egui::{CornerRadius, Rect, Sense, pos2, vec2};
+use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::dispatch::selection_of;
@@ -44,6 +44,99 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
 /// The optional tree pane and its Values tab.
 pub(in crate::app) fn tree_dock() -> DockState<Tab> {
     DockState::new(vec![Tab::Tree, Tab::Values])
+}
+
+pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, dock: &mut DockState<Tab>) {
+    let tabs: Vec<_> =
+        [Tab::Viewport, Tab::Drawing, Tab::Assembly].into_iter().filter(|tab| dock.find_tab(tab).is_some()).collect();
+    let active = dock.find_active_focused().map(|(_, tab)| *tab).unwrap_or(Tab::Viewport);
+    let max_width = ((ui.available_width() - 4.0 * tabs.len() as f32) / tabs.len() as f32).clamp(48.0, 180.0);
+    for tab in tabs.into_iter().rev() {
+        let name = match tab {
+            Tab::Viewport => state.doc.name.clone(),
+            Tab::Drawing => state.drawing.session.as_ref().map_or("Drawing".into(), |s| s.title()),
+            Tab::Assembly => {
+                state.assembly.session.as_ref().map_or("Assembly".into(), |s| s.doc.assembly().name.clone())
+            }
+            _ => unreachable!(),
+        };
+        let selected = tab == active;
+        let enabled = selected || !state.in_sketch();
+        let (dirty, path) = match tab {
+            Tab::Viewport => (state.doc.dirty, state.doc.path.as_deref()),
+            Tab::Drawing => state
+                .drawing
+                .session
+                .as_ref()
+                .map_or((false, None), |s| (s.doc.dirty || s.has_issues(), s.doc.path.as_deref())),
+            Tab::Assembly => {
+                state.assembly.session.as_ref().map_or((false, None), |s| (s.doc.is_dirty(), s.doc.path()))
+            }
+            _ => unreachable!(),
+        };
+        let color = if selected { theme::ink() } else { theme::muted() };
+        let font = theme::font_medium(12.0);
+        let padding = if dirty { 48.0 } else { 40.0 };
+        let width = (ui.painter().layout_no_wrap(name.clone(), font.clone(), color).size().x + padding).min(max_width);
+        let (space, _) = ui.allocate_exact_size(vec2(width, 27.0), Sense::hover());
+        let rect = Rect::from_min_size(pos2(space.left(), theme::MENU_HEIGHT - 27.0), space.size());
+        let response = ui.interact(
+            rect,
+            ui.id().with(("document", tab.title())),
+            if enabled { Sense::click() } else { Sense::hover() },
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, format!("{name} document tab"))
+        });
+        let radius = CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 };
+        if selected || response.hovered() {
+            ui.painter().rect_filled(rect, radius, if selected { theme::chrome() } else { theme::hover() });
+        }
+        if selected {
+            ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, theme::line()), StrokeKind::Inside);
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, theme::accent()), StrokeKind::Inside);
+        }
+        let icon = match tab {
+            Tab::Viewport => Icon::Plain("part"),
+            Tab::Drawing => Icon::Plain("drawing"),
+            _ => Icon::Plain("body"),
+        };
+        icons::paint(
+            ui.painter(),
+            icon,
+            Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), vec2(15.0, 15.0)),
+            if selected { theme::accent() } else { color },
+        );
+        let text_rect = Rect::from_min_max(
+            pos2(rect.left() + 28.0, rect.top()),
+            rect.max - vec2(if dirty { 16.0 } else { 8.0 }, 0.0),
+        );
+        let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), font, color);
+        job.wrap.max_width = text_rect.width();
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        let galley = ui.painter().layout_job(job);
+        ui.painter().galley(pos2(text_rect.left(), text_rect.center().y - galley.size().y / 2.0), galley, color);
+        if dirty {
+            ui.painter().circle_filled(pos2(rect.right() - 8.0, rect.center().y), 2.0, color);
+        }
+        let response = response.on_hover_text(path.map_or_else(|| name.clone(), |p| p.display().to_string()));
+        if enabled && response.clicked() {
+            match tab {
+                Tab::Viewport => crate::drawing::show_part_tab(dock),
+                Tab::Drawing => crate::drawing::show_drawing_tab(dock),
+                Tab::Assembly => crate::assembly::show_tab(dock),
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+pub(in crate::app) fn show_document(ui: &mut egui::Ui, dock: &mut DockState<Tab>, panels: &mut Panels<'_>) {
+    let mut active = dock.find_active_focused().map(|(_, tab)| *tab).unwrap_or(Tab::Viewport);
+    ui.push_id(("document", active.title()), |ui| panels.ui(ui, &mut active));
 }
 
 /// A dock area in the app's style, without the buttons the shell does not use.

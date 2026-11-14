@@ -14,7 +14,7 @@ mod catalogue {
     include!("../assets/icons/catalogue.rs");
 }
 
-pub use catalogue::{CAD, GLYPHS};
+pub use catalogue::{CAD, GLYPHS, PLAIN};
 
 /// How far a disabled drawing fades towards grey, and how much of it stays.
 const DISABLED_GREY: f32 = 0.85;
@@ -105,6 +105,8 @@ pub enum Icon {
     Offset,
     /// A CAD drawing of the catalogue, by its key, in its own colours.
     Cad(&'static str),
+    /// A neutral outline drawing for the Edit Suite controls.
+    Plain(&'static str),
     /// A line glyph of the catalogue, by its key, in the colour it is painted with.
     Glyph(&'static str),
 }
@@ -117,11 +119,18 @@ pub enum Treatment {
     Disabled,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Family {
+    Cad,
+    Glyph,
+    Plain,
+}
+
 /// One rasterized drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Raster {
     key: &'static str,
-    glyph: bool,
+    family: Family,
     px: u32,
     treatment: Treatment,
 }
@@ -134,13 +143,17 @@ static SVG_OPTIONS: LazyLock<usvg::Options<'static>> = LazyLock::new(|| {
 
 impl Raster {
     fn source(&self) -> Option<&'static str> {
-        let table: &[(&str, &str)] = if self.glyph { &GLYPHS } else { &CAD };
+        let table: &[(&str, &str)] = match self.family {
+            Family::Cad => &CAD,
+            Family::Glyph => &GLYPHS,
+            Family::Plain => &PLAIN,
+        };
         table.iter().find(|(key, _)| *key == self.key).map(|(_, svg)| *svg)
     }
 
     /// The drawing at its size. A glyph comes out white, and the painter tints it.
     fn image(&self, source: &str) -> ColorImage {
-        let svg = if self.glyph {
+        let svg = if self.family != Family::Cad {
             source.replace("currentColor", "#ffffff")
         } else {
             DARK.iter().fold(source.to_owned(), |svg, (light, dark)| svg.replace(light, dark))
@@ -181,10 +194,10 @@ impl Raster {
 
 /// Paints a catalogue drawing on the pixel grid, so it stays sharp at any scale. Nothing is
 /// painted for a key the catalogue does not have.
-fn paint_raster(painter: &Painter, key: &'static str, glyph: bool, rect: Rect, tint: Color32, treatment: Treatment) {
+fn paint_raster(painter: &Painter, key: &'static str, family: Family, rect: Rect, tint: Color32, treatment: Treatment) {
     let ppp = painter.pixels_per_point();
     let px = (rect.width().min(rect.height()) * ppp).round().max(1.0);
-    let raster = Raster { key, glyph, px: px as u32, treatment };
+    let raster = Raster { key, family, px: px as u32, treatment };
     let Some(source) = raster.source() else {
         debug_assert!(false, "no icon {key}");
         return;
@@ -251,6 +264,14 @@ impl Grid {
     }
 }
 
+/// Uses the outline drawing of a catalogue operation.
+pub fn plain(icon: Icon) -> Icon {
+    match icon {
+        Icon::Cad(key) => Icon::Plain(key),
+        other => other,
+    }
+}
+
 /// Paints `icon` inside `rect` (use a square) in `color`. A CAD drawing keeps its own
 /// colours.
 pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
@@ -260,8 +281,9 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
 /// Paints `icon` as [`paint`] does, with a treatment for a CAD drawing.
 pub fn paint_as(painter: &Painter, icon: Icon, rect: Rect, color: Color32, treatment: Treatment) {
     match icon {
-        Icon::Cad(key) => paint_raster(painter, key, false, rect, Color32::WHITE, treatment),
-        Icon::Glyph(key) => paint_raster(painter, key, true, rect, color, Treatment::Normal),
+        Icon::Cad(key) => paint_raster(painter, key, Family::Cad, rect, Color32::WHITE, treatment),
+        Icon::Plain(key) => paint_raster(painter, key, Family::Plain, rect, color, Treatment::Normal),
+        Icon::Glyph(key) => paint_raster(painter, key, Family::Glyph, rect, color, Treatment::Normal),
         _ => paint_drawn(painter, icon, rect, color),
     }
 }
@@ -273,7 +295,7 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
     let g = Grid { rect, stroke: Stroke::new(width, color) };
     let p = painter;
     match icon {
-        Icon::Cad(_) | Icon::Glyph(_) => {}
+        Icon::Cad(_) | Icon::Glyph(_) | Icon::Plain(_) => {}
         Icon::Sketch => {
             g.line(p, &[(3.0, 13.0), (11.0, 5.0), (13.0, 7.0), (5.0, 15.0), (2.5, 15.5)]);
             g.line(p, &[(2.5, 15.5), (3.0, 13.0)]);

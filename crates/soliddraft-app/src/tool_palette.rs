@@ -196,7 +196,7 @@ fn tile(
     } else {
         theme::ink()
     };
-    icons::paint_as(ui.painter(), command.icon, icon, ink, treatment);
+    icons::paint_as(ui.painter(), icons::plain(command.icon), icon, ink, treatment);
     let at = pos2(x + tokens::ICON_SIZE + tokens::TOOL_PADDING, rect.center().y - galley.size().y / 2.0);
     if !compact {
         ui.painter().galley(at, galley, theme::ink());

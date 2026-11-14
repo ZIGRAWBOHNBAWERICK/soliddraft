@@ -13,7 +13,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use super::dispatch::selection_of;
-use super::presentation::docks::{Panels, Tab, center_dock, show_dock, tree_dock};
+use super::presentation::docks::{Panels, Tab, center_dock, show_document, tree_dock};
 
 /// Options for automated runs (benchmarks and screenshots).
 #[derive(Clone, Debug, Default)]
@@ -459,7 +459,7 @@ impl SolidDraftApp {
         let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
         egui::Panel::top("menu")
             .exact_size(theme::MENU_HEIGHT)
-            .frame(chrome_frame)
+            .frame(chrome_frame.fill(theme::edit_suite::BAR))
             .show_separator_line(true)
             .show(root, |ui| self.menu_bar(ui));
         self.leave_start_page();
@@ -487,7 +487,7 @@ impl SolidDraftApp {
                 crate::start_page::show(ui, &mut self.state);
             } else {
                 let mut panels = Panels { state: &mut self.state };
-                show_dock(ui, &mut self.dock, egui::Id::new("center_dock"), &mut panels);
+                show_document(ui, &mut self.dock, &mut panels);
             }
         });
     }

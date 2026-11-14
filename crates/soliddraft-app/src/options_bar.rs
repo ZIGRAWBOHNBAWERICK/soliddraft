@@ -54,6 +54,36 @@ fn command(ui: &mut egui::Ui, state: &mut AppState, id: &str) {
     response.on_hover_text(command.tip(state));
 }
 
+fn view_control(ui: &mut egui::Ui, state: &mut AppState, id: &str) {
+    let command = commands::get(id).expect("view commands are registered");
+    let enabled = command.is_enabled(state);
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(28.0, 28.0), if enabled { Sense::click() } else { Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, command.label_in(state)));
+    if enabled && (response.hovered() || response.has_focus()) {
+        ui.painter().rect_filled(rect, egui::CornerRadius::same(6), theme::hover());
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(6),
+            egui::Stroke::new(1.0, theme::accent()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let icon = match id {
+        "view_front" => Icon::Plain("front"),
+        "view_top" => Icon::Plain("top"),
+        "view_right" => Icon::Plain("right"),
+        _ => icons::plain(command.icon),
+    };
+    icons::paint(ui.painter(), icon, rect.shrink(6.0), if enabled { theme::ink() } else { theme::muted() });
+    if enabled && response.clicked() {
+        state.run_command(command);
+    }
+    response.on_hover_text(command.tip(state));
+}
+
 fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if state.assembly.is_active() && state.assembly.mate.open {
         crate::mates::panel::show_suite(ui, state);
@@ -198,7 +228,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         ui.separator();
                         ui.label(egui::RichText::new("View").color(theme::muted()));
                         for id in ["view_isometric", "zoom_fit", "view_front", "view_top", "view_right", "normal_to"] {
-                            command(ui, state, id);
+                            view_control(ui, state, id);
                         }
                     }
                 });

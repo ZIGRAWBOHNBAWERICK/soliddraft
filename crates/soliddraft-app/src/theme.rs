@@ -109,6 +109,8 @@ pub mod edit_suite {
     use egui::Color32;
 
     pub const BAR: Color32 = rgb(0x22, 0x24, 0x27);
+    pub const WORKSPACE_BG: Color32 = rgb(0x17, 0x18, 0x1b);
+    pub const WORKSPACE_SELECTED: Color32 = rgb(0x4a, 0x4e, 0x55);
     pub const CHIP_LINE: Color32 = rgb(0x4a, 0x4e, 0x55);
     pub const POPUP: Color32 = rgb(0x35, 0x38, 0x3e);
     pub const POPUP_HOVER: Color32 = rgba(255, 255, 255, 26);
@@ -330,7 +332,7 @@ pub const RADIUS: u8 = 4;
 /// Corner radius of windows, menus and popups.
 pub const WINDOW_RADIUS: u8 = 6;
 
-pub const MENU_HEIGHT: f32 = 30.0;
+pub const MENU_HEIGHT: f32 = edit_suite::TITLE_HEIGHT;
 pub const COMMAND_LINE_HEIGHT: f32 = 32.0;
 /// Keep room for the model and an optional pane in a narrow Edit Suite window.
 pub const COMPACT_WIDTH: f32 = 1100.0;

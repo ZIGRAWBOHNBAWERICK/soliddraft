@@ -1525,6 +1525,9 @@ pub struct Document {
     /// An appearance shown but not applied yet, while a colour or a transparency is
     /// being dragged in the properties panel.
     appearance_preview: Option<AppearancePreview>,
+    /// The pointer gesture under way when history moved or the part was edited. It
+    /// shows and applies no appearance until the pointer is released.
+    appearance_gesture_void: bool,
     /// Bodies shown before, latest last, kept while the part keeps them.
     recent: Vec<Shown>,
     model: model::Document,
@@ -1590,6 +1593,7 @@ impl Document {
             shown: None,
             shading: (model.materials().clone(), model.active_configuration().cloned()),
             appearance_preview: None,
+            appearance_gesture_void: false,
             recent: Vec::new(),
             quality: DisplayQuality::new(model.kernel().clone()),
             model,
@@ -1644,6 +1648,7 @@ impl Document {
             shown: self.shown,
             shading: self.shading.clone(),
             appearance_preview: None,
+            appearance_gesture_void: false,
             recent: Vec::new(),
             model: self.model.fork(),
             geometry: self.geometry.clone(),
@@ -1685,7 +1690,7 @@ impl Document {
         self.dirty = true;
         self.edits += 1;
         // A preview belongs to the part as it was when the drag began.
-        self.end_appearance_preview();
+        self.void_appearance_gesture();
     }
 
     /// Changes whenever the tree is rebuilt: a command, undo, redo or a rollback. Work
@@ -2495,9 +2500,9 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<String, String> {
-        // Once history moves, a drag's preview never applies, even if Redo brings the
-        // part back to where the drag began.
-        self.end_appearance_preview();
+        // Once history moves, the drag under way never applies, even if Redo brings
+        // the part back to where it began.
+        self.void_appearance_gesture();
         if self.model.annotation_history(false) {
             return self.model.undo_deferred().map_err(|error| error.to_string());
         }
@@ -2514,7 +2519,7 @@ impl Document {
     }
 
     pub fn redo(&mut self) -> Result<String, String> {
-        self.end_appearance_preview();
+        self.void_appearance_gesture();
         if self.model.annotation_history(true) {
             return self.model.redo_deferred().map_err(|error| error.to_string());
         }
@@ -3292,7 +3297,7 @@ impl Document {
         material: Option<soliddraft_materials::Material>,
         default_appearance: Option<Appearance>,
     ) -> Result<(), String> {
-        self.end_appearance_preview();
+        self.void_appearance_gesture();
         let scope = self.material_scope();
         self.model
             .execute(model::Command::SetMaterial { material, default_appearance, scope })
@@ -3324,9 +3329,13 @@ impl Document {
     /// Shows `appearance` at `target` (or no appearance there, with `None`) without
     /// applying it: no undo entry, no edit. [`Document::set_appearance`] applies it;
     /// [`Document::end_appearance_preview`] drops it. Undo, redo, a material and any
-    /// other edit drop it for good, so it can never be applied over a part it was not
-    /// made on.
+    /// other edit drop it for good and void the gesture under way, so neither it nor a
+    /// new preview from a still-held pointer can be applied over a part it was not made
+    /// on.
     pub fn preview_appearance(&mut self, target: model::AppearanceTarget, appearance: Option<Appearance>) {
+        if self.appearance_gesture_void {
+            return;
+        }
         if let Some(a) = &appearance
             && !a.problems().is_empty()
         {
@@ -3343,6 +3352,24 @@ impl Document {
             .as_ref()
             .filter(|p| p.base == *self.model.materials())
             .map(|p| (&p.target, p.appearance.as_ref()))
+    }
+
+    /// Drops any preview and ignores the pointer gesture under way: the panel neither
+    /// previews nor applies an appearance until [`Document::release_appearance_gesture`].
+    fn void_appearance_gesture(&mut self) {
+        self.appearance_gesture_void = true;
+        self.end_appearance_preview();
+    }
+
+    /// True while the gesture under way is void (see [`Document::preview_appearance`]).
+    pub fn appearance_gesture_void(&self) -> bool {
+        self.appearance_gesture_void
+    }
+
+    /// Ends a void gesture. The properties panel calls it at the end of each frame in
+    /// which no pointer button is down, so the release frame is still ignored.
+    pub fn release_appearance_gesture(&mut self) {
+        self.appearance_gesture_void = false;
     }
 
     /// Stops showing a preview and shows the part's applied appearances again.

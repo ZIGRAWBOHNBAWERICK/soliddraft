@@ -22,6 +22,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         selection(ui, state);
     }
+    // A gesture voided by undo, redo or an edit ends once a frame passes with no button
+    // down; the release frame itself, where a slider still reads the pointer, is ignored.
+    if !ui.ctx().input(|i| i.pointer.any_down()) {
+        state.doc.release_appearance_gesture();
+    }
 }
 
 fn header(ui: &mut egui::Ui, icon: Icon, title: &str) -> Rect {
@@ -1430,6 +1435,9 @@ fn appearance_panel(ui: &mut egui::Ui, state: &mut AppState, target: AppearanceT
     });
     if remove {
         apply = Some(None);
+    }
+    if state.doc.appearance_gesture_void() {
+        return;
     }
     if let Some(appearance) = apply {
         if let Err(error) = state.doc.set_appearance(target, appearance) {

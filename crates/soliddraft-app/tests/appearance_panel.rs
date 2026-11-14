@@ -231,3 +231,79 @@ fn undo_during_a_transparency_drag_drops_the_preview() {
     assert_eq!(doc.model().undo_depth(), depth, "nothing is applied after the redo");
     assert_eq!(doc.undo_label(), Some("set appearance Blue, 60% transparent on the part"));
 }
+
+/// From one transparency to another: after Undo in the middle of a drag, the still-held
+/// slider never makes a new preview, so letting go applies nothing and Redo still has
+/// the step it undid.
+#[test]
+fn a_held_slider_after_undo_applies_nothing() {
+    if !gpu_available() {
+        return;
+    }
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| {
+            SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+        });
+    app.run_steps(10);
+    app.state_mut().state.push(AppAction::ShowAppearance);
+    app.run_steps(6);
+    app.get_by_label("Transparent").click();
+    app.run_steps(4);
+    assert_eq!(app.state().state.doc.shown_appearance(None).opacity, 0.4, "60% transparent");
+    let slider = app.get_by_role_and_label(egui::accesskit::Role::Slider, "Transparency").rect();
+
+    // A first drag applies another transparency.
+    pointer(&mut app, slider.center(), true);
+    app.hover_at(slider.center() + vec2(15.0, 0.0));
+    app.step();
+    pointer(&mut app, slider.center() + vec2(15.0, 0.0), false);
+    app.run_steps(4);
+    let committed = app.state().state.doc.shown_appearance(None).opacity;
+    assert!(committed != 0.4 && committed > 0.1, "the first drag applied {committed}");
+    let depth = app.state().state.doc.model().undo_depth();
+
+    // A second drag toward 90%, and Undo while it is held.
+    pointer(&mut app, slider.center(), true);
+    for step in 1..=6 {
+        app.hover_at(slider.center() + vec2(step as f32 * 40.0, 0.0));
+        app.step();
+    }
+    app.state_mut().state.push(AppAction::Undo);
+    app.step();
+    let shown = |app: &Harness<'_, SolidDraftApp>| {
+        let doc = &app.state().state.doc;
+        (doc.appearance_preview().is_none(), doc.shown_appearance(None).opacity, doc.model().undo_depth())
+    };
+    assert_eq!(shown(&app), (true, 0.4, depth - 1), "undo is back at 60%");
+
+    // Held still, then moved, the slider shows nothing new.
+    let held = slider.center() + vec2(240.0, 0.0);
+    app.run_steps(4);
+    app.hover_at(held - vec2(20.0, 0.0));
+    app.step();
+    app.hover_at(held);
+    app.run_steps(4);
+    assert_eq!(shown(&app), (true, 0.4, depth - 1), "a held slider makes no preview after undo");
+
+    // Letting go applies nothing, so Redo still brings back the first drag's value.
+    pointer(&mut app, held, false);
+    app.run_steps(4);
+    assert_eq!(shown(&app), (true, 0.4, depth - 1), "letting go applies nothing");
+    app.state_mut().state.push(AppAction::Redo);
+    app.run_steps(4);
+    assert_eq!(shown(&app), (true, committed, depth), "redo restores the first drag");
+
+    // The next gesture works as usual.
+    pointer(&mut app, slider.center(), true);
+    app.hover_at(slider.center() + vec2(60.0, 0.0));
+    app.step();
+    assert!(app.state().state.doc.appearance_preview().is_some(), "a new drag previews again");
+    pointer(&mut app, slider.center() + vec2(60.0, 0.0), false);
+    app.run_steps(4);
+    assert_eq!(app.state().state.doc.model().undo_depth(), depth + 1);
+}

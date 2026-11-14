@@ -754,6 +754,9 @@ impl Default for GyroidFeature {
 /// its proposed repairs. The body is derived from the two and rebuilds from them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportStepFeature {
+    /// One source entity key, bound to `sha256`; absent in older single-solid imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_solid: Option<String>,
     /// Older files omit this field and always use STEP.
     #[serde(default, skip_serializing_if = "soliddraft_kernel_api::ImportFormat::is_step")]
     pub format: soliddraft_kernel_api::ImportFormat,
@@ -780,6 +783,7 @@ impl ImportStepFeature {
     /// An import of `source`, hashed, with no decisions.
     pub fn new(source_name: impl Into<String>, source: Vec<u8>) -> ImportStepFeature {
         ImportStepFeature {
+            source_solid: None,
             format: soliddraft_kernel_api::ImportFormat::Step,
             source_name: source_name.into(),
             source_bound_names: true,

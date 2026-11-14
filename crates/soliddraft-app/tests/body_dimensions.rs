@@ -5,6 +5,9 @@
 //!
 //! Skips itself when no GPU adapter is available (plain CI runners).
 
+#[path = "support/ui.rs"]
+mod ui;
+
 use egui::{Key, Pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -13,7 +16,6 @@ use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, Sele
 use soliddraft_app::state::AppAction;
 use soliddraft_app::viewport::dimensions::DimensionTarget;
 use soliddraft_sketch::{P2, Sketch};
-use std::path::PathBuf;
 
 fn gpu_available() -> bool {
     let _ = env_logger::try_init();
@@ -35,7 +37,7 @@ fn harness(doc: Document) -> App<'static> {
 }
 
 fn save(harness: &mut App<'_>, name: &str) {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/body-dimensions");
+    let dir = ui::target_dir().join("body-dimensions");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{name}.png"));
     harness.render().expect("render").save(&path).expect("save png");
@@ -69,7 +71,9 @@ fn the_selected_body_shows_its_feature_dimensions() {
         eprintln!("no GPU adapter; skipping");
         return;
     }
+    let _case = ui::case("body-feature-dimensions");
     let mut harness = harness(soliddraft_app::demo_document());
+    harness.state_mut().state.show_tree(false);
     harness.run_steps(5);
     harness.key_press(Key::Z);
     harness.run_steps(30);
@@ -130,6 +134,7 @@ fn a_sketch_dimension_of_the_body_edits_in_its_sketch() {
         eprintln!("no GPU adapter; skipping");
         return;
     }
+    let _case = ui::case("body-sketch-dimensions");
     let mut doc = soliddraft_app::new_document();
     let sketch_id = doc
         .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })

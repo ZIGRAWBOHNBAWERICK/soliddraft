@@ -279,6 +279,8 @@ impl Default for ImportOptions {
 /// What an import is asked to read.
 #[derive(Clone, Copy, Debug)]
 pub struct ImportStepRequest<'a> {
+    /// One source entity key, bound to these exact source bytes.
+    pub source_solid: Option<&'a str>,
     /// The file name, for messages and the change record.
     pub name: &'a str,
     /// The file bytes, unchanged.

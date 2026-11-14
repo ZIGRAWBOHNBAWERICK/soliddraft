@@ -2931,10 +2931,16 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
         FeatureKind::Scan(s) => {
             json!({"source":s.source.name,"sha256":s.source.sha256,"reference":true,"fitted":s.fit.is_some()})
         }
-        FeatureKind::ImportStep(i) => json!({
+        FeatureKind::ImportStep(i) => {
+            let mut value = json!({
             "type": match i.format { soliddraft_kernel_api::ImportFormat::Step => "import_step", soliddraft_kernel_api::ImportFormat::Iges => "import_iges", soliddraft_kernel_api::ImportFormat::Mesh => "import_mesh" }, "source_name": i.source_name, "sha256": i.sha256,
             "bytes": i.source.len(), "decisions": i.decisions,
-        }),
+            });
+            if let Some(entity) = &i.source_solid {
+                value["source_solid"] = entity.clone().into();
+            }
+            value
+        }
     }
 }
 

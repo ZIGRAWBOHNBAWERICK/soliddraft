@@ -103,6 +103,7 @@ impl View {
             display: DisplayMode::Shaded,
             preset: Preset::default(),
             backdrop: soliddraft_app::theme::viewport_backdrop().into(),
+            floor: true,
             hover_id: 0,
             selected_id: 0,
             selected_feature: 0,

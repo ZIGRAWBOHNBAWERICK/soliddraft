@@ -459,6 +459,7 @@ pub fn drag_held(app: &mut App, button: egui::PointerButton, modifiers: Modifier
 }
 
 pub const SHOW_GRID: &str = "Show grid";
+pub const SHOW_FLOOR: &str = "Show floor";
 pub const SHOW_PLANES: &str = "Show origin planes";
 pub const ALWAYS_SHOW_AXES: &str = "Always show origin axes";
 
@@ -510,6 +511,7 @@ pub fn set_display(app: &mut App, change: impl FnOnce(&mut ReferenceDisplay)) {
     open_grid_and_planes(app);
     for (label, was, now) in [
         (SHOW_GRID, before.show_grid, after.show_grid),
+        (SHOW_FLOOR, before.show_floor, after.show_floor),
         (SHOW_PLANES, before.show_origin_planes, after.show_origin_planes),
         (ALWAYS_SHOW_AXES, before.always_show_origin_axes, after.always_show_origin_axes),
     ] {

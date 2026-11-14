@@ -127,6 +127,9 @@ copying prototype literals.
 
 The Scene gallery opens above the Scene button on the bottom-centred navigation
 bar. It shows favourites as thumbnails. Manage favourites lists all nine scenes.
+Below the thumbnails, Show grid hides the modelling grid and the screen grid of Night
+grid and Blueprint. Show floor hides the shadow the part casts on the ground. Both
+are the same choices as in Preferences, Grid and planes, and they persist.
 There is no second backdrop grid in the palette or swatch row on the options bar.
 The empty-space context menu and command line also offer scenes.
 

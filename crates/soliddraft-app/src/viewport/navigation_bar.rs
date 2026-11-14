@@ -93,7 +93,7 @@ impl NavigationBar {
                             egui::Popup::menu(&scene_button)
                                 .align(RectAlign::TOP_END)
                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                .show(|ui| self.gallery(ui, scene, events));
+                                .show(|ui| self.gallery(ui, scene, *references, events));
                             ui.separator();
                             if button(ui, "Section view", Icon::Section, section_active, false, allow_dimensions)
                                 .clicked()
@@ -130,7 +130,13 @@ impl NavigationBar {
         self.manage_window(parent.ctx());
     }
 
-    fn gallery(&mut self, ui: &mut egui::Ui, current: Scene, events: &mut ViewportEvents) {
+    fn gallery(
+        &mut self,
+        ui: &mut egui::Ui,
+        current: Scene,
+        references: ReferenceDisplay,
+        events: &mut ViewportEvents,
+    ) {
         ui.set_min_width(308.0);
         ui.label(egui::RichText::new("Scenes").font(theme::font_semibold(12.5)));
         if self.favourites.is_empty() {
@@ -152,6 +158,13 @@ impl NavigationBar {
                 });
             },
         );
+        ui.separator();
+        let mut shown = references;
+        ui.checkbox(&mut shown.show_grid, "Show grid").on_hover_text("The modelling grid and the scene's own grid");
+        ui.checkbox(&mut shown.show_floor, "Show floor").on_hover_text("The shadow the part casts on the ground");
+        if shown != references {
+            events.actions.push(AppAction::SetReferenceDisplay(shown));
+        }
         ui.separator();
         if ui.button("Manage favourites").clicked() {
             self.manage = true;

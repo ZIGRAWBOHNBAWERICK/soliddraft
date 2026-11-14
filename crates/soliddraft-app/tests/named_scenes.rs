@@ -93,7 +93,8 @@ fn scene_commands_persist_and_render_on_both_tiers() {
                         let y = 0.3;
                         let line = pixel(app, &image, [spacing * 3.0 / rect.width(), y]);
                         let cell = pixel(app, &image, [spacing * 3.5 / rect.width(), y]);
-                        assert!(line[0] > cell[0] + 3, "screen grid is visible: {line:?} {cell:?}");
+                        // Show grid is off here, and it hides the scene's grid too.
+                        near(line, cell);
                     }
                 }
             }

@@ -176,21 +176,9 @@ fn assert_zoom_grid(
     frames: (&image::RgbaImage, &image::RgbaImage),
     when: &str,
 ) -> (Family, Family, (f32, f32)) {
-    use soliddraft_app::viewport::grid::Spacing;
-    let view = &app.state().state.viewport;
-    let spacing = |height| {
-        let step = Spacing::for_scale(view.camera.mm_per_point(height), &view.grid_style).expect("a grid step");
-        (step.minor() as f32, step.major() as f32)
-    };
-    let drawn = spacing(view.rect.height());
-    let shown = readout(app).expect("the grid readout");
-    if shown != drawn {
-        // shortcut: main reserves 44 pt for the HUD before computing its readout; remove after the grid follow-up.
-        assert_eq!(shown, spacing(view.rect.height() - 44.0), "the existing main HUD calculation");
-        case.note(format!("existing main discrepancy: readout {shown:?}, rendered lattice {drawn:?}"));
-    }
-    let (x, y) = assert_top_view_grid_spacing(app, frames, drawn, when);
-    (x, y, shown)
+    let (x, y, spacing) = assert_top_view_grid(app, frames, when);
+    case.note(format!("{when}: readout {spacing:?}, measured {} and {} points", x.minor, y.minor));
+    (x, y, spacing)
 }
 
 /// The zoom sweep, with the numbers the design holds it to at any size and scale.
@@ -263,6 +251,21 @@ fn grid_density_is_in_points_at_two_pixels_per_point() {
 #[test]
 fn grid_density_holds_in_a_small_window() {
     sweep("grid_zoom_small", vec2(960.0, 640.0), 1.0);
+}
+
+#[test]
+fn compact_window_readout_matches_the_rendered_grid_through_zoom() {
+    let mut case = Case::gpu("grid_readout_compact");
+    seed_gpu_settings(&case, r#"{"view":{}}"#);
+    let mut app = launch_for_frames(empty(), vec2(960.0, 640.0), 1.0);
+    to_top_orthographic(&mut app);
+
+    for sample in 0..=8 {
+        let when = format!("compact zoom out {sample}");
+        let (on, off) = grid_frames(&mut case, &mut app, &when);
+        assert_zoom_grid(&mut case, &app, (&on, &off), &when);
+        wheel(&mut app, -300.0);
+    }
 }
 
 #[test]

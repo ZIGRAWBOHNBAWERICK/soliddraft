@@ -988,6 +988,7 @@ impl ViewportState {
     }
 
     fn paint_pills(&self, ui: &mut egui::Ui, rect: Rect, hover_label: Option<&str>) {
+        let grid_spacing = self.grid_spacing(rect);
         let rect = Rect::from_min_max(rect.min, rect.max - vec2(0.0, 44.0));
         let proj = if self.camera.orthographic { "Orthographic" } else { "Perspective" };
         let text =
@@ -999,7 +1000,7 @@ impl ViewportState {
         painter.rect(r, CornerRadius::same(99), theme::hud_bg(), Stroke::new(1.0, theme::line()), StrokeKind::Inside);
         painter.galley(r.center() - galley.size() / 2.0, galley, theme::muted());
 
-        if let Some(spacing) = self.grid_spacing(rect) {
+        if let Some(spacing) = grid_spacing {
             let galley = painter.layout_no_wrap(spacing.label(), theme::font(11.0), theme::muted());
             let size = galley.size() + vec2(18.0, 7.0);
             let r = Rect::from_min_size(pos2(r.right() + 6.0, r.top()), size);

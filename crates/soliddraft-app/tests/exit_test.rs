@@ -324,9 +324,11 @@ fn open_extrude_orbit_click_face() {
     harness.run_steps(3);
     save(&mut harness, "01-empty");
 
-    // Extrude from the ribbon with the default rectangle profile, then apply with Enter.
+    // Extrude from the ribbon. With no sketch it asks for one; its Rectangle button
+    // extrudes a sized rectangle instead, and Enter applies it.
     click_button(&mut harness, "Extrude");
     assert!(harness.state().state.editor.is_some(), "the extrude editor should open");
+    click_button(&mut harness, "Rectangle");
     save(&mut harness, "02-extrude-editor");
     harness.key_press(Key::Enter);
     harness.run_steps(3);

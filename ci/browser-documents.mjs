@@ -11,9 +11,9 @@
 // work. Visitor B, another browser profile on the same site at the same time, sees no
 // recent documents and nothing to recover. Nothing is sent to the server.
 //
-// Run Chrome on WebGL: a headless screenshot cannot read a WebGPU canvas. The click goes
-// to the New part tile at a fixed point of a 1400 x 813 page; tests/documents_start.rs
-// checks the tile is there.
+// Run Chrome on WebGL: a headless screenshot cannot read a WebGPU canvas. The clicks go
+// to the New part tile and to Extrude's Rectangle button at fixed points of a 1400 x 813
+// page; tests/documents_start.rs checks both are there.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -25,6 +25,7 @@ if (!chrome || !url || !out) throw new Error('usage: browser-documents.mjs CHROM
 fs.mkdirSync(out, { recursive: true });
 const SIZE = { width: 1400, height: 813 };
 const NEW_PART = [124, 143];
+const RECTANGLE = [630, 52];
 // A copy after every edit, so the test does not wait out the two-minute default.
 const FAST_AUTOSAVE = JSON.stringify({ documents: { autosave: { enabled: true, interval_seconds: 1, edits: 1 } } });
 
@@ -154,11 +155,13 @@ class Browser {
         await call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
         await v.settle(800);
       },
-      // E opens Extrude on its default rectangle; Enter applies it.
+      // E opens Extrude, which asks for a sketch when none is selected. Its Rectangle
+      // button extrudes a sized rectangle instead, and Enter applies it.
       async extrude() {
         await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 700, y: 450 });
         await v.key('e', 'KeyE', 69, 0, 'e');
         await v.settle(1500);
+        await v.click(RECTANGLE);
         await v.key('Enter', 'Enter', 13, 0, '\r');
         await v.settle(3000);
       },

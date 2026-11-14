@@ -8,10 +8,11 @@ We support free markets and reject intellectual property. Copying a program does
 
 ## What works today
 
-SolidDraft is alpha software. Keep backups of your documents. The 0.5.0 release includes:
+SolidDraft is alpha software. Keep backups of your documents. On main, targeting 0.5.0, these features work:
 
 - The Edit Suite frame, with workspaces in the title bar, tools on the left, an options bar, a 3D viewport and feature history above the command line.
 - Sketches with relations and dimensions. Extrude, cut, revolve, combine several bodies, drill holes, pattern and mirror. Edit features later, undo and redo, save and reopen parts. Supported sweeps, shells and drafts also work. See [modelling](docs/modelling.md).
+- Ruled and smooth lofts through ordered closed sketches or supported planar faces. Offset grows or shrinks supported bodies by a signed distance; Thicken makes a solid from selected faces on the front or back side. Planar cases include shrinking a block and thickening its end face. Geometry and calculation limits still apply. See [lofts](docs/modelling.md#loft) and [operation acceptance tests](crates/soliddraft-app/tests/distance_pattern.rs).
 - Fillets and chamfers on supported edges, including plane and cylinder combinations. Some blends and later operations still refuse unsupported geometry or exceed the calculation limit. See [current kernel limits](docs/needs-catallax.md).
 - STEP and IGES import with repair review and the original source retained. Files with several solids create a separate body and import feature for each solid, in one undo step. Unsupported files leave the part unchanged. Export B-rep parts as STEP AP242, supported IGES 5.3, STL, 3MF and OBJ. See [import and export](docs/exchange.md).
 - Desktop [assemblies](docs/assemblies.md#in-the-app). Insert parts and sub-assemblies, place them by position and rotation, save and reopen. Supported [mates](docs/mates.md) constrain components; [interference and clearance checks](docs/interference.md) report their proofs and refusals.
@@ -19,7 +20,7 @@ SolidDraft is alpha software. Keep backups of your documents. The 0.5.0 release 
 - Lattices and gyroids with an unproved viewport preview and certified STL export. See [field modelling](docs/modelling.md#terminal-lattice) and [export limits](docs/exchange.md#terminal-fields).
 - A desktop [assistant and MCP interface](docs/assistant.md), plus a [headless command line](docs/development.md#command-line) for recipes, parts, drawings and exports. The public browser app has no AI assistant or API key.
 
-Lofts, offset/thicken and other unsupported modelling domains remain in design. See the [roadmap](docs/roadmap.md) for what works and what is still planned. A failed or pending feature cannot export an unproved whole part.
+Broader modelling domains remain in design; a working command can still refuse unsupported inputs. See the [roadmap](docs/roadmap.md) for what works and what is still planned. A failed or pending feature cannot export an unproved whole part.
 
 ## Get SolidDraft
 

@@ -7,7 +7,8 @@ the assembly's accepted pins.
 
 For 0.4.0, `soliddraft asm rebuild rig.dwasm --json` re-saved the assembly.
 Only `manifest.json.writer` changed from `soliddraft 0.1.0` to `soliddraft 0.4.0`.
-All other entry bytes, source pins, timestamps and compression settings stayed unchanged.
+For 0.5.0, the same command changed the writer from `soliddraft 0.4.0` to `soliddraft 0.5.0`.
+Both regenerations kept all other entry bytes, source pins, timestamps and compression settings unchanged.
 Keep the binary files as generated.
 
 The regression test opens, proves, updates and saves the assembly, then compares the

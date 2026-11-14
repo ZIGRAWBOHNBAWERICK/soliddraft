@@ -167,7 +167,7 @@ impl TabViewer for Panels<'_> {
                     .filter(|id| Some(**id) != editing)
                     .filter_map(|id| {
                         let f = st.doc.feature(*id)?;
-                        Some((f.plane?, &f.sketch()?.sketch))
+                        Some((*id, f.plane?, &f.sketch()?.sketch))
                     })
                     .collect();
                 let pick_filter = if st.viewport.section_active {
@@ -219,6 +219,9 @@ impl TabViewer for Panels<'_> {
                 }
                 for a in events.actions {
                     st.push(a);
+                }
+                if let Some(id) = events.clicked_sketch.filter(|_| !st.viewport.section_active) {
+                    st.push(AppAction::Select(Some(Selection::Feature(id))));
                 }
                 if let Some(picked) = events.clicked.filter(|_| !st.viewport.section_active) {
                     let reference = events.clicked_reference.map(Selection::Reference);

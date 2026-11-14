@@ -532,7 +532,7 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb",
+      "catallax_revision": "adb2ec133e6b9d36d055156f5a8e3ccc2815edaf",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
       "supported_limits": "Several AP214 MANIFOLD_SOLID_BREP solids enter separate bodies through source entity selectors bound to the original bytes. One straight seam within the 0.01 mm automatic cap; decline leaves a single solid open and unbuilt. Unanswered or declined repairs in a several-solid source refuse the entire import. Selected imports refuse replacement by changed bytes.",
       "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; declined.dwprt and imported.dwprt; step 14 part.step, step-report.json, check-step.stdout and check-step.stderr; geometry-info.stdout recipe hashes"

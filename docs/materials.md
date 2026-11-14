@@ -19,6 +19,26 @@ responsive. The panel shows volume in mm³ and mass in kg, using the stored dens
 A missing material or density leaves mass unknown. A field preview has no measured
 solid volume and cannot supply a density-based mass through this panel.
 
+## Colour and transparency
+
+Select the body, or run Appearance from the body's context menu, and the property panel
+shows an Appearance section under Material. Select a face first to colour that face only.
+A swatch applies its colour at once. The colour button opens a picker for any other
+colour. Transparent makes the surface 60% transparent, and the slider sets 10% to 90%.
+Use the part's appearance (on a face) or Remove colour (on the part) takes the assignment
+away again. The surface keeps the finish it had: metallic, roughness and emission carry over.
+
+Each change is one undo step. A colour or transparency being dragged is shown in the
+viewport but applied only when the pointer is released
+(`Document::appearance_table_previewing`). The part stores the appearance by value, with
+an id such as `custom-1565c0-t60-m0-r0.45` that names everything that differs from a plain
+opaque colour.
+
+The viewport draws opaque faces first. Faces whose opacity is below 1 are drawn afterwards,
+blended, from both sides, and without writing depth, so faces behind or inside them show
+through. Those faces are not sorted, so overlapping transparent faces of one body blend in
+draw order. The id buffer still picks the nearest face, transparent or not.
+
 ## The two types
 
 `Material` holds physical values in SI units, with the unit in each field's name:

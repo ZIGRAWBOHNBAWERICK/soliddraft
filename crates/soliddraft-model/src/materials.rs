@@ -113,6 +113,21 @@ impl PartMaterials {
         self.material.is_empty() && self.appearances.is_empty() && self.snapshots.is_empty()
     }
 
+    /// Applies an appearance at a place in these configurations, replacing the one
+    /// there, or removes it with `None`, and drops the copies nothing uses any more.
+    pub(crate) fn assign(&mut self, target: &AppearanceTarget, appearance: Option<&Appearance>, scope: &ConfigScope) {
+        self.appearances.retain(|a| !(a.target.same_place(target) && a.scope == *scope));
+        if let Some(a) = appearance {
+            self.appearances.push(AppearanceAssignment {
+                target: target.clone(),
+                appearance: a.id.clone(),
+                scope: scope.clone(),
+            });
+            self.snapshots.put_appearance(a.clone());
+        }
+        self.prune();
+    }
+
     /// Drops the copies no assignment uses.
     pub(crate) fn prune(&mut self) {
         let materials: Vec<MaterialId> = self.material.iter().map(|m| m.material.clone()).collect();
@@ -172,6 +187,20 @@ impl AppearanceTable {
     }
 }
 
+fn material_in<'a>(m: &'a PartMaterials, configuration: Option<&ConfigurationId>) -> Option<&'a Material> {
+    scope::pick(&m.material, |a| &a.scope, configuration).and_then(|a| m.snapshots.material(&a.material))
+}
+
+fn part_appearance_in(m: &PartMaterials, configuration: Option<&ConfigurationId>) -> Appearance {
+    let part = m.appearances.iter().filter(|a| a.target == AppearanceTarget::Part);
+    scope::pick(part, |a| &a.scope, configuration)
+        .map(|a| &a.appearance)
+        .or_else(|| material_in(m, configuration).and_then(|mat| mat.default_appearance.as_ref()))
+        .and_then(|id| m.snapshots.appearance(id))
+        .cloned()
+        .unwrap_or_else(Appearance::default_part)
+}
+
 /// Why a part has no mass to show.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum MassError {
@@ -195,32 +224,42 @@ impl Document {
     /// The part's material in a configuration (`None` for the default one), from the
     /// copy the part holds.
     pub fn material(&self, configuration: Option<&ConfigurationId>) -> Option<&Material> {
-        let m = &self.materials;
-        scope::pick(&m.material, |a| &a.scope, configuration).and_then(|a| m.snapshots.material(&a.material))
+        material_in(&self.materials, configuration)
     }
 
     /// What a face with no appearance of its own or its feature's shows: the part's
     /// appearance, else the material's default appearance, else SolidDraft's default.
     pub fn part_appearance(&self, configuration: Option<&ConfigurationId>) -> Appearance {
-        let m = &self.materials;
-        let part = m.appearances.iter().filter(|a| a.target == AppearanceTarget::Part);
-        scope::pick(part, |a| &a.scope, configuration)
-            .map(|a| &a.appearance)
-            .or_else(|| self.material(configuration).and_then(|mat| mat.default_appearance.as_ref()))
-            .and_then(|id| m.snapshots.appearance(id))
-            .cloned()
-            .unwrap_or_else(Appearance::default_part)
+        part_appearance_in(&self.materials, configuration)
     }
 
     /// The appearance of every face of the part's body in a configuration, with the
     /// assignments that did not apply.
     pub fn appearance_table(&self, configuration: Option<&ConfigurationId>) -> AppearanceTable {
+        self.appearance_table_in(&self.materials, configuration)
+    }
+
+    /// The appearance table as it would be with `appearance` applied at `target` in
+    /// every configuration (or removed there with `None`), without changing the part.
+    /// The properties panel shows a colour or a transparency this way while it is
+    /// still being dragged, and applies it once as one undo step.
+    pub fn appearance_table_previewing(
+        &self,
+        configuration: Option<&ConfigurationId>,
+        target: &AppearanceTarget,
+        appearance: Option<&Appearance>,
+    ) -> AppearanceTable {
+        let mut m = self.materials.clone();
+        m.assign(target, appearance, &ConfigScope::All);
+        self.appearance_table_in(&m, configuration)
+    }
+
+    fn appearance_table_in(&self, m: &PartMaterials, configuration: Option<&ConfigurationId>) -> AppearanceTable {
         let mut table = AppearanceTable {
-            appearances: vec![self.part_appearance(configuration)],
+            appearances: vec![part_appearance_in(m, configuration)],
             faces: HashMap::new(),
             lost: Vec::new(),
         };
-        let m = &self.materials;
         // The assignment that holds at each place, most specific place last so it wins.
         let mut chosen: Vec<(usize, &AppearanceAssignment)> = Vec::new();
         for (i, a) in m.appearances.iter().enumerate() {

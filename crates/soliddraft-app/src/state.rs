@@ -51,6 +51,9 @@ pub enum AppAction {
     StartFillet,
     StartChamfer,
     ShowMaterial,
+    /// Shows the selected face's colour and transparency, or the part's when no face
+    /// is selected.
+    ShowAppearance,
     StartHole,
     StartPattern {
         circular: bool,

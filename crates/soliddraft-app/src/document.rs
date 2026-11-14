@@ -1238,6 +1238,15 @@ impl Command {
     }
 }
 
+/// An appearance the properties panel shows before it applies it.
+#[derive(Clone, Debug)]
+struct AppearancePreview {
+    target: model::AppearanceTarget,
+    appearance: Option<Appearance>,
+    /// The part's assignments the preview was made over; it lapses when they change.
+    base: model::PartMaterials,
+}
+
 /// A body's display geometry and picks as it was last shown.
 struct Shown {
     body: BodyId,
@@ -1513,6 +1522,12 @@ pub struct Document {
     shown: Option<BodyId>,
     /// Assignments used by the currently shown mesh.
     shading: (model::PartMaterials, Option<soliddraft_document::ConfigurationId>),
+    /// An appearance shown but not applied yet, while a colour or a transparency is
+    /// being dragged in the properties panel.
+    appearance_preview: Option<AppearancePreview>,
+    /// The pointer gesture under way when history moved or the part was edited. It
+    /// shows and applies no appearance until the pointer is released.
+    appearance_gesture_void: bool,
     /// Bodies shown before, latest last, kept while the part keeps them.
     recent: Vec<Shown>,
     model: model::Document,
@@ -1577,6 +1592,8 @@ impl Document {
             picks: Vec::new(),
             shown: None,
             shading: (model.materials().clone(), model.active_configuration().cloned()),
+            appearance_preview: None,
+            appearance_gesture_void: false,
             recent: Vec::new(),
             quality: DisplayQuality::new(model.kernel().clone()),
             model,
@@ -1630,6 +1647,8 @@ impl Document {
             picks: self.picks.clone(),
             shown: self.shown,
             shading: self.shading.clone(),
+            appearance_preview: None,
+            appearance_gesture_void: false,
             recent: Vec::new(),
             model: self.model.fork(),
             geometry: self.geometry.clone(),
@@ -1670,6 +1689,8 @@ impl Document {
     pub fn touch(&mut self) {
         self.dirty = true;
         self.edits += 1;
+        // A preview belongs to the part as it was when the drag began.
+        self.void_appearance_gesture();
     }
 
     /// Changes whenever the tree is rebuilt: a command, undo, redo or a rollback. Work
@@ -2479,6 +2500,9 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<String, String> {
+        // Once history moves, the drag under way never applies, even if Redo brings
+        // the part back to where it began.
+        self.void_appearance_gesture();
         if self.model.annotation_history(false) {
             return self.model.undo_deferred().map_err(|error| error.to_string());
         }
@@ -2495,6 +2519,7 @@ impl Document {
     }
 
     pub fn redo(&mut self) -> Result<String, String> {
+        self.void_appearance_gesture();
         if self.model.annotation_history(true) {
             return self.model.redo_deferred().map_err(|error| error.to_string());
         }
@@ -3272,6 +3297,7 @@ impl Document {
         material: Option<soliddraft_materials::Material>,
         default_appearance: Option<Appearance>,
     ) -> Result<(), String> {
+        self.void_appearance_gesture();
         let scope = self.material_scope();
         self.model
             .execute(model::Command::SetMaterial { material, default_appearance, scope })
@@ -3282,25 +3308,107 @@ impl Document {
         Ok(())
     }
 
-    /// Applies an appearance as one undo entry.
+    /// Applies an appearance as one undo entry, and ends any preview.
     pub fn set_appearance(
         &mut self,
         target: model::AppearanceTarget,
         appearance: Option<Appearance>,
     ) -> Result<(), String> {
+        self.appearance_preview = None;
         let scope = soliddraft_document::ConfigScope::All;
-        self.model.execute(model::Command::SetAppearance { target, appearance, scope }).map_err(|e| e.to_string())?;
-        self.touch();
+        let result =
+            self.model.execute(model::Command::SetAppearance { target, appearance, scope }).map_err(|e| e.to_string());
+        if result.is_ok() {
+            self.touch();
+        }
         self.apply_appearances();
         self.mesh_version += 1;
-        Ok(())
+        result.map(|_| ())
+    }
+
+    /// Shows `appearance` at `target` (or no appearance there, with `None`) without
+    /// applying it: no undo entry, no edit. [`Document::set_appearance`] applies it;
+    /// [`Document::end_appearance_preview`] drops it. Undo, redo, a material and any
+    /// other edit drop it for good and void the gesture under way, so neither it nor a
+    /// new preview from a still-held pointer can be applied over a part it was not made
+    /// on.
+    pub fn preview_appearance(&mut self, target: model::AppearanceTarget, appearance: Option<Appearance>) {
+        if self.appearance_gesture_void {
+            return;
+        }
+        if let Some(a) = &appearance
+            && !a.problems().is_empty()
+        {
+            return;
+        }
+        self.appearance_preview = Some(AppearancePreview { target, appearance, base: self.model.materials().clone() });
+        self.apply_appearances();
+        self.mesh_version += 1;
+    }
+
+    /// The preview [`Document::preview_appearance`] shows, while it still applies.
+    pub fn appearance_preview(&self) -> Option<(&model::AppearanceTarget, Option<&Appearance>)> {
+        self.appearance_preview
+            .as_ref()
+            .filter(|p| p.base == *self.model.materials())
+            .map(|p| (&p.target, p.appearance.as_ref()))
+    }
+
+    /// Drops any preview and ignores the pointer gesture under way: the panel neither
+    /// previews nor applies an appearance until [`Document::release_appearance_gesture`].
+    fn void_appearance_gesture(&mut self) {
+        self.appearance_gesture_void = true;
+        self.end_appearance_preview();
+    }
+
+    /// True while the gesture under way is void (see [`Document::preview_appearance`]).
+    pub fn appearance_gesture_void(&self) -> bool {
+        self.appearance_gesture_void
+    }
+
+    /// Ends a void gesture. The properties panel calls it at the end of each frame in
+    /// which no pointer button is down, so the release frame is still ignored.
+    pub fn release_appearance_gesture(&mut self) {
+        self.appearance_gesture_void = false;
+    }
+
+    /// Stops showing a preview and shows the part's applied appearances again.
+    pub fn end_appearance_preview(&mut self) {
+        if self.appearance_preview.take().is_some() {
+            self.apply_appearances();
+            self.mesh_version += 1;
+        }
+    }
+
+    /// The appearance shown now, preview included: on `face`, or with `None` what a
+    /// face without an appearance of its own or its feature's shows.
+    pub fn shown_appearance(&self, face: Option<FaceId>) -> Appearance {
+        let configuration = self.model.active_configuration();
+        let mut table = match self.appearance_preview() {
+            Some((target, appearance)) => self.model.appearance_table_previewing(configuration, target, appearance),
+            None => self.model.appearance_table(configuration),
+        };
+        match face {
+            Some(id) => table.of(id).clone(),
+            None => table.appearances.swap_remove(0),
+        }
+    }
+
+    /// True when `target` has an appearance of its own applied, not one it inherits.
+    pub fn has_own_appearance(&self, target: &model::AppearanceTarget) -> bool {
+        self.model.materials().appearances.iter().any(|a| a.target.same_place(target))
     }
 
     /// Fills each display mesh's appearance table and per-vertex index from the part's
-    /// appearance assignments, resolved for the visible configuration.
+    /// appearance assignments, resolved for the visible configuration, with the
+    /// preview on top while there is one.
     fn apply_appearances(&mut self) {
         self.shading = (self.model.materials().clone(), self.model.active_configuration().cloned());
-        let resolved = self.model.appearance_table(self.model.active_configuration());
+        let configuration = self.model.active_configuration();
+        let resolved = match self.appearance_preview() {
+            Some((target, appearance)) => self.model.appearance_table_previewing(configuration, target, appearance),
+            None => self.model.appearance_table(configuration),
+        };
         let table: Vec<Shading> = resolved.appearances.iter().map(Appearance::shading).collect();
         for mesh in self.meshes.values_mut() {
             if mesh.appearances == table

@@ -261,6 +261,9 @@ impl Backdrop {
 
 /// Appearances one body can show; a face indexing past them shows the first.
 pub const MAX_APPEARANCES: usize = 64;
+/// The opacity from which a face counts as opaque and draws in the opaque pass;
+/// `OPAQUE` in scene.wgsl is the same.
+const OPAQUE: f32 = 0.999;
 
 /// One appearance as `Shade` in scene.wgsl reads it.
 #[repr(C)]
@@ -328,6 +331,9 @@ struct GpuBody {
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     bounds: Option<(Vec3, Vec3)>,
+    /// Some face shows an appearance that is not fully opaque, so the body draws in
+    /// the see-through pass as well as the opaque one.
+    see_through: bool,
 }
 
 /// The ambient occlusion targets, full tier only.
@@ -438,6 +444,9 @@ struct Layouts {
 pub struct ViewportRenderer {
     tier: Tier,
     face_pipeline: wgpu::RenderPipeline,
+    /// The faces whose appearance is not opaque: blended over everything opaque,
+    /// both sides, writing no depth, so what is behind or inside them shows.
+    see_through_pipeline: wgpu::RenderPipeline,
     ground_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
     plane_pipeline: wgpu::RenderPipeline,
@@ -644,6 +653,18 @@ impl ViewportRenderer {
             samples: MSAA,
             cull: back,
             depth: depth(true),
+        });
+        let see_through_pipeline = pipeline(Desc {
+            label: "see-through faces",
+            layout: &scene_layout,
+            vs: "vs_face",
+            fs: Some("fs_face_see_through"),
+            buffers: &faces,
+            format: Some(COLOR_FORMAT),
+            blend: premul,
+            samples: MSAA,
+            cull: None,
+            depth: depth(false),
         });
         let ground_pipeline = pipeline(Desc {
             label: "ground",
@@ -883,6 +904,7 @@ impl ViewportRenderer {
         Self {
             tier,
             face_pipeline,
+            see_through_pipeline,
             ground_pipeline,
             grid_pipeline,
             plane_pipeline,
@@ -1032,6 +1054,7 @@ impl ViewportRenderer {
         for (slot, s) in shades.iter_mut().zip(&mesh.appearances) {
             *slot = (*s).into();
         }
+        let see_through = verts.iter().any(|v| shades[v.appearance as usize].base[3] < OPAQUE);
         let mut lines: Vec<LineInstance> = Vec::new();
         for e in &mesh.edges {
             lines.extend(e.segments.as_chunks::<2>().0.iter().map(|s| LineInstance {
@@ -1071,6 +1094,7 @@ impl ViewportRenderer {
             uniform,
             bind_group,
             bounds: mesh.bounds(),
+            see_through,
         }
     }
 
@@ -1388,6 +1412,11 @@ impl ViewportRenderer {
                 // Tested against the faces and written to no buffer, so it can hide nothing.
                 pass.set_pipeline(&self.grid_pipeline);
                 pass.draw(0..3, 0..1);
+            }
+            if show_faces && shown.iter().any(|b| b.see_through) {
+                // After everything opaque, so the opaque depth hides what is behind.
+                pass.set_pipeline(&self.see_through_pipeline);
+                draw_faces(&mut pass, &mut shown.iter().copied().filter(|b| b.see_through), true);
             }
             if show_faces && let Some(g) = ghost {
                 pass.set_pipeline(&self.face_pipeline);

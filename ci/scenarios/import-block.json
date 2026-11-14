@@ -98,7 +98,7 @@
         },
         {
           "pointer": "/revision",
-          "same_as_step": 1
+          "same_as_step": 4
         },
         {
           "pointer": "/summary/features",

@@ -343,6 +343,12 @@
       "test-linux",
       "test-macos",
       "application-loop"
+    ],
+    "ci/fixtures/import/two-blocks.igs": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
     ]
   },
   "patterns": {

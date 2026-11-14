@@ -818,11 +818,14 @@ pub struct SketchSession {
     pub pending: Vec<(P2, Vec<Snap>)>,
     /// The end of the last line drawn, so the next line chains from it.
     pub chain_from: Option<PointRef>,
+    /// What is selected, in the order it was picked.
     pub selection: Vec<SketchSel>,
     pub hover: Option<SketchSel>,
     pub cursor: Option<P2>,
     pub snaps: Vec<Snap>,
     pub drag: Option<SketchDrag>,
+    /// A selection box being dragged from empty space with the Select tool.
+    pub selection_box: Option<crate::sketcher::select_box::SelectionBox>,
     /// Live power-trim edits, committed together on release.
     pub trim_drag: Option<TrimDrag>,
     /// The first corner-trim target and the portion to keep, before the second pick.
@@ -923,6 +926,7 @@ impl SketchSession {
             cursor: None,
             snaps: Vec::new(),
             drag: None,
+            selection_box: None,
             trim_drag: None,
             corner_first: None,
             trim_bounds: Vec::new(),
@@ -989,6 +993,7 @@ impl SketchSession {
         self.dim_edit = None;
         self.preview = None;
         self.drag = None;
+        self.selection_box = None;
         if !tool.selects() {
             self.selection.clear();
         }
@@ -1005,9 +1010,12 @@ impl SketchSession {
     }
 
     /// Whether Escape has something to drop before it leaves the sketch: a tool other
-    /// than Select, a started shape or a started dimension.
+    /// than Select, a started shape, a started dimension or a selection box.
     pub fn tool_in_progress(&self) -> bool {
-        self.tool != Tool::Select || !self.pending.is_empty() || self.dim_first.is_some()
+        self.tool != Tool::Select
+            || !self.pending.is_empty()
+            || self.dim_first.is_some()
+            || self.selection_box.is_some()
     }
 
     pub fn say(&mut self, text: impl Into<String>) {
@@ -1019,6 +1027,17 @@ impl SketchSession {
             .iter()
             .filter_map(|s| match s {
                 SketchSel::Entity(e) => Some(*e),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The selected relations and dimensions, in selection order.
+    pub fn selected_constraints(&self) -> Vec<ConstraintId> {
+        self.selection
+            .iter()
+            .filter_map(|s| match s {
+                SketchSel::Constraint(c) => Some(*c),
                 _ => None,
             })
             .collect()

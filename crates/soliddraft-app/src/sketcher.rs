@@ -27,6 +27,7 @@ use std::ops::{Add, Sub};
 mod circular;
 mod ellipse;
 mod rectangle;
+pub mod select_box;
 mod slot;
 mod spline;
 pub(crate) mod text;
@@ -34,6 +35,8 @@ pub(crate) mod text;
 const POINT_REACH: f32 = 8.0;
 const CURVE_REACH: f32 = 6.0;
 const ALIGN_REACH: f32 = 6.0;
+/// The strength of the accent halo under a curve the pointer would pick.
+const HOVER_HALO: f32 = 0.45;
 
 /// Screen mapping of a sketch plane through the camera.
 pub struct Frame<'a> {
@@ -256,7 +259,7 @@ pub fn run(
         } else if picks {
             s.hover = hit_curve(&frame, &s.sketch, pos, ignore_guide_targets(s)).map(SketchSel::Entity);
             s.preview = curve_preview(s, &frame, pos);
-        } else {
+        } else if s.selection_box.is_none() {
             s.hover = hit_test(&frame, &s.sketch, pos, &glyphs);
             if s.hover.is_none()
                 && s.show_dimensions
@@ -365,6 +368,9 @@ pub fn run(
     paint_entities(&painter, &frame, s);
     paint_glyphs(&painter, s, &glyphs);
     paint_dimensions(&painter, &frame, s);
+    if let Some(b) = &s.selection_box {
+        select_box::paint(&painter, b);
+    }
     paint_rubber_band(&painter, &frame, s, snapped);
     for (kind, construction) in &s.dynamic_preview {
         let entity = Entity { id: 0, kind: kind.clone(), construction: *construction };
@@ -744,6 +750,9 @@ fn select_input(
         let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
         let hit = hit_test(frame, &s.sketch, pos, &[]);
         let label = labels.into_iter().find(|(_, r)| r.contains(pos)).map(|(id, _)| id);
+        // A drag from empty space draws a selection box instead of moving anything.
+        s.selection_box = (hit.is_none() && label.is_none())
+            .then(|| select_box::SelectionBox::new(pos, select_box::Combine::of(modifiers)));
         s.drag = match (hit, label) {
             (Some(SketchSel::Point(p)), _) if p.entity != crate::sketch::ORIGIN => {
                 Some(SketchDrag::Point { point: p, moved: false })
@@ -758,6 +767,14 @@ fn select_input(
             }
             _ => None,
         };
+    }
+    if resp.dragged_by(egui::PointerButton::Primary)
+        && let Some(pos) = resp.interact_pointer_pos()
+        && let Some(b) = s.selection_box.as_mut()
+    {
+        b.end = pos;
+        let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
+        b.picks = select_box::targets(frame, &s.sketch, &labels, b.rect(), b.kind());
     }
     if resp.dragged_by(egui::PointerButton::Primary)
         && let Some(pos) = resp.interact_pointer_pos()
@@ -785,6 +802,11 @@ fn select_input(
             Some(SketchDrag::Offset { .. }) => {}
             None => {}
         }
+    }
+    if resp.drag_stopped_by(egui::PointerButton::Primary)
+        && let Some(b) = s.selection_box.take()
+    {
+        b.combine.apply(&mut s.selection, &b.picks);
     }
     if resp.drag_stopped_by(egui::PointerButton::Primary) {
         match s.drag.take() {
@@ -1442,14 +1464,18 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
         let color = entity_color(s, e);
         let is_sel = selected(SketchSel::Entity(e.id));
         let is_related = relation_entities.contains(&e.id);
-        let is_hover = s.hover == Some(SketchSel::Entity(e.id));
+        let is_hover = s.hover == Some(SketchSel::Entity(e.id))
+            || s.selection_box.as_ref().is_some_and(|b| b.picks.contains(&SketchSel::Entity(e.id)));
         for path in e.polylines(96) {
             let pts: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
             if is_sel || is_related || is_hover {
-                let halo = Stroke::new(
-                    if is_sel || is_related { 6.0 } else { 5.0 },
-                    theme::selection_bg().gamma_multiply(if is_sel || is_related { 1.0 } else { 0.7 }),
-                );
+                // The hover halo is the accent at a strength that reads on light and dark
+                // sheets; the selection wash alone vanished under a thin line.
+                let halo = if is_sel || is_related {
+                    Stroke::new(6.0, theme::selection_bg())
+                } else {
+                    Stroke::new(6.0, theme::accent().gamma_multiply(HOVER_HALO))
+                };
                 if pts.len() >= 2 {
                     painter.add(egui::Shape::line(pts.clone(), halo));
                 }
@@ -2379,7 +2405,7 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     };
     let hint = match (s.tool, s.pending.len()) {
         (Tool::Text, _) => "Sketch text: edit the content and font, then click the baseline origin",
-        (Tool::Select, _) => "Click to select, drag to move, double-click a dimension to edit",
+        (Tool::Select, _) => "Click to select, drag across empty space to box-select, double-click a dimension to edit",
         (Tool::Line, 0) => "Line: click the start point",
         (Tool::Line, _) => "Line: click end; right-click or double-click ends chain; Esc: Select",
         (Tool::Centreline, 0) => "Centreline: click the start point",
@@ -2483,6 +2509,12 @@ fn paint_status(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     painter.circle_filled(pos2(r.left() + 10.0, r.top() + 13.0), 3.5, status_color);
     painter.galley(pos2(r.left() + 18.0, r.top() + 6.0), g1, status_color);
     painter.galley(pos2(r.left() + 10.0, r.top() + 22.0), g2, theme::muted());
+}
+
+/// Whether a curve of a closed sketch shown on `plane` lies under `pos`.
+pub fn passive_hit(camera: &Camera, rect: Rect, plane: Plane, sketch: &Sketch, pos: Pos2) -> bool {
+    let frame = Frame { plane, camera, rect };
+    sketch.drawn().any(|e| entity_distance(&frame, e, pos) <= POINT_REACH)
 }
 
 /// Draws a sketch that is not open, in a quiet colour, for selected sketches.

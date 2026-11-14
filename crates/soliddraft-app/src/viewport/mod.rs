@@ -17,7 +17,7 @@ pub mod render;
 pub mod scenes;
 
 use crate::dimension_edit::DimensionAction;
-use crate::document::{AxisKind, DisplayMesh, Document, Reference, Selection};
+use crate::document::{AxisKind, DisplayMesh, Document, FeatureId, Reference, Selection};
 use crate::icons::{self, Icon};
 use crate::navigation::{Action, Motion, NavContext, NavigationSettings, Outcome, Routed, Router, ZoomAnchor};
 use crate::settings::ReferenceDisplay;
@@ -82,6 +82,8 @@ pub struct ViewportEvents {
     pub context_position: Option<Pos2>,
     /// With a click on no model: the reference it found.
     pub clicked_reference: Option<Reference>,
+    /// A primary click on a curve of a shown sketch outside sketch editing.
+    pub clicked_sketch: Option<FeatureId>,
     pub set_view: Option<StandardView>,
     pub fit: bool,
     pub set_display: Option<DisplayMode>,
@@ -108,8 +110,8 @@ pub struct Overlay<'a> {
     pub preview: Option<Arc<DisplayMesh>>,
     /// The open sketch, which takes the pointer.
     pub sketch: Option<&'a mut SketchSession>,
-    /// Closed sketches to show quietly on their planes.
-    pub passive_sketches: Vec<(Plane, &'a Sketch)>,
+    /// Closed sketches to show quietly on their planes, with their features.
+    pub passive_sketches: Vec<(FeatureId, Plane, &'a Sketch)>,
     /// The feature value being typed at its dimension.
     pub dimension_edit: Option<&'a mut crate::dimension_edit::DimensionEdit>,
     /// Which of the part's items show.
@@ -175,6 +177,8 @@ pub struct ViewportState {
     pub hover: Option<Picked>,
     /// The reference under the pointer, when no model is.
     pub hover_reference: Option<Reference>,
+    /// The shown sketch whose curve is under the pointer, outside sketch editing.
+    pub hover_sketch: Option<FeatureId>,
     pub hover_point: Option<Vec3>,
     pub rect: Rect,
     /// The dimensions a selected body showed last frame.
@@ -203,6 +207,7 @@ impl Default for ViewportState {
             grid_style: GridStyle::default(),
             hover: None,
             hover_reference: None,
+            hover_sketch: None,
             hover_point: None,
             rect: Rect::NOTHING,
             dimensions: Vec::new(),
@@ -376,6 +381,7 @@ impl ViewportState {
         let cursor_px = self.context_pick.map(|pick| pixel(pick.at)).or(hover_px);
         self.hover = None;
         self.hover_reference = None;
+        self.hover_sketch = None;
         self.hover_point = None;
         let mut can_pick_references = false;
         if let (Some(px), Some(pos)) = (hover_px, hover_pos) {
@@ -394,9 +400,26 @@ impl ViewportState {
             }
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         }
+        // A shown sketch's curves are drawn over the model, so they take the pick first.
+        if let Some(pos) = hover_pos {
+            self.hover_sketch = passive_sketches
+                .iter()
+                .rev()
+                .find(|(_, plane, sk)| crate::sketcher::passive_hit(&self.camera, rect, *plane, sk, pos))
+                .map(|(id, _, _)| *id);
+        }
+        if self.hover_sketch.is_some() {
+            self.hover = None;
+            self.hover_reference = None;
+            self.hover_point = None;
+        }
         if response.clicked_by(egui::PointerButton::Primary) && !sketching {
-            events.clicked = Some(self.hover);
-            events.clicked_reference = self.hover_reference;
+            if let Some(id) = self.hover_sketch {
+                events.clicked_sketch = Some(id);
+            } else {
+                events.clicked = Some(self.hover);
+                events.clicked_reference = self.hover_reference;
+            }
         }
 
         if let Some(pick) = self.context_pick {
@@ -456,10 +479,17 @@ impl ViewportState {
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
 
         let painter = ui.painter().with_clip_rect(rect);
-        for (plane, sk) in passive_sketches {
-            crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, theme::muted().gamma_multiply(0.9));
+        for (id, plane, sk) in passive_sketches {
+            let picked = self.hover_sketch == Some(id) || selection == Some(Selection::Feature(id));
+            let color = if picked { theme::accent() } else { theme::muted().gamma_multiply(0.9) };
+            crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, color);
         }
         if let Some(session) = sketch {
+            // A drag the navigation preset claimed (Shift+left pans in the legacy preset)
+            // moves the camera and selects nothing.
+            if self.router.dragging() {
+                session.selection_box = None;
+            }
             let spacing = Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style);
             events.actions = crate::sketcher::run(
                 ui,
@@ -514,9 +544,11 @@ impl ViewportState {
         if annotation_gesture {
             events.clicked = None;
             events.clicked_reference = None;
+            events.clicked_sketch = None;
         }
         if let Some(d) = pointer.and_then(|p| dims.iter().rev().find(|d| d.rect.contains(p))) {
             events.clicked = None;
+            events.clicked_sketch = None;
             if self.annotation_drag.is_none() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }

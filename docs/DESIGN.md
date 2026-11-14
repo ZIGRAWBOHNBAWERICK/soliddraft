@@ -158,7 +158,7 @@ L, R, C, A, D, T, O and M select line, rectangle, circle, arc, Smart Dimension, 
 offset and move across all shortcut presets. Custom bindings take precedence, and
 typing in a field leaves the tool alone.
 
-An open sketch locks the workspace switch to its sketch and plane. The palette
+An open sketch replaces the workspace switch with a banner naming its sketch and plane. The palette
 contains sketch tools only. A red Close sketch action occupies the right end of
 the options bar. It stays visible while a tool or dimension editor is active.
 
@@ -213,6 +213,8 @@ Menus, palette entries, shortcuts and the command line use the same command
 registry. Preferences keeps Navigation and Interface shortcut settings shared
 across document types. Unavailable settings categories say "Coming soon".
 Keyboard focus and edited bindings remain visible in menus and shortcut help.
+
+Palette tools use the plain outline icons from the approved prototype. Workspace selection is grey, title menus have no resting box, and options-bar view controls use compact icons with accessible names.
 
 Icons come from `assets/icons` and `icons.rs`. The catalogue generator owns the
 SVG files. Use registry icons or the shared painter instead of text glyphs.

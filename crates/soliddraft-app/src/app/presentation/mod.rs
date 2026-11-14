@@ -102,7 +102,8 @@ impl SolidDraftApp {
 
     pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         let st = &mut self.state;
-        ui.horizontal(|ui| {
+        let dock = &mut self.dock;
+        egui::MenuBar::new().ui(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let (brand, _) = ui.allocate_exact_size(vec2(96.0, theme::MENU_HEIGHT), Sense::hover());
             let sq = Rect::from_center_size(pos2(brand.left() + 14.0, brand.center().y), vec2(15.0, 15.0));
@@ -140,23 +141,7 @@ impl SolidDraftApp {
                     // The start page has no document to name.
                     return;
                 }
-                let (name, dirty, path) =
-                    if let Some(session) = st.assembly.session.as_ref().filter(|_| st.assembly.is_active()) {
-                        (session.doc.assembly().name.clone(), session.doc.is_dirty(), session.doc.path())
-                    } else if let Some(session) = st.drawing.session.as_ref().filter(|_| st.drawing.is_active()) {
-                        (session.title(), session.doc.dirty, session.doc.path.as_deref())
-                    } else {
-                        let name = match &st.doc.path {
-                            Some(path) => {
-                                path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
-                            }
-                            None => format!("{}.{}", st.doc.name, file::EXTENSION),
-                        };
-                        (name, st.doc.dirty, st.doc.path.as_deref())
-                    };
-                let text = if dirty { format!("{name} •") } else { name };
-                ui.add(egui::Label::new(egui::RichText::new(text).size(12.0).color(theme::muted())).truncate())
-                    .on_hover_text(path.map(|p| p.display().to_string()).unwrap_or("Not saved yet".into()));
+                docks::document_tabs(ui, st, dock);
             });
         });
     }
@@ -709,9 +694,20 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
 
 /// Stable workspace ids in the title bar.
 fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
-    let locked = st.in_sketch() && !st.drawing.is_active() && !st.assembly.is_active();
-    if locked {
+    if let Some(sketch) = st.sketch.as_ref().filter(|_| !st.drawing.is_active() && !st.assembly.is_active()) {
         st.ribbon_tab = crate::state::RibbonTab::Sketch;
+        let name = st.doc.feature(sketch.feature).map_or("Sketch", |feature| feature.name.as_str());
+        let label = format!("{name} on the {}", sketch.plane.label());
+        let galley = ui.painter().layout_no_wrap(label.clone(), theme::font_semibold(12.5), theme::error());
+        let width = galley.size().x + 48.0;
+        ui.add_space((ui.max_rect().center().x - width / 2.0 - ui.cursor().left()).max(8.0));
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+        ui.painter().rect_filled(rect, CornerRadius::same(6), theme::edit_suite::WORKSPACE_BG);
+        ui.painter().circle_filled(pos2(rect.left() + 18.0, rect.center().y), 4.0, theme::edit_suite::DANGER);
+        ui.painter().galley(pos2(rect.left() + 32.0, rect.center().y - galley.size().y / 2.0), galley, theme::error());
+        ui.add_space(8.0);
+        return;
     }
     let tabs = st.workspaces();
     let widths: Vec<_> = tabs
@@ -725,26 +721,21 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
     let centered = ui.max_rect().center().x - width / 2.0;
     ui.add_space((centered - ui.cursor().left()).max(8.0));
     let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(6), theme::panel_header());
+    ui.painter().rect_filled(rect, CornerRadius::same(6), theme::edit_suite::WORKSPACE_BG);
     let mut x = rect.left() + 2.0;
     for (tab, width) in tabs.into_iter().zip(widths) {
         let bounds = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 22.0));
         x += width + gap;
         let selected = st.workspace() == tab;
-        let enabled = !locked || selected;
-        let response = ui.interact(
-            bounds,
-            ui.id().with(("workspace", tab.id())),
-            if enabled { Sense::click() } else { Sense::hover() },
-        );
+        let response = ui.interact(bounds, ui.id().with(("workspace", tab.id())), Sense::click());
         response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, format!("{} tab", tab.label()))
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("{} tab", tab.label()))
         });
-        if selected || (enabled && (response.hovered() || response.has_focus())) {
+        if selected || response.hovered() || response.has_focus() {
             ui.painter().rect_filled(
                 bounds,
                 CornerRadius::same(4),
-                if selected { theme::selection_bg() } else { theme::hover() },
+                if selected { theme::edit_suite::WORKSPACE_SELECTED } else { theme::hover() },
             );
         }
         ui.painter().text(
@@ -752,9 +743,9 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
             Align2::CENTER_CENTER,
             tab.label(),
             theme::font_medium(12.5),
-            if selected { theme::selection_ink() } else { theme::muted() },
+            if selected { theme::ink() } else { theme::muted() },
         );
-        if enabled && response.has_focus() {
+        if response.has_focus() {
             ui.painter().rect_stroke(
                 bounds,
                 CornerRadius::same(4),
@@ -762,11 +753,8 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
                 egui::StrokeKind::Inside,
             );
         }
-        if enabled && response.clicked() {
+        if response.clicked() {
             st.select_workspace(tab);
-        }
-        if !enabled {
-            response.on_hover_text("Close sketch to change workspace");
         }
     }
     ui.add_space(8.0);

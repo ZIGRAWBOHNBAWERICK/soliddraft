@@ -22,6 +22,7 @@ import pathlib
 import random
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 C = 0.866
 TONES = {
@@ -814,6 +815,61 @@ def icon_material():
 
 CAD = {k[5:]: v for k, v in list(globals().items()) if k.startswith("icon_")}
 
+# Outline drawings from the approved L00 Edit Suite prototype.
+PLAIN = {
+    "extrude": '<path d="M4 14l6-2.4 6 2.4-6 2.6z"/><path d="M4 14V8.5l6-2.4 6 2.4V14" opacity=".55"/><path d="M10 11.6V2.8M10 2.8L8 5.1M10 2.8l2 2.3"/>',
+    "revolve": '<path d="M10 3v14" class="d"/><path d="M10 5h3.5v4H12v6h-2"/><path d="M5.2 8.5a5.6 2.2 0 0 0 2.3 3.8"/><path d="M5.6 12.4h2.2v-2.2" />',
+    "sweep": '<path d="M3.5 16c0-7 4-11 11-11"/><circle cx="15.5" cy="5" r="2.3"/><circle cx="3.5" cy="16" r="1.3" class="f"/>',
+    "loft": '<ellipse cx="10" cy="4.6" rx="3" ry="1.5"/><ellipse cx="10" cy="15.5" rx="6.5" ry="2"/><path d="M7 4.8L3.5 15.3M13 4.8l3.5 10.5"/>',
+    "cut": '<path d="M3 7l7-3 7 3v7l-7 3-7-3z"/><path d="M7 8.3l3 1.3 3-1.3v3.6l-3 1.3-3-1.3z" class="t"/><path d="M7 8.3l3 1.3 3-1.3"/>',
+    "hole": '<path d="M3 7l7-3 7 3v7l-7 3-7-3z"/><ellipse cx="10" cy="8" rx="3" ry="1.4" class="f"/>',
+    "slot": '<path d="M3 7l7-3 7 3v7l-7 3-7-3z"/><rect x="6" y="6.8" width="8" height="2.6" rx="1.3" class="f"/>',
+    "fillet": '<path d="M3.5 16.5V9a5.5 5.5 0 0 1 5.5-5.5h7.5"/><path d="M3.5 16.5h13V3.5" opacity=".4"/>',
+    "chamfer": '<path d="M3.5 16.5V9l5.5-5.5h7.5"/><path d="M3.5 16.5h13V3.5" opacity=".4"/>',
+    "shell": '<path d="M3.5 6.5l6.5-3 6.5 3v7.5l-6.5 3-6.5-3z"/><path d="M6.3 8l3.7 1.7L13.7 8v4.8L10 14.5l-3.7-1.7z"/>',
+    "draft": '<path d="M5.5 4h9l2.5 12H3z"/><path d="M10 4v12" class="d"/>',
+    "lattice": '<path d="M3.5 3.5h13v13h-13zM3.5 3.5l13 13M16.5 3.5l-13 13M10 3.5v13M3.5 10h13"/>',
+    "linear": '<rect x="3" y="4" width="3.6" height="3.6"/><rect x="8.2" y="4" width="3.6" height="3.6"/><rect x="13.4" y="4" width="3.6" height="3.6"/><rect x="3" y="12.4" width="3.6" height="3.6"/><rect x="8.2" y="12.4" width="3.6" height="3.6"/><rect x="13.4" y="12.4" width="3.6" height="3.6"/>',
+    "circular": '<circle cx="10" cy="3.8" r="1.7"/><circle cx="15.4" cy="6.9" r="1.7"/><circle cx="15.4" cy="13.1" r="1.7"/><circle cx="10" cy="16.2" r="1.7"/><circle cx="4.6" cy="13.1" r="1.7"/><circle cx="4.6" cy="6.9" r="1.7"/><circle cx="10" cy="10" r="1" class="f"/>',
+    "mirror": '<path d="M10 2.5v15" class="d"/><path d="M7.5 6.5l-4 1.8v5l4-1.8z"/><path d="M12.5 6.5l4 1.8v5l-4-1.8z"/>',
+    "plane": '<path d="M2.5 13.5l5.5-8h9.5l-5.5 8z"/>',
+    "axis": '<path d="M3 17L17 3" stroke-dasharray="5 2 1 2"/><circle cx="10" cy="10" r="1.6" class="f"/>',
+    "refpoint": '<path d="M10 4.5v11M4.5 10h11"/><circle cx="10" cy="10" r="1.8" class="f"/>',
+    "origin": '<path d="M5 15V4M5 15h11M5 15l6-5"/><circle cx="5" cy="15" r="1.5" class="f"/>',
+    "drawing": '<rect x="3" y="4" width="14" height="12" rx="1"/><path d="M6 7.5h5v4H6zM13 7.5h1.5M13 10h1.5M6 13.5h8.5"/>',
+    "open_drawings": '<path d="M2.5 15.5v-10h5l1.5 2h8.5v8z"/><path d="M8 11.2l2-1 2 1v2.3l-2 1-2-1z"/>',
+    "sketch": '<path d="M3 15.5l7-2.8 7 2.8-7 2.3z" opacity=".55"/><path d="M6.5 12.5l7.6-7.6a1.4 1.4 0 0 1 2 2L8.5 14.5l-2.8.8z"/>',
+    "exit_sketch": '<path d="M5 5l10 10M15 5L5 15"/>',
+    "line": '<path d="M4.5 15.5l11-11"/><circle cx="4.5" cy="15.5" r="1.6" class="f"/><circle cx="15.5" cy="4.5" r="1.6" class="f"/>',
+    "circle": '<circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="1.3" class="f"/>',
+    "rect": '<rect x="3.5" y="5.5" width="13" height="9"/><circle cx="3.5" cy="5.5" r="1.4" class="f"/><circle cx="16.5" cy="14.5" r="1.4" class="f"/>',
+    "arc": '<path d="M3.5 13.5a7 7 0 0 1 13 0"/><circle cx="10" cy="14.5" r="1.3" class="f"/><path d="M10 14.5l6.5-1" class="d"/>',
+    "slot_sketch": '<rect x="2.5" y="6.5" width="15" height="7" rx="3.5"/><path d="M6 10h8" class="d"/>',
+    "sk_point": '<path d="M10 4.5v11M4.5 10h11"/><circle cx="10" cy="10" r="1.8" class="f"/>',
+    "smart_dim": '<path d="M3 4v12M17 4v12M4 10h12"/><path d="M6.2 7.8L4 10l2.2 2.2M13.8 7.8L16 10l-2.2 2.2"/>',
+    "construction": '<rect x="4" y="5" width="12" height="10" class="d"/><path d="M4 15L16 5" class="d" opacity=".5"/>',
+    "relations": '<circle cx="6" cy="10" r="3"/><circle cx="14" cy="10" r="3"/><path d="M9 10h2"/>',
+    "normal_to": '<path d="M3 14.5l7-2.8 7 2.8-7 2.8z"/><path d="M10 13V3M10 3L8 5.4M10 3l2 2.4"/>',
+    "insert_comp": '<path d="M4 9l6-2.6L16 9v5.4L10 17l-6-2.6z"/><path d="M10 2v6M10 8L8 5.8M10 8l2-2.2"/>',
+    "mate": '<rect x="2.8" y="6" width="6" height="8" rx="1"/><rect x="11.2" y="6" width="6" height="8" rx="1"/><path d="M8.8 10h2.4"/><circle cx="10" cy="10" r="1.2" class="f"/>',
+    "move_comp": '<path d="M5 8l4-1.8L13 8v4l-4 1.8L5 12z"/><path d="M14 10h4M18 10l-1.8-1.8M18 10l-1.8 1.8"/>',
+    "interference": '<rect x="3" y="4" width="9" height="9" rx="1"/><rect x="8" y="7" width="9" height="9" rx="1"/><rect x="8" y="7" width="4" height="6" class="f" opacity=".5"/>',
+    "explode": '<rect x="7" y="7" width="6" height="6"/><path d="M5 5L2.8 2.8M15 5l2.2-2.2M5 15l-2.2 2.2M15 15l2.2 2.2"/>',
+    "measure": '<path d="M2.8 12.8l10-10 4.4 4.4-10 10z"/><path d="M6 9.6l1.6 1.6M8.4 7.2l2.4 2.4M10.8 4.8l1.6 1.6"/>',
+    "section": '<path d="M3 7l7-3 7 3v7l-7 3-7-3z" opacity=".5"/><path d="M10 2v16" stroke-width="2"/><path d="M10 4l7 3v7l-7 3z" class="t"/>',
+    "check": '<path d="M3.5 10.5l4.2 4.2 8.8-9.4"/>',
+    "draft_check": '<path d="M5.5 4h9l2.5 12H3z"/><path d="M7.5 10.5l2 2 3.5-4"/>',
+    "mass": '<path d="M5.200 8.200h9.600l1.700 8.300h-13z"/><circle cx="10" cy="5.600" r="2.100"/>',
+    "srf_offset": '<path d="M3.5 16.5V8.5a5 5 0 0 1 5-5h8"/><path d="M8 16.5v-7a2 2 0 0 1 2-2h6.5" class="d"/>',
+    "part": '<path d="M10 2.8l6.4 3.6v7.2L10 17.2l-6.4-3.6V6.4z"/><path d="M3.6 6.4L10 10l6.4-3.6M10 10v7.2"/>',
+    "body": '<path d="M10 2.8l6.4 3.6v7.2L10 17.2l-6.4-3.6V6.4z" class="t"/><path d="M10 2.8l6.4 3.6v7.2L10 17.2l-6.4-3.6V6.4z"/>',
+    "material": '<circle cx="10" cy="10" r="6.5"/><path d="M5.4 5.4l9.2 9.2M10 3.5v13" opacity=".6"/>',
+    "front": '<rect x="4" y="4" width="12" height="12"/><path d="M8 13V7h4M8 10h3"/>',
+    "top": '<rect x="4" y="4" width="12" height="12"/><path d="M7.5 7h5M10 7v6"/>',
+    "right": '<rect x="4" y="4" width="12" height="12"/><path d="M8 13V7h2.6a1.7 1.7 0 0 1 0 3.4H8M10.4 10.4L12.2 13"/>',
+}
+
+
 LINE = {
     "undo": '<path d="M6 4 L3 7 l3 3"/><path d="M3 7 h7 a3 3 0 0 1 0 6 h-3"/>',
     "redo": '<path d="M10 4 l3 3 -3 3"/><path d="M13 7 h-7 a3 3 0 0 0 0 6 h3"/>',
@@ -878,9 +934,28 @@ def line_svg(body):
     )
 
 
+def plain_svg(key):
+    if key in PLAIN:
+        body = PLAIN[key].replace('class="f"', 'fill="currentColor" stroke="none"')
+        body = body.replace('class="t"', 'fill="currentColor" stroke="none" opacity=".2"')
+        body = body.replace('class="d"', 'stroke-dasharray="2.4 2"')
+        return f'<svg {NS} viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">{body}</g></svg>\n'
+    # Commands outside the prototype retain their geometry as neutral outlines.
+    ET.register_namespace("", "http://www.w3.org/2000/svg")
+    tree = ET.fromstring(cad_svg(key, CAD[key]))
+    for element in tree.iter():
+        stroke = element.get("stroke")
+        if stroke and stroke != "none":
+            element.set("stroke", "currentColor")
+        fill = element.get("fill")
+        if fill and fill != "none":
+            element.set("fill", "none" if stroke and stroke != "none" else "currentColor")
+    return ET.tostring(tree, encoding="unicode") + "\n"
+
+
 def catalogue_rs():
     rows = ["// Written by scripts/generate_cad_icons.py. Do not edit.", ""]
-    for name, family, keys in (("CAD", "cad", CAD), ("GLYPHS", "line", LINE)):
+    for name, family, keys in (("CAD", "cad", CAD), ("GLYPHS", "line", LINE), ("PLAIN", "plain", [*CAD, "front", "top", "right"])):
         rows.append(f"pub const {name}: [(&str, &str); {len(keys)}] = [")
         rows += [f'    ("{key}", include_str!("{family}/{key}.svg")),' for key in keys]
         rows.append("];")
@@ -890,6 +965,7 @@ def catalogue_rs():
 def files():
     out = {f"cad/{key}.svg": cad_svg(key, fn) for key, fn in CAD.items()}
     out.update({f"line/{key}.svg": line_svg(body) for key, body in LINE.items()})
+    out.update({f"plain/{key}.svg": plain_svg(key) for key in [*CAD, "front", "top", "right"]})
     out["catalogue.rs"] = catalogue_rs()
     return out
 

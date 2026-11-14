@@ -234,8 +234,31 @@ fn shade_surface(world: vec3<f32>, n: vec3<f32>, base: vec3<f32>, metallic: f32,
     return color;
 }
 
+// The opacity from which a face counts as opaque (render.rs OPAQUE).
+const OPAQUE: f32 = 0.999;
+
+// Opaque faces, and ghosts, which carry their own opacity. A face whose appearance is
+// not opaque waits for fs_face_see_through, so it never hides what is inside the part.
 @fragment
 fn fs_face(in: FaceOut) -> @location(0) vec4<f32> {
+    let ghost = (body.flags & 2u) != 0u;
+    if (!ghost && body.shades[min(in.appearance, 63u)].base.a < OPAQUE) {
+        discard;
+    }
+    return face_colour(in);
+}
+
+// Faces whose appearance is not opaque, drawn after every opaque one without writing
+// depth. Their own triangles blend in draw order, unsorted.
+@fragment
+fn fs_face_see_through(in: FaceOut) -> @location(0) vec4<f32> {
+    if (body.shades[min(in.appearance, 63u)].base.a >= OPAQUE) {
+        discard;
+    }
+    return face_colour(in);
+}
+
+fn face_colour(in: FaceOut) -> vec4<f32> {
     var n = normalize(in.normal);
     let v = normalize(globals.eye.xyz - in.world);
     // Light the side the viewer sees, even through a sheet or an open preview.
@@ -272,8 +295,11 @@ fn fs_face(in: FaceOut) -> @location(0) vec4<f32> {
     let lit_accent = accent * (0.55 + 0.45 * max(dot(n, v), 0.0));
     // A preview marks the faces its operation made (document.rs PREVIEW_MADE).
     let made = preview && in.feature_id == 0xffffffffu;
-    if (selected_body || (in.face_id != 0u && in.face_id == globals.selected_id)) {
+    if (in.face_id != 0u && in.face_id == globals.selected_id) {
         color = mix(color, lit_accent, 0.55);
+    } else if (selected_body) {
+        // Lighter than a selected face, so a colour chosen for the body still shows.
+        color = mix(color, lit_accent, 0.25);
     } else if (made) {
         color = mix(color, lit_accent, 0.5);
     } else if (feature_selected) {
@@ -281,7 +307,6 @@ fn fs_face(in: FaceOut) -> @location(0) vec4<f32> {
     } else if (in.face_id != 0u && in.face_id == globals.hover_id) {
         color = mix(color, lit_accent, 0.22);
     }
-    // Opacity blends in draw order; sorting transparent faces comes later.
     var alpha = shade.base.a;
     if (ghost) {
         alpha = 0.42;

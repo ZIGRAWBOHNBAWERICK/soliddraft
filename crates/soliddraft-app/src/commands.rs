@@ -2581,7 +2581,12 @@ fn registry() -> Vec<CommandSpec> {
         cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
         cmd("convert_entities", "Use in a sketch", Icon::Sketch, COMING_SOON).in_menu().outside_sketch(),
         cmd("isolate", "Isolate", Icon::Fit, COMING_SOON).in_menu().outside_sketch(),
-        cmd("appearance", "Appearance", Icon::Display, COMING_SOON).in_menu().outside_sketch(),
+        cmd("appearance", "Appearance", Icon::Display, "Colour the part or the selected face, or make it transparent")
+            .in_menu()
+            .outside_sketch()
+            .run(|_| AppAction::ShowAppearance)
+            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .app_only("It opens the appearance panel; agents change an appearance with document_command and SetAppearance"),
         // Features in the tree.
         cmd("edit_feature", "Edit feature", Icon::Props, "Edit the selected feature or sketch")
             .label_now(|s| selected_feature_is(s, |f| f.is_sketch()).then(|| "Edit sketch".into()))

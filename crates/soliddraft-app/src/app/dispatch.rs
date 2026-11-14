@@ -960,6 +960,12 @@ impl SolidDraftApp {
                 self.state.doc.selection = Some(Selection::Body);
                 self.state.options_details = true;
             }
+            AppAction::ShowAppearance => {
+                if !matches!(self.state.doc.selection, Some(Selection::Face(_))) {
+                    self.state.doc.selection = Some(Selection::Body);
+                }
+                self.state.options_details = true;
+            }
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));
                 if let Some(id) = feature {

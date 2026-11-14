@@ -11,9 +11,12 @@ use crate::sketcher;
 use crate::state::{AppAction, AppState, DragStep, RelationFilter, SketchSel, Tool};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
-use soliddraft_model::{DatumPlane, PlaneRef};
+use soliddraft_kernel_api::FaceId;
+use soliddraft_materials::{Appearance, AppearanceId, Srgb};
+use soliddraft_model::{AppearanceTarget, DatumPlane, PlaneRef};
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
+    settle_appearance(ui, state);
     if state.sketch.is_some() {
         sketch_panel(ui, state);
     } else {
@@ -1095,6 +1098,13 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         if sel == Selection::Body {
             ui.add_space(8.0);
             material_panel(ui, state);
+            appearance_panel(ui, state, AppearanceTarget::Part, None);
+        }
+        if let Selection::Face(face) = sel
+            && let Some(face_ref) = state.doc.face_ref(face)
+        {
+            ui.add_space(8.0);
+            appearance_panel(ui, state, AppearanceTarget::Face { face: face_ref }, Some(face));
         }
         if let (Selection::Feature(id), Some(f)) = (sel, feature)
             && f.status != FeatureStatus::Inactive
@@ -1285,5 +1295,147 @@ fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {
         if let Err(error) = state.doc.set_material(material, appearance) {
             state.note(error, crate::state::NoteKind::Error);
         }
+    }
+}
+
+/// Colours one click away, with the names their appearances take.
+const SWATCHES: [(&str, [u8; 3]); 10] = [
+    ("Red", [198, 40, 40]),
+    ("Orange", [239, 108, 0]),
+    ("Yellow", [249, 190, 37]),
+    ("Green", [46, 125, 50]),
+    ("Teal", [0, 131, 143]),
+    ("Blue", [21, 101, 192]),
+    ("Purple", [106, 27, 154]),
+    ("Graphite", [55, 61, 69]),
+    ("Silver", [176, 182, 190]),
+    ("White", [244, 244, 244]),
+];
+
+/// How transparent "Transparent" makes an opaque surface, and the most the slider allows,
+/// so a part never disappears altogether.
+const FIRST_TRANSPARENCY: f32 = 0.6;
+const MOST_TRANSPARENCY: f32 = 0.9;
+
+/// `from` in another colour and opacity, keeping its finish. The id names everything
+/// that differs from a plain opaque dielectric, so two different looks never share an
+/// id in the part's copies.
+fn painted(from: &Appearance, colour: Srgb, opacity: f32) -> Appearance {
+    let opacity = (opacity.clamp(1.0 - MOST_TRANSPARENCY, 1.0) * 100.0).round() / 100.0;
+    let transparency = ((1.0 - opacity) * 100.0).round() as u32;
+    let hex = colour.to_string();
+    let mut id = format!("custom-{}", hex.trim_start_matches('#'));
+    if transparency > 0 {
+        id.push_str(&format!("-t{transparency}"));
+    }
+    if from.metallic != 0.0 || from.roughness != 0.5 {
+        id.push_str(&format!("-m{}-r{}", from.metallic, from.roughness));
+    }
+    if from.emissive != Srgb::BLACK {
+        id.push_str(&format!("-e{}", from.emissive.to_string().trim_start_matches('#')));
+    }
+    let colour_name = SWATCHES
+        .iter()
+        .find(|(_, c)| Srgb::new(c[0], c[1], c[2]) == colour)
+        .map_or(hex.clone(), |(n, _)| (*n).to_owned());
+    let name = if transparency > 0 { format!("{colour_name}, {transparency}% transparent") } else { colour_name };
+    Appearance { id: AppearanceId(id), name, base_color: colour, opacity, ..from.clone() }
+}
+
+/// Applies a colour or transparency still being dragged once the pointer lets go, as one
+/// undo step.
+fn settle_appearance(ui: &egui::Ui, state: &mut AppState) {
+    if ui.ctx().input(|i| i.pointer.any_down()) {
+        return;
+    }
+    let Some((target, appearance)) = state.doc.appearance_preview() else { return };
+    let (target, appearance) = (target.clone(), appearance.cloned());
+    if let Err(error) = state.doc.set_appearance(target, appearance) {
+        state.note(error, crate::state::NoteKind::Error);
+    }
+}
+
+/// Colour and transparency of the part, or of one face. A swatch, the Transparent box
+/// and the reset button apply at once; the colour picker and the slider show their
+/// value while dragged and apply it when the pointer lets go.
+fn appearance_panel(ui: &mut egui::Ui, state: &mut AppState, target: AppearanceTarget, face: Option<FaceId>) {
+    let shown = state.doc.shown_appearance(face);
+    let own = state.doc.has_own_appearance(&target);
+    let dragging = ui.ctx().input(|i| i.pointer.any_down());
+    let mut apply: Option<Option<Appearance>> = None;
+    let mut preview: Option<Appearance> = None;
+    let mut remove = false;
+    let mut changed = |a: Appearance, from_pointer: bool| {
+        if from_pointer && dragging {
+            preview = Some(a);
+        } else {
+            apply = Some(Some(a));
+        }
+    };
+    section(ui, "Appearance", |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            for (name, [r, g, b]) in SWATCHES {
+                let colour = Srgb::new(r, g, b);
+                let (rect, response) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                let current = shown.base_color == colour;
+                let painter = ui.painter();
+                painter.rect_filled(rect, CornerRadius::same(4), egui::Color32::from_rgb(r, g, b));
+                let edge = if current {
+                    Stroke::new(2.0, theme::accent())
+                } else if response.hovered() {
+                    Stroke::new(1.0, theme::ink())
+                } else {
+                    Stroke::new(1.0, theme::line())
+                };
+                painter.rect_stroke(rect, CornerRadius::same(4), edge, egui::StrokeKind::Inside);
+                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, name));
+                if response.on_hover_text(name).clicked() {
+                    changed(painted(&shown, colour, shown.opacity), false);
+                }
+            }
+            let mut rgb = [shown.base_color.r, shown.base_color.g, shown.base_color.b];
+            let picker = egui::color_picker::color_edit_button_srgb(ui, &mut rgb).on_hover_text("Any colour");
+            picker.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, true, "Custom colour"));
+            if picker.changed() {
+                changed(painted(&shown, Srgb::new(rgb[0], rgb[1], rgb[2]), shown.opacity), true);
+            }
+        });
+        ui.add_space(2.0);
+        let mut transparent = shown.opacity < 1.0;
+        if ui.checkbox(&mut transparent, "Transparent").changed() {
+            let opacity = if transparent { 1.0 - FIRST_TRANSPARENCY } else { 1.0 };
+            changed(painted(&shown, shown.base_color, opacity), false);
+        }
+        if transparent {
+            let mut percent = ((1.0 - shown.opacity) * 100.0).round();
+            let slider = ui.add(
+                egui::Slider::new(&mut percent, 10.0..=MOST_TRANSPARENCY * 100.0)
+                    .step_by(1.0)
+                    .fixed_decimals(0)
+                    .suffix("%")
+                    .text("Transparency"),
+            );
+            if slider.changed() {
+                changed(painted(&shown, shown.base_color, 1.0 - percent / 100.0), true);
+            }
+        }
+        if own {
+            let reset = match target {
+                AppearanceTarget::Face { .. } => "Use the part's appearance",
+                _ => "Remove colour",
+            };
+            remove = ui.button(reset).clicked();
+        }
+    });
+    if remove {
+        apply = Some(None);
+    }
+    if let Some(appearance) = apply {
+        if let Err(error) = state.doc.set_appearance(target, appearance) {
+            state.note(error, crate::state::NoteKind::Error);
+        }
+    } else if let Some(appearance) = preview {
+        state.doc.preview_appearance(target, Some(appearance));
     }
 }

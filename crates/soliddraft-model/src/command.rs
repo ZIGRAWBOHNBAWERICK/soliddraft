@@ -11,7 +11,7 @@ use soliddraft_sketch::{ConstraintId, SolveStatus};
 
 use crate::document::Document;
 use crate::feature::{DatumPlane, Feature, FeatureId, FeatureKind, PatternSpec};
-use crate::materials::{AppearanceAssignment, AppearanceTarget, MaterialAssignment, PartMaterials};
+use crate::materials::{AppearanceTarget, MaterialAssignment, PartMaterials};
 
 /// A change to a document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1141,17 +1141,7 @@ impl Document {
                     Some(a) => format!("set appearance {} on {place}", a.name),
                     None => format!("remove appearance from {place}"),
                 };
-                let state = &mut self.materials;
-                state.appearances.retain(|a| !(a.target.same_place(&target) && a.scope == scope));
-                if let Some(a) = &appearance {
-                    state.appearances.push(AppearanceAssignment {
-                        target: target.clone(),
-                        appearance: a.id.clone(),
-                        scope: scope.clone(),
-                    });
-                    state.snapshots.put_appearance(a.clone());
-                }
-                state.prune();
+                self.materials.assign(&target, appearance.as_ref(), &scope);
                 Ok(self.materials_changed(old, Command::SetAppearance { target, appearance, scope }, label))
             }
             Command::UpdateCopies { materials, appearances } => {

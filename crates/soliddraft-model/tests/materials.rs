@@ -153,6 +153,38 @@ fn the_most_specific_appearance_wins() {
 }
 
 #[test]
+fn a_preview_shows_an_appearance_without_applying_it() {
+    let catalog = Catalog::built_in();
+    let mut d = doc();
+    block(&mut d);
+    let blue = appearance(&catalog, "anodised-blue");
+    let glass = Appearance { opacity: 0.3, ..Appearance::new("glass", "Glass", Srgb::new(200, 220, 240)) };
+    paint(&mut d, AppearanceTarget::Part, &blue);
+    let before = d.materials().clone();
+    let depth = d.undo_depth();
+
+    let preview = d.appearance_table_previewing(None, &AppearanceTarget::Part, Some(&glass));
+    assert_eq!(preview.appearances[0], glass, "the part shows the preview");
+    assert_eq!(d.materials(), &before, "the part is unchanged");
+    assert_eq!(d.undo_depth(), depth, "nothing to undo");
+    assert_eq!(d.appearance_table(None).appearances[0], blue);
+
+    // On a face it adds that face, and removing at a place previews what is underneath.
+    let top = top_face_target(&d);
+    let top_id = faces_facing(&d, Vec3::Z)[0];
+    let preview = d.appearance_table_previewing(None, &top, Some(&glass));
+    assert_eq!(preview.of(top_id), &glass);
+    assert_eq!(preview.appearances[0], blue, "the rest of the part keeps its colour");
+    let preview = d.appearance_table_previewing(None, &AppearanceTarget::Part, None);
+    assert_eq!(preview.appearances[0], Appearance::default_part());
+
+    // Applying the previewed appearance gives the table the preview showed.
+    let shown = d.appearance_table_previewing(None, &top, Some(&glass));
+    paint(&mut d, top, &glass);
+    assert_eq!(d.appearance_table(None), shown);
+}
+
+#[test]
 fn a_split_face_keeps_its_appearance_and_a_lost_one_is_reported() {
     let catalog = Catalog::built_in();
     let mut d = doc();

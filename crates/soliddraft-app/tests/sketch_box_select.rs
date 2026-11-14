@@ -190,6 +190,44 @@ fn a_box_selects_inside_left_to_right_and_crossing_right_to_left() {
     });
 }
 
+/// Drags a short box from empty space that holds nothing, then delivers one frame with
+/// a pointer move to `to` and the release at `release`, in that order or reversed.
+/// `event` would run a frame per event, so both go into one frame's raw input.
+fn flick(app: &mut App, from: Pos2, to: Pos2, release: Pos2, release_first: bool) {
+    ribbon::render_steps::rendered(app, |app| {
+        app.hover_at(from);
+        app.run_steps(3);
+        let none = Modifiers::NONE;
+        app.event(egui::Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: none,
+        });
+        app.step();
+        app.hover_at(from + egui::vec2(12.0, 12.0));
+        app.step();
+        let b = session(app).selection_box.clone().expect("a box is being dragged");
+        assert!(b.picks.is_empty(), "the short box holds {:?}", b.picks);
+        let moved = egui::Event::PointerMoved(to);
+        let up = egui::Event::PointerButton {
+            pos: release,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: none,
+        };
+        let input = app.input_mut();
+        if release_first {
+            input.events.extend([up, moved]);
+        } else {
+            input.events.extend([moved, up]);
+        }
+        app.step();
+        settle(app);
+    });
+    assert!(session(app).selection_box.is_none());
+}
+
 #[test]
 fn a_box_ends_where_the_button_comes_up() {
     let mut case = Case::new("sketch-box-release-move");
@@ -197,38 +235,19 @@ fn a_box_ends_where_the_button_comes_up() {
     case.run(&mut app, |case, app| {
         let dim = dimension(app);
         let (left_top, right_bottom) = corners(app, P2::new(-35.0, -2.0), P2::new(-3.0, 13.0));
-        ribbon::render_steps::rendered(app, |app| {
-            app.hover_at(left_top);
-            app.run_steps(3);
-            let pressed = Modifiers::NONE;
-            app.event(egui::Event::PointerButton {
-                pos: left_top,
-                button: PointerButton::Primary,
-                pressed: true,
-                modifiers: pressed,
-            });
-            app.step();
-            // A short drag that holds nothing yet.
-            app.hover_at(left_top + egui::vec2(12.0, 12.0));
-            app.step();
-            let b = session(app).selection_box.clone().expect("a box is being dragged");
-            assert!(b.picks.is_empty(), "the short box holds {:?}", b.picks);
-            // The last move and the release arrive in one frame, as a quick flick can.
-            // `event` would run a frame per event, so both go into the next frame's input.
-            let input = app.input_mut();
-            input.events.push(egui::Event::PointerMoved(right_bottom));
-            input.events.push(egui::Event::PointerButton {
-                pos: right_bottom,
-                button: PointerButton::Primary,
-                pressed: false,
-                modifiers: pressed,
-            });
-            app.step();
-            settle(app);
-        });
-        assert!(session(app).selection_box.is_none());
+        let short = left_top + egui::vec2(12.0, 12.0);
+
+        // The last move and the release arrive in one frame, as a quick flick can: the box
+        // reaches the release point although no drag frame saw it.
+        flick(app, left_top, right_bottom, right_bottom, false);
         assert_eq!(selection(app), vec![LINE, dim], "the box reached the release point");
         case.frame(app, "01-selected");
+
+        // The button comes up at the short corner and the pointer moves on in the same
+        // frame: the box ends at the release, so the later move takes nothing.
+        flick(app, left_top, right_bottom, short, true);
+        assert!(selection(app).is_empty(), "a move after the release stretched the box: {:?}", selection(app));
+        case.frame(app, "02-moved-after-release");
     });
 }
 

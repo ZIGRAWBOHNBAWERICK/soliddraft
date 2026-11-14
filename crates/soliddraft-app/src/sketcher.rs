@@ -815,8 +815,17 @@ fn select_input(
     }
     if resp.drag_stopped_by(egui::PointerButton::Primary) {
         // The release may carry a move the last drag frame never saw, so the box ends
-        // where the button came up.
-        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+        // where the button came up. That is the release event's own position: a move
+        // after it in the same frame would otherwise stretch a box already let go.
+        let released = ui.input(|i| {
+            i.events.iter().rev().find_map(|e| match e {
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, .. } => {
+                    Some(*pos)
+                }
+                _ => None,
+            })
+        });
+        if let Some(pos) = released {
             stretch_box(ui, s, frame, pos);
         }
         if let Some(b) = s.selection_box.take() {

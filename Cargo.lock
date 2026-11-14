@@ -5311,7 +5311,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bytemuck",
  "chrono",
@@ -5361,7 +5361,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-assembly"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bytemuck",
  "glam",
@@ -5383,7 +5383,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-assistant"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -5399,7 +5399,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dxf",
  "egui-wgpu",
@@ -5427,7 +5427,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-document"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blake3",
  "fs2",
@@ -5441,7 +5441,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-drawing"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dxf",
  "flate2",
@@ -5463,7 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-exchange"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5478,7 +5478,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-kernel-api"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5487,7 +5487,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-kernel-catallax"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "catallax-app",
  "catallax-boolean",
@@ -5513,7 +5513,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-materials"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "roxmltree 0.20.0",
  "serde",
@@ -5526,7 +5526,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-model"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5544,7 +5544,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-recipe"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5555,7 +5555,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-scene"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64",
  "glam",
@@ -5576,7 +5576,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-server"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "env_logger",
  "flate2",
@@ -5590,7 +5590,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-sketch"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ezpz",
  "serde",
@@ -5602,7 +5602,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-tessellation"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "glam",
  "serde",
@@ -5614,7 +5614,7 @@ dependencies = [
 
 [[package]]
 name = "soliddraft-web"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "eframe",
  "log",

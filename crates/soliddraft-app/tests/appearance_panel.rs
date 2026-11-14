@@ -99,7 +99,8 @@ fn a_part_takes_a_colour_and_turns_see_through() {
 
     // Dragging the slider shows each value without applying it; letting go applies
     // the last one as one step.
-    let slider = app.get_by_label("Transparency").rect();
+    // The slider, not the number box beside it that shares its label.
+    let slider = app.get_by_role_and_label(egui::accesskit::Role::Slider, "Transparency").rect();
     let from = slider.center();
     pointer(&mut app, from, true);
     for step in 1..=8 {

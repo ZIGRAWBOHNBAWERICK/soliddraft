@@ -519,6 +519,49 @@ class BrowserStartup(unittest.TestCase):
 
 
 class ArchiveWorkspace(unittest.TestCase):
+    def test_blade_archive_binaries_launch_the_cli_without_the_container_path(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        linux = text.split('\n  build-linux:', 1)[1].split('\n  partition-linux:', 1)[0]
+        target = next(line.strip() for line in linux.splitlines()
+                      if line.strip().startswith('echo "CARGO_TARGET_DIR='))
+        preparation = linux.split('      - name: Prepare the portable archive workspace\n', 1)[1]
+        script = textwrap.dedent(preparation.split('        run: |\n', 1)[1].split('      - uses:', 1)[0])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            canonical, producer = root / 'hosted/project', root / 'container-workspace'
+            (canonical / 'src').mkdir(parents=True)
+            (canonical / 'tests').mkdir()
+            producer.symlink_to(canonical, target_is_directory=True)
+            (canonical / 'Cargo.toml').write_text('[package]\nname="portable"\nversion="0.0.0"\n'
+                                                'edition="2021"\n[[bin]]\nname="soliddraft"\npath="src/main.rs"\n')
+            (canonical / 'src/main.rs').write_text('fn main() { println!("fixture"); }\n')
+            (canonical / 'tests/launch.rs').write_text(
+                '#[test] fn launches() { assert!(std::process::Command::new('
+                'env!("CARGO_BIN_EXE_soliddraft")).status().unwrap().success()); }\n')
+            subprocess.run(['git', 'init', '-q', canonical], check=True)
+            subprocess.run(['git', '-C', canonical, 'add', '.'], check=True)
+            subprocess.run(['git', '-C', canonical, '-c', 'user.name=Fixture', '-c',
+                            'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            output = root / 'environment'
+            output.touch()
+            env = dict(os.environ, GITHUB_WORKSPACE=str(producer),
+                       LINUX_ARCHIVE_WORKSPACE=str(canonical), GITHUB_ENV=str(output))
+            initial = subprocess.check_output(['bash', '-e', '-c', target], env=env, text=True)
+            env.update(line.split('=', 1) for line in initial.splitlines())
+            subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            env.update(line.split('=', 1) for line in output.read_text().splitlines())
+            built = subprocess.run(['cargo', 'test', '--offline', '--test', 'launch', '--no-run',
+                                    '--message-format=json'], cwd=canonical, env=env,
+                                   capture_output=True, text=True, check=True)
+            artifacts = [json.loads(line) for line in built.stdout.splitlines()]
+            executable = next(pathlib.Path(item['executable']).resolve()
+                              for item in artifacts if item.get('profile', {}).get('test')
+                              and item.get('executable'))
+            self.assertTrue((canonical / 'target/debug/soliddraft').is_file())
+            producer.unlink()
+            consumed = subprocess.run([executable], cwd=canonical, capture_output=True, text=True)
+            self.assertEqual(consumed.returncode, 0, consumed.stdout + consumed.stderr)
+
     def test_archive_preparation_keeps_the_commit_without_copying_credentials(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         block = text.split('      - name: Prepare the portable archive workspace\n', 1)[1].split('      - uses:', 1)[0]
@@ -541,6 +584,7 @@ class ArchiveWorkspace(unittest.TestCase):
             sudo.chmod(0o755)
             env = dict(os.environ, GITHUB_WORKSPACE=str(source),
                        LINUX_ARCHIVE_WORKSPACE=str(destination), SUDO_LOG=str(root / 'sudo.log'),
+                       GITHUB_ENV=str(root / 'environment'),
                        PATH=f'{binaries}:{os.environ["PATH"]}')
             subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
             self.assertEqual((destination / 'fixture').read_text(), 'source')

@@ -473,6 +473,8 @@ jobs:
             fi
             test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$(git -C "$LINUX_ARCHIVE_WORKSPACE" rev-parse HEAD)"
           fi
+          # Cargo embeds CLI paths in tests; use the consumer's canonical mount.
+          echo "CARGO_TARGET_DIR=$LINUX_ARCHIVE_WORKSPACE/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'

@@ -33,6 +33,16 @@ fn part(state: &mut AppState, file: &Path, width: f64, height: f64, depth: f64) 
     tool(state, "save", json!({ "path": file }));
 }
 
+fn assert_recent_case(dir: &Path) {
+    let dir = std::fs::canonicalize(dir).unwrap();
+    let recent = soliddraft_app::file::recent();
+    assert!(!recent.is_empty(), "the active mate case has saved parts and an assembly");
+    assert!(
+        recent.iter().all(|path| path.starts_with(&dir)),
+        "another mate window changed this case's recent-file configuration: {recent:?}"
+    );
+}
+
 fn session<'h>(h: &'h App<'_>) -> &'h AssemblySession {
     h.state().state.assembly.session.as_ref().expect("an open assembly")
 }
@@ -341,6 +351,7 @@ fn pick_drive_update_and_refuse_in_the_window() {
     assert_eq!(drawn_z(&h), 26.0);
     assert_readout(&mut h, "Z: 12 mm");
     snapshot(&mut h, "5-updated");
+    assert_recent_case(&dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -485,6 +496,7 @@ fn pick_coincident_update_and_refuse_in_the_window() {
     settle(&mut h);
     assert_eq!((shown(&h, 0), drawn(&h, 1)), (a14, [10.0, 10.0, 14.0]));
     snapshot(&mut h, "coincident-5-redone");
+    assert_recent_case(&dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -641,6 +653,7 @@ fn width_lock_and_conflicts_in_the_window() {
     assert_readout(&mut h, "Fully constrained");
     assert_eq!(drawn(&h, 1), [10.0, 7.0, 30.0], "a lock keeps B where it is");
     snapshot(&mut h, "families-3-lock");
+    assert_recent_case(&dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }

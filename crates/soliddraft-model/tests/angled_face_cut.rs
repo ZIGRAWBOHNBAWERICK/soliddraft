@@ -9,7 +9,7 @@ const PART: &str = include_str!("fixtures/angled-face-cut.json");
 
 fn covers(mesh: &Mesh, face: FaceId, plane: Plane, u: f64, v: f64) -> bool {
     let point = plane.origin + plane.x_dir * u + plane.y_dir() * v;
-    mesh.indices.chunks_exact(3).zip(&mesh.triangle_faces).any(|(indices, id)| {
+    mesh.indices.as_chunks::<3>().0.iter().zip(&mesh.triangle_faces).any(|(indices, id)| {
         if *id != face {
             return false;
         }

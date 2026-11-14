@@ -74,7 +74,8 @@ pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, doc
         };
         let color = if selected { theme::ink() } else { theme::muted() };
         let font = theme::font_medium(12.0);
-        let width = (ui.painter().layout_no_wrap(name.clone(), font.clone(), color).size().x + 42.0).min(max_width);
+        let padding = if dirty { 48.0 } else { 40.0 };
+        let width = (ui.painter().layout_no_wrap(name.clone(), font.clone(), color).size().x + padding).min(max_width);
         let (space, _) = ui.allocate_exact_size(vec2(width, 27.0), Sense::hover());
         let rect = Rect::from_min_size(pos2(space.left(), theme::MENU_HEIGHT - 27.0), space.size());
         let response = ui.interact(
@@ -88,6 +89,9 @@ pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, doc
         let radius = CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 };
         if selected || response.hovered() {
             ui.painter().rect_filled(rect, radius, if selected { theme::chrome() } else { theme::hover() });
+        }
+        if selected {
+            ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, theme::line()), StrokeKind::Inside);
         }
         if response.has_focus() {
             ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, theme::accent()), StrokeKind::Inside);
@@ -110,6 +114,7 @@ pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, doc
         let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), font, color);
         job.wrap.max_width = text_rect.width();
         job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
         let galley = ui.painter().layout_job(job);
         ui.painter().galley(pos2(text_rect.left(), text_rect.center().y - galley.size().y / 2.0), galley, color);
         if dirty {

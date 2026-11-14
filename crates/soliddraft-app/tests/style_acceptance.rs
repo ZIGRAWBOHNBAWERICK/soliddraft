@@ -47,6 +47,8 @@ fn document_tabs_live_in_the_title_and_switch_documents() {
     case.frame(&mut app, "part");
     case.run(&mut app, |app| {
         let part = ribbon::control(app, "Ribbon acceptance document tab", title());
+        let name = ribbon::painted_in(app, part.rect).into_iter().find(|t| t.text == "Ribbon acceptance").unwrap();
+        assert_eq!(name.rows, ["Ribbon acceptance"], "a normal document title fits without shortening");
         assert!(part.rect.left() > app.get_by_label("View tab").rect().right());
         assert_eq!(app.state().state.viewport.rect.top(), soliddraft_app::options_bar::HEIGHT + theme::MENU_HEIGHT);
         app.state_mut().state.push(AppAction::Drawing(DrawingAction::MakeDrawing));
@@ -72,9 +74,12 @@ fn document_tabs_live_in_the_title_and_switch_documents() {
         case.frame(app, "drawing");
         app.set_size(vec2(960.0, 700.0));
         app.run_steps(8);
-        for (_, rect) in
-            ribbon::buttons_in(app, ribbon::window(app)).into_iter().filter(|(name, _)| name.ends_with(" document tab"))
-        {
+        let narrow_tabs = ribbon::buttons_in(app, ribbon::window(app))
+            .into_iter()
+            .filter(|(name, _)| name.ends_with(" document tab"))
+            .collect::<Vec<_>>();
+        assert_eq!(narrow_tabs.len(), 3);
+        for (_, rect) in narrow_tabs {
             assert!(ribbon::window(app).contains_rect(rect), "document tabs fit the narrow title");
         }
     });
@@ -111,6 +116,10 @@ fn controls_use_plain_icons_unboxed_menus_and_grey_workspaces() {
             })
             .count();
         assert_eq!(coloured, 0, "palette icons use neutral ink");
+        for (label, view) in [("Front", "Front"), ("Top", "Top"), ("Right", "Right")] {
+            click(app, label);
+            assert_eq!(app.state().state.viewport.camera.view_name, view, "the icon runs its view command");
+        }
         let file = app.get_by_label("File").rect();
         assert_eq!(
             image.get_pixel((file.left() + 3.0) as u32, (file.top() + 3.0) as u32).0,

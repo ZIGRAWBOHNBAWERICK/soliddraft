@@ -35,8 +35,10 @@ const AT = {
   // The start page's New part tile; tests/documents_start.rs checks it is there.
   newPart: [124, 143],
 };
-// Floor right of the origin planes and above the feedback launcher.
-const FLOOR = { x: 1200, y: 400, width: 190, height: 200 };
+// Floor below the view cube, right of the Front plane's corner and above the Top
+// plane's far edge, with the feature tree open beside the viewport as a new browser
+// shows it.
+const FLOOR = { x: 1285, y: 230, width: 100, height: 140 };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function check(value, message) { if (!value) throw new Error(message); }

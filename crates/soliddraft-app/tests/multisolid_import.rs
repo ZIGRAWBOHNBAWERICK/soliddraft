@@ -259,3 +259,79 @@ fn release_mcp_scenario_imports_two_bodies_refuses_replacement_and_undoes_the_fi
     }
     assert!(doc.features.is_empty());
 }
+
+fn saved_stock_with_body_counter(next: u32) -> Vec<u8> {
+    let stock = ribbon::plate();
+    let mut truth: serde_json::Value = serde_json::from_str(&stock.model().part_json()).unwrap();
+    truth["format"] = "soliddraft-part/3".into();
+    truth["next_body"] = next.into();
+    soliddraft_model::Document::from_part_json(&truth.to_string(), soliddraft_app::kernel())
+        .unwrap()
+        .to_bytes()
+        .unwrap()
+}
+
+#[test]
+fn saved_exhausted_body_id_range_refuses_import_without_changes() {
+    for counter in [u32::MAX, u32::MAX - 1] {
+        let case = ribbon::case(&format!("import-exhausted-body-ids-{counter}"));
+        let saved = saved_stock_with_body_counter(counter);
+        let doc = soliddraft_app::file::open_bytes("stock.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        assert_eq!(doc.model().next_body(), counter);
+        assert_eq!(doc.model().live_bodies().len(), 1);
+        let source = case.path("two-solids.step");
+        std::fs::write(&source, STEP).unwrap();
+        let mut app = ribbon::app(doc);
+        case.run(&mut app, |app| {
+            let before = app.state().state.doc.model().to_bytes().unwrap();
+            let revision = app.state().state.doc.revision();
+            let depth = app.state().state.doc.undo_depth();
+            let bodies = app.state().state.doc.model().live_bodies();
+            let meshes = app.state().state.doc.meshes.clone();
+            app.state_mut().state.push(AppAction::ImportStep(Some(source)));
+            app.run_steps(4);
+            app.get_by_role_and_label(egui::accesskit::Role::Button, "Accept").click();
+            app.run_steps(8);
+            let state = &app.state().state;
+            assert_eq!(
+                state.note.as_ref().unwrap().text,
+                "This part cannot hold more bodies. Import the file into a new part."
+            );
+            assert!(state.import_dialog.is_some(), "the reviewed source remains available after refusal");
+            assert_eq!(state.doc.model().to_bytes().unwrap(), before);
+            assert_eq!(state.doc.revision(), revision);
+            assert_eq!(state.doc.undo_depth(), depth);
+            assert_eq!(state.doc.model().live_bodies(), bodies);
+            assert_eq!(state.doc.meshes, meshes);
+        });
+    }
+}
+
+#[test]
+fn last_available_body_id_range_imports_saves_and_undoes_without_reusing_ids() {
+    let case = ribbon::case("import-last-body-ids");
+    let saved = saved_stock_with_body_counter(u32::MAX - 2);
+    let doc = soliddraft_app::file::open_bytes("stock.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+    let source = case.path("two-solids.step");
+    std::fs::write(&source, STEP).unwrap();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        reviewed(app, source, ImportFormat::Step);
+        let doc = &app.state().state.doc;
+        assert_eq!(doc.model().next_body(), u32::MAX);
+        assert_eq!(doc.features.iter().map(|f| f.body_key).collect::<Vec<_>>(), [0, u32::MAX - 2, u32::MAX - 1]);
+        let saved = doc.model().to_bytes().unwrap();
+        let reopened =
+            soliddraft_app::file::open_bytes("last-ids.dwprt", &saved, soliddraft_app::kernel(), None).unwrap();
+        assert_eq!(reopened.model().next_body(), u32::MAX);
+        assert_eq!(reopened.model().live_bodies().len(), 3);
+        app.state_mut().state.push(AppAction::Undo);
+        app.run_steps(4);
+        assert_eq!(app.state().state.doc.features.len(), 1);
+        assert_eq!(app.state().state.doc.model().next_body(), u32::MAX);
+        app.state_mut().state.push(AppAction::Redo);
+        app.run_steps(4);
+        assert_eq!(app.state().state.doc.model().live_bodies().len(), 3);
+        assert_eq!(app.state().state.doc.model().next_body(), u32::MAX);
+    });
+}

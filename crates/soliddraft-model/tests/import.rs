@@ -251,7 +251,7 @@ fn separate_solids_are_never_merged_into_one_body() {
     let mut doc = Document::new("Part1", Importer::new(2, &[]));
     let id = add(&mut doc, FeatureKind::ImportStep(import())).unwrap();
     let message = failure(&doc, id);
-    assert_eq!(message, "Several-solid import is coming soon.");
+    assert_eq!(message, "Choose one source solid for each imported body.");
     assert!(doc.body().is_none());
 }
 

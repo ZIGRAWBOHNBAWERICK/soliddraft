@@ -41,7 +41,7 @@ use soliddraft_kernel_api::*;
 pub use diagnostics::{APP_REQUEST_WORK, RequestWork, with_request_allowance};
 
 /// The pinned Catallax application entry revision.
-pub const CATALLAX_REVISION: &str = "45b0a37f483d0acf3b3525a4961d54a80a056efd";
+pub const CATALLAX_REVISION: &str = "ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb";
 
 /// An in-process Catallax backend. There is no global kernel state or kernel thread.
 #[derive(Default)]
@@ -1040,6 +1040,10 @@ impl Kernel for CatallaxKernel {
         options: &ImportOptions,
     ) -> KernelResult<ProposalSet> {
         self.observe("propose_import", || import::propose(format, source, options))
+    }
+
+    fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
+        self.observe("source_solids", || import::source_solids(format, source))
     }
 
     fn import_source(

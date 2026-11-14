@@ -31,25 +31,38 @@
       },
       "checks": [
         {
-          "pointer": "/revision",
-          "same_as_step": 1
+          "pointer": "/summary/features/0/body_id",
+          "equals": 0
         },
         {
-          "pointer": "/summary/features",
-          "equals": []
+          "pointer": "/summary/features/1/body_id",
+          "equals": 1
         },
         {
-          "pointer": "/measurement/volume_mm3",
-          "equals": null
+          "pointer": "/summary/features/0/status",
+          "equals": "ok"
+        },
+        {
+          "pointer": "/summary/features/1/status",
+          "equals": "ok"
         }
       ],
-      "refused": "Several-solid import is coming soon.",
       "arguments_from": {
         "preview_token": {
           "step": 1,
           "pointer": "/result/token"
         }
       }
+    },
+    {
+      "tool": "undo",
+      "arguments": {},
+      "checks": [
+        {
+          "pointer": "/summary/features",
+          "equals": []
+        }
+      ]
     },
     {
       "tool": "preview_import",
@@ -198,7 +211,7 @@
       },
       "arguments_from": {
         "preview_token": {
-          "step": 3,
+          "step": 4,
           "pointer": "/result/token"
         }
       }
@@ -231,7 +244,7 @@
       "checks": [
         {
           "pointer": "/summary/features/0",
-          "same_as_step": 4
+          "same_as_step": 5
         },
         {
           "pointer": "/measurement/volume_mm3",
@@ -413,7 +426,7 @@
       ],
       "arguments_from": {
         "preview_token": {
-          "step": 3,
+          "step": 4,
           "pointer": "/result/token"
         }
       }
@@ -443,7 +456,7 @@
       "checks": [
         {
           "pointer": "/summary/features/0",
-          "same_as_step": 9
+          "same_as_step": 10
         },
         {
           "pointer": "/summary/body/faces",
@@ -509,7 +522,7 @@
           "tolerance": 0.0005
         }
       ],
-      "same_geometry_as_step": 9,
+      "same_geometry_as_step": 10,
       "checked_step_export": "{bundle}/imported.dwprt"
     }
   ]

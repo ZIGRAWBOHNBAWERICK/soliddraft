@@ -1163,6 +1163,7 @@ pub enum Command {
     },
     /// Adds a hole, pattern, mirror or draft.
     AddFeature(FeatureKind),
+    ImportBodies(Vec<model::ImportStepFeature>),
     /// Replaces a hole's, pattern's, mirror's or draft's definition.
     EditFeature {
         id: FeatureId,
@@ -1223,6 +1224,7 @@ impl Command {
             Command::AddChamfer { .. } => "Add chamfer".into(),
             Command::EditChamfer { .. } => "Edit chamfer".into(),
             Command::AddFeature(kind) => format!("Add {}", kind.noun()),
+            Command::ImportBodies(_) => "Import bodies".into(),
             Command::EditFeature { kind, .. } => format!("Edit {}", kind.noun()),
             Command::DeleteFeature(_) => "Delete feature".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -2641,6 +2643,26 @@ impl Document {
             Command::AddChamfer { params } => vec![add(FeatureKind::Chamfer(params).to_model(), false)],
             Command::EditChamfer { id, params } => vec![edit(id, &FeatureKind::Chamfer(params))],
             Command::AddFeature(kind) => vec![add(kind.to_model(), false)],
+            Command::ImportBodies(imports) => {
+                if imports.is_empty() {
+                    return Err("The file contains no solid bodies.".into());
+                }
+                let first = if self.model.live_bodies().iter().any(|(key, _)| *key == self.active_body) {
+                    self.model.next_body()
+                } else {
+                    self.active_body
+                };
+                let next = self.model.next_body().max(first + 1);
+                imports
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, import)| model::Command::AddFeatureInBody {
+                        body: if index == 0 { first } else { next + index as u32 - 1 },
+                        kind: model::FeatureKind::ImportStep(import),
+                        via_assistant: self.assistant_mark,
+                    })
+                    .collect()
+            }
             Command::EditFeature { id, kind } => {
                 if let FeatureKind::ReferencePlane(source) = &kind {
                     let target = self.index_of(id).ok_or("no such reference plane")?;

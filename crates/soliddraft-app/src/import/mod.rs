@@ -177,6 +177,12 @@ impl Preview {
         let Some(FeatureKind::ImportStep(old)) = doc.feature(id).map(|f| &f.kind) else {
             return Err("Choose an imported feature to replace.".into());
         };
+        if old.source_solid.is_some() {
+            if old.sha256 != self.feature.sha256 || old.format != self.feature.format {
+                return Err("This body selects a solid from the original file. Import a changed file as new bodies instead of replacing it.".into());
+            }
+            self.feature.source_solid = old.source_solid.clone();
+        }
         if old.sha256 == self.feature.sha256 && old.format == self.feature.format {
             self.feature.source_bound_names = old.source_bound_names;
         }
@@ -244,11 +250,41 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
     }
     let command = match preview.replacement {
         Some(id) => Command::EditFeature { id, kind: FeatureKind::ImportStep(feature) },
-        None => Command::AddFeature(FeatureKind::ImportStep(feature)),
+        None => {
+            let solids = if feature.format == ImportFormat::Mesh {
+                Vec::new()
+            } else {
+                doc.kernel().source_solids(feature.format, &feature.source).map_err(plain)?
+            };
+            if solids.len() > 1 {
+                Command::ImportBodies(
+                    solids
+                        .into_iter()
+                        .map(|entity| {
+                            let mut selected = feature.clone();
+                            selected.source_solid = Some(entity);
+                            selected
+                        })
+                        .collect(),
+                )
+            } else {
+                Command::AddFeature(FeatureKind::ImportStep(feature))
+            }
+        }
     };
-    // Keep a refused multibody file out of the part and reuse the accepted trial's build.
+    // Validate the whole import before changing the part, then reuse its builds.
     let mut trial = doc.scratch();
     let trial_result = trial.apply(command.clone());
+    if matches!(command, Command::ImportBodies(_))
+        && let Some(failed) =
+            trial.features[doc.features.len()..].iter().find(|f| f.status != crate::document::FeatureStatus::Ok)
+    {
+        return Err(match &failed.status {
+            crate::document::FeatureStatus::Error(message) => message.clone(),
+            _ => "The imported bodies could not be built. Restore the full feature tree and review the file again."
+                .into(),
+        });
+    }
     let imported = match preview.replacement {
         Some(id) => trial.feature(id),
         None => trial.features.last(),

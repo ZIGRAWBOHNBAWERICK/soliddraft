@@ -276,8 +276,11 @@ pub fn commit(doc: &mut Document, preview: &Preview, review: &Review) -> Result<
     let mut trial = doc.scratch();
     let trial_result = trial.apply(command.clone());
     if matches!(command, Command::ImportBodies(_))
-        && let Some(failed) =
-            trial.features[doc.features.len()..].iter().find(|f| f.status != crate::document::FeatureStatus::Ok)
+        && let Some(failed) = trial
+            .features
+            .iter()
+            .filter(|f| doc.feature(f.id).is_none())
+            .find(|f| f.status != crate::document::FeatureStatus::Ok)
     {
         return Err(match &failed.status {
             crate::document::FeatureStatus::Error(message) => message.clone(),

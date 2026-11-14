@@ -67,7 +67,10 @@ fn flow(format: ImportFormat, source: &[u8]) {
             assert_eq!(import.format, format);
             assert_eq!(import.source, source);
             assert_eq!(import.sha256, soliddraft_model::sha256_hex(source));
-            assert_eq!(import.record.as_ref().unwrap().source.sha256, import.sha256);
+            assert_eq!(
+                doc.model().import_record(soliddraft_model::FeatureId(feature.id as u32)).unwrap().source.sha256,
+                import.sha256
+            );
         }
         app.state_mut().state.push(AppAction::Undo);
         app.run_steps(4);
@@ -197,9 +200,62 @@ fn reordering_source_solid_declarations_preserves_entity_to_geometry_membership(
             let FeatureKind::ImportStep(import) = &feature.kind else { unreachable!() };
             assert_eq!(import.source, reordered.as_bytes());
             assert_eq!(
-                import.record.as_ref().unwrap().source.sha256,
+                app.state()
+                    .state
+                    .doc
+                    .model()
+                    .import_record(soliddraft_model::FeatureId(feature.id as u32))
+                    .unwrap()
+                    .source
+                    .sha256,
                 soliddraft_model::sha256_hex(reordered.as_bytes())
             );
         }
     });
+}
+
+#[test]
+fn release_mcp_scenario_imports_two_bodies_refuses_replacement_and_undoes_the_file() {
+    use serde_json::Value;
+    use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
+    use soliddraft_assistant::{Caller, ToolHost};
+
+    let scenario: Value = serde_json::from_str(include_str!("../../../ci/scenarios/import-block.json")).unwrap();
+    let mut doc = Document::new("MCP solids", soliddraft_app::kernel());
+    let mut book = ProposalBook::default();
+    let mut token = Value::Null;
+    let mut imported = Vec::new();
+    for (index, step) in scenario["steps"].as_array().unwrap().iter().take(4).enumerate() {
+        let mut input = step["arguments"].clone();
+        if let Some(path) = input["path"].as_str() {
+            input["path"] =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(path).to_str().unwrap().into();
+        }
+        if index == 1 {
+            input["preview_token"] = token.clone();
+        }
+        let out = CommandTools { doc: &mut doc, book: &mut book, surface: Surface::Mcp, drawing: None }.call(
+            step["tool"].as_str().unwrap(),
+            input,
+            &Caller::Mcp { client: "multi-solid import scenario".into() },
+        );
+        if let Some(message) = step["refused"].as_str() {
+            assert!(out.is_error, "{}", out.content);
+            assert!(out.content.contains(message), "{}", out.content);
+            assert_eq!(doc.model().to_bytes().unwrap(), imported);
+        } else {
+            assert!(!out.is_error, "{}", out.content);
+            let result: Value = serde_json::from_str(&out.content).unwrap();
+            if index == 0 {
+                token = result["token"].clone();
+            }
+            if index == 1 {
+                assert_eq!(membership(&doc).len(), 2);
+                assert_eq!(result["features"][0]["source_solid"], "#150");
+                assert_eq!(result["features"][1]["source_solid"], "#300");
+                imported = doc.model().to_bytes().unwrap();
+            }
+        }
+    }
+    assert!(doc.features.is_empty());
 }

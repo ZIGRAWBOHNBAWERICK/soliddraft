@@ -64,7 +64,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(4.0);
         let selected_feature = state.selected_feature();
-        let picking_plane = matches!(state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickPlane));
+        // A feature asking for its sketch also takes a plane to draw a new one on.
+        let picking_plane = matches!(
+            state.editor.as_ref().map(|e| &e.params),
+            Some(EditorParams::PickPlane | EditorParams::PickSketch(_))
+        );
         let picking_axis = matches!(
             state.editor.as_ref().map(|e| &e.params),
             Some(EditorParams::Revolve(_) | EditorParams::Pattern(_))

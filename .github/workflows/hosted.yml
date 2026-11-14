@@ -36,11 +36,11 @@ env:
 permissions:
   contents: read
 
-# Superseded feature runs cancel. Main and release branch runs retain their exact-commit
-# evidence even while development continues on main.
+# Superseded main and feature runs cancel. Release branch runs retain their
+# exact-commit evidence even while development continues.
 concurrency:
-  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}${{ inputs.benchmark_linux_only && '-linux-benchmark' || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
+  group: ${{ github.workflow }}-${{ startsWith(github.ref, 'refs/heads/release/') && github.run_id || github.head_ref || github.ref }}${{ inputs.benchmark_boat && '-boat-benchmark' || '' }}${{ inputs.benchmark_linux_only && '-linux-benchmark' || '' }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
 
 # Health records expire after 15 minutes. Archive consumers stay on GitHub.
 # NixOS handles only plain Cargo jobs; macOS and Windows retain their hosted runners.
@@ -51,9 +51,9 @@ jobs:
     outputs:
       selected: ${{ steps.select.outputs.selected }}
       packaging: ${{ steps.select.outputs.packaging }}
+      blade_runner: ${{ steps.runner.outputs.blade }}
       archive_runner: ${{ steps.runner.outputs.archive }}
       plain_runner: ${{ steps.runner.outputs.plain }}
-      application_runner: ${{ steps.runner.outputs.application }}
       plain_jobs: ${{ steps.runner.outputs.plain_jobs }}
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +62,7 @@ jobs:
       - id: runner
         env:
           USE_BOAT: ${{ vars.USE_BOAT == 'true' || (github.event_name == 'workflow_dispatch' && inputs.benchmark_boat) }}
+          RUNNER_BLADE_OK_AT: ${{ vars.RUNNER_BLADE_OK_AT }}
           RUNNER_BOAT_OK_AT: ${{ vars.RUNNER_BOAT_OK_AT }}
           RUNNER_BOHN03_OK_AT: ${{ vars.RUNNER_BOHN03_OK_AT }}
         run: python3 ci/select-runner.py
@@ -126,9 +127,48 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'lint')
     name: Lint (fmt, clippy)
-    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.blade_runner || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ contains(fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.blade_runner || '["ubuntu-latest"]'), 'blade-sd') && 'ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec' || '' }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - ${{ github.workspace }}:/home/runner/work/soliddraft/soliddraft
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Prepare Blade Ubuntu container
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 { print $4 }')
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < 15 * 1024 * 1024 )); then
+            echo "::error::Blade requires at least 15 GiB free before starting this job; available KiB: $free_kib"
+            exit 1
+          fi
+          if [[ "$(stat -c '%d:%i' "$GITHUB_WORKSPACE")" != "$(stat -c '%d:%i' "$LINUX_ARCHIVE_WORKSPACE")" ]]; then
+            echo '::error::Blade canonical workspace must be a bind mount of the job workspace'
+            exit 1
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE/.git"
+          {
+            echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.ci-cargo"
+            echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.ci-rustup"
+            echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target"
+            echo 'CARGO_BUILD_JOBS=4'
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Measure Blade disk usage
+        if: startsWith(runner.name, 'blade-sd-')
+        run: python3 ci/blade-disk.py start
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -138,14 +178,76 @@ jobs:
           shared-key: native-dev
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: ci/run lint
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          disk_failed=0
+          if command -v python3 >/dev/null 2>&1 && [[ -f ci/blade-disk.py ]]; then
+            python3 ci/blade-disk.py stop || disk_failed=1
+          fi
+          rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          # Only images labelled for this job may be pruned; the pinned base is retained.
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
+          exit "$disk_failed"
+      - name: Publish Blade disk usage
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: blade-disk-${{ github.job }}-${{ strategy.job-index || 0 }}
+          path: ${{ runner.temp }}/blade-disk.json
+          if-no-files-found: warn
 
   kernel:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'kernel')
     name: Catallax adapter and recipes
     runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ contains(fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]'), 'blade-sd') && 'ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec' || '' }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - ${{ github.workspace }}:/home/runner/work/soliddraft/soliddraft
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Prepare Blade Ubuntu container
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 { print $4 }')
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < 15 * 1024 * 1024 )); then
+            echo "::error::Blade requires at least 15 GiB free before starting this job; available KiB: $free_kib"
+            exit 1
+          fi
+          if [[ "$(stat -c '%d:%i' "$GITHUB_WORKSPACE")" != "$(stat -c '%d:%i' "$LINUX_ARCHIVE_WORKSPACE")" ]]; then
+            echo '::error::Blade canonical workspace must be a bind mount of the job workspace'
+            exit 1
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE/.git"
+          {
+            echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.ci-cargo"
+            echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.ci-rustup"
+            echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target"
+            echo 'CARGO_BUILD_JOBS=4'
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Measure Blade disk usage
+        if: startsWith(runner.name, 'blade-sd-')
+        run: python3 ci/blade-disk.py start
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
@@ -180,13 +282,76 @@ jobs:
 
   # The bracket's STEP opens in OpenCASCADE with the exact body's face count and a volume
   # within the reported deviation. OpenCASCADE is a test tool; the application never links it.
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          disk_failed=0
+          if command -v python3 >/dev/null 2>&1 && [[ -f ci/blade-disk.py ]]; then
+            python3 ci/blade-disk.py stop || disk_failed=1
+          fi
+          rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          # Only images labelled for this job may be pruned; the pinned base is retained.
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
+          exit "$disk_failed"
+      - name: Publish Blade disk usage
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: blade-disk-${{ github.job }}-${{ strategy.job-index || 0 }}
+          path: ${{ runner.temp }}/blade-disk.json
+          if-no-files-found: warn
+
   step-opencascade:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'step-opencascade')
     name: Bracket STEP in OpenCASCADE
-    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.application_runner || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ contains(fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]'), 'blade-sd') && 'ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec' || '' }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - ${{ github.workspace }}:/home/runner/work/soliddraft/soliddraft
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Prepare Blade Ubuntu container
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 { print $4 }')
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < 15 * 1024 * 1024 )); then
+            echo "::error::Blade requires at least 15 GiB free before starting this job; available KiB: $free_kib"
+            exit 1
+          fi
+          if [[ "$(stat -c '%d:%i' "$GITHUB_WORKSPACE")" != "$(stat -c '%d:%i' "$LINUX_ARCHIVE_WORKSPACE")" ]]; then
+            echo '::error::Blade canonical workspace must be a bind mount of the job workspace'
+            exit 1
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE/.git"
+          {
+            echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.ci-cargo"
+            echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.ci-rustup"
+            echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target"
+            echo 'CARGO_BUILD_JOBS=4'
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Measure Blade disk usage
+        if: startsWith(runner.name, 'blade-sd-')
+        run: python3 ci/blade-disk.py start
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
@@ -224,6 +389,29 @@ jobs:
             sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
             sccache --stop-server || echo "::warning::Compiler cache server unavailable."
           fi
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          disk_failed=0
+          if command -v python3 >/dev/null 2>&1 && [[ -f ci/blade-disk.py ]]; then
+            python3 ci/blade-disk.py stop || disk_failed=1
+          fi
+          rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          # Only images labelled for this job may be pruned; the pinned base is retained.
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
+          exit "$disk_failed"
+      - name: Publish Blade disk usage
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: blade-disk-${{ github.job }}-${{ strategy.job-index || 0 }}
+          path: ${{ runner.temp }}/blade-disk.json
+          if-no-files-found: warn
 
   build-linux:
     needs: select
@@ -232,18 +420,61 @@ jobs:
     env:
       CARGO_PROFILE_TEST_OPT_LEVEL: 2
     runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ contains(fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.archive_runner || '["ubuntu-latest"]'), 'blade-sd') && 'ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec' || '' }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - ${{ github.workspace }}:/home/runner/work/soliddraft/soliddraft
+    defaults:
+      run:
+        shell: bash
     outputs:
       partitions: ${{ steps.archives.outputs.partitions }}
       partition_count: ${{ steps.archives.outputs.count }}
     steps:
+      - name: Prepare Blade Ubuntu container
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 { print $4 }')
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < 15 * 1024 * 1024 )); then
+            echo "::error::Blade requires at least 15 GiB free before starting this job; available KiB: $free_kib"
+            exit 1
+          fi
+          if [[ "$(stat -c '%d:%i' "$GITHUB_WORKSPACE")" != "$(stat -c '%d:%i' "$LINUX_ARCHIVE_WORKSPACE")" ]]; then
+            echo '::error::Blade canonical workspace must be a bind mount of the job workspace'
+            exit 1
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE/.git"
+          {
+            echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.ci-cargo"
+            echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.ci-rustup"
+            echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target"
+            echo 'CARGO_BUILD_JOBS=4'
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Measure Blade disk usage
+        if: startsWith(runner.name, 'blade-sd-')
+        run: python3 ci/blade-disk.py start
       - name: Prepare the portable archive workspace
         run: |
           if [[ "$GITHUB_WORKSPACE" != "$LINUX_ARCHIVE_WORKSPACE" ]]; then
-            sudo install -d -o "$(id -u)" -g "$(id -g)" "$(dirname "$LINUX_ARCHIVE_WORKSPACE")"
-            git clone --quiet --no-local "$GITHUB_WORKSPACE" "$LINUX_ARCHIVE_WORKSPACE"
+            if [[ ! -d "$LINUX_ARCHIVE_WORKSPACE/.git" ]]; then
+              sudo install -d -o "$(id -u)" -g "$(id -g)" "$(dirname "$LINUX_ARCHIVE_WORKSPACE")"
+              git clone --quiet --no-local "$GITHUB_WORKSPACE" "$LINUX_ARCHIVE_WORKSPACE"
+            fi
             test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$(git -C "$LINUX_ARCHIVE_WORKSPACE" rev-parse HEAD)"
           fi
+          # Cargo embeds CLI paths in tests; use the consumer's canonical mount.
+          echo "CARGO_TARGET_DIR=$LINUX_ARCHIVE_WORKSPACE/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
@@ -267,6 +498,13 @@ jobs:
       - name: Run workspace documentation tests
         working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}
         run: ci/run test-doc "$RUNNER_TEMP/check-selection/selection.json"
+      - name: Release Blade build output before uploading artifacts
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          disk_failed=0
+          python3 ci/blade-disk.py stop || disk_failed=1
+          rm -rf -- "$CARGO_TARGET_DIR"
+          exit "$disk_failed"
       - uses: ./.github/actions/test-archives
         with:
           directory: ${{ runner.temp }}/test-archives
@@ -278,6 +516,29 @@ jobs:
             sccache --show-stats || echo "::warning::Compiler cache statistics unavailable."
             sccache --stop-server || echo "::warning::Compiler cache server unavailable."
           fi
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          disk_failed=0
+          if command -v python3 >/dev/null 2>&1 && [[ -f ci/blade-disk.py ]]; then
+            python3 ci/blade-disk.py stop || disk_failed=1
+          fi
+          rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          # Only images labelled for this job may be pruned; the pinned base is retained.
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
+          exit "$disk_failed"
+      - name: Publish Blade disk usage
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: blade-disk-${{ github.job }}-${{ strategy.job-index || 0 }}
+          path: ${{ runner.temp }}/blade-disk.json
+          if-no-files-found: warn
 
   partition-linux:
     needs: [select, build-linux]
@@ -294,8 +555,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check the archive consumer workspace
-        run: test "$GITHUB_WORKSPACE" = "$LINUX_ARCHIVE_WORKSPACE"
+        with:
+          persist-credentials: false
+      - name: Prepare the archive consumer workspace
+        run: |
+          if [[ "$GITHUB_WORKSPACE" != "$LINUX_ARCHIVE_WORKSPACE" ]]; then
+            if [[ ! -d "$LINUX_ARCHIVE_WORKSPACE/.git" ]]; then
+              mkdir -p "$(dirname "$LINUX_ARCHIVE_WORKSPACE")"
+              git clone --quiet --no-local "$GITHUB_WORKSPACE" "$LINUX_ARCHIVE_WORKSPACE"
+            fi
+            test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$(git -C "$LINUX_ARCHIVE_WORKSPACE" rev-parse HEAD)"
+          fi
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned test tools
         uses: ./.github/actions/pinned-tool
@@ -313,6 +583,7 @@ jobs:
           chmod 700 "$RUNNER_TEMP/soliddraft-runtime"
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/soliddraft-runtime" >> "$GITHUB_ENV"
       - name: Run the workspace archive partition
+        working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}
         run: ci/run test-shard "$RUNNER_TEMP/workspace-tests.tar.zst" "${{ matrix.shard }}/${{ needs.build-linux.outputs.partition_count }}" "target/nextest/ci/inventory.json" "$RUNNER_TEMP/listing.json"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -320,11 +591,10 @@ jobs:
           name: workspace-partition-linux-${{ matrix.shard }}
           overwrite: true
           path: |
-            target/nextest/ci/junit.xml
-            target/nextest/ci/inventory.json
+            ${{ env.LINUX_ARCHIVE_WORKSPACE }}/target/nextest/ci/junit.xml
+            ${{ env.LINUX_ARCHIVE_WORKSPACE }}/target/nextest/ci/inventory.json
           if-no-files-found: error
           retention-days: 1
-
   test-linux:
     needs: [select, build-linux, partition-linux]
     if: always() && contains(fromJSON(needs.select.outputs.selected), 'test-linux')
@@ -336,6 +606,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: workspace-partition-linux-*
@@ -350,7 +622,6 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: error
           retention-days: 1
-
   build-macos:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'test-macos')
@@ -563,18 +834,80 @@ jobs:
     if: contains(fromJSON(needs.select.outputs.selected), 'msrv')
     name: Minimum Rust version (Rust-only crates)
     runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ contains(fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.plain_runner || '["ubuntu-latest"]'), 'blade-sd') && 'ubuntu@sha256:77eb101c607d6e3d4f5ad0c8a02c2136c689b98aba1f359e6502ba517e5c57ec' || '' }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - ${{ github.workspace }}:/home/runner/work/soliddraft/soliddraft
+    defaults:
+      run:
+        shell: bash
     env:
       CARGO_BUILD_JOBS: ${{ needs.select.outputs.plain_jobs }}
     steps:
+      - name: Prepare Blade Ubuntu container
+        if: startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 { print $4 }')
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]] || (( free_kib < 15 * 1024 * 1024 )); then
+            echo "::error::Blade requires at least 15 GiB free before starting this job; available KiB: $free_kib"
+            exit 1
+          fi
+          if [[ "$(stat -c '%d:%i' "$GITHUB_WORKSPACE")" != "$(stat -c '%d:%i' "$LINUX_ARCHIVE_WORKSPACE")" ]]; then
+            echo '::error::Blade canonical workspace must be a bind mount of the job workspace'
+            exit 1
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git sudo build-essential pkg-config cmake python3 python3-venv python3-pip unzip xz-utils zstd binutils libssl-dev libudev-dev libasound2-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE"
+          git config --system --add safe.directory "$LINUX_ARCHIVE_WORKSPACE/.git"
+          {
+            echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.ci-cargo"
+            echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.ci-rustup"
+            echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target"
+            echo 'CARGO_BUILD_JOBS=4'
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Measure Blade disk usage
+        if: startsWith(runner.name, 'blade-sd-')
+        run: python3 ci/blade-disk.py start
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
-        if: needs.select.outputs.plain_jobs != '1'
+        if: needs.select.outputs.plain_jobs != '1' && !startsWith(runner.name, 'blade-sd-')
         with:
           cache-bin: false
           shared-key: native-dev
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check -p soliddraft-kernel-api -p soliddraft-recipe -p soliddraft-drawing -p soliddraft-sketch -p soliddraft-assistant -p soliddraft-materials -p soliddraft-assembly --all-features
+      - name: Clean Blade build output
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        run: |
+          test -f /.dockerenv
+          disk_failed=0
+          if command -v python3 >/dev/null 2>&1 && [[ -f ci/blade-disk.py ]]; then
+            python3 ci/blade-disk.py stop || disk_failed=1
+          fi
+          rm -rf -- "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.ci-cargo" "$GITHUB_WORKSPACE/.ci-rustup" "$GITHUB_WORKSPACE/.ci-catallax" "$GITHUB_WORKSPACE/.ci-ocp8"
+          rm -rf -- "$RUNNER_TEMP/test-archives" "$RUNNER_TEMP/workspace-tests.tar.zst" "$RUNNER_TEMP/listing.json" "$RUNNER_TEMP/partitions" "$RUNNER_TEMP/application-loop" "$RUNNER_TEMP/bracket-export" "$RUNNER_TEMP/soliddraft-runtime"
+          chown -R "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          # Only images labelled for this job may be pruned; the pinned base is retained.
+          if command -v curl >/dev/null 2>&1; then
+            curl --fail --silent --show-error --unix-socket /var/run/docker.sock --get -X POST --data-urlencode "filters={\"dangling\":[\"true\"],\"label\":[\"soliddraft.ci.job=$GITHUB_RUN_ID-$GITHUB_JOB\"]}" http://localhost/v1.47/images/prune
+          fi
+          exit "$disk_failed"
+      - name: Publish Blade disk usage
+        if: always() && startsWith(runner.name, 'blade-sd-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: blade-disk-${{ github.job }}-${{ strategy.job-index || 0 }}
+          path: ${{ runner.temp }}/blade-disk.json
+          if-no-files-found: warn
 
   interactive-linux:
     needs: select
@@ -664,7 +997,7 @@ jobs:
     needs: select
     if: contains(fromJSON(needs.select.outputs.selected), 'application-loop')
     name: Application scenarios (MCP, viewport, kernel replay)
-    runs-on: ${{ fromJSON(github.repository == 'ZIGRAWBOHNBAWERICK/soliddraft' && github.actor == 'BohnBawerick' && github.triggering_actor == 'BohnBawerick' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'BohnBawerick')) && needs.select.outputs.application_runner || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -675,6 +1008,8 @@ jobs:
       XDG_RUNTIME_DIR: /tmp/soliddraft-runtime
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'

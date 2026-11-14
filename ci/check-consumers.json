@@ -344,6 +344,16 @@
       "test-macos",
       "application-loop"
     ],
+    "ci/blade-disk.py": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "step-opencascade",
+      "msrv"
+    ],
+    "ci/test_blade_disk.py": [
+      "lint"
+    ],
     "ci/fixtures/import/two-blocks.igs": [
       "lint",
       "kernel",

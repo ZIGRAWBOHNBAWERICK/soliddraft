@@ -58,7 +58,7 @@ class CompilerCache(unittest.TestCase):
             binary.write_text('#!/bin/sh\nexit 2\n')
             binary.chmod(0o755)
             for block in blocks:
-                script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('\n\n', 1)[0])
+                script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('      - ', 1)[0].split('\n\n', 1)[0])
                 result = subprocess.run(['bash', '-euo', 'pipefail', '-c', script],
                                         env=dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
                                                  SCCACHE_SERVER_UDS=str(root / 'probe.sock')),
@@ -80,19 +80,29 @@ class RunnerHealth(unittest.TestCase):
     def select(self, **overrides):
         values = dict(event={}, actor='BohnBawerick', starter='BohnBawerick',
                       repository='ZIGRAWBOHNBAWERICK/soliddraft', boat_enabled='true',
-                      boat_at='1000', bohn_at='1000', now=1001)
+                      boat_at='1000', bohn_at='1000', blade_at='1000', now=1001)
         values.update(overrides)
         return selection.runners(**values)
 
     def test_priority_and_nixos_capability(self):
         self.assertEqual(self.select()['plain'], ['boat-large'])
-        fallback = self.select(boat_at='0')
+        fallback = self.select(boat_at='0', blade_at='0')
         self.assertEqual(fallback['plain'], ['self-hosted', 'bohn-03'])
         self.assertEqual(fallback['plain_jobs'], '1')
         self.assertEqual(fallback['archive'], ['ubuntu-latest'])
-        self.assertEqual(fallback['application'], ['ubuntu-latest'])
-        self.assertEqual(self.select(boat_at='0', bohn_at='0')['plain'], ['ubuntu-latest'])
-        self.assertEqual(self.select(boat_enabled='false')['plain'], ['self-hosted', 'bohn-03'])
+        self.assertEqual(self.select(boat_at='0', bohn_at='0', blade_at='0')['plain'], ['ubuntu-latest'])
+        self.assertEqual(self.select(boat_enabled='false', blade_at='0')['plain'], ['self-hosted', 'bohn-03'])
+
+    def test_blade_uses_the_same_health_and_trust_gate(self):
+        self.assertEqual(self.select()['blade'], ['self-hosted', 'blade-sd'])
+        self.assertEqual(self.select(boat_enabled='false')['blade'], ['self-hosted', 'blade-sd'])
+        for key in ('archive', 'plain'):
+            self.assertEqual(self.select(boat_enabled='false')[key], ['self-hosted', 'blade-sd'])
+            self.assertEqual(self.select(boat_at='0')[key], ['self-hosted', 'blade-sd'])
+            self.assertEqual(self.select(boat_at='0', blade_at='0', bohn_at='0')[key], ['ubuntu-latest'])
+        self.assertEqual(self.select(boat_enabled='false')['plain_jobs'], '4')
+        for stamp in (None, '', '0', '1002', 'bad', '101'):
+            self.assertEqual(self.select(blade_at=stamp)['blade'], ['ubuntu-latest'])
 
     def test_health_expires_and_future_or_malformed_values_fail_closed(self):
         for stamp in (None, '', 'no', '1001', '0', '100.0'):
@@ -115,7 +125,7 @@ class RunnerHealth(unittest.TestCase):
         for values in untrusted:
             with self.subTest(values=values):
                 runners = self.select(**values)
-                for key in ('plain', 'archive', 'application'):
+                for key in ('plain', 'archive', 'blade'):
                     self.assertEqual(runners[key], ['ubuntu-latest'])
 
 

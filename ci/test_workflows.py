@@ -1,4 +1,4 @@
-"""Every workflow cancels its branch's superseded runs and never cancels a run on main."""
+"""Workflow concurrency cancels superseded runs while preserving release evidence."""
 
 import json
 import os
@@ -25,10 +25,12 @@ def evaluate(expr, **github):
     inputs = github.pop("inputs", {})
     variables = github.pop("variables", {})
     needs = github.pop("needs", {})
+    matrix = github.pop("matrix", {})
     python = re.sub(r"github((?:\.\w+)+)",
                     lambda m: "g" + "".join(f"[{key!r}]" for key in m[1][1:].split('.')),
                     expr).replace("&&", " and ").replace("||", " or ")
     python = re.sub(r"needs\.select\.outputs\.(\w+)", r"n.get('\1', '')", python)
+    python = re.sub(r"matrix\.(\w+)", r"m.get('\1', '')", python)
     python = re.sub(r"vars\.(\w+)", r"v.get('\1', '')", python)
     python = re.sub(r"inputs\.(\w+)", r"i.get('\1', False)", python)
     python = re.sub(r"!(?!=)", " not ", python)
@@ -38,6 +40,8 @@ def evaluate(expr, **github):
         "i": inputs,
         "v": variables,
         "n": needs,
+        "m": matrix,
+        "contains": lambda values, item: item in values,
         "fromJSON": json.loads,
         "startsWith": lambda value, prefix: value.lower().startswith(prefix.lower()),
     })
@@ -151,12 +155,13 @@ class Concurrency(unittest.TestCase):
         self.assertNotEqual(render(group, **values, inputs={'benchmark_boat': True}),
                             render(group, **values, inputs={'benchmark_boat': True, 'benchmark_linux_only': True}))
 
-    def test_a_run_on_main_is_never_cancelled_nor_shares_a_group(self):
+    def test_main_runs_supersede_only_in_hosted_ci(self):
         for path in WORKFLOWS:
             group, cancel, _ = settings(path)
             pushes = [render(group, ref=MAIN, run_id=str(n)) for n in (200, 201, 202)]
-            self.assertEqual(len(set(pushes)), 3, f"{path.name}: main pushes share a group, so a waiting one is replaced")
-            self.assertEqual(render(cancel, ref=MAIN, run_id="200"), "false", path.name)
+            hosted = path.name == "hosted.yml"
+            self.assertEqual(len(set(pushes)), 1 if hosted else 3, path.name)
+            self.assertEqual(render(cancel, ref=MAIN, run_id="200"), str(hosted).lower(), path.name)
 
     def test_a_pull_request_from_a_branch_called_main_cannot_reach_main_runs(self):
         for path in WORKFLOWS:
@@ -327,7 +332,7 @@ class BoatRunners(unittest.TestCase):
     def test_outside_runs_cannot_override_runner_selection(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
-        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop', 'msrv'):
+        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'msrv'):
             expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
             for actor, author, source, starter in (
                     ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
@@ -340,12 +345,15 @@ class BoatRunners(unittest.TestCase):
                               event={'pull_request': {'user': {'login': author},
                                      'head': {'repo': {'full_name': source}}}},
                               needs={k: '["boat-large"]' for k in
-                                     ('plain_runner', 'archive_runner', 'application_runner')})
+                                     ('plain_runner', 'archive_runner', 'blade_runner')})
+                values['matrix'] = {'shard': 2, 'lane': 1}
                 trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
                 self.assertEqual(evaluate(expression, **values),
                                  ['boat-large'] if trusted else ['ubuntu-latest'])
-        for job in ('select', 'gate', 'test-linux', 'partition-linux'):
+        for job in ('select', 'gate', 'partition-linux', 'test-linux', 'application-loop'):
             self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
+            self.assertNotIn('    container:', jobs[job])
+            self.assertNotIn('Blade', jobs[job])
         self.assertIn('ci/select-runner.py', jobs['select'])
         self.assertIn('needs.select.outputs.plain_runner', jobs['msrv'])
         for job in ('lint', 'kernel'):
@@ -353,6 +361,125 @@ class BoatRunners(unittest.TestCase):
         self.assertIn('lane: [proof, 1, 2, 3]', jobs['application-loop'])
         self.assertIn("if: matrix.lane == 'proof'", jobs['application-loop'])
         self.assertIn('application-loop-${{ matrix.lane }}', jobs['application-loop'])
+
+
+class BladeRouting(unittest.TestCase):
+    def test_distribution_and_container_follow_the_selected_pool(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
+        values = dict(repository='ZIGRAWBOHNBAWERICK/soliddraft', actor='BohnBawerick',
+                      triggering_actor='BohnBawerick', event_name='push',
+                      needs={'blade_runner': '["self-hosted","blade-sd"]',
+                             'archive_runner': '["boat-large"]',
+                             'plain_runner': '["boat-large"]'})
+        cases = [(job, {}, ['self-hosted', 'blade-sd'] if job == 'lint' else ['boat-large'])
+                  for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'msrv')]
+        for job, matrix, expected in cases:
+            runner = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
+            image = re.search(r'^      image: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
+            with self.subTest(job=job, matrix=matrix):
+                self.assertEqual(evaluate(runner, **values, matrix=matrix), expected)
+                selected_image = evaluate(image, **values, matrix=matrix)
+                if 'blade-sd' in expected:
+                    self.assertRegex(selected_image, r'^ubuntu@sha256:[0-9a-f]{64}$')
+                else:
+                    self.assertEqual(selected_image, '')
+                self.assertEqual(evaluate(image, **dict(values, actor='outsider'), matrix=matrix), '')
+                self.assertIn('shell: bash', jobs[job])
+                self.assertIn('Prepare Blade Ubuntu container', jobs[job])
+                self.assertIn('Clean Blade build output', jobs[job])
+                if job != 'lint':
+                    pools = [['self-hosted', 'blade-sd'], ['ubuntu-latest']]
+                    if job == 'msrv':
+                        pools.append(['self-hosted', 'bohn-03'])
+                    key = 'plain_runner' if job == 'msrv' else 'archive_runner'
+                    for pool in pools:
+                        fallback = dict(values, needs={**values['needs'], key: json.dumps(pool)})
+                        self.assertEqual(evaluate(runner, **fallback, matrix=matrix), pool)
+                        self.assertEqual(bool(evaluate(image, **fallback, matrix=matrix)), 'blade-sd' in pool)
+
+
+
+class BladeOwnership(unittest.TestCase):
+    def test_mounted_checkout_and_local_clone_work_with_different_owners(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        scripts = [textwrap.dedent(block.split('        run: |\n', 1)[1].split('      - ', 1)[0])
+                   for block in text.split('      - name: Prepare Blade Ubuntu container\n')[1:]]
+        self.assertEqual(len(set(scripts)), 1)
+        git_setup = '\n'.join(line for line in scripts[0].splitlines()
+                              if line.startswith('git config --system '))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source, target, unrelated = (root / name for name in ('checkout', 'clone', 'other'))
+            for repo in (source, unrelated):
+                subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+                (repo / 'fixture').write_text('source')
+                subprocess.run(['git', '-C', str(repo), 'add', 'fixture'], check=True)
+                subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c',
+                                'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            config = root / 'system.gitconfig'
+            config.touch()
+            env = dict(os.environ, GIT_CONFIG_SYSTEM=str(config), GIT_CONFIG_GLOBAL='/dev/null',
+                       GIT_TEST_ASSUME_DIFFERENT_OWNER='1', GITHUB_WORKSPACE=str(source),
+                       LINUX_ARCHIVE_WORKSPACE=str(source))
+            probe = ['git', '-C', str(source), 'rev-parse', '--show-toplevel']
+            before = subprocess.run(probe, env=env, capture_output=True, text=True)
+            self.assertNotEqual(before.returncode, 0)
+            self.assertIn('dubious ownership', before.stderr)
+            subprocess.run(['bash', '-e', '-c', git_setup], env=env, check=True)
+            checked = subprocess.run(probe, env=env, capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            cloned = subprocess.run(['git', 'clone', '--quiet', '--no-local', str(source), str(target)],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(cloned.returncode, 0, cloned.stderr)
+            self.assertEqual((target / 'fixture').read_text(), 'source')
+            refused = subprocess.run(['git', '-C', str(unrelated), 'rev-parse', '--show-toplevel'],
+                                     env=env, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn('dubious ownership', refused.stderr)
+
+
+class BladeCleanup(unittest.TestCase):
+    def test_cleanup_removes_only_this_jobs_build_output(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        blocks = text.split('      - name: Clean Blade build output\n')[1:]
+        self.assertTrue(blocks)
+        for block in blocks:
+            condition = block.splitlines()[0]
+            self.assertIn("always() && startsWith(runner.name, 'blade-sd-')", condition)
+            script = textwrap.dedent(block.split('        run: |\n', 1)[1].split('      - ', 1)[0].split('\n\n', 1)[0])
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / 'target').mkdir()
+                (root / 'target/large-build').write_text('build output')
+                (root / 'keep').write_text('source')
+                marker = root / 'container-marker'
+                marker.touch()
+                (root / 'portable/target').mkdir(parents=True)
+                binary = root / 'bin'
+                binary.mkdir()
+                (binary / 'curl').write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$PRUNE_LOG"\n')
+                (binary / 'curl').chmod(0o755)
+                self.assertIn('test -f /.dockerenv', script)
+                subprocess.run(['bash', '-e', '-c', script.replace('/.dockerenv', str(marker))],
+                               check=True, env=dict(os.environ, GITHUB_WORKSPACE=str(root),
+                                   LINUX_ARCHIVE_WORKSPACE=str(root / 'portable'), RUNNER_TEMP=str(root),
+                                   GITHUB_RUN_ID='123', GITHUB_JOB='fixture', PRUNE_LOG=str(root / 'prune.log'),
+                                   PATH=f'{binary}:{os.environ["PATH"]}'))
+                prune = (root / 'prune.log').read_text()
+                self.assertIn('soliddraft.ci.job=123-fixture', prune)
+                self.assertIn('"dangling":["true"]', prune)
+                self.assertTrue((root / 'portable').exists())
+                self.assertFalse((root / 'target').exists())
+                self.assertEqual((root / 'keep').read_text(), 'source')
+                (root / 'prune.log').unlink()
+                unavailable = 'command() { if [[ "$1" == -v && "$2" == curl ]]; then return 1; fi; builtin command "$@"; };\n'
+                subprocess.run(['bash', '-e', '-c', unavailable + script.replace('/.dockerenv', str(marker))],
+                               check=True, env=dict(os.environ, GITHUB_WORKSPACE=str(root),
+                                   LINUX_ARCHIVE_WORKSPACE=str(root / 'portable'), RUNNER_TEMP=str(root),
+                                   GITHUB_RUN_ID='123', GITHUB_JOB='fixture', PRUNE_LOG=str(root / 'prune.log'),
+                                   PATH=f'{binary}:{os.environ["PATH"]}'))
+                self.assertFalse((root / 'prune.log').exists())
 
 
 class BrowserStartup(unittest.TestCase):
@@ -392,6 +519,49 @@ class BrowserStartup(unittest.TestCase):
 
 
 class ArchiveWorkspace(unittest.TestCase):
+    def test_blade_archive_binaries_launch_the_cli_without_the_container_path(self):
+        text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
+        linux = text.split('\n  build-linux:', 1)[1].split('\n  partition-linux:', 1)[0]
+        target = next(line.strip() for line in linux.splitlines()
+                      if line.strip().startswith('echo "CARGO_TARGET_DIR='))
+        preparation = linux.split('      - name: Prepare the portable archive workspace\n', 1)[1]
+        script = textwrap.dedent(preparation.split('        run: |\n', 1)[1].split('      - uses:', 1)[0])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            canonical, producer = root / 'hosted/project', root / 'container-workspace'
+            (canonical / 'src').mkdir(parents=True)
+            (canonical / 'tests').mkdir()
+            producer.symlink_to(canonical, target_is_directory=True)
+            (canonical / 'Cargo.toml').write_text('[package]\nname="portable"\nversion="0.0.0"\n'
+                                                'edition="2021"\n[[bin]]\nname="soliddraft"\npath="src/main.rs"\n')
+            (canonical / 'src/main.rs').write_text('fn main() { println!("fixture"); }\n')
+            (canonical / 'tests/launch.rs').write_text(
+                '#[test] fn launches() { assert!(std::process::Command::new('
+                'env!("CARGO_BIN_EXE_soliddraft")).status().unwrap().success()); }\n')
+            subprocess.run(['git', 'init', '-q', canonical], check=True)
+            subprocess.run(['git', '-C', canonical, 'add', '.'], check=True)
+            subprocess.run(['git', '-C', canonical, '-c', 'user.name=Fixture', '-c',
+                            'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            output = root / 'environment'
+            output.touch()
+            env = dict(os.environ, GITHUB_WORKSPACE=str(producer),
+                       LINUX_ARCHIVE_WORKSPACE=str(canonical), GITHUB_ENV=str(output))
+            initial = subprocess.check_output(['bash', '-e', '-c', target], env=env, text=True)
+            env.update(line.split('=', 1) for line in initial.splitlines())
+            subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
+            env.update(line.split('=', 1) for line in output.read_text().splitlines())
+            built = subprocess.run(['cargo', 'test', '--offline', '--test', 'launch', '--no-run',
+                                    '--message-format=json'], cwd=canonical, env=env,
+                                   capture_output=True, text=True, check=True)
+            artifacts = [json.loads(line) for line in built.stdout.splitlines()]
+            executable = next(pathlib.Path(item['executable']).resolve()
+                              for item in artifacts if item.get('profile', {}).get('test')
+                              and item.get('executable'))
+            self.assertTrue((canonical / 'target/debug/soliddraft').is_file())
+            producer.unlink()
+            consumed = subprocess.run([executable], cwd=canonical, capture_output=True, text=True)
+            self.assertEqual(consumed.returncode, 0, consumed.stdout + consumed.stderr)
+
     def test_archive_preparation_keeps_the_commit_without_copying_credentials(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         block = text.split('      - name: Prepare the portable archive workspace\n', 1)[1].split('      - uses:', 1)[0]
@@ -414,6 +584,7 @@ class ArchiveWorkspace(unittest.TestCase):
             sudo.chmod(0o755)
             env = dict(os.environ, GITHUB_WORKSPACE=str(source),
                        LINUX_ARCHIVE_WORKSPACE=str(destination), SUDO_LOG=str(root / 'sudo.log'),
+                       GITHUB_ENV=str(root / 'environment'),
                        PATH=f'{binaries}:{os.environ["PATH"]}')
             subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
             self.assertEqual((destination / 'fixture').read_text(), 'source')
@@ -425,8 +596,8 @@ class ArchiveWorkspace(unittest.TestCase):
             subprocess.run(['bash', '-e', '-c', script], env=env, check=True, capture_output=True)
             self.assertEqual((root / 'sudo.log').read_text().splitlines(), ['called'])
         linux = text.split('\n  build-linux:', 1)[1].split('\n  test-linux:', 1)[0]
-        self.assertEqual(linux.count('working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}'), 2)
-        self.assertIn('run: test "$GITHUB_WORKSPACE" = "$LINUX_ARCHIVE_WORKSPACE"', text)
+        self.assertEqual(linux.count('working-directory: ${{ env.LINUX_ARCHIVE_WORKSPACE }}'), 3)
+        self.assertIn('Prepare the archive consumer workspace', text)
 
 
 class RustCache(unittest.TestCase):

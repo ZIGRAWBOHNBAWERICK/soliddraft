@@ -81,6 +81,7 @@ scenes are a separate choice; a dark frame does not imply a dark modelling space
 | Active tool, focus and command prompt | `PALETTE.accent` | `#f5a524` |
 | Selected fill | `PALETTE.selection_bg`, `PALETTE.accent_soft` | Amber at 20% |
 | Selected text | `PALETTE.selection_ink` | `#f5a524` |
+| Workspace switch | `WORKSPACE_BG`, `WORKSPACE_SELECTED` | `#17181b`, `#4a4e55` |
 | Text on filled amber actions | `PALETTE.on_accent` | `#231600` |
 | Hovered amber action | `PRIMARY_HOVER` | `#ffbc4d` |
 | Fields and raised chips | `PALETTE.field_bg`, `PALETTE.chip` | `#3a3d43` |

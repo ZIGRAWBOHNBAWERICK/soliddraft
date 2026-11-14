@@ -55,7 +55,9 @@ pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, doc
         let name = match tab {
             Tab::Viewport => state.doc.name.clone(),
             Tab::Drawing => state.drawing.session.as_ref().map_or("Drawing".into(), |s| s.title()),
-            Tab::Assembly => state.assembly.session.as_ref().map_or("Assembly".into(), |s| s.title()),
+            Tab::Assembly => {
+                state.assembly.session.as_ref().map_or("Assembly".into(), |s| s.doc.assembly().name.clone())
+            }
             _ => unreachable!(),
         };
         let selected = tab == active;

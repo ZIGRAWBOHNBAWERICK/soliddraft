@@ -702,7 +702,7 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
         let width = galley.size().x + 48.0;
         ui.add_space((ui.max_rect().center().x - width / 2.0 - ui.cursor().left()).max(8.0));
         let (rect, response) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
         ui.painter().rect_filled(rect, CornerRadius::same(6), theme::edit_suite::WORKSPACE_BG);
         ui.painter().circle_filled(pos2(rect.left() + 18.0, rect.center().y), 4.0, theme::edit_suite::DANGER);
         ui.painter().galley(pos2(rect.left() + 32.0, rect.center().y - galley.size().y / 2.0), galley, theme::error());

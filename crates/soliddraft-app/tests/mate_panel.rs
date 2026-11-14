@@ -14,9 +14,17 @@ use soliddraft_app::viewport::camera::StandardView;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 const HANG: Duration = Duration::from_secs(600);
+
+// Each complete case owns the GPU contexts and the process-wide config override.
+static GPU: Mutex<()> = Mutex::new(());
+
+fn gpu_lock() -> MutexGuard<'static, ()> {
+    GPU.lock().unwrap_or_else(|poison| poison.into_inner())
+}
 
 type App<'a> = Harness<'a, SolidDraftApp>;
 
@@ -236,6 +244,7 @@ fn snapshot(h: &mut App<'_>, name: &str) {
 
 #[test]
 fn pick_drive_update_and_refuse_in_the_window() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
@@ -366,6 +375,7 @@ fn pick_drive_update_and_refuse_in_the_window() {
 
 #[test]
 fn pick_coincident_update_and_refuse_in_the_window() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
@@ -533,6 +543,7 @@ fn pick(h: &mut App<'_>, component: u32, face: &str) {
 
 #[test]
 fn width_lock_and_conflicts_in_the_window() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {

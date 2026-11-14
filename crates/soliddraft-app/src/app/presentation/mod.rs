@@ -131,9 +131,6 @@ impl SolidDraftApp {
             if !st.drawing.is_active() && !st.assembly.is_active() {
                 quick_access(ui, st);
             }
-            if st.start.is_none() {
-                workspace_switch(ui, st);
-            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(10.0);
                 if st.start.is_some() {
@@ -705,69 +702,4 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         menu_command(ui, st, "shortcuts", "Keyboard shortcuts");
         menu_command(ui, st, "about", "About SolidDraft");
     });
-}
-
-/// Stable workspace ids in the title bar.
-fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
-    let locked = st.in_sketch() && !st.drawing.is_active() && !st.assembly.is_active();
-    if locked {
-        st.ribbon_tab = crate::state::RibbonTab::Sketch;
-    }
-    let tabs = st.workspaces();
-    let widths: Vec<_> = tabs
-        .iter()
-        .map(|tab| {
-            ui.painter().layout_no_wrap(tab.label().to_owned(), theme::font_medium(12.5), theme::ink()).size().x + 28.0
-        })
-        .collect();
-    let gap = 1.0;
-    let width = widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32 + 4.0;
-    let centered = ui.max_rect().center().x - width / 2.0;
-    ui.add_space((centered - ui.cursor().left()).max(8.0));
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(6), theme::panel_header());
-    let mut x = rect.left() + 2.0;
-    for (tab, width) in tabs.into_iter().zip(widths) {
-        let bounds = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 22.0));
-        x += width + gap;
-        let selected = st.workspace() == tab;
-        let enabled = !locked || selected;
-        let response = ui.interact(
-            bounds,
-            ui.id().with(("workspace", tab.id())),
-            if enabled { Sense::click() } else { Sense::hover() },
-        );
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, format!("{} tab", tab.label()))
-        });
-        if selected || (enabled && (response.hovered() || response.has_focus())) {
-            ui.painter().rect_filled(
-                bounds,
-                CornerRadius::same(4),
-                if selected { theme::selection_bg() } else { theme::hover() },
-            );
-        }
-        ui.painter().text(
-            bounds.center(),
-            Align2::CENTER_CENTER,
-            tab.label(),
-            theme::font_medium(12.5),
-            if selected { theme::selection_ink() } else { theme::muted() },
-        );
-        if enabled && response.has_focus() {
-            ui.painter().rect_stroke(
-                bounds,
-                CornerRadius::same(4),
-                egui::Stroke::new(1.0, theme::accent()),
-                egui::StrokeKind::Inside,
-            );
-        }
-        if enabled && response.clicked() {
-            st.select_workspace(tab);
-        }
-        if !enabled {
-            response.on_hover_text("Close sketch to change workspace");
-        }
-    }
-    ui.add_space(8.0);
 }

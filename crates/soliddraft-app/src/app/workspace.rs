@@ -465,6 +465,7 @@ impl SolidDraftApp {
         self.leave_start_page();
         let start = self.state.start.is_some();
         if !start {
+            crate::left_bar::panel(root, &mut self.state);
             crate::options_bar::panel(root, &mut self.state);
         }
         let status = self.status();

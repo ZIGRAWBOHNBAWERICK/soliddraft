@@ -108,7 +108,7 @@ fn side_areas_toggle_resize_and_come_back_next_run() {
     assert_eq!(layout(&harness), Layout::default());
     assert!(!harness.state().state.tree_shown());
     let wide = viewport_rect(&harness);
-    assert!((wide.left() - theme::edit_suite::PALETTE_WIDTH).abs() < 2.0);
+    assert!((wide.left() - soliddraft_app::left_bar::WIDTH - theme::edit_suite::PALETTE_WIDTH).abs() < 2.0);
     assert!(wide.right() >= 1439.0);
     let history = egui::PanelState::load(&harness.ctx, egui::Id::new("feature_timeline")).unwrap().outer_rect;
     let command = egui::PanelState::load(&harness.ctx, soliddraft_app::command_line::bar_id()).unwrap().outer_rect;

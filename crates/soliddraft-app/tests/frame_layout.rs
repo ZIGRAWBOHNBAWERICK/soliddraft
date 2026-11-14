@@ -6,6 +6,7 @@ mod ribbon;
 use egui::{Key, Modifiers, Rect, pos2, vec2};
 use egui_kittest::kittest::Queryable;
 
+use soliddraft_app::left_bar;
 use soliddraft_app::state::RibbonTab;
 use soliddraft_app::theme::{self, Mode};
 
@@ -46,8 +47,8 @@ fn old_and_current_frame_settings_open_edit_suite_and_the_command_palette() {
 }
 
 #[test]
-fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
-    let case = ribbon::case("title-bar-workspaces");
+fn left_bar_workspaces_select_the_palette_and_leave_the_title_bar() {
+    let case = ribbon::case("left-bar-workspaces");
     for mode in [Mode::Light, Mode::Dark] {
         for (width, scale) in [(1440.0, 1.0), (1280.0, 1.0), (960.0, 1.0), (1280.0, 2.0)] {
             let mut app = ribbon::app_at(ribbon::plate(), vec2(width, 900.0), scale);
@@ -56,31 +57,49 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
             app.run_steps(8);
             case.run(&mut app, |app| {
                 let title = Rect::from_min_max(pos2(0.0, 0.0), pos2(width, theme::MENU_HEIGHT));
-                let mut previous = 0.0;
+                let bar = left_bar(app);
+                assert_eq!(bar.left(), 0.0, "the strip is at the window's left edge");
+                assert_eq!(bar.top(), title.bottom(), "the strip starts below the title");
+                assert_eq!(bar.width(), left_bar::WIDTH);
+                let options = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar"))
+                    .expect("the options bar is laid out")
+                    .outer_rect;
+                let palette = suite_palette(app);
+                assert_eq!(options.left(), bar.right(), "the options bar starts right of the strip");
+                assert_eq!(palette.left(), bar.right(), "the palette follows the strip");
+                assert_eq!(options.top(), title.bottom(), "the options bar follows the title");
+                assert_eq!(palette.top(), options.bottom(), "the palette follows options without a tab row");
+
+                // The pointer rests on Inspect before any click: egui hides a tooltip
+                // right after one.
+                let inspect = ribbon::control(app, "Inspect tab", bar).rect;
+                assert_eq!(ribbon::tooltip(app, inspect), "Inspect", "the icon is named on hover");
+
+                let mut previous = bar.top();
                 for tab in RibbonTab::ALL {
                     let label = format!("{} tab", tab.label());
                     assert_eq!(app.query_all_by_label(&label).count(), 1, "one {label}");
-                    let control = ribbon::control(app, &label, title);
-                    assert!(title.contains_rect(control.rect), "{label} fits in the title bar");
-                    assert!(control.rect.left() > previous, "workspaces keep their order: {mode:?} width={width} scale={scale} tab={tab:?} previous_right={previous} current={:?}", control.rect);
-                    previous = control.rect.right();
+                    let control = ribbon::control(app, &label, bar);
+                    assert!(bar.contains_rect(control.rect), "{label} is in the strip");
+                    assert!(!title.intersects(control.rect), "{label} left the title bar");
+                    assert!(
+                        control.rect.top() >= previous,
+                        "workspaces keep their order: {mode:?} width={width} scale={scale} tab={tab:?}"
+                    );
+                    previous = control.rect.bottom();
                     ribbon::click_at(app, control.rect.center());
                     app.run_steps(8);
                     assert_eq!(app.state().state.ribbon_tab, tab);
-                    assert!(ribbon::control(app, &label, title).selected);
+                    assert!(ribbon::control(app, &label, bar).selected);
+                    for other in RibbonTab::ALL.into_iter().filter(|other| *other != tab) {
+                        let other = format!("{} tab", other.label());
+                        assert!(!ribbon::control(app, &other, bar).selected, "only {label} is marked");
+                    }
                 }
-                let view = app.get_by_label("View tab").rect();
-                let undo = app.get_by_label("Undo").rect();
-                assert!(!undo.intersects(view), "quick access leaves room for the switch");
-                let sketch = app.get_by_label("Sketch tab").rect();
+                let sketch = ribbon::control(app, "Sketch tab", bar).rect;
                 ribbon::click_at(app, sketch.center());
                 app.run_steps(8);
-                let options = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar"))
-                    .expect("the options bar is laid out").outer_rect;
-                let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette"))
-                    .expect("the palette is laid out").outer_rect;
-                assert_eq!(options.top(), title.bottom(), "the options bar follows the title");
-                assert_eq!(palette.top(), options.bottom(), "the palette follows options without a duplicate tab row");
+                let palette = suite_palette(app);
                 assert!(
                     ribbon::control(app, "Start sketch", palette).rect.top() < palette.top() + 10.0,
                     "Start sketch begins the palette"
@@ -89,22 +108,48 @@ fn title_bar_workspaces_select_the_palette_without_a_duplicate_strip() {
                 assert_eq!(RibbonTab::ALL.map(|tab| tab.id()), ["solid", "sketch", "assembly", "inspect", "view"]);
                 if width < 1280.0 {
                     let menu = app.get_by_label("Menu").rect();
-                    assert!(!menu.intersects(sketch));
                     ribbon::click_at(app, menu.center());
                     app.run_steps(4);
                     let file = app.get_by_label_contains("File").rect();
                     ribbon::click_at(app, file.center());
                     app.run_steps(4);
-                    assert!(app.query_all_by_label_contains("New part").next().is_some(), "compact File commands remain reachable");
+                    assert!(
+                        app.query_all_by_label_contains("New part").next().is_some(),
+                        "compact File commands remain reachable"
+                    );
                     app.key_press(Key::Escape);
                     app.run_steps(4);
                     app.key_press(Key::Escape);
                     app.run_steps(4);
                 }
-                case.frame(app, &format!("title-{mode:?}-{width}-{scale}x"));
+                case.frame(app, &format!("left-bar-{mode:?}-{width}-{scale}x"));
             });
         }
     }
+}
+
+#[test]
+fn a_locked_left_bar_icon_says_why() {
+    use soliddraft_app::document::{PlaneKind, SketchPlane};
+    use soliddraft_app::state::AppAction;
+    let case = ribbon::case("left-bar-sketch-lock");
+    let mut app = ribbon::app(ribbon::plate());
+    app.state_mut().state.push(AppAction::StartSketchOn(SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 }));
+    case.run(&mut app, |app| {
+        ribbon::until(app, "the sketch opens", |app| app.state().state.in_sketch());
+        app.run_steps(8);
+        let bar = left_bar(app);
+        assert!(ribbon::control(app, "Sketch tab", bar).selected);
+        let solid = ribbon::control(app, "Solid tab", bar);
+        assert!(!solid.enabled);
+        assert_eq!(ribbon::tooltip(app, solid.rect), "Close sketch to change workspace");
+        assert_eq!(ribbon::tooltip(app, ribbon::control(app, "Sketch tab", bar).rect), "Sketch");
+        case.frame(app, "sketch-locked");
+    });
+}
+
+fn left_bar(app: &ribbon::App) -> Rect {
+    egui::PanelState::load(&app.ctx, egui::Id::new("left_bar")).expect("the left bar is laid out").outer_rect
 }
 
 fn suite_palette(app: &ribbon::App) -> Rect {
@@ -156,13 +201,13 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         assert!(app.state().state.command_line.session_open, "Mate leaves the command line's Enter key alone");
         app.state_mut().state.command_line.close_session();
         app.run_steps(8);
-        let inspect = app.get_by_label("Inspect tab").rect();
+        let inspect = ribbon::control(app, "Inspect tab", left_bar(app)).rect;
         ribbon::click_at(app, inspect.center());
         app.run_steps(8);
         click_suite(app, "Interference");
         assert!(app.state().state.assembly.interference.open);
         let part_camera = app.state().state.viewport.camera.direction();
-        let view = app.get_by_label("View tab").rect();
+        let view = ribbon::control(app, "View tab", left_bar(app)).rect;
         ribbon::click_at(app, view.center());
         app.run_steps(8);
         click_suite(app, "Graphite");
@@ -181,11 +226,11 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         assert_eq!(app.state().state.workspaces().len(), 5);
         app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Show));
         app.run_steps(8);
-        assert!(ribbon::control(app, "View tab", ribbon::window(app)).selected);
+        assert!(ribbon::control(app, "View tab", left_bar(app)).selected);
         app.set_size(vec2(960.0, 700.0));
         app.run_steps(8);
         assert!(app.state().state.active_viewport().rect.width() >= 300.0);
-        let assembly_tab = app.get_by_label("Assembly tab").rect();
+        let assembly_tab = ribbon::control(app, "Assembly tab", left_bar(app)).rect;
         ribbon::click_at(app, assembly_tab.center());
         app.run_steps(8);
         click_suite(app, "Mate");
@@ -234,17 +279,17 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         for (workspace, command) in
             [("Views", "Standard views"), ("Annotate", "Smart dimension"), ("Sheet", "Add sheet"), ("View", "Fit")]
         {
-            let tab = app.get_by_label(&format!("{workspace} tab")).rect();
+            let tab = ribbon::control(app, &format!("{workspace} tab"), left_bar(app)).rect;
             ribbon::click_at(app, tab.center());
             app.run_steps(8);
             ribbon::control(app, command, suite_palette(app));
             assert!(!ribbon::painted_in(app, suite_palette(app)).iter().any(|text| text.text == "Assistant"));
         }
-        let views = app.get_by_label("Views tab").rect();
+        let views = ribbon::control(app, "Views tab", left_bar(app)).rect;
         ribbon::click_at(app, views.center());
         app.run_steps(8);
         case.frame(app, "drawing-views");
-        let sheet = app.get_by_label("Sheet tab").rect();
+        let sheet = ribbon::control(app, "Sheet tab", left_bar(app)).rect;
         ribbon::click_at(app, sheet.center());
         app.run_steps(8);
         let before = app.state().state.drawing.session.as_ref().unwrap().doc.drawing.sheets.len();

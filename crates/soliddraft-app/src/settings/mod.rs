@@ -526,7 +526,7 @@ mod tests {
         assert!(view_from(&serde_json::json!({"frame_layout": "classic"})).references.always_show_origin_axes);
         assert!(
             !layout_from(&serde_json::json!({
-                "layout": {"tree": {"shown": true}, "suite": {"part": false}}
+                "layout": {"tree": {"shown": true, "width": 300.0}, "suite": {"part": false}}
             }))
             .suite
             .part,

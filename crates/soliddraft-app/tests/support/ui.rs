@@ -297,7 +297,10 @@ pub fn switch_workspace(app: &mut App, id: &str) {
 
 /// The visible command palette at the left of the viewport.
 pub fn palette_region(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the tool palette is open").outer_rect
+    let palette =
+        egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the tool palette is open").outer_rect;
+    // The open side area starts on the palette's right edge; its rows are not the palette's.
+    palette.shrink2(vec2(0.5, 0.0))
 }
 
 /// Reveals a palette command by stable id without running it.
@@ -482,6 +485,15 @@ pub fn menu(app: &mut App, name: &str, entry: &str) {
 
 pub fn open_tree(app: &mut App) {
     if !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        app.run_steps(8);
+    }
+}
+
+/// Closes the side area, for a check that clicks or measures the viewport at the width it
+/// has without the tree beside it.
+pub fn close_tree(app: &mut App) {
+    if app.state().state.tree_shown() {
         app.key_press(Key::F9);
         app.run_steps(8);
     }

@@ -33,7 +33,7 @@ fn reference_plane_editor_creates_a_plane_and_attaches_a_sketch() {
         assert_eq!(plane.name, "Plane1");
         assert_eq!(plane.plane.unwrap().origin.z, -6.0);
         case.frame(app, "reference-plane");
-        ribbon::run_command(app, "toggle_tree");
+        ribbon::open_tree(app);
         let eye = app.get_by_label("Hide Plane1").rect();
         ribbon::click_at(app, eye.center());
         settle(app);
@@ -72,6 +72,7 @@ fn reference_plane_on_a_translated_part_is_visible() {
     })
     .unwrap();
     let mut app = ribbon::app(doc);
+    ribbon::close_tree(&mut app);
     case.run(&mut app, |app| {
         settle(app);
         app.key_press(Key::Z);

@@ -218,6 +218,11 @@ fn start(doc: Document, size: Vec2, pixels_per_point: f32, eager: bool) -> App {
         .build_eframe(move |cc| SolidDraftApp::new(cc, doc, Automation::default()));
     render_steps::set_eager(&mut app, eager);
     settle(&mut app);
+    // The viewport is measured at full width; a case that needs the tree opens it.
+    if app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        settle(&mut app);
+    }
     app
 }
 

@@ -332,7 +332,7 @@ class BoatRunners(unittest.TestCase):
     def test_outside_runs_cannot_override_runner_selection(self):
         text = next(p for p in WORKFLOWS if p.name == 'hosted.yml').read_text()
         jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S))
-        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'application-loop', 'msrv', 'partition-linux', 'test-linux'):
+        for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'msrv'):
             expression = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
             for actor, author, source, starter in (
                     ('BohnBawerick', 'BohnBawerick', 'ZIGRAWBOHNBAWERICK/soliddraft', 'BohnBawerick'),
@@ -345,13 +345,15 @@ class BoatRunners(unittest.TestCase):
                               event={'pull_request': {'user': {'login': author},
                                      'head': {'repo': {'full_name': source}}}},
                               needs={k: '["boat-large"]' for k in
-                                     ('plain_runner', 'archive_runner', 'application_runner', 'blade_runner')})
+                                     ('plain_runner', 'archive_runner', 'blade_runner')})
                 values['matrix'] = {'shard': 2, 'lane': 1}
                 trusted = actor == author == starter == 'BohnBawerick' and source == values['repository']
                 self.assertEqual(evaluate(expression, **values),
                                  ['boat-large'] if trusted else ['ubuntu-latest'])
-        for job in ('select', 'gate'):
+        for job in ('select', 'gate', 'partition-linux', 'test-linux', 'application-loop'):
             self.assertIn('    runs-on: ubuntu-latest\n', jobs[job])
+            self.assertNotIn('    container:', jobs[job])
+            self.assertNotIn('Blade', jobs[job])
         self.assertIn('ci/select-runner.py', jobs['select'])
         self.assertIn('needs.select.outputs.plain_runner', jobs['msrv'])
         for job in ('lint', 'kernel'):
@@ -369,14 +371,8 @@ class BladeRouting(unittest.TestCase):
                       triggering_actor='BohnBawerick', event_name='push',
                       needs={'blade_runner': '["self-hosted","blade-sd"]',
                              'archive_runner': '["boat-large"]',
-                             'application_runner': '["boat-large"]',
                              'plain_runner': '["boat-large"]'})
-        cases = [(job, {'shard': n}, ['self-hosted', 'blade-sd'] if n % 2 == 0 else ['ubuntu-latest'])
-                 for job in ('partition-linux', 'test-linux') for n in range(1, 9)]
-        cases += [('application-loop', {'lane': lane},
-                   ['self-hosted', 'blade-sd'] if lane == 1 else ['ubuntu-latest'] if lane == 3 else ['boat-large'])
-                  for lane in ('proof', 1, 2, 3)]
-        cases += [(job, {}, ['self-hosted', 'blade-sd'] if job == 'lint' else ['boat-large'])
+        cases = [(job, {}, ['self-hosted', 'blade-sd'] if job == 'lint' else ['boat-large'])
                   for job in ('lint', 'kernel', 'build-linux', 'step-opencascade', 'msrv')]
         for job, matrix, expected in cases:
             runner = re.search(r'^    runs-on: \$\{\{ (.*) \}\}$', jobs[job], re.M)[1]
@@ -392,9 +388,13 @@ class BladeRouting(unittest.TestCase):
                 self.assertIn('shell: bash', jobs[job])
                 self.assertIn('Prepare Blade Ubuntu container', jobs[job])
                 self.assertIn('Clean Blade build output', jobs[job])
-                if job == 'msrv':
-                    for pool in (['self-hosted', 'blade-sd'], ['self-hosted', 'bohn-03'], ['ubuntu-latest']):
-                        fallback = dict(values, needs={**values['needs'], 'plain_runner': json.dumps(pool)})
+                if job != 'lint':
+                    pools = [['self-hosted', 'blade-sd'], ['ubuntu-latest']]
+                    if job == 'msrv':
+                        pools.append(['self-hosted', 'bohn-03'])
+                    key = 'plain_runner' if job == 'msrv' else 'archive_runner'
+                    for pool in pools:
+                        fallback = dict(values, needs={**values['needs'], key: json.dumps(pool)})
                         self.assertEqual(evaluate(runner, **fallback, matrix=matrix), pool)
                         self.assertEqual(bool(evaluate(image, **fallback, matrix=matrix)), 'blade-sd' in pool)
 

@@ -90,14 +90,13 @@ class RunnerHealth(unittest.TestCase):
         self.assertEqual(fallback['plain'], ['self-hosted', 'bohn-03'])
         self.assertEqual(fallback['plain_jobs'], '1')
         self.assertEqual(fallback['archive'], ['ubuntu-latest'])
-        self.assertEqual(fallback['application'], ['ubuntu-latest'])
         self.assertEqual(self.select(boat_at='0', bohn_at='0', blade_at='0')['plain'], ['ubuntu-latest'])
         self.assertEqual(self.select(boat_enabled='false', blade_at='0')['plain'], ['self-hosted', 'bohn-03'])
 
     def test_blade_uses_the_same_health_and_trust_gate(self):
         self.assertEqual(self.select()['blade'], ['self-hosted', 'blade-sd'])
         self.assertEqual(self.select(boat_enabled='false')['blade'], ['self-hosted', 'blade-sd'])
-        for key in ('archive', 'application', 'plain'):
+        for key in ('archive', 'plain'):
             self.assertEqual(self.select(boat_enabled='false')[key], ['self-hosted', 'blade-sd'])
             self.assertEqual(self.select(boat_at='0')[key], ['self-hosted', 'blade-sd'])
             self.assertEqual(self.select(boat_at='0', blade_at='0', bohn_at='0')[key], ['ubuntu-latest'])
@@ -126,7 +125,7 @@ class RunnerHealth(unittest.TestCase):
         for values in untrusted:
             with self.subTest(values=values):
                 runners = self.select(**values)
-                for key in ('plain', 'archive', 'application', 'blade'):
+                for key in ('plain', 'archive', 'blade'):
                     self.assertEqual(runners[key], ['ubuntu-latest'])
 
 

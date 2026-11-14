@@ -165,3 +165,5 @@ pub fn bench_document() -> Document {
     doc.selection = None;
     doc
 }
+
+mod multibody;

@@ -728,9 +728,9 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
         "Solid",
         &[
             ("Sketch", &["sketch"]),
-            ("Create", &["extrude", "revolve", "sweep", "loft"]),
+            ("Create", &["extrude", "revolve", "sweep", "loft", "new_body"]),
             ("Remove", &["cut", "hole", "slot"]),
-            ("Modify", &["fillet", "chamfer", "shell", "draft", "lattice", "gyroid", "offset", "thicken"]),
+            ("Modify", &["fillet", "chamfer", "shell", "draft", "lattice", "gyroid", "offset", "thicken", "combine"]),
             ("Pattern", &["linear_pattern", "circular_pattern", "mirror"]),
             ("Reference", &["reference_plane", "reference_axis", "reference_point"]),
         ],

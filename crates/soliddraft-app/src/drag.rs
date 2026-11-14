@@ -50,7 +50,8 @@ impl Dimension {
             FeatureKind::Cut(p) if !p.through_all && p.up_to.is_none() => Some(Dimension::Depth),
             FeatureKind::Fillet(_) => Some(Dimension::Radius),
             FeatureKind::Chamfer(_) => Some(Dimension::Distance),
-            FeatureKind::Extrude(_)
+            FeatureKind::Combine { .. }
+            | FeatureKind::Extrude(_)
             | FeatureKind::Cut(_)
             | FeatureKind::ReferencePlane(_)
             | FeatureKind::Sketch(_)
@@ -121,7 +122,8 @@ pub fn edit_command(id: FeatureId, kind: FeatureKind) -> Option<Command> {
         | FeatureKind::Revolve(_)
         | FeatureKind::Loft(_)
         | FeatureKind::Sweep(_)) => Command::EditFeature { id, kind },
-        FeatureKind::ReferencePlane(_)
+        FeatureKind::Combine { .. }
+        | FeatureKind::ReferencePlane(_)
         | FeatureKind::Sketch(_)
         | FeatureKind::Scan(_)
         | FeatureKind::ImportStep(_)
@@ -558,6 +560,9 @@ fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answ
     let allowance = model.kernel().reserve_proof_work().map_err(|error| refused(error.to_string()))?;
     let construction = baseline.and_then(|baseline| {
         let edits = crate::document::scalar_edits(&baseline, &model).filter(|edits| !edits.is_empty())?;
+        if baseline.live_bodies().len() != 1 {
+            return None;
+        }
         baseline.body()?;
         Some(ConstructionTask { request, baseline, edits, params, model: model.fork() })
     });

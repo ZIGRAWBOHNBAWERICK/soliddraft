@@ -177,9 +177,10 @@ impl TabViewer for Panels<'_> {
                 crate::scan::paint(ui, st);
                 st.after_viewport(ui, &events);
                 if let Some(response) = &events.context_response {
-                    let selection = pick_filter.selection(
-                        events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p)),
-                    );
+                    let picked =
+                        events.secondary_clicked.flatten().and_then(|p| crate::viewport::pick::selection(&st.doc, p));
+                    st.doc.target_selection(picked);
+                    let selection = pick_filter.selection(picked);
                     let target = if let Some(session) = st.sketch.as_mut() {
                         if let Some(pos) = events.context_position {
                             let picked =
@@ -208,6 +209,7 @@ impl TabViewer for Panels<'_> {
                 if let Some(picked) = events.clicked.filter(|_| !st.viewport.section_active) {
                     let reference = events.clicked_reference.map(Selection::Reference);
                     let sel = picked.and_then(|p| selection_of(&st.doc, p)).or(reference);
+                    st.doc.target_selection(sel);
                     st.push(AppAction::Select(pick_filter.selection(sel)));
                 }
                 if let Some(v) = events.set_view {

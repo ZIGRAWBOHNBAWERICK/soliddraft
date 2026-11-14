@@ -2795,6 +2795,9 @@ fn selection_json(doc: &Document, sel: Selection) -> Value {
     if matches!(sel, Selection::Face(_) | Selection::Edge(_)) {
         mark_estimates(&mut v, topology.as_ref());
     }
+    if matches!(sel, Selection::Body) && (doc.model().next_body() > 1 || doc.active_body != 0) {
+        v["body_id"] = doc.active_body.into();
+    }
     v["name"] = info.title.into();
     v["kind"] = match sel {
         Selection::Body => "body",
@@ -2825,6 +2828,7 @@ fn params_json(doc: &Document, kind: &FeatureKind) -> Value {
     let name = |id: FeatureId| doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "missing".into());
     let labels = |refs: &[EdgeRef]| refs.iter().map(|r| r.label.clone()).collect::<Vec<_>>();
     match kind {
+        FeatureKind::Combine { operation, tool } => json!({"type":"combine", "operation":operation, "tool_body":tool}),
         FeatureKind::ReferencePlane(p) => json!({"type": "reference_plane", "source": p, "offset": p.offset()}),
         FeatureKind::Sketch(s) => json!({
             "type": "sketch",
@@ -2950,7 +2954,8 @@ impl CommandTools<'_> {
         let proof = doc.proof_state();
         let current = proof.current_proved_display() || (proof.display_only_bound && proof.current_proved_model());
         let mass = if current && doc.model().active_field().is_none() { cached_body_mass(doc) } else { None };
-        json!({
+        let body_context = doc.model().next_body() > 1 || doc.active_body != 0;
+        let mut summary = json!({
             "part": doc.name,
             "units": "mm",
             "values": crate::grid::tools::values(crate::measure::values(doc), doc.model().values().summary()),
@@ -2963,6 +2968,7 @@ impl CommandTools<'_> {
                     let expressions = doc.model().values().expressions(feature);
                     if !expressions.is_empty() { v["expressions"] = json!(expressions); }
                 }
+                if body_context { v["body_id"] = f.body_key.into(); }
                 v["id"] = f.id.into();
                 v["name"] = f.name.clone().into();
                 v["status"] = status_text(doc, f.id).into();
@@ -2992,7 +2998,13 @@ impl CommandTools<'_> {
                 .map(|p| json!({ "id": p.id, "summary": p.summary })).collect::<Vec<_>>(),
             "auto_apply": self.book.auto_apply,
             "undo": doc.undo_label(),
-        })
+        });
+        if body_context {
+            summary["bodies"] =
+                doc.model().live_bodies().iter().map(|(key, _)| json!({"id":key,"name":doc.body_name(*key)})).collect();
+            summary["active_body"] = doc.active_body.into();
+        }
+        summary
     }
 
     fn feature(&self, name: &str) -> Result<Value, String> {
@@ -3000,6 +3012,9 @@ impl CommandTools<'_> {
         let id = feature_by_name(doc, name)?;
         let f = doc.feature(id).expect("found by name");
         let mut v = params_json(doc, &f.kind);
+        if doc.model().next_body() > 1 || doc.active_body != 0 {
+            v["body_id"] = f.body_key.into();
+        }
         v["name"] = f.name.clone().into();
         v["status"] = status_text(doc, id).into();
         if let Some(record) = doc.model().import_record(soliddraft_model::FeatureId(id as u32)) {

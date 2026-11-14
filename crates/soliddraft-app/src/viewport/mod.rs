@@ -531,6 +531,9 @@ impl ViewportState {
             && doc.display_body().is_some()
         {
             events.clicked = None;
+            if let Some(selection) = self.hover.and_then(|picked| pick::selection(doc, picked)) {
+                events.actions.push(AppAction::Select(Some(selection)));
+            }
             events.actions.push(AppAction::Select(Some(Selection::Body)));
         }
         for (i, d) in dims.iter().enumerate() {

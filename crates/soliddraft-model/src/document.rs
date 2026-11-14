@@ -99,6 +99,7 @@ pub struct Document {
     /// The first feature below the rollback bar.
     pub(crate) rollback: Option<FeatureId>,
     pub(crate) next_id: u32,
+    pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
     pub(crate) materials: PartMaterials,
     /// Viewport quality, export accuracy and whether to save display data: kept in the
@@ -147,6 +148,7 @@ impl Document {
             datum_names: BTreeMap::new(),
             rollback: None,
             next_id: 1,
+            next_body: 1,
             materials: PartMaterials::default(),
             settings: Settings::default(),
             view: Visibility::default(),
@@ -242,6 +244,9 @@ impl Document {
         format: soliddraft_exchange::Format,
         accuracy_mm: Option<f64>,
     ) -> Result<soliddraft_exchange::Export, String> {
+        if self.live_bodies().len() > 1 {
+            return Err("Several-body export is coming soon. Combine the bodies before exporting.".into());
+        }
         let mut tolerance = self.settings.export;
         if let Some(mm) = accuracy_mm {
             tolerance.chord_height = mm;
@@ -440,9 +445,13 @@ impl Document {
         self.features.iter().zip(&self.built).map(|(f, b)| (f.id, &b.status)).collect()
     }
 
-    /// The part body at the end of the tree (or at the rollback bar).
+    /// The single solid at the rollback bar. Several-body parts use `live_bodies`.
     pub fn body(&self) -> Option<BodyId> {
-        self.built.last().and_then(|b| b.output)
+        if self.next_body == 1 {
+            return self.built.last().and_then(|b| b.output);
+        }
+        let bodies = self.live_bodies();
+        (bodies.len() == 1).then(|| bodies[0].1)
     }
 
     /// The part body right after a feature.
@@ -453,7 +462,69 @@ impl Document {
     /// The part body a feature starts from.
     pub fn body_before(&self, id: FeatureId) -> Option<BodyId> {
         let i = self.built_index(id)?;
-        i.checked_sub(1).and_then(|p| self.built[p].output)
+        self.body_at(self.features[i].body, i)
+    }
+
+    /// Current solid for each stable body identity, in body order.
+    pub fn live_bodies(&self) -> Vec<(u32, BodyId)> {
+        if self.next_body == 1 {
+            return self.body().map(|body| vec![(0, body)]).unwrap_or_default();
+        }
+        self.body_states(self.built.len()).into_iter().collect()
+    }
+
+    /// Solid bodies available immediately before a feature.
+    pub fn bodies_before(&self, id: FeatureId) -> Vec<(u32, BodyId)> {
+        self.index_of(id).map(|end| self.body_states(end).into_iter().collect()).unwrap_or_default()
+    }
+
+    /// Features contributing to a body, including tools consumed by Combine.
+    pub fn body_features(&self, key: u32) -> Vec<FeatureId> {
+        let mut bodies = std::collections::BTreeSet::from([key]);
+        let mut features = Vec::new();
+        for feature in self.features.iter().take(self.active_count()).rev() {
+            if !bodies.contains(&feature.body) {
+                continue;
+            }
+            features.push(feature.id);
+            if let FeatureKind::Combine { tool, .. } = feature.kind
+                && self.status(feature.id) == Some(&FeatureStatus::Ok)
+            {
+                bodies.insert(tool);
+            }
+        }
+        features.reverse();
+        features
+    }
+
+    /// The next unused body identity.
+    pub fn next_body(&self) -> u32 {
+        self.next_body
+    }
+
+    pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {
+        if self.next_body == 1 {
+            if key != 0 {
+                return None;
+            }
+            return end.checked_sub(1).and_then(|i| self.built.get(i)).and_then(|built| built.output);
+        }
+        self.body_states(end).get(&key).copied()
+    }
+
+    fn body_states(&self, end: usize) -> BTreeMap<u32, BodyId> {
+        let mut bodies = BTreeMap::new();
+        for b in self.built.iter().take(end) {
+            if let Some(body) = b.output {
+                bodies.insert(b.body_key, body);
+            } else {
+                bodies.remove(&b.body_key);
+            }
+            if let Some(tool) = b.consumed_tool {
+                bodies.remove(&tool);
+            }
+        }
+        bodies
     }
 
     /// Where a sketch lies and what regions it has, as the last rebuild placed it.

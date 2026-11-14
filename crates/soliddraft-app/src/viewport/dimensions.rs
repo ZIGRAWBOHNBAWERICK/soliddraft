@@ -7,7 +7,9 @@
 
 use super::camera::Camera;
 use crate::dimension_edit::{DimensionAction, DimensionEdit, FeatureField};
-use crate::document::{Document, EndKind, Feature, FeatureId, FeatureKind, FeatureStatus, ProfileKind, fmt_mm};
+use crate::document::{
+    Document, EndKind, Feature, FeatureId, FeatureKind, FeatureStatus, ProfileKind, Selection, fmt_mm,
+};
 use crate::sketch::{ConstraintId, ConstraintKind, DistanceKind, P2, Sketch};
 use crate::sketcher::{arrow, paint_closed_dimensions, value_pill};
 use crate::state::AppAction;
@@ -106,6 +108,9 @@ pub fn paint(
     let end = doc.rollback.unwrap_or(doc.features.len()).min(doc.features.len());
     let built: Vec<&Feature> =
         doc.features[..end].iter().filter(|f| !f.suppressed && f.status != FeatureStatus::Inactive).collect();
+    let scoped = matches!(doc.selection, Some(Selection::Body | Selection::Face(_) | Selection::Edge(_)));
+    let contributing = doc.body_features();
+    let in_body = |f: &Feature| !scoped || contributing.contains(&f.id);
     let anchors = if body { anchors(doc) } else { HashMap::new() };
     let mut shown = Vec::new();
     let authored_position = |key: AnnotationKey| {
@@ -161,15 +166,16 @@ pub fn paint(
     let sketches = built.iter().filter_map(|f| {
         let FeatureKind::Sketch(s) = &f.kind else { return None };
         let plane = f.plane?;
-        (visible_sketches.contains(&f.id) || (body && built.iter().any(|c| c.kind.sketch() == Some(f.id))))
-            .then_some((*f, plane, &s.sketch))
+        (visible_sketches.contains(&f.id)
+            || (body && in_body(f) && built.iter().any(|c| c.kind.sketch() == Some(f.id))))
+        .then_some((*f, plane, &s.sketch))
     });
     for authored in [true, false] {
         for (f, plane, sketch) in sketches.clone() {
             sketch_dims(&mut shown, f, plane, sketch, true, Some(authored));
         }
     }
-    for f in &built {
+    for f in built.iter().filter(|f| in_body(f)) {
         let mut depth: Option<(Plane, &Sketch, f64)> = None;
         let builtin;
         match &f.kind {
@@ -274,7 +280,7 @@ fn values(kind: &FeatureKind) -> Vec<(AnnotationValue, String)> {
     use AnnotationValue::*;
     match kind {
         FeatureKind::Revolve(r) => vec![(Angle, format!("{}°", fmt_mm(r.angle_deg)))],
-        FeatureKind::Sweep(_) | FeatureKind::Loft(_) => vec![],
+        FeatureKind::Combine { .. } | FeatureKind::Sweep(_) | FeatureKind::Loft(_) => vec![],
         FeatureKind::Fillet(p) => vec![(Radius, format!("R{}", fmt_mm(p.radius)))],
         FeatureKind::Chamfer(p) => vec![(Distance, fmt_mm(p.distance))],
         FeatureKind::Draft(d) => vec![(Angle, format!("{}°", fmt_mm(d.angle)))],

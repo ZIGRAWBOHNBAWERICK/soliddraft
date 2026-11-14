@@ -454,6 +454,11 @@ impl SolidDraftApp {
                 self.open_editor(None, EditorParams::Gyroid(soliddraft_model::GyroidFeature::default()));
                 self.state.doc.selection = None;
             }
+            AppAction::NewBody => self.state.doc.new_body(),
+            AppAction::SelectBody(key) => self.state.doc.select_body(key),
+            AppAction::StartCombine => {
+                self.state.doc.combine_form = crate::multibody::CombineForm::new(&self.state.doc);
+            }
             AppAction::StartOffset => {
                 self.open_editor(None, EditorParams::Offset(soliddraft_model::OffsetFeature { distance: 1.0 }));
                 self.state.doc.selection = None;
@@ -510,6 +515,11 @@ impl SolidDraftApp {
             AppAction::EditFeature(id) => {
                 let Some(f) = self.state.doc.feature(id) else { return };
                 let params = match &f.kind {
+                    FeatureKind::Combine { operation, tool } => {
+                        self.state.doc.combine_form =
+                            Some(crate::multibody::CombineForm::editing(id, f.body_key, *tool, *operation));
+                        return;
+                    }
                     FeatureKind::Sketch(_) => {
                         self.apply(ctx, AppAction::EditSketch(id));
                         return;
@@ -940,6 +950,7 @@ impl SolidDraftApp {
                         _ => {}
                     }
                 }
+                self.state.doc.target_selection(sel);
                 self.state.doc.selection = sel;
                 self.state.rename = None;
             }

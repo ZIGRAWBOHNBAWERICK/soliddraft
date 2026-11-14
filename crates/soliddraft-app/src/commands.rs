@@ -2013,6 +2013,18 @@ fn registry() -> Vec<CommandSpec> {
                  0.1 mm⁵. Never computed from the preview or a mesh, and only when asked for.",
                 Vec::new,
             ),
+        cmd("new_body", "New body", Icon::Extrude, "Create the next feature in a separate solid body")
+            .on(Solid, "Create", Small).outside_sketch()
+            .run(|_| AppAction::NewBody)
+            .when(|s| !s.in_sketch() && s.editor.is_none() && field_open(s))
+            .app_only("Choose the next feature's body in the modelling window"),
+        cmd("combine", "Combine", Icon::Extrude, "Union, subtract or intersect two solid bodies")
+            .on(Solid, "Modify", Small).outside_sketch()
+            .run(|_| AppAction::StartCombine)
+            .when(|s| !s.in_sketch() && s.editor.is_none() && s.doc.model().live_bodies().len() >= 2 && field_open(s))
+            .hint(|s| (s.doc.model().live_bodies().len() < 2).then(|| "Combine needs two solid bodies".into()))
+            .undo(Undo::Step)
+            .app_only("Choose target and tool bodies in the Combine window"),
         cmd("offset", "Offset", Icon::Cad("srf_offset"), "Grow or shrink the body by a signed distance")
             .on(Solid, "Modify", Small).outside_sketch()
             .run(|_| AppAction::StartOffset)
@@ -2099,9 +2111,9 @@ fn registry() -> Vec<CommandSpec> {
         )
         .key(Scope::Part, ctrl_shift, Key::D)
         .run(|_| AppAction::Drawing(DrawingAction::MakeDrawing))
-        .when(has_body)
+        .when(|s| has_body(s) && s.doc.model().live_bodies().len() == 1)
         .lit(|s| s.drawing.new.is_some())
-        .hint(|s| (!has_body(s)).then(|| "Make drawing needs a body".into()))
+        .hint(|s| if s.doc.model().live_bodies().len() > 1 { Some("Several-body drawings are coming soon. Combine the bodies first.".into()) } else { (!has_body(s)).then(|| "Make drawing needs a body".into()) })
 .agents(
             Agents::Mcp,
             "With the template's default views (Front, Top, Left and Isometric) fitted to the sheet and centre marks \
@@ -2221,7 +2233,7 @@ fn registry() -> Vec<CommandSpec> {
         cmd("section", "Section", Icon::Cad("section"), "Cut the view open on a plane")
             .on(Inspect, "Check", Small)
             .run(|_| AppAction::ToggleSection)
-            .when(|s| s.doc.display_body().is_some() && s.editor.is_none() && !s.in_sketch())
+            .when(|s| !s.doc.meshes.is_empty() && s.editor.is_none() && !s.in_sketch())
             .app_only("Section view"),
         cmd("draft_check", "Draft check", Icon::Cad("draft_check"), "Show which faces have enough draft")
             .on(Inspect, "Surface quality", Small),

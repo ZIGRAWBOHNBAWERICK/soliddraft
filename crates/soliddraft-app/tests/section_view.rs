@@ -7,6 +7,115 @@ use egui::{accesskit::Role, pos2};
 use egui_kittest::kittest::Queryable;
 use soliddraft_app::{document::DisplayMesh, section::SectionPlane};
 
+fn separated_bodies() -> soliddraft_app::document::Document {
+    use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, SketchPlane};
+    use soliddraft_sketch::{P2, Sketch};
+
+    let mut doc = Document::new("Section both bodies", soliddraft_app::kernel());
+    for (x, depth) in [(-30.0, 10.0), (30.0, 20.0)] {
+        if x > 0.0 {
+            doc.new_body();
+        }
+        let id = doc
+            .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+            .unwrap()
+            .unwrap();
+        let mut sketch = Sketch::new();
+        sketch.rectangle(P2::new(x, 0.0), 20.0, 10.0).unwrap();
+        doc.apply(Command::EditSketch { id, sketch }).unwrap();
+        doc.apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(id), depth, ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap();
+    }
+    doc
+}
+
+#[test]
+fn section_keeps_every_body_when_the_active_body_changes() {
+    let case = ribbon::case("section-multibody");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let doc = separated_bodies();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        let before = app.state().state.doc.model().to_bytes().unwrap();
+        let meshes = app.state().state.doc.meshes.clone();
+        click(app, "Inspect tab");
+        click(app, "Section");
+        ready(app);
+        let section = |app: &ribbon::App| app.state().state.section.mesh(&app.state().state.doc).unwrap();
+        assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "both bodies contribute to the section");
+        let (lo, hi) = section(app).bounds().unwrap();
+        assert!(lo.x < -30.0 && hi.x > 30.0, "the section spans both separated bodies");
+
+        app.state_mut().state.doc.select_body(0);
+        app.run_steps(3);
+        ready(app);
+        assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "selection does not change the section");
+        app.state_mut().state.doc.new_body();
+        app.run_steps(3);
+        ready(app);
+        assert!((volume(&section(app)) - 4000.0).abs() < 0.1, "an empty active body does not hide the section");
+        assert!(soliddraft_app::commands::get("section").unwrap().is_enabled(&app.state().state));
+        drag_offset(app, -20.0);
+        let offset = app.state().state.section.offset;
+        assert!(offset > 0.0 && offset < 10.0);
+        let kept = volume(&section(app));
+        assert!((kept - 400.0 * offset).abs() < 0.1, "both bodies are cut at the same plane");
+        click(app, "Flip side");
+        ready(app);
+        assert!((kept + volume(&section(app)) - 6000.0).abs() < 0.1, "both complementary cuts stay visible");
+        case.frame(app, "both-bodies-sectioned");
+        let body_feature = app.state().state.doc.features.iter().find(|f| !f.is_sketch()).unwrap().id;
+        let item = soliddraft_app::document::ViewItem::Feature(body_feature);
+        app.state_mut().state.doc.set_view_choice(item, Some(false));
+        app.run_steps(4);
+        assert!(app.state().state.section.mesh(&app.state().state.doc).is_none(), "hidden solids stay hidden");
+        app.state_mut().state.doc.set_view_choice(item, None);
+        app.run_steps(3);
+        ready(app);
+        click(app, "Close section");
+        assert_eq!(app.state().state.doc.model().to_bytes().unwrap(), before);
+        assert_eq!(app.state().state.doc.meshes, meshes);
+    });
+}
+
+#[test]
+fn a_face_section_keeps_its_plane_when_another_or_empty_body_is_active() {
+    let case = ribbon::case("section-face-multibody");
+    std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
+    let mut doc = separated_bodies();
+    doc.select_body(0);
+    let face = doc.faces.iter().find(|f| f.centroid.x < 0.0 && (f.centroid.z - 10.0).abs() < 1e-5).unwrap();
+    let (face, label) = (face.id, face.label.clone());
+    let entry = doc.faces.iter().filter(|f| f.label == label).position(|f| f.id == face).unwrap();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        click(app, "Inspect tab");
+        click(app, "Section");
+        ready(app);
+        app.get_by_label("Face plane").click();
+        app.run_steps(3);
+        app.query_all_by_label(&label).nth(entry).unwrap().click();
+        app.run_steps(3);
+        ready(app);
+        assert_eq!(app.state().state.section.plane, SectionPlane::Face(face));
+        let version = app.state().state.doc.mesh_version;
+        let mesh = app.state().state.section.mesh(&app.state().state.doc).unwrap();
+        app.state_mut().state.doc.select_body(1);
+        app.run_steps(3);
+        assert_eq!(app.state().state.doc.mesh_version, version);
+        assert!(app.state().state.doc.face_plane(face).is_some(), "the selected face still belongs to the scene");
+        assert_eq!(app.state().state.section.mesh(&app.state().state.doc).as_deref(), Some(mesh.as_ref()));
+        app.state_mut().state.doc.new_body();
+        app.run_steps(3);
+        assert!(app.state().state.doc.face_plane(face).is_some(), "an empty active body does not lose the face");
+        assert_eq!(app.state().state.section.mesh(&app.state().state.doc).as_deref(), Some(mesh.as_ref()));
+        case.frame(app, "face-section-with-empty-active-body");
+    });
+}
+
 fn ready(app: &mut ribbon::App) {
     let start = std::time::Instant::now();
     loop {

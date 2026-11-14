@@ -22,6 +22,9 @@ use crate::document::{BuiltSketch, Document, FeatureStatus};
 /// One feature's rebuild result.
 #[derive(Clone, Debug)]
 pub(crate) struct Built {
+    /// Body membership of this retained build, including while definitions are dirty.
+    pub body_key: u32,
+    pub consumed_tool: Option<u32>,
     pub status: FeatureStatus,
     /// The part body after this feature.
     pub output: Option<BodyId>,
@@ -40,8 +43,19 @@ pub(crate) struct Built {
 }
 
 impl Built {
+    fn in_body(mut self, feature: &Feature) -> Self {
+        self.body_key = feature.body;
+        self.consumed_tool = match feature.kind {
+            FeatureKind::Combine { tool, .. } if self.status.is_ok() => Some(tool),
+            _ => None,
+        };
+        self
+    }
+
     fn pass(status: FeatureStatus, current: Option<BodyId>) -> Built {
         Built {
+            body_key: 0,
+            consumed_tool: None,
             status,
             output: current,
             owned: None,
@@ -85,6 +99,7 @@ impl Document {
             datum_names: self.datum_names.clone(),
             rollback: self.rollback,
             next_id: self.next_id,
+            next_body: self.next_body,
             materials: self.materials.clone(),
             settings: self.settings.clone(),
             view: self.view.clone(),
@@ -188,17 +203,18 @@ impl Document {
         self.built.truncate(start);
         let active = self.active_count();
         let mut cache = std::mem::take(&mut self.cache);
-        let mut current = start.checked_sub(1).and_then(|i| self.built[i].output);
+
         for i in start..self.features.len() {
             let f = self.features[i].clone();
+            let current = self.body_at(f.body, i);
             let built = if i >= active {
                 Built::pass(FeatureStatus::RolledBack, current)
             } else if f.suppressed {
                 Built::pass(FeatureStatus::Suppressed, current)
             } else {
                 self.build(&f, current, &mut cache)
-            };
-            current = built.output;
+            }
+            .in_body(&f);
             self.built.push(built);
         }
         cache.trim(&self.built);
@@ -217,7 +233,7 @@ impl Document {
         let mut cache = std::mem::take(&mut self.cache);
         for i in 0..self.dirty.min(self.built.len()) {
             if i < self.active_count() && !self.features[i].suppressed {
-                let current = i.checked_sub(1).and_then(|i| self.built[i].output);
+                let current = self.body_at(self.features[i].body, i);
                 self.built[i] = self.build_or_keep(&self.features[i], current, &mut cache, Some(&self.built[i]));
             }
         }
@@ -281,6 +297,25 @@ impl Document {
                 profiles.push(self.built[index].version);
             }
         }
+        if let FeatureKind::Sketch(SketchFeature {
+            plane: SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. },
+            ..
+        }) = &f.kind
+        {
+            let body =
+                self.feature(face.feature).and_then(|feature| self.body_at(feature.body, self.built.len())).or(current);
+            if let Some(owner) = body.and_then(|body| self.built.iter().find(|b| b.owned == Some(body))) {
+                profiles.push(owner.version);
+            }
+        }
+        if let FeatureKind::Combine { tool, .. } = f.kind {
+            let end = self.index_of(f.id).unwrap_or(self.built.len());
+            if let Some(body) = self.body_at(tool, end)
+                && let Some(owner) = self.built.iter().find(|b| b.owned == Some(body))
+            {
+                profiles.push(owner.version);
+            }
+        }
         if let Some(kept) = kept {
             return kept.clone();
         }
@@ -291,6 +326,25 @@ impl Document {
         let mut result = None;
         let work_used = self.kernel.measure_work(&mut || {
             result = Some(match &f.kind {
+                FeatureKind::Combine { operation, tool } => {
+                    let end = self.index_of(f.id).unwrap_or(self.built.len());
+                    match (current, self.body_at(*tool, end)) {
+                        _ if f.body == *tool => Built::failed(current, "Choose two different bodies to combine."),
+                        (Some(target), Some(tool)) => {
+                            let result = self.kernel.boolean(&OpTag::new(format!("{}.combine", f.id)), *operation, target, tool).map_err(|error| {
+                                let message = match error {
+                                    KernelError::InvalidInput(message) => message,
+                                    KernelError::Unsupported(message) if message == "this would leave nothing of the part" => "This combine would leave no solid body.".into(),
+                                    KernelError::Unsupported(_) => "Combine for these bodies is coming soon.".into(),
+                                    _ => "These bodies cannot be combined with this operation. Check that their boundaries are closed and overlap.".into(),
+                                };
+                                KernelError::InvalidInput(message)
+                            });
+                            self.finish(result, current, |_| Vec::new())
+                        }
+                        _ => Built::failed(current, "Combine needs two available solid bodies."),
+                    }
+                }
                 FeatureKind::ReferencePlane(p) => match self.sketch_plane_of(p, current) {
                     Ok((plane, _)) => {
                         let mut built = Built::pass(FeatureStatus::Ok, current);
@@ -371,7 +425,7 @@ impl Document {
             }
             Err(_) => {}
         }
-        cache.insert(key, built, &self.kernel)
+        cache.insert(key, built.in_body(f), &self.kernel)
     }
 
     /// The built sketch an extrusion sweeps, or the extrusion's result when that sketch
@@ -419,7 +473,11 @@ impl Document {
                     let r = RepairNeeded { slot: ReferenceSlot::SketchPlane, reason, message, candidates };
                     Err(Box::new(Built::pass(FeatureStatus::RepairNeeded(vec![r]), current)))
                 };
-                let Some(body) = current else {
+                let source_body = self
+                    .feature(face.feature)
+                    .and_then(|feature| self.body_at(feature.body, self.built.len()))
+                    .or(current);
+                let Some(body) = source_body else {
                     return repair(RepairReason::Missing, "there is no part body to sketch on".into(), vec![]);
                 };
                 // A sketch plane needs no mesh of the body before it unless this cannot answer.
@@ -471,6 +529,8 @@ impl Document {
         };
         let regions = s.sketch.regions().map_err(|e| e.to_string());
         Built {
+            body_key: 0,
+            consumed_tool: None,
             status: FeatureStatus::Ok,
             output: current,
             owned: None,
@@ -567,6 +627,8 @@ impl Document {
         };
         match run() {
             Ok(output) => Built {
+                body_key: 0,
+                consumed_tool: None,
                 status: FeatureStatus::Ok,
                 output,
                 owned: mine,
@@ -804,6 +866,8 @@ impl Document {
         };
         match run(&mut mine) {
             Ok(output) => Built {
+                body_key: 0,
+                consumed_tool: None,
                 status: FeatureStatus::Ok,
                 output,
                 owned: mine,
@@ -887,6 +951,8 @@ impl Document {
             })
             .collect();
         Built {
+            body_key: 0,
+            consumed_tool: None,
             status: FeatureStatus::Ok,
             output: Some(result.body),
             owned: Some(result.body),
@@ -941,6 +1007,8 @@ impl Document {
     ) -> Built {
         match result {
             Ok(r) => Built {
+                body_key: 0,
+                consumed_tool: None,
                 status: FeatureStatus::Ok,
                 output: Some(r.body),
                 owned: Some(r.body),
@@ -1309,12 +1377,13 @@ impl Document {
                 }
                 if r.bodies.len() != 1 {
                     release(&r);
-                    let n = r.bodies.len();
-                    return Built::failed(current, format!("the file holds {n} solids; a part holds one body"));
+                    return Built::failed(current, "Several-solid import is coming soon.");
                 }
                 let result = r.bodies.remove(0).result;
                 let body = result.body;
                 Built {
+                    body_key: 0,
+                    consumed_tool: None,
                     status: FeatureStatus::Ok,
                     output: Some(body),
                     owned: Some(body),

@@ -335,7 +335,8 @@ fn references(doc: &soliddraft_model::Document) -> Value {
                 .map(|(i, face)| (ReferenceSlot::Face { index: i as u32 }, origin(face), vec![face]))
                 .chain(plane(&d.neutral))
                 .collect(),
-            FeatureKind::Offset(_)
+            FeatureKind::Combine { .. }
+            | FeatureKind::Offset(_)
             | FeatureKind::Pattern(_)
             | FeatureKind::Revolve(_)
             | FeatureKind::Sweep(_)

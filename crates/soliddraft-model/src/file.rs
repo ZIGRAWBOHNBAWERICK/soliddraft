@@ -6,7 +6,8 @@
 //! - `manifest.json`: the part's id, kind and format, the application and kernel that
 //!   wrote it, its semantic hash (the revision drawings and assemblies pin) and its
 //!   geometry hash, and its sections.
-//! - `part.json`: the truth. The format tag (`soliddraft-part/2`), the part's name and
+//! - `part.json`: the truth. The format tag (`soliddraft-part/2`, or `/3` for explicit
+//!   body identities), the part's name and
 //!   units, every feature in tree order with its parameters, sketch and persistent
 //!   references, the rollback bar and the next free feature id, and when it has them
 //!   the part's text properties and its material and appearance assignments with copies
@@ -62,6 +63,8 @@ use crate::view::{self, Visibility};
 
 /// The format tag of the current version.
 pub const FORMAT: &str = "soliddraft-part/2";
+/// Parts with explicit body identities require this version.
+pub const MULTIBODY_FORMAT: &str = "soliddraft-part/3";
 /// The format tag of part files from before the document envelope.
 pub const LEGACY_FORMAT: &str = "soliddraft-part/1";
 /// The file name extension parts are saved under.
@@ -85,7 +88,7 @@ pub enum FileError {
     #[error("the part's recipe is not valid: {0}")]
     Json(#[from] serde_json::Error),
     /// The format tag is not one this version reads.
-    #[error("the file {}, this version reads {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
+    #[error("the file {}, this version reads {MULTIBODY_FORMAT}, {FORMAT} and {LEGACY_FORMAT}", found_tag(.found))]
     Format {
         /// The tag in the file.
         found: String,
@@ -109,6 +112,13 @@ impl From<EnvelopeError> for FileError {
     }
 }
 
+fn first_body_id() -> u32 {
+    1
+}
+fn is_first_body_id(id: &u32) -> bool {
+    *id == 1
+}
+
 /// `part.json`, and `recipe.json` before the envelope.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -128,6 +138,8 @@ struct Recipe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rollback: Option<FeatureId>,
     next_feature: u32,
+    #[serde(default = "first_body_id", skip_serializing_if = "is_first_body_id")]
+    next_body: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     material: Vec<MaterialAssignment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -180,7 +192,7 @@ impl Document {
 
     fn recipe(&self) -> Recipe {
         Recipe {
-            format: FORMAT.into(),
+            format: if self.next_body > 1 { MULTIBODY_FORMAT } else { FORMAT }.into(),
             name: self.name.clone(),
             units: Units::Mm,
             features: self
@@ -202,6 +214,7 @@ impl Document {
             datum_names: self.datum_names.clone(),
             rollback: self.rollback,
             next_feature: self.next_id,
+            next_body: self.next_body,
             material: self.materials.material.clone(),
             appearances: self.materials.appearances.clone(),
             snapshots: self.materials.snapshots.clone(),
@@ -324,7 +337,7 @@ impl Document {
         };
         m.check(DocKind::Part, &[PART])?;
         let text = package.read_text(PART)?.ok_or_else(|| FileError::Archive("no part.json".into()))?;
-        let mut doc = Self::read_truth(&text, kernel, 2)?;
+        let mut doc = Self::read_truth(&text, kernel, 3)?;
         doc.id = m.id;
         if let Ok(Some(text)) = package.read_text(settings::ENTRY) {
             doc.settings = Settings::from_json(&text).unwrap_or_default();
@@ -339,14 +352,14 @@ impl Document {
     /// rebuilds it on `kernel`. Without a manifest there is no recorded id, so the part
     /// gets the id derived from its content, as a pre-envelope file does.
     pub fn from_part_json(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        let mut doc = Self::read_truth(text, kernel, 2)?;
+        let mut doc = Self::read_truth(text, kernel, 3)?;
         doc.rebuild();
         Ok(doc)
     }
 
     /// Decodes authored truth without starting a kernel operation.
     pub(crate) fn from_part_json_unbuilt(text: &str, kernel: Arc<dyn Kernel>) -> Result<Document, FileError> {
-        Self::read_truth(text, kernel, 2)
+        Self::read_truth(text, kernel, 3)
     }
 
     /// Reads truth text whose format's major version is at most `newest`.
@@ -424,6 +437,7 @@ impl Document {
         doc.features = recipe.features;
         doc.rollback = recipe.rollback;
         doc.next_id = recipe.next_feature;
+        doc.next_body = recipe.next_body.max(doc.features.iter().map(|f| f.body.saturating_add(1)).max().unwrap_or(1));
         Ok(doc)
     }
 
@@ -452,6 +466,7 @@ fn part_manifest(
 ) -> Manifest {
     let mut m = Manifest::new(id, DocKind::Part, manifest::semantic_hash(DocKind::Part, truth));
     m.kernel = Some(format!("{} {}", backend.name, backend.version));
+    m.format = truth.get("format").and_then(Value::as_str).unwrap_or(FORMAT).to_owned();
     m.geometry_hash = Some(shape_hash(truth));
     m.sections = vec![Section::required(PART)];
     if !settings.is_default() {
@@ -473,9 +488,17 @@ fn optional_entries<'a>(settings: &Settings, view: &Visibility) -> impl Iterator
 fn shape_hash(truth: &Value) -> ContentHash {
     let mut truth = soliddraft_document::hash::without_format(truth);
     if let Value::Object(map) = &mut truth {
-        for key in
-            ["name", "datum_names", "material", "appearances", "snapshots", "values", "configurations", "properties"]
-        {
+        for key in [
+            "name",
+            "datum_names",
+            "material",
+            "appearances",
+            "snapshots",
+            "values",
+            "configurations",
+            "properties",
+            "next_body",
+        ] {
             map.remove(key);
         }
         if let Some(Value::Array(features)) = map.get_mut("features") {

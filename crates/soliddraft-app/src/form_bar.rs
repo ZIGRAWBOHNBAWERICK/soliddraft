@@ -149,7 +149,9 @@ pub fn show<K: Copy + Eq + Hash + std::fmt::Debug>(
         state.key = Some(form.key);
     }
     let available = ui.available_rect_before_wrap();
-    let title_width = (available.width() * 0.12).clamp(110.0, 190.0);
+    // The title tile fits its text, within 12% of the bar, so short titles leave room for fields.
+    let title_text = ui.painter().layout_no_wrap(form.title.into(), theme::font_medium(12.0), theme::ink()).size().x;
+    let title_width = (title_text.ceil() + 42.0).clamp(110.0, (available.width() * 0.12).clamp(110.0, 190.0));
     let actions_width = if form.can_confirm { 154.0 } else { 76.0 };
     let plan = plan(form.fields, available.width() - title_width - actions_width - 2.0 * GAP);
     let mut anchor = Rect::NOTHING;

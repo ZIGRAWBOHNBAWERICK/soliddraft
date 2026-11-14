@@ -192,7 +192,10 @@ pub fn user_library() -> Result<Library, String> {
 /// choices of the user, not of the document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ReferenceDisplay {
+    /// The modelling grid, and the screen grid of a scene that has one.
     pub show_grid: bool,
+    /// The floor under the part: the shadow the part casts on the ground.
+    pub show_floor: bool,
     pub show_origin_planes: bool,
     /// Keeps the origin axes on with nothing selected. A selected reference shows them
     /// either way.
@@ -201,7 +204,7 @@ pub struct ReferenceDisplay {
 
 impl Default for ReferenceDisplay {
     fn default() -> Self {
-        Self { show_grid: true, show_origin_planes: true, always_show_origin_axes: true }
+        Self { show_grid: true, show_floor: true, show_origin_planes: true, always_show_origin_axes: true }
     }
 }
 
@@ -267,6 +270,7 @@ fn view_from(all: &Value) -> ViewSettings {
         scene: serde_json::from_value(view["scene"].clone()).unwrap_or_default(),
         references: ReferenceDisplay {
             show_grid: flag("show_grid", shown.show_grid),
+            show_floor: flag("show_floor", shown.show_floor),
             show_origin_planes: flag("show_origin_planes", shown.show_origin_planes),
             always_show_origin_axes: flag("always_show_origin_axes", shown.always_show_origin_axes),
         },

@@ -13,15 +13,20 @@ work belongs behind `edit_suite` until the release switches the default.
 ## Frame
 
 One frame holds parts, assemblies and drawings. At the 1440 by 900 reference size,
-the title bar is 34 px tall, the options bar below it is 46 px, and the tool palette
-is 250 px wide at the left. The viewport fills the remaining space. A 58 px timeline
-sits above a 30 px command line at the bottom, both to the right of the palette.
-These measurements exclude the prototype's guide strip, which is review furniture.
+the title bar is 34 px tall. A 40 px icon strip runs down the window's left edge
+below it. The options bar, 46 px tall, starts right of the strip, and the tool
+palette is 250 px wide beside the strip. The viewport fills the remaining space. A
+58 px timeline sits above a 30 px command line at the bottom, both to the right of
+the palette. These measurements exclude the prototype's guide strip, which is review
+furniture.
 
-The title bar holds menus at the left, workspaces in the centre and open document
-tabs at the right. The part switch keeps the stable Solid, Sketch, Assembly, Inspect
-and View ids and drives the palette without a second tab row. Below 1280 points
-wide, Menu groups the menus to leave room for all five workspaces. It has no search field. There is no Surface workspace.
+The title bar holds menus at the left and the open document's name at the right.
+Below 1280 points wide, Menu groups the menus. It has no search field.
+
+The icon strip holds the document's workspaces, one icon each, top to bottom. Hovering
+an icon names it, and the active one is marked. The part's strip keeps the stable
+Solid, Sketch, Assembly, Inspect and View ids and drives the palette without a tab
+row. There is no Surface workspace.
 
 | Document | Workspaces | Bottom strip | Tree and Values pane |
 |---|---|---|---|
@@ -127,6 +132,9 @@ copying prototype literals.
 
 The Scene gallery opens above the Scene button on the bottom-centred navigation
 bar. It shows favourites as thumbnails. Manage favourites lists all nine scenes.
+Below the thumbnails, Show grid hides the modelling grid and the screen grid of Night
+grid and Blueprint. Show floor hides the shadow the part casts on the ground. Both
+are the same choices as in Preferences, Grid and planes, and they persist.
 There is no second backdrop grid in the palette or swatch row on the options bar.
 The empty-space context menu and command line also offer scenes.
 
@@ -158,7 +166,7 @@ L, R, C, A, D, T, O and M select line, rectangle, circle, arc, Smart Dimension, 
 offset and move across all shortcut presets. Custom bindings take precedence, and
 typing in a field leaves the tool alone.
 
-An open sketch locks the workspace switch to its sketch and plane. The palette
+An open sketch locks the icon strip to its Sketch workspace. The palette
 contains sketch tools only. A red Close sketch action occupies the right end of
 the options bar. It stays visible while a tool or dimension editor is active.
 

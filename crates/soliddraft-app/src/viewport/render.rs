@@ -143,6 +143,8 @@ pub struct FrameInput {
     pub preset: Preset,
     /// The gradient and optional screen grid composited behind the model.
     pub backdrop: super::scenes::Backdrop,
+    /// Whether the ground under the model shows the model's shadow.
+    pub floor: bool,
     pub hover_id: u32,
     pub selected_id: u32,
     pub selected_feature: u32,
@@ -1129,7 +1131,7 @@ impl ViewportRenderer {
             self.sun = Some(sun_frame(lo, hi));
         }
         let ao = look.ambient_occlusion > 0.0 && show_faces && self.ao_pipelines.is_some();
-        let ground = shadows && self.sun.is_some_and(|s| input.eye.z > s.ground.z);
+        let ground = shadows && input.floor && self.sun.is_some_and(|s| input.eye.z > s.ground.z);
 
         let size = self.targets.as_ref().map(|t| t.size).unwrap_or([1, 1]);
         let view_proj = input.proj * input.view;

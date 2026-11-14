@@ -62,7 +62,9 @@ fn the_bracket_in_light_and_dark() {
         assert_eq!(style.visuals.selection.stroke.color, egui::Color32::from_rgb(0xf5, 0xa5, 0x24));
         assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(6));
         let image = harness.render().expect("Edit Suite renders");
-        assert_eq!(image.get_pixel(2, 200).0, [0x30, 0x33, 0x38, 255], "the palette paints charcoal");
+        // The palette starts right of the workspace strip.
+        let x = soliddraft_app::left_bar::WIDTH as u32 + 2;
+        assert_eq!(image.get_pixel(x, 200).0, [0x30, 0x33, 0x38, 255], "the palette paints charcoal");
         let start = harness.get_by_label("Start sketch").rect();
         assert_eq!(
             image.get_pixel((start.left() + 6.0) as u32, start.center().y as u32).0,

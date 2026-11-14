@@ -2555,6 +2555,18 @@ fn registry() -> Vec<CommandSpec> {
                 display.always_show_origin_axes = !display.always_show_origin_axes;
                 AppAction::SetReferenceDisplay(display)
             }).lit(|s| s.viewport.references.always_show_origin_axes).app_only(LOOK),
+        cmd("grid", "Grid", Icon::Rectangle, "Show or hide the grid, the scene's grid included")
+            .run(|s| {
+                let mut display = s.viewport.references;
+                display.show_grid = !display.show_grid;
+                AppAction::SetReferenceDisplay(display)
+            }).lit(|s| s.viewport.references.show_grid).app_only(LOOK),
+        cmd("floor", "Floor", Icon::Plane, "Show or hide the floor: the shadow the part casts on the ground")
+            .run(|s| {
+                let mut display = s.viewport.references;
+                display.show_floor = !display.show_floor;
+                AppAction::SetReferenceDisplay(display)
+            }).lit(|s| s.viewport.references.show_floor).app_only(LOOK),
         cmd("origin_planes", "Origin planes", Icon::Plane, "Show or hide the origin planes")
             .run(|s| {
                 let mut display = s.viewport.references;

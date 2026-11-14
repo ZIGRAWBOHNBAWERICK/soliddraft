@@ -47,8 +47,9 @@ pub(super) const VIEW_KEY_CONTROLS: [(&str, &str); 5] = [
 ];
 
 /// The Grid and planes page's controls, for search.
-pub(super) const GRID_AND_PLANES_CONTROLS: [(&str, &str); 8] = [
+pub(super) const GRID_AND_PLANES_CONTROLS: [(&str, &str); 9] = [
     ("show_grid", "Show grid"),
+    ("show_floor", "Show floor"),
     ("grid_strength", "Grid strength"),
     ("grid_spacing", "Grid spacing: follow the zoom or fixed"),
     ("grid_major", "Grid major line every"),
@@ -451,6 +452,8 @@ fn grid_and_planes_page(p: &mut Preferences, ui: &mut egui::Ui) {
     let mut d = p.display;
     control(lit(p, "show_grid"), ui, |ui| ui.checkbox(&mut d.show_grid, "Show grid"));
     grid_style(p, ui);
+    control(lit(p, "show_floor"), ui, |ui| ui.checkbox(&mut d.show_floor, "Show floor"));
+    ui.label(egui::RichText::new("The floor is the shadow the part casts on the ground.").color(theme::muted()));
     ui.add_space(8.0);
     control(lit(p, "show_origin_planes"), ui, |ui| ui.checkbox(&mut d.show_origin_planes, "Show origin planes"));
     control(lit(p, "always_show_origin_axes"), ui, |ui| {

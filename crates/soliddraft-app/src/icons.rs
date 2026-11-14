@@ -103,6 +103,10 @@ pub enum Icon {
     Trim,
     Extend,
     Offset,
+    /// One part in front of another, for the Assembly workspace.
+    Assembly,
+    /// A drawing sheet with its title block, for the drawing's Sheet workspace.
+    Sheet,
     /// A CAD drawing of the catalogue, by its key, in its own colours.
     Cad(&'static str),
     /// A line glyph of the catalogue, by its key, in the colour it is painted with.
@@ -546,6 +550,14 @@ fn paint_drawn(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             g.dot(p, 2.4, 8.0, 1.3);
             g.dot(p, 13.6, 8.0, 1.3);
             g.dot(p, 8.0, 10.0, 1.0);
+        }
+        Icon::Assembly => {
+            g.rect(p, 6.5, 2.5, 13.5, 9.5);
+            g.line(p, &[(6.5, 6.5), (2.5, 6.5), (2.5, 13.5), (9.5, 13.5), (9.5, 9.5)]);
+        }
+        Icon::Sheet => {
+            g.rect(p, 2.0, 3.5, 14.0, 12.5);
+            g.line(p, &[(8.5, 12.5), (8.5, 9.5), (14.0, 9.5)]);
         }
         Icon::Rectangle => {
             g.rect(p, 2.5, 4.0, 13.5, 12.0);

@@ -527,7 +527,7 @@ when projected to the slow runner class. The projection is `elapsed_ms * 392 /
 calibration_ms`, using the sole `mass_properties` call in
 `bracket/commands/0019/measurement.kernel.json`, still at 92,153 work. This is
 measurement evidence, not a wall-clock PR gate. Further rebuild-speed work:
-https://github.com/BohnBawerick/soliddraft/issues/27.
+https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/issues/27.
 
 An edit step can set `max_edit_work` to a nonnegative integer. The runner checks
 `timing.work.edit` against that inclusive ceiling and fails the step with

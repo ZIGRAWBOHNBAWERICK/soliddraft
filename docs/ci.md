@@ -153,6 +153,8 @@ The running selector and its map are the candidate policy; `--head` names the tr
 
 `ci/known-over-budget.json` has one more reader. `packaging/release.py` reads it for the release notes, called by the Linux `assemble` job in `packages.yml`, which also runs when Hosted CI calls the packaging jobs. An edit to this file does not rebuild packages because `Inventory.test_known_gaps_render_release_notes` runs that reader in lint. This is the only such substitution. Any other file that packaging reads must list the package units.
 
+The versioned `release_limitations` records disclose measured strict timing failures and export timeouts in release notes. They do not add scenario exemptions or change budgets, work caps or recorded timing baselines. The scenario runner reads the existing `steps` entries separately.
+
 ## Superseded runs
 
 Hosted CI groups pull request runs by their head branch and main runs by the main ref, so a new push cancels older runs in the same group, including queued runs. Release branch runs each use their own run id and never cancel one another. Manual runs use the pushed ref, and the benchmark input suffixes keep benchmark runs separate from normal runs. `ci/test_workflows.py`, run in the lint job, checks these groups and cancellation settings, including a pull request from a branch called `main`. Other workflows retain independent main runs.

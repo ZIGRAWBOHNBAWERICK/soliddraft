@@ -515,6 +515,9 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
 fn seed_gpu_settings(case: &Case, json: &str) {
     let mut settings: serde_json::Value = serde_json::from_str(json).unwrap();
     settings["view"]["scene"] = serde_json::json!("white");
+    if settings["view"]["show_grid"].is_null() {
+        settings["view"]["show_grid"] = serde_json::json!(true);
+    }
     if settings["view"]["grid"]["color"].is_null() {
         settings["view"]["grid"]["color"] = serde_json::json!("#0c1420");
     }

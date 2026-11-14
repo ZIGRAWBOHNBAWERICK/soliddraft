@@ -266,11 +266,11 @@ fn the_chip_row_reorders_takes_palette_buttons_and_comes_back_next_run() {
     save(&mut harness, "c06-chips-arranged");
 
     // Right-click removes one.
-    harness.get_by_label("Cancel on the command bar").click_secondary();
+    harness.get_by_label("Smart dim on the command bar").click_secondary();
     harness.run_steps(3);
-    harness.get_by_label("Remove Cancel from the bar").click();
+    harness.get_by_label("Remove Smart dim from the bar").click();
     harness.run_steps(4);
-    assert!(!tools(&harness).iter().any(|t| t == "cancel"));
+    assert!(!tools(&harness).iter().any(|t| t == "smart_dimension"));
 
     // The row is in the settings file, and the next run starts from it.
     let chosen = tools(&harness);

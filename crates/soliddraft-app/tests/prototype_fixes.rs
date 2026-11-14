@@ -80,6 +80,29 @@ fn individual_relations_are_on_the_palette() {
         assert!(missing.is_empty(), "relations missing from the open palette: {missing:?}");
     });
     case.frame(&mut app, "relations");
+    click(&mut app, "Line");
+    for p in [P2::new(10.0, 10.0), P2::new(20.0, 30.0)] {
+        let at = screen(&app, p);
+        ribbon::click_at(&mut app, at);
+    }
+    app.key_press(Key::Escape);
+    app.run_steps(8);
+    let at = screen(&app, P2::new(15.0, 20.0));
+    ribbon::click_at(&mut app, at);
+    click(&mut app, "Vertical");
+    assert!(
+        app.state()
+            .state
+            .sketch
+            .as_ref()
+            .unwrap()
+            .sketch
+            .constraints
+            .iter()
+            .any(|c| { matches!(c.kind, ConstraintKind::Vertical { .. }) }),
+        "the palette's Vertical applies the relation"
+    );
+    case.frame(&mut app, "vertical-applied");
 }
 
 #[test]
@@ -118,6 +141,18 @@ fn defined_sketch_geometry_paints_above_origin_axes() {
         assert!(near_line(app, [11, 13, 17]), "fully defined line on the Y axis is black with axes on");
     });
     case.frame(&mut app, "defined-with-axes");
+    type_line(&mut app, "scene graphite");
+    app.key_press(Key::Enter);
+    app.run_steps(12);
+    assert!(near_line(&mut app, [11, 13, 17]), "fully defined geometry stays black on the dark scene's sketch sheet");
+    let at = screen(&app, P2::new(-20.0, 0.0));
+    let image = app.render().unwrap();
+    let axis_visible = (-2..=2).any(|dy| {
+        let p = image.get_pixel(at.x as u32, (at.y as i32 + dy) as u32).0;
+        p[0] > p[1].saturating_add(50) && p[0] > p[2].saturating_add(50)
+    });
+    assert!(axis_visible, "the sketch sheet leaves the X origin axis visible");
+    case.frame(&mut app, "defined-dark-with-axes");
 }
 
 #[test]

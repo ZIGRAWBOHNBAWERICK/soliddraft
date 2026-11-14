@@ -21,6 +21,8 @@ fn label(command: &CommandSpec, state: &AppState) -> String {
     match command.id {
         "sketch" if !state.in_sketch() => "Start sketch".to_owned(),
         "smart_dimension" => "Smart Dimension".to_owned(),
+        "sketch_horizontal" => "Horizontal".to_owned(),
+        "sketch_vertical" => "Vertical".to_owned(),
         _ => command.label_in(state),
     }
 }
@@ -32,7 +34,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
     let tab = state.workspace();
     let mut pending = None;
-    let mut relations_anchor = ui.max_rect();
+    let relations_anchor = ui.max_rect();
     egui::ScrollArea::vertical()
         .id_salt(("palette", state.drawing.is_active(), state.assembly.is_active(), tab.id()))
         .auto_shrink([false; 2])
@@ -54,7 +56,19 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                     pending = Some(command);
                 }
             }
-            for (group, commands) in commands::ribbon(tab) {
+            let mut groups = commands::ribbon(tab);
+            if tab == Tab::Part(RibbonTab::Sketch) {
+                groups.sort_by_key(|(group, _)| match *group {
+                    "Sketch" => 0,
+                    "Draw" => 1,
+                    "Constrain" => 2,
+                    "Modify" => 3,
+                    "Transform" => 4,
+                    "Display" => 5,
+                    _ => 6,
+                });
+            }
+            for (group, commands) in groups {
                 if state.drawing.is_active() && group == "Assistant" {
                     continue;
                 }
@@ -68,6 +82,7 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                         (command.shown)(state)
                             && !(start && command.id == "sketch")
                             && command.id != "smart_dimension"
+                            && command.id != "relations"
                             && !(state.in_sketch() && matches!(command.id, "sketch" | "exit_sketch"))
                             && !(state.assembly.is_active()
                                 && tab == Tab::Assembly
@@ -103,9 +118,6 @@ fn show_mode(ui: &mut egui::Ui, state: &mut AppState, compact: bool) {
                     ui.horizontal(|ui| {
                         for command in row {
                             let response = tile(ui, state, command, width, height, compact);
-                            if command.id == "relations" {
-                                relations_anchor = response.rect;
-                            }
                             if response.clicked() {
                                 pending = Some(*command);
                             }

@@ -89,8 +89,8 @@ impl fmt::Display for NoProvider {
         match self {
             NoProvider::NoKey => write!(
                 f,
-                "No API key, so the assistant is off. Add an OpenRouter or Anthropic key under Provider on the \
-                 Assistant tab. Or set {} or {}, or run `soliddraft key set openrouter` or \
+                "No API key, so the assistant is off. Add an OpenRouter or Anthropic key under \
+                 Tools > Assistant > Provider. Or set {} or {}, or run `soliddraft key set openrouter` or \
                  `soliddraft key set anthropic`, and restart.",
                 ProviderKind::OpenRouter.key_var(),
                 ProviderKind::Anthropic.key_var(),

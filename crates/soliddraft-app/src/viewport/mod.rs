@@ -456,21 +456,24 @@ impl ViewportState {
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(input)));
 
         let painter = ui.painter().with_clip_rect(rect);
+        if let Some(session) = &sketch {
+            crate::sketcher::paint_plane(
+                &painter,
+                &crate::sketcher::Frame { plane: session.plane, camera: &self.camera, rect },
+                doc,
+                &session.sketch,
+                self.scene.is_some_and(scenes::Scene::is_dark),
+            );
+        }
+        if scene.axes.contains(&true) {
+            self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);
+        }
         for (plane, sk) in passive_sketches {
             crate::sketcher::paint_passive(&painter, &self.camera, rect, plane, sk, theme::muted().gamma_multiply(0.9));
         }
         if let Some(session) = sketch {
             let spacing = Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style);
-            events.actions = crate::sketcher::run(
-                ui,
-                session,
-                doc,
-                &self.camera,
-                rect,
-                &response,
-                spacing,
-                self.scene.is_some_and(scenes::Scene::is_dark),
-            );
+            events.actions = crate::sketcher::run(ui, session, doc, &self.camera, rect, &response, spacing);
             ui.ctx().request_repaint();
         }
         if doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok())) {
@@ -478,9 +481,6 @@ impl ViewportState {
                 Rect::from_min_size(rect.left_top() + vec2(12.0, 12.0), vec2(160.0, 24.0)),
                 egui::Label::new(egui::RichText::new("unproved preview").color(theme::muted())),
             );
-        }
-        if scene.axes.contains(&true) {
-            self.paint_origin_axes(&painter, scene.reach, rect, scene.axes);
         }
         self.paint_plane_names(ui, &scene, rect);
         if !sketching {

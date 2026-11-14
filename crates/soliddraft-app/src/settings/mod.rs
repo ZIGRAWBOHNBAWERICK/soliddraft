@@ -201,7 +201,7 @@ pub struct ReferenceDisplay {
 
 impl Default for ReferenceDisplay {
     fn default() -> Self {
-        Self { show_grid: true, show_origin_planes: true, always_show_origin_axes: true }
+        Self { show_grid: false, show_origin_planes: false, always_show_origin_axes: true }
     }
 }
 

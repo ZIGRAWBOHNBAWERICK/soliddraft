@@ -174,7 +174,6 @@ pub fn run(
     rect: Rect,
     resp: &egui::Response,
     grid: Option<crate::viewport::grid::Spacing>,
-    light_sheet: bool,
 ) -> Vec<AppAction> {
     let mut actions = Vec::new();
     let frame = Frame { plane: s.plane, camera, rect };
@@ -360,7 +359,6 @@ pub fn run(
     s.dynamic_preview = dynamic_preview(s, snapped);
 
     // Drawing.
-    paint_plane(&painter, &frame, doc, &s.sketch, light_sheet);
     paint_regions(&painter, &frame, s);
     paint_entities(&painter, &frame, s);
     paint_glyphs(&painter, s, &glyphs);
@@ -1329,7 +1327,13 @@ fn entity_color(s: &SketchSession, e: &Entity) -> Color32 {
     }
 }
 
-fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketch: &Sketch, light_sheet: bool) {
+pub(crate) fn paint_plane(
+    painter: &egui::Painter,
+    frame: &Frame<'_>,
+    doc: &Document,
+    sketch: &Sketch,
+    light_sheet: bool,
+) {
     let mut half = 100.0_f64;
     if let Some((lo, hi)) = doc.bounds() {
         half = half.max(((hi - lo).length() as f64) * 0.65);

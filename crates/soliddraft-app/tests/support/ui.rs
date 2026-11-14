@@ -306,6 +306,8 @@ pub fn reveal_command(app: &mut App, id: &str) -> Control {
     let label = match id {
         "sketch" if !app.state().state.in_sketch() => "Start sketch".to_owned(),
         "smart_dimension" => "Smart Dimension".to_owned(),
+        "sketch_horizontal" => "Horizontal".to_owned(),
+        "sketch_vertical" => "Vertical".to_owned(),
         _ => command.label_in(&app.state().state),
     };
     let palette = palette_region(app);

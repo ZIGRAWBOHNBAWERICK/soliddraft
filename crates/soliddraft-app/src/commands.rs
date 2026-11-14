@@ -1475,6 +1475,22 @@ fn registry() -> Vec<CommandSpec> {
     let ctrl = Modifiers::COMMAND;
     let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
     let cmd = CommandSpec::new;
+    macro_rules! relation {
+        ($id:literal, $label:literal, $name:literal, $hint:literal) => {
+            cmd($id, $label, Icon::Relation, $hint)
+                .on(Sketch, "Constrain", Small)
+                .run(|s| {
+                    AppAction::SketchRelationSet(menu_relation(s, $name).expect("enabled with an applicable relation"))
+                })
+                .when(|s| menu_relation(s, $name).is_some())
+                .hint(|s| {
+                    menu_relation(s, $name)
+                        .is_none()
+                        .then(|| concat!($hint, "; an existing relation is already applied").into())
+                })
+                .app_only(SKETCHER)
+        };
+    }
     vec![
         cmd("document_command", "Document command", Icon::Tree, "Run a canonical part journal command").agents(
             Agents::Mcp,
@@ -2561,21 +2577,17 @@ fn registry() -> Vec<CommandSpec> {
                 display.show_origin_planes = !display.show_origin_planes;
                 AppAction::SetReferenceDisplay(display)
             }).lit(|s| s.viewport.references.show_origin_planes).app_only(LOOK),
-        cmd("sketch_vertical", "Make vertical", Icon::Relation, "Select one line or two points")
-            .run(|s| AppAction::SketchRelationSet(menu_relation(s, "Vertical").expect("enabled with an applicable relation")))
-            .when(|s| menu_relation(s, "Vertical").is_some())
-            .hint(|s| menu_relation(s, "Vertical").is_none().then(|| "Select one line or two points; an existing relation is already applied".into()))
-            .app_only(SKETCHER),
-        cmd("sketch_horizontal", "Make horizontal", Icon::Relation, "Select one line or two points")
-            .run(|s| AppAction::SketchRelationSet(menu_relation(s, "Horizontal").expect("enabled with an applicable relation")))
-            .when(|s| menu_relation(s, "Horizontal").is_some())
-            .hint(|s| menu_relation(s, "Horizontal").is_none().then(|| "Select one line or two points; an existing relation is already applied".into()))
-            .app_only(SKETCHER),
-        cmd("sketch_fix", "Fix", Icon::Relation, "Select one point or entity other than the origin")
-            .run(|s| AppAction::SketchRelationSet(menu_relation(s, "Fix").expect("enabled with an applicable relation")))
-            .when(|s| menu_relation(s, "Fix").is_some())
-            .hint(|s| menu_relation(s, "Fix").is_none().then(|| "Select one point or entity other than the origin; an existing relation is already applied".into()))
-            .app_only(SKETCHER),
+        relation!("sketch_horizontal", "Make horizontal", "Horizontal", "Select one line or two points"),
+        relation!("sketch_vertical", "Make vertical", "Vertical", "Select one line or two points"),
+        relation!("sketch_coincident", "Coincident", "Coincident", "Select two points"),
+        relation!("sketch_parallel", "Parallel", "Parallel", "Select two lines"),
+        relation!("sketch_perpendicular", "Perpendicular", "Perpendicular", "Select two lines"),
+        relation!("sketch_tangent", "Tangent", "Tangent", "Select a line and an arc or circle, or two arcs or circles"),
+        relation!("sketch_equal", "Equal", "Equal", "Select two lines, two circular curves, or two ellipses"),
+        relation!("sketch_concentric", "Concentric", "Concentric", "Select two arcs, circles or ellipses"),
+        relation!("sketch_midpoint", "Midpoint", "Midpoint", "Select one point and one line"),
+        relation!("sketch_symmetric", "Symmetric", "Symmetric", "Select two points or matching entities, then the axis line last"),
+        relation!("sketch_fix", "Fix", "Fix", "Select one point or entity other than the origin"),
         cmd("select_other", "Select other", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
         cmd("select_tangent_chain", "Select tangent chain", Icon::Views, COMING_SOON).in_menu().outside_sketch(),
         cmd("select_loop", "Select loop", Icon::Views, COMING_SOON).in_menu().outside_sketch(),

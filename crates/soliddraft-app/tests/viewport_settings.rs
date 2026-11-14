@@ -12,7 +12,7 @@ use soliddraft_app::viewport::look::Preset;
 use support::{ALWAYS_SHOW_AXES, Case, empty, launch, set_preference};
 
 const DEFAULTS: ReferenceDisplay =
-    ReferenceDisplay { show_grid: true, show_origin_planes: true, always_show_origin_axes: true };
+    ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
 
 /// Reads the settings and checks that reading wrote nothing.
 fn view_unchanged(case: &Case) -> settings::ViewSettings {
@@ -47,7 +47,7 @@ fn a_missing_show_grid_falls_back_alone() {
     let case = Case::settings("view_missing_show_grid");
     case.seed_settings(r#"{"view":{"preset":"fast","show_origin_planes":false,"always_show_origin_axes":true}}"#);
     let view = view_unchanged(&case);
-    let expected = ReferenceDisplay { show_grid: true, show_origin_planes: false, always_show_origin_axes: true };
+    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
     assert_eq!((view.preset, view.references), (Preset::Fast, expected));
 }
 
@@ -56,7 +56,7 @@ fn a_missing_show_origin_planes_falls_back_alone() {
     let case = Case::settings("view_missing_show_origin_planes");
     case.seed_settings(r#"{"view":{"preset":"fast","show_grid":false,"always_show_origin_axes":true}}"#);
     let view = view_unchanged(&case);
-    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: true, always_show_origin_axes: true };
+    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
     assert_eq!((view.preset, view.references), (Preset::Fast, expected));
 }
 
@@ -76,7 +76,7 @@ fn a_wrong_typed_show_grid_falls_back_alone() {
         r#"{"view":{"preset":"fast","show_grid":"no","show_origin_planes":false,"always_show_origin_axes":true}}"#,
     );
     let view = view_unchanged(&case);
-    let expected = ReferenceDisplay { show_grid: true, show_origin_planes: false, always_show_origin_axes: true };
+    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
     assert_eq!((view.preset, view.references), (Preset::Fast, expected));
 }
 
@@ -87,7 +87,7 @@ fn a_wrong_typed_show_origin_planes_falls_back_alone() {
         r#"{"view":{"preset":"fast","show_grid":false,"show_origin_planes":0,"always_show_origin_axes":true}}"#,
     );
     let view = view_unchanged(&case);
-    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: true, always_show_origin_axes: true };
+    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
     assert_eq!((view.preset, view.references), (Preset::Fast, expected));
 }
 

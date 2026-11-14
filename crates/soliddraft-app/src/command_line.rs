@@ -37,8 +37,8 @@ pub const AI_COMMAND: &str = "ai";
 /// Words that close the session when typed in it, with or without a leading `/`.
 pub const CLOSE_WORDS: [&str; 2] = ["exit", "close"];
 
-/// The chips a new bar starts with: the selection tools.
-pub const DEFAULT_TOOLS: [&str; 5] = ["sketch_select", "cancel", "measure", "normal_to", "zoom_fit"];
+/// The chips a new bar starts with.
+pub const DEFAULT_TOOLS: [&str; 5] = ["sketch_select", "smart_dimension", "measure", "normal_to", "zoom_fit"];
 
 pub const SESSION_MIN_HEIGHT: f32 = 160.0;
 pub const SESSION_DEFAULT_HEIGHT: f32 = 320.0;
@@ -737,7 +737,7 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
         s.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
         s.store(ui.ctx(), id);
     }
-    completion_list(ui, cl, &resp);
+    completion_list(ui, cl, &resp, context);
     if enter {
         let line = std::mem::take(&mut state.command_line.input);
         if session { submit_session(state, line) } else { submit_bar(state, line) }
@@ -756,10 +756,19 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
     }
 }
 
-/// The names Tab found, over the prompt, while there are several.
-fn completion_list(ui: &egui::Ui, cl: &mut CommandLine, field: &egui::Response) {
-    let Some(c) = cl.completion.as_ref().filter(|c| c.names.len() > 1) else { return };
-    let slash = if c.slash { "/" } else { "" };
+/// Matching commands above the focused prompt, without replacing the typed prefix.
+fn completion_list(ui: &egui::Ui, cl: &mut CommandLine, field: &egui::Response, context: Context) {
+    let input = cl.input.trim_start();
+    if !field.has_focus() || input.is_empty() || input.contains(char::is_whitespace) {
+        return;
+    }
+    let names =
+        cl.completion.as_ref().map_or_else(|| completions(input, context, cl.session_open), |c| c.names.clone());
+    if names.is_empty() {
+        return;
+    }
+    let shown = cl.completion.as_ref().and_then(|c| c.shown);
+    let slash = if input.starts_with('/') { "/" } else { "" };
     let mut picked = None;
     egui::Area::new(egui::Id::new("command_completions"))
         .order(egui::Order::Foreground)
@@ -767,15 +776,15 @@ fn completion_list(ui: &egui::Ui, cl: &mut CommandLine, field: &egui::Response) 
         .pivot(Align2::LEFT_BOTTOM)
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                for (i, name) in c.names.iter().enumerate().take(14) {
+                for (i, name) in names.iter().enumerate().take(14) {
                     let label = commands::get(name).map(|c| c.label).unwrap_or("closes the session");
                     let text = egui::RichText::new(format!("{name:<24}{label}")).font(theme::mono(11.5));
-                    if ui.add(egui::Button::selectable(c.shown == Some(i), text)).clicked() {
+                    if ui.add(egui::Button::selectable(shown == Some(i), text)).clicked() {
                         picked = Some(*name);
                     }
                 }
-                if c.names.len() > 14 {
-                    ui.label(egui::RichText::new(format!("{} more", c.names.len() - 14)).color(theme::muted()));
+                if names.len() > 14 {
+                    ui.label(egui::RichText::new(format!("{} more", names.len() - 14)).color(theme::muted()));
                 }
             });
         });

@@ -224,13 +224,15 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
         let mut columns = Vec::new();
         for (_, items) in commands::ribbon(RibbonTab::Sketch) {
             for (command, _) in items {
-                if !(command.shown)(&app.state().state) || matches!(command.id, "sketch" | "exit_sketch") {
+                if !(command.shown)(&app.state().state) || matches!(command.id, "sketch" | "exit_sketch" | "relations")
+                {
                     continue;
                 }
-                let label = if command.id == "smart_dimension" {
-                    "Smart Dimension".to_owned()
-                } else {
-                    command.label_in(&app.state().state)
+                let label = match command.id {
+                    "smart_dimension" => "Smart Dimension".to_owned(),
+                    "sketch_horizontal" => "Horizontal".to_owned(),
+                    "sketch_vertical" => "Vertical".to_owned(),
+                    _ => command.label_in(&app.state().state),
                 };
                 let control = ribbon::control(app, &label, bounds);
                 assert!(bounds.contains_rect(control.rect), "{label} is inside the palette");
@@ -257,7 +259,7 @@ fn registry_tools_are_named_in_two_columns_and_run_from_the_palette() {
             assert_eq!(app.state().state.sketch.as_ref().unwrap().tool, tool);
             assert!(ribbon::control(app, label, bounds).selected);
         }
-        click(app, "Relations");
+        ribbon::run_command(app, "relations");
         assert!(app.state().state.sketch.as_ref().unwrap().relations_open);
         assert!(app.query_all_by_label("Show all relations").next().is_some(), "the Relations menu is visible");
         case.frame(app, "relations");
@@ -334,11 +336,14 @@ fn short_windows_scroll_without_collapsing_tools_in_both_themes() {
                 }
                 for (_, items) in commands::ribbon(RibbonTab::Sketch) {
                     for (command, _) in items {
-                        if (command.shown)(&app.state().state) && !matches!(command.id, "sketch" | "exit_sketch") {
-                            let label = if command.id == "smart_dimension" {
-                                "Smart Dimension".to_owned()
-                            } else {
-                                command.label_in(&app.state().state)
+                        if (command.shown)(&app.state().state)
+                            && !matches!(command.id, "sketch" | "exit_sketch" | "relations")
+                        {
+                            let label = match command.id {
+                                "smart_dimension" => "Smart Dimension".to_owned(),
+                                "sketch_horizontal" => "Horizontal".to_owned(),
+                                "sketch_vertical" => "Vertical".to_owned(),
+                                _ => command.label_in(&app.state().state),
                             };
                             assert!(seen.contains(&label), "{label} can be read at {scale}x in {mode:?}");
                         }

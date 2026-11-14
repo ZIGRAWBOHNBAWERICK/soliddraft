@@ -231,7 +231,7 @@ export const features = {
       name: "General fillets, sweeps, lofts, STEP import, mates",
       kind: "In design",
       line: "Not built yet. Each waits on a named stage of the kernel's roadmap, and the ribbon shows it disabled with that stage.",
-      href: `${site.links.repo}/blob/main/docs/roadmap.md`,
+      href: `${site.links.repo}/blob/main/ROADMAP.md`,
       inDesign: true,
     },
   ] satisfies FeatureItem[],

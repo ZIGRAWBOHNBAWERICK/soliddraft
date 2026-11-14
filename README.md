@@ -20,7 +20,7 @@ SolidDraft is alpha software. Keep backups of your documents. On main, targeting
 - Lattices and gyroids with an unproved viewport preview and certified STL export. See [field modelling](docs/modelling.md#terminal-lattice) and [export limits](docs/exchange.md#terminal-fields).
 - A desktop [assistant and MCP interface](docs/assistant.md), plus a [headless command line](docs/development.md#command-line) for recipes, parts, drawings and exports. The public browser app has no AI assistant or API key.
 
-Broader modelling domains remain in design; a working command can still refuse unsupported inputs. See the [roadmap](docs/roadmap.md) for what works and what is still planned. A failed or pending feature cannot export an unproved whole part.
+Broader modelling domains remain in design; a working command can still refuse unsupported inputs. See the [roadmap](ROADMAP.md) for what works and what is still planned. A failed or pending feature cannot export an unproved whole part.
 
 ## Get SolidDraft
 

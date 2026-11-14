@@ -1,10 +1,11 @@
 //! Selected-boundary trim through the existing Trim panel and native pointer input.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, Modifiers, Pos2, pos2, vec2};
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::Queryable;
+
+use egui::{Key, Modifiers, Pos2, vec2};
 use ribbon::App;
 use soliddraft_app::{
     document::{Command, FeatureId, PlaneKind, SketchPlane},
@@ -51,45 +52,19 @@ fn screen(app: &App, p: P2) -> Pos2 {
 }
 
 fn pick(app: &mut App, p: P2) {
+    ribbon::close_options(app);
     let at = screen(app, p);
     ribbon::click_at(app, at);
 }
 
 fn mode(app: &mut App, label: &str) {
-    let window = ribbon::window(app);
-    let band = ribbon::ribbon_region(app);
-    if !app.query_all(By::new().role(egui::accesskit::Role::Button).label("Trim")).any(|n| band.intersects(n.rect())) {
-        ribbon::click_button(app, "Modify group", window);
-    }
-    let properties = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect.top();
-    let controls = egui::Rect::from_min_max(window.min, pos2(window.right(), properties));
-    ribbon::click_button(app, "Trim", controls);
+    ribbon::run_command(app, "sketch_trim");
     choose_mode(app, label);
 }
 
 fn choose_mode(app: &mut App, label: &str) {
-    for _ in 0..4 {
-        if let Some(p) = ribbon::painted(app).into_iter().find(|p| {
-            p.text == label && p.rect.contains_rect(p.full) && p.rect.right() < app.state().state.viewport.rect.left()
-        }) {
-            ribbon::click_at(app, p.rect.center());
-            assert_eq!(session(app).tool.label(), format!("Trim {}", label.to_lowercase()));
-            return;
-        }
-        let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
-        app.hover_at(pos2(
-            app.state().state.viewport.rect.left() - 15.0,
-            (head.bottom() + ribbon::band(app).top()) / 2.0,
-        ));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -180.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        app.run_steps(12);
-    }
-    panic!("Trim must expose {label} in its existing property panel");
+    ribbon::click_option(app, label);
+    assert_eq!(session(app).tool.label(), format!("Trim {}", label.to_lowercase()));
 }
 
 #[test]
@@ -226,6 +201,9 @@ fn bounded_trim_refusals_right_click_and_document_changes_are_safe() {
         assert_eq!(session(&app).sketch, before);
         assert_eq!(app.state().state.doc.revision(), revision);
     }
+    ribbon::open_options(&mut app);
+    app.get_by_label("Choose bounds again").scroll_to_me();
+    app.run_steps(24);
     frame(&mut app, "bounded-refused");
     assert!(
         ribbon::painted(&app).iter().any(|p| p.text == "Choose bounds again" && p.rect.contains_rect(p.full)),
@@ -278,11 +256,15 @@ fn outside_trim_keeps_an_analytic_arc_in_a_compact_dark_view() {
     mode(&mut app, "Outside");
     pick(&mut app, P2::new(11.0, 5.0));
     pick(&mut app, P2::new(5.0, 11.0));
+    ribbon::open_options(&mut app);
+    app.get_by_label("Choose bounds again").scroll_to_me();
+    app.run_steps(24);
     frame(&mut app, "bounded-arc-small-dark-controls");
     assert!(
         ribbon::painted(&app).iter().any(|p| p.text == "Choose bounds again" && p.rect.contains_rect(p.full)),
         "the bounds reset control remains visible in the compact panel"
     );
+    ribbon::close_options(&mut app);
     let d = 50.0_f64.sqrt();
     let at = screen(&app, P2::new(d, d));
     app.hover_at(at);

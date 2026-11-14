@@ -1,29 +1,21 @@
-//! PropertyManager: the open sketch, the feature editor while a feature is
-//! being created or edited, otherwise the selected entity's properties.
+//! Sketch and selection details, plus controls shared with the options bar.
 
 use crate::document::{
-    Command, EndKind, FeatureId, FeatureKind, FeatureStatus, PlaneKind, ProfileKind, Reference, Selection, SketchPlane,
-    fmt_mm, plane_ref_label,
+    Command, FeatureId, FeatureKind, FeatureStatus, Reference, Selection, SketchPlane, fmt_mm, plane_ref_label,
 };
 use crate::drag::Dimension;
 use crate::form_bar::value_cell;
 use crate::icons::{self, Icon};
 use crate::sketch::{ConstraintKind, EntityKind, fmt_value, solve};
 use crate::sketcher;
-use crate::state::{AppAction, AppState, DragStep, EditorParams, RelationFilter, SketchSel, Tool};
+use crate::state::{AppAction, AppState, DragStep, RelationFilter, SketchSel, Tool};
 use crate::theme;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, pos2, vec2};
-use soliddraft_kernel_api::{HoleDepth, HoleHead, HoleTip, Vec3};
-use soliddraft_model::{DatumPlane, PatternSpec, PlaneRef};
+use soliddraft_model::{DatumPlane, PlaneRef};
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     if state.sketch.is_some() {
         sketch_panel(ui, state);
-        if state.frame_layout == crate::settings::FrameLayout::Classic {
-            crate::sketch_values::popup(ui, state);
-        }
-    } else if state.editor.is_some() {
-        editor(ui, state);
     } else {
         selection(ui, state);
     }
@@ -61,103 +53,17 @@ fn small_button(ui: &mut egui::Ui, rect: Rect, icon: Icon, tip: &str, primary: b
     resp.on_hover_text(tip)
 }
 
-/// OK and Cancel in the header; returns (ok, cancel).
-fn ok_cancel(ui: &mut egui::Ui, head: Rect, ok_tip: &str, cancel_tip: &str) -> (bool, bool) {
-    let ok = small_button(
-        ui,
-        Rect::from_center_size(pos2(head.right() - 42.0, head.center().y), vec2(22.0, 22.0)),
-        Icon::Check,
-        ok_tip,
-        true,
-    );
-    let cancel = small_button(
-        ui,
-        Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), vec2(22.0, 22.0)),
-        Icon::Close,
-        cancel_tip,
-        false,
-    );
-    (ok.clicked(), cancel.clicked())
-}
-
 // ---------------------------------------------------------------------------
-// The feature form: a header, cards of sections, and the numbers in one table.
+// Shared form controls.
 
 /// The width of a form table's caption column.
 const LABEL_WIDTH: f32 = 96.0;
 /// The height of one row of a form table.
 const ROW_HEIGHT: f32 = 24.0;
-/// The space between the cards of a form.
-const CARD_GAP: f32 = 6.0;
 /// The height of a pick's chip, inside its margin.
 const CHIP_HEIGHT: f32 = 18.0;
 /// How many picks a list shows before it scrolls.
 const LIST_ROWS: usize = 4;
-
-/// The feature editor's header: the feature's icon on an accent tile, then its title.
-fn feature_header(ui: &mut egui::Ui, icon: Icon, title: &str) -> Rect {
-    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(head, CornerRadius::ZERO, theme::panel_header());
-    let tile = Rect::from_center_size(pos2(head.left() + 22.0, head.center().y), vec2(24.0, 24.0));
-    painter.rect_filled(tile, CornerRadius::same(7), theme::accent());
-    icons::paint(painter, icon, tile.shrink(5.0), theme::on_accent());
-    painter.text(
-        pos2(tile.right() + 10.0, head.center().y),
-        Align2::LEFT_CENTER,
-        title,
-        theme::font_semibold(13.5),
-        theme::ink(),
-    );
-    painter.hline(head.x_range(), head.bottom() - 0.5, Stroke::new(1.0, theme::line()));
-    head
-}
-
-/// OK and Cancel at the right of the feature header; returns (ok, cancel). Without
-/// `ok`, only Cancel shows.
-fn header_buttons(ui: &mut egui::Ui, head: Rect, ok: bool) -> (bool, bool) {
-    let size = vec2(24.0, 24.0);
-    let cancel = small_button(
-        ui,
-        Rect::from_center_size(pos2(head.right() - 20.0, head.center().y), size),
-        Icon::Close,
-        "Cancel (Esc)",
-        false,
-    );
-    let ok = ok
-        && small_button(
-            ui,
-            Rect::from_center_size(pos2(head.right() - 49.0, head.center().y), size),
-            Icon::Check,
-            "OK (Enter)",
-            true,
-        )
-        .clicked();
-    (ok, cancel.clicked())
-}
-
-/// A card of the form: a titled section on the raised surface. The title keeps its
-/// exact text, so automation and the acceptance tests can find the section by it.
-fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let inner = egui::Frame::new()
-        .fill(theme::chip())
-        .stroke(Stroke::new(1.0, theme::line().gamma_multiply(0.4)))
-        .corner_radius(CornerRadius::same(8))
-        .inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 6 })
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let (bar, _) = ui.allocate_exact_size(vec2(3.0, 13.0), Sense::hover());
-                ui.painter().rect_filled(bar, CornerRadius::same(2), theme::accent());
-                ui.label(egui::RichText::new(title).family(theme::semibold()).size(11.5).color(theme::ink()));
-            });
-            ui.add_space(2.0);
-            add(ui)
-        })
-        .inner;
-    ui.add_space(CARD_GAP);
-    inner
-}
 
 /// One row of a form table: the caption in its column, and the cell the value goes in.
 fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, Rect) -> R) -> R {
@@ -227,17 +133,6 @@ fn unit_value(
             .fixed_decimals(2)
             .update_while_editing(update_while_editing),
     )
-}
-
-/// A fillet radius or chamfer distance, typed as text. Each edit that reads as a
-/// positive number of millimetres is the new size at once; anything else is refused
-/// beside the field and keeps the text, so nothing is silently clamped to another size.
-fn size_field(ui: &mut egui::Ui, label: &str, value: &mut f64, refused: &mut Option<String>) {
-    let id = ui.make_persistent_id(("size", label));
-    row(ui, label, |ui, cell| size_input(ui, label, value, refused, cell, id));
-    if let Some(why) = refused {
-        error_row(ui, why);
-    }
 }
 
 pub(crate) fn size_input(
@@ -323,29 +218,6 @@ fn dimension_field(ui: &mut egui::Ui, state: &mut AppState, id: FeatureId, kind:
             theme::muted()
         }));
     }
-}
-
-/// The end condition of an extrude or cut. Through all is offered to cuts only, and
-/// the up-to conditions need a body to stop against.
-fn end_combo(ui: &mut egui::Ui, id: &str, end: &mut EndKind, cut: bool, up_to: bool) {
-    choice_row(ui, "End", |ui, width| {
-        egui::ComboBox::from_id_salt(id).width(width).selected_text(end.label()).show_ui(ui, |ui| {
-            let mut options = vec![EndKind::Blind];
-            if cut {
-                options.push(EndKind::ThroughAll);
-            }
-            if up_to {
-                options.push(EndKind::UpToNext);
-                options.push(EndKind::UpToFace(None));
-            }
-            for option in options {
-                let same = std::mem::discriminant(&option) == std::mem::discriminant(end);
-                if ui.selectable_label(same, option.label()).clicked() && !same {
-                    *end = option;
-                }
-            }
-        });
-    });
 }
 
 /// What the viewport waits for: an accent-edged note.
@@ -446,26 +318,6 @@ pub(crate) fn pick_list<'a>(
         .inner
 }
 
-fn picked_face(ui: &mut egui::Ui, face: Option<&crate::document::FaceRef>) {
-    match face {
-        Some(f) => {
-            picked_chip(ui, Icon::Plane, &f.label, false);
-        }
-        None => pick_prompt(ui, "Click the face to stop at"),
-    }
-}
-
-/// A count badge beside a section's picks.
-fn count_note(ui: &mut egui::Ui, count: usize, one: &str, many: &str) {
-    if count > 0 {
-        ui.label(
-            egui::RichText::new(format!("{count} {}", if count == 1 { one } else { many }))
-                .size(11.0)
-                .color(theme::muted()),
-        );
-    }
-}
-
 /// A row of mutually exclusive choices as one segmented control. Returns the index
 /// clicked, if any. Each segment reports itself selected or not, like a selectable label.
 fn segmented(ui: &mut egui::Ui, id: &str, options: &[&str], selected: usize) -> Option<usize> {
@@ -514,44 +366,6 @@ pub(crate) fn coord(ui: &mut egui::Ui, id: &str, label: &str, value: &mut f64) {
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("{id} value")));
 }
 
-fn count_field(ui: &mut egui::Ui, count: &mut u32) {
-    number_row(ui, "Copies", "", egui::DragValue::new(count).range(2..=1000));
-}
-
-/// An angle with standard choices and a free value.
-fn standard_angle(ui: &mut egui::Ui, id: &str, label: &str, angle: &mut f64, choices: &[(f64, &str)]) {
-    let text = choices.iter().find(|(v, _)| v == angle).map_or(format!("{}°", fmt_mm(*angle)), |(_, t)| (*t).into());
-    choice_row(ui, label, |ui, width| {
-        egui::ComboBox::from_id_salt(id).width(width).selected_text(text).show_ui(ui, |ui| {
-            for (value, text) in choices {
-                ui.selectable_value(angle, *value, *text);
-            }
-        });
-    });
-    if *angle != 0.0 {
-        number_row_named(
-            ui,
-            "",
-            &format!("{label} angle"),
-            "°",
-            egui::DragValue::new(angle).speed(0.5).range(1.0..=179.0),
-        );
-    }
-}
-
-/// One of the world axes as a direction.
-fn axis_combo(ui: &mut egui::Ui, id: &str, label: &str, direction: &mut Vec3) {
-    let axes = [(Vec3::X, "X"), (Vec3::Y, "Y"), (Vec3::Z, "Z"), (-Vec3::X, "−X"), (-Vec3::Y, "−Y"), (-Vec3::Z, "−Z")];
-    let text = axes.iter().find(|(v, _)| v == direction).map_or("Custom", |(_, t)| t);
-    choice_row(ui, label, |ui, width| {
-        egui::ComboBox::from_id_salt(id).width(width).selected_text(text).show_ui(ui, |ui| {
-            for (value, text) in axes {
-                ui.selectable_value(direction, value, text);
-            }
-        });
-    });
-}
-
 /// A reference plane choice; a picked face shows by its label.
 pub(crate) fn plane_combo(
     ui: &mut egui::Ui,
@@ -592,69 +406,14 @@ fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(theme::muted()));
 }
 
-/// The closing note of a feature form: what the preview shows and how to finish.
-fn form_note(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(2.0);
-    ui.horizontal_top(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-        ui.painter().circle_stroke(r.center(), 6.0, Stroke::new(1.0, theme::muted()));
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, "i", theme::font_semibold(9.5), theme::muted());
-        ui.add(egui::Label::new(egui::RichText::new(text).size(11.0).color(theme::muted())).wrap());
-    });
-}
-
-/// A refusal, on its own tinted strip beside the control it is about.
-fn error_row(ui: &mut egui::Ui, err: &str) {
-    ui.add_space(4.0);
-    egui::Frame::new()
-        .fill(theme::error_soft())
-        .stroke(Stroke::new(1.0, theme::error().gamma_multiply(0.5)))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(egui::Margin::symmetric(8, 5))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal_top(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                icons::paint(ui.painter(), Icon::Warning, r, theme::error());
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(crate::geometry_message::for_user(err)).size(11.5).color(theme::error()),
-                    )
-                    .wrap(),
-                );
-            });
-        });
-}
-
 /// A field parameter: one value, or a linear grade between two anchors on a part axis.
 /// `unit` names the values, such as "mm"; the anchors are always millimetres.
-pub(crate) fn grade_field(
-    ui: &mut egui::Ui,
-    label: &str,
-    grade: &mut soliddraft_kernel_api::Grade,
-    unit: &str,
-    speed: f64,
-) {
-    grade_controls(ui, label, grade, unit, speed, true);
-}
-
 pub(crate) fn grade_options(
     ui: &mut egui::Ui,
     label: &str,
     grade: &mut soliddraft_kernel_api::Grade,
     unit: &str,
     speed: f64,
-) {
-    grade_controls(ui, label, grade, unit, speed, false);
-}
-
-fn grade_controls(
-    ui: &mut egui::Ui,
-    label: &str,
-    grade: &mut soliddraft_kernel_api::Grade,
-    unit: &str,
-    speed: f64,
-    constant_value: bool,
 ) {
     use soliddraft_kernel_api::{Grade, GradeAxis, LinearGrade};
     ui.label(egui::RichText::new(label).size(12.0).color(theme::ink()));
@@ -676,7 +435,6 @@ fn grade_controls(
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, info.clone()));
     };
     match grade {
-        Grade::Constant(v) if constant_value => value(ui, "", v, unit),
         Grade::Constant(_) => {}
         Grade::Linear(l) => {
             choice_row(ui, "Axis", |ui, _| {
@@ -747,624 +505,7 @@ pub(crate) fn thicken_side(ui: &mut egui::Ui, side: &mut soliddraft_kernel_api::
     });
 }
 
-fn editor(ui: &mut egui::Ui, state: &mut AppState) {
-    let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
-    let (title, icon) = match state.editor.as_ref().map(|e| &e.params) {
-        Some(EditorParams::Revolve(_)) => (state.editor.as_ref().unwrap().title(), Icon::Revolve),
-        Some(EditorParams::Loft(_)) => (state.editor.as_ref().unwrap().title(), Icon::Loft),
-        Some(EditorParams::Sweep(_)) => (state.editor.as_ref().unwrap().title(), Icon::Sweep),
-        Some(EditorParams::Extrude(_)) => (state.editor.as_ref().unwrap().title(), Icon::Extrude),
-        Some(EditorParams::Cut(_)) => (state.editor.as_ref().unwrap().title(), Icon::Cut),
-        Some(EditorParams::Fillet(_)) => (state.editor.as_ref().unwrap().title(), Icon::Fillet),
-        Some(EditorParams::Chamfer(_)) => (state.editor.as_ref().unwrap().title(), Icon::Chamfer),
-        Some(EditorParams::Hole(_)) => (state.editor.as_ref().unwrap().title(), Icon::Hole),
-        Some(EditorParams::Pattern(p)) => (
-            state.editor.as_ref().unwrap().title(),
-            if matches!(p.layout, PatternSpec::Linear { .. }) { Icon::LinearPattern } else { Icon::CircularPattern },
-        ),
-        Some(EditorParams::ReferencePlane(_)) => (state.editor.as_ref().unwrap().title(), Icon::Plane),
-        Some(EditorParams::Mirror(_)) => (state.editor.as_ref().unwrap().title(), Icon::Mirror),
-        Some(EditorParams::Draft(_)) => (state.editor.as_ref().unwrap().title(), Icon::Draft),
-        Some(EditorParams::Lattice(_) | EditorParams::Gyroid(_)) => {
-            (state.editor.as_ref().unwrap().title(), Icon::Cad("lattice"))
-        }
-        Some(EditorParams::Offset(_)) => (state.editor.as_ref().unwrap().title(), Icon::Cad("srf_offset")),
-        Some(EditorParams::Thicken(_)) => (state.editor.as_ref().unwrap().title(), Icon::Shell),
-        Some(EditorParams::Shell(_)) => (state.editor.as_ref().unwrap().title(), Icon::Shell),
-        Some(EditorParams::PickPlane) => ("Sketch".to_owned(), Icon::Sketch),
-        Some(EditorParams::Repair { .. }) => ("Repair references".to_owned(), Icon::Repair),
-        None => return,
-    };
-    let head = feature_header(ui, icon, &title);
-    let pick_plane = matches!(state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickPlane));
-    let (ok, cancel) = header_buttons(ui, head, !pick_plane);
-    if ok {
-        state.push(AppAction::CommitEditor);
-    }
-    if cancel {
-        state.push(AppAction::CancelEditor);
-    }
-
-    let sketch_names: Vec<(crate::document::FeatureId, String)> =
-        state.doc.features.iter().filter(|f| f.is_sketch()).map(|f| (f.id, f.name.clone())).collect();
-    let sketch_name = |id: crate::document::FeatureId, missing: &str| {
-        sketch_names.iter().find(|(i, _)| *i == id).map_or_else(|| missing.to_owned(), |(_, n)| n.clone())
-    };
-    let target = state
-        .editor
-        .as_ref()
-        .and_then(|e| e.target)
-        .and_then(|id| state.doc.index_of(id))
-        .unwrap_or(state.doc.features.len());
-    let plane_choices: Vec<_> = state
-        .doc
-        .features
-        .iter()
-        .take(target)
-        .filter(|f| matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
-        .map(|f| (soliddraft_model::FeatureId(f.id as u32), f.name.clone()))
-        .collect();
-    let pattern_choices = pattern_sources(&state.doc, target);
-    let loft_choices = crate::loft_panel::choices(&state.doc, target);
-    let sweep_radius = match state.editor.as_ref().map(|e| &e.params) {
-        Some(EditorParams::Sweep(s)) => state.doc.sweep_anchor(s.sketch.0 as u64).map_or(10.0, |(_, radius)| radius),
-        _ => 0.0,
-    };
-    let mut actions = Vec::new();
-    let Some(editor) = state.editor.as_mut() else { return };
-    egui::ScrollArea::vertical().id_salt("pm").auto_shrink([false, false]).show(ui, |ui| {
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 8)).show(ui, |ui| match &mut editor.params {
-            EditorParams::Loft(l) => {
-                section(ui, "Profiles in order", |ui| {
-                    crate::loft_panel::page(ui, l, &loft_choices);
-                });
-                if let Some(error) = &editor.error {
-                    error_row(ui, error);
-                }
-            }
-            EditorParams::Sweep(s) => {
-                section(ui, "Polygon profile", |ui| {
-                    picked_chip(ui, Icon::Sketch, &sketch_name(s.sketch.0 as u64, "Missing sketch"), false);
-                });
-                section(ui, "Path", |ui| crate::sweep_panel::page(ui, &mut s.path, sweep_radius, coord));
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-                form_note(ui, "The profile stays where it was sketched, so start the path on it.");
-            }
-            EditorParams::Revolve(r) => {
-                section(ui, "Meridian sketch", |ui| {
-                    picked_chip(ui, Icon::Sketch, &sketch_name(r.sketch.0 as u64, "Missing sketch"), false);
-                });
-                section(ui, "Axis", |ui| {
-                    for (caption, values, id) in
-                        [("Point", &mut r.axis_origin, "origin"), ("Direction", &mut r.axis_direction, "direction")]
-                    {
-                        ui.label(egui::RichText::new(caption).size(12.0).color(theme::ink()));
-                        ui.horizontal(|ui| {
-                            for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
-                                coord(ui, &format!("revolve {id} {label}"), label, &mut values[i]);
-                            }
-                        });
-                    }
-                });
-                section(ui, "Angle", |ui| {
-                    number_row(ui, "Angle", "°", egui::DragValue::new(&mut r.angle_deg).speed(1.0).range(0.0..=360.0));
-                });
-            }
-            EditorParams::Extrude(params) => {
-                section(ui, "Profile", |ui| match params.sketch {
-                    Some(id) => {
-                        picked_chip(ui, Icon::Sketch, &sketch_name(id, "Sketch"), false);
-                    }
-                    None => {
-                        let is_rect = matches!(params.profile, ProfileKind::Rectangle { .. });
-                        match segmented(ui, "extrude_profile", &["Rectangle", "Circle"], (!is_rect) as usize) {
-                            Some(0) if !is_rect => {
-                                params.profile = ProfileKind::Rectangle { width: 60.0, height: 40.0 }
-                            }
-                            Some(1) if is_rect => params.profile = ProfileKind::Circle { diameter: 24.0 },
-                            _ => {}
-                        }
-                        match &mut params.profile {
-                            ProfileKind::Rectangle { width, height } => {
-                                mm_field(ui, "Width", width);
-                                mm_field(ui, "Height", height);
-                            }
-                            ProfileKind::Circle { diameter } => {
-                                mm_field(ui, "Diameter", diameter);
-                            }
-                        }
-                        choice_row(ui, "Plane", |ui, width| {
-                            egui::ComboBox::from_id_salt("plane")
-                                .width(width)
-                                .selected_text(state.doc.model().datum_name(params.plane.to_model()))
-                                .show_ui(ui, |ui| {
-                                    for p in PlaneKind::ALL {
-                                        ui.selectable_value(
-                                            &mut params.plane,
-                                            p,
-                                            state.doc.model().datum_name(p.to_model()),
-                                        );
-                                    }
-                                });
-                        });
-                    }
-                });
-                section(ui, "Direction 1", |ui| {
-                    let mut end = params.end.clone();
-                    end_combo(ui, "extrude_end", &mut end, false, params.sketch.is_some());
-                    params.end = end;
-                    match &params.end {
-                        EndKind::Blind => {
-                            mm_field(ui, "Depth", &mut params.depth);
-                        }
-                        EndKind::UpToFace(face) => picked_face(ui, face.as_ref()),
-                        _ => {}
-                    }
-                    ui.checkbox(&mut params.flip, "Flip direction");
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-                form_note(ui, "The ghost in the viewport previews the added material. Enter applies, Esc cancels.");
-            }
-            EditorParams::Cut(params) => {
-                section(ui, "Profile", |ui| {
-                    picked_chip(ui, Icon::Sketch, &sketch_name(params.sketch, "Sketch"), false);
-                });
-                section(ui, "Direction 1", |ui| {
-                    let mut end = params.end();
-                    end_combo(ui, "cut_end", &mut end, true, true);
-                    if end != params.end() {
-                        params.set_end(end);
-                    }
-                    match params.end() {
-                        EndKind::Blind => {
-                            mm_field(ui, "Depth", &mut params.depth);
-                        }
-                        EndKind::UpToFace(face) => picked_face(ui, face.as_ref()),
-                        _ => {}
-                    }
-                    ui.checkbox(&mut params.flip, "Flip direction");
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-                form_note(ui, "The material to remove shows in red; the body previews the result.");
-            }
-            EditorParams::Fillet(_) | EditorParams::Chamfer(_) => {
-                let chamfer = matches!(editor.params, EditorParams::Chamfer(_));
-                let edges = editor.edges().to_vec();
-                let remove = section(ui, "Items to round", |ui| {
-                    count_note(ui, edges.len(), "edge", "edges");
-                    let remove = pick_list(
-                        ui,
-                        "Click edges or faces in the viewport",
-                        Icon::Axis,
-                        edges.iter().map(|e| e.label.as_str()),
-                    );
-                    if let Some(why) = &editor.feedback.pick {
-                        error_row(ui, why);
-                    }
-                    remove
-                });
-                if let (Some(i), Some(list)) = (remove, editor.edges_mut()) {
-                    list.remove(i);
-                }
-                section(ui, if chamfer { "Chamfer parameters" } else { "Fillet parameters" }, |ui| {
-                    let refused = &mut editor.feedback.size;
-                    match &mut editor.params {
-                        EditorParams::Fillet(f) => size_field(ui, "Radius", &mut f.radius, refused),
-                        EditorParams::Chamfer(c) => {
-                            size_field(ui, "Distance", &mut c.distance, refused);
-                            if edit_suite {
-                                let mut unequal = c.other_distance.is_some();
-                                if ui.checkbox(&mut unequal, "Two distances").changed() {
-                                    c.other_distance = unequal.then_some(c.distance);
-                                    editor.feedback.second_size = None;
-                                }
-                                if let Some(other) = &mut c.other_distance {
-                                    size_field(ui, "Distance 2", other, &mut editor.feedback.second_size);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    if let Some(err) = &editor.error {
-                        error_row(ui, err);
-                    }
-                });
-                form_note(
-                    ui,
-                    "A face adds every edge on its boundary. Edges stay picked across a rebuild: each one is \
-                     named by the feature that made it.",
-                );
-            }
-            EditorParams::Hole(h) => {
-                section(ui, "Placement", |ui| {
-                    match &h.face {
-                        Some(face) => {
-                            picked_chip(ui, Icon::Plane, &face.label, false);
-                        }
-                        None => pick_prompt(ui, "Click the planar face the holes start on"),
-                    }
-                    hint(ui, "Centres in the face's sketch frame, mm.");
-                    let mut remove = None;
-                    for (i, p) in h.points.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(format!("{}", i + 1)).size(12.0).color(theme::muted()));
-                            coord(ui, &format!("hole_u{i}"), "u", &mut p.u);
-                            coord(ui, &format!("hole_v{i}"), "v", &mut p.v);
-                            if ui.add(egui::Button::new("×").small().frame(false)).on_hover_text("Remove").clicked() {
-                                remove = Some(i);
-                            }
-                        });
-                    }
-                    if let Some(i) = remove.filter(|_| h.points.len() > 1) {
-                        h.points.remove(i);
-                    }
-                    if ui.button("Add point").clicked() {
-                        let next = h.points.last().copied().unwrap_or_default();
-                        h.points.push(crate::sketch::P2::new(next.u + 10.0, next.v));
-                    }
-                });
-                section(ui, "Hole", |ui| {
-                    mm_field(ui, "Diameter", &mut h.diameter);
-                    let through = matches!(h.depth, HoleDepth::Through);
-                    match segmented(ui, "hole_depth", &["Through", "Blind"], (!through) as usize) {
-                        Some(0) => h.depth = HoleDepth::Through,
-                        Some(1) if through => h.depth = HoleDepth::Blind { depth: 10.0 },
-                        _ => {}
-                    }
-                    if let HoleDepth::Blind { depth } = &mut h.depth {
-                        mm_field(ui, "Depth", depth);
-                        let mut angle = match h.tip {
-                            HoleTip::Flat => 0.0,
-                            HoleTip::Cone { angle_deg } => angle_deg,
-                        };
-                        standard_angle(
-                            ui,
-                            "hole_tip",
-                            "Tip",
-                            &mut angle,
-                            &[(0.0, "Flat"), (118.0, "118°"), (90.0, "90°")],
-                        );
-                        h.tip = if angle == 0.0 { HoleTip::Flat } else { HoleTip::Cone { angle_deg: angle } };
-                    }
-                });
-                section(ui, "Head", |ui| {
-                    let kind = match h.head {
-                        None => 0,
-                        Some(HoleHead::Counterbore { .. }) => 1,
-                        Some(HoleHead::Countersink { .. }) => 2,
-                    };
-                    match segmented(ui, "hole_head", &["None", "Counterbore", "Countersink"], kind) {
-                        Some(0) => h.head = None,
-                        Some(1) if kind != 1 => {
-                            h.head = Some(HoleHead::Counterbore { diameter: h.diameter * 1.8, depth: h.diameter })
-                        }
-                        Some(2) if kind != 2 => {
-                            h.head = Some(HoleHead::Countersink { diameter: h.diameter * 2.0, angle_deg: 90.0 })
-                        }
-                        _ => {}
-                    }
-                    match &mut h.head {
-                        Some(HoleHead::Counterbore { diameter, depth }) => {
-                            mm_field(ui, "Diameter", diameter);
-                            mm_field(ui, "Depth", depth);
-                        }
-                        Some(HoleHead::Countersink { diameter, angle_deg }) => {
-                            mm_field(ui, "Diameter", diameter);
-                            standard_angle(
-                                ui,
-                                "hole_sink",
-                                "Angle",
-                                angle_deg,
-                                &[(82.0, "82°"), (90.0, "90°"), (100.0, "100°"), (120.0, "120°")],
-                            );
-                        }
-                        None => {}
-                    }
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-                form_note(ui, "Standard angles: 118° drill tips; 82°, 90° and 100° countersinks.");
-            }
-            EditorParams::Pattern(p) => {
-                section(ui, "Features", |ui| {
-                    choice_row(ui, "Source", |ui, _| pattern_source(ui, p, &pattern_choices));
-                });
-                section(ui, "Layout", |ui| match &mut p.layout {
-                    PatternSpec::Linear { direction, spacing, count } => {
-                        axis_combo(ui, "pattern_dir", "Direction", direction);
-                        mm_field(ui, "Spacing", spacing);
-                        count_field(ui, count);
-                    }
-                    PatternSpec::Circular { axis_direction, count, angle, .. } => {
-                        axis_combo(ui, "pattern_axis", "Axis", axis_direction);
-                        count_field(ui, count);
-                        unit_field(ui, "Angle", angle, "°");
-                    }
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-                form_note(ui, "Choose a feature to repeat its operation, or Whole body to copy the part.");
-            }
-            EditorParams::ReferencePlane(source) => {
-                section(ui, "Source plane", |ui| {
-                    let mut plane = match source {
-                        soliddraft_model::SketchPlane::Datum { datum, .. } => {
-                            PlaneRef::Datum { datum: *datum, offset: 0.0 }
-                        }
-                        soliddraft_model::SketchPlane::Feature { feature, .. } => {
-                            PlaneRef::Feature { feature: *feature }
-                        }
-                        soliddraft_model::SketchPlane::Face { face }
-                        | soliddraft_model::SketchPlane::FaceOffset { face, .. } => {
-                            PlaneRef::Face { face: face.clone() }
-                        }
-                    };
-                    let mut offset = source.offset();
-                    plane_combo(ui, "reference_plane_source", &mut plane, &plane_choices);
-                    ui.add_space(4.0);
-                    number_row(
-                        ui,
-                        "Offset",
-                        "mm",
-                        egui::DragValue::new(&mut offset).speed(0.5).range(-100_000.0..=100_000.0),
-                    );
-                    *source = match plane {
-                        PlaneRef::Datum { datum, .. } => soliddraft_model::SketchPlane::Datum { datum, offset },
-                        PlaneRef::Feature { feature } => soliddraft_model::SketchPlane::Feature { feature, offset },
-                        PlaneRef::Face { face } => soliddraft_model::SketchPlane::FaceOffset { face, offset },
-                    };
-                });
-                form_note(
-                    ui,
-                    "Choose a plane in the tree or click a planar face. A negative offset moves in the opposite \
-                     direction.",
-                );
-            }
-            EditorParams::Mirror(m) => {
-                section(ui, "Mirror plane", |ui| {
-                    plane_combo(ui, "mirror_plane", &mut m.plane, &plane_choices);
-                    hint(ui, "Or click a planar face in the viewport.");
-                    ui.checkbox(&mut m.keep_original, "Keep the original");
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-            }
-            EditorParams::Lattice(l) => {
-                let title = l.cell.map_or("Lattice".to_owned(), |cell| format!("{} lattice", cell.label()));
-                section(ui, if edit_suite { "Lattice" } else { &title }, |ui| {
-                    if edit_suite {
-                        let cell = l.cell.get_or_insert(soliddraft_kernel_api::LatticeCell::Cubic);
-                        egui::ComboBox::from_label("Cell type").selected_text(cell.label()).show_ui(ui, |ui| {
-                            for choice in soliddraft_kernel_api::LatticeCell::ALL {
-                                ui.selectable_value(cell, choice, choice.label());
-                            }
-                        });
-                    }
-                    hint(ui, "Grid at the part origin. Unproved preview; export certifies the mesh.");
-                    let v = l.cell_size_mm.get_or_insert(0.0);
-                    number_row(ui, "Cell size", "mm", egui::DragValue::new(v).speed(0.1));
-                    let radius = l.radius_mm.get_or_insert(soliddraft_kernel_api::Grade::Constant(0.0));
-                    grade_field(ui, "Beam radius (mm), controls density", radius, "mm", 0.1);
-                    for (label, v) in [("Accuracy", &mut l.accuracy_mm), ("Minimum detail", &mut l.min_detail_mm)] {
-                        number_row(ui, label, "mm", egui::DragValue::new(v).speed(0.01));
-                    }
-                });
-
-                ui.label("unproved preview");
-                if let Some(error) = &editor.error {
-                    error_row(ui, error);
-                }
-            }
-            EditorParams::Gyroid(g) => {
-                section(ui, "Network gyroid", |ui| {
-                    hint(ui, "Fixed to the part origin. Unproved preview; export certifies the mesh.");
-                    number_row(ui, "Period", "mm", egui::DragValue::new(&mut g.period_mm).speed(0.1));
-                    grade_field(ui, "Network level (dimensionless)", &mut g.level, "", 0.01);
-                    for (label, v) in [("Accuracy", &mut g.accuracy_mm), ("Minimum detail", &mut g.min_detail_mm)] {
-                        number_row(ui, label, "mm", egui::DragValue::new(v).speed(0.01));
-                    }
-                });
-                ui.label("unproved preview");
-                if let Some(error) = &editor.error {
-                    error_row(ui, error);
-                }
-            }
-            EditorParams::Offset(s) => {
-                section(ui, "Distance", |ui| {
-                    number_row(ui, "Offset", "mm", egui::DragValue::new(&mut s.distance).speed(0.1));
-                    hint(ui, "Positive grows the body; negative shrinks it.");
-                });
-                if let Some(error) = &editor.error {
-                    error_row(ui, error);
-                }
-            }
-            EditorParams::Thicken(s) => {
-                section(ui, "Faces", |ui| {
-                    if let Some(i) =
-                        pick_list(ui, "Click faces to thicken", Icon::Plane, s.faces.iter().map(|f| f.label.as_str()))
-                    {
-                        s.faces.remove(i);
-                    }
-                });
-                section(ui, "Thickness", |ui| {
-                    number_row(ui, "Thickness", "mm", egui::DragValue::new(&mut s.thickness).speed(0.1));
-                    choice_row(ui, "Side", |ui, _| thicken_side(ui, &mut s.side));
-                });
-                if let Some(error) = &editor.error {
-                    error_row(ui, error);
-                }
-                form_note(ui, "Creates a solid from the selected faces at the chosen thickness.");
-            }
-            EditorParams::Shell(s) => {
-                section(ui, "Open faces", |ui| {
-                    let mut every_face = s.open_faces.is_all();
-                    if ui.checkbox(&mut every_face, "Open every face").changed() {
-                        s.open_faces = if every_face {
-                            soliddraft_model::ShellOpenings::All
-                        } else {
-                            soliddraft_model::ShellOpenings::Faces(Vec::new())
-                        };
-                    }
-                    if let soliddraft_model::ShellOpenings::Faces(faces) = &mut s.open_faces {
-                        let remove = pick_list(
-                            ui,
-                            "Click faces to open; leave empty for a closed shell",
-                            Icon::Plane,
-                            faces.iter().map(|f| f.label.as_str()),
-                        );
-                        if let Some(i) = remove {
-                            faces.remove(i);
-                        }
-                    } else {
-                        hint(ui, "Nothing of the part remains.");
-                    }
-                });
-                section(ui, "Wall", |ui| {
-                    // Keep the user's typed value: invalid walls must be reported, not
-                    // silently clamped to the generic positive dimension-field range.
-                    number_row(ui, "Wall thickness", "mm", egui::DragValue::new(&mut s.thickness).speed(0.1));
-                });
-                if let Some(error) = &editor.error {
-                    error_row(ui, error);
-                }
-            }
-            EditorParams::Draft(d) => {
-                section(ui, "Faces to draft", |ui| {
-                    count_note(ui, d.faces.len(), "face", "faces");
-                    let remove = pick_list(
-                        ui,
-                        "Click faces in the viewport",
-                        Icon::Plane,
-                        d.faces.iter().map(|f| f.label.as_str()),
-                    );
-                    if let Some(i) = remove {
-                        d.faces.remove(i);
-                    }
-                });
-                section(ui, "Neutral plane", |ui| {
-                    plane_combo(ui, "draft_neutral", &mut d.neutral, &plane_choices);
-                    ui.checkbox(&mut d.picking_neutral, "Next face click sets the neutral plane");
-                    unit_field(ui, "Angle", &mut d.angle, "°");
-                    ui.checkbox(&mut d.reverse, "Pull against the neutral normal");
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-                form_note(ui, "Draft tapers planar faces, and cylinders parallel to the pull.");
-            }
-            EditorParams::PickPlane => {
-                section(ui, "Sketch plane", |ui| {
-                    hint(ui, "Choose a reference plane, or click a planar face of the body.");
-                    ui.add_space(4.0);
-                    for (feature, name) in &plane_choices {
-                        if ui.add_sized(vec2(ui.available_width(), 26.0), egui::Button::new(name)).clicked() {
-                            actions.push(AppAction::StartSketchOn(SketchPlane::Feature {
-                                feature: feature.0 as _,
-                                offset: 0.0,
-                            }));
-                        }
-                    }
-                    for p in PlaneKind::ALL {
-                        if ui
-                            .add_sized(
-                                vec2(ui.available_width(), 26.0),
-                                egui::Button::new(state.doc.model().datum_name(p.to_model())),
-                            )
-                            .clicked()
-                        {
-                            actions.push(AppAction::StartSketchOn(SketchPlane::Reference { plane: p, offset: 0.0 }));
-                        }
-                    }
-                });
-            }
-            EditorParams::Repair { items, chosen, active } => {
-                section(ui, "Missing references", |ui| {
-                    hint(ui, "Pick the replacement for each one in the viewport, then OK.");
-                    ui.add_space(4.0);
-                    for (i, item) in items.iter().enumerate() {
-                        let is_active = *active == i;
-                        let picked = chosen.get(i).and_then(|c| c.as_ref()).map(|c| c.label().to_owned());
-                        let frame = egui::Frame::new()
-                            .fill(if is_active { theme::accent_soft() } else { theme::panel() })
-                            .stroke(Stroke::new(1.0, if is_active { theme::accent() } else { theme::line() }))
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(egui::Margin::symmetric(8, 5));
-                        let resp = frame
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    let (r, _) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
-                                    let icon = match item.kind {
-                                        crate::document::RefKind::Edge => Icon::Axis,
-                                        crate::document::RefKind::Face | crate::document::RefKind::Plane => Icon::Plane,
-                                    };
-                                    icons::paint(ui.painter(), icon, r, theme::muted());
-                                    ui.label(
-                                        egui::RichText::new(&item.label)
-                                            .size(12.0)
-                                            .strikethrough()
-                                            .color(theme::muted()),
-                                    );
-                                });
-                                match &picked {
-                                    Some(l) => {
-                                        ui.label(egui::RichText::new(format!("→ {l}")).size(12.0).color(theme::ok()));
-                                    }
-                                    None => {
-                                        ui.label(
-                                            egui::RichText::new(if is_active {
-                                                match item.kind {
-                                                    crate::document::RefKind::Edge => "Click the replacement edge",
-                                                    crate::document::RefKind::Face => "Click the replacement face",
-                                                    crate::document::RefKind::Plane => "Choose a plane or planar face",
-                                                }
-                                            } else {
-                                                "Waiting"
-                                            })
-                                            .size(11.5)
-                                            .color(if is_active {
-                                                theme::accent()
-                                            } else {
-                                                theme::muted()
-                                            }),
-                                        );
-                                    }
-                                }
-                            })
-                            .response;
-                        if ui.interact(resp.rect, ui.id().with(("repair_item", i)), Sense::click()).clicked() {
-                            *active = i;
-                        }
-                        ui.add_space(4.0);
-                    }
-                });
-                if let Some(err) = &editor.error {
-                    error_row(ui, err);
-                }
-            }
-        });
-    });
-    for a in actions {
-        state.push(a);
-    }
-}
-
 fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
-    let name = state
-        .sketch
-        .as_ref()
-        .and_then(|s| state.doc.feature(s.feature))
-        .map(|f| f.name.clone())
-        .unwrap_or("Sketch".into());
     let plane_label = state
         .sketch
         .as_ref()
@@ -1372,13 +513,7 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
         .and_then(|f| f.sketch())
         .map(|s| s.plane.label())
         .unwrap_or_default();
-    if state.frame_layout == crate::settings::FrameLayout::Classic {
-        let head = header(ui, Icon::Sketch, &name);
-        let (ok, cancel) = ok_cancel(ui, head, "Exit sketch (Enter)", "Exit sketch and discard nothing (Esc)");
-        if ok || cancel {
-            state.push(AppAction::ExitSketch);
-        }
-    }
+
     let mut actions = Vec::new();
     let has_body = state.doc.model().body().is_some();
     let links =
@@ -1947,11 +1082,6 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         theme::section_label(ui, kind);
         egui::Grid::new("props").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
             for (k, v) in &info.details {
-                if matches!(k.as_str(), "Carrier accuracy" | "Import deviation" | "Approved import limit")
-                    && state.frame_layout != crate::settings::FrameLayout::EditSuite
-                {
-                    continue;
-                }
                 ui.label(egui::RichText::new(k).size(12.0).color(theme::muted()));
                 let color = match k.as_str() {
                     "Error" => theme::error(),
@@ -1962,7 +1092,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.end_row();
             }
         });
-        if state.frame_layout == crate::settings::FrameLayout::EditSuite && sel == Selection::Body {
+        if sel == Selection::Body {
             ui.add_space(8.0);
             material_panel(ui, state);
         }
@@ -2009,11 +1139,7 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| match sel {
             Selection::Feature(id) => {
-                if state.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && state
-                        .doc
-                        .feature(id)
-                        .is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_)))
+                if state.doc.feature(id).is_some_and(|f| matches!(f.kind, crate::document::FeatureKind::ImportStep(_)))
                     && ui.button("Replace file...").clicked()
                 {
                     state.push(AppAction::ReplaceImport { feature: id, path: None });
@@ -2069,6 +1195,27 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         });
         let _ = fmt_mm(0.0);
     });
+}
+
+fn section<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let inner = egui::Frame::new()
+        .fill(theme::chip())
+        .stroke(Stroke::new(1.0, theme::line().gamma_multiply(0.4)))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 6 })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (bar, _) = ui.allocate_exact_size(vec2(3.0, 13.0), Sense::hover());
+                ui.painter().rect_filled(bar, CornerRadius::same(2), theme::accent());
+                ui.label(egui::RichText::new(title).family(theme::semibold()).size(11.5).color(theme::ink()));
+            });
+            ui.add_space(2.0);
+            add(ui)
+        })
+        .inner;
+    ui.add_space(6.0);
+    inner
 }
 
 fn material_panel(ui: &mut egui::Ui, state: &mut AppState) {

@@ -274,7 +274,12 @@ pub fn parameters(feature: &Feature) -> Vec<Param> {
             out.push(param(Parameter::Accuracy, Unit::Length, g.accuracy_mm));
             out.push(param(Parameter::MinDetail, Unit::Length, g.min_detail_mm));
         }
-        FeatureKind::Loft(_) | FeatureKind::Sweep(_) | FeatureKind::Mirror(_) | FeatureKind::ImportStep(_) => {}
+        FeatureKind::Combine { .. }
+        | FeatureKind::Scan(_)
+        | FeatureKind::Loft(_)
+        | FeatureKind::Sweep(_)
+        | FeatureKind::Mirror(_)
+        | FeatureKind::ImportStep(_) => {}
     }
     out
 }

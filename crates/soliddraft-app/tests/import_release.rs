@@ -1,6 +1,6 @@
 //! Release import flows use the real review, kernel, feature tree and saved source.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui_kittest::kittest::Queryable;
@@ -9,7 +9,6 @@ use soliddraft_app::{
     command_tools::{CommandTools, ProposalBook, Surface},
     document::{Document, FeatureKind, FeatureStatus},
     import::{Preview, Review, commit},
-    settings::FrameLayout,
     state::AppAction,
 };
 use soliddraft_assistant::{Caller, ToolHost};
@@ -100,8 +99,7 @@ fn closed_mesh_review_accepts_displays_saves_reopens_and_exports_an_exact_solid(
     let mut app = ribbon::app(Document::new("Mesh solid", soliddraft_app::kernel()));
     app.run_steps(3);
     let command = soliddraft_app::commands::get("import_mesh").unwrap();
-    assert!(!(command.shown)(&app.state().state));
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    assert!((command.shown)(&app.state().state));
     app.run_steps(3);
     app.get_by_label("File").click();
     app.run_steps(3);

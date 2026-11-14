@@ -1319,15 +1319,13 @@ fn entity_color(s: &SketchSession, e: &Entity) -> Color32 {
     };
     let in_conflict = s.sketch.constraints_of(e.id).any(|c| conflicting.contains(&c.id));
     if in_conflict {
-        if theme::is_edit_suite() { theme::edit_suite::DANGER } else { theme::error() }
+        theme::edit_suite::DANGER
     } else if e.construction {
-        if theme::is_edit_suite() { theme::edit_suite::CONSTRUCTION } else { theme::muted() }
+        theme::edit_suite::CONSTRUCTION
     } else if s.sketch.free.contains(&e.id) {
-        if theme::is_edit_suite() { theme::edit_suite::UNDER_DEFINED } else { theme::accent() }
-    } else if theme::is_edit_suite() {
-        theme::edit_suite::FULLY_DEFINED
+        theme::edit_suite::UNDER_DEFINED
     } else {
-        theme::ink()
+        theme::edit_suite::FULLY_DEFINED
     }
 }
 
@@ -1740,10 +1738,8 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
             theme::error()
         } else if sel {
             theme::accent()
-        } else if theme::is_edit_suite() {
-            theme::edit_suite::DIMENSION
         } else {
-            theme::muted().gamma_multiply(1.15)
+            theme::edit_suite::DIMENSION
         };
         let Some(label) = c.label() else { continue };
         let Some(lp) = frame.screen(label) else { continue };

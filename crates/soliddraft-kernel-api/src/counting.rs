@@ -61,6 +61,24 @@ impl Counting {
 }
 
 impl Kernel for Counting {
+    fn scan_reference(&self, source: &crate::scan::ScanSource) -> KernelResult<crate::scan::ScanReference> {
+        self.inner.scan_reference(source)
+    }
+
+    fn fit_scan(&self, source: &crate::scan::ScanSource) -> KernelResult<crate::scan::ScanFit> {
+        self.inner.fit_scan(source)
+    }
+
+    fn build_scan_fit(
+        &self,
+        tag: &OpTag,
+        source: &crate::scan::ScanSource,
+        fit: &crate::scan::ScanFit,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.build_scan_fit(tag, source, fit)
+    }
+
     fn body_relation(
         &self,
         a: crate::PlacedBody,
@@ -257,6 +275,19 @@ impl Kernel for Counting {
         self.inner.export_field_stand_in(body, accuracy)
     }
 
+    fn independent_check(&self, body: BodyId) -> KernelResult<crate::IndependentCheck> {
+        self.inner.independent_check(body)
+    }
+
+    fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<crate::PrintMesh>> {
+        self.note(Work::Mesh(body));
+        self.inner.print_mesh(body, params)
+    }
+
+    fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<crate::FieldExport> {
+        self.inner.export_field_stl_at(body, accuracy_mm)
+    }
+
     fn tessellate(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
         self.inner.tessellate(body, params)
@@ -289,6 +320,10 @@ impl Kernel for Counting {
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.note(Work::Mesh(body));
         self.inner.preview(body, params)
+    }
+
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
+        self.inner.measure_work(run)
     }
 
     fn reserve_proof_work(&self) -> KernelResult<Box<dyn crate::ProofWork>> {

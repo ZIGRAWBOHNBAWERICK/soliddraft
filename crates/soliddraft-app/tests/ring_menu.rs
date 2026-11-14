@@ -1,6 +1,6 @@
 //! The approved ring through the real Edit Suite frame and renderer.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, PointerButton, Pos2, Rect, vec2};
@@ -9,7 +9,6 @@ use glam::Vec3;
 use ribbon::{App, render_steps};
 use soliddraft_app::{
     document::{Command, PlaneKind, SketchPlane},
-    settings::FrameLayout,
     sketch::{ConstraintKind, P2},
     sketcher::Frame,
     state::{AppAction, SketchSel, Tool},
@@ -201,16 +200,4 @@ fn sketch_ring_applies_a_relation_as_one_edit_and_keeps_solid_commands_hidden() 
         assert!(app.state().state.sketch.is_some());
         assert!(app.query_all_by_label("Quick commands").next().is_none());
     });
-}
-
-#[test]
-fn classic_has_no_ring() {
-    let case = ribbon::case("ring-classic");
-    let mut app = ribbon::app(ribbon::plate());
-    assert_eq!(app.state().state.frame_layout, FrameLayout::Classic);
-    let at = world(&app, Vec3::new(0.0, 0.0, 20.0));
-    secondary(&mut app, at, true);
-    assert!(app.query_all_by_label("Quick commands").next().is_none());
-    drop(app);
-    drop(case);
 }

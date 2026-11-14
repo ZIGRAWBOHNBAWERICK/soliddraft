@@ -36,6 +36,7 @@ pub use measure::{Certainty, Measurement, PairEndpoint, PairQuantity, PointProof
 mod assembly_measure;
 mod body_relation;
 pub use body_relation::{BodyContactFaces, BodyDistance, BodyQueryRefusal, BodyRelation, OverlapVolume, PlacedBody};
+mod checks;
 mod edit;
 mod field;
 mod geometry;
@@ -44,8 +45,10 @@ mod ids;
 mod iges;
 mod import;
 mod profile;
+pub mod scan;
 mod sweep;
 
+pub use checks::{IndependentCheck, IndependentStep, PrintMesh, PrintReport};
 pub use edit::{ConstructionEdit, ConstructionFace, ConstructionMesh, ProofWork, ScalarEdit, ScalarParameter};
 pub use field::{
     ExactRange, ExchangedMoments, FieldMass, FieldMassAccuracy, Grade, GradeAxis, LinearGrade, ProxyMoments,
@@ -904,6 +907,21 @@ pub type KernelResult<T> = Result<T, KernelError>;
 /// Implementations are thread-safe; a backend that needs a single kernel thread
 /// serialises calls internally.
 pub trait Kernel: Send + Sync {
+    /// Reads an open mesh or point cloud without turning it into a solid.
+    fn scan_reference(&self, _source: &scan::ScanSource) -> KernelResult<scan::ScanReference> {
+        Err(KernelError::Unsupported("Coming soon".into()))
+    }
+
+    /// Fits supported analytic surfaces, retaining both sampled deviation maps.
+    fn fit_scan(&self, _source: &scan::ScanSource) -> KernelResult<scan::ScanFit> {
+        Err(KernelError::Unsupported("Coming soon".into()))
+    }
+
+    /// Rebuilds the exact saved recipe without fitting the source again.
+    fn build_scan_fit(&self, _tag: &OpTag, _source: &scan::ScanSource, _fit: &scan::ScanFit) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Coming soon".into()))
+    }
+
     /// Compares two solids at their accepted assembly placements without changing either.
     /// Refused quantities remain independent of successful answers.
     /// Clearance uses its shortest round-trip decimal, like authored lengths.
@@ -1074,6 +1092,24 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported("field mass stand-in".into()))
     }
 
+    /// Independently constructs every recipe prefix with both representations.
+    fn independent_check(&self, body: BodyId) -> KernelResult<IndependentCheck> {
+        let _ = body;
+        Err(KernelError::Unsupported("independent part check".into()))
+    }
+
+    /// Qualified print geometry and its certificate, when the backend supports it.
+    fn print_mesh(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Option<PrintMesh>> {
+        let _ = (body, params);
+        Ok(None)
+    }
+
+    /// Exports a field at an explicit accuracy without changing its saved settings.
+    fn export_field_stl_at(&self, body: BodyId, accuracy_mm: f64) -> KernelResult<FieldExport> {
+        let _ = (body, accuracy_mm);
+        Err(KernelError::Unsupported("field export at an explicit accuracy".into()))
+    }
+
     /// Triangulates a body within its supported controls. The screen uses [`preview`](Self::preview).
     fn tessellate(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh>;
 
@@ -1113,6 +1149,13 @@ pub trait Kernel: Send + Sync {
     /// The default returns `tessellate`.
     fn preview(&self, body: BodyId, params: &TessellationParams) -> KernelResult<Mesh> {
         self.tessellate(body, params)
+    }
+
+    /// Runs one feature build and reports deterministic work units, when supported.
+    /// Nested calls keep the caller's allowance. This excludes display and export work.
+    fn measure_work(&self, run: &mut dyn FnMut()) -> KernelResult<Option<u64>> {
+        run();
+        Ok(None)
     }
 
     /// Prepares exact-proof work when no early representation is requested.

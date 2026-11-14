@@ -26,6 +26,9 @@ fn commands_json_lists_the_whole_registry() {
     assert_eq!(extrude["params"][1]["name"], "depth");
     let front = listed.as_array().unwrap().iter().find(|c| c["id"] == "view_front").unwrap();
     assert_eq!(front["workspace"], "model");
+    let check = listed.as_array().unwrap().iter().find(|c| c["id"] == "check").unwrap();
+    assert_eq!(check["agents"], "app", "Inspect > Check is implemented in the app");
+    assert_eq!(check["app_only"], "Part check report");
 }
 
 #[test]

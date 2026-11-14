@@ -42,14 +42,17 @@ pub mod navigation;
 pub mod options_bar;
 pub mod palette;
 pub mod panels;
+pub mod part_check;
 pub mod platform;
 pub mod preferences;
+pub mod print_check;
 pub mod properties;
 pub mod recent;
 pub mod recovery;
-pub mod ribbon;
 mod ring_menu;
+pub mod scan;
 pub mod scene_import;
+pub mod section;
 pub mod settings;
 pub mod sketch_diagnostics;
 pub mod sketch_tools;
@@ -162,3 +165,5 @@ pub fn bench_document() -> Document {
     doc.selection = None;
     doc
 }
+
+mod multibody;

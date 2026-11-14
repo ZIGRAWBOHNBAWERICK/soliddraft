@@ -1,9 +1,9 @@
 //! Drawings: 2D sheets of the part with views, dimensions and notes, as a document that
-//! opens in a tab beside the part. The sheet canvas, the drawing ribbon tabs, the drawing
+//! opens in a tab beside the part. The sheet canvas, the drawing workspaces, the drawing
 //! tree, the PropertyManagers and the automatic update live here; the model types come
 //! from `soliddraft-drawing`.
 //!
-//! Hooks into the shell are small: `Tab::Drawing` in `app.rs`, one arm in `ribbon.rs`,
+//! Hooks into the shell are small: `Tab::Drawing` in `app.rs`, the palette registry,
 //! one `AppAction::Drawing` variant and one `DrawingState` field in `state.rs`.
 
 pub mod canvas;
@@ -12,7 +12,6 @@ pub mod part;
 pub mod properties_d3;
 pub mod properties_drawing;
 pub mod reference;
-pub mod ribbon_drawing;
 pub mod sheets;
 pub mod tools;
 pub mod tree_drawing;
@@ -47,7 +46,7 @@ use web_time::Instant;
 /// How long a drawing's message stays on the bottom bar.
 const MESSAGE_ON_BAR: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// The drawing's ribbon tabs.
+/// The drawing's workspaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DrawingTab {
     Views,
@@ -901,6 +900,9 @@ pub fn create_drawing(state: &AppState, new: &NewDrawing) -> Result<DrawingSessi
 }
 
 pub(crate) fn create_drawing_for_part(part_doc: &Document, new: &NewDrawing) -> Result<DrawingSession, String> {
+    if part_doc.model().live_bodies().len() > 1 {
+        return Err("Several-body drawings are coming soon. Combine the bodies first.".into());
+    }
     let ctx = PartContext::new(part_doc).ok_or("The part has no body yet; extrude something first")?;
     let template = library::template(&new.template);
     let model_template = template.template();
@@ -1395,9 +1397,8 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 session.selection = None;
                 session.set_tool(DrawingTool::Select);
             }
-            if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                state.options_details = true;
-            }
+
+            state.options_details = true;
         }
         DrawingAction::SetTab(t) => {
             if let Some(s) = state.drawing.session.as_mut() {

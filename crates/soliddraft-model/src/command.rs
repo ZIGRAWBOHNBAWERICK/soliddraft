@@ -39,6 +39,16 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         via_assistant: bool,
     },
+    /// Adds a feature to a named body, creating that body if it is empty.
+    AddFeatureInBody {
+        /// Stable body identity.
+        body: u32,
+        /// Marks the feature as the assistant's.
+        #[serde(default)]
+        via_assistant: bool,
+        /// Feature definition.
+        kind: FeatureKind,
+    },
     /// Puts back a feature with a known id, as redo of an add and undo of a delete do.
     InsertFeature {
         /// The feature, id included.
@@ -676,6 +686,11 @@ impl Document {
             {
                 Err(CommandError::Invalid("gyroid accuracy and minimum detail must be positive".into()))
             }
+            FeatureKind::Scan(s)
+                if s.source.bytes.is_empty() || crate::sha256_hex(&s.source.bytes) != s.source.sha256 =>
+            {
+                Err(CommandError::Invalid("The saved scan does not match its original file.".into()))
+            }
             FeatureKind::ImportStep(i) if i.source.is_empty() => {
                 Err(CommandError::Invalid("the imported file is empty".into()))
             }
@@ -719,6 +734,7 @@ impl Document {
         Self::check_order(&next)?;
         Self::check_field_last(&next)?;
         self.next_id = self.next_id.max(feature.id.0 + 1);
+        self.next_body = self.next_body.max(feature.body.saturating_add(1));
         self.features = next;
         self.touch(position);
         Ok(())
@@ -773,6 +789,7 @@ impl Document {
         if features.len() != self.features.len()
             || features.iter().zip(&self.features).any(|(a, b)| {
                 a.id != b.id
+                    || a.body != b.body
                     || a.name != b.name
                     || a.suppressed != b.suppressed
                     || a.via_assistant != b.via_assistant
@@ -893,7 +910,8 @@ impl Document {
                 self.check_inputs(&kind)?;
                 let position = position.unwrap_or_else(|| self.active_count());
                 let name = name.unwrap_or_else(|| self.fresh_name(kind.base_name()));
-                let feature = Feature { id: FeatureId(self.next_id), name, kind, suppressed: false, via_assistant };
+                let feature =
+                    Feature { body: 0, id: FeatureId(self.next_id), name, kind, suppressed: false, via_assistant };
                 let id = feature.id;
                 let label = format!("add {}", feature.name);
                 self.insert(feature.clone(), position)?;
@@ -903,6 +921,20 @@ impl Document {
                     created: Some(id),
                     label,
                 })
+            }
+            Command::AddFeatureInBody { body, kind, via_assistant } => {
+                Self::check_kind(&kind)?;
+                self.check_inputs(&kind)?;
+                let position = self.active_count();
+                let feature = Feature {
+                    body,
+                    id: FeatureId(self.next_id),
+                    name: self.fresh_name(kind.base_name()),
+                    kind,
+                    suppressed: false,
+                    via_assistant,
+                };
+                self.apply_inner(Command::InsertFeature { feature, position })
             }
             Command::InsertFeature { feature, position } => {
                 Self::check_kind(&feature.kind)?;

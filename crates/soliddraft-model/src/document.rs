@@ -99,6 +99,7 @@ pub struct Document {
     /// The first feature below the rollback bar.
     pub(crate) rollback: Option<FeatureId>,
     pub(crate) next_id: u32,
+    pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
     pub(crate) materials: PartMaterials,
     /// Viewport quality, export accuracy and whether to save display data: kept in the
@@ -147,6 +148,7 @@ impl Document {
             datum_names: BTreeMap::new(),
             rollback: None,
             next_id: 1,
+            next_body: 1,
             materials: PartMaterials::default(),
             settings: Settings::default(),
             view: Visibility::default(),
@@ -233,6 +235,23 @@ impl Document {
     /// not have; suppressed and rolled-back features are fine. A field part writes only
     /// its labelled STL, or its mass stand-in when that is the format asked for.
     pub fn export(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
+        self.export_at(format, None)
+    }
+
+    /// Exports at an explicit mesh accuracy without changing the document settings.
+    pub fn export_at(
+        &self,
+        format: soliddraft_exchange::Format,
+        accuracy_mm: Option<f64>,
+    ) -> Result<soliddraft_exchange::Export, String> {
+        if self.live_bodies().len() > 1 {
+            return Err("Several-body export is coming soon. Combine the bodies before exporting.".into());
+        }
+        let mut tolerance = self.settings.export;
+        if let Some(mm) = accuracy_mm {
+            tolerance.chord_height = mm;
+            tolerance.check()?;
+        }
         if format == soliddraft_exchange::Format::StandIn {
             return self.export_stand_in(&FieldMassAccuracy::default());
         }
@@ -245,15 +264,24 @@ impl Document {
         }
         let body = self.built_body()?;
         if field {
-            let output = self.kernel.export_field_stl(body).map_err(|e| e.to_string())?;
+            let output = match accuracy_mm {
+                Some(mm) => self.kernel.export_field_stl_at(body, mm),
+                None => self.kernel.export_field_stl(body),
+            }
+            .map_err(|e| e.to_string())?;
             return Ok(soliddraft_exchange::Export {
                 bytes: output.bytes,
                 report: soliddraft_exchange::Report::FieldMesh(output.report),
+                proof: None,
             });
         }
 
-        soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &self.settings.export)
-            .map_err(|e| e.to_string())
+        let mut out = soliddraft_exchange::export(self.kernel.as_ref(), body, &self.name, format, &tolerance)
+            .map_err(|e| e.to_string())?;
+        if out.proof.is_some() {
+            out.proof = Some(self.proof_report());
+        }
+        Ok(out)
     }
 
     /// The active field's explicit mass stand-in: a STEP file holding the field's source
@@ -266,7 +294,49 @@ impl Document {
         Ok(soliddraft_exchange::Export {
             bytes: output.bytes,
             report: soliddraft_exchange::Report::StandIn(Box::new(output.report)),
+            proof: Some(self.proof_report()),
         })
+    }
+
+    /// Current feature answers and retained build work, without rendering claims.
+    pub fn proof_report(&self) -> soliddraft_exchange::proof::ProofReport {
+        use soliddraft_exchange::proof::{AnswerKind, FeatureProof, ProofReport};
+        let active = self.active_count();
+        ProofReport {
+            features: self
+                .features
+                .iter()
+                .enumerate()
+                .map(|(index, feature)| {
+                    let (answer_kind, message) = if feature.suppressed || index >= active {
+                        (AnswerKind::Inactive, Some("Suppressed or past the rollback bar".into()))
+                    } else if index >= self.dirty {
+                        (AnswerKind::Pending, Some("Waiting for proof".into()))
+                    } else {
+                        match self.status(feature.id) {
+                            Some(FeatureStatus::Ok) => (AnswerKind::Proved, None),
+                            Some(FeatureStatus::Failed(reason)) => (AnswerKind::Refused, Some(reason.clone())),
+                            Some(FeatureStatus::RepairNeeded(_)) => {
+                                (AnswerKind::Refused, Some("A reference needs repair".into()))
+                            }
+                            Some(FeatureStatus::Blocked(input)) => {
+                                (AnswerKind::Pending, Some(format!("Waiting for {input} to build")))
+                            }
+                            _ => (AnswerKind::Pending, Some("Waiting for proof".into())),
+                        }
+                    };
+                    FeatureProof {
+                        id: feature.id.to_string(),
+                        name: feature.name.clone(),
+                        answer_kind,
+                        model_bound: None,
+                        display_bound: None,
+                        work_used: self.feature_work(feature.id),
+                        message,
+                    }
+                })
+                .collect(),
+        }
     }
 
     /// Proven unit-density moments of the active field's own definition, on request only.
@@ -297,6 +367,22 @@ impl Document {
             return Err(format!("{} did not build; repair or suppress it before exporting", f.name));
         }
         Ok(self.body().ok_or("the part has no body to export")?)
+    }
+
+    /// Checks every current recipe prefix independently with both representations.
+    pub fn independent_check(&self) -> Result<soliddraft_kernel_api::IndependentCheck, String> {
+        if self.is_dirty() {
+            return Err("Wait for the part to rebuild before checking it".into());
+        }
+        let mut report = self.kernel.independent_check(self.built_body()?).map_err(|e| e.to_string())?;
+        for step in &mut report.steps {
+            if let Some(feature) =
+                step.feature_tag.as_ref().and_then(|tag| feature_of_tag(tag.as_str())).and_then(|id| self.feature(id))
+            {
+                step.step = feature.name.clone();
+            }
+        }
+        Ok(report)
     }
 
     /// The kernel the document builds on.
@@ -348,14 +434,24 @@ impl Document {
         self.built_index(id).map(|i| &self.built[i].status)
     }
 
+    /// Work used to build the current feature result, excluding display and export.
+    /// A reused build keeps its original work count. Unsupported backends return `None`.
+    pub fn feature_work(&self, id: FeatureId) -> Option<u64> {
+        self.built_index(id).and_then(|i| self.built[i].work_used)
+    }
+
     /// Every feature's id and state, in tree order.
     pub fn statuses(&self) -> Vec<(FeatureId, &FeatureStatus)> {
         self.features.iter().zip(&self.built).map(|(f, b)| (f.id, &b.status)).collect()
     }
 
-    /// The part body at the end of the tree (or at the rollback bar).
+    /// The single solid at the rollback bar. Several-body parts use `live_bodies`.
     pub fn body(&self) -> Option<BodyId> {
-        self.built.last().and_then(|b| b.output)
+        if self.next_body == 1 {
+            return self.built.last().and_then(|b| b.output);
+        }
+        let bodies = self.live_bodies();
+        (bodies.len() == 1).then(|| bodies[0].1)
     }
 
     /// The part body right after a feature.
@@ -366,7 +462,69 @@ impl Document {
     /// The part body a feature starts from.
     pub fn body_before(&self, id: FeatureId) -> Option<BodyId> {
         let i = self.built_index(id)?;
-        i.checked_sub(1).and_then(|p| self.built[p].output)
+        self.body_at(self.features[i].body, i)
+    }
+
+    /// Current solid for each stable body identity, in body order.
+    pub fn live_bodies(&self) -> Vec<(u32, BodyId)> {
+        if self.next_body == 1 {
+            return self.body().map(|body| vec![(0, body)]).unwrap_or_default();
+        }
+        self.body_states(self.built.len()).into_iter().collect()
+    }
+
+    /// Solid bodies available immediately before a feature.
+    pub fn bodies_before(&self, id: FeatureId) -> Vec<(u32, BodyId)> {
+        self.index_of(id).map(|end| self.body_states(end).into_iter().collect()).unwrap_or_default()
+    }
+
+    /// Features contributing to a body, including tools consumed by Combine.
+    pub fn body_features(&self, key: u32) -> Vec<FeatureId> {
+        let mut bodies = std::collections::BTreeSet::from([key]);
+        let mut features = Vec::new();
+        for feature in self.features.iter().take(self.active_count()).rev() {
+            if !bodies.contains(&feature.body) {
+                continue;
+            }
+            features.push(feature.id);
+            if let FeatureKind::Combine { tool, .. } = feature.kind
+                && self.status(feature.id) == Some(&FeatureStatus::Ok)
+            {
+                bodies.insert(tool);
+            }
+        }
+        features.reverse();
+        features
+    }
+
+    /// The next unused body identity.
+    pub fn next_body(&self) -> u32 {
+        self.next_body
+    }
+
+    pub(crate) fn body_at(&self, key: u32, end: usize) -> Option<BodyId> {
+        if self.next_body == 1 {
+            if key != 0 {
+                return None;
+            }
+            return end.checked_sub(1).and_then(|i| self.built.get(i)).and_then(|built| built.output);
+        }
+        self.body_states(end).get(&key).copied()
+    }
+
+    fn body_states(&self, end: usize) -> BTreeMap<u32, BodyId> {
+        let mut bodies = BTreeMap::new();
+        for b in self.built.iter().take(end) {
+            if let Some(body) = b.output {
+                bodies.insert(b.body_key, body);
+            } else {
+                bodies.remove(&b.body_key);
+            }
+            if let Some(tool) = b.consumed_tool {
+                bodies.remove(&tool);
+            }
+        }
+        bodies
     }
 
     /// Where a sketch lies and what regions it has, as the last rebuild placed it.

@@ -56,7 +56,7 @@ pub enum Family {
 }
 
 impl Family {
-    const ALL: [Family; 19] = [
+    pub const ALL: [Family; 19] = [
         Family::Gear,
         Family::RackAndPinion,
         Family::Screw,
@@ -78,7 +78,7 @@ impl Family {
         Family::Slot,
     ];
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Family::Gear => "Gear",
             Family::RackAndPinion => "Rack and Pinion",
@@ -483,11 +483,6 @@ fn labelled(ui: &mut egui::Ui, value: &mut String, hint: &str, name: &'static st
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name));
 }
 
-/// The panel. Nothing shows while it is closed.
-pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
-    details(ui, state, false);
-}
-
 fn choose_family(draft: &mut Draft, family: Family) {
     draft.family = family;
     if family == Family::Angle {
@@ -543,7 +538,7 @@ pub fn show_suite(ui: &mut egui::Ui, state: &mut AppState) {
         },
         |ui, key| {
             if key == Key::Details {
-                details(ui, state, true);
+                details(ui, state);
                 return false;
             }
             let draft = &mut state.assembly.mate;
@@ -601,7 +596,7 @@ pub fn show_suite(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
+fn details(ui: &mut egui::Ui, state: &mut AppState) {
     if !state.assembly.mate.open {
         return;
     }
@@ -622,9 +617,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
         .collect();
     let d = &mut state.assembly.mate;
     ui.add_space(8.0);
-    if !suite {
-        theme::section_label(ui, "Mate");
-    }
+
     let face = |p: &Option<PickedFace>| {
         p.as_ref().map_or("Pick a face".to_owned(), |p| format!("{}: {}", p.component, p.face.label))
     };
@@ -643,21 +636,7 @@ fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
     for (label, slot) in slots.iter().zip([&d.a, &d.b, &d.c, &d.d]) {
         ui.label(format!("{label}  {}", face(slot)));
     }
-    if !suite {
-        ui.horizontal_wrapped(|ui| {
-            for family in Family::ALL {
-                if ui.selectable_label(d.family == family, family.label()).clicked() && d.family != family {
-                    choose_family(d, family);
-                }
-            }
-        });
-        if d.family.has_alignment() {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut d.alignment, Alignment::Opposed, "Opposed");
-                ui.selectable_value(&mut d.alignment, Alignment::Aligned, "Aligned");
-            });
-        }
-    }
+
     if d.family == Family::Hinge {
         ui.checkbox(&mut d.hinge_limits, "Angular stops");
         ui.horizontal(|ui| {
@@ -702,16 +681,12 @@ fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
             ui.checkbox(&mut d.flipped, "From the second end");
         }
     }
-    if !suite && d.family == Family::Angle {
-        labelled(ui, &mut d.distance, "Signed degrees", "Mate degrees");
-    }
+
     if d.family == Family::LimitAngle || (d.family == Family::Hinge && d.hinge_limits) {
         labelled(ui, &mut d.min, "Least signed degrees", "Mate least degrees");
         labelled(ui, &mut d.max, "Greatest signed degrees", "Mate greatest degrees");
     }
-    if !suite && matches!(d.family, Family::Distance | Family::ProfileCenter) {
-        labelled(ui, &mut d.distance, "Distance, such as 5 mm", "Mate distance");
-    }
+
     if d.family == Family::LimitDistance {
         labelled(ui, &mut d.min, "Least distance, such as 0 mm", "Mate least distance");
         labelled(ui, &mut d.max, "Greatest distance, such as 10 mm", "Mate greatest distance");
@@ -737,9 +712,6 @@ fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
         ui.checkbox(&mut d.reverse, "Reverse");
     }
     ui.horizontal(|ui| {
-        if !suite && ui.button("Add mate").clicked() {
-            actions.push(MateAction::Add);
-        }
         if ui.button("Clear faces").clicked() {
             actions.push(MateAction::Clear);
         }
@@ -749,10 +721,6 @@ fn details(ui: &mut egui::Ui, state: &mut AppState, suite: bool) {
             actions.push(MateAction::AddOrigin(c));
         }
     });
-    // What the last command refused, under the button that ran it.
-    if !suite && let Some(e) = &d.error {
-        ui.colored_label(theme::error(), e);
-    }
     if let Some(c) = &d.conflict {
         conflicts(ui, c, &mates, &mut actions);
     }

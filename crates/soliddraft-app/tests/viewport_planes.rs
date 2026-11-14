@@ -7,6 +7,7 @@
 mod support;
 
 use egui::{Vec2, pos2, vec2};
+use egui_kittest::kittest::Queryable;
 use glam::Vec3;
 use soliddraft_app::document::{AxisKind, PlaneKind, Reference, Selection};
 use soliddraft_app::state::{AppAction, EditorParams};
@@ -227,6 +228,7 @@ fn picks(app: &mut App, points: &[Vec3]) -> Vec<Option<Selection>> {
 #[test]
 fn reference_overlays_leave_opaque_model_and_picks_readable() {
     let mut case = Case::gpu("overlays_and_the_model");
+    case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#0c1420"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(box_part());
     let before = model(&app);
     pointer_to_chrome(&mut app);
@@ -298,13 +300,7 @@ fn reference_overlays_leave_opaque_model_and_picks_readable() {
     // Wireframe keeps the planes outside the model and keeps edges pickable.
     let look = app.state().state.viewport.preset;
     let display = app.state().state.viewport.display;
-    click_button(&mut app, "Display style");
-    let mut seen = vec![app.state().state.viewport.display];
-    while app.state().state.viewport.display != DisplayMode::Wireframe {
-        click_button(&mut app, "Display style");
-        seen.push(app.state().state.viewport.display);
-        assert!(seen.len() < 5, "the control reaches Wireframe: {seen:?}");
-    }
+    choose_display_style(&mut app, DisplayMode::Wireframe);
     let wire = case.frame(&mut app, "wireframe-on");
     all_overlays(&mut app, false);
     let wire_off = case.frame(&mut app, "wireframe-off");
@@ -320,11 +316,16 @@ fn reference_overlays_leave_opaque_model_and_picks_readable() {
 
     // The overlays leave the user's own view choices alone.
     all_overlays(&mut app, false);
-    while app.state().state.viewport.display != display {
-        click_button(&mut app, "Display style");
-    }
+    choose_display_style(&mut app, display);
     assert_eq!(app.state().state.viewport.preset, look, "the look stays");
     assert_eq!(model(&app), before, "and so does the model");
+}
+
+fn choose_display_style(app: &mut App, display: DisplayMode) {
+    click_button(app, "Display style");
+    app.get_by_label(display.label()).click();
+    settle(app);
+    assert_eq!(app.state().state.viewport.display, display);
 }
 
 /// The Top, Front and Right squares as seen now, from their size as measured.

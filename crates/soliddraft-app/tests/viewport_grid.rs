@@ -94,7 +94,7 @@ fn the_grid_shows_in_every_look() {
         ("realistic", "realistic", Preset::Realistic),
     ] {
         let mut case = Case::gpu(&format!("grid_in_look_{name}"));
-        case.seed_settings(&format!(r#"{{"view":{{"preset":"{look}"}}}}"#));
+        seed_gpu_settings(&case, &format!(r#"{{"view":{{"preset":"{look}"}}}}"#));
         let mut app = launch_for_frames(empty(), SIZE, 1.0);
         assert_eq!(app.state().state.viewport.preset, preset);
         let (minor, _) = readout(&app).expect("a readout");
@@ -106,7 +106,8 @@ fn the_grid_shows_in_every_look() {
 #[test]
 fn grid_visibility_is_a_persistent_display_preference() {
     let mut case = Case::gpu("grid_preference");
-    case.seed_settings(
+    seed_gpu_settings(
+        &case,
         r#"{"view":{"preset":"fast","show_origin_planes":false,"always_show_origin_axes":false},"navigation":{"preset_id":"onshape","future":"keep"}}"#,
     );
     let navigation = case.settings_json()["navigation"].clone();
@@ -169,9 +170,21 @@ fn grid_visibility_is_a_persistent_display_preference() {
     others(&case);
 }
 
+fn assert_zoom_grid(
+    case: &mut Case,
+    app: &App,
+    frames: (&image::RgbaImage, &image::RgbaImage),
+    when: &str,
+) -> (Family, Family, (f32, f32)) {
+    let (x, y, spacing) = assert_top_view_grid(app, frames, when);
+    case.note(format!("{when}: readout {spacing:?}, measured {} and {} points", x.minor, y.minor));
+    (x, y, spacing)
+}
+
 /// The zoom sweep, with the numbers the design holds it to at any size and scale.
 fn sweep(case_name: &str, size: egui::Vec2, ppp: f32) {
     let mut case = Case::gpu(case_name);
+    seed_gpu_settings(&case, r#"{"view":{}}"#);
     let mut app = launch_for_frames(empty(), size, ppp);
     let before = model(&app);
     to_top_orthographic(&mut app);
@@ -179,7 +192,7 @@ fn sweep(case_name: &str, size: egui::Vec2, ppp: f32) {
     let start_scale = points_per_mm(&app);
     let start = readout(&app).expect("a readout");
     let (on, off) = grid_frames(&mut case, &mut app, "start");
-    let (start_family, _, _) = assert_top_view_grid(&app, (&on, &off), "the start");
+    let (start_family, _, _) = assert_zoom_grid(&mut case, &app, (&on, &off), "the start");
     let centre = viewport(&app).center();
     let phase = |app: &App, family: &Family| {
         family.lines.iter().map(|l| (l.at - centre.x).abs()).fold(f32::MAX, f32::min) * points_per_mm(app).signum()
@@ -198,7 +211,7 @@ fn sweep(case_name: &str, size: egui::Vec2, ppp: f32) {
             let moved = points_per_mm(&app);
             let (on, off) = grid_frames(&mut case, &mut app, &format!("zoom-{label}-{sample}"));
             let when = format!("zoom {label} {sample}, {moved} points per mm");
-            let (x, y, spacing) = assert_top_view_grid(&app, (&on, &off), &when);
+            let (x, y, spacing) = assert_zoom_grid(&mut case, &app, (&on, &off), &when);
             for family in [&x, &y] {
                 assert!((8.0..=80.0).contains(&family.minor), "{when}: minor {} points", family.minor);
             }
@@ -219,7 +232,7 @@ fn sweep(case_name: &str, size: egui::Vec2, ppp: f32) {
         assert!((back / start_scale - 1.0).abs() < 0.03, "back at {back}, started at {start_scale}");
         assert_eq!(readout(&app), Some(start), "the spacing after zooming {label} and back");
         let (on, off) = grid_frames(&mut case, &mut app, &format!("back-from-{label}"));
-        let (family, _, _) = assert_top_view_grid(&app, (&on, &off), "back at the start");
+        let (family, _, _) = assert_zoom_grid(&mut case, &app, (&on, &off), "back at the start");
         assert!((phase(&app, &family) - start_phase).abs() <= 2.0, "the phase after zooming {label} and back");
     }
     assert_eq!(model(&app), before, "zooming does not touch the model");
@@ -238,6 +251,21 @@ fn grid_density_is_in_points_at_two_pixels_per_point() {
 #[test]
 fn grid_density_holds_in_a_small_window() {
     sweep("grid_zoom_small", vec2(960.0, 640.0), 1.0);
+}
+
+#[test]
+fn compact_window_readout_matches_the_rendered_grid_through_zoom() {
+    let mut case = Case::gpu("grid_readout_compact");
+    seed_gpu_settings(&case, r#"{"view":{}}"#);
+    let mut app = launch_for_frames(empty(), vec2(960.0, 640.0), 1.0);
+    to_top_orthographic(&mut app);
+
+    for sample in 0..=8 {
+        let when = format!("compact zoom out {sample}");
+        let (on, off) = grid_frames(&mut case, &mut app, &when);
+        assert_zoom_grid(&mut case, &app, (&on, &off), &when);
+        wheel(&mut app, -300.0);
+    }
 }
 
 #[test]
@@ -300,6 +328,8 @@ fn a_spacing_step_is_stable_and_a_pan_keeps_the_spacing() {
 #[test]
 fn grid_follows_each_reference_sketch_and_restores_ground() {
     let mut case = Case::gpu("grid_on_sketches");
+    // The dark scene has an opaque sketch sheet; sample the grid over a light scene.
+    case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#30343a"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(sketches());
 
     // Each with the normal the plane gives it, and one offset from its reference.
@@ -341,6 +371,8 @@ fn grid_follows_each_reference_sketch_and_restores_ground() {
 #[test]
 fn face_sketch_grid_is_on_the_face_not_world_zero() {
     let mut case = Case::gpu("grid_on_a_face");
+    // The dark scene has an opaque sketch sheet; sample the grid over a light scene.
+    case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#30343a"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(box_part());
 
     let top = {
@@ -354,9 +386,9 @@ fn face_sketch_grid_is_on_the_face_not_world_zero() {
     let session = app.state().state.sketch.as_ref().expect("a sketch on the face");
     assert!((session.plane.origin.z - 20.0).abs() < 1e-6, "the sketch is at z = 20");
 
-    // Zoom out until the crossings below clear the box's 40 mm depth.
+    // Leave the model clear of the sampled grid crossings in the narrower canvas.
     orbit_off_plane(&mut app, Vec3::Z);
-    while readout(&app).expect("a readout").0 < 10.0 {
+    while readout(&app).expect("a readout").0 < 20.0 {
         wheel(&mut app, -300.0);
     }
     let (minor, _) = readout(&app).expect("a readout");
@@ -440,14 +472,14 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
         (app, on, off, x, spacing)
     };
 
-    case.seed_settings(r#"{"view":{"preset":"fast"}}"#);
+    seed_gpu_settings(&case, r#"{"view":{"preset":"fast"}}"#);
     let (_, _, _, light, _) = top(&mut case, "default");
     // The dark theme draws the default in light ink; it reads as a grid there too.
-    case.seed_settings(r#"{"appearance":{"theme":"dark"},"view":{"preset":"fast"}}"#);
+    seed_gpu_settings(&case, r#"{"appearance":{"theme":"dark"},"view":{"preset":"fast"}}"#);
     let (app, _, _, dark, _) = top(&mut case, "default-dark");
     assert!(dark.minor_contrast >= 4.0, "{dark:?}");
     drop(app);
-    case.seed_settings(r#"{"view":{"preset":"fast","grid":{"strength":1.0}}}"#);
+    seed_gpu_settings(&case, r#"{"view":{"preset":"fast","grid":{"strength":1.0}}}"#);
     let (app, _, _, full, _) = top(&mut case, "full-strength");
     assert_eq!(app.state().state.viewport.grid_style.strength, 1.0, "the start read the strength");
     assert!(
@@ -456,7 +488,7 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
     );
     drop(app);
 
-    case.seed_settings(r##"{"view":{"preset":"fast","grid":{"strength":1.0,"color":"#d42020"}}}"##);
+    seed_gpu_settings(&case, r##"{"view":{"preset":"fast","grid":{"strength":1.0,"color":"#d42020"}}}"##);
     let (app, on, off, red, _) = top(&mut case, "red");
     let line = red.majors.first().expect("a major line").at;
     let rect = viewport(&app);
@@ -469,10 +501,45 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
     assert!(dg > 30 && db > 30 && dg > dr * 2 && db > dr * 2, "a red line: {on:?} over {off:?}");
     drop(app);
 
-    case.seed_settings(r#"{"view":{"preset":"fast","grid":{"follow_zoom":false,"fixed_mm":10,"major_every":4}}}"#);
+    seed_gpu_settings(
+        &case,
+        r#"{"view":{"preset":"fast","grid":{"follow_zoom":false,"fixed_mm":10,"major_every":4}}}"#,
+    );
     let (mut app, on, off, _, spacing) = top(&mut case, "fixed-10mm");
     assert_eq!(spacing, (10.0, 40.0), "the readout names the fixed spacing");
     assert_lattice(&on, &off, &app, lattice_on_ground(10.0), "a fixed 10 mm lattice");
     wheel(&mut app, 300.0);
     assert_eq!(readout(&app), Some((10.0, 40.0)), "a fixed spacing stays when zooming");
+}
+
+fn seed_gpu_settings(case: &Case, json: &str) {
+    let mut settings: serde_json::Value = serde_json::from_str(json).unwrap();
+    settings["view"]["scene"] = serde_json::json!("white");
+    if settings["view"]["grid"]["color"].is_null() {
+        settings["view"]["grid"]["color"] = serde_json::json!("#0c1420");
+    }
+    settings["view"]["always_show_origin_axes"] = serde_json::json!(false);
+    if settings.get("navigation").is_none() {
+        settings["navigation"] = serde_json::json!({"preset_id":"fusion"});
+    }
+    case.seed_settings(&settings.to_string());
+}
+
+#[test]
+fn automatic_grid_ink_is_readable_on_light_and_dark_scenes() {
+    for scene in ["white", "graphite"] {
+        let mut case = Case::gpu(&format!("automatic_grid_{scene}"));
+        case.seed_settings(
+            &serde_json::json!({
+                "view": {"scene": scene, "show_origin_planes": false, "always_show_origin_axes": false},
+                "navigation": {"preset_id": "fusion"}
+            })
+            .to_string(),
+        );
+        let mut app = launch(empty());
+        assert!(app.state().state.viewport.grid_style.color.is_none());
+        to_top_orthographic(&mut app);
+        let (on, off) = grid_frames(&mut case, &mut app, "automatic-ink");
+        assert_top_view_grid(&app, (&on, &off), scene);
+    }
 }

@@ -1,14 +1,6 @@
-//! Merge 2 of the ribbon layout: what a pointer cannot prove exhaustively. The tab and
-//! group contract comes first, then every command compared with its frozen state on main
-//! before the merge. Moving a command on the ribbon changes where it is drawn, and nothing
-//! else about it.
-//!
-//! Requires a renderer: a run without one fails.
-//!
-//! Run it away from the other GPU targets:
-//! `cargo test -p soliddraft-app --test ribbon_registry -- --test-threads=1`.
+//! Stable command ids, shortcuts, agent schemas and availability against the frozen contract.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 #[path = "support/configuration_registry.rs"]
@@ -17,7 +9,7 @@ mod configuration_registry;
 use ribbon::App;
 use serde_json::{Map, Value, json};
 use soliddraft_app::commands::{self, Agents, Context, History, Tab};
-use soliddraft_app::state::{AppState, RibbonTab};
+use soliddraft_app::state::{AppAction, AppState, RibbonTab};
 use std::collections::HashSet;
 
 /// A schema without its prose: names, types and requiredness are the contract.
@@ -689,6 +681,16 @@ fn before_ridealong_inputs(id: &str, current: &mut Value) {
     }
 }
 
+fn before_print_accuracy(id: &str, current: &mut Value) {
+    if !["export_stl", "export_3mf", "export_obj"].contains(&id) {
+        return;
+    }
+    let input = current.pointer_mut("/tool/input").expect("mesh export inputs");
+    assert!(!input["required"].as_array().unwrap().iter().any(|field| field == "accuracy_mm"));
+    let added = input["properties"].as_object_mut().unwrap().remove("accuracy_mm").expect("mesh export accuracy");
+    assert_eq!(added, json!({"type": "number"}), "print accuracy is one optional number");
+}
+
 fn baseline() -> Value {
     serde_json::from_str(include_str!("fixtures/ribbon_registry/baseline.json")).expect("the frozen contract")
 }
@@ -718,7 +720,7 @@ fn holds(tab: &str, groups: &[(&str, &[&str])]) {
 }
 
 #[test]
-fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
+fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
     let _case = ribbon::case("u1");
 
     // The new tabs and groups come first: on main this is what fails.
@@ -726,9 +728,9 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         "Solid",
         &[
             ("Sketch", &["sketch"]),
-            ("Create", &["extrude", "revolve", "sweep", "loft"]),
+            ("Create", &["extrude", "revolve", "sweep", "loft", "new_body"]),
             ("Remove", &["cut", "hole", "slot"]),
-            ("Modify", &["fillet", "chamfer", "shell", "draft", "lattice", "gyroid", "offset", "thicken"]),
+            ("Modify", &["fillet", "chamfer", "shell", "draft", "lattice", "gyroid", "offset", "thicken", "combine"]),
             ("Pattern", &["linear_pattern", "circular_pattern", "mirror"]),
             ("Reference", &["reference_plane", "reference_axis", "reference_point"]),
         ],
@@ -809,6 +811,7 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     // Every command as main left it.
     let (frozen, now) = (baseline(), observed());
     let rows = frozen["commands"].as_object().expect("the frozen commands");
+    let part_entry = AppState::new(ribbon::blank());
     for (id, row) in rows {
         if id == "reference_plane" {
             let plane = commands::get(id).unwrap();
@@ -835,6 +838,15 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
         before_ridealong_inputs(id, &mut current);
         before_distance_verbs(id, &mut current);
         before_feature_pattern_source(id, &mut current);
+        before_print_accuracy(id, &mut current);
+        if id == "check" {
+            assert_eq!(current["agents"], "app", "Check opens its own report");
+            current["agents"] = row["agents"].clone();
+            for (fixture, availability) in current["availability"].as_object_mut().unwrap() {
+                assert_eq!(availability["enabled"], true, "Check works in {fixture}");
+                availability["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
         if [
             "view_isometric",
             "view_front",
@@ -871,6 +883,13 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
             for (fixture, observed) in current["availability"].as_object_mut().unwrap() {
                 observed["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
+        }
+        if id == "section" {
+            assert_eq!(current["agents"], "app", "Section opens display-only inspection");
+            assert!(commands::get(id).unwrap().action.is_some());
+            assert_eq!(current["availability"]["plate"]["enabled"], true);
+            current["agents"] = row["agents"].clone();
+            current["availability"]["plate"]["enabled"] = row["availability"]["plate"]["enabled"].clone();
         }
         if id == "relations" {
             assert_eq!(current["agents"], "app", "Relations is now an interactive sketch command");
@@ -918,6 +937,20 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
                 current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }
+        if (id.starts_with("sketch_") || id == "smart_dimension")
+            && commands::get(id)
+                .and_then(|c| c.action)
+                .is_some_and(|action| matches!(action(&part_entry), AppAction::SketchTool(_)))
+        {
+            for fixture in ["blank", "sketch", "plate", "assembly"] {
+                assert_eq!(
+                    current["availability"][fixture]["enabled"],
+                    fixture != "assembly",
+                    "Edit Suite sketch tools start a sketch on part documents"
+                );
+                current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
+            }
+        }
         assert_eq!(&current, row, "{id} changed");
     }
     for list in ["agent_tools", "verbs"] {
@@ -951,7 +984,11 @@ fn the_ribbon_moves_commands_and_changes_nothing_else_about_them() {
     let first = |query: &str, context: Context| commands::search_here(query, &history, context)[0].command.id;
     assert_eq!(first("check", part), "check");
     assert_eq!(first("check model", part), "check_model");
-    assert!(commands::get("check").unwrap().action.is_none(), "Check is not the assistant's check");
+    let check = commands::get("check").unwrap();
+    let state = AppState::new(ribbon::blank());
+    assert!(check.is_working());
+    assert!(matches!(check.action_now(&state), Some(AppAction::CheckPart)), "Check runs independent construction");
+    assert_ne!(check.tip(&state), "Coming soon");
     assert!(commands::get("check_model").unwrap().action.is_some());
 
     // What left the part's ribbon can still be found where it works.

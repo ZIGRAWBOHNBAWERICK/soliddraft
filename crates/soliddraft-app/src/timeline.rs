@@ -31,7 +31,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     let mut actions = Vec::new();
     let editing = state.sketch.as_ref().map(|s| s.feature);
     let edit_index = editing.and_then(|id| state.doc.features.iter().position(|f| f.id == id));
-    let can_change = editing.is_none() && state.editor.is_none();
+    let can_change = !state.feature_edit_open();
     if !can_change || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.timeline.dragging = None;
         state.timeline.rollback_drag = false;
@@ -99,7 +99,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     let (id, name, summary, icon, is_sketch, suppressed, repair) = (
                         feature.id,
                         feature.name.clone(),
-                        feature.summary(),
+                        if state.doc.model().next_body() > 1 {
+                            format!("Body {} · {}", feature.body_key + 1, feature.summary())
+                        } else {
+                            feature.summary()
+                        },
                         tree::feature_icon(&feature.kind),
                         feature.is_sketch(),
                         feature.suppressed,
@@ -269,7 +273,35 @@ fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, chip: Rec
         } else {
             "Pending"
         };
-        (label, reason)
+        if let Some(bound) = drag.display_bound() {
+            (
+                crate::document::WITHIN_BOUND_LABEL,
+                format!(
+                    "Measured display deviation: {} mm\nRule limit: {} mm\n{}",
+                    bound.measured_mm, bound.level_mm, bound.method
+                ),
+            )
+        } else {
+            (label, crate::geometry_message::for_user(&reason))
+        }
+    } else if let Some(editor) = state.editor.as_ref().filter(|editor| editor.target == Some(id)) {
+        match &editor.error {
+            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+        }
+    } else if state.sketch.as_ref().is_some_and(|sketch| sketch.feature == id) {
+        ("Pending", "Finish or cancel this sketch edit before exporting.".into())
+    } else if let Some(form) = state.doc.combine_form.as_ref().filter(|form| form.editing == Some(id)) {
+        match &form.error {
+            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+        }
+    } else if let Some(soliddraft_model::FeatureStatus::Blocked(input)) =
+        state.doc.model().status(soliddraft_model::FeatureId(id as u32))
+        && !matches!(feature.status, FeatureStatus::Inactive)
+    {
+        let name = state.doc.feature(u64::from(input.0)).map_or("an earlier feature", |feature| feature.name.as_str());
+        ("Pending", format!("Waiting for {name} to build. Repair that feature before exporting."))
     } else {
         match &feature.status {
             FeatureStatus::Ok => ("Proved", "The current feature is proved.".to_owned()),

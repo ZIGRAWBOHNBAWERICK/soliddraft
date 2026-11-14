@@ -6,7 +6,7 @@
 //! adapter counts. Expected values stay in the manifests. No case asserts how long
 //! anything took.
 //!
-//! A test file brings this in after `support/ribbon.rs`, with
+//! A test file brings this in after `support/ui.rs`, with
 //! `#[path = "support/ux_tools.rs"] mod ux_tools;`.
 
 #![allow(dead_code)]

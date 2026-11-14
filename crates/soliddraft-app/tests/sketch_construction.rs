@@ -1,6 +1,6 @@
 //! Construction retention and dedicated centreline placement through native input.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2};
@@ -48,7 +48,8 @@ fn launch(sketch: Sketch, name: &str) -> (App, FeatureId, PathBuf) {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app_at(doc, ribbon::EXPANDED_WINDOW, 1.0);
-    assert!(!commands::get("sketch_centreline").unwrap().is_enabled(&app.state().state));
+    app.state_mut().state.viewport.references.always_show_origin_axes = false;
+    assert!(commands::get("sketch_centreline").unwrap().is_enabled(&app.state().state));
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
     (app, id, dir)
@@ -87,7 +88,11 @@ fn assert_dashed(app: &mut App, a: P2, b: P2, color: egui::Color32) {
             [-1.0, 0.0, 1.0].into_iter().any(|offset| {
                 let at = (p + normal * offset) * app.ctx.pixels_per_point();
                 let pixel = image.get_pixel(at.x.round() as u32, at.y.round() as u32).0;
-                (0..3).all(|channel| pixel[channel].abs_diff(expected[channel]) <= 75)
+                if color == soliddraft_app::theme::accent() {
+                    i16::from(pixel[0]) > i16::from(pixel[1]) + 40 && i16::from(pixel[1]) > i16::from(pixel[2]) + 20
+                } else {
+                    (0..3).all(|channel| pixel[channel].abs_diff(expected[channel]) <= 75)
+                }
             })
         })
         .count();
@@ -221,7 +226,7 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     app.key_press(Key::Escape);
     app.run_steps(6);
     app.render().unwrap().save(dir.join("guides.png")).unwrap();
-    assert_dashed(&mut app, P2::new(5.0, 0.0), P2::new(25.0, 0.0), soliddraft_app::theme::muted());
+    assert_dashed(&mut app, P2::new(5.0, 0.0), P2::new(25.0, 0.0), soliddraft_app::theme::edit_suite::CONSTRUCTION);
 
     // The ordinary Line shortcut and other drawing tools retain their previous mode.
     app.key_press(Key::L);

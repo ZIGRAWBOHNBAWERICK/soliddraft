@@ -73,12 +73,34 @@ fn click_at(h: &mut App<'_>, pos: Pos2) {
     h.run_steps(3);
 }
 
+fn open_details(h: &mut App<'_>) {
+    if h.state().state.assembly.mate.open {
+        if !h.state().state.form_bar.expanded {
+            h.get_by_label_contains("More (").click();
+            h.run_steps(8);
+        }
+    } else if !h.state().state.options_details {
+        h.get_by_label("Assembly options").click();
+        h.run_steps(8);
+    }
+}
+
 /// Scrolls the button into view before sending a real pointer click.
 fn button(h: &mut App<'_>, name: &str) {
+    if h.query_all_by_role_and_label(egui::accesskit::Role::Button, name).next().is_none() {
+        open_details(h);
+    }
     h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().scroll_to_me();
     h.run_steps(24);
     let pos = h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().rect().center();
     click_at(h, pos);
+    if name == "Apply"
+        && !h.state().state.assembly.form.open
+        && let Some(close) = h.query_by_label("Close options")
+    {
+        close.click();
+        h.run_steps(8);
+    }
 }
 
 /// The tree row of the occurrence called `name`.
@@ -90,6 +112,11 @@ fn tree_row<'n>(h: &'n App<'_>, name: &'n str) -> egui_kittest::Node<'n> {
 fn type_into(h: &mut App<'_>, label: &str, text: &str, clear: impl FnOnce(&mut AppState)) {
     clear(&mut h.state_mut().state);
     h.run_steps(2);
+    if h.query_by_label(label).is_none() {
+        open_details(h);
+    }
+    h.get_by_label(label).scroll_to_me();
+    h.run_steps(24);
     h.get_by_label(label).focus();
     h.run_steps(2);
     h.get_by_label(label).type_text(text);
@@ -338,6 +365,7 @@ fn form_pick_and_move_the_floating_child_in_the_window() {
     h.run_steps(6);
     assert_eq!(session(&h).selected, Some(path("16/6")));
     // As a user types a number: click into the field, select what it holds, type, Enter.
+    open_details(&mut h);
     h.get_by_label("Placement X").click();
     h.run_steps(3);
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);

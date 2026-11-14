@@ -91,6 +91,8 @@ fn dragging_the_depth_field_previews_and_applies_one_undo_step() {
     assert_eq!(plate_depth(&harness), 10.0);
     kernel.rules.lock().unwrap().hold_next = true;
 
+    harness.get_by_label("Details").click();
+    harness.run_steps(8);
     let start = harness.get_by_label("Depth value").rect().center();
     harness.hover_at(start);
     harness.run_steps(2);
@@ -140,6 +142,8 @@ fn dragging_the_depth_field_previews_and_applies_one_undo_step() {
     assert_eq!(plate_depth(&harness), dragged, "the value the drag rested on is applied");
     assert_eq!(harness.state().state.doc.undo_depth(), undo_before + 1, "one drag is one undo step");
     save(&mut harness, "drag-preview-pending-committed");
+    harness.get_by_label("Close options").click();
+    harness.run_steps(8);
     let center = harness.get_by_label("3D viewport").rect().center();
     harness.hover_at(center);
     harness.run_steps(8);
@@ -206,6 +210,8 @@ fn refused_fillet_edit_restores_the_proved_shape_and_blocks_export() {
     let undo_before = harness.state().state.doc.undo_depth();
     assert_eq!(harness.state().state.doc.revision(), proved_revision);
     save(&mut harness, "edit-proof-before-failure");
+    harness.get_by_label("Details").click();
+    harness.run_steps(8);
     harness.get_by_label("Radius value").click();
     harness.run_steps(2);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);

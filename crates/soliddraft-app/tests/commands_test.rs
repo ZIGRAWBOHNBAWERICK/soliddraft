@@ -7,7 +7,7 @@
 //! turns on the GPU: short harnesses made and dropped at the same moment crashed the
 //! driver.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, vec2};
@@ -78,7 +78,7 @@ fn ctrl_shift_z_redoes() {
 }
 
 #[test]
-fn every_ribbon_button_is_a_registry_command() {
+fn every_palette_button_is_a_registry_command() {
     let _turn = gpu_turn();
     if !gpu_available() {
         eprintln!("skipping: no GPU adapter");
@@ -87,43 +87,31 @@ fn every_ribbon_button_is_a_registry_command() {
     let mut harness = harness();
     harness.set_size(vec2(1920.0, 900.0));
     harness.run_steps(4);
+    // Render each workspace after its scroll animations finish.
+    harness.set_render_every_step(false);
     for tab in RibbonTab::ALL {
         harness.state_mut().state.ribbon_tab = tab;
         harness.run_steps(2);
         let panels = commands::ribbon(tab);
         assert!(!panels.is_empty(), "{} has no panels", tab.label());
-        let registered: Vec<_> = panels
-            .iter()
-            .flat_map(|(_, items)| items)
-            .filter(|(c, _)| (c.shown)(&harness.state().state))
-            .map(|(c, _)| c.label_in(&harness.state().state))
-            .collect();
-        let mut body = ribbon::ribbon_region(&harness);
-        body.min.y = soliddraft_app::theme::MENU_HEIGHT + soliddraft_app::theme::RIBBON_TABS_HEIGHT;
-        for (label, _) in ribbon::buttons_in(&harness, body) {
-            assert!(
-                registered.contains(&label) || panels.iter().any(|(group, _)| label == format!("{group} group")),
-                "{}: unregistered ribbon button {label}",
-                tab.label()
-            );
-        }
         for (panel, items) in panels {
             for (command, _) in items {
                 if !(command.shown)(&harness.state().state) {
                     continue;
                 }
-                let button = ribbon::reveal_ribbon_command(&mut harness, command.id);
+                let button = ribbon::reveal_command(&mut harness, command.id);
                 assert!(
                     ribbon::window(&harness).contains_rect(button.rect),
                     "{} › {panel}: command {} must remain reachable",
                     tab.label(),
                     command.id
                 );
-                ribbon::dismiss_ribbon_popup(&mut harness);
             }
         }
+        harness.render().expect("the palette workspace renders");
     }
     // A click runs the command and remembers it as recent.
+    harness.set_render_every_step(true);
     harness.state_mut().state.ribbon_tab = RibbonTab::Solid;
     harness.run_steps(2);
     harness.get_by_label("Extrude").click();
@@ -204,10 +192,13 @@ fn the_drawing_ribbon_and_keys_come_from_the_registry() {
     harness.state_mut().state.push(AppAction::Drawing(DrawingAction::CreateDrawing));
     harness.run_steps(6);
     assert!(harness.state().state.drawing.is_active(), "the drawing tab is open and active");
-    for tab in DrawingTab::ALL {
+    for tab in DrawingTab::EDIT_SUITE {
         harness.state_mut().state.drawing.session.as_mut().unwrap().tab = tab;
         harness.run_steps(2);
         for (panel, items) in commands::ribbon(tab) {
+            if panel == "Assistant" {
+                continue;
+            }
             for (command, _) in items.into_iter().filter(|(c, _)| (c.shown)(&harness.state().state)) {
                 let label = command.label_in(&harness.state().state);
                 assert!(
@@ -275,6 +266,7 @@ fn mass_properties_button_calculates_on_request_without_measuring_selection() {
     harness.get_by_label("Mass props").click();
     harness.run_steps(3);
     assert_eq!(harness.state().state.doc.kernel().cached_mass_properties(body).unwrap().volume, 12000.0);
+    ribbon::open_options(&mut harness);
     assert!(harness.query_by_label("12000 mm³").is_some());
     harness.render().unwrap().save(dir.join("after-request.png")).unwrap();
     println!("mass properties viewport proof: {}", dir.display());

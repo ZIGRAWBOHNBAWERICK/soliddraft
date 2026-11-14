@@ -1,9 +1,9 @@
 //! Dimension placement and reference annotations through native sketch input.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
-use egui::{Key, Modifiers, Pos2, pos2, vec2};
+use egui::{Key, Modifiers, Pos2, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::{
@@ -38,6 +38,9 @@ fn launch_at(mut doc: soliddraft_app::document::Document, mut sketch: Sketch, of
     let mut app = ribbon::app(doc);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
+    let st = &mut app.state_mut().state;
+    st.viewport.camera.zoom(0.65, None, st.viewport.rect.aspect_ratio());
+    app.run_steps(8);
     (app, id)
 }
 
@@ -46,28 +49,14 @@ fn session(app: &App) -> &SketchSession {
 }
 
 fn control(app: &mut App, label: &str) {
-    for direction in [-1.0, 1.0] {
-        for _ in 0..12 {
-            let left = app.state().state.viewport.rect.left();
-            if let Some(p) = ribbon::painted(app)
-                .into_iter()
-                .find(|p| p.text == label && p.rect.right() < left && p.rect.contains_rect(p.full))
-            {
-                ribbon::click_at(app, p.rect.center());
-                return;
-            }
-            let head = ribbon::painted(app).into_iter().find(|p| p.text == "Properties").unwrap().rect;
-            app.hover_at(pos2(left - 15.0, (head.bottom() + ribbon::band(app).top()) / 2.0));
-            app.event(egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: vec2(0.0, direction * 80.0),
-                phase: egui::TouchPhase::Move,
-                modifiers: Modifiers::NONE,
-            });
-            app.run_steps(10);
+    if label == "Link values" {
+        ribbon::run_command(app, "link_values");
+    } else {
+        ribbon::click_option(app, label);
+        if matches!(label, "Reference dimensions" | "Reference dimension") {
+            ribbon::close_options(app);
         }
     }
-    panic!("the sketch must expose {label} in its diagnostics workflow");
 }
 
 fn screen(app: &App, p: P2) -> Pos2 {
@@ -101,7 +90,7 @@ fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut sketch = Sketch::new();
     let mut ids = Vec::new();
-    for (x, radius, y) in [(-12.0, 5.0, -9.0), (12.0, 7.0, -11.0)] {
+    for (x, radius, y) in [(-12.0, 5.0, -15.0), (12.0, 7.0, -17.0)] {
         let entity = sketch.add(EntityKind::Circle { center: P2::new(x, 0.0), radius }, false);
         ids.push(sketch.constrain(ConstraintKind::Radius {
             entity,
@@ -225,6 +214,9 @@ fn linked_dimensions_share_edits_unlink_cancel_undo_and_reopen() {
     ribbon::document_tab(&mut app, "Tree");
     app.state_mut().state.push(AppAction::EditSketch(feature));
     app.run_steps(60);
+    let st = &mut app.state_mut().state;
+    st.viewport.camera.zoom(0.65, None, st.viewport.rect.aspect_ratio());
+    app.run_steps(8);
     assert_eq!(session(&app).sketch, saved);
     let at = label(&app, ids[0]);
     ribbon::double_click_at(&mut app, at);

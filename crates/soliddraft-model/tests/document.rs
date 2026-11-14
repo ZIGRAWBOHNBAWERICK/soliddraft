@@ -341,7 +341,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
     assert_eq!(back.part_json(), d.part_json());
     assert_eq!(back.to_bytes().unwrap(), bytes);
 
-    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/3");
+    let newer = d.part_json().replace("soliddraft-part/2", "soliddraft-part/4");
     assert!(matches!(Document::from_part_json(&newer, kernel.clone()), Err(FileError::Format { .. })));
     // A truth without a format tag says so, rather than naming a blank one.
     let Err(untagged) = Document::from_part_json("[1, 2]", kernel.clone()) else { panic!("a list is not a part") };
@@ -351,7 +351,7 @@ fn files_round_trip_and_refuse_what_they_cannot_read() {
         Document::from_part_json(&newer, kernel.clone())
             .unwrap_err()
             .to_string()
-            .starts_with("the file is soliddraft-part/3,")
+            .starts_with("the file is soliddraft-part/4,")
     );
     let broken = d.part_json().replace("\"next_feature\": 4", "\"next_feature\": 2");
     assert!(matches!(Document::from_part_json(&broken, kernel.clone()), Err(FileError::Invalid(_))), "{broken}");
@@ -469,6 +469,37 @@ fn hashes_follow_the_design_and_ids_follow_the_document() {
     let id = twin.id();
     twin.new_identity();
     assert_ne!(twin.id(), id, "Save as copy mints a new id");
+}
+
+#[test]
+fn undoing_an_added_feature_restores_geometry_without_reusing_its_id() {
+    let mut d = doc();
+    let (_, extrusion) = block(&mut d);
+    let before = d.truth();
+    let geometry = d.geometry_hash();
+    let body = d.body();
+    let faces = d.generated_faces(extrusion).to_vec();
+    let added = add(
+        &mut d,
+        top_sketch(|s| {
+            s.rectangle(P2::new(0.0, 0.0), 5.0, 5.0).unwrap();
+        }),
+    );
+    d.undo().unwrap();
+    let mut restored = d.truth();
+    assert!(restored["next_feature"].as_u64().unwrap() > before["next_feature"].as_u64().unwrap());
+    restored["next_feature"] = before["next_feature"].clone();
+    assert_eq!(restored, before, "only the next unused id changes across undo");
+    assert_eq!(d.body(), body);
+    assert_eq!(d.generated_faces(extrusion), faces);
+    assert_eq!(d.geometry_hash(), geometry);
+    let replacement = add(
+        &mut d,
+        top_sketch(|s| {
+            s.rectangle(P2::new(0.0, 0.0), 8.0, 8.0).unwrap();
+        }),
+    );
+    assert!(replacement.0 > added.0, "undo must not recycle a persistent feature id");
 }
 
 #[test]

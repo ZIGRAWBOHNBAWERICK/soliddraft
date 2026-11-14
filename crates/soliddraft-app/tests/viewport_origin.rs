@@ -26,7 +26,7 @@ fn assert_cube_works(app: &mut App) {
 
 fn assert_hidden_at_rest(case: &mut Case, app: &mut App, name: &str) {
     assert_eq!(reference(app), None, "{name}: nothing selected");
-    assert!(!app.state().state.viewport.references.always_show_origin_axes, "{name}: the default is off");
+    assert!(!app.state().state.viewport.references.always_show_origin_axes, "{name}: the saved axes preference is off");
     pointer_to_chrome(app);
     let image = case.frame(app, &format!("{name}-rest"));
     case.note(format!("{name} rest: rays {:?}, corner {}", rays(&image, app), corner_triad_pixels(&image, app)));
@@ -35,7 +35,7 @@ fn assert_hidden_at_rest(case: &mut Case, app: &mut App, name: &str) {
 }
 
 #[test]
-fn origin_axes_are_hidden_in_a_fresh_and_old_part() {
+fn saved_preference_hides_origin_axes_in_fresh_and_old_parts() {
     {
         let mut case = Case::gpu("origin_axes_are_hidden_fresh");
         let mut app = launch(empty());
@@ -51,8 +51,7 @@ fn origin_axes_are_hidden_in_a_fresh_and_old_part() {
         assert_eq!(corner, 0, "no resting triad in the assembly viewport");
 
         // Back on the part tab, whose title sits at the left of the bar over the viewport.
-        let rect = viewport(&app);
-        click(&mut app, pos2(rect.left() + 24.0, rect.top() - 14.0));
+        part_tab(&mut app);
         assert!(!app.state().state.assembly.is_active(), "the part tab is active again");
 
         // The disclosure control is not a selection.
@@ -208,7 +207,8 @@ fn always_on_is_persisted_and_selection_still_overrides_off() {
     // On through the window: with nothing selected the axes show.
     open_grid_and_planes(&mut app);
     assert!(!checked(&app, ALWAYS_SHOW_AXES), "unchecked on a new install");
-    click_label(&mut app, ALWAYS_SHOW_AXES);
+    app.get_by_role_and_label(egui::accesskit::Role::CheckBox, ALWAYS_SHOW_AXES).click();
+    settle(&mut app);
     assert!(checked(&app, ALWAYS_SHOW_AXES));
     close_preferences(&mut app);
     assert_eq!(reference(&app), None);

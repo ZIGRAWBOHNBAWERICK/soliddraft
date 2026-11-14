@@ -39,8 +39,7 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
     let references = &state.viewport.references;
     match item {
         ViewItem::Plane(plane) => {
-            state.frame_layout == crate::settings::FrameLayout::EditSuite
-                && state.editor.as_ref().is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane))
+            state.editor.as_ref().is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane))
                 || choice.unwrap_or(
                     references.show_origin_planes
                         || doc.selection == Some(Selection::Reference(Reference::Plane(plane))),
@@ -53,6 +52,9 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
         ),
         ViewItem::Feature(id) => match doc.feature(id) {
             Some(f) if matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)) => choice.unwrap_or(true),
+            Some(f) if matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none()) => {
+                choice.unwrap_or(true)
+            }
             Some(f) if f.is_sketch() => choice.unwrap_or(state.selected_sketch() == Some(id)),
             Some(_) => body_shown(doc),
             None => false,
@@ -66,10 +68,11 @@ fn tool_wants_an_axis(state: &AppState) -> bool {
 }
 
 /// The body shows unless a feature that shapes it is hidden.
-fn body_shown(doc: &Document) -> bool {
+pub(crate) fn body_shown(doc: &Document) -> bool {
     !doc.features.iter().any(|f| {
         !f.is_sketch()
             && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
+            && !matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none())
             && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
     })
 }
@@ -97,9 +100,11 @@ pub fn toggle(state: &mut AppState, item: ViewItem) {
     let doc = &mut state.doc;
     if show
         && let ViewItem::Feature(id) = item
-        && doc
-            .feature(id)
-            .is_some_and(|f| !f.is_sketch() && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_)))
+        && doc.feature(id).is_some_and(|f| {
+            !f.is_sketch()
+                && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
+                && !matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none())
+        })
     {
         let hidden: Vec<FeatureId> = doc
             .features
@@ -107,6 +112,7 @@ pub fn toggle(state: &mut AppState, item: ViewItem) {
             .filter(|f| {
                 !f.is_sketch()
                     && !matches!(f.kind, crate::document::FeatureKind::ReferencePlane(_))
+                    && !matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none())
                     && doc.view_choice(ViewItem::Feature(f.id)) == Some(false)
             })
             .map(|f| f.id)

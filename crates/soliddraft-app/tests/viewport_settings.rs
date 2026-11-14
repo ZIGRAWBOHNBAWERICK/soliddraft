@@ -12,7 +12,7 @@ use soliddraft_app::viewport::look::Preset;
 use support::{ALWAYS_SHOW_AXES, Case, empty, launch, set_preference};
 
 const DEFAULTS: ReferenceDisplay =
-    ReferenceDisplay { show_grid: true, show_origin_planes: true, always_show_origin_axes: false };
+    ReferenceDisplay { show_grid: true, show_origin_planes: true, always_show_origin_axes: true };
 
 /// Reads the settings and checks that reading wrote nothing.
 fn view_unchanged(case: &Case) -> settings::ViewSettings {
@@ -65,7 +65,7 @@ fn a_missing_always_show_origin_axes_falls_back_alone() {
     let case = Case::settings("view_missing_always_show_origin_axes");
     case.seed_settings(r#"{"view":{"preset":"fast","show_grid":false,"show_origin_planes":false}}"#);
     let view = view_unchanged(&case);
-    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: false };
+    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
     assert_eq!((view.preset, view.references), (Preset::Fast, expected));
 }
 
@@ -98,7 +98,7 @@ fn a_wrong_typed_always_show_origin_axes_falls_back_alone() {
         r#"{"view":{"preset":"fast","show_grid":false,"show_origin_planes":false,"always_show_origin_axes":"yes"}}"#,
     );
     let view = view_unchanged(&case);
-    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: false };
+    let expected = ReferenceDisplay { show_grid: false, show_origin_planes: false, always_show_origin_axes: true };
     assert_eq!((view.preset, view.references), (Preset::Fast, expected));
 }
 
@@ -231,5 +231,5 @@ fn edit_suite_starts_with_origin_axes_and_keeps_an_explicit_choice() {
     case.seed_settings(r#"{"frame_layout":"edit_suite","view":{"always_show_origin_axes":false}}"#);
     assert!(!view_unchanged(&case).references.always_show_origin_axes);
     case.seed_settings(r#"{"frame_layout":"classic"}"#);
-    assert!(!view_unchanged(&case).references.always_show_origin_axes);
+    assert!(view_unchanged(&case).references.always_show_origin_axes);
 }

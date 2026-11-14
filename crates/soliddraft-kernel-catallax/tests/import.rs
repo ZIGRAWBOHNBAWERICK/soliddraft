@@ -120,8 +120,7 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
             },
         )
         .unwrap_err();
-    assert!(refused.to_string().contains("2 solids"), "{refused}");
-    assert!(refused.to_string().contains("a part holds one body"), "{refused}");
+    assert!(refused.to_string().contains("Several-solid import is coming soon."), "{refused}");
 }
 
 #[test]

@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
-#[path = "ribbon.rs"]
+#[path = "ui.rs"]
 mod ribbon;
 
 pub use ribbon::render_steps;
@@ -73,6 +73,11 @@ impl Case {
     /// A case on the real renderer. Panics when there is no adapter.
     pub fn gpu(name: &str) -> Self {
         let mut case = Self::settings(name);
+        // A dark scene keeps the geometry sampling distinct from the background.
+        // Fusion supplies an orbit gesture that also works on a sketch plane.
+        case.seed_settings(
+            r#"{"view":{"always_show_origin_axes":false,"scene":"graphite"},"navigation":{"preset_id":"fusion"}}"#,
+        );
         let _ = env_logger::try_init();
         let instance = egui_wgpu::wgpu::Instance::default();
         let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
@@ -290,16 +295,46 @@ pub fn pick(app: &mut App, point: Pos2) {
     settle(app);
 }
 
+fn reveal_tree_label(app: &mut App, label: &str) {
+    let role = egui::accesskit::Role::Button;
+    if app.query_all_by_role_and_label(role, label).next().is_none() && !app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        settle(app);
+    }
+    if app.query_all_by_role_and_label(role, label).next().is_none()
+        && let Some(group) = app.query_by_role_and_label(role, "Origin, planes and axes")
+    {
+        group.click();
+        settle(app);
+    }
+}
+
 pub fn click_label(app: &mut App, label: &str) {
-    app.get_by_label(label).hover();
+    reveal_tree_label(app, label);
+    app.get_by_role_and_label(egui::accesskit::Role::Button, label).hover();
     app.run_steps(4);
-    app.get_by_label(label).click();
+    app.get_by_role_and_label(egui::accesskit::Role::Button, label).click();
     settle(app);
+}
+
+pub fn part_tab(app: &mut App) {
+    let name = app.state().state.doc.name.clone();
+    ribbon::document_tab(app, &name);
 }
 
 /// Opens a menu of the menu bar and clicks an item. Menu labels carry their shortcut
 /// text, and the menu bar comes before a ribbon tab of the same name.
 pub fn click_menu(app: &mut App, menu: &str, item: &str) {
+    if menu == "View" && item == "Orthographic" {
+        if !app.state().state.viewport.camera.orthographic {
+            run_command(app, "orthographic");
+        }
+        return;
+    }
+    if app.query_all_by_label(menu).next().is_none() && app.query_by_label("Menu").is_some() {
+        app.get_by_label("Menu").click();
+        app.run_steps(4);
+    }
     app.get_all_by_label(menu).next().unwrap_or_else(|| panic!("missing menu {menu}")).hover();
     app.run_steps(4);
     app.get_all_by_label(menu).next().unwrap_or_else(|| panic!("missing menu {menu}")).click();
@@ -311,6 +346,20 @@ pub fn click_menu(app: &mut App, menu: &str, item: &str) {
 }
 
 pub fn click_button(app: &mut App, label: &str) {
+    let command = match label {
+        "Top view (T)" => Some("view_top"),
+        "Front view (F)" => Some("view_front"),
+        "Right view (R)" => Some("view_right"),
+        "Isometric view (I)" => Some("view_isometric"),
+        "Sketch" => Some("sketch"),
+        "Exit" => Some("exit_sketch"),
+        "Linear" => Some("linear_pattern"),
+        _ => None,
+    };
+    if let Some(command) = command {
+        run_command(app, command);
+        return;
+    }
     let role = egui::accesskit::Role::Button;
     app.get_all_by_role_and_label(role, label).next().unwrap_or_else(|| panic!("missing button {label}")).hover();
     app.run_steps(4);
@@ -325,9 +374,10 @@ pub fn run_command(app: &mut App, id: &str) {
 
 /// Two clicks on a row, close enough to be a double click.
 pub fn double_click_label(app: &mut App, label: &str) {
-    app.get_by_label(label).hover();
+    reveal_tree_label(app, label);
+    app.get_by_role_and_label(egui::accesskit::Role::Button, label).hover();
     app.run_steps(4);
-    let point = app.get_by_label(label).rect().center();
+    let point = app.get_by_role_and_label(egui::accesskit::Role::Button, label).rect().center();
     for pressed in [true, false, true, false] {
         app.event(egui::Event::PointerButton {
             pos: point,
@@ -421,14 +471,9 @@ fn press_label(app: &mut App, label: &str) {
     app.run_steps(3);
 }
 
-/// Opens Tools > Preferences and goes to Viewport > Grid and planes. In a sketch the ribbon
-/// has a Tools group too, and the menu bar comes first.
+/// Opens Preferences and goes to Viewport > Grid and planes.
 pub fn open_grid_and_planes(app: &mut App) {
-    app.get_all_by_label("Tools").next().expect("the Tools menu").hover();
-    app.run_steps(2);
-    app.get_all_by_label("Tools").next().expect("the Tools menu").click();
-    app.run_steps(3);
-    press_label(app, "Preferences…");
+    ribbon::run_command(app, "settings");
     assert!(app.state().preferences.is_some(), "the menu opened Preferences");
     press_label(app, "Grid and planes");
 }
@@ -442,7 +487,9 @@ pub fn close_preferences(app: &mut App) {
 
 /// Whether a checkbox of the open window is checked.
 pub fn checked(app: &App, label: &str) -> bool {
-    row_selected(app, label)
+    use egui_kittest::kittest::NodeT;
+    app.get_by_role_and_label(egui::accesskit::Role::CheckBox, label).accesskit_node().toggled()
+        == Some(egui::accesskit::Toggled::True)
 }
 
 /// Sets one choice through the window, leaving it closed.
@@ -549,7 +596,8 @@ pub fn reference(app: &App) -> Option<Reference> {
 /// Whether the tree's accessible row shows selected.
 pub fn row_selected(app: &App, label: &str) -> bool {
     use egui_kittest::kittest::NodeT;
-    app.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+    app.get_by_role_and_label(egui::accesskit::Role::Button, label).accesskit_node().toggled()
+        == Some(egui::accesskit::Toggled::True)
 }
 
 /// Everything a purely visual operation must leave as it was.
@@ -592,7 +640,9 @@ pub fn camera(app: &App) -> (Vec3, Vec3, f32, bool, &'static str) {
 
 fn axis_coloured(axis: AxisKind, c: Color32) -> bool {
     match axis {
-        AxisKind::X => c.r() > c.g().saturating_add(60) && c.r() > c.b().saturating_add(60),
+        AxisKind::X => {
+            c.r() > c.g().saturating_add(60) && c.r() > c.b().saturating_add(60) && c.g() < c.b().saturating_add(35)
+        }
         AxisKind::Y => c.g() > c.r().saturating_add(40) && c.g() > c.b().saturating_add(20),
         AxisKind::Z => c.b() > c.r().saturating_add(60) && c.b() > c.g().saturating_add(30),
     }
@@ -890,9 +940,19 @@ pub fn assert_top_view_grid(
     when: &str,
 ) -> (Family, Family, (f32, f32)) {
     let spacing = readout(app).unwrap_or_else(|| panic!("{when}: no grid readout"));
+    let (x, y) = assert_top_view_grid_spacing(app, frames, spacing, when);
+    (x, y, spacing)
+}
+
+pub fn assert_top_view_grid_spacing(
+    app: &App,
+    frames: (&image::RgbaImage, &image::RgbaImage),
+    spacing: (f32, f32),
+    when: &str,
+) -> (Family, Family) {
     let x = assert_family(app, frames, spacing, true, &format!("{when}, lines of constant X"));
     let y = assert_family(app, frames, spacing, false, &format!("{when}, lines of constant Y"));
-    (x, y, spacing)
+    (x, y)
 }
 
 /// A lattice in world space: `origin + i * step * u + j * step * v`.
@@ -1133,20 +1193,29 @@ pub fn opaque_points(app: &App) -> Vec<Pos2> {
     points
 }
 
-/// Whether an outline of one world edge kept its ink: the darkest pixel near each sample
-/// stands about where it did. The share of samples that did.
+/// The share of edge samples that retain visible contrast over the tinted background.
 pub fn edge_kept(on: &image::RgbaImage, off: &image::RgbaImage, app: &App, samples: &[Vec3]) -> f32 {
     let ppp = app.ctx.pixels_per_point();
-    let darkest = |image: &image::RgbaImage, p: Pos2| {
+    let contrast = |image: &image::RgbaImage, p: Pos2| {
         let (x, y) = ((p.x * ppp) as i32, (p.y * ppp) as i32);
-        (-1..=1)
-            .flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
+        let values: Vec<u32> = (-2..=2)
+            .flat_map(|dy| (-2..=2).map(move |dx| (x + dx, y + dy)))
             .map(|(x, y)| image.get_pixel(x as u32, y as u32).0.iter().take(3).map(|c| u32::from(*c)).sum::<u32>() / 3)
-            .min()
-            .unwrap()
+            .collect();
+        values.iter().max().unwrap() - values.iter().min().unwrap()
     };
-    let points: Vec<Pos2> = samples.iter().filter_map(|w| projected(app, *w)).collect();
-    let kept = points.iter().filter(|p| darkest(on, **p).abs_diff(darkest(off, **p)) <= 16).count();
+    // Topology also includes edges hidden behind an opaque face in this view.
+    let points: Vec<Pos2> =
+        samples.iter().filter_map(|w| projected(app, *w)).filter(|p| contrast(off, *p) >= 16).collect();
+    assert!(!points.is_empty(), "visible model edges to sample");
+    // Plane tint changes antialiased edge pixels along with their background.
+    let kept = points
+        .iter()
+        .filter(|p| {
+            let ink = contrast(on, **p);
+            ink >= 16 && ink * 2 >= contrast(off, **p)
+        })
+        .count();
     kept as f32 / points.len().max(1) as f32
 }
 

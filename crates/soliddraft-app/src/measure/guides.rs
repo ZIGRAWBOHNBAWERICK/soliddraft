@@ -19,11 +19,11 @@ pub fn offered(auto_relations: bool, raw: P2, inferred: (P2, Vec<Snap>)) -> (P2,
 /// Snap and construction controls, under the sketch status in the viewport's corner.
 pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     let at = Rect::from_min_size(pos2(rect.left() + 12.0, rect.top() + 58.0), vec2(150.0, 22.0));
-    if crate::theme::is_edit_suite() {
-        let height = if s.tool.places_points() { 94.0 } else { 70.0 };
-        let controls = Rect::from_min_size(at.min, vec2(at.width(), height)).expand(4.0);
-        ui.painter().rect_filled(controls, 6, crate::theme::hud_bg());
-    }
+
+    let height = if s.tool.places_points() { 94.0 } else { 70.0 };
+    let controls = Rect::from_min_size(at.min, vec2(at.width(), height)).expand(4.0);
+    ui.painter().rect_filled(controls, 6, crate::theme::hud_bg());
+
     ui.put(at, egui::Checkbox::new(&mut s.auto_relations, "Auto relations"));
     let centreline = s.tool == Tool::Centreline;
     let mut construction = s.draws_construction();

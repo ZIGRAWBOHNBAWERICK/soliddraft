@@ -7,7 +7,7 @@ use soliddraft_app::sketch::{EntityKind, P2, Sketch};
 use soliddraft_app::sketcher::Frame;
 use soliddraft_app::state::{SketchSession, Tool};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 #[path = "support/ux_tools.rs"]
 mod ux_tools;
@@ -25,6 +25,7 @@ fn screen(app: &App, p: P2) -> Pos2 {
 }
 
 fn click(app: &mut App, p: P2, modifiers: Modifiers) {
+    ribbon::close_options(app);
     let pos = screen(app, p);
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(pos);
@@ -41,6 +42,7 @@ fn click(app: &mut App, p: P2, modifiers: Modifiers) {
 }
 
 fn hover(app: &mut App, p: P2) {
+    ribbon::close_options(app);
     let pos = screen(app, p);
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(pos);
@@ -49,6 +51,7 @@ fn hover(app: &mut App, p: P2) {
 }
 
 fn drag(app: &mut App, a: P2, b: P2) {
+    ribbon::close_options(app);
     let (a, b) = (screen(app, a), screen(app, b));
     ribbon::render_steps::rendered(app, |app| {
         app.hover_at(a);
@@ -78,22 +81,7 @@ fn drag(app: &mut App, a: P2, b: P2) {
 }
 
 fn button(app: &mut App, label: &str) {
-    let view = app.state().state.viewport.rect;
-    let pane = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
-    for _ in 0..6 {
-        if app.get_all_by_role_and_label(egui::accesskit::Role::Button, label).any(|n| pane.contains_rect(n.rect())) {
-            break;
-        }
-        app.hover_at(egui::pos2(pane.right() - 18.0, pane.bottom() - 60.0));
-        app.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -120.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        settle(app);
-    }
-    ribbon::click_button(app, label, pane);
+    ribbon::click_option(app, label);
     settle(app);
 }
 
@@ -142,6 +130,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     );
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = launch(doc, STANDARD);
+    ribbon::open_tree(&mut app);
     let view = app.state().state.viewport.rect;
     let left = egui::Rect::from_min_max(egui::pos2(0.0, view.top()), egui::pos2(view.left(), view.bottom()));
     let row = ribbon::button_rect(&app, &name, left);
@@ -191,6 +180,7 @@ fn copy_tools_place_values_without_moving_sources_and_apply_as_one_undo() {
     assert!(matches!(preview.added[0], EntityKind::Circle { radius, .. } if (radius - 7.0).abs() < 0.08));
     drag(&mut app, P2::new(25.0, 10.0), P2::new(20.0, 10.0));
     assert!((session(&app).modify.distance - 5.0).abs() < 0.08);
+    ribbon::open_options(&mut app);
     let distance = app.get_by_role(egui::accesskit::Role::SpinButton).rect();
     ribbon::double_click_at(&mut app, distance.center());
     app.key_press_modifiers(Modifiers::COMMAND, Key::A);

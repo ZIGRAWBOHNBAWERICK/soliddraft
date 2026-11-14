@@ -477,9 +477,9 @@ pub fn replace(state: &mut AppState, doc: AssemblyDocument, scene: Scene) {
 fn install(state: &mut AppState, mut session: AssemblySession) {
     state.assembly.workspace = Workspace::Assembly;
     state.assembly.tree_hidden = false;
-    if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-        session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
-    }
+
+    session.viewport.scene = Some(state.viewport.scene.unwrap_or_else(|| crate::settings::view().scene));
+
     state.assembly.opening = None;
     state.assembly.form = crate::subassembly::Draft::default();
     state.assembly.last_part = None;
@@ -934,7 +934,6 @@ pub fn tree(ui: &mut egui::Ui, state: &mut AppState) {
 /// The property panel: the Mate panel while it is open, otherwise the selected component's
 /// placement, typed; or the assembly's summary.
 pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
-    let mating = state.assembly.mate.open;
     let forming = state.assembly.form.open;
     let checking = state.assembly.interference.open;
     let collision_drag = &mut state.assembly.collision_drag;
@@ -973,14 +972,6 @@ pub fn properties(ui: &mut egui::Ui, state: &mut AppState) {
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(12, 0))
                 .show(ui, |ui| crate::interference::panel::show(ui, state));
-        });
-        return;
-    }
-    if mating {
-        egui::ScrollArea::vertical().id_salt("assembly_mate").auto_shrink([false, true]).show(ui, |ui| {
-            egui::Frame::new()
-                .inner_margin(egui::Margin::symmetric(12, 0))
-                .show(ui, |ui| crate::mates::panel::show(ui, state));
         });
         return;
     }

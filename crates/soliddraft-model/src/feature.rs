@@ -24,6 +24,9 @@ impl fmt::Display for FeatureId {
 /// One step of the part.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Feature {
+    /// Stable body identity. Zero is the original body in older files.
+    #[serde(default, skip_serializing_if = "body_is_zero")]
+    pub body: u32,
     /// Stable id.
     pub id: FeatureId,
     /// The name the tree shows, such as "Boss-Extrude1".
@@ -38,6 +41,10 @@ pub struct Feature {
     pub via_assistant: bool,
 }
 
+fn body_is_zero(body: &u32) -> bool {
+    *body == 0
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -50,6 +57,13 @@ fn is_zero(v: &f64) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// Combines the target body with another body.
+    Combine {
+        /// Boolean operation.
+        operation: soliddraft_kernel_api::BooleanOp,
+        /// Stable identity of the tool body, consumed on success.
+        tool: u32,
+    },
     /// A reusable offset plane with a persistent source.
     ReferencePlane(SketchPlane),
     /// A 2D sketch on a plane.
@@ -82,6 +96,8 @@ pub enum FeatureKind {
     Shell(ShellFeature),
     /// A body read from an external STEP file, with the answers to its repair questions.
     ImportStep(ImportStepFeature),
+    /// A scan reference, optionally fitted to a clean part.
+    Scan(ScanFeature),
     /// Turns the finished body into a lattice. It is always the last feature.
     Lattice(LatticeFeature),
     /// Turns the finished body into a network gyroid. It is always the last feature.
@@ -92,6 +108,7 @@ impl FeatureKind {
     /// The tree's base name for the kind, numbered to make a feature name.
     pub fn base_name(&self) -> &'static str {
         match self {
+            FeatureKind::Combine { .. } => "Combine",
             FeatureKind::ReferencePlane(_) => "Plane",
             FeatureKind::Sketch(_) => "Sketch",
             FeatureKind::Revolve(_) => "Revolve",
@@ -112,6 +129,7 @@ impl FeatureKind {
             FeatureKind::Thicken(_) => "Thicken",
             FeatureKind::Shell(_) => "Shell",
             FeatureKind::ImportStep(_) => "Import",
+            FeatureKind::Scan(_) => "Scan",
             FeatureKind::Lattice(_) => "Lattice",
             FeatureKind::Gyroid(_) => "Gyroid",
         }
@@ -148,6 +166,7 @@ impl FeatureKind {
     pub fn dependencies(&self) -> Vec<FeatureId> {
         let mut out = Vec::new();
         match self {
+            FeatureKind::Combine { .. } => {}
             FeatureKind::Sketch(s) => out.extend(s.plane.dependencies()),
             FeatureKind::ReferencePlane(p) => out.extend(p.dependencies()),
             FeatureKind::Revolve(r) => out.push(r.sketch),
@@ -167,7 +186,11 @@ impl FeatureKind {
             FeatureKind::Hole(h) => out.push(h.face.feature),
             FeatureKind::Pattern(p) => out.extend(p.source),
             FeatureKind::Thicken(t) => out.extend(t.faces.iter().map(|face| face.feature)),
-            FeatureKind::Offset(_) | FeatureKind::ImportStep(_) | FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => {}
+            FeatureKind::Scan(_)
+            | FeatureKind::Offset(_)
+            | FeatureKind::ImportStep(_)
+            | FeatureKind::Lattice(_)
+            | FeatureKind::Gyroid(_) => {}
             FeatureKind::Mirror(m) => {
                 out.extend(m.plane.dependencies());
             }
@@ -855,4 +878,14 @@ mod hex_bytes {
         }
         Ok((0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("checked hex")).collect())
     }
+}
+
+/// An embedded reference scan and its accepted fit, when present.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScanFeature {
+    /// Unchanged source in millimetres.
+    pub source: soliddraft_kernel_api::scan::ScanSource,
+    /// Saved native definitions and both sampled deviation maps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<soliddraft_kernel_api::scan::ScanFit>,
 }

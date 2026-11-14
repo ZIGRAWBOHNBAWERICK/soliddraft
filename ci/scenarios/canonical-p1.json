@@ -509,7 +509,7 @@
             },
             {
               "pointer": "/report/chord_height",
-              "equals": 0.01
+              "equals": 0.08
             },
             {
               "pointer": "/report/triangles",
@@ -520,7 +520,8 @@
               "minimum": 4
             }
           ],
-          "attempt": "accepted"
+          "attempt": "accepted",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [
@@ -586,7 +587,7 @@
             },
             {
               "pointer": "/report/chord_height",
-              "equals": 0.01
+              "equals": 0.08
             },
             {
               "pointer": "/report/triangles",
@@ -597,7 +598,8 @@
               "minimum": 4
             }
           ],
-          "attempt": "accepted"
+          "attempt": "accepted",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [
@@ -695,7 +697,7 @@
             },
             {
               "pointer": "/report/chord_height",
-              "equals": 0.01
+              "equals": 0.08
             },
             {
               "pointer": "/report/triangles",
@@ -706,7 +708,8 @@
               "minimum": 4
             }
           ],
-          "attempt": "accepted"
+          "attempt": "accepted",
+          "accuracy_mm": 0.08
         }
       ],
       "checks": [

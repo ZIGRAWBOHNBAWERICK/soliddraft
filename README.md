@@ -34,20 +34,21 @@ Help fund SolidDraft and Catallax through [GitHub Sponsors](https://github.com/s
 
 ## What it is
 
-A SolidWorks-style desktop CAD app: a feature tree on the left, a ribbon of commands on top, a 3D viewport in the middle, and a command line along the bottom that opens an AI assistant session.
+A desktop CAD app with workspaces in the title bar, tools on the left, an options bar for the active tool, a 3D viewport, and feature history above the command line. The command line also opens an AI assistant session.
 
 SolidDraft is built for [Catallax](https://github.com/BohnBawerick/catallax) and will run only on it. They are one project in two repositories: SolidDraft is the CAD application and Catallax is its kernel. The desktop, browser and command-line application run on Catallax. See the [project website](https://kernel.zigrawbohnbawerick.org/) and the [roadmap](docs/roadmap.md).
 
-![SolidDraft with a rebuilt bracket](docs/screenshots/soliddraft.png)
+![SolidDraft Edit Suite with the demo part](docs/screenshots/soliddraft.png)
 
 ## What works today
 
 Work in progress. SolidDraft runs only on Catallax. See [the backend gaps](docs/needs-catallax.md) for the limits of the current application entry.
 
-- The desktop app, with its ribbon, feature tree, property panel, command line, assistant session and wgpu viewport.
+- The Edit Suite desktop app, with its tool palette, options bar, optional feature tree, history, command line, assistant session and wgpu viewport.
+- Inspect > Section and the navigation bar's Section view cut the display on XY, YZ, ZX or a planar face. Drag Offset to move the cut, use Flip side to switch the retained half, and Close section to restore the whole view. The cap preserves openings, and saving and exporting keep the whole part.
 - Desktop depth, fillet-radius and chamfer-distance edits separate construction display from exact proof. Supported construction charts produce selectable provisional faces before proof finishes; one drag is one undo step. Pending or failed input cannot export, and a failed edit restores the whole last proved part while its feature stays red with a reason.
 - Sketching on a plane or a planar face with line, rectangle, circle, arc and slot tools, with relations and dimensions. The Modify group adds polygon, trim and extend by pointer with a live preview. Offset, mirror and linear and circular patterns copy the selection, with distance, axis, step and centre placed by pointer or typed in the property panel.
-- Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; booleans and rational-frame revolves through the kernel and recipe runner. Persistent references, undo and redo, feature tree editing and part files work.
+- Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; rational-frame revolves through the kernel and recipe runner. Parts can hold several bodies. New body starts a separate solid, selection chooses the body for later features, and Combine unions, subtracts or intersects two bodies. Persistent references, undo and redo, feature tree editing and part files work.
 - Sweeps of closed polygon profiles along chains of straight lines and quarter, half and three-quarter arcs, or one rational spline, with the path in the property panel, editing, undo, save and reopen. The profile keeps its direction along lines or a spline, or turns with the path along lines and arcs. This is in the feature batch after 0.2.0. Other path motions and curved profiles remain unavailable; loft is coming soon.
 - Holes on a planar face, blind or through, with flat or drill-point tips, counterbores and countersinks at any angle, including the standard 118° tip and 82°, 90° and 100° countersinks. A countersink or drill point cannot yet go into a body that has another cylinder; see [the backend gaps](docs/needs-catallax.md).
 - Linear and circular patterns and mirrors of the part's body.
@@ -87,7 +88,7 @@ cargo run --release -p soliddraft-app -- --demo
 
 A part or drawing file on the command line opens it; without one the app opens on the start page with the recent documents. `--demo` loads a sample part, `--bench` measures frame times on a dense body and exits, `--screenshot out.png` saves the window and exits, `--help` lists the rest. Press `?` in the app for the keyboard shortcuts.
 
-Modelling starts with a sketch: pick a plane in the tree or click a planar face, draw, add dimensions with `D`, then Extrude or Cut from the property panel. Hole, Fillet, Chamfer, Draft, the patterns and Mirror work on the body from the ribbon. Fillet and Chamfer take picked edges, or a picked face for every edge on its boundary; one the kernel refuses is not added, and the note gives the kernel's reason.
+Modelling starts with a sketch: pick a plane in the tree or click a planar face, draw, add dimensions with `D`, then Extrude or Cut from the options bar. Hole, Fillet, Chamfer, Draft, the patterns and Mirror work on the body from the tool palette. Fillet and Chamfer take picked edges, or a picked face for every edge on its boundary; one the kernel refuses is not added, and the note gives the kernel's reason.
 
 ## Running in a browser
 

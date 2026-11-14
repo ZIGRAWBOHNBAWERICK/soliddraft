@@ -72,7 +72,7 @@ impl SolidDraftApp {
     /// What "zoom to fit" frames: the body, the open sketch, or with nothing
     /// built yet a 200 mm workspace around the sketch origin.
     pub(super) fn fit_bounds(&self) -> Option<(glam::Vec3, glam::Vec3)> {
-        let mut acc = self.state.doc.bounds();
+        let mut acc = crate::scan::document_bounds(&self.state.doc);
         if let Some(s) = &self.state.sketch {
             let f = crate::sketcher::Frame {
                 plane: s.plane,
@@ -208,12 +208,9 @@ impl SolidDraftApp {
                     None => {
                         self.open_editor(None, EditorParams::PickPlane);
                         self.state.origin_open = true;
-                        if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                            self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
-                            self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
-                        } else {
-                            self.state.note("Choose a plane in the tree or click a planar face", NoteKind::Info);
-                        }
+
+                        self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+                        self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
                     }
                 }
             }
@@ -457,6 +454,11 @@ impl SolidDraftApp {
                 self.open_editor(None, EditorParams::Gyroid(soliddraft_model::GyroidFeature::default()));
                 self.state.doc.selection = None;
             }
+            AppAction::NewBody => self.state.doc.new_body(),
+            AppAction::SelectBody(key) => self.state.doc.select_body(key),
+            AppAction::StartCombine => {
+                self.state.doc.combine_form = crate::multibody::CombineForm::new(&self.state.doc);
+            }
             AppAction::StartOffset => {
                 self.open_editor(None, EditorParams::Offset(soliddraft_model::OffsetFeature { distance: 1.0 }));
                 self.state.doc.selection = None;
@@ -513,6 +515,11 @@ impl SolidDraftApp {
             AppAction::EditFeature(id) => {
                 let Some(f) = self.state.doc.feature(id) else { return };
                 let params = match &f.kind {
+                    FeatureKind::Combine { operation, tool } => {
+                        self.state.doc.combine_form =
+                            Some(crate::multibody::CombineForm::editing(id, f.body_key, *tool, *operation));
+                        return;
+                    }
                     FeatureKind::Sketch(_) => {
                         self.apply(ctx, AppAction::EditSketch(id));
                         return;
@@ -547,6 +554,18 @@ impl SolidDraftApp {
                     }),
                     // An import has no editor; its repair questions have their own dialog.
                     FeatureKind::ImportStep(_) => return,
+                    FeatureKind::Scan(_) => {
+                        if !crate::scan::part_active(&self.state) {
+                            return;
+                        }
+                        if self.state.in_sketch() {
+                            self.apply(ctx, AppAction::ExitSketch);
+                        }
+                        self.close_editor();
+                        self.state.doc.selection = Some(Selection::Feature(id));
+                        self.state.scan.open = true;
+                        return;
+                    }
                     // The lattice's controls arrive with its editor slice.
                     FeatureKind::Lattice(l) => EditorParams::Lattice(*l),
                     FeatureKind::Gyroid(g) => EditorParams::Gyroid(*g),
@@ -931,16 +950,15 @@ impl SolidDraftApp {
                         _ => {}
                     }
                 }
+                self.state.doc.target_selection(sel);
                 self.state.doc.selection = sel;
                 self.state.rename = None;
             }
             AppAction::MeasureEntity => self.state.measure.open = !self.state.measure.open,
+            AppAction::ToggleSection => self.state.section.toggle(&self.state.doc),
             AppAction::ShowMaterial => {
                 self.state.doc.selection = Some(Selection::Body);
-                self.state.layout.tree.shown = true;
-                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                    self.state.options_details = true;
-                }
+                self.state.options_details = true;
             }
             AppAction::MeasureMassProperties => {
                 let feature = self.state.doc.selection.and_then(|sel| self.state.doc.selection_feature(sel));
@@ -963,10 +981,7 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SketchTool(tool) => {
-                if !self.state.in_sketch()
-                    && self.state.frame_layout == crate::settings::FrameLayout::EditSuite
-                    && crate::commands::Context::of(&self.state).part()
-                {
+                if !self.state.in_sketch() && crate::commands::Context::of(&self.state).part() {
                     self.apply(ctx, AppAction::StartSketch);
                     if let Some(editor) = &mut self.state.editor
                         && matches!(editor.params, EditorParams::PickPlane)
@@ -1106,10 +1121,7 @@ impl SolidDraftApp {
                     && let Some(f) = self.state.doc.feature(id)
                 {
                     let rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
-                    if self.state.frame_layout == crate::settings::FrameLayout::EditSuite
-                        && !self.state.drawing.is_active()
-                        && !self.state.assembly.is_active()
-                    {
+                    if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
                         self.state.timeline.rename = rename;
                     } else {
                         self.state.rename = rename;
@@ -1170,14 +1182,12 @@ impl SolidDraftApp {
                 }
             }
             AppAction::SetScene(scene) => {
-                if self.state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                    self.state.viewport.scene = Some(scene);
-                    if let Some(session) = self.state.assembly.session.as_mut() {
-                        session.viewport.scene = Some(scene);
-                    }
-                    if let Err(e) = crate::settings::save_scene(scene) {
-                        self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
-                    }
+                self.state.viewport.scene = Some(scene);
+                if let Some(session) = self.state.assembly.session.as_mut() {
+                    session.viewport.scene = Some(scene);
+                }
+                if let Err(e) = crate::settings::save_scene(scene) {
+                    self.state.note(format!("Scene changed, but could not be saved: {e}"), NoteKind::Error);
                 }
             }
             AppAction::SetTheme(mode) => {
@@ -1236,6 +1246,7 @@ impl SolidDraftApp {
                 self.state.sketch = None;
                 self.state.chat.preview = None;
                 self.state.import_dialog = None;
+                self.state.scan = Default::default();
                 self.state.doc = crate::new_document();
                 self.state.viewport.camera.fit(None);
                 self.state.note("New part", NoteKind::Info);
@@ -1262,6 +1273,31 @@ impl SolidDraftApp {
                     ) {
                         Ok(preview) => self.state.import_dialog = Some(preview),
                         Err(message) => self.state.note(message, NoteKind::Error),
+                    }
+                }
+            }
+            AppAction::ShowScan => {
+                if crate::scan::part_active(&self.state) {
+                    self.state.scan.open = true;
+                }
+            }
+            AppAction::FitScan => crate::scan::start_fit(&mut self.state),
+            AppAction::ImportScan(path) => {
+                if !crate::scan::can_import(&self.state) {
+                    return;
+                }
+                let path =
+                    path.or_else(|| crate::platform::open_path("Import scan reference", "STL or OBJ", &["stl", "obj"]));
+                if let Some(path) = path {
+                    let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
+                        crate::scan::review(
+                            &mut self.state,
+                            path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                            bytes,
+                        )
+                    });
+                    if let Err(e) = result {
+                        self.state.note(e, NoteKind::Error);
                     }
                 }
             }
@@ -1403,6 +1439,7 @@ impl SolidDraftApp {
                     Err(e) => self.state.note(e, NoteKind::Error),
                 }
             }
+            AppAction::CheckPart => crate::part_check::start(&mut self.state, ctx),
             AppAction::Export { format, path } => {
                 let path = path.or_else(|| {
                     let name = format!("{}.{}", self.state.doc.name, format.extension());
@@ -1410,8 +1447,12 @@ impl SolidDraftApp {
                     crate::platform::save_path(&title, format.name(), format.extension(), &name)
                 });
                 let Some(path) = path else { return };
+                if crate::print_check::is_mesh(format) {
+                    crate::print_check::start(&mut self.state, format, path, ctx);
+                    return;
+                }
                 let exported = self.state.export_part(format);
-                match exported.and_then(|out| crate::platform::write_file(&path, &out.bytes).map(|()| out.report)) {
+                match exported.and_then(|out| out.write_with(&path, crate::platform::write_file).map(|()| out.report)) {
                     Ok(report) => {
                         let kind = match &report {
                             soliddraft_exchange::Report::Step(r) if !r.within_tolerance => NoteKind::Error,
@@ -1443,7 +1484,6 @@ impl SolidDraftApp {
                     self.dock.push_to_focused_leaf(Tab::Assembly);
                 }
                 self.tree_dock = tree_dock();
-                self.suite_tree_dock = egui_dock::DockState::new(vec![Tab::Tree, Tab::Values]);
                 self.state.layout = Layout::default();
                 self.state.assembly.tree_hidden = false;
                 self.state.drawing.tree_hidden = false;

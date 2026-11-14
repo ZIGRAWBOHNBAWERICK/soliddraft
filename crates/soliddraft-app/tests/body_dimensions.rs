@@ -75,6 +75,8 @@ fn the_selected_body_shows_its_feature_dimensions() {
     harness.run_steps(30);
     assert!(shown(&harness).is_empty(), "nothing is selected, so no dimension shows");
 
+    harness.key_press(Key::F9);
+    harness.run_steps(6);
     harness.get_by_label("Solid body").click();
     harness.run_steps(6);
     assert_eq!(harness.state().state.doc.selection, Some(Selection::Body));

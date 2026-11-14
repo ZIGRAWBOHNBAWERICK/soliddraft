@@ -182,6 +182,7 @@ fn drawing_workspace(harness: &mut Harness<'_, SolidDraftApp>) {
 
     harness.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::D);
     harness.run_steps(4);
+    click_button(harness, "Drawing options");
     click_button(harness, "Create drawing (Enter)");
     harness.run_steps(12);
     assert!(harness.state().state.drawing.is_active());

@@ -1,6 +1,6 @@
 //! Right-click picking and commands through the real Edit Suite frame.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, PointerButton, Pos2};
@@ -189,25 +189,6 @@ fn sketch_right_click_ends_the_chain_before_offering_entity_or_empty_menus() {
         case.frame(app, "empty-sketch");
         dismiss(app);
         assert!(app.state().state.sketch.is_some(), "Escape closes the menu without closing the sketch");
-    });
-}
-
-#[test]
-fn classic_keeps_its_viewport_and_feature_menu_behavior() {
-    let case = ribbon::case("context-classic");
-    set_frame(&case, "classic");
-    let mut app = ribbon::app(ribbon::plate());
-    case.run(&mut app, |app| {
-        let original = app.state().state.doc.selection;
-        let face = world(app, Vec3::new(0.0, 0.0, 20.0));
-        right_click(app, face, true);
-        assert_eq!(app.state().state.doc.selection, original);
-        assert!(app.query_all_by_label("Face").next().is_none());
-        let name = app.state().state.doc.features[0].name.clone();
-        let row = tree_row(app, &name);
-        right_click(app, row, false);
-        assert!(app.query_all_by_label("Roll back to here").next().is_some());
-        assert!(app.query_all_by_label("Repair references…").next().is_none());
     });
 }
 

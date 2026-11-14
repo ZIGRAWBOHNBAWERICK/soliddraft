@@ -9,6 +9,7 @@
 
 pub mod mesh;
 mod obj;
+pub mod proof;
 mod stl;
 mod three_mf;
 
@@ -103,6 +104,9 @@ pub struct MeshReport {
     /// Requested controls the kernel could not guarantee, in words.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unavailable_controls: Vec<String>,
+    /// Native print qualification of the encoded geometry, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_check: Option<soliddraft_kernel_api::PrintReport>,
 }
 
 /// What an export wrote, by kind.
@@ -158,6 +162,14 @@ impl Report {
             ),
             Report::Mesh(r) => {
                 let mut s = format!("{} triangles; within {} mm of the exact part", r.triangles, r.chord_height);
+                if let Some(check) = &r.print_check {
+                    s = format!(
+                        "{} triangles; certified within {} mm; {} print route",
+                        r.triangles,
+                        bound_mm(check.certified_accuracy_mm),
+                        check.route
+                    );
+                }
                 if !r.closed {
                     s += "; the mesh is not closed";
                 }
@@ -175,6 +187,8 @@ impl Report {
 pub struct Export {
     /// The file's bytes.
     pub bytes: Vec<u8>,
+    /// Feature evidence for STEP sidecar reports.
+    pub proof: Option<proof::ProofReport>,
     /// What was written.
     pub report: Report,
 }
@@ -209,23 +223,46 @@ pub fn export(
         Format::Step => {
             let options = StepOptions { product_name: name.to_owned(), ..StepOptions::default() };
             let step = kernel.export_step(body, &options)?;
-            Ok(Export { bytes: step.text.into_bytes(), report: Report::Step(step.report) })
+            let features = kernel
+                .history(body)?
+                .into_iter()
+                .map(|record| proof::FeatureProof {
+                    id: record.tag.as_str().to_owned(),
+                    name: record.tag.as_str().to_owned(),
+                    answer_kind: proof::AnswerKind::Proved,
+                    model_bound: None,
+                    display_bound: None,
+                    work_used: None,
+                    message: None,
+                })
+                .collect();
+            Ok(Export {
+                bytes: step.text.into_bytes(),
+                report: Report::Step(step.report),
+                proof: Some(proof::ProofReport { features }),
+            })
         }
         Format::Iges => {
             let iges = kernel.export_iges(body, &soliddraft_kernel_api::IgesOptions::default())?;
-            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report) })
+            Ok(Export { bytes: iges.text.into_bytes(), report: Report::Iges(iges.report), proof: None })
         }
         Format::StandIn => {
             Err(ExportError::Invalid("a mass stand-in comes from a part's active lattice or gyroid".into()))
         }
         Format::Stl | Format::ThreeMf | Format::Obj => {
             tolerance.check().map_err(ExportError::Invalid)?;
-            let mesh = kernel.tessellate(body, &tolerance.params())?;
+            let qualified = kernel.print_mesh(body, &tolerance.params())?;
+            let mesh = match &qualified {
+                Some(output) => output.mesh.clone(),
+                None => kernel.tessellate(body, &tolerance.params())?,
+            };
             let welded = mesh::weld(&mesh);
             let closed = welded.is_closed();
             let bytes = match format {
                 Format::Obj => obj::write(&mesh, name, tolerance.chord_height),
-                Format::Stl => stl::write(&welded, name),
+                Format::Stl => {
+                    qualified.as_ref().map_or_else(|| stl::write(&welded, name), |output| output.stl.clone())
+                }
                 Format::ThreeMf if closed => three_mf::write(&welded, name)?,
                 Format::ThreeMf => return Err(ExportError::NotClosed),
                 Format::Step | Format::Iges | Format::StandIn => unreachable!(),
@@ -236,8 +273,9 @@ pub fn export(
                 chord_height: tolerance.chord_height,
                 closed,
                 unavailable_controls: mesh.unavailable_controls,
+                print_check: qualified.map(|output| output.report),
             };
-            Ok(Export { bytes, report: Report::Mesh(report) })
+            Ok(Export { bytes, report: Report::Mesh(report), proof: None })
         }
     }
 }
@@ -247,7 +285,7 @@ pub fn export(
 ///
 /// The rounding works on the bound's exact decimal value, so a binary64 that sits just above
 /// a step, such as `0.01` itself, reads as the next step rather than as the step below it.
-fn bound_mm(bound: f64) -> String {
+pub fn bound_mm(bound: f64) -> String {
     const DECIMALS: usize = 6;
     if !bound.is_finite() || bound <= 0.0 {
         return if bound == 0.0 { "0".into() } else { bound.to_string() };
@@ -277,6 +315,12 @@ fn bound_mm(bound: f64) -> String {
     if fraction.is_empty() { whole.to_owned() } else { format!("{whole}.{fraction}") }
 }
 
+/// Preserve the qualified binary32 point exactly in decimal mesh formats.
+pub(crate) fn coordinate(value: f32) -> String {
+    // Every finite binary32 has an exact decimal with at most 149 fractional digits.
+    format!("{:.149}", f64::from(value)).trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
 /// The exact decimal value of a finite, non-negative `value`: its whole part and every
 /// fractional digit. A binary64 has at most 1074 fractional digits, and Rust prints the
 /// requested precision exactly, so nothing here is rounded.
@@ -291,6 +335,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decimal_coordinates_preserve_the_qualified_binary32_point() {
+        assert_eq!(coordinate(0.1), "0.100000001490116119384765625");
+        assert_eq!(coordinate(-0.1), "-0.100000001490116119384765625");
+        assert_eq!(coordinate(120.0), "120");
+        assert_eq!(coordinate(f32::from_bits(1)).split('.').nth(1).unwrap().len(), 149);
+        assert_eq!(coordinate(f32::MAX).parse::<f64>().unwrap(), f64::from(f32::MAX));
+    }
+
+    #[test]
     fn mesh_summary_distinguishes_unavailable_controls_from_open_geometry() {
         for closed in [true, false] {
             for unavailable_controls in [vec![], vec!["curve angle".into(), "per-face aspect ratio".into()]] {
@@ -300,6 +353,7 @@ mod tests {
                     chord_height: 0.1,
                     closed,
                     unavailable_controls: unavailable_controls.clone(),
+                    print_check: None,
                 });
                 let mut expected = "12 triangles; within 0.1 mm of the exact part".to_owned();
                 if !closed {

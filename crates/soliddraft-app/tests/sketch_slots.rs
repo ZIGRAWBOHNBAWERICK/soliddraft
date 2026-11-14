@@ -1,6 +1,6 @@
 //! Slot commands through native pointer input, including cancellation and history.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::Key;
@@ -157,7 +157,7 @@ fn exercise(command: &str, tool: Tool, picks: &[P2], area: f64) {
     app.state_mut().state.push(AppAction::Open(Some(path)));
     app.run_steps(12);
     let reopened: &Sketch = &app.state().state.doc.feature(id).unwrap().sketch().unwrap().sketch;
-    assert_eq!(reopened, &saved);
+    ribbon::assert_sketch_close(reopened, &saved);
     soliddraft_app::file::set_config_dir(None);
 }
 

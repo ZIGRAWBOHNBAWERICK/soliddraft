@@ -1,7 +1,7 @@
 //! L14, L22 and F14 through the app, rendered frames and the real proof worker.
 
 mod gated;
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Rect, pos2, vec2};
@@ -13,7 +13,7 @@ use soliddraft_app::chat::ChatState;
 use soliddraft_app::document::{
     AnswerBound, Command, Document, ExtrudeParams, FeatureStatus, PlaneKind, ProfileKind, Reference, Selection,
 };
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::{AppAction, Tool};
 use soliddraft_assistant::tools::call_checked;
 use soliddraft_assistant::{Caller, MockProvider, MockTurn};
@@ -388,7 +388,7 @@ fn bounded_fixtures_reject_answers_outside_the_declared_limit_or_without_a_defin
 
 fn suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.layout.tree.shown = false;
     app.run_steps(8);
     app
@@ -561,7 +561,9 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
                 &caller,
             );
             assert!(
-                output.is_error && output.content.contains("Boss-Extrude2") && output.content.contains("did not build"),
+                output.is_error
+                    && output.content.contains("Boss-Extrude2")
+                    && output.content.contains("requires a proved result"),
                 "{tool}: {}",
                 output.content
             );
@@ -581,5 +583,85 @@ fn proof_lights_follow_the_changed_feature_and_unproved_exports_leave_files_alon
         );
         assert!(!output.is_error, "{}", output.content);
         assert_ne!(std::fs::read(&path).unwrap(), b"existing export");
+    });
+}
+
+#[test]
+fn a_proof_start_refusal_belongs_to_the_changed_chip() {
+    let case = ribbon::case("timeline-proof-start-refusal");
+    let kernel = Arc::new(gated::Gated::default());
+    let mut doc = Document::new("Proof start refusal", kernel.clone());
+    soliddraft_app::populate_demo(&mut doc);
+    let id = doc.features[0].id;
+    let later = doc.features[1].name.clone();
+    let mut app = suite(doc);
+    kernel.rules.lock().unwrap().refuse_proof_reservation = true;
+    case.run(&mut app, |app| {
+        app.state_mut().state.push(AppAction::Command(Command::EditExtrude {
+            id,
+            params: ExtrudeParams { depth: 30.0, ..Default::default() },
+        }));
+        ribbon::until(app, "proof start refusal", |app| app.state().state.doc.proof_state().failed);
+        app.run_steps(8);
+        let badge = app.get_by_label("Boss-Extrude1 proof: Refused").rect();
+        assert!(app.query_all_by_label(&format!("{later} proof: Pending")).next().is_some());
+        assert!(app.query_all_by_label(&format!("{later} proof: Refused")).next().is_none());
+        app.hover_at(badge.center());
+        app.run_steps(90);
+        assert!(ribbon::painted(app).iter().any(|text| text.text.contains("could not start its proof")));
+        let path = case.path("refused.step");
+        app.state_mut()
+            .state
+            .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
+        app.run_steps(8);
+        assert!(!path.exists());
+        assert!(!soliddraft_exchange::proof::sidecar_path(&path, "json").exists());
+        let notice = &app.state().state.note.as_ref().unwrap().text;
+        assert!(notice.contains("could not start its proof"), "{notice}");
+        case.frame(app, "refused-on-changed-chip");
+    });
+}
+
+#[test]
+fn file_export_action_writes_the_step_and_both_proof_reports() {
+    let case = ribbon::case("step-proof-reports");
+    let mut app = suite(ribbon::plate());
+    case.run(&mut app, |app| {
+        let path = case.path("plate.step");
+        std::fs::write(&path, b"previous STEP").unwrap();
+        let id = app.state().state.doc.features[0].id;
+        app.state_mut().state.push(AppAction::EditFeature(id));
+        app.run_steps(8);
+        assert!(app.state().state.editor.is_some());
+        assert!(app.query_all_by_label("Boss-Extrude1 proof: Pending").next().is_some());
+        app.state_mut()
+            .state
+            .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
+        app.run_steps(8);
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous STEP");
+        assert!(!soliddraft_exchange::proof::sidecar_path(&path, "json").exists());
+        assert!(app.state().state.note.as_ref().unwrap().text.contains("Finish or cancel"));
+        app.key_press(Key::Escape);
+        app.run_steps(8);
+        assert!(app.state().state.editor.is_none());
+        assert!(app.query_all_by_label("Boss-Extrude1 proof: Proved").next().is_some());
+        app.state_mut()
+            .state
+            .push(AppAction::Export { format: soliddraft_exchange::Format::Step, path: Some(path.clone()) });
+        app.run_steps(8);
+        assert!(std::fs::read(&path).unwrap().starts_with(b"ISO-10303-21"));
+        let machine: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(soliddraft_exchange::proof::sidecar_path(&path, "json")).unwrap())
+                .unwrap();
+        assert_eq!(machine["features"][0]["name"], "Boss-Extrude1");
+        assert_eq!(machine["features"][0]["answer_kind"], "proved");
+        assert!(machine["features"][0]["work_used"].as_u64().unwrap() > 0);
+        assert!(
+            std::fs::read_to_string(soliddraft_exchange::proof::sidecar_path(&path, "txt"))
+                .unwrap()
+                .contains("Boss-Extrude1")
+        );
+        assert!(app.state().state.note.as_ref().unwrap().text.starts_with("Exported"));
+        case.frame(app, "step-and-proof-written");
     });
 }

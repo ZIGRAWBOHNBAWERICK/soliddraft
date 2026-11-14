@@ -1,13 +1,13 @@
 //! Timeline acceptance through the app, pointer events and software Vulkan.
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2, Rect, pos2, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, Selection, SketchPlane};
-use soliddraft_app::settings::FrameLayout;
+
 use soliddraft_app::state::AppAction;
 use soliddraft_app::theme::{self, Mode};
 
@@ -72,7 +72,7 @@ fn sketches() -> Document {
 
 fn edit_suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+
     app.state_mut().state.show_tree(false);
     app.run_steps(8);
     app
@@ -186,7 +186,7 @@ fn tree_button_toggles_the_shared_pane_and_remembers_the_choice() {
 }
 
 #[test]
-fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
+fn chips_include_absorbed_sketches() {
     let case = ribbon::case("timeline-layout");
     let mut doc = ribbon::sketch();
     let sketch = doc.features[0].id;
@@ -196,8 +196,8 @@ fn chips_include_absorbed_sketches_and_only_appear_in_edit_suite() {
     })
     .unwrap();
     let mut app = ribbon::app(doc);
-    assert!(app.query_all_by_label("Sketch1 in history").next().is_none());
-    app.state_mut().state.frame_layout = FrameLayout::EditSuite;
+    assert!(app.query_all_by_label("Sketch1 in history").next().is_some());
+
     app.state_mut().state.show_tree(false);
     app.run_steps(8);
     case.run(&mut app, |app| {

@@ -110,6 +110,9 @@ impl KernelSource {
         level: Level,
     ) -> Result<(DisplayMesh, String), String> {
         let doc = self.exact(part_file)?;
+        if doc.live_bodies().len() > 1 {
+            return Err("Several-body parts in assemblies are coming soon. Combine the bodies first.".into());
+        }
         let quality = quality.copied().unwrap_or(doc.settings().viewport);
         let mut data =
             doc.display_data(&quality, &[level]).ok_or("the part has no body")?.map_err(|e| e.to_string())?;

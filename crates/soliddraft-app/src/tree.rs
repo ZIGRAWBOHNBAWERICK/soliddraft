@@ -27,7 +27,6 @@ struct RowItem {
     status: FeatureStatus,
     suppressed: bool,
     via_assistant: bool,
-    is_sketch: bool,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
@@ -153,7 +152,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
         let material = state.doc.material();
-        let edit_suite = state.frame_layout == crate::settings::FrameLayout::EditSuite;
         let can_assign = crate::commands::get("material").is_some_and(|command| command.is_enabled(state));
         let material_row = row(
             ui,
@@ -161,29 +159,28 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 indent: 0,
                 icon: Icon::Material,
                 name: "Material",
-                sub: material.map_or(if edit_suite { "Unassigned" } else { "Coming soon" }, |m| m.name.as_str()),
-                dim: edit_suite && !can_assign,
+                sub: material.map_or("Unassigned", |m| m.name.as_str()),
+                dim: !can_assign,
                 ..RowSpec::plain()
             },
         );
         if can_assign && material_row.clicked() {
             actions.push(AppAction::ShowMaterial);
         }
-        // The body row: selecting it shows every dimension that builds the body.
-        if state.doc.display_body().is_some() {
+        for (key, _) in state.doc.model().live_bodies() {
+            let label = state.doc.body_name(key);
             let r = row(
                 ui,
                 RowSpec {
                     indent: 0,
                     icon: Icon::Extrude,
-                    name: crate::document::BODY_NAME,
-                    selected: state.doc.selection == Some(Selection::Body),
+                    name: &label,
+                    selected: state.doc.selection == Some(Selection::Body) && state.doc.active_body == key,
                     ..RowSpec::plain()
                 },
-            )
-            .on_hover_text("Select to show every dimension that builds the body");
-            if r.clicked() {
-                actions.push(AppAction::Select(Some(Selection::Body)));
+            );
+            if r.clicked() || (!state.in_sketch() && r.secondary_clicked()) {
+                actions.push(AppAction::SelectBody(key));
             }
             if !state.in_sketch() {
                 crate::context_menu::show(state, &r, crate::context_menu::Target::Body, Some(Selection::Body));
@@ -213,6 +210,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 _ => (f.summary(), f.status.clone()),
             };
+            let sub = if state.doc.model().next_body() > 1 { format!("Body {} · {sub}", f.body_key + 1) } else { sub };
             items.push(RowItem {
                 id: f.id,
                 index: i,
@@ -224,7 +222,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 status,
                 suppressed: f.suppressed,
                 via_assistant: f.via_assistant,
-                is_sketch: f.is_sketch(),
             });
             if let Some(c) = child
                 && state.expanded.contains(&f.id)
@@ -240,7 +237,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     status: c.status.clone(),
                     suppressed: c.suppressed,
                     via_assistant: false,
-                    is_sketch: true,
                 });
             }
         }
@@ -396,58 +392,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 actions.push(crate::dimension_edit::row_double_click(state, item.id));
             }
             let id = item.id;
-            let (is_sketch, suppressed, index) = (item.is_sketch, item.suppressed, item.index);
-            let needs_repair = matches!(item.status, FeatureStatus::NeedsRepair(_));
-            let name = item.name.clone();
-            if state.frame_layout == crate::settings::FrameLayout::EditSuite {
-                if !state.in_sketch() {
-                    crate::context_menu::show(
-                        state,
-                        &resp,
-                        crate::context_menu::Target::Feature,
-                        Some(Selection::Feature(id)),
-                    );
-                }
-            } else {
-                resp.context_menu(|ui| {
-                    if ui.button(if is_sketch { "Edit sketch" } else { "Edit feature" }).clicked() {
-                        actions.push(if is_sketch { AppAction::EditSketch(id) } else { AppAction::EditFeature(id) });
-                        ui.close();
-                    }
-                    if needs_repair && ui.button("Repair references…").clicked() {
-                        actions.push(AppAction::StartRepair(id));
-                        ui.close();
-                    }
-                    let rename_key = state.shortcuts.shortcut_text("rename").unwrap_or_default();
-                    if ui.add(egui::Button::new("Rename").shortcut_text(rename_key)).clicked() {
-                        state.rename = Some(Rename { feature: id, text: name.clone(), focus: true });
-                        ui.close();
-                    }
-                    if ui.button(if suppressed { "Unsuppress" } else { "Suppress" }).clicked() {
-                        actions.push(AppAction::Command(Command::Suppress { id, suppressed: !suppressed }));
-                        ui.close();
-                    }
-                    if ui.button("Roll back to here").clicked() {
-                        actions.push(AppAction::Command(Command::Rollback(Some(index + 1))));
-                        ui.close();
-                    }
-                    if ui.button("Zoom to fit").clicked() {
-                        actions.push(AppAction::ZoomFit);
-                        ui.close();
-                    }
-                    ui.separator();
-                    let delete_key = state.shortcuts.shortcut_text("delete").unwrap_or_default();
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("Delete").color(theme::error()))
-                                .shortcut_text(delete_key),
-                        )
-                        .clicked()
-                    {
-                        actions.push(AppAction::Command(Command::DeleteFeature(id)));
-                        ui.close();
-                    }
-                });
+
+            if !state.in_sketch() {
+                crate::context_menu::show(
+                    state,
+                    &resp,
+                    crate::context_menu::Target::Feature,
+                    Some(Selection::Feature(id)),
+                );
             }
         }
         if !bar_drawn && !items.is_empty() {
@@ -722,9 +674,10 @@ pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {
         },
         FeatureKind::Mirror(_) => Icon::Mirror,
         FeatureKind::Draft(_) => Icon::Draft,
+        FeatureKind::Combine { .. } => Icon::Extrude,
         FeatureKind::Shell(_) | FeatureKind::Thicken(_) => Icon::Shell,
         FeatureKind::Offset(_) => Icon::Cad("srf_offset"),
-        FeatureKind::ImportStep(_) => Icon::Import,
+        FeatureKind::ImportStep(_) | FeatureKind::Scan(_) => Icon::Import,
         FeatureKind::Lattice(_) | FeatureKind::Gyroid(_) => Icon::Cad("lattice"),
     }
 }

@@ -5,6 +5,25 @@ add or cut material, fillets and chamfers, persistent references that survive ed
 undo and redo, and a native file. This page covers the crates that do it. The screens on
 top of them are described in [DESIGN.md](DESIGN.md).
 
+## Bodies and Combine
+
+Use New body before adding the first feature of a separate solid. Select a body in the
+tree, or select one of its faces, to target later features at that body. The tree and
+history show which body each feature acts on. Each body rebuilds independently.
+
+Combine takes a target body, a tool body and Union, Subtract or Intersect. The result
+replaces the target and consumes the tool. Other bodies stay unchanged. Undo restores
+both inputs. Edit the Combine feature to change its operation or tool. A refused
+Combine leaves the part and its undo history unchanged.
+
+Part files save every body's features and their stable body identities. Existing
+single-body files keep their format and load into the original body. Parts with new
+bodies use `soliddraft-part/3`, so older applications refuse them instead of joining
+the bodies by mistake. Several-body
+export is coming soon. Combine the bodies into one solid before exporting, making a
+drawing, or inserting the part into an assembly. Several-solid STEP and IGES import
+is a separate follow-up and currently reports that it is coming soon.
+
 ## Loft
 
 Loft joins two or more closed sketch regions or planar faces, in the order shown in

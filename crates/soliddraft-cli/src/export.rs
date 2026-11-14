@@ -13,7 +13,7 @@ use soliddraft_model::Document;
 use soliddraft_tessellation::ExportTolerance;
 
 pub(crate) const USAGE: &str = "\
-usage: soliddraft export <part.dwprt | recipe.json> --out <file>... [--stand-in <file.step>] [--max-work <units>] [--json]
+usage: soliddraft export <part.dwprt | recipe.json> --out <file>... [--accuracy-mm <mm>] [--stand-in <file.step>] [--max-work <units>] [--json]
 
 Exports a part file, rebuilt on the Catallax kernel, or a recipe's result. The
 extension of each --out file picks its format:
@@ -37,6 +37,9 @@ field's source envelope as a massless surface and unit-density proxy solids
 whose proven moments lie inside the field's, never the field's boundary.
 
   --out       a file to write; repeat it for several formats
+  --accuracy-mm  request this mesh accuracy for this export only. A larger
+              value is a coarser choice and allows more deviation. Saved
+              settings and exact-geometry exports keep their own tolerances
   --stand-in  a .step file for a field part's mass stand-in
   --max-work  lower the request's deterministic work allowance from the
               application's 20000000 units. The whole request, opening and
@@ -52,14 +55,22 @@ struct Args {
     outputs: Vec<(PathBuf, Format)>,
     json: bool,
     max_work: u64,
+    accuracy_mm: Option<f64>,
 }
 
 fn parse(args: &[String]) -> Result<Args, String> {
-    let (mut input, mut outputs, mut json, mut max_work) = (None, Vec::new(), false, APP_REQUEST_WORK);
+    let (mut input, mut outputs, mut json, mut max_work, mut accuracy_mm) =
+        (None, Vec::new(), false, APP_REQUEST_WORK, None);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--json" => json = true,
+            "--accuracy-mm" => {
+                let value = it.next().ok_or("--accuracy-mm needs a value in millimetres")?;
+                let mm = value.parse().map_err(|_| format!("--accuracy-mm {value}: give a number"))?;
+                ExportTolerance { chord_height: mm, ..ExportTolerance::default() }.check()?;
+                accuracy_mm = Some(mm);
+            }
             "--max-work" => {
                 let value = it.next().ok_or("--max-work needs a number of units")?;
                 max_work = value.parse().map_err(|_| format!("--max-work {value}: give a whole number of units"))?;
@@ -92,7 +103,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
     if outputs.is_empty() {
         return Err("no --out file given".into());
     }
-    Ok(Args { input, outputs, json, max_work })
+    Ok(Args { input, outputs, json, max_work, accuracy_mm })
 }
 
 pub(crate) fn run(args: &[String]) -> ExitCode {
@@ -115,13 +126,28 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
 fn export(a: &Args) -> Result<(), String> {
     let (exports, work) = soliddraft_kernel_catallax::with_request_allowance(a.max_work, || build(a));
     if work.exhausted {
-        return Err(format!(
-            "{}: numbers.operation-budget: the request's {}-unit work allowance ran out",
-            a.input.display(),
-            a.max_work
+        return Err(coarser_hint(
+            a,
+            format!(
+                "{}: numbers.operation-budget: the request's {}-unit work allowance ran out",
+                a.input.display(),
+                a.max_work
+            ),
         ));
     }
-    publish(a, &exports?, work)
+    publish(a, &exports.map_err(|error| coarser_hint(a, error))?, work)
+}
+
+fn coarser_hint(a: &Args, error: String) -> String {
+    if a.outputs.iter().any(|(_, format)| matches!(format, Format::Stl | Format::ThreeMf | Format::Obj))
+        && soliddraft_app::print_check::can_coarsen(&error)
+    {
+        format!(
+            "{error}. No files were written. Try --accuracy-mm <mm> with an explicitly coarser value; larger values allow more deviation and leave saved settings unchanged."
+        )
+    } else {
+        error
+    }
 }
 
 /// Opens or builds the input and makes every requested file, writing nothing.
@@ -131,19 +157,34 @@ fn build(a: &Args) -> Result<Vec<Export>, String> {
     let exports = match DocKind::of_path(&a.input) {
         Some(DocKind::Part) => {
             let doc = Document::open(&a.input, kernel.clone()).map_err(|e| at(e.to_string()))?;
-            a.outputs.iter().map(|(_, f)| doc.export(*f)).collect::<Result<Vec<_>, _>>().map_err(at)?
+            a.outputs
+                .iter()
+                .map(|(_, f)| doc.export_at(*f, a.accuracy_mm))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(at)?
         }
         Some(kind) => return Err(at(format!("export takes a part or a recipe, not a {kind}"))),
         None => {
             let text = std::fs::read_to_string(&a.input).map_err(|e| at(e.to_string()))?;
             let recipe = soliddraft_recipe::parse(&text).map_err(|e| at(e.to_string()))?;
-            let (_, body) = soliddraft_recipe::build(kernel.as_ref(), &recipe).map_err(|e| at(e.to_string()))?;
+            let (body, work_by_step) =
+                soliddraft_recipe::build_body_with_work(kernel.as_ref(), &recipe).map_err(|e| at(e.to_string()))?;
+            let tolerance = ExportTolerance {
+                chord_height: a.accuracy_mm.unwrap_or(ExportTolerance::default().chord_height),
+                ..ExportTolerance::default()
+            };
             a.outputs
                 .iter()
                 .map(|(_, f)| {
-                    soliddraft_exchange::export(kernel.as_ref(), body, &recipe.name, *f, &ExportTolerance::default())
+                    let mut out = soliddraft_exchange::export(kernel.as_ref(), body, &recipe.name, *f, &tolerance)?;
+                    if let Some(proof) = &mut out.proof {
+                        for feature in &mut proof.features {
+                            feature.work_used = work_by_step.get(&feature.id).copied().flatten();
+                        }
+                    }
+                    Ok(out)
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<Vec<_>, soliddraft_exchange::ExportError>>()
                 .map_err(|e| at(e.to_string()))?
         }
     };
@@ -172,7 +213,9 @@ fn publish(a: &Args, exports: &[Export], work: RequestWork) -> Result<(), String
 }
 
 fn write(path: &Path, out: &Export) -> Result<(), String> {
-    soliddraft_document::save_atomic(path, &out.bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    out.write_with(path, |path, bytes| {
+        soliddraft_document::save_atomic(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    })
 }
 
 fn report(path: &Path, format: Format, out: &Export, json: bool, work: RequestWork) {
@@ -226,6 +269,7 @@ mod tests {
         let first = dir.join("first.stl");
         let second = dir.join("second.step");
         let a = Args {
+            accuracy_mm: None,
             input: "unused.json".into(),
             outputs: vec![(first.clone(), Format::Stl), (second.clone(), Format::Step)],
             json: true,
@@ -234,6 +278,7 @@ mod tests {
         let work = RequestWork { used: 1, limit: APP_REQUEST_WORK, exhausted: false };
         let step = |within_tolerance| Export {
             bytes: b"must not be published".to_vec(),
+            proof: Some(soliddraft_exchange::proof::ProofReport::default()),
             report: Report::Step(soliddraft_kernel_api::StepReport {
                 max_deviation: if within_tolerance { "0" } else { "0.001" }.into(),
                 max_deviation_mm: if within_tolerance { 0.0 } else { 0.001 },
@@ -253,10 +298,12 @@ mod tests {
         };
         let mesh = Export {
             bytes: b"mesh must not be published".to_vec(),
+            proof: None,
             report: Report::Mesh(soliddraft_exchange::MeshReport {
                 triangles: 12,
                 vertices: 8,
                 chord_height: 0.01,
+                print_check: None,
                 closed: true,
                 unavailable_controls: Vec::new(),
             }),

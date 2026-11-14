@@ -8,9 +8,9 @@ SolidDraft exports B-rep parts as STEP AP242, IGES 5.3, STL, 3MF or OBJ. The cod
 |---|---|---|
 | STEP AP242 (`.step`, `.stp`) | the exact B-rep, written by Catallax's exporter | Catallax's proven largest distance between written and exact geometry, rounded up |
 | IGES 5.3 (`.iges`, `.igs`) | supported exact B-rep definitions through Catallax | proven whole-boundary displacement, including every face and trim |
-| STL (`.stl`, binary) | the kernel's mesh at the part's export tolerance | the export chord height |
-| 3MF (`.3mf`, core specification) | the same mesh, which must be closed | the export chord height |
-| OBJ (`.obj`, Wavefront) | the display mesh, retaining face groups and normals | the export chord height |
+| STL (`.stl`, binary) | Catallax's qualified print mesh, with its native certificate header | certified model, tessellation and file-rounding bound |
+| 3MF (`.3mf`, core specification) | the same qualified closed mesh | the same certified bound |
+| OBJ (`.obj`, Wavefront) | the same qualified mesh, retaining face groups and normals | the same certified bound |
 
 STEP writes exact planes, cylinders, cones, spheres, tori, lines and circles. Intersection curves that have no exact STEP form are fitted splines, and the report counts them. A ring fillet between nonparallel cylinders writes one fitted band under a certificate, and the report's `fit_mm` holds its fit to the exact definition. The status line adds that fit to the file's own bound. The certified route refuses a file over the requested tolerance, and a ring with no certificate, such as a patterned copy, writes nothing. The requested tolerance is 0.0000001 mm. If decimal rounding or spline fitting cannot meet it, the CLI refuses the whole export batch before writing any file. The app still writes the file, reports the bound over tolerance with Catallax's warning, and shows the message as an error.
 
@@ -36,13 +36,48 @@ An active lattice or gyroid exports only as binary STL, through the native field
 
 A field's mass stand-in is a separate STEP output, written only when asked for: the Mass stand-in command, the `export_stand_in` tool or `soliddraft export part.dwprt --stand-in mass.step`. It is never the field's boundary and never stands in for a refused field export. The file holds the field's source region as one massless `SHELL_BASED_SURFACE_MODEL` envelope and one or two unit-density `MANIFOLD_SOLID_BREP` proxy blocks, with no density or material metadata. Catallax first proves the field's own moments to 0.01 mm³, 0.001 mm and 0.1 mm⁵; the proxy's exact moments, and then its moments after the file's coordinate rounding, must lie inside those enclosures, or the export is refused (`stand-in.properties-not-matched`, `stand-in.exchange-not-enclosed`) before any byte is written. A field read through a subtracted operand is refused with `field.stand-in-envelope-coverage`. The `stand_in` JSON report is labelled "mass stand-in — not field boundary geometry" and carries the field enclosures, the proxy's exact moments, their exchanged bounds, the inertia residual, the body counts, the file's rounding bound, the deterministic work and the file SHA-256. The proxy's file is the same, byte for byte, as Catallax's public `catallax-stand-in/1` request answers for the field's native recipe. A consumer that sums the mass of the solids alone gets the field's mass properties; the envelope carries none. `soliddraft export --max-work <units>` runs the whole request, opening and rebuilding the part included, on one deterministic allowance, refuses with `numbers.operation-budget` and writes nothing when it runs out, and adds the work used to each `--json` line.
 
+## Print check and independent part check
+
+Desktop mesh export opens Print check before writing a destination. It shows the selected
+print route, requested and certified accuracy, and the model, tessellation and file-rounding
+contributions. OBJ and 3MF write each binary32 position as its exact decimal value,
+so text encoding adds no further coordinate error. The qualification checks closure, vertex connections, outward orientation,
+and preservation of components and cavities. Field exports show their native field verdict,
+minimum detail and certified distance bound.
+
+An accuracy or refinement refusal offers a button labelled with a coarser accuracy. Each
+choice runs a fresh check on the same representation and leaves saved settings unchanged.
+Save checked export writes only the accepted bytes. Cancel and refusals leave an existing
+file alone. Changing or reopening the part invalidates the report. MCP mesh exports accept
+an optional `accuracy_mm` for the same explicit choice and return structured `evidence`
+beside the summary. They never retry with a coarser accuracy automatically.
+The CLI offers the same choice with `soliddraft export part.dwprt --out part.stl
+--accuracy-mm 0.04`. It reports the newly certified accuracy, keeps saved settings
+unchanged and leaves exact-geometry export tolerances unchanged. A refused mesh
+request suggests the flag and writes none of the requested files.
+
+Inspect > Check independently builds every solid-valued recipe prefix in the boundary
+model and distance field. Its report counts confirmed solid steps, identifies reference
+definitions separately, and lists each representation's refusals. Each prefix receives a
+20,000,000-unit work allowance. This is construction coverage. It does not certify sampled
+surface agreement, whole-boundary agreement or print accuracy. Reports belong to one open
+revision and become stale after edits or undo. Qualified print geometry is cached per immutable body and export controls, separately
+from display meshes. Repeated formats reuse that certificate. Changed geometry or
+accuracy needs a new qualification. The desktop runs these checks off the interface thread. The browser runs them
+synchronously with the same construction and per-prefix work limits.
+
+CLI recipe export builds the result without collecting unused replay mass or display
+summaries. It retains step build counters for STEP proof sidecars. Recipe validation
+and expected-error input checks still run. Opening the
+input, rebuilding it and preparing every output share the same 20,000,000-unit allowance.
+
 ## Refusals
 
 A part with a feature that needs a repair, is blocked or failed is refused, so no file shows a body the part does not have. Suppressed and rolled-back features are fine; the export is the body the tree shows. A refused export writes no file. The CLI also refuses a batch containing any over-tolerance STEP report before creating or replacing any destination, including other formats in that batch.
 
 ## Where to export
 
-- In the app, File > Export offers STEP AP242, IGES 5.3, STL, 3MF and OBJ. The status bar shows each export's report in one line.
+- In the app, File > Export offers STEP AP242, IGES 5.3, STL, 3MF and OBJ. Mesh formats open Print check for review before saving. The status bar shows the saved export's report in one line.
 - On the command line, `soliddraft export <part.dwprt | recipe.json> --out bracket.step --out bracket.iges --out bracket.3mf --out bracket.obj` writes each file; `--json` prints each export report. It does not measure the body for acceptance checks.
 
 ## The OpenCASCADE check
@@ -57,7 +92,7 @@ The `iges-export` application scenario builds the bracket through MCP, exports `
 
 STEP import accepts single-body analytic solids, including spheres, tori and general cone angles, and spline files the kernel can certify. Binary-noise cleanup and planar source cleanup keep their measured bounds in the saved import record. Unsupported geometry gets a plain message and leaves the part unchanged.
 
-File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. Files with several solids are refused because a part holds one body.
+File > Import STEP reads a source file and shows its repair preview. Accept applies automatic repairs within the kernel's cap without saving an acceptance answer. A seam above that cap, or one where the nearest feature is unknown, asks for an allowed movement of at least the measured gap and the name of who approved it, and Accept stays off until both are given. Decline keeps the source with a declined answer and an unbuilt import in the tree, and the solid stays open until the gap is resolved. Cancel leaves the part unchanged. Closing the preview also cancels it. Several-solid STEP and IGES import is coming soon. Such files currently leave the part unchanged.
 
 The part file keeps the original source bytes, their SHA-256, repair decisions and the import record. An approved repair is saved under its question as `accept:<tolerance-mm>:<approver>`. Reopening checks the digest and verifies the saved record against the source before rebuilding the body. Repairs never overwrite the source file. A built import can be exported through the checked STEP route above.
 
@@ -187,3 +222,64 @@ The root assembly keeps the import record in `import.json`, outside both hashes.
 MCP clients call `import_scene {"path":"washer.glb","out":"washer.dwasm"}`, with `units` and `up` when needed. The reply holds the status line, the import record and the opened assembly's summary, whose occurrences carry their names and kind `mesh`.
 
 The `scene-import` application scenario imports the sand3d bracket as `.usda`, `.glb`, `.urdf`, `.obj` and `.stl`, the sand3d washer as `.usda`, `.glb` and `.urdf`, and NVIDIA's SimReady cardboard box as binary `.usd`. It checks each tree, its names, scale and orientation against the source, and the transforms, colours and joints where the file has them. It saves and reopens the washer in a fresh process. The fixtures and their licences are in `ci/fixtures/scene-import`. `cargo test -p soliddraft-scene` runs the same files through the reader alone, and checks that the washer's three formats agree on every part's box and every joint's axis. `cargo test -p soliddraft-app --test scene_import_app` imports the washer from GLB and the box from USD in the rendered window; set `SOLIDDRAFT_SCENE_IMPORT_PROOF_DIR` to keep its frames.
+
+## Scan references and fitted parts
+
+File > Import scan reference reads STL and OBJ coordinates in millimetres. Review
+shows the point and triangle counts, open edges, reversed edge pairs and
+nonmanifold edges. Accept stores the unchanged source with the part as `Scan1`.
+A reference has no inside, mass or volume. Holes, crossing or reversed triangles,
+degenerate triangles and isolated OBJ points stay as supplied. The limits are
+200,000 triangles and 1,000,000 points.
+
+Open Scan workspace from File or the command palette. Fit scan to part runs in
+the background and offers a review before it changes the part. It needs at least
+100 points and an empty solid history. The supported family is block stock with
+bosses, bores and convex rounds on stock edges. Unsupported regions and surfaces
+are listed explicitly, including their sample counts. Free-form regions are reported as unexplained.
+
+The review shows maximum, RMS, 95th percentile and sample count in both
+directions. Scan to part measures the supplied samples against the fitted
+boundary. Part to scan also exposes gaps in the scan. Switch between their
+colour maps in the viewport; the legend is in millimetres. These are sampled
+distances, not bounds on the whole scanned surface. The display mesh's chord
+bound is shown separately. The viewport draws up to 30,000 evenly spaced map
+points from the selected map. Both complete maps stay in the saved part.
+Scan-to-part statistics also include triangle-interior probes. The scan map
+contains the input fitting points and does not retain those additional probes.
+
+Accept fitted part keeps the scan and its maps and rebuilds the saved native
+recipe as a solid. Later solid features and checked exports use that solid.
+Reopening replays the accepted definitions without fitting again. Undo removes
+the fit and restores the reference. Cancel, a refused fit or a part changed
+during fitting leaves the original part unchanged.
+
+The `scan_workspace` application test drives reference review, cancellation,
+acceptance, a fitting refusal, both maps, fit acceptance, save/reopen, downstream
+editing and STEP export through the real application and renderer.
+
+## STEP proof reports
+
+Every STEP file written by the app or `soliddraft export` has two adjacent reports:
+`part.step.proof.txt` for reading and `part.step.proof.json` for tools. The suffix
+preserves the full filename, including `.stp`. Browser exports download all three
+files. A report write failure prevents publication of the new STEP file.
+
+The JSON format is `soliddraft-proof/1`. It records the STEP bytes' SHA-256, the
+export deviation certificate, and each feature's name, id, model answer kind,
+model bound, independent display bound, and work used. Suppressed features and
+features below the rollback bar are inactive and contribute no geometry.
+
+Work counts cover the original retained feature build, including its geometry
+queries. They exclude rendering and STEP export. Cache reuse, undo and renaming
+keep the count with that build. A null count means the backend or input did not
+record it. Raw recipe exports list the contributing operation tags and their build work, excluding replay summary queries.
+
+Pending, refused and model-bounded answers cannot export. Finish or cancel a live
+feature, sketch or dimension preview first. A measured display bound does not
+certify geometry. When the exact model has independent proof, STEP export uses
+that model and includes the display evidence separately in the report.
+
+Reports are written before the STEP file, with an atomic write for each desktop
+file. A later write failure can leave reports for bytes that were not published;
+compare their SHA-256 with the STEP file before relying on them.

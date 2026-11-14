@@ -273,6 +273,22 @@ class Checks(unittest.TestCase):
         self.assertTrue(scenarios.references_kept(known, [ref], [], False)["pass"])
         self.assertFalse(scenarios.references_kept(known, [], [], False)["pass"], "the undo cleared the deletion")
 
+    def test_undo_removes_only_the_undone_features_references_and_redo_checks_their_origins(self):
+        base = {"feature_id": "F1", "feature": "Sketch1", "slot": "sketch plane", "origin": "Top plane",
+            "resolved": True, "kernel_origins": [], "matches_origin": True}
+        fillet = dict(base, feature_id="F4", feature="Fillet1", slot="edge 1", origin="F3 Edge 1")
+        known = {}
+        self.assertTrue(scenarios.references_kept(known, [base, fillet], [], False)["pass"])
+        self.assertTrue(scenarios.references_kept(known, [base], [], False, removed={"F4"})["pass"])
+        self.assertFalse(scenarios.references_kept(known, [], [], False, removed={"F4"})["pass"],
+                         "a reference owned by a retained feature must survive")
+        wrong = dict(fillet, origin="F3 Edge 2")
+        self.assertFalse(scenarios.references_kept(known, [base, wrong], [], False)["pass"],
+                         "redo must restore the original input edge")
+        self.assertTrue(scenarios.references_kept(known, [base, fillet], [], False)["pass"])
+        self.assertFalse(scenarios.references_kept(known, [base], [], False)["pass"],
+                         "a restored reference cannot disappear again without removing its owner")
+
     def test_new_part_starts_its_own_reference_history(self):
         ref = {"feature_id": "F1", "feature": "Sketch1", "slot": "sketch plane", "origin": "Top plane",
             "resolved": True, "kernel_origins": [], "matches_origin": True}
@@ -1363,6 +1379,29 @@ class Trends(unittest.TestCase):
 
 
 class ExportAttemptEvidence(unittest.TestCase):
+    def test_explicit_coarser_export_requires_its_own_matching_certificate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            args = argparse.Namespace(soliddraft="soliddraft", timeout=5)
+            for proof, expected in [
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": 0.05}, True),
+                ({"requested_accuracy_mm": 0.01, "certified_accuracy_mm": 0.005}, False),
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": 0.09}, False),
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": -1}, False),
+                ({"requested_accuracy_mm": 0.08, "certified_accuracy_mm": False}, False),
+                ({}, False),
+            ]:
+                def export(command, **kwargs):
+                    self.assertEqual(command[command.index("--accuracy-mm") + 1], "0.08")
+                    pathlib.Path(command[command.index("--out") + 1]).write_bytes(b"mesh")
+                    value = {"report": {"kind": "mesh", "print_check": proof}, "request_work": {
+                        "limit": scenarios.APP_REQUEST_WORK, "used": 5, "exhausted": False}}
+                    return scenarios.subprocess.CompletedProcess(command, 0, json.dumps(value), "")
+
+                with self.subTest(proof=proof), mock.patch.object(scenarios.subprocess, "run", side_effect=export):
+                    result = scenarios.export_check(args, directory, {"format": "stl", "accuracy_mm": 0.08}, {})
+                    self.assertEqual(result["pass"], expected)
+
     def test_attempt_identifiers_cannot_escape_or_replace_other_evidence(self):
         for attempt in ["", "../part", "dir/name", None, True, 3]:
             with self.subTest(attempt=attempt), self.assertRaises(ValueError):

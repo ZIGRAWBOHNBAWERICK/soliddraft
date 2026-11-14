@@ -155,6 +155,13 @@ paths = ["crates/soliddraft-app/src/main.rs"]
 module = ["main"]
 
 [[areas]]
+name = "app.multibody"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/multibody.rs"]
+module = ["multibody"]
+
+[[areas]]
 name = "app.navigation"
 owner = "core"
 crate = "soliddraft-app"
@@ -176,6 +183,13 @@ paths = ["crates/soliddraft-app/src/panels.rs"]
 module = ["panels"]
 
 [[areas]]
+name = "app.part_check"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/part_check.rs"]
+module = ["part_check"]
+
+[[areas]]
 name = "app.platform"
 owner = "core"
 crate = "soliddraft-app"
@@ -188,6 +202,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/preferences/"]
 module = ["preferences"]
+
+[[areas]]
+name = "app.print_check"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/print_check.rs"]
+module = ["print_check"]
 
 [[areas]]
 name = "app.properties"
@@ -211,11 +232,11 @@ paths = ["crates/soliddraft-app/src/recovery.rs", "crates/soliddraft-app/src/rec
 module = ["recovery"]
 
 [[areas]]
-name = "app.ribbon"
+name = "app.scan"
 owner = "core"
 crate = "soliddraft-app"
-paths = ["crates/soliddraft-app/src/ribbon.rs"]
-module = ["ribbon"]
+paths = ["crates/soliddraft-app/src/scan.rs"]
+module = ["scan"]
 
 [[areas]]
 name = "app.scene_import"
@@ -349,6 +370,13 @@ owner = "core"
 crate = "soliddraft-app"
 paths = ["crates/soliddraft-app/src/tree_visibility.rs"]
 module = ["tree_visibility"]
+
+[[areas]]
+name = "app.section"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/section.rs"]
+module = ["section"]
 
 [[areas]]
 name = "app.viewport"

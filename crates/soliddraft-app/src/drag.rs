@@ -50,7 +50,8 @@ impl Dimension {
             FeatureKind::Cut(p) if !p.through_all && p.up_to.is_none() => Some(Dimension::Depth),
             FeatureKind::Fillet(_) => Some(Dimension::Radius),
             FeatureKind::Chamfer(_) => Some(Dimension::Distance),
-            FeatureKind::Extrude(_)
+            FeatureKind::Combine { .. }
+            | FeatureKind::Extrude(_)
             | FeatureKind::Cut(_)
             | FeatureKind::ReferencePlane(_)
             | FeatureKind::Sketch(_)
@@ -61,6 +62,7 @@ impl Dimension {
             | FeatureKind::Shell(_)
             | FeatureKind::Offset(_)
             | FeatureKind::Thicken(_)
+            | FeatureKind::Scan(_)
             | FeatureKind::ImportStep(_)
             | FeatureKind::Lattice(_)
             | FeatureKind::Gyroid(_)
@@ -120,8 +122,10 @@ pub fn edit_command(id: FeatureId, kind: FeatureKind) -> Option<Command> {
         | FeatureKind::Revolve(_)
         | FeatureKind::Loft(_)
         | FeatureKind::Sweep(_)) => Command::EditFeature { id, kind },
-        FeatureKind::ReferencePlane(_)
+        FeatureKind::Combine { .. }
+        | FeatureKind::ReferencePlane(_)
         | FeatureKind::Sketch(_)
+        | FeatureKind::Scan(_)
         | FeatureKind::ImportStep(_)
         | FeatureKind::Lattice(_)
         | FeatureKind::Gyroid(_) => {
@@ -386,6 +390,17 @@ impl DragPreview {
         changed
     }
 
+    /// Rendering evidence for the current completed drag answer, never model proof.
+    pub fn display_bound(&self) -> Option<soliddraft_kernel_api::DisplayBound> {
+        self.proved_request()?;
+        let proof = self.proof.as_ref()?.as_ref().ok()?;
+        if proof.failure.is_some() {
+            return None;
+        }
+        proof.display.as_ref()?;
+        proof.model.kernel().display_bound(proof.model.body()?).ok().flatten()
+    }
+
     pub fn label(&self) -> (String, bool) {
         if let Shown::Failed { value, message } = &self.shown {
             return (format!("Edit failed · {} {} mm: {message}", self.dimension().label(), fmt_mm(*value)), true);
@@ -545,6 +560,9 @@ fn prepare(queued: Queued) -> Result<(ProofTask, Option<ConstructionTask>), Answ
     let allowance = model.kernel().reserve_proof_work().map_err(|error| refused(error.to_string()))?;
     let construction = baseline.and_then(|baseline| {
         let edits = crate::document::scalar_edits(&baseline, &model).filter(|edits| !edits.is_empty())?;
+        if baseline.live_bodies().len() != 1 {
+            return None;
+        }
         baseline.body()?;
         Some(ConstructionTask { request, baseline, edits, params, model: model.fork() })
     });

@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-#[path = "support/ribbon.rs"]
+#[path = "support/ui.rs"]
 mod ribbon;
 
 use ribbon::App;
@@ -290,7 +290,7 @@ fn type_radius(case: &Case, app: &mut App, value: &str) {
 /// The panel's own OK button.
 fn click_ok(case: &Case, app: &mut App) {
     case.note("click OK");
-    let rect = ribbon::button_rect(app, "OK (Enter)", ribbon::window(app));
+    let rect = ribbon::button_rect(app, "OK", ribbon::window(app));
     ribbon::click_at(app, rect.center());
     settle(app);
 }
@@ -524,20 +524,8 @@ fn assert_valid_drawn(app: &App, what: &str) {
     assert_eq!(doc.error_count(), 0, "{what}: no errors");
 }
 
-/// Text the last frame painted in the side panel, left of the viewport.
 fn panel_text(app: &App) -> Vec<ribbon::Painted> {
-    let left = viewport(app).left();
-    ribbon::painted(app).into_iter().filter(|p| p.rect.right() <= left + ribbon::TOLERANCE).collect()
-}
-
-fn panel_rect(app: &App, exact: &str) -> Rect {
-    panel_text(app)
-        .into_iter()
-        .find(|p| p.text == exact)
-        .unwrap_or_else(|| {
-            panic!("the panel paints {exact:?}: {:?}", panel_text(app).iter().map(|p| &p.text).collect::<Vec<_>>())
-        })
-        .rect
+    ribbon::painted(app)
 }
 
 /// A message painted in the panel between two heights: beside the control it is about.
@@ -553,25 +541,21 @@ fn assert_painted_between(case: &Case, app: &App, message: &str, top: f32, botto
     );
 }
 
-/// The band of the panel that holds the picks: from its caption to the parameters.
+/// Form feedback appears below the options bar.
 fn pick_band(app: &App) -> (f32, f32) {
-    (panel_rect(app, "Items to round").bottom(), panel_rect(app, "Fillet parameters").top())
+    let bar = egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
+    (bar.bottom(), viewport(app).bottom())
 }
 
-/// The band below the Radius field, down to the panel's closing hint.
 fn radius_band(app: &App) -> (f32, f32) {
-    let field = app.get_by_label("Radius value").rect();
-    let hint = panel_text(app)
-        .into_iter()
-        .find(|p| p.text.starts_with("A face adds"))
-        .map_or(viewport(app).bottom(), |p| p.rect.top());
-    (field.top(), hint)
+    pick_band(app)
 }
 
 /// The messages painted in a band of the panel, leaving out a field's own text.
 fn band_text(app: &App, (top, bottom): (f32, f32), field: Option<Rect>) -> Vec<String> {
     panel_text(app)
         .into_iter()
+        .filter(|p| p.color == soliddraft_app::theme::error())
         .filter(|p| p.rect.top() >= top - ribbon::TOLERANCE && p.rect.bottom() <= bottom + ribbon::TOLERANCE)
         .filter(|p| field.is_none_or(|f| !f.expand(ribbon::TOLERANCE).contains_rect(p.rect)))
         .map(|p| p.text)
@@ -853,7 +837,7 @@ fn faces_collect_complete_boundaries_and_the_slot_stays_drawable() {
     let top = point("/expected/box_top_face/interior");
     let edge_at = point("/expected/box_single_edge/edge_midpoint");
 
-    let assert_top_boundary = |app: &App, what: &str| {
+    let assert_top_boundary = |app: &mut App, what: &str| {
         let edges = held(app);
         case.note(format!("{what}: held {edges:?}"));
         assert_eq!(edges.len(), count("/expected/box_top_face/boundary_edges"), "{what}: the top boundary: {edges:?}");
@@ -872,11 +856,16 @@ fn faces_collect_complete_boundaries_and_the_slot_stays_drawable() {
             .map(|v| v.as_f64().unwrap())
             .collect();
         assert!(lengths.iter().zip(&want).all(|(a, b)| (a - b).abs() < 1e-6), "{what}: lengths {lengths:?}");
+        let label = format!("{} edges", edges.len());
+        app.get_by_label(&label).click();
+        app.run_steps(8);
         let painted: Vec<String> = panel_text(app).into_iter().map(|p| p.text).collect();
         for e in &edges {
             assert!(!e.label.trim().is_empty(), "{what}: a usable name");
             assert!(painted.contains(&e.label), "{what}: the panel shows {:?}: {painted:?}", e.label);
         }
+        app.get_by_label(&label).click();
+        app.run_steps(8);
     };
 
     // (1) and (2) Command first: an edge, then the face it bounds.

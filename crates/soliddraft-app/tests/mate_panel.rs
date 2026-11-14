@@ -48,6 +48,10 @@ fn settle(h: &mut App<'_>) {
         assert!(Instant::now() < until, "the assembly did not settle");
     }
     h.run_steps(12);
+    if !h.state().state.tree_shown() {
+        h.key_press(egui::Key::F9);
+        h.run_steps(8);
+    }
 }
 
 fn click_at(h: &mut App<'_>, pos: Pos2) {
@@ -68,10 +72,40 @@ fn click_at(h: &mut App<'_>, pos: Pos2) {
 /// Clicks a button, first scrolling it into view: a button clipped out of the panel takes
 /// no click, and egui animates the scroll.
 fn button(h: &mut App<'_>, name: &str) {
-    h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().scroll_to_me();
+    use soliddraft_app::mates::Family;
+    use soliddraft_assembly::Alignment;
+    if Family::ALL.iter().any(|family| family.label() == name) {
+        if h.state().state.form_bar.expanded {
+            h.get_by_label_contains("More (").click();
+            h.run_steps(8);
+        }
+        let current = h.state().state.assembly.mate.family.label();
+        h.get_by_value(current).click();
+        h.run_steps(4);
+    }
+    if matches!(name, "Opposed" | "Aligned") {
+        let aligned = h.state().state.assembly.mate.alignment == Alignment::Aligned;
+        if aligned != (name == "Aligned") {
+            h.get_by_label("Flip").click();
+            h.run_steps(4);
+        }
+        return;
+    }
+    let label = if name == "Add mate" { "OK" } else { name };
+    if h.query_all_by_role_and_label(egui::accesskit::Role::Button, label).next().is_none()
+        && !h.state().state.form_bar.expanded
+    {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap().scroll_to_me();
     h.run_steps(24);
-    let pos = h.get_all_by_role_and_label(egui::accesskit::Role::Button, name).next().unwrap().rect().center();
+    let pos = h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).next().unwrap().rect().center();
     click_at(h, pos);
+    if matches!(name, "Add mate" | "Clear faces") && h.state().state.form_bar.expanded {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
 }
 
 /// Replaces what a panel field holds, by typing into it.
@@ -84,11 +118,34 @@ fn type_into(h: &mut App<'_>, label: &str, text: &str) {
         "Value name" => d.value_name.clear(),
         _ => d.value_expression.clear(),
     }
+    let label = if label == "Mate distance"
+        && matches!(
+            h.state().state.assembly.mate.family,
+            soliddraft_app::mates::Family::Distance | soliddraft_app::mates::Family::ProfileCenter
+        ) {
+        "Mate value"
+    } else {
+        label
+    };
     h.run_steps(2);
+    if h.query_by_label(label).is_none() && !h.state().state.form_bar.expanded {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
     h.get_by_label(label).focus();
     h.run_steps(2);
     h.get_by_label(label).type_text(text);
     h.run_steps(3);
+}
+
+fn assert_readout(h: &mut App<'_>, text: &str) {
+    if h.state().state.assembly.mate.open && !h.state().state.form_bar.expanded {
+        h.get_by_label_contains("More (").click();
+        h.run_steps(8);
+    }
+    h.get_by_value(text).scroll_to_me();
+    h.run_steps(24);
+    h.get_by_value(text);
 }
 
 fn view(h: &mut App<'_>, view: StandardView) {
@@ -236,8 +293,8 @@ fn pick_drive_update_and_refuse_in_the_window() {
         }
     }
     settle(&mut h);
-    h.get_by_value("Z: 5 mm");
-    h.get_by_value("Fully constrained");
+    assert_readout(&mut h, "Z: 5 mm");
+    assert_readout(&mut h, "Fully constrained");
     assert_eq!(drawn_z(&h), 15.0, "B's underside sits 5 mm above A's top");
     snapshot(&mut h, "1-mated");
 
@@ -262,7 +319,7 @@ fn pick_drive_update_and_refuse_in_the_window() {
     type_into(&mut h, "Value expression", "1.2 cm");
     button(&mut h, "Set value");
     settle(&mut h);
-    h.get_by_value("Z: 12 mm");
+    assert_readout(&mut h, "Z: 12 mm");
     assert_eq!(drawn_z(&h), 22.0);
     snapshot(&mut h, "3-driven");
 
@@ -276,13 +333,13 @@ fn pick_drive_update_and_refuse_in_the_window() {
         st.push(AppAction::Assembly(AssemblyAction::Show));
     }
     settle(&mut h);
-    h.get_by_value("The part has changed; Update to use it");
+    assert_readout(&mut h, "The part has changed; Update to use it");
     assert_eq!(drawn_z(&h), 22.0);
     snapshot(&mut h, "4-stale");
     button(&mut h, "Update");
     settle(&mut h);
     assert_eq!(drawn_z(&h), 26.0);
-    h.get_by_value("Z: 12 mm");
+    assert_readout(&mut h, "Z: 12 mm");
     snapshot(&mut h, "5-updated");
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
@@ -366,8 +423,8 @@ fn pick_coincident_update_and_refuse_in_the_window() {
     button(&mut h, "Add mate");
     settle(&mut h);
     assert!(h.state().state.assembly.mate.error.is_none(), "{:?}", h.state().state.assembly.mate.error);
-    h.get_by_value("Cz: coincident, opposed, 0 mm apart");
-    h.get_by_value("Fully constrained");
+    assert_readout(&mut h, "Cz: coincident, opposed, 0 mm apart");
+    assert_readout(&mut h, "Fully constrained");
     assert_eq!(drawn(&h, 1), [10.0, 10.0, 10.0], "B's underside on A's top");
     upright(&h);
     let summary = AppTools { state: &mut h.state_mut().state }.summary()["assembly"].clone();
@@ -391,7 +448,7 @@ fn pick_coincident_update_and_refuse_in_the_window() {
         st.push(AppAction::Assembly(AssemblyAction::Show));
     }
     settle(&mut h);
-    h.get_by_value("The part has changed; Update to use it");
+    assert_readout(&mut h, "The part has changed; Update to use it");
     let a10 = shown(&h, 0);
     assert_eq!(a10.1, 10.0);
     assert_eq!(drawn(&h, 1), [10.0, 10.0, 10.0]);
@@ -401,7 +458,7 @@ fn pick_coincident_update_and_refuse_in_the_window() {
     let a14 = shown(&h, 0);
     assert!(a14.0 != a10.0 && a14.1 == 14.0, "{a14:?}");
     assert_eq!(drawn(&h, 1), [10.0, 10.0, 14.0]);
-    h.get_by_value("Cz: coincident, opposed, 0 mm apart");
+    assert_readout(&mut h, "Cz: coincident, opposed, 0 mm apart");
     upright(&h);
     snapshot(&mut h, "coincident-3-updated");
 
@@ -524,7 +581,7 @@ fn width_lock_and_conflicts_in_the_window() {
     button(&mut h, "Add mate");
     settle(&mut h);
     assert!(h.state().state.assembly.mate.error.is_none(), "{:?}", h.state().state.assembly.mate.error);
-    h.get_by_value("W: width, aligned, 25% of the play");
+    assert_readout(&mut h, "W: width, aligned, 25% of the play");
     assert_eq!(drawn(&h, 1), [5.0, 7.0, 30.0], "a quarter of the 20 mm play from A's +x side");
     snapshot(&mut h, "families-1-width");
 
@@ -544,9 +601,9 @@ fn width_lock_and_conflicts_in_the_window() {
     assert_eq!(accepted(&mut h), before, "a refusal changes nothing");
     let conflict = h.state().state.assembly.mate.conflict.clone().expect("the refusal fills the Conflicts list");
     assert_eq!(conflict.mates, ["W", "X"]);
-    h.get_by_value("These mates cannot all hold");
-    h.get_by_value("W (width)");
-    h.get_by_value("X (not added)");
+    assert_readout(&mut h, "These mates cannot all hold");
+    assert_readout(&mut h, "W (width)");
+    assert_readout(&mut h, "X (not added)");
     assert!(h.query_by_label("Delete X").is_none(), "X was refused, so there is nothing to delete");
     h.get_by_label("Flip W");
     h.get_by_label("Delete W").scroll_to_me();
@@ -570,7 +627,7 @@ fn width_lock_and_conflicts_in_the_window() {
     type_into(&mut h, "Mate name", "P");
     button(&mut h, "Add mate");
     settle(&mut h);
-    h.get_by_value("P: parallel, opposed, 20 mm apart");
+    assert_readout(&mut h, "P: parallel, opposed, 20 mm apart");
     button(&mut h, "Clear faces");
     button(&mut h, "Lock");
     assert!(h.query_by_label("Aligned").is_none(), "a Lock has no alignment");
@@ -580,8 +637,8 @@ fn width_lock_and_conflicts_in_the_window() {
     button(&mut h, "Add mate");
     settle(&mut h);
     assert!(h.state().state.assembly.mate.error.is_none(), "{:?}", h.state().state.assembly.mate.error);
-    h.get_by_value("L: locked");
-    h.get_by_value("Fully constrained");
+    assert_readout(&mut h, "L: locked");
+    assert_readout(&mut h, "Fully constrained");
     assert_eq!(drawn(&h, 1), [10.0, 7.0, 30.0], "a lock keeps B where it is");
     snapshot(&mut h, "families-3-lock");
     drop(h);

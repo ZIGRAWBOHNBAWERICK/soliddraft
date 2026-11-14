@@ -5,7 +5,7 @@
 pub use crate::chat::{ChatMessage, ChatState, Role};
 use crate::document::{
     ChamferParams, Command, CutParams, DisplayMesh, Document, DraftParams, EntityInfo, ExtrudeParams, FeatureId,
-    FilletParams, HoleParams, Preview, Selection, SketchPlane,
+    FeatureStatus, FilletParams, HoleParams, Preview, Selection, SketchPlane,
 };
 use crate::document::{EdgeRef, EntityRef};
 use crate::drag::{Dimension, DragPreview, Finish};
@@ -59,6 +59,9 @@ pub enum AppAction {
     StartReferencePlane,
     StartDraft,
     StartShell,
+    NewBody,
+    SelectBody(u32),
+    StartCombine,
     StartOffset,
     StartThicken,
     StartLattice,
@@ -93,6 +96,9 @@ pub enum AppAction {
     /// Computes mass properties only after the user requests them.
     MeasureMassProperties,
     MeasureEntity,
+    /// Run independent construction checks on the current part.
+    CheckPart,
+    ToggleSection,
     SetView(StandardView),
     /// Look straight at the active sketch plane, or the selected planar face.
     NormalTo,
@@ -142,6 +148,9 @@ pub enum AppAction {
     ImportIges(Option<PathBuf>),
     /// Review a closed STL or OBJ mesh as an exact solid.
     ImportMesh(Option<PathBuf>),
+    ImportScan(Option<PathBuf>),
+    FitScan,
+    ShowScan,
     /// Review a replacement source for an imported feature.
     ReplaceImport {
         feature: FeatureId,
@@ -1050,6 +1059,9 @@ pub struct Rename {
 pub struct AppState {
     pub doc: Document,
     pub measure: crate::measure::panel::State,
+    pub part_check: Option<crate::part_check::Inspection>,
+    pub print_check: Option<crate::print_check::Dialog>,
+    pub section: crate::section::State,
     pub(crate) mass: crate::measure::mass::State,
     pub viewport: ViewportState,
     pub pick_filter: crate::viewport::PickFilter,
@@ -1070,6 +1082,7 @@ pub struct AppState {
     pub palette: Option<crate::palette::Palette>,
     /// The open Provider dialog.
     pub import_dialog: Option<crate::import::Preview>,
+    pub scan: crate::scan::Workspace,
     pub provider_dialog: Option<crate::chat::ProviderDialog>,
     /// The open File locations page.
     pub locations_dialog: Option<crate::locations::LocationsDialog>,
@@ -1101,8 +1114,6 @@ pub struct AppState {
     pub values: crate::values_tab::ValuesTab,
     /// Whether the side area is shown and how wide it is.
     pub layout: crate::panels::Layout,
-    /// Internal choice of frame during the layout rebuild.
-    pub frame_layout: crate::settings::FrameLayout,
     /// The command line along the bottom and the assistant session above it.
     pub command_line: crate::command_line::CommandLine,
     /// Where pinned revisions of referenced documents come from. Cache-only for now: the
@@ -1126,9 +1137,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn tree_shown(&self) -> bool {
-        if self.frame_layout == crate::settings::FrameLayout::Classic {
-            self.layout.tree.shown
-        } else if self.assembly.is_active() {
+        if self.assembly.is_active() {
             self.layout.suite.assembly
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing
@@ -1138,9 +1147,7 @@ impl AppState {
     }
 
     pub fn show_tree(&mut self, shown: bool) {
-        if self.frame_layout == crate::settings::FrameLayout::Classic {
-            self.layout.tree.shown = shown;
-        } else if self.assembly.is_active() {
+        if self.assembly.is_active() {
             self.layout.suite.assembly = shown;
         } else if self.drawing.is_active() || self.drawing.new.is_some() {
             self.layout.suite.drawing = shown;
@@ -1224,6 +1231,9 @@ impl AppState {
         Self {
             doc,
             measure: Default::default(),
+            part_check: None,
+            print_check: None,
+            section: Default::default(),
             mass: Default::default(),
             viewport: ViewportState::default(),
             pick_filter: Default::default(),
@@ -1242,6 +1252,7 @@ impl AppState {
             show_shortcuts: false,
             palette: None,
             import_dialog: None,
+            scan: Default::default(),
             provider_dialog: None,
             locations_dialog: None,
             locations_epoch: 0,
@@ -1260,7 +1271,6 @@ impl AppState {
             assembly: Default::default(),
             tool_document: None,
             layout: crate::panels::Layout::load(),
-            frame_layout: crate::settings::frame_layout(),
             command_line: crate::command_line::CommandLine::load(),
             revisions: Arc::new(soliddraft_document::CacheOnlyStore::new()),
             commands: crate::settings::command_history(),
@@ -1274,11 +1284,7 @@ impl AppState {
     }
 
     pub fn selection_filter(&self) -> crate::viewport::PickFilter {
-        if self.frame_layout == crate::settings::FrameLayout::EditSuite
-            && self.editor.is_none()
-            && self.sketch.is_none()
-            && !self.measure.open
-        {
+        if self.editor.is_none() && self.sketch.is_none() && !self.measure.open {
             self.pick_filter
         } else {
             Default::default()
@@ -1451,20 +1457,66 @@ impl AppState {
         self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
     }
 
+    pub(crate) fn feature_edit_open(&self) -> bool {
+        self.editor.is_some() || self.sketch.is_some() || self.doc.combine_form.is_some()
+    }
+
     /// Exports only the committed revision. A live dimension edit cannot export
     /// the preceding body as if it represented the value currently requested.
     pub fn export_part(&self, format: soliddraft_exchange::Format) -> Result<soliddraft_exchange::Export, String> {
+        self.export_part_at(format, None)
+    }
+
+    /// Exports at an explicitly chosen accuracy, retaining the current revision guards.
+    pub fn export_part_at(
+        &self,
+        format: soliddraft_exchange::Format,
+        accuracy_mm: Option<f64>,
+    ) -> Result<soliddraft_exchange::Export, String> {
+        self.export_ready()?;
+        let mut out = self.doc.model().export_at(format, accuracy_mm)?;
+        if out.proof.is_some() {
+            out.proof = Some(self.doc.proof_report());
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn export_ready(&self) -> Result<(), String> {
         if self.drag_preview.is_some() {
             return Err("Finish or cancel the dimension edit before exporting".into());
+        }
+        if self.feature_edit_open() {
+            return Err("Finish or cancel the feature or sketch edit before exporting".into());
         }
         let proof = self.doc.proof_state();
         if proof.answered_within_bound && !proof.display_only_bound {
             return Err("This answer is within a stated bound. Export requires a proved result.".into());
         }
-        if self.doc.proof_pending() || self.doc.proof_message().is_some_and(|(_, failed)| failed) {
-            return Err("The requested revision has not passed proof".into());
+        if self.doc.proof_pending() {
+            return Err("Proof is pending for the current edit. Wait for proof before exporting.".into());
         }
-        self.doc.model().export(format)
+        if proof.failed {
+            let reason = self
+                .doc
+                .proof_message()
+                .filter(|(_, failed)| *failed)
+                .map(|(message, _)| crate::geometry_message::for_user(message))
+                .or_else(|| {
+                    self.doc.features.iter().find_map(|feature| match &feature.status {
+                        FeatureStatus::Error(message) => {
+                            Some(format!("{}: {}", feature.name, crate::geometry_message::for_user(message)))
+                        }
+                        FeatureStatus::NeedsRepair(_) => Some(format!("{} needs a reference repaired", feature.name)),
+                        _ => None,
+                    })
+                })
+                .unwrap_or_else(|| "The current edit was refused".into());
+            return Err(format!("Export requires a proved result. {reason}"));
+        }
+        if !proof.current_proved_model() {
+            return Err("The current result has not been proved. Wait for proof before exporting.".into());
+        }
+        Ok(())
     }
 
     /// Runs one step of a dimension drag. Only the final value reaches the document, as
@@ -1472,7 +1524,7 @@ impl AppState {
     pub fn drag_dimension(&mut self, step: DragStep) {
         match step {
             DragStep::Start { feature, dimension } => {
-                if self.editor.is_some() || self.sketch.is_some() {
+                if self.feature_edit_open() {
                     return;
                 }
                 if let Some(previous) = self.drag_preview.take() {

@@ -1978,6 +1978,9 @@ fn paint_dimension_lines(
 pub fn value_pill(painter: &egui::Painter, at: Pos2, text: String, ink: Color32, bg: Color32, stroke: Stroke) -> Rect {
     let galley = painter.layout_no_wrap(text, theme::font_medium(11.5), ink);
     let r = Rect::from_center_size(at, galley.size() + vec2(12.0, 6.0));
+    // The selection, hover and error tints are see-through: on a light sheet alone they
+    // let the curve under the label show and wash out its text.
+    painter.rect_filled(r, CornerRadius::same(4), theme::hud_bg());
     painter.rect(r, CornerRadius::same(4), bg, stroke, StrokeKind::Inside);
     painter.galley(r.center() - galley.size() / 2.0, galley, ink);
     r

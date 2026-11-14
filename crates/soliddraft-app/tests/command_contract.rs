@@ -951,6 +951,17 @@ fn command_ids_shortcuts_agent_schemas_and_availability_stay_compatible() {
                 current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
             }
         }
+        // A profile feature with no sketch selected asks for one, so it no longer waits
+        // for a selection, as Extrude never did. Cut still needs a body.
+        let asks_for_sketch: &[&str] = match id.as_str() {
+            "revolve" | "sweep" => &["blank", "sketch", "plate", "assembly"],
+            "cut" => &["plate"],
+            _ => &[],
+        };
+        for fixture in asks_for_sketch {
+            assert_eq!(current["availability"][fixture]["enabled"], true, "{id} starts on {fixture}");
+            current["availability"][fixture]["enabled"] = row["availability"][fixture]["enabled"].clone();
+        }
         assert_eq!(&current, row, "{id} changed");
     }
     for list in ["agent_tools", "verbs"] {

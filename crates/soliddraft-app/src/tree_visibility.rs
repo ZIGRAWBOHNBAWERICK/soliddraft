@@ -39,7 +39,10 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
     let references = &state.viewport.references;
     match item {
         ViewItem::Plane(plane) => {
-            state.editor.as_ref().is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane))
+            state
+                .editor
+                .as_ref()
+                .is_some_and(|editor| matches!(editor.params, EditorParams::PickPlane | EditorParams::PickSketch(_)))
                 || choice.unwrap_or(
                     references.show_origin_planes
                         || doc.selection == Some(Selection::Reference(Reference::Plane(plane))),
@@ -55,7 +58,12 @@ pub fn shown(state: &AppState, item: ViewItem) -> bool {
             Some(f) if matches!(&f.kind, crate::document::FeatureKind::Scan(s) if s.fit.is_none()) => {
                 choice.unwrap_or(true)
             }
-            Some(f) if f.is_sketch() => choice.unwrap_or(state.selected_sketch() == Some(id)),
+            // A feature asking for its sketch shows the ones it could use.
+            Some(f) if f.is_sketch() => choice.unwrap_or(
+                state.selected_sketch() == Some(id)
+                    || state.editor.as_ref().is_some_and(|e| matches!(e.params, EditorParams::PickSketch(_)))
+                        && doc.consumer_of(id).is_none(),
+            ),
             Some(_) => body_shown(doc),
             None => false,
         },

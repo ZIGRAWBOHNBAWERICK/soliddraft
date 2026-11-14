@@ -104,6 +104,11 @@ fn extrude_numbers_accept_keyboard_input() {
     case.run(&mut app, |case, app| {
         open(app, AppAction::StartExtrude);
         assert_eq!(editor_title(app), "Boss-Extrude");
+        // With no sketch, the extrude asks for one; its sized rectangle needs none.
+        let rectangle = app.get_by_label("Rectangle").rect();
+        ribbon::click_at(app, rectangle.center());
+        settle(app);
+        pointer_to_chrome(app);
         case.frame(app, "extrude");
         assert_fields(app, "Boss-Extrude", &["Width value", "Height value", "Depth value"]);
         ribbon::open_options(app);

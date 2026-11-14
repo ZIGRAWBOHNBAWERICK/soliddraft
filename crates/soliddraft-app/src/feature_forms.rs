@@ -69,6 +69,11 @@ pub enum Key {
     LoftProfileList,
     PlaneDatum(u8),
     PlaneFeature(u64),
+    SketchPrompt,
+    NewSketch,
+    UseSketch(u64),
+    /// Extrude's sized rectangle (false) or circle (true) on an origin plane, without a sketch.
+    QuickProfile(bool),
     RepairWas,
     RepairReplacement,
     RepairNavigation,
@@ -82,7 +87,13 @@ pub struct Spec {
     pub fields: Vec<Field<Key>>,
 }
 
-pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId, String)]) -> Spec {
+/// The form for `params`. A plane picker lists `plane_choices`; a feature asking for its
+/// sketch lists `sketch_choices`, the sketches no other feature uses.
+pub fn spec(
+    params: &EditorParams,
+    plane_choices: &[(soliddraft_model::FeatureId, String)],
+    sketch_choices: &[(crate::document::FeatureId, String)],
+) -> Spec {
     use Key::*;
     let field = |id, label, group, width| Field::new(id, label, group, width);
     let (kind, icon, fields) = match params {
@@ -290,6 +301,23 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
             );
             ("pick_plane", Icon::Sketch, fields)
         }
+        EditorParams::PickSketch(feature) => {
+            let mut fields = vec![field(SketchPrompt, "", "Sketch", 330.0), field(NewSketch, "", "Sketch", 120.0)];
+            fields.extend(sketch_choices.iter().map(|(id, _)| field(UseSketch(*id), "", "Existing sketches", 130.0)));
+            if *feature == crate::state::ProfileFeature::Extrude {
+                fields.extend([
+                    field(QuickProfile(false), "", "Without a sketch", 110.0),
+                    field(QuickProfile(true), "", "Without a sketch", 100.0),
+                ]);
+            }
+            let icon = match feature {
+                crate::state::ProfileFeature::Extrude => Icon::Extrude,
+                crate::state::ProfileFeature::Cut => Icon::Cut,
+                crate::state::ProfileFeature::Revolve => Icon::Revolve,
+                crate::state::ProfileFeature::Sweep => Icon::Sweep,
+            };
+            ("pick_sketch", icon, fields)
+        }
         EditorParams::Repair { items, .. } => (
             "repair",
             Icon::Repair,
@@ -301,11 +329,13 @@ pub fn spec(params: &EditorParams, plane_choices: &[(soliddraft_model::FeatureId
             ],
         ),
     };
-    Spec { kind, icon, confirm: !matches!(params, EditorParams::PickPlane), fields }
+    Spec { kind, icon, confirm: !matches!(params, EditorParams::PickPlane | EditorParams::PickSketch(_)), fields }
 }
 
 struct Context {
     sketches: Vec<(crate::document::FeatureId, String)>,
+    /// Sketches with geometry that no feature uses yet, for a feature asking for one.
+    free_sketches: Vec<(crate::document::FeatureId, String)>,
     planes: Vec<(soliddraft_model::FeatureId, String)>,
     datums: Vec<(crate::document::PlaneKind, String)>,
     sweep_radius: f64,
@@ -329,6 +359,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
             Vec::new()
         },
         sketches: state.doc.features.iter().filter(|f| f.is_sketch()).map(|f| (f.id, f.name.clone())).collect(),
+        free_sketches: if matches!(editor.params, EditorParams::PickSketch(_)) {
+            state
+                .doc
+                .features
+                .iter()
+                .filter(|f| f.sketch().is_some_and(|s| !s.sketch.is_empty()))
+                .filter(|f| state.doc.consumer_of(f.id).is_none())
+                .map(|f| (f.id, f.name.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        },
         planes: state
             .doc
             .features
@@ -346,7 +388,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
             _ => 0.0,
         },
     };
-    let spec = spec(&editor.params, &context.planes);
+    let spec = spec(&editor.params, &context.planes, &context.free_sketches);
     let title = editor.title();
     let key = egui::Id::new(("feature_form", spec.kind, editor.target));
     let error = editor
@@ -492,6 +534,21 @@ fn render(
     use soliddraft_kernel_api::{HoleDepth, LatticeCell};
     if key == Key::Edges {
         picked_edges(ui, editor);
+        return false;
+    }
+    if let Key::QuickProfile(circle) = key {
+        let (name, profile) = if circle {
+            ("Circle", ProfileKind::Circle { diameter: 24.0 })
+        } else {
+            ("Rectangle", ProfileKind::Rectangle { width: 60.0, height: 40.0 })
+        };
+        if ui
+            .button(name)
+            .on_hover_text(format!("Extrude a sized {} on an origin plane", name.to_lowercase()))
+            .clicked()
+        {
+            editor.params = EditorParams::Extrude(crate::document::ExtrudeParams { profile, ..Default::default() });
+        }
         return false;
     }
     let sketch_name =
@@ -961,6 +1018,21 @@ fn render(
                 && ui.button(name).clicked()
             {
                 actions.push(AppAction::StartSketchOn(SketchPlane::Feature { feature: id, offset: 0.0 }));
+            }
+        }
+        (EditorParams::PickSketch(_), Key::SketchPrompt) => {
+            readout(ui, "Pick a sketch, or a plane or face to draw one on")
+        }
+        (EditorParams::PickSketch(feature), Key::NewSketch) => {
+            if ui.button("New sketch").on_hover_text("Draw the profile on a plane or flat face").clicked() {
+                actions.push(AppAction::NewSketchFor(*feature));
+            }
+        }
+        (EditorParams::PickSketch(_), Key::UseSketch(id)) => {
+            if let Some((_, name)) = context.free_sketches.iter().find(|(v, _)| *v == id)
+                && ui.button(name).clicked()
+            {
+                actions.push(AppAction::Select(Some(crate::document::Selection::Feature(id))));
             }
         }
         (EditorParams::Repair { items, active, .. }, Key::RepairWas) => {

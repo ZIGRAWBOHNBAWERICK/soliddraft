@@ -38,6 +38,8 @@ pub enum AppAction {
     /// Starts a sketch on the selected plane or face, or asks for one.
     StartSketch,
     StartSketchOn(SketchPlane),
+    /// Asks for a plane or planar face for a new sketch, then starts the feature on it.
+    NewSketchFor(ProfileFeature),
     /// Opens the sketch feature for editing.
     EditSketch(FeatureId),
     /// Closes the sketch and returns to the part without starting a feature.
@@ -254,6 +256,8 @@ pub struct FeatureEditor {
     pub params: EditorParams,
     /// The sketch tool to arm after this plane picker completes. Closing it drops the tool.
     pub pending_sketch_tool: Option<Tool>,
+    /// The feature this plane picker's new sketch is for. It starts when the sketch closes.
+    pub then_feature: Option<ProfileFeature>,
     pub preview: Preview,
     pub error: Option<String>,
     /// The document's rollback before the editor rolled the display back to the
@@ -267,6 +271,37 @@ pub struct FeatureEditor {
     /// The picks and the body `marks` were sampled for.
     marked: (Vec<EdgeRef>, Option<soliddraft_kernel_api::BodyId>),
     last: Option<EditorParams>,
+}
+
+/// A feature built from one sketch. Starting one with no sketch selected asks for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileFeature {
+    Extrude,
+    Cut,
+    Revolve,
+    Sweep,
+}
+
+impl ProfileFeature {
+    /// The feature's panel title, the same before and after its sketch is chosen.
+    pub fn title(self) -> &'static str {
+        match self {
+            ProfileFeature::Extrude => "Boss-Extrude",
+            ProfileFeature::Cut => "Cut-Extrude",
+            ProfileFeature::Revolve => "Revolve",
+            ProfileFeature::Sweep => "Sweep",
+        }
+    }
+
+    /// The action that starts the feature from the selected sketch.
+    pub fn start(self) -> AppAction {
+        match self {
+            ProfileFeature::Extrude => AppAction::StartExtrude,
+            ProfileFeature::Cut => AppAction::StartCut,
+            ProfileFeature::Revolve => AppAction::StartRevolve,
+            ProfileFeature::Sweep => AppAction::StartSweep,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -291,6 +326,9 @@ pub enum EditorParams {
     Gyroid(soliddraft_model::GyroidFeature),
     /// Picking a plane or planar face for a new sketch.
     PickPlane,
+    /// A feature started with no sketch selected, asking for its sketch: an existing one,
+    /// or a plane or planar face to draw a new one on.
+    PickSketch(ProfileFeature),
     /// Choosing replacements for a feature's missing references.
     Repair {
         items: Vec<crate::document::RepairItem>,
@@ -305,6 +343,7 @@ impl FeatureEditor {
             target,
             params,
             pending_sketch_tool: None,
+            then_feature: None,
             preview: Preview::default(),
             error: None,
             saved_rollback,
@@ -339,7 +378,16 @@ impl FeatureEditor {
             EditorParams::Lattice(_) => format!("{edit}Lattice"),
             EditorParams::Gyroid(_) => format!("{edit}Gyroid"),
             EditorParams::PickPlane => "Sketch".to_owned(),
+            EditorParams::PickSketch(feature) => feature.title().to_owned(),
             EditorParams::Repair { .. } => "Repair references".to_owned(),
+        }
+    }
+
+    /// The feature to start once the sketch this picker leads to closes.
+    pub fn feature_after_sketch(&self) -> Option<ProfileFeature> {
+        match self.params {
+            EditorParams::PickSketch(feature) => Some(feature),
+            _ => self.then_feature,
         }
     }
 
@@ -401,6 +449,7 @@ impl FeatureEditor {
             | EditorParams::Mirror(_)
             | EditorParams::Draft(_)
             | EditorParams::PickPlane
+            | EditorParams::PickSketch(_)
             | EditorParams::Repair { .. } => Ok(Preview::default()),
         };
         match result {
@@ -877,6 +926,8 @@ pub struct SketchSession {
     pub dynamic_preview: Vec<(EntityKind, bool)>,
     /// What the active Modify tool would do now, redrawn every frame.
     pub preview: Option<ToolPreview>,
+    /// The feature waiting for this sketch. It starts on it when the sketch closes.
+    pub then_feature: Option<ProfileFeature>,
 }
 
 /// One power-trim gesture and the checkpoints its trail can undo.
@@ -956,6 +1007,7 @@ impl SketchSession {
             dynamic_mirror: None,
             dynamic_preview: Vec::new(),
             preview: None,
+            then_feature: None,
         }
     }
 

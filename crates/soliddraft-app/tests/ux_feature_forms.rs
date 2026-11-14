@@ -43,7 +43,7 @@ fn click(app: &mut App, label: &str) {
 fn feature_fields_and_finish_actions_stay_on_the_bar_and_spill_into_the_sheet() {
     let mut case = Case::new("feature-forms");
     for (id, sketch, sheet) in [
-        ("extrude", false, false),
+        ("extrude", true, false),
         ("revolve", true, false),
         ("sweep", true, true),
         ("loft", true, true),

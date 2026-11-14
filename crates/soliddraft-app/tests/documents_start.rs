@@ -159,6 +159,18 @@ fn the_browser_checks_find_new_part_where_they_click() {
     assert!(tile.shrink(8.0).contains(egui::pos2(124.0, 143.0)), "New part is at {tile:?}");
 }
 
+/// `ci/browser-documents.mjs` edits a new part with E, a click on Extrude's Rectangle
+/// button at a fixed point of a 1400 x 813 page, and Enter.
+#[test]
+fn the_browser_checks_find_extrude_rectangle_where_they_click() {
+    let _case = case("extrude-rectangle-point");
+    let mut app = app_at(blank(), vec2(1400.0, 813.0), 1.0);
+    app.state_mut().state.push(AppAction::StartExtrude);
+    app.run_steps(4);
+    let button = app.get_by_role_and_label(egui::accesskit::Role::Button, "Rectangle").rect();
+    assert!(button.shrink(4.0).contains(egui::pos2(630.0, 52.0)), "Rectangle is at {button:?}");
+}
+
 /// The app this test kills: edits a part called Bracket without saving, and keeps editing
 /// after autosave's first copy is on disk. Does nothing unless the parent test started it.
 #[test]

@@ -129,9 +129,10 @@ fn command_helpers_work_outside_the_commands_ribbon_tab() {
     ribbon::switch_workspace(&mut harness, "inspect");
     assert_eq!(harness.state().state.ribbon_tab, RibbonTab::Inspect);
     ribbon::run_command(&mut harness, "extrude");
+    // Nothing is selected in the sample part, so the extrude asks for its sketch.
     assert!(matches!(
         harness.state().state.editor.as_ref().unwrap().params,
-        soliddraft_app::state::EditorParams::Extrude(_)
+        soliddraft_app::state::EditorParams::PickSketch(soliddraft_app::state::ProfileFeature::Extrude)
     ));
     assert_eq!(harness.state().state.commands.recent.first().map(String::as_str), Some("extrude"));
 }

@@ -25,7 +25,7 @@ use crate::document::{Command, Selection};
 use crate::drawing::{DrawingAction, DrawingSel, DrawingSession, DrawingTab, DrawingTool, LinkState, PlaceKind};
 use crate::icons::Icon;
 use crate::panels::Side;
-use crate::state::{AppAction, AppState, DragStep, EditorParams, RibbonTab, Tool};
+use crate::state::{AppAction, AppState, DragStep, EditorParams, ProfileFeature, RibbonTab, Tool};
 use crate::viewport::camera::StandardView;
 use crate::viewport::look::Preset;
 use crate::viewport::render::DisplayMode;
@@ -1869,7 +1869,7 @@ fn registry() -> Vec<CommandSpec> {
             .run(|_| AppAction::StartExtrude)
             .outside_sketch()
             .when(|s| !s.in_sketch() && field_open(s))
-            .lit(|s| editing(s, |p| matches!(p, EditorParams::Extrude(_))))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Extrude(_) | EditorParams::PickSketch(ProfileFeature::Extrude))))
             .hint(after_field)
             .agents(Agents::Verb, "Every profile of the sketch extrudes along its normal.", tools::extrude_params)
 .undo(Undo::Step),
@@ -1877,13 +1877,9 @@ fn registry() -> Vec<CommandSpec> {
             .on(Solid, "Create", Large)
             .run(|_| AppAction::StartRevolve)
             .outside_sketch()
-            .when(|s| !s.in_sketch() && field_open(s) && s.selected_sketch().is_some())
-            .lit(|s| editing(s, |p| matches!(p, EditorParams::Revolve(_))))
-            .hint(|s| {
-                after_field(s).or_else(|| {
-                    s.selected_sketch().is_none().then(|| "Select a sketch to revolve".into())
-                })
-            })
+            .when(|s| !s.in_sketch() && field_open(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Revolve(_) | EditorParams::PickSketch(ProfileFeature::Revolve))))
+            .hint(after_field)
             .agents(Agents::Verb, "Revolve a closed meridian sketch about a model-space axis.", tools::revolve_params)
             .undo(Undo::Step),
         cmd("edit_revolve", "Edit revolve", Icon::Revolve, "Change a revolution angle")
@@ -1893,9 +1889,9 @@ fn registry() -> Vec<CommandSpec> {
             .on(Solid, "Create", Small)
             .run(|_| AppAction::StartSweep)
             .outside_sketch()
-            .when(|s| !s.in_sketch() && field_open(s) && s.selected_sketch().is_some())
-            .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_))))
-            .hint(|s| after_field(s).or_else(|| s.selected_sketch().is_none().then(|| "Select a closed polygon sketch to sweep".into())))
+            .when(|s| !s.in_sketch() && field_open(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Sweep(_) | EditorParams::PickSketch(ProfileFeature::Sweep))))
+            .hint(after_field)
             .agents(Agents::Verb, "Sweep a closed polygon sketch along lines and arcs, or one rational spline with fixed orientation. The profile keeps its placement. `end` is a shorthand for one line.", tools::sweep_params)
             .undo(Undo::Step),
         cmd("edit_sweep", "Edit sweep", Icon::Sweep, "Change a sweep path")
@@ -1919,19 +1915,9 @@ fn registry() -> Vec<CommandSpec> {
             .key(Scope::Model, none, Key::X)
             .run(|_| AppAction::StartCut)
             .outside_sketch()
-            .when(|s| !s.in_sketch() && field_open(s) && has_body(s) && s.selected_sketch().is_some())
-            .lit(|s| editing(s, |p| matches!(p, EditorParams::Cut(_))))
-            .hint(|s| {
-                if let Some(why) = after_field(s) {
-                    Some(why)
-                } else if has_body(s) && s.selected_sketch().is_some() {
-                    None
-                } else if has_body(s) {
-                    Some("Select a sketch to cut with, or sketch on a face first".into())
-                } else {
-                    Some("Cut needs a body and a sketch".into())
-                }
-            })
+            .when(|s| !s.in_sketch() && field_open(s) && has_body(s))
+            .lit(|s| editing(s, |p| matches!(p, EditorParams::Cut(_) | EditorParams::PickSketch(ProfileFeature::Cut))))
+            .hint(|s| after_field(s).or_else(|| (!has_body(s)).then(|| "Cut needs a body".into())))
             .agents(
                 Agents::Verb,
                 "Every profile cuts against the sketch normal (into the face it sits on) unless flipped. Several \

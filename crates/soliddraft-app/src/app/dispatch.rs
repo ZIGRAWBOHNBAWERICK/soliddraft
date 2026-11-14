@@ -6,7 +6,7 @@ use crate::document::{
 };
 use crate::file;
 use crate::panels::{Layout, Side};
-use crate::state::{AppAction, EditorParams, FeatureEditor, NoteKind, SketchSession};
+use crate::state::{AppAction, EditorParams, FeatureEditor, NoteKind, ProfileFeature, SketchSession};
 use crate::theme;
 use crate::viewport::dimensions::DimensionTarget;
 use crate::viewport::render::{DisplayMode, Picked};
@@ -46,6 +46,35 @@ impl SolidDraftApp {
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
+    }
+
+    /// Opens the plane picker for a new sketch. `then` starts on the sketch when it closes.
+    fn ask_plane(&mut self, then: Option<ProfileFeature>) {
+        self.open_editor(None, EditorParams::PickPlane);
+        if let Some(editor) = self.state.editor.as_mut() {
+            editor.then_feature = then;
+        }
+        self.state.origin_open = true;
+        self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
+        self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
+    }
+
+    /// The selected sketch `feature` can be built from. With none, or one another feature
+    /// already uses, the feature's panel opens asking for its sketch instead.
+    fn sketch_for(&mut self, feature: ProfileFeature) -> Option<crate::document::FeatureId> {
+        let selected = self.state.selected_sketch();
+        if let Some(id) = selected
+            && self.state.doc.consumer_of(id).is_none()
+        {
+            return Some(id);
+        }
+        let used = selected.and_then(|id| sketch_in_use(&self.state.doc, id));
+        self.open_editor(None, EditorParams::PickSketch(feature));
+        if let Some(editor) = self.state.editor.as_mut() {
+            editor.error = used;
+        }
+        self.state.doc.selection = None;
+        None
     }
 
     pub(super) fn open_sketch(&mut self, id: crate::document::FeatureId) {
@@ -205,24 +234,37 @@ impl SolidDraftApp {
                 };
                 match plane {
                     Some(plane) => self.apply(ctx, AppAction::StartSketchOn(plane)),
+                    // A feature waiting for its sketch keeps waiting through the new picker,
+                    // as when a sketch tool is chosen before the plane.
                     None => {
-                        self.open_editor(None, EditorParams::PickPlane);
-                        self.state.origin_open = true;
-
-                        self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
-                        self.state.note("Choose an origin plane or click a flat face", NoteKind::Info);
+                        let then = self.state.editor.as_ref().and_then(FeatureEditor::feature_after_sketch);
+                        self.ask_plane(then);
                     }
                 }
             }
+            AppAction::NewSketchFor(feature) => {
+                if !self.state.in_sketch() {
+                    self.ask_plane(Some(feature));
+                }
+            }
             AppAction::StartSketchOn(plane) => {
-                let tool = self.close_editor().and_then(|editor| editor.pending_sketch_tool);
+                let closed = self.close_editor();
+                let tool = closed.as_ref().and_then(|editor| editor.pending_sketch_tool);
+                let then = closed.as_ref().and_then(FeatureEditor::feature_after_sketch);
                 match self.state.doc.apply(Command::AddSketch { plane }) {
                     Ok(Some(id)) => {
                         self.open_sketch(id);
-                        if let Some(tool) = tool
-                            && let Some(session) = &mut self.state.sketch
-                        {
-                            session.set_tool(tool);
+                        if let Some(session) = &mut self.state.sketch {
+                            if let Some(tool) = tool {
+                                session.set_tool(tool);
+                            }
+                            if let Some(feature) = then {
+                                session.then_feature = Some(feature);
+                                session.say(format!(
+                                    "Draw the profile, then exit the sketch to continue the {}",
+                                    feature.title()
+                                ));
+                            }
                         }
                     }
                     Ok(None) => {}
@@ -246,20 +288,25 @@ impl SolidDraftApp {
                     // An empty new sketch leaves nothing behind.
                     let _ = self.state.doc.apply(Command::DeleteFeature(id));
                     self.state.doc.selection = None;
+                    // The feature it was drawn for asks for a sketch again.
+                    if let Some(feature) = session.then_feature {
+                        self.open_editor(None, EditorParams::PickSketch(feature));
+                    }
                     return;
                 }
                 self.state.doc.selection = Some(Selection::Feature(id));
+                if let Some(feature) = session.then_feature {
+                    self.apply(ctx, feature.start());
+                }
             }
             AppAction::StartExtrude => {
                 if self.state.in_sketch() {
                     return;
                 }
-                let sketch = self.state.selected_sketch().filter(|s| self.state.doc.consumer_of(*s).is_none());
-                let params = match sketch {
-                    Some(id) => ExtrudeParams { sketch: Some(id), depth: 10.0, ..Default::default() },
-                    None => ExtrudeParams::default(),
-                };
-                self.open_editor(None, EditorParams::Extrude(params));
+                if let Some(id) = self.sketch_for(ProfileFeature::Extrude) {
+                    let params = ExtrudeParams { sketch: Some(id), depth: 10.0, ..Default::default() };
+                    self.open_editor(None, EditorParams::Extrude(params));
+                }
             }
             AppAction::StartLoft => {
                 if self.state.in_sketch() {
@@ -289,35 +336,32 @@ impl SolidDraftApp {
                 if self.state.in_sketch() {
                     return;
                 }
-                match self.state.selected_sketch().filter(|id| self.state.doc.consumer_of(*id).is_none()) {
-                    Some(id) => {
-                        let normal = self
-                            .state
-                            .doc
-                            .feature(id)
-                            .and_then(|f| f.plane)
-                            .map(|p| p.normal)
-                            .unwrap_or(soliddraft_kernel_api::Vec3::Z);
-                        // Arcs turn about model axes, so the path starts on the profile.
-                        let start = self.state.doc.sweep_anchor(id).map_or([0.0; 3], |(start, _)| start);
-                        let end = soliddraft_kernel_api::Vec3::from(start) + normal * 10.0;
-                        self.open_editor(
-                            None,
-                            EditorParams::Sweep(soliddraft_model::SweepFeature {
-                                sketch: soliddraft_model::FeatureId(id as u32),
-                                path: soliddraft_kernel_api::Sweep::line(start, end.into(), "travel"),
-                            }),
-                        );
-                    }
-                    None => self.state.note("Select a closed polygon sketch to sweep", NoteKind::Info),
+                if let Some(id) = self.sketch_for(ProfileFeature::Sweep) {
+                    let normal = self
+                        .state
+                        .doc
+                        .feature(id)
+                        .and_then(|f| f.plane)
+                        .map(|p| p.normal)
+                        .unwrap_or(soliddraft_kernel_api::Vec3::Z);
+                    // Arcs turn about model axes, so the path starts on the profile.
+                    let start = self.state.doc.sweep_anchor(id).map_or([0.0; 3], |(start, _)| start);
+                    let end = soliddraft_kernel_api::Vec3::from(start) + normal * 10.0;
+                    self.open_editor(
+                        None,
+                        EditorParams::Sweep(soliddraft_model::SweepFeature {
+                            sketch: soliddraft_model::FeatureId(id as u32),
+                            path: soliddraft_kernel_api::Sweep::line(start, end.into(), "travel"),
+                        }),
+                    );
                 }
             }
             AppAction::StartRevolve => {
                 if self.state.in_sketch() {
                     return;
                 }
-                match self.state.selected_sketch().filter(|id| self.state.doc.consumer_of(*id).is_none()) {
-                    Some(id) => self.open_editor(
+                if let Some(id) = self.sketch_for(ProfileFeature::Revolve) {
+                    self.open_editor(
                         None,
                         EditorParams::Revolve(soliddraft_model::RevolveFeature {
                             sketch: soliddraft_model::FeatureId(id as u32),
@@ -325,19 +369,15 @@ impl SolidDraftApp {
                             axis_direction: [0.0, 1.0, 0.0],
                             angle_deg: 360.0,
                         }),
-                    ),
-                    None => self.state.note("Select a closed meridian sketch to revolve", NoteKind::Info),
+                    );
                 }
             }
             AppAction::StartCut => {
                 if self.state.in_sketch() {
                     return;
                 }
-                match self.state.selected_sketch() {
-                    Some(id) if self.state.doc.consumer_of(id).is_none() => {
-                        self.open_editor(None, EditorParams::Cut(CutParams::new(id)));
-                    }
-                    _ => self.state.note("Select a sketch to cut with, or sketch on a face first", NoteKind::Info),
+                if let Some(id) = self.sketch_for(ProfileFeature::Cut) {
+                    self.open_editor(None, EditorParams::Cut(CutParams::new(id)));
                 }
             }
             AppAction::StartFillet | AppAction::StartChamfer => {
@@ -665,7 +705,7 @@ impl SolidDraftApp {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Draft(d.to_model()) },
                         None => Command::AddFeature(FeatureKind::Draft(d.to_model())),
                     },
-                    (_, EditorParams::PickPlane) => return,
+                    (_, EditorParams::PickPlane | EditorParams::PickSketch(_)) => return,
                     (Some(id), EditorParams::Repair { items, chosen, .. }) => {
                         let mut applied = 0;
                         for (item, choice) in items.iter().zip(chosen) {
@@ -728,6 +768,18 @@ impl SolidDraftApp {
                 // Editors that collect picks take the click instead of selecting.
                 if let Some(e) = self.state.editor.as_mut() {
                     match (&mut e.params, sel) {
+                        (EditorParams::PickSketch(feature), Some(pick)) => {
+                            let feature = *feature;
+                            match sketch_pick(&self.state.doc, pick) {
+                                Ok(SketchPick::Use(id)) => {
+                                    self.state.doc.selection = Some(Selection::Feature(id));
+                                    self.apply(ctx, feature.start());
+                                }
+                                Ok(SketchPick::DrawOn(plane)) => self.apply(ctx, AppAction::StartSketchOn(plane)),
+                                Err(why) => e.error = Some(why),
+                            }
+                            return;
+                        }
                         (
                             EditorParams::Fillet(_) | EditorParams::Chamfer(_),
                             Some(pick @ (Selection::Edge(_) | Selection::Face(_) | Selection::Vertex(_))),
@@ -1621,4 +1673,39 @@ fn use_axis(params: &mut EditorParams, axis: AxisKind) {
 /// Maps an id-buffer pick to the document entity it stands for.
 pub(super) fn selection_of(doc: &Document, picked: Picked) -> Option<Selection> {
     crate::viewport::pick::selection(doc, picked)
+}
+
+/// What a click gives a feature asking for its sketch.
+enum SketchPick {
+    /// An existing sketch no other feature uses.
+    Use(crate::document::FeatureId),
+    /// A plane or planar face to draw a new sketch on.
+    DrawOn(SketchPlane),
+}
+
+fn sketch_pick(doc: &Document, pick: Selection) -> Result<SketchPick, String> {
+    match pick {
+        Selection::Feature(id) if doc.sketch_of(id).is_some() => match sketch_in_use(doc, id) {
+            Some(why) => Err(why),
+            None => Ok(SketchPick::Use(id)),
+        },
+        Selection::Feature(id) if doc.model().reference_plane(soliddraft_model::FeatureId(id as u32)).is_some() => {
+            Ok(SketchPick::DrawOn(SketchPlane::Feature { feature: id, offset: 0.0 }))
+        }
+        Selection::Reference(Reference::Plane(plane)) => {
+            Ok(SketchPick::DrawOn(SketchPlane::Reference { plane, offset: 0.0 }))
+        }
+        Selection::Face(f) => match doc.face_ref(f) {
+            Some(face) => Ok(SketchPick::DrawOn(SketchPlane::Face { face })),
+            None => Err("Sketches need a planar face".into()),
+        },
+        _ => Err("Pick a sketch, or a plane or flat face to sketch on".into()),
+    }
+}
+
+/// Why sketch `id` cannot start another feature: the feature that already uses it.
+fn sketch_in_use(doc: &Document, id: crate::document::FeatureId) -> Option<String> {
+    let user = doc.feature(doc.consumer_of(id)?)?;
+    let sketch = doc.feature(id).map_or("The sketch", |f| f.name.as_str());
+    Some(format!("{sketch} is already used by {}; pick another sketch or draw a new one", user.name))
 }

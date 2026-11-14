@@ -76,7 +76,7 @@ impl Case {
         // A dark scene keeps the geometry sampling distinct from the background.
         // Fusion supplies an orbit gesture that also works on a sketch plane.
         case.seed_settings(
-            r#"{"view":{"always_show_origin_axes":false,"scene":"graphite"},"navigation":{"preset_id":"fusion"}}"#,
+            r#"{"view":{"show_grid":true,"show_origin_planes":true,"always_show_origin_axes":false,"scene":"graphite"},"navigation":{"preset_id":"fusion"}}"#,
         );
         let _ = env_logger::try_init();
         let instance = egui_wgpu::wgpu::Instance::default();

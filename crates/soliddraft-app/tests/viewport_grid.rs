@@ -108,7 +108,7 @@ fn grid_visibility_is_a_persistent_display_preference() {
     let mut case = Case::gpu("grid_preference");
     seed_gpu_settings(
         &case,
-        r#"{"view":{"preset":"fast","show_origin_planes":false,"always_show_origin_axes":false},"navigation":{"preset_id":"onshape","future":"keep"}}"#,
+        r#"{"view":{"preset":"fast","show_grid":true,"show_origin_planes":false,"always_show_origin_axes":false},"navigation":{"preset_id":"onshape","future":"keep"}}"#,
     );
     let navigation = case.settings_json()["navigation"].clone();
     let others = |case: &Case| {
@@ -531,7 +531,7 @@ fn automatic_grid_ink_is_readable_on_light_and_dark_scenes() {
         let mut case = Case::gpu(&format!("automatic_grid_{scene}"));
         case.seed_settings(
             &serde_json::json!({
-                "view": {"scene": scene, "show_origin_planes": false, "always_show_origin_axes": false},
+                "view": {"scene": scene, "show_grid": true, "show_origin_planes": false, "always_show_origin_axes": false},
                 "navigation": {"preset_id": "fusion"}
             })
             .to_string(),

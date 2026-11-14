@@ -175,7 +175,7 @@ fn typing_a_prefix_shows_a_clickable_suggestion_and_tab_completes() {
         assert_eq!(app.state().state.command_line.input, "fillet");
         app.key_press(Key::Escape);
         app.run_steps(4);
-        type_line(app, "fil");
+        type_line(app, "fille");
         app.key_press(Key::Tab);
         app.run_steps(8);
         assert_eq!(app.state().state.command_line.input, "fillet");

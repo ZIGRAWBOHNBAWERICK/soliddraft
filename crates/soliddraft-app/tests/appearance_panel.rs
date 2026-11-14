@@ -169,3 +169,65 @@ fn a_part_takes_a_colour_and_turns_see_through() {
     app.run_steps(4);
     assert_eq!(app.state().state.doc.shown_appearance(Some(face)).base_color, blue);
 }
+
+/// Undo in the middle of a transparency drag ends the drag's preview for good: letting go
+/// applies nothing, and Redo brings back only what was applied, never the preview.
+#[test]
+fn undo_during_a_transparency_drag_drops_the_preview() {
+    if !gpu_available() {
+        return;
+    }
+    let mut app = Harness::builder()
+        .with_size(vec2(1440.0, 900.0))
+        .with_pixels_per_point(1.0)
+        .with_render_every_step(true)
+        .with_step_dt(1.0 / 60.0)
+        .wgpu()
+        .build_eframe(|cc| {
+            SolidDraftApp::new(cc, soliddraft_app::command_tools::board_bracket(), Automation::default())
+        });
+    app.run_steps(10);
+    app.state_mut().state.push(AppAction::ShowAppearance);
+    app.run_steps(6);
+    app.get_by_label("Blue").click();
+    app.run_steps(4);
+    app.get_by_label("Transparent").click();
+    app.run_steps(4);
+    let depth = app.state().state.doc.model().undo_depth();
+    assert_eq!(app.state().state.doc.shown_appearance(None).opacity, 0.4);
+
+    let from = app.get_by_role_and_label(egui::accesskit::Role::Slider, "Transparency").rect().center();
+    pointer(&mut app, from, true);
+    for step in 1..=8 {
+        app.hover_at(from + vec2(step as f32 * 30.0, 0.0));
+        app.step();
+    }
+    assert!(app.state().state.doc.appearance_preview().is_some(), "the drag previews");
+
+    // Undo while the pointer is still down takes back the Transparent step.
+    app.state_mut().state.push(AppAction::Undo);
+    app.step();
+    let opaque = |app: &Harness<'_, SolidDraftApp>| {
+        let doc = &app.state().state.doc;
+        (doc.appearance_preview().is_none(), doc.shown_appearance(None).opacity)
+    };
+    assert_eq!(opaque(&app), (true, 1.0), "undo drops the preview and shows the opaque blue");
+
+    pointer(&mut app, from + vec2(240.0, 0.0), false);
+    app.run_steps(4);
+    assert_eq!(app.state().state.doc.model().undo_depth(), depth - 1, "letting go applies nothing");
+    assert_eq!(opaque(&app), (true, 1.0));
+
+    // Redo restores the applied 60%, and the dropped preview stays dropped.
+    app.state_mut().state.push(AppAction::Redo);
+    app.run_steps(4);
+    let doc = &app.state().state.doc;
+    assert!(doc.appearance_preview().is_none(), "redo does not revive the preview");
+    assert_eq!(doc.shown_appearance(None).opacity, 0.4);
+    assert_eq!(doc.model().undo_depth(), depth);
+    assert!(doc.meshes.values().all(|m| (m.appearances[0].base_color[3] - 0.4).abs() < 1e-6), "the mesh shows 60%");
+    app.run_steps(4);
+    let doc = &app.state().state.doc;
+    assert_eq!(doc.model().undo_depth(), depth, "nothing is applied after the redo");
+    assert_eq!(doc.undo_label(), Some("set appearance Blue, 60% transparent on the part"));
+}

@@ -1684,6 +1684,8 @@ impl Document {
     pub fn touch(&mut self) {
         self.dirty = true;
         self.edits += 1;
+        // A preview belongs to the part as it was when the drag began.
+        self.end_appearance_preview();
     }
 
     /// Changes whenever the tree is rebuilt: a command, undo, redo or a rollback. Work
@@ -2493,6 +2495,9 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<String, String> {
+        // Once history moves, a drag's preview never applies, even if Redo brings the
+        // part back to where the drag began.
+        self.end_appearance_preview();
         if self.model.annotation_history(false) {
             return self.model.undo_deferred().map_err(|error| error.to_string());
         }
@@ -2509,6 +2514,7 @@ impl Document {
     }
 
     pub fn redo(&mut self) -> Result<String, String> {
+        self.end_appearance_preview();
         if self.model.annotation_history(true) {
             return self.model.redo_deferred().map_err(|error| error.to_string());
         }
@@ -3286,6 +3292,7 @@ impl Document {
         material: Option<soliddraft_materials::Material>,
         default_appearance: Option<Appearance>,
     ) -> Result<(), String> {
+        self.end_appearance_preview();
         let scope = self.material_scope();
         self.model
             .execute(model::Command::SetMaterial { material, default_appearance, scope })
@@ -3316,8 +3323,9 @@ impl Document {
 
     /// Shows `appearance` at `target` (or no appearance there, with `None`) without
     /// applying it: no undo entry, no edit. [`Document::set_appearance`] applies it;
-    /// [`Document::end_appearance_preview`] drops it. Any change to the part's
-    /// appearances drops it too.
+    /// [`Document::end_appearance_preview`] drops it. Undo, redo, a material and any
+    /// other edit drop it for good, so it can never be applied over a part it was not
+    /// made on.
     pub fn preview_appearance(&mut self, target: model::AppearanceTarget, appearance: Option<Appearance>) {
         if let Some(a) = &appearance
             && !a.problems().is_empty()

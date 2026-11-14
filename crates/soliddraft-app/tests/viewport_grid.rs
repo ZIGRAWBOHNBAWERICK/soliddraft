@@ -331,6 +331,7 @@ fn grid_follows_each_reference_sketch_and_restores_ground() {
     // The dark scene has an opaque sketch sheet; sample the grid over a light scene.
     case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#30343a"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(sketches());
+    set_display(&mut app, |d| d.show_grid = true);
 
     // Each with the normal the plane gives it, and one offset from its reference.
     let rows =
@@ -374,6 +375,7 @@ fn face_sketch_grid_is_on_the_face_not_world_zero() {
     // The dark scene has an opaque sketch sheet; sample the grid over a light scene.
     case.seed_settings(r##"{"view":{"scene":"white","always_show_origin_axes":false,"grid":{"color":"#30343a"}},"navigation":{"preset_id":"fusion"}}"##);
     let mut app = launch(box_part());
+    set_display(&mut app, |d| d.show_grid = true);
 
     let top = {
         let state = &app.state().state;

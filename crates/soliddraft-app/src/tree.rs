@@ -3,10 +3,12 @@
 //! double-click shows a solid feature's dimensions or edits the rest, F2 or a slow
 //! second click renames, drag reorders, right-click offers the rest. The eye at the end
 //! of a feature, plane or axis row shows or hides it (see
-//! [`tree_visibility`](crate::tree_visibility)).
+//! [`tree_visibility`](crate::tree_visibility)). A mark before the eye says whether the
+//! feature is proved, pending or refused, and an under-defined sketch reads `(-)`.
 
 use crate::document::{
-    AxisKind, Command, FeatureId, FeatureKind, FeatureStatus, PlaneKind, Reference, Selection, SketchPlane, ViewItem,
+    AxisKind, Command, Feature, FeatureId, FeatureKind, FeatureStatus, PlaneKind, Reference, Selection, SketchPlane,
+    ViewItem,
 };
 use crate::icons::{self, Icon};
 use crate::state::{AppAction, AppState, EditorParams, NoteKind, Rename};
@@ -27,6 +29,7 @@ struct RowItem {
     status: FeatureStatus,
     suppressed: bool,
     via_assistant: bool,
+    under_defined: bool,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
@@ -222,6 +225,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 status,
                 suppressed: f.suppressed,
                 via_assistant: f.via_assistant,
+                under_defined: under_defined(state, f),
             });
             if let Some(c) = child
                 && state.expanded.contains(&f.id)
@@ -237,6 +241,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     status: c.status.clone(),
                     suppressed: c.suppressed,
                     via_assistant: false,
+                    under_defined: under_defined(state, c),
                 });
             }
         }
@@ -268,6 +273,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         let mut row_centres: Vec<(usize, f32)> = Vec::new();
         let mut bar_drawn = false;
         let bar_at = rollback.unwrap_or(feature_count);
+        // While a sketch is open, the features after it wait for it, so they read dimmed.
+        let editing = state.sketch.as_ref().map(|s| s.feature);
+        let edit_index = editing.and_then(|id| state.doc.features.iter().position(|f| f.id == id));
 
         for item in &items {
             // The rollback bar sits before the first feature past it.
@@ -275,7 +283,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 rollback_bar(ui, state, bar_at, feature_count, &mut actions, &mut bar_target, pointer_released);
                 bar_drawn = true;
             }
-            let inactive = item.suppressed || matches!(item.status, FeatureStatus::Inactive);
+            let inactive = item.suppressed
+                || matches!(item.status, FeatureStatus::Inactive)
+                || (editing != Some(item.id) && edit_index.is_some_and(|at| item.index > at));
             let error = match &item.status {
                 FeatureStatus::Error(e) => Some(crate::geometry_message::for_user(e)),
                 _ => None,
@@ -344,6 +354,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         warn: repair.as_deref(),
                         via_assistant: item.via_assistant,
                         suppressed: item.suppressed,
+                        under_defined: item.under_defined,
+                        badge: true,
                         drop_above: dragging.is_some_and(|d| d != item.id)
                             && pointer_pos.is_some_and(|p| {
                                 let r = Rect::from_min_size(pos2(0.0, last_bottom), vec2(10_000.0, theme::ROW_HEIGHT));
@@ -352,6 +364,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     },
                 );
                 tree_visibility::eye(ui, state, resp.rect, ViewItem::Feature(item.id), &item.name);
+                if let Some(feature) = state.doc.feature(item.id) {
+                    proof_badge(ui, state, feature, resp.rect);
+                }
                 resp
             };
             last_bottom = resp.rect.bottom();
@@ -495,6 +510,9 @@ fn rollback_bar(
         CornerRadius::same(3),
         color,
     );
+    if resp.has_focus() {
+        ui.painter().rect_stroke(rect, CornerRadius::same(3), Stroke::new(2.0, theme::ink()), StrokeKind::Inside);
+    }
     if resp.hovered() || resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
@@ -530,6 +548,10 @@ pub(crate) struct RowSpec<'a> {
     pub(crate) warn: Option<&'a str>,
     pub(crate) via_assistant: bool,
     pub(crate) suppressed: bool,
+    /// A sketch that is not fully defined: its name reads `(-) Name`, as in SolidWorks.
+    pub(crate) under_defined: bool,
+    /// Keeps room before the eye for the feature's proof mark (see [`proof_badge`]).
+    pub(crate) badge: bool,
     pub(crate) drop_above: bool,
 }
 
@@ -549,6 +571,8 @@ impl RowSpec<'static> {
             warn: None,
             via_assistant: false,
             suppressed: false,
+            under_defined: false,
+            badge: false,
             drop_above: false,
         }
     }
@@ -576,6 +600,10 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     }
     if spec.drop_above {
         painter.hline(inner.x_range(), inner.top() + 0.5, Stroke::new(2.0, theme::accent()));
+    }
+    // Keyboard focus is a ring in the ink colour, apart from the selection fill.
+    if resp.has_focus() {
+        painter.rect_stroke(inner, CornerRadius::same(5), Stroke::new(2.0, theme::ink()), StrokeKind::Inside);
     }
     let x0 = rect.left() + 10.0 + spec.indent as f32 * 20.0;
     let ink = if spec.selected {
@@ -610,7 +638,8 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
         icon_color,
     );
     let font = if dim { theme::font(12.0) } else { theme::font(12.5) };
-    let name_rect = painter.text(pos2(x0 + 35.0, rect.center().y), Align2::LEFT_CENTER, spec.name, font, ink);
+    let caption = if spec.under_defined { format!("(-) {}", spec.name) } else { spec.name.to_owned() };
+    let name_rect = painter.text(pos2(x0 + 35.0, rect.center().y), Align2::LEFT_CENTER, caption, font, ink);
     let mut after = name_rect.right() + 6.0;
     if spec.suppressed {
         icons::paint(
@@ -631,8 +660,9 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     }
     if !spec.sub.is_empty() {
         let eye = if spec.shown.is_some() { crate::tree_visibility::EYE_WIDTH } else { 0.0 };
+        let badge = if spec.badge { BADGE_WIDTH } else { 0.0 };
         painter.text(
-            pos2(inner.right() - 8.0 - eye, rect.center().y),
+            pos2(inner.right() - 8.0 - eye - badge, rect.center().y),
             Align2::RIGHT_CENTER,
             spec.sub,
             theme::font(11.0),
@@ -655,7 +685,124 @@ pub(crate) fn row(ui: &mut egui::Ui, spec: RowSpec<'_>) -> egui::Response {
     resp
 }
 
-/// The same feature icon in the tree and timeline.
+/// The room a row keeps for the proof mark, between its summary and its eye.
+const BADGE_WIDTH: f32 = 12.0;
+
+/// Whether `feature` is a sketch that is not fully defined, reading the open sketch
+/// session when the feature is the one being edited.
+fn under_defined(state: &AppState, feature: &Feature) -> bool {
+    let status = state
+        .sketch
+        .as_ref()
+        .filter(|s| s.feature == feature.id)
+        .map(|s| &s.sketch.status)
+        .or_else(|| feature.sketch().map(|s| &s.sketch.status));
+    matches!(status, Some(crate::sketch::SolveStatus::UnderDefined))
+}
+
+/// The mark before a feature row's eye: whether export can trust the feature. A green
+/// dot is proved, an open amber ring is pending, a red cross is refused, a diamond is
+/// answered within a stated bound, and a grey ring is inactive. Hover gives the reason.
+fn proof_badge(ui: &mut egui::Ui, state: &AppState, feature: &Feature, row: Rect) {
+    let id = feature.id;
+    let (label, reason) = if let Some(drag) = state.drag_preview.as_ref().filter(|drag| drag.feature() == id) {
+        let (reason, failed) = drag.label();
+        let label = if failed {
+            "Refused"
+        } else if drag.proved_request().is_some() && !drag.pending() {
+            "Proved"
+        } else {
+            "Pending"
+        };
+        if let Some(bound) = drag.display_bound() {
+            (
+                crate::document::WITHIN_BOUND_LABEL,
+                format!(
+                    "Measured display deviation: {} mm\nRule limit: {} mm\n{}",
+                    bound.measured_mm, bound.level_mm, bound.method
+                ),
+            )
+        } else {
+            (label, crate::geometry_message::for_user(&reason))
+        }
+    } else if let Some(editor) = state.editor.as_ref().filter(|editor| editor.target == Some(id)) {
+        match &editor.error {
+            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+        }
+    } else if state.sketch.as_ref().is_some_and(|sketch| sketch.feature == id) {
+        ("Pending", "Finish or cancel this sketch edit before exporting.".into())
+    } else if let Some(form) = state.doc.combine_form.as_ref().filter(|form| form.editing == Some(id)) {
+        match &form.error {
+            Some(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            None => ("Pending", "Finish or cancel this feature edit. Its preview cannot export.".into()),
+        }
+    } else if let Some(soliddraft_model::FeatureStatus::Blocked(input)) =
+        state.doc.model().status(soliddraft_model::FeatureId(id as u32))
+        && !matches!(feature.status, FeatureStatus::Inactive)
+    {
+        let name = state.doc.feature(u64::from(input.0)).map_or("an earlier feature", |feature| feature.name.as_str());
+        ("Pending", format!("Waiting for {name} to build. Repair that feature before exporting."))
+    } else {
+        match &feature.status {
+            FeatureStatus::Ok => ("Proved", "The current feature is proved.".to_owned()),
+            FeatureStatus::AnsweredWithinBound(bound) => (crate::document::WITHIN_BOUND_LABEL, bound.description()),
+            FeatureStatus::Pending => {
+                ("Pending", "The current edit is waiting for proof. Export waits for proof.".to_owned())
+            }
+            FeatureStatus::Error(reason) => ("Refused", crate::geometry_message::for_user(reason)),
+            FeatureStatus::NeedsRepair(_) => {
+                ("Refused", "A reference is missing. Choose Repair to replace it.".to_owned())
+            }
+            FeatureStatus::Inactive => ("Inactive", "This feature is suppressed or past the rollback bar.".to_owned()),
+        }
+    };
+    let color = match label {
+        "Proved" => theme::ok(),
+        "Pending" => theme::warn(),
+        "Refused" => theme::error(),
+        crate::document::WITHIN_BOUND_LABEL => theme::bounded(),
+        _ => theme::muted(),
+    };
+    let centre = pos2(row.right() - 4.0 - tree_visibility::EYE_WIDTH - BADGE_WIDTH / 2.0, row.center().y);
+    if ui.is_rect_visible(Rect::from_center_size(centre, vec2(8.0, 8.0))) {
+        let painter = ui.painter();
+        if label == crate::document::WITHIN_BOUND_LABEL {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    centre + vec2(0.0, -4.0),
+                    centre + vec2(4.0, 0.0),
+                    centre + vec2(0.0, 4.0),
+                    centre + vec2(-4.0, 0.0),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+        } else if label == "Refused" {
+            for sign in [-1.0, 1.0] {
+                painter.line_segment(
+                    [centre + vec2(-3.0, -3.0 * sign), centre + vec2(3.0, 3.0 * sign)],
+                    Stroke::new(1.5, color),
+                );
+            }
+        } else if label == "Proved" {
+            painter.circle_filled(centre, 3.0, color);
+        } else {
+            painter.circle_stroke(centre, 3.0, Stroke::new(1.5, color));
+        }
+    }
+    let response = ui.interact(
+        Rect::from_center_size(centre, vec2(BADGE_WIDTH, theme::ROW_HEIGHT - 6.0)),
+        ui.id().with(("proof", id)),
+        Sense::hover(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} proof: {label}", feature.name))
+    });
+    response.on_hover_text(format!("{label}: {reason}"));
+}
+
+/// The icon of a feature's kind, in its tree row.
 pub(crate) fn feature_icon(kind: &FeatureKind) -> Icon {
     match kind {
         FeatureKind::ReferencePlane(_) => Icon::Plane,

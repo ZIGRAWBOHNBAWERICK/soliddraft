@@ -14,7 +14,7 @@ use crate::viewport::render::DisplayMode;
 use egui::{Align2, CornerRadius, Key, Rect, Sense, pos2, vec2};
 
 use super::workspace::SolidDraftApp;
-use docks::{Panels, show_dock, strip};
+use docks::{pane, strip};
 
 impl SolidDraftApp {
     /// Runs the commands whose shortcuts were pressed, as the command registry binds
@@ -199,22 +199,11 @@ impl SolidDraftApp {
         };
         let mut shown = self.state.tree_shown();
         let mut open_requested = false;
-        let dock = &mut self.tree_dock;
-        if std::mem::take(&mut self.state.values.tree_focus)
-            && let Some(at) = dock.find_tab(&docks::Tab::Tree)
-        {
-            let _ = dock.set_active_tab(at);
-        }
-        if std::mem::take(&mut self.state.values.focus)
-            && let Some(at) = dock.find_tab(&docks::Tab::Values)
-        {
-            let _ = dock.set_active_tab(at);
-        }
-        let mut panels = Panels { state: &mut self.state };
+        let state = &mut self.state;
         egui::Panel::show_switched(root, &mut shown, collapsed, expanded, |ui, expanded| {
             if expanded {
-                show_dock(ui, dock, side.panel_id().with("dock"), &mut panels);
-            } else if strip(ui, side, title, &panels.state.shortcuts) {
+                pane(ui, state);
+            } else if strip(ui, side, title, &state.shortcuts) {
                 open_requested = true;
             }
         });
@@ -648,8 +637,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         ui.separator();
 
         if ui.button("Tree").clicked() {
-            st.show_tree(true);
-            st.values.tree_focus = true;
+            st.show_pane(crate::panels::Pane::Tree);
             ui.close();
         }
         if ui.button("Values").clicked() {

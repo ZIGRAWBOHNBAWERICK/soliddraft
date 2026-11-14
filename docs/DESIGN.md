@@ -15,24 +15,27 @@ work belongs behind `edit_suite` until the release switches the default.
 One frame holds parts, assemblies and drawings. At the 1440 by 900 reference size,
 the title bar is 34 px tall. A 40 px icon strip runs down the window's left edge
 below it. The options bar, 46 px tall, starts right of the strip, and the tool
-palette is 250 px wide beside the strip. The viewport fills the remaining space. A
-58 px timeline sits above a 30 px command line at the bottom, both to the right of
-the palette. These measurements exclude the prototype's guide strip, which is review
-furniture.
+palette is 250 px wide beside the strip. The side area, when shown, sits between the
+palette and the viewport. The viewport fills the remaining space down to a 30 px
+command line at the bottom, right of the palette. There is no history strip: the
+feature tree is the part's history. These measurements exclude the prototype's guide
+strip, which is review furniture.
 
 The title bar holds menus at the left and the open document's name at the right.
 Below 1280 points wide, Menu groups the menus. It has no search field.
 
-The icon strip holds the document's workspaces, one icon each, top to bottom. Hovering
-an icon names it, and the active one is marked. The part's strip keeps the stable
-Solid, Sketch, Assembly, Inspect and View ids and drives the palette without a tab
-row. There is no Surface workspace.
+The icon strip starts with the side area's panes: the feature tree first, then
+Values. A short line divides them from the document's workspaces, one icon each, top
+to bottom. Hovering an icon names it, and the active ones are marked. A pane icon
+shows its pane in the side area; clicking the icon of the pane already shown hides
+the area. The part's strip keeps the stable Solid, Sketch, Assembly, Inspect and View
+ids and drives the palette without a tab row. There is no Surface workspace.
 
-| Document | Workspaces | Bottom strip | Tree and Values pane |
-|---|---|---|---|
-| Part | Solid, Sketch, Assembly, Inspect, View | Feature history | Hidden by default |
-| Assembly | Assembly, Inspect, View | Components and mates | Open by default |
-| Drawing | Views, Annotate, Sheet, View | Sheets and the active sheet's views | Open by default |
+| Document | Workspaces | Side area |
+|---|---|---|
+| Part | Solid, Sketch, Assembly, Inspect, View | Feature tree, open by default |
+| Assembly | Assembly, Inspect, View | Assembly tree, open by default |
+| Drawing | Views, Annotate, Sheet, View | Drawing tree, open by default |
 
 The palette exposes named commands in two columns. Every tool remains reachable by
 scrolling at shorter window heights. Keep the name visible beside its icon. Smart
@@ -58,10 +61,11 @@ plane picking. Start sketch offers the three origin planes in the viewport and o
 the bar, and accepts a flat face. Choosing a sketch tool outside a sketch first
 asks for its plane and then arms that tool.
 
-Tree and Values share a 236 px pane between the palette and viewport. Open it from
-the View workspace, View menu or Tree button beside the timeline. There is no
-separate Properties pane in Edit Suite. The tree holds structure, origin planes,
-visibility and the Material row. Values holds named inputs and expressions.
+The tree and Values share one side area between the palette and viewport, with no
+tab row: the strip's tree and Values icons choose which one it shows. F9, the View
+workspace and the View menu also show or hide it. There is no separate Properties
+pane in Edit Suite. The tree holds structure, origin planes, visibility, the Material
+row and the rollback bar. Values holds named inputs and expressions.
 
 ## Theme tokens
 
@@ -116,7 +120,7 @@ Use `theme::mono` for entered values, measurements and the command prompt.
 | Numeric value and prompt | `VALUE_SIZE`, 12 px |
 | Palette group caption | `GROUP_LABEL_SIZE`, 9 px |
 
-The frame constants in `edit_suite` name title, options, palette, pane, timeline and
+The frame constants in `edit_suite` name title, options, palette, pane and
 command-line dimensions. `TOOL_HEIGHT` is 23 px, `ROW_HEIGHT` is 25 px and
 `CONTROL_HEIGHT` is 28 px. `ICON_SIZE` is 16 px. Palette columns have a 2 px gap,
 tools have 5 px horizontal padding, and options groups have a 12 px gap. Allow a
@@ -196,12 +200,14 @@ A face offers Face, Feature and Body columns; an edge offers Edge, Feature and B
 The menu follows the picked context and stays inside the window near an edge.
 It uses the same charcoal, amber, text and popup tokens as the rest of the frame.
 
-The timeline is history. Clicking a chip selects; double-clicking edits;
-right-clicking opens its context menu. Clicking between chips moves the rollback
-marker and displays that history position. An under-defined sketch carries a
-`(-)` prefix. Suppression, missing references and failed or pending proofs retain
-text explanations alongside their status marks. Visibility choices remain saved
-with the document.
+The feature tree is history. Clicking a row selects; double-clicking edits;
+right-clicking opens its context menu, which includes Roll back to here. Dragging a
+row reorders it. Dragging the rollback bar between rows displays that history
+position, and double-clicking the bar restores every feature. An under-defined
+sketch carries a `(-)` prefix. A mark before each feature's eye says whether it is
+proved, pending, refused or answered within a stated bound, and hovering it gives
+the reason. Suppression and missing references retain text explanations alongside
+their status marks. Visibility choices remain saved with the document.
 
 ## Command line and assistant
 
@@ -210,7 +216,7 @@ completes commands, Up and Down recall history, and a typed command runs the sam
 registry action as its button. Status details remain available when the line is
 short of room.
 
-Typing `ai` opens a session above the timeline. Its dark console uses the terminal
+Typing `ai` opens a session above the command line. Its dark console uses the terminal
 tokens. Preview, Apply, Discard and Undo retain their existing proposal semantics.
 After 30 seconds idle the session folds into an `ai · 1 turn` chip; its countdown
 stays visible. There is no docked Assistant pane or drawing Assistant workspace.

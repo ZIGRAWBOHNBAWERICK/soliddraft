@@ -1,4 +1,5 @@
-//! The Values tab, beside the feature tree in the same panel.
+//! The Values pane, shown in the side area in place of the feature tree by the Values
+//! icon of the left strip.
 //!
 //! Globals come first, then every number typed into a feature, grouped by feature in
 //! tree order, with a column per configuration. A cell takes a number, a name or a
@@ -61,9 +62,6 @@ pub enum ValuesAction {
 /// The tab's session state. Document truth stays in the part.
 #[derive(Clone, Debug, Default)]
 pub struct ValuesTab {
-    /// Set to bring the tab forward on the next frame.
-    pub focus: bool,
-    pub tree_focus: bool,
     table: Option<(u64, ValuesTable)>,
     /// Typed text not yet applied, or refused.
     drafts: BTreeMap<Field, String>,
@@ -508,10 +506,7 @@ fn draft(state: &AppState, key: &Field) -> String {
 /// Runs what the tab asked for.
 pub fn apply(state: &mut AppState, action: ValuesAction) {
     match action {
-        ValuesAction::Show => {
-            state.values.focus = true;
-            state.show_tree(true);
-        }
+        ValuesAction::Show => state.show_pane(crate::panels::Pane::Values),
         ValuesAction::Commit(key, text) => commit(state, key, text),
         ValuesAction::RemoveGlobal(name) => {
             run(state, Field::Name(name.clone()), Command::RemoveValue { name });

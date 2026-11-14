@@ -18,7 +18,7 @@ fn old_and_current_frame_settings_open_edit_suite_and_the_command_palette() {
         std::fs::write(config.join("settings.json"), format!(r#"{{"frame_layout":"{setting}"}}"#)).unwrap();
         let mut app = ribbon::app(ribbon::plate());
         case.run(&mut app, |app| {
-            assert!(!app.state().state.tree_shown());
+            assert!(app.state().state.tree_shown(), "{setting}: the part's tree starts shown");
             let palette = &theme::edit_suite::PALETTE;
             assert_eq!(theme::palette(), palette, "{setting}: startup installs the frame's tokens");
             assert_eq!(app.ctx.global_style().visuals.panel_fill, palette.panel);
@@ -57,7 +57,7 @@ fn left_bar_workspaces_select_the_palette_and_leave_the_title_bar() {
             app.run_steps(8);
             case.run(&mut app, |app| {
                 let title = Rect::from_min_max(pos2(0.0, 0.0), pos2(width, theme::MENU_HEIGHT));
-                let bar = left_bar(app);
+                let bar = ribbon::left_bar(app);
                 assert_eq!(bar.left(), 0.0, "the strip is at the window's left edge");
                 assert_eq!(bar.top(), title.bottom(), "the strip starts below the title");
                 assert_eq!(bar.width(), left_bar::WIDTH);
@@ -138,7 +138,7 @@ fn a_locked_left_bar_icon_says_why() {
     case.run(&mut app, |app| {
         ribbon::until(app, "the sketch opens", |app| app.state().state.in_sketch());
         app.run_steps(8);
-        let bar = left_bar(app);
+        let bar = ribbon::left_bar(app);
         assert!(ribbon::control(app, "Sketch tab", bar).selected);
         let solid = ribbon::control(app, "Solid tab", bar);
         assert!(!solid.enabled);
@@ -146,10 +146,6 @@ fn a_locked_left_bar_icon_says_why() {
         assert_eq!(ribbon::tooltip(app, ribbon::control(app, "Sketch tab", bar).rect), "Sketch");
         case.frame(app, "sketch-locked");
     });
-}
-
-fn left_bar(app: &ribbon::App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("left_bar")).expect("the left bar is laid out").outer_rect
 }
 
 fn suite_palette(app: &ribbon::App) -> Rect {
@@ -178,7 +174,7 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
     case.run(&mut app, |app| {
         assert!(app.state().state.assembly.is_active());
         assert!(app.state().state.tree_shown(), "assembly tree starts open");
-        assert!(!ribbon::painted(app).iter().any(|text| text.text == "History"), "the part timeline is absent");
+        assert!(!ribbon::painted(app).iter().any(|text| text.text == "History"), "no history strip is painted");
         assert!(app.query_all_by_label("Properties").next().is_none(), "assembly editors live on the options bar");
         assert_eq!(
             app.state().state.workspaces().iter().map(|tab| tab.id()).collect::<Vec<_>>(),
@@ -201,13 +197,13 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         assert!(app.state().state.command_line.session_open, "Mate leaves the command line's Enter key alone");
         app.state_mut().state.command_line.close_session();
         app.run_steps(8);
-        let inspect = ribbon::control(app, "Inspect tab", left_bar(app)).rect;
+        let inspect = ribbon::control(app, "Inspect tab", ribbon::left_bar(app)).rect;
         ribbon::click_at(app, inspect.center());
         app.run_steps(8);
         click_suite(app, "Interference");
         assert!(app.state().state.assembly.interference.open);
         let part_camera = app.state().state.viewport.camera.direction();
-        let view = ribbon::control(app, "View tab", left_bar(app)).rect;
+        let view = ribbon::control(app, "View tab", ribbon::left_bar(app)).rect;
         ribbon::click_at(app, view.center());
         app.run_steps(8);
         click_suite(app, "Graphite");
@@ -226,11 +222,11 @@ fn assembly_workspaces_route_named_tools_and_keep_the_part_camera() {
         assert_eq!(app.state().state.workspaces().len(), 5);
         app.state_mut().state.push(AppAction::Assembly(AssemblyAction::Show));
         app.run_steps(8);
-        assert!(ribbon::control(app, "View tab", left_bar(app)).selected);
+        assert!(ribbon::control(app, "View tab", ribbon::left_bar(app)).selected);
         app.set_size(vec2(960.0, 700.0));
         app.run_steps(8);
         assert!(app.state().state.active_viewport().rect.width() >= 300.0);
-        let assembly_tab = ribbon::control(app, "Assembly tab", left_bar(app)).rect;
+        let assembly_tab = ribbon::control(app, "Assembly tab", ribbon::left_bar(app)).rect;
         ribbon::click_at(app, assembly_tab.center());
         app.run_steps(8);
         click_suite(app, "Mate");
@@ -269,7 +265,7 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
     case.run(&mut app, |app| {
         assert!(app.state().state.drawing.is_active());
         assert!(app.state().state.tree_shown(), "drawing tree starts open");
-        assert!(!ribbon::painted(app).iter().any(|text| text.text == "History"), "the part timeline is absent");
+        assert!(!ribbon::painted(app).iter().any(|text| text.text == "History"), "no history strip is painted");
         assert!(app.query_all_by_label("Properties").next().is_none(), "drawing editors live on the options bar");
         assert_eq!(
             app.state().state.workspaces().iter().map(|tab| tab.id()).collect::<Vec<_>>(),
@@ -279,17 +275,17 @@ fn drawing_has_four_workspaces_and_asks_for_help_on_the_ai_line() {
         for (workspace, command) in
             [("Views", "Standard views"), ("Annotate", "Smart dimension"), ("Sheet", "Add sheet"), ("View", "Fit")]
         {
-            let tab = ribbon::control(app, &format!("{workspace} tab"), left_bar(app)).rect;
+            let tab = ribbon::control(app, &format!("{workspace} tab"), ribbon::left_bar(app)).rect;
             ribbon::click_at(app, tab.center());
             app.run_steps(8);
             ribbon::control(app, command, suite_palette(app));
             assert!(!ribbon::painted_in(app, suite_palette(app)).iter().any(|text| text.text == "Assistant"));
         }
-        let views = ribbon::control(app, "Views tab", left_bar(app)).rect;
+        let views = ribbon::control(app, "Views tab", ribbon::left_bar(app)).rect;
         ribbon::click_at(app, views.center());
         app.run_steps(8);
         case.frame(app, "drawing-views");
-        let sheet = ribbon::control(app, "Sheet tab", left_bar(app)).rect;
+        let sheet = ribbon::control(app, "Sheet tab", ribbon::left_bar(app)).rect;
         ribbon::click_at(app, sheet.center());
         app.run_steps(8);
         let before = app.state().state.drawing.session.as_ref().unwrap().doc.drawing.sheets.len();

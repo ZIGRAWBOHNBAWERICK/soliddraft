@@ -1089,7 +1089,6 @@ pub struct AppState {
     /// Bumped when File locations are saved, so cached lookups refresh.
     pub locations_epoch: u64,
     pub rename: Option<Rename>,
-    pub timeline: crate::timeline::State,
     /// The tree row being dragged for reordering.
     pub drag_feature: Option<FeatureId>,
     /// The feature dimension being dragged, with its previews.
@@ -1110,7 +1109,7 @@ pub struct AppState {
     pub(crate) tool_document: Option<crate::app::Tab>,
     /// Previews of candidate configuration tables.
     pub grid: crate::grid::preview::GridState,
-    /// The Values tab beside the feature tree.
+    /// The Values pane's drafts and refusals.
     pub values: crate::values_tab::ValuesTab,
     /// Whether the side area is shown and how wide it is.
     pub layout: crate::panels::Layout,
@@ -1153,6 +1152,27 @@ impl AppState {
             self.layout.suite.drawing = shown;
         } else {
             self.layout.suite.part = shown;
+        }
+    }
+
+    /// Whether the side area is shown with `pane` in it.
+    pub fn pane_shown(&self, pane: crate::panels::Pane) -> bool {
+        self.tree_shown() && self.layout.pane == pane
+    }
+
+    /// Shows the side area with `pane` in it.
+    pub fn show_pane(&mut self, pane: crate::panels::Pane) {
+        self.layout.pane = pane;
+        self.show_tree(true);
+    }
+
+    /// What clicking the strip icon of `pane` does: it hides the side area when that pane
+    /// already shows there, and shows the pane otherwise.
+    pub fn toggle_pane(&mut self, pane: crate::panels::Pane) {
+        if self.pane_shown(pane) {
+            self.show_tree(false);
+        } else {
+            self.show_pane(pane);
         }
     }
 
@@ -1257,7 +1277,6 @@ impl AppState {
             locations_dialog: None,
             locations_epoch: 0,
             rename: None,
-            timeline: Default::default(),
             drag_feature: None,
             drag_preview: None,
             dimension_edit: None,

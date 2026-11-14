@@ -384,15 +384,6 @@ pub fn options_region(app: &App) -> Rect {
     found.into_iter().min_by(|a, b| a.area().total_cmp(&b.area())).expect("the options sheet is painted")
 }
 
-/// Closes the options panel with its own button, so clicks reach the geometry under it.
-pub fn close_options(app: &mut App) {
-    if app.state().state.options_details {
-        app.get_by_label("Close options").click();
-        app.run_steps(8);
-    }
-    assert!(!app.state().state.options_details, "the options panel closes");
-}
-
 pub fn click_option(app: &mut App, label: &str) {
     if app.query_all_by_label(label).next().is_none() && app.query_by_value(label).is_none() {
         open_options(app);

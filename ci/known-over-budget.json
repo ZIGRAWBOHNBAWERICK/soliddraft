@@ -1,6 +1,6 @@
 {
   "format": "soliddraft-known-over-budget/1",
-  "follow_up": "https://github.com/BohnBawerick/soliddraft/issues/27",
+  "follow_up": "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/issues/27",
   "comment": "Legacy timing inventory. Wall-clock budgets and the former 120 percent regression limits are advisory under the 30 October policy; work caps remain hard. The six retained entries keep their original recorded times. References and original bracket records use the local work-PC baseline identified below; drawing step 24 retains its hosted release record from https://github.com/BohnBawerick/soliddraft/actions/runs/40823628229, and bracket steps 35 and 43 retain their captain-approved first records from https://github.com/BohnBawerick/soliddraft/actions/runs/41008941098. Ten entries were removed using sample 1 of https://github.com/BohnBawerick/soliddraft/actions/runs/41036690172; each was below 1000 ms raw and 900 ms after slow-class projection.",
   "measured_run": "https://github.com/BohnBawerick/soliddraft/actions/runs/40167997912",
   "measured_on": "local work-PC Linux x64 runner, ci-linux-local",

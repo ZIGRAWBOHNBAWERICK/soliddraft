@@ -271,7 +271,7 @@ def load_known_over_budget(path):
 
 
 # Listed steps record where faster booleans when rebuilding after an edit are still owed:
-# https://github.com/BohnBawerick/soliddraft/issues/27.
+# https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/issues/27.
 # A step over its budget, a listed step over 120% of its recorded time and a listing that
 # no longer matches its step are each a warning; none fails the run.
 def accept_latency(scenario, number, tool, latency, known):

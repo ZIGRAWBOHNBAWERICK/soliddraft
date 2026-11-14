@@ -34,6 +34,7 @@ pub mod interference;
 pub mod journal;
 #[cfg(target_arch = "wasm32")]
 pub mod journal_browser;
+pub mod left_bar;
 pub mod locations;
 mod loft_panel;
 pub mod mates;

@@ -352,6 +352,8 @@ fn feature_checks_refresh_after_native_edits_undo_redo_and_reset_after_reopen() 
     assert!(ribbon::painted(&app).iter().any(|p| p.text == "Boss extrude needs a closed region."));
     let open = session(&app).sketch.clone();
     frame(&mut app, "preflight-open");
+    // The open panel covers the end of Line 1; Refresh diagnostics opens it again.
+    ribbon::close_options(&mut app);
     app.key_press(Key::L);
     app.run_steps(6);
     for p in [P2::new(10.0, 0.0), P2::new(0.0, 10.0)] {

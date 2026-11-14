@@ -140,6 +140,8 @@ fn small_kept_circles_have_visible_construction_dashes() {
     let target = sketch.add(EntityKind::Circle { center: P2::new(5.0, 5.0), radius: 2.0 }, false);
     let (mut app, _) = launch(sketch);
     option(&mut app, "Keep trimmed pieces as construction");
+    // The open panel covers the circle's right side.
+    ribbon::close_options(&mut app);
     let at = screen(&app, P2::new(7.0, 5.0));
     ribbon::click_at(&mut app, at);
     assert!(session(&app).sketch.entity(target).unwrap().construction);

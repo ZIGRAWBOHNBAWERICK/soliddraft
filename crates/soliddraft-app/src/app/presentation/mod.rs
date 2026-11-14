@@ -4,7 +4,6 @@ pub(super) mod docks;
 
 use crate::command_line::{Status, StatusNote};
 use crate::commands;
-use crate::file;
 use crate::icons::{self, Icon};
 use crate::panels::{self, Side};
 use crate::state::{AppAction, AppState, EditorParams, NoteKind};
@@ -697,7 +696,8 @@ fn workspace_switch(ui: &mut egui::Ui, st: &mut AppState) {
     if let Some(sketch) = st.sketch.as_ref().filter(|_| !st.drawing.is_active() && !st.assembly.is_active()) {
         st.ribbon_tab = crate::state::RibbonTab::Sketch;
         let name = st.doc.feature(sketch.feature).map_or("Sketch", |feature| feature.name.as_str());
-        let label = format!("{name} on the {}", sketch.plane.label());
+        let plane = st.doc.sketch_of(sketch.feature).map_or_else(|| "plane".into(), |s| s.plane.label());
+        let label = format!("{name} on the {plane}");
         let galley = ui.painter().layout_no_wrap(label.clone(), theme::font_semibold(12.5), theme::error());
         let width = galley.size().x + 48.0;
         ui.add_space((ui.max_rect().center().x - width / 2.0 - ui.cursor().left()).max(8.0));

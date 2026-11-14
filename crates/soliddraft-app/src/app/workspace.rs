@@ -487,7 +487,7 @@ impl SolidDraftApp {
                 crate::start_page::show(ui, &mut self.state);
             } else {
                 let mut panels = Panels { state: &mut self.state };
-                show_document(ui, &self.dock, &mut panels);
+                show_document(ui, &mut self.dock, &mut panels);
             }
         });
     }

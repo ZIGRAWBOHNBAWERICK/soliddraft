@@ -125,7 +125,7 @@ pub(in crate::app) fn document_tabs(ui: &mut egui::Ui, state: &mut AppState, doc
     }
 }
 
-pub(in crate::app) fn show_document(ui: &mut egui::Ui, dock: &DockState<Tab>, panels: &mut Panels<'_>) {
+pub(in crate::app) fn show_document(ui: &mut egui::Ui, dock: &mut DockState<Tab>, panels: &mut Panels<'_>) {
     let mut active = dock.find_active_focused().map(|(_, tab)| *tab).unwrap_or(Tab::Viewport);
     ui.push_id(("document", active.title()), |ui| panels.ui(ui, &mut active));
 }

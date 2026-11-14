@@ -43,3 +43,11 @@ fn field_hints_remain_readable() {
         assert_eq!(style.visuals.extreme_bg_color, PALETTE.field_bg);
     }
 }
+
+#[test]
+fn workspace_and_sketch_banner_text_meet_aa() {
+    use soliddraft_app::theme::edit_suite::{WORKSPACE_BG, WORKSPACE_SELECTED};
+    assert!(contrast(PALETTE.ink, WORKSPACE_SELECTED) >= 4.5);
+    assert!(contrast(PALETTE.muted, WORKSPACE_BG) >= 4.5);
+    assert!(contrast(PALETTE.error, WORKSPACE_BG) >= 4.5);
+}

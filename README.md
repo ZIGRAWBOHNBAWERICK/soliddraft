@@ -1,141 +1,49 @@
 # SolidDraft
 
-A parametric CAD application written in Rust, free for everyone, for ever.
+Free, open-source parametric CAD for mechanical parts. It runs on your desktop and in your browser, on [Catallax](https://kernel.zigrawbohnbawerick.org/), an exact geometry kernel written in Rust.
 
-**Status:** SolidDraft is not released for download yet. A release with the features below is coming soon. For now it is research grade only.
+We support free markets and reject intellectual property. Copying a program does not deprive anyone of their copy. Geometry is mathematics, and a CAD tool should not need permission from a closed kernel's owner to exist. SolidDraft and Catallax are one project in two repositories, free to use, change and share.
 
-## Why this is free
-
-Nearly every commercial CAD program you can buy runs on one of a handful of closed geometry kernels. Parasolid, ACIS, CGM and a few others sit under SolidWorks, Inventor, Fusion, NX, CATIA and most of the rest. Their owners licence them, meter them and can withdraw them. The maths inside is a century old and the algorithms are published. What is closed is the code, and the code is kept closed by law.
-
-That law is not property. Property exists because things are scarce. If you take my lathe, I no longer have a lathe. If you copy my kernel, I still have my kernel, and now you have one too. Ideas, formulas and programs are not scarce in that sense, so the "intellectual property" over them has to be manufactured by the state: a grant that forbids you from arranging your own bits in a pattern someone else arranged first. Murray Rothbard said it of patents in 1962: "Patents, therefore, are grants of exclusive monopoly privilege by the State" (Man, Economy, and State, ch. 10, sec. 7, Mises Institute edition, https://mises.org/online-book/man-economy-and-state-power-and-market/10-monopoly-and-competition/7-patents-and-copyrights). Rothbard kept copyright as a kind of contract. Stephan Kinsella took the argument the rest of the way: "Ideas are not naturally scarce" (Against Intellectual Property, Journal of Libertarian Studies 15:2, 2001, "Scarcity and Ideas"). We stand with that reading.
-
-Apply it to CAD. Geometry is mathematics and belongs to everyone. A B-rep kernel is a set of theorems with a type system around them. There is no good reason the ground every CAD tool stands on should be owned by three companies and rented to everyone else. A public kernel is the ground a free market in CAD tools can grow on: small vendors, scripts, plug-ins and one-person products that do not have to ask anyone's permission to exist. Closed kernels did not make CAD good. They made it expensive and slow to change.
-
-So this app is public. Free to use, change and share, for good.
-
-## What we are attempting
-
-SolidDraft and Catallax are an attempt to put the strongest AI reasoning available to work on CAD: better modelling tools and a geometry kernel that anyone can study, build and improve. Almost all of the code is written by AI coding agents, directed and reviewed by a human. Whether that approach works at the scale CAD demands is the open question. We will find out in public.
-
-## About the licence
-
-An honest objection: an open-source licence is itself a copyright instrument. You cannot refuse copyright. It attaches to code the moment it is written, whether the author wants it or not. The only way to hand it back is a licence or a waiver, and that document borrows the state's rule to undo the state's rule. We accept that. The licence here does not exist to exclude anyone. It gives away, in writing, every right the law handed us by default, and keeps one thing, the author's name on the work.
-
-Licensed under MIT. The licence is used for one purpose only: to keep the credit line below attached to copies of this work.
-
-Credit: SolidDraft was started by Zigrawbohnbawerick Pty Ltd. Keep that line if you copy it.
-
-Check out my other products at [ZigrawBohnBawerick](https://zigrawbohnbawerick.org/).
-
-## Sponsorship
-
-Help fund SolidDraft and Catallax through [GitHub Sponsors](https://github.com/sponsors/BohnBawerick) or [Ko-fi](https://ko-fi.com/pedropaiva56920). Both support the same project, started by Zigrawbohnbawerick Pty Ltd.
-
-## What it is
-
-A desktop CAD app with workspaces in the title bar, tools on the left, an options bar for the active tool, a 3D viewport, and feature history above the command line. The command line also opens an AI assistant session.
-
-SolidDraft is built for [Catallax](https://github.com/BohnBawerick/catallax) and will run only on it. They are one project in two repositories: SolidDraft is the CAD application and Catallax is its kernel. The desktop, browser and command-line application run on Catallax. See the [project website](https://kernel.zigrawbohnbawerick.org/) and the [roadmap](docs/roadmap.md).
-
-![SolidDraft Edit Suite with the demo part](docs/screenshots/soliddraft.png)
+[Open in the browser](https://zigrawbohnbawerick.github.io/soliddraft/app/) · [Download for the desktop](https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/releases) · [Website](https://zigrawbohnbawerick.github.io/soliddraft/)
 
 ## What works today
 
-Work in progress. SolidDraft runs only on Catallax. See [the backend gaps](docs/needs-catallax.md) for the limits of the current application entry.
+SolidDraft is alpha software. Keep backups of your documents. The 0.5.0 release includes:
 
-- The Edit Suite desktop app, with its tool palette, options bar, optional feature tree, history, command line, assistant session and wgpu viewport.
-- Inspect > Section and the navigation bar's Section view cut the display on XY, YZ, ZX or a planar face. Drag Offset to move the cut, use Flip side to switch the retained half, and Close section to restore the whole view. The cap preserves openings, and saving and exporting keep the whole part.
-- Desktop depth, fillet-radius and chamfer-distance edits separate construction display from exact proof. Supported construction charts produce selectable provisional faces before proof finishes; one drag is one undo step. Pending or failed input cannot export, and a failed edit restores the whole last proved part while its feature stays red with a reason.
-- Sketching on a plane or a planar face with line, rectangle, circle, arc and slot tools, with relations and dimensions. The Modify group adds polygon, trim and extend by pointer with a live preview. Offset, mirror and linear and circular patterns copy the selection, with distance, axis, step and centre placed by pointer or typed in the property panel.
-- Extrudes and cuts, blind, through all, up to the next boundary or up to a planar face; rational-frame revolves through the kernel and recipe runner. Parts can hold several bodies. New body starts a separate solid, selection chooses the body for later features, and Combine unions, subtracts or intersects two bodies. Persistent references, undo and redo, feature tree editing and part files work.
-- Sweeps of closed polygon profiles along chains of straight lines and quarter, half and three-quarter arcs, or one rational spline, with the path in the property panel, editing, undo, save and reopen. The profile keeps its direction along lines or a spline, or turns with the path along lines and arcs. This is in the feature batch after 0.2.0. Other path motions and curved profiles remain unavailable; loft is coming soon.
-- Holes on a planar face, blind or through, with flat or drill-point tips, counterbores and countersinks at any angle, including the standard 118° tip and 82°, 90° and 100° countersinks. A countersink or drill point cannot yet go into a body that has another cylinder; see [the backend gaps](docs/needs-catallax.md).
-- Linear and circular patterns and mirrors of the part's body.
-- Clean single-body analytic STEP import with source preservation, review, approved seam repairs, save/reopen and checked export. This addition is for the next feature batch, after 0.2.0. See [STEP import](docs/exchange.md#step-import).
-- Analytic planar shells with selected open faces, including trays with separated through bores, editable wall thickness and persistent inner-wall names. Shell can also open every face, which leaves nothing of the part. See [shell coverage and evidence](docs/l08-shell-tool.md).
-- Fillets and equal-distance chamfers between planes and between planes and cylinders, and drafts of planar faces and cylinders parallel to the pull.
-- Drawings use Catallax meshes for polygon hidden-line removal. Plane sections on screen are cut from the same meshes; an exported section subtracts a half-space through a Catallax boolean. ISO and ANSI sheets, aligned views, dimensions and annotations keep their formats. Output to drawing files, SVG, PDF and DXF works, and every exported view curve says whether it is the model's exact line or circle or a mesh polyline. Exact silhouettes and some curve conversions remain pending.
-- The assistant, connected to Claude: it reads the part, proposes changes as cards you preview, apply and undo. The same commands are open to outside agents over MCP.
-- A headless command line that replays recipes, rebuilds parts, renders hidden-line views and makes drawings.
-- A WebAssembly build that runs the app and Catallax in one browser module.
+- The Edit Suite frame, with workspaces in the title bar, tools on the left, an options bar, a 3D viewport and feature history above the command line.
+- Sketches with relations and dimensions. Extrude, cut, revolve, combine several bodies, drill holes, pattern and mirror. Edit features later, undo and redo, save and reopen parts. Supported sweeps, shells and drafts also work. See [modelling](docs/modelling.md).
+- Fillets and chamfers on supported edges, including plane and cylinder combinations. Some blends and later operations still refuse unsupported geometry or exceed the calculation limit. See [current kernel limits](docs/needs-catallax.md).
+- STEP and IGES import with repair review and the original source retained. Files with several solids create a separate body and import feature for each solid, in one undo step. Unsupported files leave the part unchanged. Export B-rep parts as STEP AP242, supported IGES 5.3, STL, 3MF and OBJ. See [import and export](docs/exchange.md).
+- Desktop [assemblies](docs/assemblies.md#in-the-app). Insert parts and sub-assemblies, place them by position and rotation, save and reopen. Supported [mates](docs/mates.md) constrain components; [interference and clearance checks](docs/interference.md) report their proofs and refusals.
+- ISO and ANSI drawings with aligned views, sections, details, dimensions and annotations. Export SVG, PDF and DXF. Hidden-line removal uses meshes; exported curves identify exact lines and circles or mesh polylines. Exact silhouettes remain in design.
+- Lattices and gyroids with an unproved viewport preview and certified STL export. See [field modelling](docs/modelling.md#terminal-lattice) and [export limits](docs/exchange.md#terminal-fields).
+- A desktop [assistant and MCP interface](docs/assistant.md), plus a [headless command line](docs/development.md#command-line) for recipes, parts, drawings and exports. The public browser app has no AI assistant or API key.
 
-Waiting commands stay visible and disabled with a short explanation. Opening a part with a waiting feature rebuilds its available prefix and marks the feature with an error; that prefix is not a proved whole part and cannot export.
+Lofts, offset/thicken and other unsupported modelling domains remain in design. See the [roadmap](docs/roadmap.md) for what works and what is still planned. A failed or pending feature cannot export an unproved whole part.
 
-| Waiting feature | Catallax stage |
-|---|---|
-| Offset and thicken; unsupported shell envelopes | 3 |
-| Up to a curved face (Catallax covers bare stock targets only) | 3 |
-| Other fillets | 4 |
-| Other path motions and loft; spline, ellipse and text profiles | 5 |
-| STEP spline files and unsupported analytic imports | 6 |
+## Get SolidDraft
 
-Parts export as STEP AP242 and supported exact-surface IGES 5.3 with Catallax's proven deviation, and as STL, 3MF and OBJ from Catallax's meshes, from File > Export or `soliddraft export`; see [part export](docs/exchange.md). The desktop app imports supported single-body IGES solids through the same review as STEP; see [IGES import](docs/exchange.md#iges-import). Surfacing and sheet metal are not available. In the desktop app an assembly opens in a tab beside the part: File > New assembly or Make assembly from part, insert parts from a file dialog or by dropping their files on the window, place each by typing its position and rotation, then save and reopen it; see [assemblies](docs/assemblies.md#in-the-app). Coincident, Distance and Origin mates tie components by their faces ([mates](docs/mates.md)), and Interference checks every pair of parts for interference or a clearance on certified meshes ([interference](docs/interference.md)). The [roadmap](docs/roadmap.md) orders the remaining work.
+[Open the browser app](https://zigrawbohnbawerick.github.io/soliddraft/app/). The kernel runs inside your tab. Files open by upload and save by download. Nothing to install. Assemblies are desktop-only, and browser geometry calculations run on the interface thread. See [the browser build](docs/web.md) for local builds and optional self-hosted assistant support.
 
-## Building
+[Desktop downloads](https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/releases) include Linux AppImage, Debian package and portable archive, and a macOS disk image. Builds are unsigned for now, with checksums and build attestations. Windows downloads are deferred.
 
-You need Rust 1.95 or later. There is no C++ kernel, submodule or separate kernel build.
+Start with a sketch on a plane or planar face, add dimensions with `D`, then extrude or cut. Press `?` in the app for keyboard shortcuts.
+
+## Build from source
+
+Install Rust 1.95 or later, then run these commands from the repository root. There is no C++ kernel, submodule or separate kernel build.
 
 ```sh
 cargo build --release --locked
-```
-
-## Running the app
-
-```sh
 cargo run --release -p soliddraft-app -- --demo
 ```
 
-A part or drawing file on the command line opens it; without one the app opens on the start page with the recent documents. `--demo` loads a sample part, `--bench` measures frame times on a dense body and exits, `--screenshot out.png` saves the window and exits, `--help` lists the rest. Press `?` in the app for the keyboard shortcuts.
+Without `--demo`, the app opens its start page. Pass a part, assembly or drawing file to open it. See [development](docs/development.md) for command-line examples, tests and contribution checks, and [application scenarios](docs/application-loop.md) for agent-driven verification.
 
-Modelling starts with a sketch: pick a plane in the tree or click a planar face, draw, add dimensions with `D`, then Extrude or Cut from the options bar. Hole, Fillet, Chamfer, Draft, the patterns and Mirror work on the body from the tool palette. Fillet and Chamfer take picked edges, or a picked face for every edge on its boundary; one the kernel refuses is not added, and the note gives the kernel's reason.
+## Licence, support and thanks
 
-## Running in a browser
+Started by Zigrawbohnbawerick Pty Ltd. Written with AI coding agents, with human direction and review. The [MIT licence](LICENSE) grants permission to use, change and share the code while retaining its notice. Copyright attaches by default; we use the licence to give those rights away. See [NOTICE](NOTICE) for credits and the bundled Inter font's SIL Open Font License 1.1.
 
-The app also runs in a web browser as WebAssembly. A small server serves it and holds the assistant's API key. The browser shares the revision and export guards, but construction and exact proof still run on its interface thread: the desktop's responsive-worker behaviour is not a browser capability claim. See `docs/web.md`.
+Support SolidDraft and Catallax through [Ko-fi](https://ko-fi.com/pedropaiva56920) or [GitHub Sponsors](https://github.com/sponsors/BohnBawerick). Both fund the same project. Thank you to everyone who contributes code, reports bugs or funds the work.
 
-## The assistant
-
-The assistant needs an Anthropic API key, from `ANTHROPIC_API_KEY` or the OS keychain:
-
-```sh
-printf %s "$KEY" | cargo run --release -p soliddraft-cli -- key set
-```
-
-Without a key the app runs and the assistant session says the assistant is off. `--mcp [PORT]` serves the open part to MCP clients such as Claude Code; `soliddraft mcp` serves a headless part over stdio, and `soliddraft run` runs the same commands from a shell or a script. See `docs/assistant.md`. Agent scenarios, per-command evidence bundles and windowless viewport captures are described in [the application loop](docs/application-loop.md).
-
-## Command line
-
-```sh
-cargo run --release -p soliddraft-cli -- replay --steps recipes/union.json
-cargo run --release -p soliddraft-cli -- view recipes/bracket.json --dir front,top,right,iso --svg 'bracket-{view}.svg'
-cargo run --release -p soliddraft-cli -- part bracket.dwprt
-cargo run --release -p soliddraft-cli -- export recipes/bracket.json --out bracket.step --out bracket.3mf --out bracket.obj
-cargo run --release -p soliddraft-cli -- draw recipes/bracket.json --template iso-a3
-```
-
-Replay prints each step's face, edge and vertex counts, volume, area, validity and a geometric digest. Export writes STEP, IGES, STL, 3MF or OBJ, chosen by each `--out` file's extension, with each file's deviation. View writes hidden-line views. Part rebuilds a saved part and prints every feature's state. Draw makes a full drawing of a recipe's result. Each subcommand has `--help`.
-
-## Tests
-
-```sh
-cargo test --workspace
-```
-
-The app's exit tests drive the real interface through `egui_kittest` on wgpu and skip themselves on a machine with no GPU adapter.
-
-## Contributing
-
-Pull requests are welcome. Read `docs/DESIGN.md` for the app's interface to the kernel and `docs/modelling.md` for the document model before changing either. Keep document and viewport code behind the existing kernel interface; Catallax is the only backend. Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` before you open a pull request. Agent-written code is fine and expected; say so in the pull request, and stay accountable for what it does.
-
-If a change needs a new kernel operation, describe it in an issue before changing the bridge.
-
-## Licence and credit
-
-Licensed under MIT. See `LICENSE` and `NOTICE`.
-
-The bundled Inter font is under the SIL Open Font License 1.1.
-
-SolidDraft is not affiliated with, sponsored by or endorsed by Dassault Systèmes, Autodesk, Siemens or NVIDIA. SolidWorks, DraftSight, Parasolid and the other names above are their owners' marks.
-
-Started by Zigrawbohnbawerick Pty Ltd. Written with AI coding agents.
+https://zigrawbohnbawerick.org/

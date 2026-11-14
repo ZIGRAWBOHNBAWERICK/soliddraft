@@ -246,10 +246,32 @@ class KnownGapNotesTests(unittest.TestCase):
                 '{"scenario": "drawing", "step": 35, "tool": "edit_extrude", "last_measured_ms": 1}]}')
             with patch.object(release, "ROOT", root):
                 text = "\n".join(release.known_gap_notes())
-        self.assertIn("## Known gaps", text)
+        self.assertIn("## Known limitations", text)
         self.assertIn("- bracket: steps 19 (edit_extrude).", text)
         self.assertIn("- drawing: steps 24 (edit_extrude), 35 (edit_extrude).", text)
         self.assertIn("https://example.invalid/27", text)
+
+    def test_current_release_discloses_strict_failures_and_export_timeouts(self):
+        with patch.object(release, "version", return_value="0.5.0"):
+            text = "\n".join(release.known_gap_notes())
+        self.assertIn("13 scenarios passed functional checks but exceeded strict timing budgets", text)
+        for scenario in ("graded-fields", "loft", "p5-flanged-housing", "p5-placed-housing",
+                         "ring-fillet", "rod-cut-28deg", "skew-corner-fillet", "sphere-revolve",
+                         "spline-sweep", "torus-revolve", "canonical-p1", "canonical-p5", "loft-edge-fillet"):
+            self.assertIn(f"- `{scenario}`.", text)
+        self.assertIn("STL export timed out after 600 seconds in 2 scenarios: `gyroid`, `lattice`", text)
+        self.assertIn("did not pass the full strict scenario verdict", text)
+        self.assertIn("Timing budgets remain unchanged", text)
+        self.assertIn("not quiet timing measurements", text)
+        self.assertIn("https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/issues/27", text)
+        self.assertNotIn("https://github.com/BohnBawerick/soliddraft/issues/", text)
+
+    def test_release_limitations_do_not_leak_into_another_version(self):
+        with patch.object(release, "version", return_value="0.5.1"):
+            text = "\n".join(release.known_gap_notes())
+        self.assertIn("- bracket: steps", text)
+        self.assertNotIn("### 0.5.0 validation", text)
+        self.assertNotIn("STL export timed out", text)
 
 if __name__ == "__main__":
     unittest.main()

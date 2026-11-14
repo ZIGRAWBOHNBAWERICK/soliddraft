@@ -751,8 +751,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-app"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-boolean",
  "catallax-features",
@@ -771,8 +771,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-boolean"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-intersect",
  "catallax-numbers",
@@ -783,8 +783,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-compare"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-boolean",
  "catallax-features",
@@ -799,8 +799,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-features"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-boolean",
  "catallax-import",
@@ -817,8 +817,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-field"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-boolean",
  "catallax-features",
@@ -835,8 +835,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-iges"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-numbers",
  "catallax-shapes",
@@ -845,8 +845,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-import"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-boolean",
  "catallax-intersect",
@@ -862,8 +862,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-intersect"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-numbers",
  "catallax-shapes",
@@ -872,8 +872,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-measure"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-boolean",
  "catallax-intersect",
@@ -885,8 +885,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-mesh"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-import",
  "catallax-intersect",
@@ -899,8 +899,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-numbers"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "im",
  "num-bigint",
@@ -910,8 +910,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-recipe"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-numbers",
  "serde",
@@ -920,8 +920,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-shapes"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-numbers",
  "im",
@@ -929,8 +929,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-step"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-intersect",
  "catallax-numbers",
@@ -941,8 +941,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-topology"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "catallax-numbers",
  "catallax-recipe",
@@ -952,8 +952,8 @@ dependencies = [
 
 [[package]]
 name = "catallax-trace"
-version = "0.1.5"
-source = "git+https://github.com/BohnBawerick/catallax?rev=ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb#ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb"
+version = "0.2.0"
+source = "git+https://github.com/BohnBawerick/catallax?rev=adb2ec133e6b9d36d055156f5a8e3ccc2815edaf#adb2ec133e6b9d36d055156f5a8e3ccc2815edaf"
 dependencies = [
  "libm",
 ]

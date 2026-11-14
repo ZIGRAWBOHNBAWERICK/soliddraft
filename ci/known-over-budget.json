@@ -11,5 +11,19 @@
     {"scenario": "bracket", "step": 35, "tool": "drive", "last_measured_ms": 1892.423282},
     {"scenario": "bracket", "step": 43, "tool": "set_value", "last_measured_ms": 1945.130604},
     {"scenario": "drawing", "step": 24, "tool": "edit_extrude", "last_measured_ms": 2571.201994}
-  ]
+  ],
+  "release_limitations": {
+    "0.5.0": {
+      "source": "1db4fe1882a96b0cc7488a7e62959cf8d4a3ccdf",
+      "kernel": "ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb",
+      "strict_timing_scenarios": [
+        "graded-fields", "loft", "p5-flanged-housing", "p5-placed-housing",
+        "ring-fillet", "rod-cut-28deg", "skew-corner-fillet", "sphere-revolve",
+        "spline-sweep", "torus-revolve", "canonical-p1", "canonical-p5", "loft-edge-fillet"
+      ],
+      "stl_export_timeouts": {"seconds": 600, "scenarios": ["gyroid", "lattice"]},
+      "measurement_context": "The work PC was also running a Catallax replay during this sweep, so these are not quiet timing measurements. A separate dedicated Linux CI replay also exceeded the field_mass timing budgets in graded-fields. The other timing failures and both export timeouts remain unresolved.",
+      "report": "https://github.com/ZIGRAWBOHNBAWERICK/soliddraft/pull/300#issuecomment-6874660909"
+    }
+  }
 }

@@ -73,9 +73,10 @@ class Inventory(unittest.TestCase):
         spec.loader.exec_module(release)
         gaps = read('known-over-budget.json')
         lines = release.known_gap_notes()
-        self.assertEqual(lines[0], '## Known gaps')
+        self.assertEqual(lines[0], '## Known limitations')
         self.assertIn(gaps['follow_up'], lines[2])
-        self.assertEqual(sum(line.startswith('- ') for line in lines),
+        legacy = "\n".join(lines).split("\n### ", 1)[0].splitlines()
+        self.assertEqual(sum(line.startswith('- ') for line in legacy),
                          len({step['scenario'] for step in gaps['steps']}))
 
     def test_inventory_matches_files_and_has_owners(self):

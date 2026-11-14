@@ -193,10 +193,27 @@ def known_gap_notes():
     steps = {}
     for entry in policy["steps"]:
         steps.setdefault(entry["scenario"], []).append(f"{entry['step']} ({entry['tool']})")
-    lines = ["## Known gaps", "",
+    lines = ["## Known limitations", "",
              "These application steps took longer than the 1,000 ms feature click budget when measured; "
              f"this is not a claim of meeting the budget. Follow-up: {policy['follow_up']}.", ""]
-    return lines + [f"- {scenario}: steps {', '.join(numbers)}." for scenario, numbers in steps.items()] + [""]
+    lines += [f"- {scenario}: steps {', '.join(numbers)}." for scenario, numbers in steps.items()] + [""]
+    releases = policy.get("release_limitations", {})
+    limitation = releases.get(version()) if releases else None
+    if limitation:
+        timing = limitation["strict_timing_scenarios"]
+        timeouts = limitation["stl_export_timeouts"]
+        lines += [f"### {version()} validation", "",
+                  f"Validation of SolidDraft `{limitation['source']}` with Catallax `{limitation['kernel']}` "
+                  "did not pass the full strict scenario verdict. Timing budgets remain unchanged.", "",
+                  f"{len(timing)} scenarios passed functional checks but exceeded strict timing budgets:", "",
+                  *[f"- `{scenario}`." for scenario in timing], "",
+                  f"STL export timed out after {timeouts['seconds']} seconds in {len(timeouts['scenarios'])} scenarios: "
+                  + ", ".join(f"`{scenario}`" for scenario in timeouts["scenarios"]) + ". "
+                  "Those exports did not complete in that run.", "",
+                  limitation["measurement_context"], "",
+                  f"[Validation report]({limitation['report']}). "
+                  f"[Timing follow-up]({policy['follow_up']}).", ""]
+    return lines
 
 
 def notes(pulls, previous, windows):

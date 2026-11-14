@@ -160,6 +160,7 @@ fn typing_a_prefix_shows_a_clickable_suggestion_and_tab_completes() {
     let case = ribbon::case("prototype-type-ahead");
     let mut app = ribbon::app(ribbon::plate());
     type_line(&mut app, "fil");
+    case.frame(&mut app, "suggestions");
     case.run(&mut app, |app| {
         let input = app.get_by_label("Command line").rect();
         let found = ribbon::buttons_in(app, ribbon::window(app)).into_iter().find(|(label, rect)| {

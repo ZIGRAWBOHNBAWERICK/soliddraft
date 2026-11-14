@@ -473,7 +473,7 @@ impl ViewportState {
         }
         if let Some(session) = sketch {
             let spacing = Spacing::for_scale(self.camera.mm_per_point(rect.height()), &self.grid_style);
-            events.actions = crate::sketcher::run(ui, session, doc, &self.camera, rect, &response, spacing);
+            events.actions = crate::sketcher::run(ui, session, &self.camera, rect, &response, spacing);
             ui.ctx().request_repaint();
         }
         if doc.model().active_field().is_some_and(|f| doc.model().status(f.id).is_some_and(|s| s.is_ok())) {

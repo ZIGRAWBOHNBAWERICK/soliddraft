@@ -134,6 +134,8 @@ The scenes are Plain white, Studio fade, 3 point faded, Soft spotlight, Graphite
 Night grid, 3 point beige, Blueprint and Lightbox studio. Their backgrounds live in
 `viewport/scenes.rs`. Plain white is the default. A scene changes the backdrop,
 not the frame palette or the geometric meaning of sketch colours.
+Fresh views show origin axes with the grid and origin planes off. Saved display
+choices keep their values.
 
 The navigation bar holds orbit, pan, zoom, fit, display style, Scene, origin axes
 and all dimensions. Drag Orbit, Pan or Zoom to move the camera directly. Favourite
@@ -150,8 +152,8 @@ projection and rendering quality retain their existing preferences.
 ## Sketch mode
 
 The internal Edit Suite frame leads its sketch palette with a full-width Smart
-Dimension tile. Entity tools use Edit and Move and copy groups, and Relations opens
-beside its palette tile. Canceling plane picking restores plane visibility and drops
+Dimension tile. Individual relation tools follow Draw. Entity tools use Edit and
+Move and copy groups. Canceling plane picking restores plane visibility and drops
 the pending tool. The classic frame keeps its ribbon.
 
 L, R, C, A, D, T, O and M select line, rectangle, circle, arc, Smart Dimension, trim,
@@ -197,9 +199,11 @@ with the document.
 
 ## Command line and assistant
 
-The bottom line holds tool chips, a command prompt and document status. Tab
-completes commands, Up and Down recall history, and a typed command runs the same
-registry action as its button. Status details remain available when the line is
+The bottom line holds tool chips, a command prompt and document status. The default
+chips are Select, Smart Dimension, Measure, Normal to and Fit. Typing a command
+prefix shows matching commands. Tab completes commands, Up and Down recall history,
+and a typed command runs the same registry action as its button. Status details
+remain available when the line is
 short of room.
 
 Typing `ai` opens a session above the timeline. Its dark console uses the terminal

@@ -759,7 +759,12 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
 /// Matching commands above the focused prompt, without replacing the typed prefix.
 fn completion_list(ui: &egui::Ui, cl: &mut CommandLine, field: &egui::Response, context: Context) {
     let input = cl.input.trim_start();
-    if !field.has_focus() || input.is_empty() || input.contains(char::is_whitespace) {
+    let id = egui::Id::new("command_completions");
+    let over_list = ui
+        .ctx()
+        .pointer_interact_pos()
+        .is_some_and(|p| ui.ctx().layer_id_at(p) == Some(egui::LayerId::new(egui::Order::Foreground, id)));
+    if !(field.has_focus() || over_list) || input.is_empty() || input.contains(char::is_whitespace) {
         return;
     }
     let names =
@@ -770,7 +775,7 @@ fn completion_list(ui: &egui::Ui, cl: &mut CommandLine, field: &egui::Response, 
     let shown = cl.completion.as_ref().and_then(|c| c.shown);
     let slash = if input.starts_with('/') { "/" } else { "" };
     let mut picked = None;
-    egui::Area::new(egui::Id::new("command_completions"))
+    egui::Area::new(id)
         .order(egui::Order::Foreground)
         .fixed_pos(field.rect.left_top() - vec2(4.0, 6.0))
         .pivot(Align2::LEFT_BOTTOM)

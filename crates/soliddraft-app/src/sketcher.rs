@@ -165,11 +165,9 @@ pub fn finish_spline(s: &mut SketchSession, actions: &mut Vec<AppAction>) {
 }
 
 /// Runs the sketcher for one frame: input first, then drawing.
-#[allow(clippy::too_many_arguments)]
 pub fn run(
     ui: &mut egui::Ui,
     s: &mut SketchSession,
-    doc: &Document,
     camera: &Camera,
     rect: Rect,
     resp: &egui::Response,

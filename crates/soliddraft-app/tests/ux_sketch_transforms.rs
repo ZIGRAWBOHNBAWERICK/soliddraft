@@ -151,8 +151,11 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
     assert!(copied.entity(4).unwrap().construction);
     undo_redo(&mut app, &moved, &copied);
 
-    // Rotate copies about a pointer centre with an editable signed angle.
+    // Rotate copies about a pointer centre with an editable signed angle. The copies reach
+    // past the first fit, so the view fits again before they are picked.
     app.key_press(Key::Escape);
+    settle(&mut app);
+    app.key_press(Key::Z);
     settle(&mut app);
     click(&mut app, P2::new(2.0, 1.0), Modifiers::NONE);
     click(&mut app, P2::new(37.0, 21.0), Modifiers::CTRL);
@@ -185,6 +188,8 @@ fn transforms_preview_apply_cancel_undo_and_reopen() {
 
     // Uniform scale includes circle radii, and Cancel/Escape discard preview-only edits.
     app.key_press(Key::Escape);
+    settle(&mut app);
+    app.key_press(Key::Z);
     settle(&mut app);
     click(&mut app, P2::new(6.0, 5.0), Modifiers::NONE);
     click(&mut app, P2::new(31.0, -27.0), Modifiers::CTRL);

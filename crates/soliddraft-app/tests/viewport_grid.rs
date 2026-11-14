@@ -494,6 +494,10 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
     let rect = viewport(&app);
     let point = |y: f32| (line.round() as u32, (rect.top() + y) as u32);
     let (x, y) = point(rect.height() / 3.0);
+    // The line may straddle two pixel columns; read the one it covers most.
+    let x = (x - 1..=x + 1)
+        .max_by_key(|x| i32::from(off.get_pixel(*x, y).0[1]) - i32::from(on.get_pixel(*x, y).0[1]))
+        .unwrap();
     let on = on.get_pixel(x, y).0.map(i32::from);
     let off = off.get_pixel(x, y).0.map(i32::from);
     // Red ink darkens green and blue far more than red.

@@ -74,9 +74,11 @@ fn flow(format: ImportFormat, source: &[u8]) {
         }
         app.state_mut().state.push(AppAction::Undo);
         app.run_steps(4);
+        ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
         assert!(app.state().state.doc.features.is_empty());
         app.state_mut().state.push(AppAction::Redo);
         app.run_steps(6);
+        ribbon::until(app, "redo rebuild", |app| !app.state().state.doc.proof_pending());
         assert_eq!(membership(&app.state().state.doc), before);
 
         let saved = case.path("imported.dwprt");
@@ -115,6 +117,7 @@ fn flow(format: ImportFormat, source: &[u8]) {
         assert_eq!(doc.model().live_bodies()[1].1, untouched, "editing one import keeps the other solid");
         app.state_mut().state.push(AppAction::Undo);
         app.run_steps(4);
+        ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
 
         app.state_mut().state.push(AppAction::StartCombine);
         app.run_steps(4);
@@ -128,6 +131,7 @@ fn flow(format: ImportFormat, source: &[u8]) {
         case.frame(app, "combined-imports");
         app.state_mut().state.push(AppAction::Undo);
         app.run_steps(4);
+        ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
 
         let original = app.state().state.doc.model().to_bytes().unwrap();
         let revision = app.state().state.doc.revision();
@@ -335,10 +339,12 @@ fn last_available_body_id_range_imports_saves_and_undoes_without_reusing_ids() {
         assert_eq!(reopened.model().live_bodies().len(), 3);
         app.state_mut().state.push(AppAction::Undo);
         app.run_steps(4);
+        ribbon::until(app, "undo rebuild", |app| !app.state().state.doc.proof_pending());
         assert_eq!(app.state().state.doc.features.len(), 1);
         assert_eq!(app.state().state.doc.model().next_body(), u32::MAX);
         app.state_mut().state.push(AppAction::Redo);
         app.run_steps(4);
+        ribbon::until(app, "redo rebuild", |app| !app.state().state.doc.proof_pending());
         assert_eq!(app.state().state.doc.model().live_bodies().len(), 3);
         assert_eq!(app.state().state.doc.model().next_body(), u32::MAX);
     });

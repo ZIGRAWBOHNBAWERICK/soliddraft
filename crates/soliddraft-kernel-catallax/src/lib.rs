@@ -1114,6 +1114,38 @@ impl Kernel for CatallaxKernel {
         })
     }
 
+    fn extrude_on_face(
+        &self,
+        tag: &OpTag,
+        profile: &Profile,
+        support: soliddraft_kernel_api::FaceSupport,
+        distance: f64,
+    ) -> KernelResult<OpResult> {
+        profile.check()?;
+        let local = Profile { plane: Plane::XY, ..profile.clone() };
+        let sheet = self.create_body_from_profile(&OpTag::new(format!("{}.profile", tag.0)), &local)?;
+        let result = self.observe("extrude_on_face", || {
+            let state = self.state()?;
+            let solid = state.solid(support.body)?;
+            let face = solid.cat_face(support.face, support.body)?;
+            let origin = solid.app.names.faces[&face]
+                .first()
+                .ok_or_else(|| KernelError::InvalidInput("the supporting face has no origin".into()))?;
+            let native = catallax_recipe::Operation::ExtrudeOnFace {
+                profile: state.step(sheet.body)?,
+                body: state.step(support.body)?,
+                face: native::pattern(origin),
+                normal_direction: native::vector(profile.plane.normal, "sketch normal direction")?,
+                x_direction: native::vector(profile.plane.x_dir, "sketch X direction")?,
+                offset: native::number(support.offset, "sketch offset")?,
+                distance: native::number(distance, "extrusion distance")?,
+            };
+            self.native(state, tag, OpKind::Extrude, support.body, &[support.body, sheet.body], native, None, &[])
+        });
+        let _ = self.release(sheet.body);
+        result
+    }
+
     fn create_profile_from_face(&self, tag: &OpTag, body: BodyId, face: FaceId) -> KernelResult<OpResult> {
         self.observe("create_profile_from_face", || {
             let native = loft::face_profile(self.solid(body)?.as_ref(), body, face)?;

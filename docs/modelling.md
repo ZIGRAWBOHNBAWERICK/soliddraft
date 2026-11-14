@@ -128,9 +128,11 @@ Sketch, or choose it in the Mirror editor. References store the plane's identity
 so renaming it keeps its sketches and mirrors attached. An unavailable source raises
 a repair prompt. Plane definitions, names and visibility survive save and reopen.
 
-Without an offset, a boss or cut starts exactly on the face, forwards or
-reversed; the tool is never moved off the face, and the kernel's coplanar Boolean rules
-decide the face the tool and the part share.
+For sketches attached directly to a face, blind and through-all extrusions retain that
+face in the kernel recipe. Their start plane and normal stay exact, including on angled faces with irrational unit
+normals. Without an offset, the tool starts on that face; no epsilon moves it outside.
+The kernel's coplanar Boolean rules decide the shared face. Boundary-limited extrusions
+and sketches on separate reference-plane features still use the world-space frame path.
 
 A hole's faces are named by the hole's place in the point list and the part of the hole: entry, counterbore wall and floor, countersink, wall, floor or tip. A pattern's or mirror's copy faces are named by the copy number and ranked by the names of the faces they copy, so editing the spacing, the count or an earlier feature keeps them. A drafted face keeps the name of the face it tilts. An extrusion up to a boundary starts on its sketch face like every other extrusion.
 

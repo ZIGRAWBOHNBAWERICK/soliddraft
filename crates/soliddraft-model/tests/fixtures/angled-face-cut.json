@@ -1,0 +1,555 @@
+{
+  "format": "soliddraft-part/2",
+  "name": "Part1",
+  "units": "mm",
+  "features": [
+    {
+      "id": 2,
+      "name": "Sketch1",
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "on": "datum",
+          "datum": "front"
+        },
+        "sketch": {
+          "entities": [
+            {
+              "id": 0,
+              "kind": {
+                "type": "point",
+                "p": {
+                  "u": 0.0,
+                  "v": 0.0
+                }
+              },
+              "construction": true
+            },
+            {
+              "id": 1,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": 0.0,
+                  "v": 0.0
+                },
+                "b": {
+                  "u": 150.08645629882812,
+                  "v": 0.0
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 2,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": 150.08645629882812,
+                  "v": 0.0
+                },
+                "b": {
+                  "u": 0.0,
+                  "v": 120.0
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": 0.0,
+                  "v": 120.0
+                },
+                "b": {
+                  "u": 0.0,
+                  "v": 0.0
+                }
+              },
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 1,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 1,
+                  "index": 0
+                },
+                "b": {
+                  "entity": 0,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 2,
+              "kind": {
+                "type": "horizontal",
+                "target": 1
+              }
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 2,
+                  "index": 0
+                },
+                "b": {
+                  "entity": 1,
+                  "index": 1
+                }
+              }
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 3,
+                  "index": 0
+                },
+                "b": {
+                  "entity": 2,
+                  "index": 1
+                }
+              }
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 3,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 0,
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "next_entity": 4,
+          "next_constraint": 6
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "Boss-Extrude1",
+      "kind": {
+        "type": "extrude",
+        "profile": {
+          "from": "sketch",
+          "feature": 2
+        },
+        "operation": "boss",
+        "end": {
+          "type": "blind",
+          "depth": 105.5
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Sketch2",
+      "kind": {
+        "type": "sketch",
+        "plane": {
+          "on": "face",
+          "face": {
+            "feature": 3,
+            "generator": {
+              "kind": "side",
+              "entity": 2
+            },
+            "fingerprint": {
+              "surface": "plane",
+              "normal": [
+                0.6244755519662776,
+                0.0,
+                0.7810443553322775
+              ],
+              "centroid": [
+                75.04322814941406,
+                -52.74999999999999,
+                60.00000000000001
+              ],
+              "area": 20273.011425567634
+            },
+            "label": "Boss-Extrude1 · Side of line 2"
+          }
+        },
+        "sketch": {
+          "entities": [
+            {
+              "id": 0,
+              "kind": {
+                "type": "point",
+                "p": {
+                  "u": 0.0,
+                  "v": 0.0
+                }
+              },
+              "construction": true
+            },
+            {
+              "id": 1,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": -52.195125579833984,
+                  "v": 1.726492166519165
+                },
+                "b": {
+                  "u": -69.71279914190637,
+                  "v": -8.387341380119322
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 2,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": -69.71279914190637,
+                  "v": -8.387341380119322
+                },
+                "b": {
+                  "u": -69.71279914190639,
+                  "v": -28.615008473396294
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": -69.71279914190639,
+                  "v": -28.615008473396294
+                },
+                "b": {
+                  "u": -52.195125579833984,
+                  "v": -38.72884202003479
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": -52.195125579833984,
+                  "v": -38.72884202003479
+                },
+                "b": {
+                  "u": -34.677452017761595,
+                  "v": -28.61500847339631
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": -34.677452017761595,
+                  "v": -28.61500847339631
+                },
+                "b": {
+                  "u": -34.67745201776159,
+                  "v": -8.387341380119322
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "line",
+                "a": {
+                  "u": -34.67745201776159,
+                  "v": -8.387341380119322
+                },
+                "b": {
+                  "u": -52.195125579833984,
+                  "v": 1.726492166519165
+                }
+              },
+              "construction": false
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "circle",
+                "center": {
+                  "u": -52.195125579833984,
+                  "v": -18.501174926757812
+                },
+                "radius": 20.227667093276978
+              },
+              "construction": true
+            }
+          ],
+          "constraints": [
+            {
+              "id": 1,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 1,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 2,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 2,
+              "kind": {
+                "type": "point_on",
+                "point": {
+                  "entity": 1,
+                  "index": 0
+                },
+                "entity": 7
+              }
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 2,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 3,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "equal",
+                "a": 1,
+                "b": 2
+              }
+            },
+            {
+              "id": 5,
+              "kind": {
+                "type": "point_on",
+                "point": {
+                  "entity": 2,
+                  "index": 0
+                },
+                "entity": 7
+              }
+            },
+            {
+              "id": 6,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 3,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 4,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "equal",
+                "a": 1,
+                "b": 3
+              }
+            },
+            {
+              "id": 8,
+              "kind": {
+                "type": "point_on",
+                "point": {
+                  "entity": 3,
+                  "index": 0
+                },
+                "entity": 7
+              }
+            },
+            {
+              "id": 9,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 4,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 5,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 10,
+              "kind": {
+                "type": "equal",
+                "a": 1,
+                "b": 4
+              }
+            },
+            {
+              "id": 11,
+              "kind": {
+                "type": "point_on",
+                "point": {
+                  "entity": 4,
+                  "index": 0
+                },
+                "entity": 7
+              }
+            },
+            {
+              "id": 12,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 5,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 6,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 13,
+              "kind": {
+                "type": "equal",
+                "a": 1,
+                "b": 5
+              }
+            },
+            {
+              "id": 14,
+              "kind": {
+                "type": "point_on",
+                "point": {
+                  "entity": 5,
+                  "index": 0
+                },
+                "entity": 7
+              }
+            },
+            {
+              "id": 15,
+              "kind": {
+                "type": "coincident",
+                "a": {
+                  "entity": 6,
+                  "index": 1
+                },
+                "b": {
+                  "entity": 1,
+                  "index": 0
+                }
+              }
+            },
+            {
+              "id": 16,
+              "kind": {
+                "type": "equal",
+                "a": 1,
+                "b": 6
+              }
+            },
+            {
+              "id": 17,
+              "kind": {
+                "type": "point_on",
+                "point": {
+                  "entity": 6,
+                  "index": 0
+                },
+                "entity": 7
+              }
+            }
+          ],
+          "polygons": [
+            {
+              "circle": 7,
+              "edges": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "relations": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17
+              ],
+              "mode": "inscribed"
+            }
+          ],
+          "next_entity": 8,
+          "next_constraint": 18
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Cut-Extrude1",
+      "kind": {
+        "type": "extrude",
+        "profile": {
+          "from": "sketch",
+          "feature": 4
+        },
+        "operation": "cut",
+        "end": {
+          "type": "blind",
+          "depth": 150.0
+        },
+        "reverse": true
+      }
+    }
+  ],
+  "next_feature": 6
+}

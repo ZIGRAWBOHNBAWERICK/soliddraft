@@ -468,7 +468,7 @@ pub(crate) fn resolve_plane(r: &FaceRef, view: &View, names: &NameMap) -> Result
 /// plane clear of the origin has an offset that cannot depend on the display centroid.
 /// There the topology's snap of that centroid onto the plane cancels exactly, and a
 /// tilted plane keeps its round-off, or a plane through the origin its sign of zero.
-pub(crate) fn carrier_plane(r: &FaceRef, carriers: &[FaceCarrier], names: &NameMap) -> Option<(Vec3, Vec3)> {
+pub(crate) fn carrier_plane(r: &FaceRef, carriers: &[FaceCarrier], names: &NameMap) -> Option<(FaceId, Vec3, Vec3)> {
     let seed = names.get(&r.feature)?.iter().find(|n| n.generator == r.generator && n.ordinal == r.ordinal)?;
     let mut pieces = carriers.iter().filter(|f| f.origins.contains(&seed.origin));
     let first = pieces.next()?;
@@ -478,7 +478,7 @@ pub(crate) fn carrier_plane(r: &FaceRef, carriers: &[FaceCarrier], names: &NameM
     let unchanged = |f: &FaceCarrier| r.fingerprint.changed(f.surface, f.normal).is_none();
     let same_plane = |f: &FaceCarrier| f.normal == Some(normal) && f.on_plane.is_some_and(|p| p.dot(normal) == offset);
     let clean = axis_aligned && offset.abs() > SAME_PLANE && unchanged(first);
-    (clean && pieces.all(|f| unchanged(f) && same_plane(f))).then_some((normal, on_plane))
+    (clean && pieces.all(|f| unchanged(f) && same_plane(f))).then_some((first.id, normal, on_plane))
 }
 
 /// Every current face a face reference names, for an assignment that follows a face
@@ -768,7 +768,7 @@ mod tests {
             fingerprint: FaceFingerprint::of(&face(1, 10.0, vec![])),
             label: String::new(),
         };
-        let plane = |faces: &[FaceCarrier]| carrier_plane(&r, faces, &names);
+        let plane = |faces: &[FaceCarrier]| carrier_plane(&r, faces, &names).map(|(_, n, p)| (n, p));
         let whole = carrier(1, 10.0, vec![cap.clone()]);
         assert_eq!(plane(std::slice::from_ref(&whole)), whole.normal.zip(whole.on_plane));
         // The pieces of a split face give one plane, whichever comes first.

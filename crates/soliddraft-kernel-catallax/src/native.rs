@@ -36,12 +36,12 @@ fn exact_point(p: [f64; 3]) -> Option<Point3> {
     Some(Point3([n(p[0])?, n(p[1])?, n(p[2])?]))
 }
 
-fn pattern(origin: &Origin) -> OriginPattern {
+pub(super) fn pattern(origin: &Origin) -> OriginPattern {
     OriginPattern::from(origin.clone())
 }
 
 impl Solid {
-    fn cat_face(&self, face: FaceId, body: BodyId) -> KernelResult<catallax_topology::FaceId> {
+    pub(super) fn cat_face(&self, face: FaceId, body: BodyId) -> KernelResult<catallax_topology::FaceId> {
         self.ids
             .faces
             .iter()

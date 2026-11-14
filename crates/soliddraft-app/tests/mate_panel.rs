@@ -33,10 +33,18 @@ fn part(state: &mut AppState, file: &Path, width: f64, height: f64, depth: f64) 
     tool(state, "save", json!({ "path": file }));
 }
 
-fn assert_recent_case(dir: &Path) {
+fn assert_recent_case(h: &mut App<'_>, dir: &Path) {
+    let saved = dir.join("recent-scope.dwasm");
+    h.state_mut().state.push(AppAction::Assembly(AssemblyAction::Save(Some(saved.clone()))));
+    settle(h);
+    assert!(saved.is_file(), "the UI save writes the accepted assembly");
+    let saved = std::fs::canonicalize(saved).unwrap();
+    let recent: Vec<PathBuf> = serde_json::from_slice(
+        &std::fs::read(dir.join("config/recent.json")).expect("the active mate case owns its recent-file list"),
+    )
+    .unwrap();
+    assert!(recent.contains(&saved));
     let dir = std::fs::canonicalize(dir).unwrap();
-    let recent = soliddraft_app::file::recent();
-    assert!(!recent.is_empty(), "the active mate case has saved parts and an assembly");
     assert!(
         recent.iter().all(|path| path.starts_with(&dir)),
         "another mate window changed this case's recent-file configuration: {recent:?}"
@@ -351,7 +359,7 @@ fn pick_drive_update_and_refuse_in_the_window() {
     assert_eq!(drawn_z(&h), 26.0);
     assert_readout(&mut h, "Z: 12 mm");
     snapshot(&mut h, "5-updated");
-    assert_recent_case(&dir);
+    assert_recent_case(&mut h, &dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -496,7 +504,7 @@ fn pick_coincident_update_and_refuse_in_the_window() {
     settle(&mut h);
     assert_eq!((shown(&h, 0), drawn(&h, 1)), (a14, [10.0, 10.0, 14.0]));
     snapshot(&mut h, "coincident-5-redone");
-    assert_recent_case(&dir);
+    assert_recent_case(&mut h, &dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -653,7 +661,7 @@ fn width_lock_and_conflicts_in_the_window() {
     assert_readout(&mut h, "Fully constrained");
     assert_eq!(drawn(&h, 1), [10.0, 7.0, 30.0], "a lock keeps B where it is");
     snapshot(&mut h, "families-3-lock");
-    assert_recent_case(&dir);
+    assert_recent_case(&mut h, &dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }

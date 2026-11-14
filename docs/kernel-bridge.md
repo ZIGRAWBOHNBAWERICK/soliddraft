@@ -2,7 +2,7 @@
 
 SolidDraft runs only on Catallax. `soliddraft-kernel-catallax` implements `soliddraft-kernel-api::Kernel` through Catallax's `catallax-app` entry. The application, CLI and tests use that implementation. Desktop and browser builds compile it in process with Rust. There is no C++ bridge, separate WebAssembly kernel or server fallback. Desktop edit construction and exact proof run on separate application workers; the browser currently runs both on its interface thread.
 
-The adapter pins its Catallax revision in `Cargo.toml` and `CATALLAX_REVISION`. No Catallax source is copied here. See [the remaining gaps](needs-catallax.md) and [the roadmap](roadmap.md).
+The adapter pins its Catallax revision in `Cargo.toml` and `CATALLAX_REVISION`. No Catallax source is copied here. See [the remaining gaps](needs-catallax.md) and [the roadmap](../ROADMAP.md).
 
 ## Operations and body ownership
 

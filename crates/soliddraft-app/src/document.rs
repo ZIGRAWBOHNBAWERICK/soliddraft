@@ -2647,17 +2647,21 @@ impl Document {
                 if imports.is_empty() {
                     return Err("The file contains no solid bodies.".into());
                 }
+                let refusal = "This part cannot hold more bodies. Import the file into a new part.";
+                let count = u32::try_from(imports.len()).map_err(|_| refusal)?;
                 let first = if self.model.live_bodies().iter().any(|(key, _)| *key == self.active_body) {
                     self.model.next_body()
                 } else {
                     self.active_body
                 };
-                let next = self.model.next_body().max(first + 1);
+                let next = self.model.next_body().max(first.checked_add(1).ok_or(refusal)?);
+                // Reserve the next-free identity too.
+                next.checked_add(count - 1).ok_or(refusal)?;
                 imports
                     .into_iter()
                     .enumerate()
                     .map(|(index, import)| model::Command::AddFeatureInBody {
-                        body: if index == 0 { first } else { next + index as u32 - 1 },
+                        body: if index == 0 { first } else { next + (index as u32 - 1) },
                         kind: model::FeatureKind::ImportStep(import),
                         via_assistant: self.assistant_mark,
                     })

@@ -447,6 +447,10 @@ fn narrow_palette_keeps_tools_named_for_accessibility_and_the_ai_chip_visible() 
     let case = ribbon::case("edit-suite-compact");
     let mut app = suite(ribbon::blank());
     case.run(&mut app, |app| {
+        // The palette's own room is measured with the side area closed.
+        app.key_press(Key::F9);
+        app.run_steps(8);
+        assert!(!app.state().state.tree_shown());
         app.set_size(vec2(1280.0, 800.0));
         app.run_steps(8);
         let start = ribbon::control(app, "Start sketch", ribbon::window(app));

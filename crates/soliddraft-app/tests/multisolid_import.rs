@@ -215,7 +215,7 @@ fn reordering_source_solid_declarations_preserves_entity_to_geometry_membership(
 }
 
 #[test]
-fn release_mcp_scenario_imports_two_bodies_refuses_replacement_and_undoes_the_file() {
+fn release_mcp_scenario_imports_two_bodies_undoes_and_previews_the_next_file() {
     use serde_json::Value;
     use soliddraft_app::command_tools::{CommandTools, ProposalBook, Surface};
     use soliddraft_assistant::{Caller, ToolHost};
@@ -225,7 +225,8 @@ fn release_mcp_scenario_imports_two_bodies_refuses_replacement_and_undoes_the_fi
     let mut book = ProposalBook::default();
     let mut token = Value::Null;
     let mut imported = Vec::new();
-    for (index, step) in scenario["steps"].as_array().unwrap().iter().take(4).enumerate() {
+    let mut revisions = Vec::new();
+    for (index, step) in scenario["steps"].as_array().unwrap().iter().take(5).enumerate() {
         let mut input = step["arguments"].clone();
         if let Some(path) = input["path"].as_str() {
             input["path"] =
@@ -256,6 +257,13 @@ fn release_mcp_scenario_imports_two_bodies_refuses_replacement_and_undoes_the_fi
                 imported = doc.model().to_bytes().unwrap();
             }
         }
+        for check in step["checks"].as_array().unwrap() {
+            if check["pointer"] == "/revision" {
+                let earlier = check["same_as_step"].as_u64().unwrap() as usize;
+                assert_eq!(doc.revision(), revisions[earlier - 1], "scenario step {}", index + 1);
+            }
+        }
+        revisions.push(doc.revision());
     }
     assert!(doc.features.is_empty());
 }

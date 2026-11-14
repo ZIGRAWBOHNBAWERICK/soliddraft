@@ -26,7 +26,7 @@ fn pick_measure_track_and_edit() {
     }
     let config = std::env::temp_dir().join(format!("soliddraft-measure-panel-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
-    soliddraft_app::file::set_config_dir(Some(config));
+    soliddraft_app::file::set_config_dir(Some(config.clone()));
     let mut doc = Document::new("Measured block", Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
     let id = doc
         .apply(Command::AddExtrude {
@@ -83,6 +83,15 @@ fn pick_measure_track_and_edit() {
     h.get_by_label("Check: fail");
     assert_eq!(measure::panel::row_color("fail"), theme::error());
     snapshot(&mut h, "failed-check");
+    let saved = config.join("tracked.dwprt");
+    h.state_mut().state.push(soliddraft_app::state::AppAction::SaveAs(Some(saved.clone())));
+    settle(&mut h);
+    assert!(saved.is_file());
+    let recent: Vec<std::path::PathBuf> = serde_json::from_slice(
+        &std::fs::read(config.join("recent.json")).expect("the active measurement case owns its recent-file list"),
+    )
+    .unwrap();
+    assert!(recent.contains(&saved));
 }
 
 /// V2 batch 2 G1.

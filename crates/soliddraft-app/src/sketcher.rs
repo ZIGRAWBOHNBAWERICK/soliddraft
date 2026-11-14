@@ -731,6 +731,19 @@ fn trim_input(
     true
 }
 
+/// Moves the far corner of the selection box being dragged, if any, to `pos` and
+/// recomputes what it would select.
+fn stretch_box(ui: &egui::Ui, s: &mut SketchSession, frame: &Frame<'_>, pos: Pos2) {
+    if s.selection_box.is_none() {
+        return;
+    }
+    let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
+    if let Some(b) = s.selection_box.as_mut() {
+        b.end = pos;
+        b.picks = select_box::targets(frame, &s.sketch, &labels, b.rect(), b.kind());
+    }
+}
+
 /// Pointer input for the select tool: clicks pick, drags move, double-clicks edit.
 #[allow(clippy::too_many_arguments)]
 fn select_input(
@@ -770,11 +783,8 @@ fn select_input(
     }
     if resp.dragged_by(egui::PointerButton::Primary)
         && let Some(pos) = resp.interact_pointer_pos()
-        && let Some(b) = s.selection_box.as_mut()
     {
-        b.end = pos;
-        let labels = if s.show_dimensions { label_rects(frame, &s.sketch, ui) } else { Vec::new() };
-        b.picks = select_box::targets(frame, &s.sketch, &labels, b.rect(), b.kind());
+        stretch_box(ui, s, frame, pos);
     }
     if resp.dragged_by(egui::PointerButton::Primary)
         && let Some(pos) = resp.interact_pointer_pos()
@@ -803,10 +813,15 @@ fn select_input(
             None => {}
         }
     }
-    if resp.drag_stopped_by(egui::PointerButton::Primary)
-        && let Some(b) = s.selection_box.take()
-    {
-        b.combine.apply(&mut s.selection, &b.picks);
+    if resp.drag_stopped_by(egui::PointerButton::Primary) {
+        // The release may carry a move the last drag frame never saw, so the box ends
+        // where the button came up.
+        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+            stretch_box(ui, s, frame, pos);
+        }
+        if let Some(b) = s.selection_box.take() {
+            b.combine.apply(&mut s.selection, &b.picks);
+        }
     }
     if resp.drag_stopped_by(egui::PointerButton::Primary) {
         match s.drag.take() {

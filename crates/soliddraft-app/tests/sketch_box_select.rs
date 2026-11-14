@@ -190,6 +190,46 @@ fn a_box_selects_inside_left_to_right_and_crossing_right_to_left() {
     });
 }
 
+#[test]
+fn a_box_ends_where_the_button_comes_up() {
+    let mut case = Case::new("sketch-box-release-move");
+    let (mut app, _) = open(&mut case);
+    case.run(&mut app, |case, app| {
+        let dim = dimension(app);
+        let (left_top, right_bottom) = corners(app, P2::new(-35.0, -2.0), P2::new(-3.0, 13.0));
+        ribbon::render_steps::rendered(app, |app| {
+            app.hover_at(left_top);
+            app.run_steps(3);
+            let pressed = Modifiers::NONE;
+            app.event(egui::Event::PointerButton {
+                pos: left_top,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: pressed,
+            });
+            app.step();
+            // A short drag that holds nothing yet.
+            app.hover_at(left_top + egui::vec2(12.0, 12.0));
+            app.step();
+            let b = session(app).selection_box.clone().expect("a box is being dragged");
+            assert!(b.picks.is_empty(), "the short box holds {:?}", b.picks);
+            // The last move and the release arrive in one frame, as a quick flick can.
+            app.event(egui::Event::PointerMoved(right_bottom));
+            app.event(egui::Event::PointerButton {
+                pos: right_bottom,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: pressed,
+            });
+            app.step();
+            settle(app);
+        });
+        assert!(session(app).selection_box.is_none());
+        assert_eq!(selection(app), vec![LINE, dim], "the box reached the release point");
+        case.frame(app, "01-selected");
+    });
+}
+
 /// How far a pixel is from another, summed over the colour channels.
 fn difference(a: &image::Rgba<u8>, b: &image::Rgba<u8>) -> u32 {
     (0..3).map(|i| a[i].abs_diff(b[i]) as u32).sum()

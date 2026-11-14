@@ -349,11 +349,16 @@
       "kernel",
       "test-linux",
       "step-opencascade",
-      "msrv",
-      "application-loop"
+      "msrv"
     ],
     "ci/test_blade_disk.py": [
       "lint"
+    ],
+    "ci/fixtures/import/two-blocks.igs": [
+      "lint",
+      "kernel",
+      "test-linux",
+      "application-loop"
     ]
   },
   "patterns": {

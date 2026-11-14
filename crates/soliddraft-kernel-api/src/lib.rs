@@ -1376,6 +1376,12 @@ pub trait Kernel: Send + Sync {
         }
     }
 
+    /// Stable entity keys in the original STEP or IGES bytes, before repair.
+    fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
+        let _ = (format, source);
+        Err(KernelError::Unsupported("source solid selection".into()))
+    }
+
     /// Builds or replays the explicitly selected source format and its repair decisions.
     fn import_source(
         &self,

@@ -239,7 +239,7 @@
         ],
         "diameter": 2
       },
-      "refusal": "intersect.traced-pair-required",
+      "refusal": "intersect.trace-native-window",
       "checks": [
         {
           "pointer": "/measurement/volume_mm3",

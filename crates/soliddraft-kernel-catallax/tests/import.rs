@@ -18,6 +18,7 @@ fn source_incidence_certificates_round_trip_and_tampering_is_refused() {
     let options = ImportOptions::default();
     kernel.propose_import(source, &options).unwrap();
     let request = ImportStepRequest {
+        source_solid: None,
         name: &feature.source_name,
         source,
         sha256: &feature.sha256,
@@ -60,6 +61,7 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
     let decisions = feature.kernel_decisions().unwrap();
     assert_eq!(decisions, [Decision::Decline { id: "g0".into() }]);
     let request = ImportStepRequest {
+        source_solid: None,
         name: &feature.source_name,
         source: &feature.source,
         sha256: &feature.sha256,
@@ -111,6 +113,7 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
         .import_step(
             &OpTag::new("two"),
             &ImportStepRequest {
+                source_solid: None,
                 name: &two.source_name,
                 source: &two.source,
                 sha256: &two.sha256,
@@ -120,7 +123,7 @@ fn reviewed_import_round_trips_the_kernel_question_and_builds_one_exact_body() {
             },
         )
         .unwrap_err();
-    assert!(refused.to_string().contains("Several-solid import is coming soon."), "{refused}");
+    assert!(refused.to_string().contains("Choose one source solid for each imported body."), "{refused}");
 }
 
 #[test]
@@ -136,6 +139,7 @@ fn an_approved_seam_saves_its_limit_and_approver_and_verifies_on_reopen() {
     let feature = unanswered.accepted(&proposal.question, "0.03", "Ana: lead reviewer");
     let decisions = feature.kernel_decisions().unwrap();
     let request = ImportStepRequest {
+        source_solid: None,
         name: &feature.source_name,
         source: &feature.source,
         sha256: &feature.sha256,
@@ -207,8 +211,15 @@ fn round_trip_source(name: &str, source: &[u8], volume: f64) -> RepairRecord {
     let feature = ImportStepFeature::new(name, source.to_vec());
     let options = ImportOptions::default();
     kernel.propose_import(source, &options).unwrap();
-    let request =
-        ImportStepRequest { name, source, sha256: &feature.sha256, options: &options, decisions: &[], record: None };
+    let request = ImportStepRequest {
+        source_solid: None,
+        name,
+        source,
+        sha256: &feature.sha256,
+        options: &options,
+        decisions: &[],
+        record: None,
+    };
     let imported = kernel.import_step(&OpTag::new("wider"), &request).unwrap();
     assert_eq!(imported.bodies.len(), 1);
     let body = imported.bodies[0].result.body;

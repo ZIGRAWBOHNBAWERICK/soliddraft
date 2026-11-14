@@ -12,11 +12,19 @@ use soliddraft_app::{
     document::{Command, Document, ExtrudeParams, ProfileKind, Selection},
     measure, theme,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use window::{App, button, click_at, screen_of, settle, snapshot};
+
+// Each complete case owns the GPU contexts and the process-wide config override.
+static GPU: Mutex<()> = Mutex::new(());
+
+fn gpu_lock() -> MutexGuard<'static, ()> {
+    GPU.lock().unwrap_or_else(|poison| poison.into_inner())
+}
 
 #[test]
 fn pick_measure_track_and_edit() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
@@ -26,7 +34,7 @@ fn pick_measure_track_and_edit() {
     }
     let config = std::env::temp_dir().join(format!("soliddraft-measure-panel-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
-    soliddraft_app::file::set_config_dir(Some(config));
+    soliddraft_app::file::set_config_dir(Some(config.clone()));
     let mut doc = Document::new("Measured block", Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
     let id = doc
         .apply(Command::AddExtrude {
@@ -83,11 +91,22 @@ fn pick_measure_track_and_edit() {
     h.get_by_label("Check: fail");
     assert_eq!(measure::panel::row_color("fail"), theme::error());
     snapshot(&mut h, "failed-check");
+    let saved = config.join("tracked.dwprt");
+    h.state_mut().state.push(soliddraft_app::state::AppAction::SaveAs(Some(saved.clone())));
+    settle(&mut h);
+    assert!(saved.is_file());
+    let saved = std::fs::canonicalize(saved).unwrap();
+    let recent: Vec<std::path::PathBuf> = serde_json::from_slice(
+        &std::fs::read(config.join("recent.json")).expect("the active measurement case owns its recent-file list"),
+    )
+    .unwrap();
+    assert!(recent.contains(&saved));
 }
 
 /// V2 batch 2 G1.
 #[test]
 fn hover_pick_pair_track_edit_and_reopen_in_window() {
+    let _gpu = gpu_lock();
     use soliddraft_app::state::AppAction;
     let mut doc = Document::new("Paired block", Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()));
     let id = doc
@@ -196,6 +215,7 @@ fn hover_pick_pair_track_edit_and_reopen_in_window() {
 /// measure.nonplanar-face: face #94 is not planar`. An unfinished pair says only Coming soon.
 #[test]
 fn an_unfinished_pair_says_only_coming_soon() {
+    let _gpu = gpu_lock();
     use egui_kittest::kittest::{NodeT, by};
     use serde_json::json;
     use soliddraft_app::{app_tools::AppTools, command_tools::find_entity, measure::hover::Pick};

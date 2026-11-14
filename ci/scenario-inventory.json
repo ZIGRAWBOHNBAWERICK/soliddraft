@@ -532,10 +532,10 @@
         "soliddraft-kernel-api",
         "soliddraft-kernel-catallax"
       ],
-      "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
+      "catallax_revision": "ad826a1dc5aaa1abf7500e5ca484ff82d9aae4fb",
       "route": "MCP document commands -> Catallax adapter -> pinned kernel",
-      "supported_limits": "One AP214 MANIFOLD_SOLID_BREP of planar faces in millimetres; one straight seam within the 0.01 mm automatic cap; decline leaves the solid open and unbuilt; files with more than one solid are refused; opening, uncertain, curved and unsupported-entity cases are later V9 batches",
-      "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; declined.dwprt and imported.dwprt; step 12 part.step, step-report.json, check-step.stdout and check-step.stderr; geometry-info.stdout recipe hashes"
+      "supported_limits": "Several AP214 MANIFOLD_SOLID_BREP solids enter separate bodies through source entity selectors bound to the original bytes. One straight seam within the 0.01 mm automatic cap; decline leaves a single solid open and unbuilt. Unanswered or declined repairs in a several-solid source refuse the entire import. Selected imports refuse replacement by changed bytes.",
+      "evidence": "result.json, protocol.json and commands/NNNN/{part.dwprt,command.json,kernel.json}; declined.dwprt and imported.dwprt; step 14 part.step, step-report.json, check-step.stdout and check-step.stderr; geometry-info.stdout recipe hashes"
     },
     {
       "id": "import-features",

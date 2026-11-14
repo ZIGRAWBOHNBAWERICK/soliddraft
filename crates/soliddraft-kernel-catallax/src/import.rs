@@ -69,6 +69,13 @@ fn source_format(format: ImportFormat) -> catallax_import::SourceFormat {
     }
 }
 
+pub(super) fn source_solids(format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
+    if format == ImportFormat::Mesh {
+        return Err(KernelError::InvalidInput("Mesh solids do not have source entity selectors.".into()));
+    }
+    source_format(format).solid_entities(source).map_err(|error| refusal(format, error))
+}
+
 fn refusal(format: ImportFormat, error: catallax_import::ImportRefusal) -> KernelError {
     if format == ImportFormat::Step {
         return step_refusal(error);
@@ -191,20 +198,28 @@ impl CatallaxKernel {
             }
             None => {}
         }
-        let count = imported.bodies.len() + imported.left_open.len();
-        if count != 1 {
-            return Err(KernelError::InvalidInput("Several-solid import is coming soon.".into()));
-        }
+        let selected = match request.source_solid {
+            Some(entity) => imported.bodies.iter().find(|(key, _)| key == entity),
+            None if imported.bodies.len() + imported.left_open.len() == 1 => imported.bodies.first(),
+            None => return Err(KernelError::InvalidInput("Choose one source solid for each imported body.".into())),
+        };
         let record = wire(imported.record)?;
         if !imported.left_open.is_empty() {
             return Ok(ImportStepResult { bodies: Vec::new(), left_open: imported.left_open, record });
         }
+        let name = &selected
+            .ok_or_else(|| {
+                KernelError::InvalidInput(
+                    "The selected solid is missing from the original file. Import the file again as new bodies.".into(),
+                )
+            })?
+            .0;
         let kind = match format {
             ImportFormat::Step => OpKind::ImportStep,
             ImportFormat::Iges => OpKind::ImportIges,
             ImportFormat::Mesh => unreachable!(),
         };
-        self.build_imported_body(kind, tag, request, record, &imported.bodies[0].0)
+        self.build_imported_body(kind, tag, request, record, name)
     }
 
     fn import_mesh_body(&self, tag: &OpTag, request: &ImportStepRequest<'_>) -> KernelResult<ImportStepResult> {
@@ -254,6 +269,9 @@ impl CatallaxKernel {
         }
         let mut step = json!({"id":result, "op":kind.name(), "file":{"name":request.name,"sha256":request.sha256},
             "pose":{"rotation":["1","0","0","0"],"translation":["0","0","0"]}, "decisions":saved});
+        if let Some(entity) = request.source_solid {
+            step["source_solid"] = json!(entity);
+        }
         if kind == OpKind::ImportMesh {
             step.as_object_mut().expect("step object").remove("decisions");
             step["scale"] = json!("1");

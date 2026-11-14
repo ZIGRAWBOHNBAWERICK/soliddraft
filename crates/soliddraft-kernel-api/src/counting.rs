@@ -110,6 +110,10 @@ impl Kernel for Counting {
         self.inner.propose_import_source(format, source, options)
     }
 
+    fn source_solids(&self, format: crate::ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
+        self.inner.source_solids(format, source)
+    }
+
     fn import_source(
         &self,
         format: crate::ImportFormat,

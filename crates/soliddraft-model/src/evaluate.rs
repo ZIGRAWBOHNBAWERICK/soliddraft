@@ -1340,6 +1340,7 @@ impl Document {
             Err(message) => return Built::failed(current, message),
         };
         let request = ImportStepRequest {
+            source_solid: i.source_solid.as_deref(),
             name: &i.source_name,
             source: &i.source,
             sha256: &i.sha256,
@@ -1377,7 +1378,7 @@ impl Document {
                 }
                 if r.bodies.len() != 1 {
                     release(&r);
-                    return Built::failed(current, "Several-solid import is coming soon.");
+                    return Built::failed(current, "Choose one source solid for each imported body.");
                 }
                 let result = r.bodies.remove(0).result;
                 let body = result.body;

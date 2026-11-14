@@ -14,9 +14,17 @@ use soliddraft_app::viewport::camera::StandardView;
 use soliddraft_assistant::Caller;
 use soliddraft_assistant::tools::call_checked;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 const HANG: Duration = Duration::from_secs(600);
+
+// Each complete case owns the GPU contexts and the process-wide config override.
+static GPU: Mutex<()> = Mutex::new(());
+
+fn gpu_lock() -> MutexGuard<'static, ()> {
+    GPU.lock().unwrap_or_else(|poison| poison.into_inner())
+}
 
 type App<'a> = Harness<'a, SolidDraftApp>;
 
@@ -31,6 +39,24 @@ fn part(state: &mut AppState, file: &Path, width: f64, height: f64, depth: f64) 
     tool(state, "sketch", json!({ "plane": "top", "shapes": [shape] }));
     tool(state, "extrude", json!({ "sketch": "Sketch1", "depth": depth, "flip": false }));
     tool(state, "save", json!({ "path": file }));
+}
+
+fn assert_recent_case(h: &mut App<'_>, dir: &Path) {
+    let saved = dir.join("recent-scope.dwasm");
+    h.state_mut().state.push(AppAction::Assembly(AssemblyAction::Save(Some(saved.clone()))));
+    settle(h);
+    assert!(saved.is_file(), "the UI save writes the accepted assembly");
+    let saved = std::fs::canonicalize(saved).unwrap();
+    let recent: Vec<PathBuf> = serde_json::from_slice(
+        &std::fs::read(dir.join("config/recent.json")).expect("the active mate case owns its recent-file list"),
+    )
+    .unwrap();
+    assert!(recent.contains(&saved));
+    let dir = std::fs::canonicalize(dir).unwrap();
+    assert!(
+        recent.iter().all(|path| path.starts_with(&dir)),
+        "another mate window changed this case's recent-file configuration: {recent:?}"
+    );
 }
 
 fn session<'h>(h: &'h App<'_>) -> &'h AssemblySession {
@@ -218,6 +244,7 @@ fn snapshot(h: &mut App<'_>, name: &str) {
 
 #[test]
 fn pick_drive_update_and_refuse_in_the_window() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
@@ -341,12 +368,14 @@ fn pick_drive_update_and_refuse_in_the_window() {
     assert_eq!(drawn_z(&h), 26.0);
     assert_readout(&mut h, "Z: 12 mm");
     snapshot(&mut h, "5-updated");
+    assert_recent_case(&mut h, &dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn pick_coincident_update_and_refuse_in_the_window() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
@@ -485,6 +514,7 @@ fn pick_coincident_update_and_refuse_in_the_window() {
     settle(&mut h);
     assert_eq!((shown(&h, 0), drawn(&h, 1)), (a14, [10.0, 10.0, 14.0]));
     snapshot(&mut h, "coincident-5-redone");
+    assert_recent_case(&mut h, &dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -513,6 +543,7 @@ fn pick(h: &mut App<'_>, component: u32, face: &str) {
 
 #[test]
 fn width_lock_and_conflicts_in_the_window() {
+    let _gpu = gpu_lock();
     let instance = egui_wgpu::wgpu::Instance::default();
     let adapters = pollster::block_on(instance.enumerate_adapters(egui_wgpu::wgpu::Backends::all()));
     if adapters.is_empty() {
@@ -641,6 +672,7 @@ fn width_lock_and_conflicts_in_the_window() {
     assert_readout(&mut h, "Fully constrained");
     assert_eq!(drawn(&h, 1), [10.0, 7.0, 30.0], "a lock keeps B where it is");
     snapshot(&mut h, "families-3-lock");
+    assert_recent_case(&mut h, &dir);
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }

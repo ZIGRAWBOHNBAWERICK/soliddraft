@@ -407,6 +407,19 @@ impl Expression {
         walk(&self.tree, &mut out);
         out
     }
+
+    /// Whether it reads the feature input `input`.
+    pub(crate) fn reads(&self, input: &crate::values::Input) -> bool {
+        fn walk(tree: &Expr, input: &crate::values::Input) -> bool {
+            match tree {
+                Expr::Param(found) => found == input,
+                Expr::Number(..) | Expr::Ref(_) => false,
+                Expr::Neg(inner) => walk(inner, input),
+                Expr::Op(_, a, b) => walk(a, input) || walk(b, input),
+            }
+        }
+        walk(&self.tree, input)
+    }
 }
 
 /// The names an expression's text uses, once each, in the order written.

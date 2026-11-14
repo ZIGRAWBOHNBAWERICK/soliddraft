@@ -184,7 +184,7 @@ impl TabViewer for Panels<'_> {
                     let target = if let Some(session) = st.sketch.as_mut() {
                         if let Some(pos) = events.context_position {
                             let picked =
-                                crate::sketcher::context_pick(session, &st.viewport.camera, st.viewport.rect, pos);
+                                crate::sketcher::context_pick(ui, session, &st.viewport.camera, st.viewport.rect, pos);
                             if !picked.is_some_and(|p| session.selection.contains(&p)) {
                                 session.selection = picked.into_iter().collect();
                             }

@@ -103,6 +103,20 @@ impl Configurations {
         Ok(features)
     }
 
+    /// Drops every row's override of a parameter that no longer exists. Refuses while a
+    /// row's override text still reads one.
+    pub(crate) fn forget_names(&mut self, names: &[String]) -> Result<(), String> {
+        for row in &mut self.rows {
+            for (key, text) in &row.overrides {
+                if let Some(name) = crate::value_expr::names(text).into_iter().find(|n| names.contains(n)) {
+                    return Err(format!("{key} in {} reads {name}; change it before removing the dimension", row.name));
+                }
+            }
+            row.overrides.retain(|key, _| !names.contains(key));
+        }
+        Ok(())
+    }
+
     pub(crate) fn capture_edits(&mut self, before: &[Feature], after: &[Feature]) -> bool {
         if self.is_empty() {
             return false;

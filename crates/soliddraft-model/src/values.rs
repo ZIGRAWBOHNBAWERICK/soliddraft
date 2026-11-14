@@ -331,6 +331,44 @@ impl Values {
         Ok(())
     }
 
+    /// Lets go of the driving dimensions that sketch `feature` no longer has, as `features`
+    /// stand: a deleted dimension, or one turned into a reference, takes its drive and its
+    /// pinned name with it. Refuses while another value still reads one. Returns the
+    /// dimensions let go of, with their pinned names.
+    pub(crate) fn forget_dimensions(
+        &mut self,
+        feature: FeatureId,
+        features: &[Feature],
+    ) -> Result<Vec<(Input, Option<String>)>, String> {
+        let gone = |input: &Input| {
+            matches!(input, Input::Dimension { feature: f, .. } if *f == feature)
+                && params::read(features, input).is_none()
+        };
+        let mut lost: Vec<Input> = Vec::new();
+        for input in self.bindings.iter().map(|b| &b.input).chain(self.names.iter().map(|p| &p.input)) {
+            if gone(input) && !lost.contains(input) {
+                lost.push(input.clone());
+            }
+        }
+        for input in &lost {
+            let name = self.pinned(input).map_or_else(|| "the dimension".to_owned(), str::to_owned);
+            let reader =
+                self.entries.iter().find(|v| v.expression.reads(input)).map(|v| v.name.clone()).or_else(|| {
+                    self.bindings
+                        .iter()
+                        .find(|b| b.input != *input && b.expression.reads(input))
+                        .map(|b| self.pinned(&b.input).map_or_else(|| "a feature's value".to_owned(), str::to_owned))
+                });
+            if let Some(reader) = reader {
+                return Err(format!("{reader} reads {name}; change {reader} before removing the dimension"));
+            }
+        }
+        let lost: Vec<_> = lost.into_iter().map(|input| (self.pinned(&input).map(str::to_owned), input)).collect();
+        self.bindings.retain(|b| !lost.iter().any(|(_, input)| *input == b.input));
+        self.names.retain(|p| !lost.iter().any(|(_, input)| *input == p.input));
+        Ok(lost.into_iter().map(|(name, input)| (input, name)).collect())
+    }
+
     /// Removes a global that nothing reads.
     pub(crate) fn remove(&mut self, name: &str) -> Result<(), String> {
         let index =

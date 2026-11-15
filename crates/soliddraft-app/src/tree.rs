@@ -19,8 +19,11 @@ use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, pos2,
 /// A row the tree shows, flattened from the feature list.
 struct RowItem {
     id: FeatureId,
-    /// Index in the document's feature list.
+    /// Index in the document's feature list; a nested sketch carries its consumer's.
     index: usize,
+    /// Where the row's block starts in the feature list: its absorbed sketch, which may
+    /// come well before the feature, or the feature itself.
+    first: usize,
     indent: u8,
     chevron: Option<bool>,
     icon: Icon,
@@ -199,6 +202,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             let icon = feature_icon(&f.kind);
             let child = f.kind.sketch().and_then(|s| state.doc.feature(s));
+            let first =
+                child.and_then(|c| state.doc.features.iter().position(|x| x.id == c.id)).map_or(i, |at| at.min(i));
             let (sub, status) = match &state.drag_preview {
                 Some(drag) if drag.feature() == f.id => {
                     let (message, failed) = drag.label();
@@ -217,6 +222,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             items.push(RowItem {
                 id: f.id,
                 index: i,
+                first,
                 indent: 0,
                 chevron: child.map(|_| state.expanded.contains(&f.id)),
                 icon,
@@ -233,6 +239,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 items.push(RowItem {
                     id: c.id,
                     index: i,
+                    first,
                     indent: 1,
                     chevron: None,
                     icon: Icon::Sketch,
@@ -265,7 +272,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         let pointer_released = ui.input(|i| i.pointer.primary_released());
         let pointer_pos = ui.input(|i| i.pointer.interact_pos());
         let dragging = state.drag_feature;
-        let mut drop_target: Option<usize> = None;
+        // The block, first and last index, of the row the dragged feature was dropped on.
+        let mut drop_target: Option<(usize, usize)> = None;
         let mut bar_target: Option<usize> = None;
         let mut rename_commit: Option<(FeatureId, String)> = None;
         let mut rename_cancel = false;
@@ -379,9 +387,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 resp.scroll_to_me(None);
             }
             if dragging.is_some_and(|d| d != item.id) && resp.hovered() && pointer_released {
-                drop_target = Some(item.index);
+                drop_target = Some((item.first, item.index));
             }
-            if resp.drag_started_by(egui::PointerButton::Primary) && item.indent == 0 {
+            // A nested sketch drags too: it may move away from its feature, as far up as
+            // its own inputs allow.
+            if resp.drag_started_by(egui::PointerButton::Primary) {
                 state.drag_feature = Some(item.id);
             }
             if resp.clicked() {
@@ -449,8 +459,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
             if pointer_released {
                 state.drag_feature = None;
-                if let Some(target) = drop_target {
-                    actions.push(AppAction::Command(Command::Reorder { id: d, index: target }));
+                // Dropped on a row, the feature takes that row's place: above the row's block
+                // when it came from below, below it when it came from above. The command
+                // keeps every sketch ahead of its consumer and refuses an order that breaks
+                // an input.
+                if let Some((first, last)) = drop_target
+                    && let Some(from) = state.doc.features.iter().position(|f| f.id == d)
+                    && !(first..=last).contains(&from)
+                {
+                    let index = if from > last { first } else { last };
+                    actions.push(AppAction::Command(Command::Reorder { id: d, index }));
                 }
             }
         }

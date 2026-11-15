@@ -9,7 +9,7 @@ mod ribbon;
 use egui::{Key, Modifiers, Pos2, Rect, pos2, vec2};
 use egui_kittest::kittest::Queryable;
 use ribbon::App;
-use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, Selection, SketchPlane};
+use soliddraft_app::document::{Command, Document, ExtrudeParams, FeatureStatus, PlaneKind, Selection, SketchPlane};
 use soliddraft_app::panels::{Pane, Side};
 use soliddraft_app::state::AppAction;
 use soliddraft_app::theme::{self, Mode};
@@ -279,6 +279,63 @@ fn row_and_rollback_bar_drags_change_order_and_rollback() {
         let last = row(app, "Sketch2");
         drag(app, rollback_bar(app).center(), pos2(last.center().x, last.bottom() + 6.0));
         assert_eq!(app.state().state.doc.rollback, None);
+    });
+}
+
+#[test]
+fn a_nested_sketch_drags_out_of_its_feature_to_a_legal_place() {
+    use soliddraft_app::document::CutParams;
+    let case = ribbon::case("tree-nested-drag");
+    let mut doc = ribbon::sketch();
+    let sketch = doc.features[0].id;
+    let extrude = doc
+        .apply(Command::AddExtrude {
+            params: ExtrudeParams { sketch: Some(sketch), ..Default::default() },
+            via_assistant: false,
+        })
+        .unwrap()
+        .unwrap();
+    let hole = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    let mut circle = soliddraft_sketch::Sketch::new();
+    circle.circle_at(soliddraft_sketch::P2::new(10.0, 10.0), 8.0).unwrap();
+    doc.apply(Command::EditSketch { id: hole, sketch: circle }).unwrap();
+    let cut = doc
+        .apply(Command::AddCut {
+            params: CutParams { sketch: hole, depth: 20.0, through_all: true, flip: true, up_to: None },
+        })
+        .unwrap()
+        .unwrap();
+    let order = |app: &App| app.state().state.doc.features.iter().map(|f| f.id).collect::<Vec<_>>();
+    let mut app = ribbon::app(doc);
+    case.run(&mut app, |app| {
+        assert_eq!(order(app), [sketch, extrude, hole, cut]);
+        let name = |app: &App, id| app.state().state.doc.feature(id).unwrap().name.clone();
+        let (cut_name, hole_name, extrude_name) = (name(app, cut), name(app, hole), name(app, extrude));
+        let cut_row = row(app, &cut_name);
+        ribbon::click_at(app, pos2(cut_row.left() + 10.0, cut_row.center().y));
+        app.run_steps(4);
+        let nested = row(app, &hole_name);
+        assert!(nested.top() >= cut_row.bottom() - 1.0, "the sketch nests under its cut");
+        case.frame(app, "nested");
+        // The circle sketch reads nothing, so it may leave its cut for the top of the part.
+        drag(app, nested.center(), row(app, &extrude_name).center());
+        assert_eq!(order(app), [hole, sketch, extrude, cut], "the sketch moved above the extrude's block");
+        assert!(
+            app.state()
+                .state
+                .doc
+                .features
+                .iter()
+                .all(|f| !matches!(f.status, FeatureStatus::Error(_) | FeatureStatus::NeedsRepair(_))),
+            "every feature still builds"
+        );
+        case.frame(app, "moved");
+        app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        app.run_steps(8);
+        assert_eq!(order(app), [sketch, extrude, hole, cut], "undo restores the order");
     });
 }
 

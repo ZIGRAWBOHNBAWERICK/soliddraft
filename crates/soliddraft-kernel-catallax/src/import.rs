@@ -316,6 +316,7 @@ impl CatallaxKernel {
                 solid: Some(Arc::new(Solid {
                     // Imports are rebuilt from their source, not handed over.
                     key: String::new(),
+                    handed_previews: Default::default(),
                     app,
                     ids,
                     display,

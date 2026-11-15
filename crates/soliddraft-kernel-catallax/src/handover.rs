@@ -16,7 +16,7 @@ use catallax_numbers::Decider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use soliddraft_kernel_api::{EdgeId, FaceId, KernelError, KernelResult, Topology, VertexId};
+use soliddraft_kernel_api::{EdgeId, EdgePolyline, FaceId, KernelError, KernelResult, Mesh, Topology, VertexId};
 
 /// The first bytes of a hand-over, then its version.
 const MAGIC: &[u8; 16] = b"soliddraft-hand1";
@@ -61,7 +61,22 @@ pub(crate) struct HandedTopology {
     pub faces: Vec<(u64, u32)>,
     pub edges: Vec<(u64, u32)>,
     pub vertices: Vec<(u64, u32)>,
+    /// The early display meshes the handing kernel sampled, by display key, with its ids.
+    #[serde(default)]
+    pub previews: Vec<HandedPreview>,
 }
+
+/// One early display mesh and its edges, as [`soliddraft_kernel_api::Kernel::preview`] and
+/// `preview_edges` answer for one display key.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct HandedPreview {
+    pub key: String,
+    pub mesh: Mesh,
+    pub edges: Vec<EdgePolyline>,
+}
+
+/// Early display meshes renamed into a kernel's own ids, by display key.
+pub(crate) type Previews = BTreeMap<String, (Mesh, Vec<EdgePolyline>)>;
 
 impl HandedTopology {
     /// The topology with each id the handing kernel gave replaced by the id this kernel
@@ -94,6 +109,38 @@ impl HandedTopology {
             info.edges = info.edges.iter().map(|id| edge(*id)).collect::<Option<_>>()?;
         }
         Some(topology)
+    }
+
+    /// The handed-over early display meshes, renamed like [`HandedTopology::renamed`];
+    /// `None` if any face or edge they name has no id here.
+    pub(crate) fn renamed_previews(
+        &self,
+        faces: &BTreeMap<u32, FaceId>,
+        edges: &BTreeMap<u32, EdgeId>,
+    ) -> Option<Previews> {
+        let face_ids: BTreeMap<u64, FaceId> =
+            self.faces.iter().map(|(theirs, index)| Some((*theirs, *faces.get(index)?))).collect::<Option<_>>()?;
+        let edge_ids: BTreeMap<u64, EdgeId> =
+            self.edges.iter().map(|(theirs, index)| Some((*theirs, *edges.get(index)?))).collect::<Option<_>>()?;
+        self.previews
+            .iter()
+            .map(|preview| {
+                let mut mesh = preview.mesh.clone();
+                mesh.triangle_faces =
+                    mesh.triangle_faces.iter().map(|id| face_ids.get(&id.raw()).copied()).collect::<Option<_>>()?;
+                let edges = preview
+                    .edges
+                    .iter()
+                    .map(|polyline| {
+                        Some(EdgePolyline {
+                            edge: *edge_ids.get(&polyline.edge.raw())?,
+                            points: polyline.points.clone(),
+                        })
+                    })
+                    .collect::<Option<_>>()?;
+                Some((preview.key.clone(), (mesh, edges)))
+            })
+            .collect()
     }
 }
 

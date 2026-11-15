@@ -2522,7 +2522,12 @@ impl Document {
         self.model.withdraw(depth).map_err(|e| e.to_string())?;
         self.after_change();
         match drawn {
-            Some(drawn) if drawn < depth && self.display_failure.is_some() => self.abandon(drawn),
+            Some(drawn) if drawn < depth && self.display_failure.is_some() => {
+                // Back to the part on screen, with the history as it was there.
+                self.model.withdraw(drawn).map_err(|e| e.to_string())?;
+                self.after_change();
+                Ok(())
+            }
             Some(_) => Ok(()),
             None => {
                 if self.display_failure.is_some()

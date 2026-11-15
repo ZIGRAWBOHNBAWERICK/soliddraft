@@ -549,17 +549,16 @@ impl Document {
 
     /// Reverts the commands recorded since the undo stack was `depth` deep, as
     /// [`Self::abandon`] does, and puts back the redo stack the first of them cleared:
-    /// for a command refused after it ran, which leaves the history as it found it.
+    /// for a command refused after it ran, which leaves the history as it found it. A
+    /// redo stack cleared further down stays kept for a later withdraw to that depth.
     pub fn withdraw(&mut self, depth: usize) -> Result<(), CommandError> {
         let journal = self.journal_command(|| serde_json::json!({"op":"withdraw", "depth":depth}));
         journal.finish((|| {
-            let cleared = self.cleared_redo.take();
             self.revert_to(depth)?;
-            if let Some((at, redo)) = cleared
-                && at == depth
-                && self.redo.is_empty()
-            {
-                self.redo = redo;
+            match self.cleared_redo.take() {
+                Some((at, redo)) if at == depth && self.redo.is_empty() => self.redo = redo,
+                Some((at, redo)) if at < depth => self.cleared_redo = Some((at, redo)),
+                _ => {}
             }
             Ok(())
         })())

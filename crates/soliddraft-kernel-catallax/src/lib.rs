@@ -32,9 +32,13 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use catallax_app::{Error, EvaluatedApplicationBody};
+
+mod evaluated;
+mod handover;
 use catallax_mesh::{MeshOptions, PreviewMesh, PreviewOptions, preview_mesh_body};
 use catallax_numbers::{Decider, Rational};
 use catallax_recipe::StepId;
+pub(crate) use evaluated::{AppBody, Exact};
 use serde_json::{Value, json};
 use soliddraft_kernel_api::*;
 
@@ -60,6 +64,13 @@ struct State {
     /// Imported STEP sources by SHA-256. Catallax reads them again for every build
     /// that continues an imported body, even when the import itself is reused.
     files: BTreeMap<String, Arc<[u8]>>,
+    /// Builds this kernel made since [`Kernel::keep_builds`], by recipe key, as bytes.
+    kept: Option<Vec<(String, Vec<u8>)>>,
+    /// Builds another kernel handed over, by recipe key; a build of the same
+    /// definition takes one instead of evaluating it.
+    offered: BTreeMap<String, Arc<catallax_features::Built>>,
+    /// Bodies Catallax evaluated here rather than took from an offer.
+    fresh: u64,
 }
 
 struct Stored {
@@ -70,7 +81,7 @@ struct Stored {
 }
 
 struct Solid {
-    app: EvaluatedApplicationBody,
+    app: AppBody,
     ids: convert::Ids,
     display: MeshCache<catallax_mesh::Mesh>,
     print: MeshCache<PrintMesh>,
@@ -345,6 +356,12 @@ impl CatallaxKernel {
         Self::default()
     }
 
+    /// How many feature bodies Catallax has evaluated in this kernel, not counting builds
+    /// taken from an offered hand-over.
+    pub fn fresh_builds(&self) -> u64 {
+        self.state().map(|state| state.fresh).unwrap_or_default()
+    }
+
     /// Enables synchronous per-call evidence and deterministic work accounting.
     pub fn with_diagnostics(max_work: u64) -> Self {
         Self::capture(Some(max_work))
@@ -564,15 +581,36 @@ impl CatallaxKernel {
         let input = json!({"format":"soliddraft-recipe/1", "name":"SolidDraft", "steps": steps.values().collect::<Vec<_>>(), "result": result});
         let sources = state.sources(&steps)?;
         let capture = state.capture;
+        let offered = state.offered.clone();
+        let keeping = state.kept.is_some();
         drop(state);
         let mut questions = Vec::new();
         let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
-        let built =
-            build(&input, op, prefix.as_ref().map(|solid| &solid.app), &files, capture.then_some(&mut questions));
+        let built = build(
+            &input,
+            op,
+            prefix.as_ref().map(|solid| &solid.app),
+            &files,
+            capture.then_some(&mut questions),
+            &offered,
+        );
+        // A build made here is kept for hand-over outside the lock; an offered one is not.
+        let kept = match &built {
+            Ok((app, _, key)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
+                Some((key.clone(), handover::write(app.checkpoint.built())?))
+            }
+            _ => None,
+        };
         let mut state = self.state()?;
         // A refused build keeps its question too.
         state.questions.extend(questions);
-        let (app, names) = built?;
+        if let (Some(kept), Some(list)) = (kept, state.kept.as_mut()) {
+            list.push(kept);
+        }
+        if matches!(&built, Ok((app, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_))) {
+            state.fresh += 1;
+        }
+        let (app, names, _) = built?;
         Ok((state, Evaluated { app, names, steps, history, parents, seq, result }))
     }
 
@@ -615,7 +653,7 @@ fn terminal_field(body: BodyId) -> KernelError {
 
 /// The operation's result, before it becomes a stored body.
 struct Evaluated {
-    app: EvaluatedApplicationBody,
+    app: AppBody,
     names: BTreeMap<String, catallax_recipe::StepId>,
     steps: BTreeMap<u64, Value>,
     history: BTreeMap<u64, HistoryRecord>,
@@ -631,7 +669,7 @@ const NOTHING_LEFT: &str = "this would leave nothing of the part";
 /// and keeps the request in `requested_radius`. SolidDraft never builds a radius other
 /// than the one the feature records, so it refuses as Catallax did before, naming the
 /// largest radius that fits. A radius that consumes a face exactly still builds.
-fn stopped_short(app: &EvaluatedApplicationBody, step: &str) -> Option<KernelError> {
+fn stopped_short(app: &AppBody, step: &str) -> Option<KernelError> {
     let built = app.checkpoint.built();
     let limit = built
         .fillets
@@ -654,7 +692,7 @@ fn stopped_short(app: &EvaluatedApplicationBody, step: &str) -> Option<KernelErr
     })
 }
 
-fn is_empty(app: &EvaluatedApplicationBody) -> bool {
+fn is_empty(app: &AppBody) -> bool {
     let exact = app.checkpoint.built();
     exact.model.body(exact.result).kind == catallax_topology::BodyKind::Empty
 }
@@ -832,18 +870,24 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
 fn build(
     input: &Value,
     op: OpKind,
-    prefix: Option<&EvaluatedApplicationBody>,
+    prefix: Option<&AppBody>,
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
-) -> KernelResult<(EvaluatedApplicationBody, BTreeMap<String, catallax_recipe::StepId>)> {
+    offered: &BTreeMap<String, Arc<catallax_features::Built>>,
+) -> KernelResult<(AppBody, BTreeMap<String, catallax_recipe::StepId>, String)> {
     let converted = converted_recipe(input, op)?;
     if let Some(questions) = questions {
         let problem = serde_json::to_value(&converted.recipe).expect("Catallax recipes serialize");
         questions.push(json!({"format":"catallax-question/1", "source":"recipe", "problem":problem}));
     }
+    let key = handover::key(&converted.recipe);
+    if let Some(built) = offered.get(&key) {
+        return Ok((AppBody::adopted(built.clone()), converted.steps, key));
+    }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.
-    let prefix = prefix.map(|app| app.checkpoint.clone());
+    // A handed-over body has no continuation; its prefix is rebuilt from the recipe.
+    let prefix = prefix.and_then(|app| app.checkpoint.continuation());
     let app = if files.is_empty() {
         catallax_app::build_incremental_without_display(&converted.recipe, prefix, &mut Decider::default())
     } else {
@@ -860,7 +904,7 @@ fn build(
             build_error(op, e)
         }
     })?;
-    Ok((app, converted.steps))
+    Ok((app.into(), converted.steps, key))
 }
 
 /// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
@@ -1040,6 +1084,23 @@ impl Kernel for CatallaxKernel {
         options: &ImportOptions,
     ) -> KernelResult<ProposalSet> {
         self.observe("propose_import", || import::propose(format, source, options))
+    }
+
+    fn keep_builds(&self) -> KernelResult<()> {
+        self.state()?.kept.get_or_insert_with(Vec::new);
+        Ok(())
+    }
+
+    fn hand_over(&self) -> KernelResult<Vec<u8>> {
+        let kept = self.state()?.kept.take().unwrap_or_default();
+        Ok(handover::encode(&kept))
+    }
+
+    fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
+        let builds = handover::decode(bytes)?;
+        let count = builds.len();
+        self.state()?.offered.extend(builds);
+        Ok(count)
     }
 
     fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
@@ -2040,7 +2101,8 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (replayed, steps) = build(&recipe, OpKind::Subtract, None, &Default::default(), None).unwrap();
+            let (replayed, steps, _) =
+                build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default()).unwrap();
             let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
             let result = steps[recipe["result"].as_str().unwrap()].as_str();
             assert!(operations.iter().any(|op| op["id"] == result), "{evidence}");
@@ -2088,7 +2150,8 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (fresh, _) = build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None).unwrap();
+            let (fresh, _, _) =
+                build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default()).unwrap();
             assert_eq!(kernel.solid(swept.body).unwrap().app.names, fresh.names);
             assert_eq!(
                 kernel.export_step(swept.body, &StepOptions::default()).unwrap(),

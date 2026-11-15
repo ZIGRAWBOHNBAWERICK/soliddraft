@@ -1,8 +1,51 @@
-//! Requested body properties, computed away from the desktop event loop.
+//! Requested body properties, computed away from the interface thread: on a worker
+//! thread on the desktop, and in the kernel worker in the browser.
 
 use crate::document::{Document, FeatureId};
-use soliddraft_kernel_api::BodyId;
+use soliddraft_kernel_api::{BodyId, Kernel, MassProperties};
 use std::sync::mpsc;
+
+/// Properties already computed for `body`. Inspection reads them; it never starts one.
+pub(crate) fn cached(kernel: &dyn Kernel, body: BodyId) -> Option<MassProperties> {
+    kernel.cached_mass_properties(body).or_else(|| browser::cached(body))
+}
+
+/// The browser's kernel worker measures its own rebuild of the part, so its answers are
+/// kept here by the page's body. A body never changes, so an answer never goes stale.
+#[cfg(target_arch = "wasm32")]
+mod browser {
+    use soliddraft_kernel_api::{BodyId, MassProperties};
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+
+    /// Enough for every feature row of a long tree and a few earlier revisions.
+    const KEPT: usize = 256;
+
+    thread_local! {
+        static MEASURED: RefCell<VecDeque<(BodyId, MassProperties)>> = const { RefCell::new(VecDeque::new()) };
+    }
+
+    pub(super) fn cached(body: BodyId) -> Option<MassProperties> {
+        MEASURED.with_borrow(|measured| measured.iter().find(|(b, _)| *b == body).map(|(_, p)| *p))
+    }
+
+    pub(super) fn keep(body: BodyId, properties: MassProperties) {
+        MEASURED.with_borrow_mut(|measured| {
+            measured.retain(|(b, _)| *b != body);
+            if measured.len() == KEPT {
+                measured.pop_front();
+            }
+            measured.push_back((body, properties));
+        });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod browser {
+    pub(super) fn cached(_: soliddraft_kernel_api::BodyId) -> Option<soliddraft_kernel_api::MassProperties> {
+        None
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::MASS_WORK_LIMIT;
@@ -87,7 +130,7 @@ impl State {
     pub(crate) fn request(&mut self, doc: &Document, feature: FeatureId, ctx: &egui::Context) -> Result<(), String> {
         let request = Request::of(doc, feature).ok_or("Select a solid feature with measurable properties")?;
         self.failure = None;
-        if doc.kernel().cached_mass_properties(request.body).is_some() {
+        if cached(doc.kernel().as_ref(), request.body).is_some() {
             self.pending = None;
             #[cfg(not(target_arch = "wasm32"))]
             if let Some(worker) = &self.worker {
@@ -130,8 +173,19 @@ impl State {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = ctx;
-            Err("Coming soon".into())
+            let (_, part) = doc.model().snapshot().encode().map_err(|error| error.to_string())?;
+            let job = crate::kernel_worker::Job::MassProperties {
+                feature: soliddraft_model::FeatureId(u32::try_from(feature).map_err(|_| "No such feature")?),
+            };
+            let (sender, answer) = mpsc::channel();
+            crate::kernel_worker::submit(part, &job, ctx, move |result| {
+                let result = result.and_then(|value| {
+                    serde_json::from_value::<MassProperties>(value).map_err(|error| error.to_string())
+                });
+                let _ = sender.send(result.map(|properties| browser::keep(request.body, properties)));
+            })?;
+            self.pending = Some(Pending { request, answer });
+            Ok(())
         }
     }
 

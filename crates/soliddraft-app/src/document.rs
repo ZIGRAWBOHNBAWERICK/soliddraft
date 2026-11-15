@@ -4251,7 +4251,7 @@ impl Document {
                     && !matches!(&f.kind, FeatureKind::Scan(scan) if scan.fit.is_none())
                     && self.current_exact_display()
                     && let Some(body) = f.body
-                    && let Some(mp) = self.kernel().cached_mass_properties(body)
+                    && let Some(mp) = crate::measure::mass::cached(self.kernel().as_ref(), body)
                 {
                     details.push(("Volume".to_owned(), format!("{:.0} mm³", mp.volume)));
                     details.push(("Surface area".to_owned(), format!("{:.0} mm²", mp.area)));

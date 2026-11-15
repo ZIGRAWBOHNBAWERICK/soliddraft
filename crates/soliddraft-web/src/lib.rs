@@ -46,9 +46,13 @@ impl log::Log for FeedbackLogger {
     fn flush(&self) {}
 }
 
-/// Starts the app when the page loads the module.
+/// Starts the app when the page loads the module. The kernel worker loads the same
+/// module and has no window; it only answers `kernel_worker_run`.
 #[wasm_bindgen(start)]
 pub fn start() {
+    if web_sys::window().is_none() {
+        return;
+    }
     let _ = log::set_logger(&FeedbackLogger);
     log::set_max_level(log::LevelFilter::Info);
     std::panic::set_hook(Box::new(|info| {

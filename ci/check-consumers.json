@@ -36,6 +36,9 @@
     "ci/browser-journal.js": [
       "web"
     ],
+    "ci/browser-kernel-worker.js": [
+      "web"
+    ],
     "ci/browser-preferences.mjs": [
       "web"
     ],

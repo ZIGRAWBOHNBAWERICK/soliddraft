@@ -58,6 +58,14 @@ origin in an isolated `chrome-devtools-axi` session, then run
 session's origin storage when seeding each case; never use a profile with user
 documents.
 
+`ci/browser-kernel-worker.js` runs the same way on the sample part. It asks for mass
+properties from the Inspect strip and requires the kernel worker's answer, with no task
+on the page's thread longer than 250 ms meanwhile. It then makes the worker fail by
+starting it again on a module that is not the application, which it reports and closes
+on as it does after a trap, checks that the page keeps running, and requires the next
+request to start a new worker that measures the plate alone. Its
+clicks go to fixed points of a 1400 x 813 page.
+
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks
 through the DevTools protocol, because the canvas takes only trusted input. Visitor A
@@ -121,6 +129,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 | Path | Jobs beyond lint | Reader |
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
+| `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |
 | `ci/check-gate.py` | all | Merge gate, and the gate tests in lint; it controls mandatory checks |

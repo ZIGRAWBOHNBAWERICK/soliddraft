@@ -4,7 +4,7 @@
 mod ribbon;
 
 use egui::{Key, Modifiers, Pos2};
-use egui_kittest::kittest::{By, Queryable};
+use egui_kittest::kittest::Queryable;
 use ribbon::App;
 use soliddraft_app::{
     commands,
@@ -52,7 +52,26 @@ fn launch(sketch: Sketch, name: &str) -> (App, FeatureId, PathBuf) {
     assert!(commands::get("sketch_centreline").unwrap().is_enabled(&app.state().state));
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(20);
+    settle_view(&mut app);
     (app, id, dir)
+}
+
+/// Runs frames until the view's move into the sketch has landed: the fit frames the
+/// sketch in the band clear of its status and the navigation bar, so its origin is off
+/// the viewport's centre and moves while the zoom does. Clicks need it still.
+fn settle_view(app: &mut App) {
+    let pose = |app: &App| {
+        let c = &app.state().state.viewport.camera;
+        (c.target, c.distance, c.yaw, c.pitch)
+    };
+    for _ in 0..240 {
+        let before = pose(app);
+        app.run_steps(1);
+        if pose(app) == before {
+            return;
+        }
+    }
+    panic!("the view never settled");
 }
 
 fn history(app: &mut App, before: &Sketch, after: &Sketch) {
@@ -141,13 +160,10 @@ fn centrepoint_arc_can_place_a_major_sweep() {
     }
 }
 
-fn property_button(app: &mut App, label: &str) -> egui::Rect {
-    ribbon::open_options(app);
-    let band = ribbon::options_region(app);
-    app.query_all(By::new().role(egui::accesskit::Role::Button).label(label))
-        .find(|n| band.contains_rect(n.rect()))
-        .unwrap_or_else(|| panic!("property tool {label}"))
-        .rect()
+/// The tool's named button in the palette, which restarts placement.
+fn palette_button(app: &mut App, command: &str) -> egui::Rect {
+    ribbon::close_options(app);
+    ribbon::reveal_command(app, command).rect
 }
 
 fn disable_inference(app: &mut App) {
@@ -223,7 +239,7 @@ fn perimeter_and_three_point_tools_preview_refuse_cancel_and_commit_once() {
         assert!(commands::search(label, &Default::default()).iter().any(|m| m.command.label == label));
         ribbon::run_command(&mut app, command);
         assert_eq!(session(&app).tool, tool);
-        let _ = property_button(&mut app, label);
+        let _ = palette_button(&mut app, command);
         let before = session(&app).sketch.clone();
         for count in [1, 2] {
             for p in &picks[..count] {
@@ -233,8 +249,8 @@ fn perimeter_and_three_point_tools_preview_refuse_cancel_and_commit_once() {
             app.run_steps(5);
             assert!(session(&app).pending.is_empty());
             assert_eq!(session(&app).sketch, before);
-            // Escape selects the selection tool; the property entry can restart placement.
-            let at = property_button(&mut app, label).center();
+            // Escape selects the selection tool; the palette entry can restart placement.
+            let at = palette_button(&mut app, command).center();
             ribbon::click_at(&mut app, at);
             app.run_steps(5);
         }

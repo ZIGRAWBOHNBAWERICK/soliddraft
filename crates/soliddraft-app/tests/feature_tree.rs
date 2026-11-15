@@ -304,7 +304,7 @@ fn a_nested_sketch_drags_out_of_its_feature_to_a_legal_place() {
     doc.apply(Command::EditSketch { id: hole, sketch: circle }).unwrap();
     let cut = doc
         .apply(Command::AddCut {
-            params: CutParams { sketch: hole, depth: 20.0, through_all: true, flip: true, up_to: None },
+            params: CutParams { sketch: hole, depth: 20.0, through_all: true, flip: true, up_to: None, draft: None },
         })
         .unwrap()
         .unwrap();
@@ -523,9 +523,10 @@ fn a_double_click_on_the_selected_row_shows_its_dimensions_and_never_renames() {
         assert!(app.query_all_by_label("Feature name").next().is_none(), "no rename field is open");
         assert_eq!(
             app.state().state.doc.selection,
-            Some(Selection::Body),
-            "the double-click shows the dimensions that build the body"
+            Some(Selection::Feature(id)),
+            "the double-click shows the feature's own dimensions"
         );
+        assert_eq!(app.state().state.viewport.dimensions_of, Some(id));
         case.frame(app, "double-click-shows-dimensions");
     });
 }

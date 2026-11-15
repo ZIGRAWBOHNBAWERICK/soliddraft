@@ -1,4 +1,6 @@
-//! The Edit Suite ring and command columns, measured from the approved L00 prototype.
+//! The Edit Suite's right-click menu: command columns at the pointer, measured from the
+//! approved L00 prototype. Holding Shift while right-clicking opens the ring of quick
+//! commands instead, a marking menu for users who know where each command sits.
 
 use crate::commands::CommandSpec;
 use crate::document::Selection;
@@ -25,7 +27,6 @@ pub(crate) struct Item {
     pub command: &'static CommandSpec,
     pub label: String,
     pub enabled: bool,
-    pub soon: bool,
     pub selected: bool,
     pub selection: Option<Selection>,
     pub shortcut: String,
@@ -40,8 +41,12 @@ pub(crate) struct Column {
 
 pub(crate) struct Menu {
     pub title: String,
-    pub quick: [Item; 8],
+    /// The ring's commands with their slot, so a command keeps its direction when a
+    /// neighbour is hidden.
+    pub quick: Vec<(usize, Item)>,
     pub columns: Vec<Column>,
+    /// The ring of quick commands rather than the columns.
+    pub ring: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -64,7 +69,10 @@ fn text_width(ctx: &egui::Context, text: &str, size: f32) -> f32 {
 
 impl Layout {
     pub fn measure(ctx: &egui::Context, menu: &Menu, at: Pos2) -> Self {
-        let pill_widths = std::array::from_fn(|i| text_width(ctx, &menu.quick[i].label, 12.0) + 40.0);
+        let mut pill_widths = [0.0; 8];
+        for (slot, item) in &menu.quick {
+            pill_widths[*slot] = text_width(ctx, &item.label, 12.0) + 40.0;
+        }
         let widths = menu
             .columns
             .iter()
@@ -72,43 +80,23 @@ impl Layout {
                 column
                     .items
                     .iter()
-                    .map(|item| {
-                        let suffix = if item.soon {
-                            text_width(ctx, "Coming soon", 10.5)
-                        } else {
-                            text_width(ctx, &item.shortcut, 11.0)
-                        };
-                        text_width(ctx, &item.label, 12.0) + suffix + 52.0
-                    })
+                    .map(|item| text_width(ctx, &item.label, 12.0) + text_width(ctx, &item.shortcut, 11.0) + 52.0)
                     .fold(172.0, f32::max)
             })
             .collect::<Vec<_>>();
         let rows = menu.columns.iter().map(|column| column.items.len()).max().unwrap_or(0);
-        Self::arrange(at, ctx.content_rect().shrink(6.0), pill_widths, &widths, HEADER + ROW * rows as f32 + 2.0 * PAD)
+        let available = ctx.content_rect().shrink(6.0);
+        if menu.ring {
+            Self::ring(at, available, pill_widths)
+        } else {
+            Self::list(at, available, &widths, HEADER + ROW * rows as f32 + 2.0 * PAD)
+        }
     }
 
-    fn arrange(at: Pos2, available: Rect, pill_widths: [f32; 8], widths: &[f32], list_height: f32) -> Self {
-        let ring_size = vec2(440.0_f32.min(available.width()), 236.0_f32.min((available.height() - 58.0).max(28.0)));
-        let mut ring = inside(Rect::from_center_size(at, ring_size), available);
-        let gaps = GAP * widths.len().saturating_sub(1) as f32;
-        let total_width = widths.iter().sum::<f32>();
-        let list_size = vec2(
-            (total_width + gaps + 2.0 * PAD).min(available.width()),
-            list_height.min((available.height() - ring.height() - GAP).max(28.0)),
-        );
-        let mut below = ring.bottom() + GAP + list_size.y <= available.bottom();
-        if !below && ring.top() - GAP - list_size.y < available.top() {
-            let shift_up = ring.bottom() + GAP + list_size.y - available.bottom();
-            let shift_down = available.top() + GAP + list_size.y - ring.top();
-            if shift_up <= shift_down {
-                ring = ring.translate(vec2(0.0, -shift_up));
-                below = true;
-            } else {
-                ring = ring.translate(vec2(0.0, shift_down));
-            }
-        }
-        let y = if below { ring.bottom() + GAP } else { ring.top() - GAP - list_size.y };
-        let list = inside(Rect::from_min_size(pos2(ring.center().x - list_size.x / 2.0, y), list_size), available);
+    /// The ring alone, centred on the pointer.
+    fn ring(at: Pos2, available: Rect, pill_widths: [f32; 8]) -> Self {
+        let ring_size = vec2(440.0_f32.min(available.width()), 236.0_f32.min(available.height().max(28.0)));
+        let ring = inside(Rect::from_center_size(at, ring_size), available);
         let horizontal_radius =
             150.0_f32.min((ring.width() - pill_widths.iter().copied().fold(0.0, f32::max)).max(0.0) / 2.0);
         let vertical_radius = 92.0_f32.min((ring.height() - PILL_HEIGHT).max(0.0) / 2.0);
@@ -118,6 +106,18 @@ impl Layout {
                 vec2(pill_widths[i].min(ring.width()), PILL_HEIGHT),
             )
         });
+        Self { bounds: ring, ring, list: Rect::NOTHING, pills, columns: Vec::new() }
+    }
+
+    /// The columns alone, opening down and right of the pointer as a context menu does,
+    /// and moved back inside the window near its edges.
+    fn list(at: Pos2, available: Rect, widths: &[f32], list_height: f32) -> Self {
+        let gaps = GAP * widths.len().saturating_sub(1) as f32;
+        let total_width = widths.iter().sum::<f32>();
+        let size = vec2((total_width + gaps + 2.0 * PAD).min(available.width()), list_height.min(available.height()));
+        let left = if at.x + size.x <= available.right() { at.x } else { at.x - size.x };
+        let top = if at.y + size.y <= available.bottom() { at.y } else { at.y - size.y };
+        let list = inside(Rect::from_min_size(pos2(left, top), size), available);
         let scale = ((list.width() - gaps - 2.0 * PAD) / total_width.max(1.0)).min(1.0);
         let mut x = list.left() + PAD;
         let columns = widths
@@ -129,7 +129,7 @@ impl Layout {
                 column
             })
             .collect();
-        Self { bounds: ring.union(list), ring, list, pills, columns }
+        Self { bounds: list, ring: Rect::NOTHING, list, pills: [Rect::NOTHING; 8], columns }
     }
 }
 
@@ -220,13 +220,7 @@ fn button(ui: &mut egui::Ui, item: &Item, rect: Rect, id: Id, pill: bool) -> boo
     }
     let left = rect.left() + 8.0;
     icons::paint(painter, icon(item), Rect::from_center_size(pos2(left + 7.5, rect.center().y), vec2(15.0, 15.0)), ink);
-    let suffix = if !pill && item.soon {
-        "Coming soon"
-    } else if !pill {
-        &item.shortcut
-    } else {
-        ""
-    };
+    let suffix = if pill { "" } else { &item.shortcut };
     let suffix_width = text_width(ui.ctx(), suffix, 10.5);
     if !suffix.is_empty() {
         painter.text(
@@ -261,8 +255,15 @@ fn button(ui: &mut egui::Ui, item: &Item, rect: Rect, id: Id, pill: bool) -> boo
 pub(crate) fn show(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, opening: bool) -> Option<Choice> {
     let offset = ui.min_rect().min - layout.bounds.min;
     ui.set_min_size(layout.bounds.size());
+    if menu.ring {
+        show_ring(ui, menu, layout, offset, opening)
+    } else {
+        show_columns(ui, menu, layout, offset, opening)
+    }
+}
+
+fn show_ring(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, offset: Vec2, opening: bool) -> Option<Choice> {
     let ring = layout.ring.translate(offset);
-    let list = layout.list.translate(offset);
     let painter = ui.painter().clone();
     let radius = 75.0_f32.min(ring.height() / 2.0 - 18.0);
     painter.circle_filled(ring.center(), radius, Color32::from_rgba_unmultiplied(34, 36, 39, 46));
@@ -284,9 +285,9 @@ pub(crate) fn show(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, opening: boo
     let mut focus = opening;
     let quick_group = ui.scope_builder(egui::UiBuilder::new().max_rect(ring), |ui| {
         ui.set_min_size(ring.size());
-        for (index, item) in menu.quick.iter().enumerate() {
-            let rect = layout.pills[index].translate(offset);
-            let id = ui.id().with(("quick", index, item.command.id));
+        for (slot, item) in &menu.quick {
+            let rect = layout.pills[*slot].translate(offset);
+            let id = ui.id().with(("quick", *slot, item.command.id));
             if button(ui, item, rect, id, true) {
                 choice = Some(Choice { command: item.command, selection: item.selection });
             }
@@ -297,7 +298,15 @@ pub(crate) fn show(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, opening: boo
         }
     });
     quick_group.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Quick commands"));
+    choice
+}
+
+fn show_columns(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, offset: Vec2, opening: bool) -> Option<Choice> {
+    let list = layout.list.translate(offset);
+    let painter = ui.painter().clone();
     panel(&painter, list, 8, 32, 12);
+    let mut choice = None;
+    let mut focus = opening;
     for (index, column) in menu.columns.iter().enumerate() {
         let rect = layout.columns[index].translate(offset);
         if index > 0 {
@@ -327,8 +336,13 @@ pub(crate) fn show(ui: &mut egui::Ui, menu: &Menu, layout: &Layout, opening: boo
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (row, item) in column.items.iter().enumerate() {
                             let (row_rect, _) = ui.allocate_exact_size(vec2(body.width(), ROW), Sense::hover());
-                            if button(ui, item, row_rect, ui.id().with(("command", row, item.command.id)), false) {
+                            let id = ui.id().with(("command", row, item.command.id));
+                            if button(ui, item, row_rect, id, false) {
                                 choice = Some(Choice { command: item.command, selection: item.selection });
+                            }
+                            if focus && item.enabled {
+                                ui.ctx().memory_mut(|memory| memory.request_focus(id));
+                                focus = false;
                             }
                         }
                     },
@@ -344,27 +358,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ring_and_columns_fit_at_window_edges_without_overlapping() {
+    fn ring_and_columns_open_alone_and_fit_at_window_edges() {
         for size in [vec2(1440.0, 900.0), vec2(1280.0, 720.0), vec2(800.0, 600.0)] {
             let bounds = Rect::from_min_size(Pos2::ZERO, size).shrink(6.0);
             for point in
                 [bounds.center(), bounds.left_top(), bounds.right_top(), bounds.left_bottom(), bounds.right_bottom()]
             {
-                let layout = Layout::arrange(point, bounds, [126.0; 8], &[186.0, 172.0, 192.0], 216.0);
-                assert!(bounds.contains_rect(layout.bounds), "{size:?} {point:?}");
-                assert!(!layout.ring.intersects(layout.list));
-                for pill in layout.pills {
+                let ring = Layout::ring(point, bounds, [126.0; 8]);
+                assert!(bounds.contains_rect(ring.bounds), "{size:?} {point:?}");
+                assert!(ring.columns.is_empty());
+                for pill in ring.pills {
                     assert!(bounds.contains_rect(pill));
                 }
-                for column in layout.columns {
-                    assert!(layout.list.contains_rect(column));
+                let list = Layout::list(point, bounds, &[186.0, 172.0, 192.0], 216.0);
+                assert!(bounds.contains_rect(list.bounds), "{size:?} {point:?}");
+                assert!(!list.ring.is_positive());
+                for column in list.columns {
+                    assert!(list.list.contains_rect(column));
                 }
             }
         }
         let bounds = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
         let at = pos2(720.0, 450.0);
-        let layout = Layout::arrange(at, bounds, [126.0; 8], &[186.0, 172.0, 192.0], 216.0);
-        assert_eq!(layout.ring.center(), at);
-        assert_eq!(layout.pills.len(), 8);
+        assert_eq!(Layout::ring(at, bounds, [126.0; 8]).ring.center(), at);
+        assert_eq!(Layout::list(at, bounds, &[186.0, 172.0, 192.0], 216.0).list.min, at);
     }
 }

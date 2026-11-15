@@ -207,12 +207,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             if f.is_sketch() && absorbed.contains(&f.id) {
                 continue;
             }
+            // An extrusion's Draft option shows on the extrusion's row.
+            if state.doc.draft_owner(f.id).is_some() {
+                continue;
+            }
+            let draft_status =
+                state.doc.linked_draft(f.id).and_then(|d| state.doc.feature(d)).map(|d| d.status.clone());
             let icon = feature_icon(&f.kind);
             let child = f.kind.sketch().and_then(|s| state.doc.feature(s));
             let first =
                 child.and_then(|c| state.doc.features.iter().position(|x| x.id == c.id)).map_or(i, |at| at.min(i));
-            let (sub, status) = match &state.drag_preview {
-                Some(drag) if drag.feature() == f.id => {
+            let (sub, status) = match (&state.drag_preview, draft_status) {
+                (Some(drag), _) if drag.feature() == f.id => {
                     let (message, failed) = drag.label();
                     let status = if failed { FeatureStatus::Error(message.clone()) } else { FeatureStatus::Pending };
                     (message, status)
@@ -223,6 +229,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                 _ if matches!(f.status, FeatureStatus::Error(_)) => {
                     (format!("Failed · {}", f.summary()), f.status.clone())
                 }
+                (_, Some(status @ FeatureStatus::Error(_))) => (format!("Failed · {}", f.summary()), status),
                 _ => (f.summary(), f.status.clone()),
             };
             let sub = if state.doc.model().next_body() > 1 { format!("Body {} · {sub}", f.body_key + 1) } else { sub };

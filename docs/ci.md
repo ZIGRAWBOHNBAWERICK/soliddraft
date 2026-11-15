@@ -88,7 +88,9 @@ check window draws the outcome, read through the read-only `shown_part_check` ex
 Every solid step must be confirmed by both models and the page must report no crash:
 Catallax's kernel observations once read a clock the browser does not have, and the page
 stopped. The page must then still take input: the window closes, and a feature tree row
-selected afterwards draws in Details.
+selected afterwards draws in Details. A changed selection draws its Details button only
+in a later frame, so the check clicks Details once the read-only `shown_options` export
+reports the row selected and the button drawn, where that frame drew it.
 
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks

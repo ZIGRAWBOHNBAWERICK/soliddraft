@@ -61,6 +61,10 @@ pub enum Key {
     DraftFaces,
     NeutralPlane,
     Reverse,
+    /// An extrusion's or cut's Draft option: on or off, its angle, and outward.
+    TaperOn,
+    TaperAngle,
+    TaperOutward,
     PathStart,
     Orientation,
     SweepPath,
@@ -85,6 +89,15 @@ pub struct Spec {
     pub icon: Icon,
     pub confirm: bool,
     pub fields: Vec<Field<Key>>,
+}
+
+/// The Draft option's fields: a tick box, then, when ticked, its angle and Outward.
+fn draft_fields(fields: &mut Vec<Field<Key>>, on: bool) {
+    fields.push(Field::new(Key::TaperOn, "", "Draft", 82.0));
+    if on {
+        fields.push(Field::new(Key::TaperAngle, "Angle", "Draft", 130.0));
+        fields.push(Field::new(Key::TaperOutward, "", "Draft", 96.0));
+    }
 }
 
 /// The form for `params`. A plane picker lists `plane_choices`; a feature asking for its
@@ -113,6 +126,7 @@ pub fn spec(
                 EndKind::UpToFace(_) => fields.push(field(UpToFace, "To", "Direction", 190.0)),
                 _ => {}
             }
+            draft_fields(&mut fields, p.draft.is_some());
             fields.push(field(Flip, "", "Direction", 112.0));
             ("extrude", Icon::Extrude, fields)
         }
@@ -151,6 +165,7 @@ pub fn spec(
                 EndKind::UpToFace(_) => fields.push(field(UpToFace, "To", "Direction", 190.0)),
                 _ => {}
             }
+            draft_fields(&mut fields, p.draft.is_some());
             fields.push(field(Flip, "", "Direction", 112.0));
             ("cut", Icon::Cut, fields)
         }
@@ -392,13 +407,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
     let title = editor.title();
     let key = egui::Id::new(("feature_form", spec.kind, editor.target));
     let error = editor
-        .feedback
-        .size
-        .as_ref()
-        .or(editor.feedback.second_size.as_ref())
-        .or(editor.feedback.pick.as_ref())
-        .or(editor.error.as_ref())
-        .map(|s| crate::geometry_message::for_user(s));
+        .refusal()
+        .or(editor.feedback.size.as_deref())
+        .or(editor.feedback.second_size.as_deref())
+        .or(editor.feedback.pick.as_deref())
+        .or(editor.error.as_deref())
+        .map(crate::geometry_message::for_user);
     let mut actions = Vec::new();
     let editor = state.editor.as_mut().expect("open feature form");
     let response = form_bar::show(
@@ -425,10 +439,44 @@ pub fn show(ui: &mut egui::Ui, state: &mut crate::state::AppState) {
     }
 }
 
+/// One field of the Draft option. Ticking it starts at three degrees inward.
+fn draft_option(ui: &mut egui::Ui, key: Key, draft: &mut Option<crate::document::ExtrudeDraft>) {
+    match (key, draft.as_mut()) {
+        (Key::TaperOn, _) => {
+            let mut on = draft.is_some();
+            if ui.checkbox(&mut on, "Draft").on_hover_text("Taper the side faces from the sketch plane").changed() {
+                *draft = on.then(Default::default);
+            }
+        }
+        (Key::TaperAngle, Some(d)) => number(
+            ui,
+            "Draft angle",
+            "°",
+            egui::DragValue::new(&mut d.angle).speed(0.25).range(0.01..=89.0).fixed_decimals(2),
+        ),
+        (Key::TaperOutward, Some(d)) => {
+            ui.checkbox(&mut d.outward, "Outward").on_hover_text("Widen the sides as they grow, not narrow them");
+        }
+        _ => {}
+    }
+}
+
 fn number(ui: &mut egui::Ui, label: &str, unit: &str, widget: impl egui::Widget) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(36.0), 24.0), egui::Sense::hover());
     let response = crate::form_bar::value_cell(ui, rect, unit, |ui, inner| ui.put(inner, widget));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, format!("{label} value")));
+}
+
+/// An extrusion's Depth, which takes the keyboard when `focus`, as a double-click on the
+/// preview's depth asks.
+fn depth_field(ui: &mut egui::Ui, value: &mut f64, focus: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(36.0), 24.0), egui::Sense::hover());
+    let widget = egui::DragValue::new(value).speed(0.5).range(0.01..=100_000.0).fixed_decimals(2);
+    let response = crate::form_bar::value_cell(ui, rect, "mm", |ui, inner| ui.put(inner, widget));
+    if focus {
+        response.request_focus();
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Depth value"));
 }
 
 fn mm(ui: &mut egui::Ui, label: &str, value: &mut f64) {
@@ -558,6 +606,7 @@ fn render(
     }
     let sketch_name =
         |id| context.sketches.iter().find(|(i, _)| *i == id).map(|(_, n)| n.as_str()).unwrap_or("Missing sketch");
+    let mut editor_focus = key == Key::Depth && std::mem::take(&mut editor.focus_depth);
     match (&mut editor.params, key) {
         (EditorParams::Offset(p), Key::Offset) => {
             number(ui, "Offset", "mm", egui::DragValue::new(&mut p.distance).speed(0.1));
@@ -630,7 +679,10 @@ fn render(
             });
         }
         (EditorParams::Extrude(p), Key::End) => end(ui, &mut p.end, false, p.sketch.is_some()),
-        (EditorParams::Extrude(p), Key::Depth) => mm(ui, "Depth", &mut p.depth),
+        (EditorParams::Extrude(p), Key::Depth) => {
+            let focus = std::mem::take(&mut editor_focus);
+            depth_field(ui, &mut p.depth, focus)
+        }
         (EditorParams::Extrude(p), Key::UpToFace) => {
             if let EndKind::UpToFace(face) = &p.end {
                 readout(ui, face.as_ref().map(|f| f.label.as_str()).unwrap_or("Click a planar face"));
@@ -638,6 +690,12 @@ fn render(
         }
         (EditorParams::Extrude(p), Key::Flip) => {
             ui.checkbox(&mut p.flip, "Flip direction");
+        }
+        (EditorParams::Extrude(p), key @ (Key::TaperOn | Key::TaperAngle | Key::TaperOutward)) => {
+            draft_option(ui, key, &mut p.draft)
+        }
+        (EditorParams::Cut(p), key @ (Key::TaperOn | Key::TaperAngle | Key::TaperOutward)) => {
+            draft_option(ui, key, &mut p.draft)
         }
         (EditorParams::Cut(p), Key::Profile) => readout(ui, sketch_name(p.sketch)),
         (EditorParams::Cut(p), Key::End) => {
@@ -647,7 +705,10 @@ fn render(
                 p.set_end(value);
             }
         }
-        (EditorParams::Cut(p), Key::Depth) => mm(ui, "Depth", &mut p.depth),
+        (EditorParams::Cut(p), Key::Depth) => {
+            let focus = std::mem::take(&mut editor_focus);
+            depth_field(ui, &mut p.depth, focus)
+        }
         (EditorParams::Cut(p), Key::UpToFace) => {
             if let EndKind::UpToFace(face) = p.end() {
                 readout(ui, face.as_ref().map(|f| f.label.as_str()).unwrap_or("Click a planar face"));

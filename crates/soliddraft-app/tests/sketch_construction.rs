@@ -226,7 +226,9 @@ fn centreline_is_a_dashed_constrained_chain_without_changing_ordinary_drawing() 
     app.key_press(Key::Escape);
     app.run_steps(6);
     app.render().unwrap().save(dir.join("guides.png")).unwrap();
-    assert_dashed(&mut app, P2::new(5.0, 0.0), P2::new(25.0, 0.0), soliddraft_app::theme::edit_suite::CONSTRUCTION);
+    // The chain's upright segment: the one along the X axis lies on the sheet's axis line,
+    // whose ink fills the dash gaps wherever the fit leaves it between two pixel rows.
+    assert_dashed(&mut app, P2::new(30.0, 4.0), P2::new(30.0, 16.0), soliddraft_app::theme::edit_suite::CONSTRUCTION);
 
     // The ordinary Line shortcut and other drawing tools retain their previous mode.
     app.key_press(Key::L);

@@ -307,3 +307,53 @@ fn a_rolled_back_feature_stays_on_the_status_bar() {
         app.render().expect("the last frame renders");
     });
 }
+
+/// A form's feature the viewport cannot draw is refused after it built. The refusal puts
+/// the history back as it was, the redo step included.
+#[test]
+fn a_form_refused_for_its_display_keeps_the_redo_step() {
+    let kernel = Arc::new(Gated::default());
+    let (mut doc, id) = part(kernel.clone());
+    doc.apply(edit(id, 20.0)).unwrap();
+    doc.undo().unwrap();
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (1, 1));
+
+    refuse_display(&kernel, true);
+    let refused = doc.apply_form(add(25.0)).unwrap_err();
+    assert!(refused.contains(REASON), "{refused}");
+    assert_eq!(doc.features.len(), 1, "the refused feature is withdrawn");
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (1, 1), "the refusal keeps the redo step");
+
+    refuse_display(&kernel, false);
+    doc.redo().unwrap();
+    assert_eq!(depth_of(&doc, id), 20.0);
+}
+
+/// A form refused for its display over an unproved edit the viewport could not draw
+/// either: withdrawing the form leaves a part it still cannot draw, so the edit goes too,
+/// back to the part on screen. The history goes back to how it was there, with the redo
+/// step the edit had cleared.
+#[test]
+fn a_form_refused_over_an_undrawn_edit_returns_to_the_drawn_part_with_its_redo_step() {
+    let kernel = Arc::new(Gated::default());
+    let (mut doc, id) = part(kernel.clone());
+    doc.apply(edit(id, 20.0)).unwrap();
+    doc.undo().unwrap();
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (1, 1));
+    let drawn = (doc.display_body(), volume(&doc), doc.triangle_count());
+
+    refuse_display(&kernel, true);
+    doc.apply_interactive(edit(id, 14.0)).unwrap();
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (2, 0));
+    let refused = doc.apply_form(add(25.0)).unwrap_err();
+    assert!(refused.contains(REASON), "{refused}");
+
+    assert_eq!(doc.features.len(), 1, "the refused feature is withdrawn");
+    assert_eq!(depth_of(&doc, id), 10.0, "the undrawn edit goes back to the drawn depth");
+    assert_eq!((doc.display_body(), volume(&doc), doc.triangle_count()), drawn, "the part stays on screen");
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (1, 1), "the redo step from before the edit comes back");
+
+    refuse_display(&kernel, false);
+    doc.redo().unwrap();
+    assert_eq!(depth_of(&doc, id), 20.0);
+}

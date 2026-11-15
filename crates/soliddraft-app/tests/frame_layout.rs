@@ -418,3 +418,92 @@ fn the_options_sheet_takes_a_click_in_the_frame_after_it_opens() {
     click_in_one_frame(&mut app, close);
     assert!(!app.state().state.options_details, "Close options closes the sheet on the frame after it opened");
 }
+
+/// The walk-over's frame fixes. View has one entry for the side area and no theme pair
+/// that changed only the grid. Insert lists the part's features from the command
+/// registry, grouped as the palette groups them. The options sheet has one close
+/// control. Fit frames the part above the navigation bar. The Help menu names the
+/// browser's feedback form only in the browser.
+#[test]
+fn view_insert_options_and_fit_after_the_walkover() {
+    let case = ribbon::case("frame-walkover");
+    let mut app = ribbon::app(ribbon::plate());
+    case.run(&mut app, |app| {
+        let area = ribbon::window(app);
+        ribbon::click_button(app, "View", area);
+        app.run_steps(6);
+        let painted: Vec<String> = ribbon::painted(app).into_iter().map(|p| p.text).collect();
+        for gone in ["Light theme", "Dark theme", "Tree", "Values"] {
+            assert!(!painted.iter().any(|t| t == gone), "View lists no {gone}: {painted:?}");
+        }
+        assert!(painted.iter().any(|t| t == "Feature tree"), "one entry for the side area");
+        case.frame(app, "view-menu");
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+
+        ribbon::click_button(app, "Insert", area);
+        app.run_steps(6);
+        let painted: Vec<String> = ribbon::painted(app).into_iter().map(|p| p.text).collect();
+        for group in ["Create", "Remove", "Edit features", "Pattern", "Reference"] {
+            assert!(painted.iter().any(|t| t == group), "Insert has {group}: {painted:?}");
+        }
+        // The menu's Create, not the palette's group heading of the same name.
+        let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).map(|p| p.outer_rect);
+        let create = app
+            .query_all(egui_kittest::kittest::By::new().label_contains("Create"))
+            .map(|n| n.rect())
+            .filter(|r| palette.is_none_or(|p| !p.contains(r.center())))
+            .collect::<Vec<_>>();
+        assert_eq!(create.len(), 1, "one Create in Insert: {create:?}");
+        let create = create[0];
+        app.hover_at(create.center());
+        app.run_steps(8);
+        let painted: Vec<String> = ribbon::painted(app).into_iter().map(|p| p.text).collect();
+        for entry in ["Extrude", "Revolve", "Sweep", "Loft"] {
+            assert!(painted.iter().any(|t| t == entry), "Insert > Create has {entry}: {painted:?}");
+        }
+        case.frame(app, "insert-menu");
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+
+        ribbon::click_button(app, "Help", area);
+        app.run_steps(6);
+        assert!(app.query_all_by_label("Give feedback…").next().is_none(), "the desktop has no feedback form");
+        app.key_press(Key::Escape);
+        app.run_steps(4);
+
+        // One close control on the options sheet: the selection's Clear X is not there.
+        let face = app.state().state.doc.faces.iter().find(|f| f.label == "End cap").expect("the top").id;
+        app.state_mut()
+            .state
+            .push(soliddraft_app::state::AppAction::Select(Some(soliddraft_app::document::Selection::Face(face))));
+        app.run_steps(6);
+        ribbon::open_options(app);
+        assert_eq!(app.query_all_by_label("Close options").count(), 1);
+        assert!(app.query_all_by_label("Clear selection (Esc)").next().is_none(), "no second close control");
+        case.frame(app, "options-one-close");
+        ribbon::close_options(app);
+        app.state_mut().state.push(soliddraft_app::state::AppAction::Select(None));
+        app.run_steps(4);
+
+        // Fit keeps the part clear of the pills and the navigation bar at the bottom.
+        app.key_press(Key::Z);
+        app.run_steps(60);
+        let state = &app.state().state;
+        let (lo, hi) = state.doc.bounds().unwrap();
+        let view = state.viewport.rect;
+        let mut lowest = f32::MIN;
+        for x in [lo.x, hi.x] {
+            for y in [lo.y, hi.y] {
+                for z in [lo.z, hi.z] {
+                    let p = state.viewport.camera.project(glam::Vec3::new(x, y, z), view).unwrap();
+                    lowest = lowest.max(p.y);
+                }
+            }
+        }
+        assert!(lowest < view.bottom() - 84.0, "the part's lowest corner {lowest} clears the bar band of {view:?}");
+        case.frame(app, "fit-above-the-bar");
+    });
+}

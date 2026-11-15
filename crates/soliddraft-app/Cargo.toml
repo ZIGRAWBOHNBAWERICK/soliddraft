@@ -73,6 +73,8 @@ web-sys = { workspace = true, features = [
     "DedicatedWorkerGlobalScope",
     "Document",
     "ErrorEvent",
+    "Event",
+    "EventTarget",
     "File",
     "FileList",
     "Headers",

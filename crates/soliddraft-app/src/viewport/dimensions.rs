@@ -102,6 +102,7 @@ pub fn paint(
     doc: &Document,
     pointer: Option<Pos2>,
     body: bool,
+    only: Option<FeatureId>,
     visible_sketches: &[FeatureId],
     preview: Option<(AnnotationKey, Vec3)>,
     dark: bool,
@@ -111,7 +112,12 @@ pub fn paint(
         doc.features[..end].iter().filter(|f| !f.suppressed && f.status != FeatureStatus::Inactive).collect();
     let scoped = matches!(doc.selection, Some(Selection::Body | Selection::Face(_) | Selection::Edge(_)));
     let contributing = doc.body_features();
-    let in_body = |f: &Feature| !scoped || contributing.contains(&f.id);
+    // One feature's set: the feature and the sketch it consumes.
+    let own_sketch = only.and_then(|id| doc.feature(id)).and_then(|f| f.kind.sketch());
+    let in_body = |f: &Feature| match only {
+        Some(id) => f.id == id || Some(f.id) == own_sketch,
+        None => !scoped || contributing.contains(&f.id),
+    };
     let anchors = if body { anchors(doc) } else { HashMap::new() };
     let mut shown = Vec::new();
     let authored_position = |key: AnnotationKey| {
@@ -164,11 +170,12 @@ pub fn paint(
             });
         }
     };
-    // Reserve authored labels across every visible sketch before placing any defaults.
+    // Reserve authored labels across every visible sketch before placing any defaults. One
+    // feature's set leaves out a sketch that is only shown and is not its own.
     let sketches = built.iter().filter_map(|f| {
         let FeatureKind::Sketch(s) = &f.kind else { return None };
         let plane = f.plane?;
-        (visible_sketches.contains(&f.id)
+        ((visible_sketches.contains(&f.id) && (only.is_none() || in_body(f)))
             || (body && in_body(f) && built.iter().any(|c| c.kind.sketch() == Some(f.id))))
         .then_some((*f, plane, &s.sketch))
     });
@@ -277,6 +284,11 @@ pub fn paint(
         pill(painter, dimension.rect, dimension.text.clone(), pointer);
     }
     shown
+}
+
+/// Whether a feature shows values of its own beside its faces.
+pub(crate) fn has_values(kind: &FeatureKind) -> bool {
+    !values(kind).is_empty()
 }
 
 /// The values a feature shows beside its faces.

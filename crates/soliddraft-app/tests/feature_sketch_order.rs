@@ -312,3 +312,226 @@ fn a_feature_opened_from_the_sketch_view_turns_to_show_its_depth() {
         assert_eq!(app.state().state.viewport.camera.view_name, "Front", "a turned view is left alone");
     });
 }
+
+/// A Cut sketched on a chamfer, a face no reference plane lies along, turns the view off
+/// that face's own normal too. A fixed view could stay on the normal of such a face; the
+/// unit test `a_feature_on_any_plane_gets_a_view_oblique_to_its_normal` covers a normal
+/// on the isometric line of sight.
+#[test]
+fn a_cut_on_an_oblique_face_turns_the_view_off_its_normal() {
+    use soliddraft_app::document::{ChamferParams, Command, SketchPlane};
+    let mut doc = ribbon::plate();
+    // The plate's top front edge, along X at y = -20 and z = 20.
+    let edge = doc
+        .edges
+        .iter()
+        .find(|e| (e.midpoint.z - 20.0).abs() < 1e-6 && (e.midpoint.y + 20.0).abs() < 1e-6)
+        .expect("the top front edge")
+        .id;
+    let edge = doc.edge_ref(edge).unwrap();
+    doc.apply(Command::AddChamfer { params: ChamferParams { edges: vec![edge], distance: 8.0, other_distance: None } })
+        .unwrap();
+    let body = doc.display_body().unwrap();
+    let chamfer = doc
+        .kernel()
+        .topology(body)
+        .unwrap()
+        .faces
+        .into_iter()
+        .find(|f| f.normal.is_some_and(|n| n.y < -0.5 && n.z > 0.5))
+        .expect("the chamfer face")
+        .id;
+    let face = doc.face_ref(chamfer).unwrap();
+    let sketch = doc.apply(Command::AddSketch { plane: SketchPlane::Face { face } }).unwrap().unwrap();
+    let mut drawing = soliddraft_app::sketch::Sketch::new();
+    drawing.rectangle(soliddraft_app::sketch::P2::ZERO, 10.0, 4.0).unwrap();
+    doc.apply(Command::EditSketch { id: sketch, sketch: drawing }).unwrap();
+
+    let mut case = Case::new("feature-sketch-order/oblique-cut");
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        let normal = {
+            let plane = app.state().state.doc.feature(sketch).unwrap().plane.unwrap();
+            glam::Vec3::new(plane.normal.x as f32, plane.normal.y as f32, plane.normal.z as f32)
+        };
+        assert!(normal.x.abs() < 1e-3 && normal.y < -0.5 && normal.z > 0.5, "an oblique face: {normal}");
+        let along = |app: &App| app.state().state.viewport.camera.heading().dot(normal).abs();
+        app.state_mut().state.push(AppAction::EditSketch(sketch));
+        settle(app);
+        app.state_mut().state.push(AppAction::ExitSketch);
+        settle(app);
+        assert!(along(app) > 0.999, "the closed sketch leaves the view on its normal: {}", along(app));
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(sketch))));
+        settle(app);
+
+        ribbon::run_command(app, "cut");
+        app.run_steps(90);
+        assert!(matches!(params(app), Some(EditorParams::Cut(_))), "{:?}", params(app));
+        assert!(along(app) < 0.9, "the view left the chamfer's normal, so the cut's depth shows: {}", along(app));
+        case.frame(app, "1-cut-preview-off-the-normal");
+    });
+}
+
+/// Editing an early sketch shows the part as it was when the sketch was made, as a
+/// feature's editor does: later features roll back until the sketch closes. A sketch on a
+/// face has its sheet on that face, not round the world origin.
+#[test]
+fn an_early_sketch_opens_on_the_part_as_it_was_with_its_sheet_on_the_face() {
+    use soliddraft_app::document::{Command, CutParams, ExtrudeParams, PlaneKind, SketchPlane};
+    use soliddraft_app::sketch::{P2, Sketch};
+    let mut doc = ribbon::blank();
+    // A block away from the origin, then a circle on its top face, cut through.
+    let base = doc
+        .apply(Command::AddSketch { plane: SketchPlane::Reference { plane: PlaneKind::Top, offset: 0.0 } })
+        .unwrap()
+        .unwrap();
+    let mut drawing = Sketch::new();
+    drawing.rectangle(P2::new(100.0, 50.0), 60.0, 40.0).unwrap();
+    doc.apply(Command::EditSketch { id: base, sketch: drawing }).unwrap();
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams { sketch: Some(base), depth: 20.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let body = doc.display_body().unwrap();
+    let block = doc.kernel().mass_properties(body).unwrap().volume;
+    let top = doc
+        .kernel()
+        .topology(body)
+        .unwrap()
+        .faces
+        .into_iter()
+        .find(|f| f.normal.is_some_and(|n| n.z > 0.99) && f.centroid.z > 19.9)
+        .unwrap()
+        .id;
+    let face = doc.face_ref(top).unwrap();
+    let hole = doc.apply(Command::AddSketch { plane: SketchPlane::Face { face } }).unwrap().unwrap();
+    let mut circle = Sketch::new();
+    // A face's sketch plane keeps the world origin's projection as its own origin, so
+    // the block's middle is at (100, 50) on it too.
+    circle.circle_at(P2::new(100.0, 50.0), 10.0).unwrap();
+    doc.apply(Command::EditSketch { id: hole, sketch: circle }).unwrap();
+    doc.apply(Command::AddCut { params: CutParams::new(hole) }).unwrap();
+    let cut = doc.kernel().mass_properties(doc.display_body().unwrap()).unwrap().volume;
+    assert!(cut < block - 1.0, "the cut removes material");
+
+    let mut case = Case::new("feature-sketch-order/early-sketch");
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        app.state_mut().state.push(AppAction::EditSketch(hole));
+        settle(app);
+        let state = &app.state().state;
+        let shown = state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap().volume;
+        assert!((shown - block).abs() < 1e-3, "the part shows without the later cut: {shown} against {block}");
+        // The sheet's middle lies over the block, not over the world origin.
+        let session = state.sketch.as_ref().unwrap();
+        let centre = soliddraft_app::sketcher::sheet_centre(&state.doc, &session.sketch, session.plane);
+        let p = session.plane;
+        let v = p.normal.cross(p.x_dir);
+        let world = p.origin + p.x_dir * centre.u + v * centre.v;
+        assert!((world.x - 100.0).abs() < 1.0 && (world.y - 50.0).abs() < 1.0, "the sheet is centred at {world:?}");
+        case.frame(app, "1-early-sketch-on-the-part-as-it-was");
+
+        // The roll-back is only the sketch's view of the part. A save or a recovery copy
+        // made while the sketch is open keeps the part whole.
+        let model = app.state().state.doc.model();
+        let saved = model.to_bytes().unwrap();
+        let (_, recovered) = model.snapshot().encode().unwrap();
+        for (copy, bytes) in [("saved", saved), ("recovered", recovered)] {
+            let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+            let reopened = soliddraft_app::file::open_bytes("early.dwprt", &bytes, kernel, None).unwrap();
+            assert_eq!(reopened.rollback, None, "the {copy} part keeps no roll-back");
+            let volume = reopened.kernel().mass_properties(reopened.display_body().unwrap()).unwrap().volume;
+            assert!((volume - cut).abs() < 1e-3, "the {copy} part has its cut: {volume} against {cut}");
+        }
+
+        app.state_mut().state.push(AppAction::ExitSketch);
+        settle(app);
+        let state = &app.state().state;
+        assert_eq!(state.doc.rollback, None, "closing the sketch rolls the part forward again");
+        let shown = state.doc.kernel().mass_properties(state.doc.display_body().unwrap()).unwrap().volume;
+        assert!((shown - cut).abs() < 1e-3, "the cut is back: {shown} against {cut}");
+        case.frame(app, "2-closed-the-part-is-whole");
+    });
+}
+
+/// An editor shows the part rolled back to before its feature. A rollback the user drags
+/// while it is open stands once it closes, and the saved part keeps it.
+#[test]
+fn a_rollback_dragged_in_an_open_editor_stands_after_it_closes() {
+    use soliddraft_app::document::{Command, ExtrudeParams};
+    let mut doc = ribbon::plate();
+    for depth in [5.0, 8.0] {
+        doc.apply(Command::AddExtrude { params: ExtrudeParams { depth, ..Default::default() }, via_assistant: false })
+            .unwrap();
+    }
+    assert_eq!(doc.features.len(), 3);
+    let second = doc.features[1].id;
+
+    let mut case = Case::new("feature-sketch-order/rollback-in-editor");
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        app.state_mut().state.push(AppAction::EditFeature(second));
+        settle(app);
+        assert!(app.state().state.editor.is_some());
+        assert_eq!(app.state().state.doc.rollback, Some(1), "the editor shows the part before its feature");
+        // The user drags the rollback bar to just above the last feature.
+        app.state_mut().state.push(AppAction::Command(soliddraft_app::document::Command::Rollback(Some(2))));
+        settle(app);
+        case.frame(app, "1-dragged-in-the-editor");
+        app.state_mut().state.push(AppAction::CancelEditor);
+        settle(app);
+        let state = &app.state().state;
+        assert!(state.editor.is_none());
+        assert_eq!(state.doc.rollback, Some(2), "the dragged rollback stands after the editor closes");
+        case.frame(app, "2-closed-the-drag-stands");
+
+        let bytes = app.state().state.doc.model().to_bytes().unwrap();
+        let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let reopened = soliddraft_app::file::open_bytes("dragged.dwprt", &bytes, kernel, None).unwrap();
+        assert_eq!(reopened.rollback, Some(2), "the saved part keeps the dragged rollback");
+    });
+}
+
+/// With a face selected its base sketch shows over the body. Where the sketch's outline
+/// lies on the body's own bottom edges, the edge under the pointer still takes the pick.
+#[test]
+fn a_shown_base_sketch_leaves_the_body_edges_under_it_pickable() {
+    use soliddraft_app::document::{Command, ExtrudeParams};
+    let mut doc = ribbon::sketch();
+    let sketch = doc.features[0].id;
+    doc.apply(Command::AddExtrude {
+        params: ExtrudeParams { sketch: Some(sketch), depth: 20.0, ..Default::default() },
+        via_assistant: false,
+    })
+    .unwrap();
+    let mut case = Case::new("feature-sketch-order/sketch-over-edges");
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        let top = app
+            .state()
+            .state
+            .doc
+            .faces
+            .iter()
+            .find(|f| f.centroid.z > 19.9 && f.surface == soliddraft_kernel_api::SurfaceKind::Plane)
+            .expect("the top face")
+            .id;
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Face(top))));
+        settle(app);
+        assert!(
+            soliddraft_app::tree_visibility::visible(&app.state().state).sketches.contains(&sketch),
+            "the face's base sketch shows"
+        );
+        // The middle of the bottom front edge, where the sketch's line lies too.
+        let state = &app.state().state;
+        let at = state.viewport.camera.project(glam::Vec3::new(0.0, -20.0, 0.0), state.viewport.rect).unwrap();
+        ribbon::render_steps::await_pick(app, at);
+        app.run_steps(3);
+        let state = &app.state().state;
+        let picked = state.viewport.hover.and_then(|p| soliddraft_app::viewport::pick::selection(&state.doc, p));
+        assert!(matches!(picked, Some(Selection::Edge(_))), "the body's edge is under the pointer: {picked:?}");
+        assert_eq!(state.viewport.hover_sketch, None, "the sketch outline does not take the edge's pick");
+        case.frame(app, "1-edge-under-the-sketch");
+    });
+}

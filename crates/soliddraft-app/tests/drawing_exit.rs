@@ -229,7 +229,7 @@ fn bracket_document() -> Document {
     let bore = sketch_on(&mut doc, PlaneKind::Top, circles(&[(P2::new(70.0, 45.0), 6.0)]));
     let bore = doc
         .apply(Command::AddCut {
-            params: CutParams { sketch: bore, depth: 40.0, through_all: true, flip: true, up_to: None },
+            params: CutParams { sketch: bore, depth: 40.0, through_all: true, flip: true, up_to: None, draft: None },
         })
         .unwrap()
         .unwrap();
@@ -245,7 +245,7 @@ fn bracket_document() -> Document {
     );
     let holes = doc
         .apply(Command::AddCut {
-            params: CutParams { sketch: holes, depth: 12.0, through_all: true, flip: true, up_to: None },
+            params: CutParams { sketch: holes, depth: 12.0, through_all: true, flip: true, up_to: None, draft: None },
         })
         .unwrap()
         .unwrap();
@@ -253,7 +253,7 @@ fn bracket_document() -> Document {
     let slot = sketch_on(&mut doc, PlaneKind::Right, rectangle(P2::new(25.0, 25.0), P2::new(65.0, 37.0)));
     let slot = doc
         .apply(Command::AddCut {
-            params: CutParams { sketch: slot, depth: 12.0, through_all: false, flip: true, up_to: None },
+            params: CutParams { sketch: slot, depth: 12.0, through_all: false, flip: true, up_to: None, draft: None },
         })
         .unwrap()
         .unwrap();

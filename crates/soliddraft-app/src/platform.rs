@@ -77,6 +77,25 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
+/// Writes an export: the file at `path` and the files beside it, such as a STEP file's
+/// proof report. On the desktop each is a file. In the browser, where each would be its
+/// own download, they arrive as one zip named after the export.
+pub fn write_export(path: &Path, files: Vec<(std::path::PathBuf, Vec<u8>)>) -> Result<(), String> {
+    if cfg!(target_arch = "wasm32") && files.len() > 1 {
+        let entries: Vec<(String, Vec<u8>)> = files
+            .into_iter()
+            .map(|(file, bytes)| {
+                (file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), bytes)
+            })
+            .collect();
+        return write_file(&path.with_extension("zip"), &crate::zip::stored(&entries));
+    }
+    for (file, bytes) in files {
+        write_file(&file, &bytes)?;
+    }
+    Ok(())
+}
+
 /// The file the user last uploaded, with its name, once it has arrived. Always `None` on
 /// the desktop, where opening a file is immediate.
 pub fn take_upload() -> Option<(String, Vec<u8>)> {

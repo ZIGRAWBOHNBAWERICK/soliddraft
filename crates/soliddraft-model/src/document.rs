@@ -100,6 +100,9 @@ pub struct Document {
     pub(crate) datum_names: BTreeMap<DatumPlane, String>,
     /// The first feature below the rollback bar.
     pub(crate) rollback: Option<FeatureId>,
+    /// The rollback bar as the user left it, held while a view such as an editor shows
+    /// the part rolled back further. Files and recovery copies record this one.
+    pub(crate) held_rollback: Option<Option<FeatureId>>,
     pub(crate) next_id: u32,
     pub(crate) next_body: u32,
     /// The material, the appearances and the copies of both the part holds.
@@ -119,6 +122,9 @@ pub struct Document {
     pub(crate) cache: BuildCache,
     pub(crate) undo: Vec<UndoEntry>,
     pub(crate) redo: Vec<UndoEntry>,
+    /// The redo stack the last command that found one cleared, with the undo depth just
+    /// before that command, so [`Self::withdraw`] can put it back.
+    pub(crate) cleared_redo: Option<(usize, Vec<UndoEntry>)>,
     pub(crate) log: Vec<String>,
     /// The solver's verdict on the last sketch a command solved.
     pub(crate) last_solve: Option<SolveStatus>,
@@ -149,6 +155,7 @@ impl Document {
             table_edits: 0,
             datum_names: BTreeMap::new(),
             rollback: None,
+            held_rollback: None,
             next_id: 1,
             next_body: 1,
             materials: PartMaterials::default(),
@@ -160,6 +167,7 @@ impl Document {
             cache: BuildCache::default(),
             undo: Vec::new(),
             redo: Vec::new(),
+            cleared_redo: None,
             log: Vec::new(),
             last_solve: None,
             journal: Some(Default::default()),
@@ -695,6 +703,38 @@ impl Document {
             self.rebuild();
             Ok(())
         })());
+    }
+
+    /// Holds the rollback bar where it stands for files and recovery copies while a view
+    /// moves it with [`Self::set_rollback`], as an editor does to show the part as it was
+    /// before a feature. A second hold keeps the first bar.
+    pub fn hold_rollback(&mut self) {
+        let journal = self.journal_command(|| serde_json::json!({"op":"hold_rollback"}));
+        let _ = journal.finish({
+            if self.held_rollback.is_none() {
+                self.held_rollback = Some(self.rollback);
+            }
+            Ok::<_, String>(())
+        });
+    }
+
+    /// Ends a hold: files record the rollback bar where it stands again.
+    pub fn release_rollback(&mut self) {
+        let journal = self.journal_command(|| serde_json::json!({"op":"release_rollback"}));
+        let _ = journal.finish({
+            self.held_rollback = None;
+            Ok::<_, String>(())
+        });
+    }
+
+    /// The rollback bar held for files while a view moves it, if one is held.
+    pub fn held_rollback(&self) -> Option<Option<FeatureId>> {
+        self.held_rollback
+    }
+
+    /// The rollback bar a file records: the held one while a view moves the bar.
+    pub(crate) fn saved_rollback(&self) -> Option<FeatureId> {
+        self.held_rollback.unwrap_or(self.rollback)
     }
 
     /// The name of a face for people, such as "Boss-Extrude1 · End cap".

@@ -183,8 +183,36 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         assert!(shows(app, "1 face"), "one face is counted in the singular");
         assert!(!shows(app, "1 faces"));
         case.frame(app, "draft-one-face");
-        // A draft in the tree names its value Angle. It read "Layout", the word for a
-        // pattern's copies. The draft may be refused; its row and its value stay.
+        // The top face lies across the pull, so OK is refused. The form stays open with
+        // the reason in its message area, right of the palette, and the tree gains no
+        // failed row.
+        let count = app.state().state.doc.features.len();
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        assert!(
+            matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Draft(_))),
+            "a refused draft keeps its form open"
+        );
+        assert_eq!(app.state().state.doc.features.len(), count, "a refused draft adds no row");
+        let message = ribbon::painted(app)
+            .into_iter()
+            .find(|p| p.text.starts_with("Draft cannot"))
+            .expect("the form says why Draft refused");
+        let palette = egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).unwrap().outer_rect;
+        assert!(message.rect.left() >= palette.right(), "the message clears the palette: {message:?}");
+        assert!(
+            app.state().state.note.as_ref().is_none_or(|n| n.kind != soliddraft_app::state::NoteKind::Error),
+            "a refusal is no error note"
+        );
+        case.frame(app, "draft-refused");
+        open(app, AppAction::CancelEditor);
+
+        // A side face drafts. A draft in the tree names its value Angle. It read
+        // "Layout", the word for a pattern's copies.
+        open(app, AppAction::StartDraft);
+        ribbon::click_world(app, Vec3::new(30.0, 0.0, TOP / 2.0));
+        settle(app);
+        pointer_to_chrome(app);
         open(app, AppAction::CommitEditor);
         rebuilt(app);
         let doc = &app.state().state.doc;
@@ -202,6 +230,47 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         case.frame(app, "pattern");
         assert_fields(app, "Linear Pattern", &["Spacing value", "Copies value"]);
         open(app, AppAction::CancelEditor);
+    });
+}
+
+/// An OK that only changes a dimension is refused as any other: a radius the part
+/// cannot take keeps the form open, and the fillet keeps the radius it had.
+#[test]
+fn a_refused_radius_keeps_the_fillet_form_open() {
+    let mut case = Case::new("feature-panel/fillet-radius-refused");
+    let mut app = launch(ribbon::plate(), STANDARD);
+    case.run(&mut app, |case, app| {
+        open(app, AppAction::StartFillet);
+        let (long, short) = near_edges(app);
+        ribbon::click_world(app, long);
+        ribbon::click_world(app, short);
+        settle(app);
+        ribbon::type_field(app, "Radius value", "5");
+        settle(app);
+        pointer_to_chrome(app);
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let fillet = app.state().state.doc.features.last().expect("the fillet is in the tree").id;
+        let before = ux_tools::facts(app);
+
+        open(app, AppAction::EditFeature(fillet));
+        ribbon::type_field(app, "Radius value", "35");
+        settle(app);
+        pointer_to_chrome(app);
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        assert!(
+            matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::Fillet(_))),
+            "a refused radius keeps its form open"
+        );
+        case.frame(app, "fillet-radius-refused");
+        // The open form shows the part rolled back to before the fillet. Cancel brings the
+        // fillet back as it was.
+        open(app, AppAction::CancelEditor);
+        rebuilt(app);
+        let status = app.state().state.doc.feature(fillet).unwrap().status.clone();
+        assert_eq!(status, soliddraft_app::document::FeatureStatus::Ok, "the fillet keeps its radius");
+        assert_eq!(ux_tools::facts(app), before, "the part is as it was");
     });
 }
 
@@ -381,5 +450,205 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
             other => panic!("the last feature is the fillet, not {other:?}"),
         }
         assert!(doc.display_failure().is_none(), "the fillet builds");
+    });
+}
+
+/// The centre of the one tick box named `label`, opening the form's More sheet when the
+/// bar has no room for it.
+fn check_box(app: &mut App, label: &str) -> egui::Pos2 {
+    let role = egui::accesskit::Role::CheckBox;
+    if app.query_by_role_and_label(role, label).is_none() {
+        let more = app
+            .query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.starts_with("More ("))))
+            .next()
+            .expect("the form's More button")
+            .rect()
+            .center();
+        ribbon::click_at(app, more);
+        settle(app);
+    }
+    app.get_by_role_and_label(role, label).rect().center()
+}
+
+fn editor_params(app: &App) -> EditorParams {
+    app.state().state.editor.as_ref().expect("a form is open").params.clone()
+}
+
+/// A drag from `from` to `to`, a few points a frame, as a hand moves.
+fn drag(app: &mut App, from: egui::Pos2, to: egui::Pos2) {
+    app.hover_at(from);
+    app.run_steps(3);
+    app.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
+    app.step();
+    for i in 1..=10 {
+        app.hover_at(from + (to - from) * (i as f32 / 10.0));
+        app.step();
+    }
+    app.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    app.run_steps(4);
+}
+
+/// The Extrude preview is amber material with a depth arrow on the profile: dragging the
+/// arrow sets the depth, and a double-click on its value opens Depth for typing. Draft is
+/// a tick box of the form, as in SOLIDWORKS. Ticked, the preview is the tapered body, and
+/// OK adds one row to the tree: the extrusion, built with a draft linked to it.
+#[test]
+fn extrude_previews_its_depth_arrow_and_takes_a_draft_option() {
+    let mut case = Case::new("feature-panel/extrude-arrow-and-draft");
+    let mut app = launch(ribbon::sketch(), STANDARD);
+    case.run(&mut app, |case, app| {
+        let sketch = app.state().state.doc.features[0].id;
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(sketch))));
+        settle(app);
+        ribbon::run_command(app, "extrude");
+        settle(app);
+        pointer_to_chrome(app);
+        let EditorParams::Extrude(before) = editor_params(app) else { panic!("the Extrude form is open") };
+        let preview = app.state().state.editor.as_ref().unwrap().preview.clone();
+        assert!(preview.tool.is_some(), "the material Extrude adds shows");
+        let arrow = preview.guides.arrow.expect("a depth arrow");
+        assert!(arrow.drags && arrow.text == soliddraft_app::document::fmt_mm(before.depth), "{arrow:?}");
+        assert!((arrow.to - arrow.from).length() as f64 - before.depth < 1e-3);
+        case.frame(app, "1-extrude-arrow");
+
+        // Drag the arrow's handle out along the arrow: the depth grows.
+        let handle = app.get_by_label("Depth arrow").rect().center();
+        let state = &app.state().state;
+        let tip = state.viewport.camera.project(arrow.to, state.viewport.rect).unwrap();
+        let along = (tip - handle).normalized();
+        drag(app, handle, handle + along * 40.0);
+        settle(app);
+        let EditorParams::Extrude(dragged) = editor_params(app) else { panic!() };
+        assert!(dragged.depth > before.depth + 1.0, "the drag deepened {} to {}", before.depth, dragged.depth);
+        case.frame(app, "2-extrude-arrow-dragged");
+
+        // A double-click on the value opens Depth for typing.
+        pointer_to_chrome(app);
+        let value = app.get_by_label("Depth on the preview").rect().center();
+        ribbon::double_click_at(app, value);
+        app.run_steps(4);
+        assert!(app.get_by_label("Depth value").is_focused(), "the form's Depth takes the keyboard");
+        app.key_press(Key::Escape);
+        settle(app);
+        if app.state().state.editor.is_none() {
+            ribbon::run_command(app, "extrude");
+            settle(app);
+        }
+
+        // Tick Draft: the angle and Outward appear, and the preview tapers.
+        pointer_to_chrome(app);
+        let tick = check_box(app, "Draft");
+        ribbon::click_at(app, tick);
+        settle(app);
+        let EditorParams::Extrude(drafted) = editor_params(app) else { panic!() };
+        assert_eq!(drafted.draft, Some(soliddraft_app::document::ExtrudeDraft::default()));
+        assert!(app.query_by_label("Draft angle value").is_some(), "the angle shows once Draft is ticked");
+        // The sheet grows to hold them: a field it clipped would not take the click.
+        let outward = check_box(app, "Outward");
+        ribbon::click_at(app, outward);
+        settle(app);
+        let EditorParams::Extrude(drafted) = editor_params(app) else { panic!() };
+        assert!(drafted.draft.is_some_and(|d| d.outward), "Outward takes the click: {drafted:?}");
+        let preview = app.state().state.editor.as_ref().unwrap().preview.clone();
+        assert!(preview.result.is_some(), "the preview is the tapered body");
+        assert!(preview.guides.arrow.is_some(), "the tapered preview keeps its depth arrow");
+        let made = preview.result.as_ref().unwrap().face_features.iter().filter(|f| **f == u32::MAX).count();
+        assert!(made > 0, "the new material is marked for its amber");
+        pointer_to_chrome(app);
+        case.frame(app, "3-extrude-draft-preview");
+
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        assert!(app.state().state.editor.is_none(), "{:?}", app.state().state.note.as_ref().map(|n| &n.text));
+        let doc = &app.state().state.doc;
+        let extrude = doc.features.iter().find(|f| f.kind.noun() == "extrude").expect("the extrusion").id;
+        let draft = doc.linked_draft(extrude).expect("the extrusion carries its draft");
+        let name = doc.feature(draft).unwrap().name.clone();
+        ribbon::open_tree(app);
+        assert!(app.query_all_by_label(&name).next().is_none(), "the draft has no row of its own");
+        assert!(shows_with(app, "draft"), "the extrusion's row says it is drafted");
+        case.frame(app, "4-extrude-draft-built");
+    });
+}
+
+/// Whether some node's label or value contains `text`.
+fn shows_with(app: &App, text: &str) -> bool {
+    app.query_all(
+        By::new()
+            .predicate(|n| n.label().is_some_and(|l| l.contains(text)) || n.value().is_some_and(|v| v.contains(text))),
+    )
+    .next()
+    .is_some()
+}
+
+/// Pattern, Mirror and Draft show their result before OK, as built: the copies or the
+/// tilted faces marked, the copies numbered, the draft's neutral plane and pull drawn.
+#[test]
+fn pattern_mirror_and_draft_preview_before_ok() {
+    let mut case = Case::new("feature-panel/built-previews");
+    let (doc, _) = plate_with_circle();
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        // A boss to copy: the circle on the plate, extruded.
+        open(app, AppAction::StartExtrude);
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let boss = app.state().state.doc.features.last().unwrap().id;
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(boss))));
+        settle(app);
+
+        open(app, AppAction::StartPattern { circular: false });
+        let preview = app.state().state.editor.as_ref().expect("the Pattern form").preview.clone();
+        assert!(
+            preview.result.is_some(),
+            "the pattern shows its copies: {:?}",
+            app.state().state.editor.as_ref().unwrap().error
+        );
+        assert!(!preview.guides.labels.is_empty(), "the copies are numbered");
+        case.frame(app, "linear-pattern");
+        open(app, AppAction::CancelEditor);
+
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(boss))));
+        settle(app);
+        open(app, AppAction::StartMirror);
+        let preview = app.state().state.editor.as_ref().expect("the Mirror form").preview.clone();
+        assert!(
+            preview.result.is_some(),
+            "the mirror shows its copy: {:?}",
+            app.state().state.editor.as_ref().unwrap().error
+        );
+        case.frame(app, "mirror");
+        open(app, AppAction::CancelEditor);
+
+        app.state_mut().state.push(AppAction::Select(None));
+        open(app, AppAction::StartDraft);
+        ribbon::click_world(app, Vec3::new(30.0, 0.0, TOP / 2.0));
+        settle(app);
+        pointer_to_chrome(app);
+        let preview = app.state().state.editor.as_ref().expect("the Draft form").preview.clone();
+        assert!(preview.result.is_some(), "the draft shows the tilted face");
+        assert_eq!(preview.guides.outline.len(), 4, "the neutral plane is outlined");
+        assert!(preview.guides.arrow.as_ref().is_some_and(|a| !a.drags), "the pull is an arrow");
+        case.frame(app, "draft");
+        open(app, AppAction::CancelEditor);
+
+        // A hole before its face: a ghost follows the pointer over a planar face.
+        open(app, AppAction::StartHole);
+        let state = &app.state().state;
+        let top = state.viewport.camera.project(Vec3::new(-20.0, -12.0, TOP), state.viewport.rect).unwrap();
+        ribbon::render_steps::await_pick(app, top);
+        app.run_steps(3);
+        case.frame(app, "hole-ghost");
+        open(app, AppAction::CancelEditor);
     });
 }

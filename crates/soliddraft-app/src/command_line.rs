@@ -707,7 +707,11 @@ fn prompt(ui: &mut egui::Ui, state: &mut AppState, session: bool) {
             egui::RichText::new("Ask the assistant, or type a command").color(theme::terminal_muted()),
         )
     } else {
-        let hint = format!("Type a command, Tab completes · {AI_COMMAND} opens the assistant");
+        let hint = if cfg!(target_arch = "wasm32") {
+            "Type a command, Tab completes".to_owned()
+        } else {
+            format!("Type a command, Tab completes · {AI_COMMAND} opens the assistant")
+        };
         (theme::ink(), egui::RichText::new(hint).color(theme::muted()))
     };
     let cl = &mut state.command_line;

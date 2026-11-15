@@ -111,7 +111,11 @@ fn diagnostics_locate_open_ends_without_editing_or_selecting_geometry() {
     app.run_steps(90);
     let issue = soliddraft_app::sketch_diagnostics::selected(session(&app)).unwrap();
     let at = screen(&app, issue.locations[0]);
-    assert!(at.distance(app.state().state.viewport.rect.center()) < 3.0, "Locate centres the actual fault");
+    // Centred in the band the sketch status and the navigation bar leave clear.
+    let viewport = &app.state().state.viewport;
+    let framing = viewport.camera.framing();
+    let clear_centre = viewport.rect.center() + egui::vec2(0.0, (framing.top - framing.bottom) / 2.0);
+    assert!(at.distance(clear_centre) < 3.0, "Locate centres the actual fault");
     assert_marker(&app);
     assert_eq!(app.state().state.doc.revision(), revision);
     frame(&mut app, "diagnostics-located");

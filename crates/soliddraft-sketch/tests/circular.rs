@@ -90,6 +90,13 @@ fn tangent_arcs_continue_both_ends_of_lines_and_arcs_on_either_side() {
             }
         }
     }
+    // A pick a few millionths off the tangent, as the screen projection leaves it, is
+    // still straight on: no arc kilometres wide.
+    let mut sketch = Sketch::new();
+    let line = sketch.add(EntityKind::Line { a: P2::new(-20.0, 0.0), b: P2::ZERO }, false);
+    assert!(tangent_arc(&sketch, PointRef::new(line, 1), P2::new(20.0, -3.8e-6)).is_err());
+    assert!(tangent_arc(&sketch, PointRef::new(line, 1), P2::new(20.0, 0.5)).is_ok());
+
     let mut sketch = Sketch::new();
     let circle = sketch.add(EntityKind::Circle { center: P2::ZERO, radius: 2.0 }, false);
     for from in [PointRef::ORIGIN, PointRef::new(circle, 0), PointRef::new(99, 1)] {

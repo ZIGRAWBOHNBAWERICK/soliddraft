@@ -117,6 +117,11 @@ pub mod edit_suite {
     pub const ON_DANGER: Color32 = Color32::WHITE;
     pub const UNDER_DEFINED: Color32 = rgb(0x1d, 0x4f, 0xe0);
     pub const UNDER_DEFINED_LABEL: Color32 = rgb(0x7f, 0xb2, 0xff);
+    /// A form's preview guides: the depth arrow, a draft's plane and pull, copy numbers.
+    /// The amber of the added material (scene.wgsl PREVIEW_ADD), deep enough for a white scene.
+    pub const PREVIEW_EDGE: Color32 = rgb(0xd9, 0x7f, 0x00);
+    /// The red of material a form removes, for a hole's ghost at the pointer.
+    pub const PREVIEW_REMOVE_EDGE: Color32 = rgb(0xd0, 0x3a, 0x30);
     pub const FULLY_DEFINED: Color32 = rgb(0x0b, 0x0d, 0x11);
     pub const CONSTRUCTION: Color32 = rgb(0x5b, 0x6b, 0x86);
     pub const DIMENSION: Color32 = rgb(0x24, 0x56, 0xc4);

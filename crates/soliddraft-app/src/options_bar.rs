@@ -91,7 +91,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         egui::Button::new(egui::RichText::new("Close sketch").color(theme::edit_suite::ON_DANGER))
                             .fill(theme::edit_suite::DANGER),
                     )
-                    .on_hover_text("Close sketch (Enter or Esc)")
+                    .on_hover_text("Close sketch (Enter)")
                     .clicked()
                 {
                     state.push(AppAction::ExitSketch);
@@ -135,6 +135,13 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                             .truncate(),
                         );
                     }
+                    if let Some(session) = state.sketch.as_mut() {
+                        ui.separator();
+                        egui::ScrollArea::horizontal()
+                            .id_salt("sketch_switches")
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| ui.horizontal_centered(|ui| crate::measure::guides::bar(ui, session)));
+                    }
                 });
             },
         );
@@ -172,13 +179,24 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}")));
         response.on_hover_text(&label);
 
+        let mut details_at = None;
         if state.doc.selection.is_some() || state.measure.open {
             let response = ui.button("Details");
             sheet_anchor = response.rect;
+            details_at = Some(response.rect.center());
             if response.clicked() {
                 state.options_details = !state.options_details;
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let selected =
+                state.doc.selection.and_then(|selection| state.doc.describe(selection)).map(|info| info.title);
+            let details = details_at.map(|at| serde_json::json!({ "x": at.x, "y": at.y }));
+            crate::web::show_options(serde_json::json!({ "selected": selected, "details": details }));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = details_at;
         egui::ScrollArea::horizontal()
             .id_salt(("options_contents", label, format!("{:?}", state.doc.selection)))
             .auto_shrink([false, true])
@@ -322,9 +340,12 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                 .show(ui, |ui| {
                     ui.set_width(width - 16.0);
                     ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
+                    // The sheet's one close control. The selection's own Clear X hides
+                    // in here (properties_in_sheet).
                     if ui.button("Close options").clicked() {
                         state.options_details = false;
                     }
+                    state.properties_in_sheet = true;
                     if state.assembly.is_active() {
                         crate::assembly::properties(ui, state);
                     } else if state.drawing.new.is_some() && !state.drawing.is_active() {
@@ -334,6 +355,7 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                     } else {
                         crate::properties::show(ui, state);
                     }
+                    state.properties_in_sheet = false;
                 });
         },
     );

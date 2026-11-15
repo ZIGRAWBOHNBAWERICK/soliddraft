@@ -87,16 +87,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             let tile_width = TILE.x.min(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
-                if tile(ui, "New part", "A solid body from sketches and features", tile_width).clicked() {
+                if tile(ui, "New part", "A solid body from sketches and features", tile_width, true).clicked() {
                     state.push(AppAction::NewPart);
                 }
-                if tile(ui, "New assembly", "Parts placed and mated together", tile_width).clicked() {
+                // The browser build has no assemblies yet: the tile says so, greyed.
+                let assemblies = crate::commands::get("new_assembly").is_some_and(|c| c.is_enabled(state));
+                let caption = if assemblies { "Parts placed and mated together" } else { "Desktop app only" };
+                if tile(ui, "New assembly", caption, tile_width, assemblies).clicked() {
                     run(state, "new_assembly");
                 }
-                if tile(ui, "New drawing", "Sheets with views of a part", tile_width).clicked() {
+                if tile(ui, "New drawing", "Sheets with views of a part", tile_width, true).clicked() {
                     state.push(AppAction::NewDrawing);
                 }
-                if tile(ui, "Open…", "A part, assembly or drawing file", tile_width).clicked() {
+                if tile(ui, "Open…", "A part, assembly or drawing file", tile_width, true).clicked() {
                     run(state, "open");
                 }
             });
@@ -153,16 +156,20 @@ fn open(state: &mut AppState, doc: &RecentDoc) {
 }
 
 /// One of the four large buttons at the top.
-fn tile(ui: &mut egui::Ui, title: &str, caption: &str, width: f32) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(width, TILE.y), Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+/// A start tile. A disabled one is greyed, takes no click, and its caption says why.
+fn tile(ui: &mut egui::Ui, title: &str, caption: &str, width: f32, enabled: bool) -> egui::Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, TILE.y), sense);
+    let response = if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, title));
     let painter = ui.painter_at(rect);
-    let fill = if response.hovered() { theme::hover() } else { theme::panel() };
-    let stroke = if response.hovered() { theme::accent() } else { theme::line() };
+    let hot = enabled && response.hovered();
+    let fill = if hot { theme::hover() } else { theme::panel() };
+    let stroke = if hot { theme::accent() } else { theme::line() };
     painter.rect(rect, 8, fill, Stroke::new(1.0, stroke), StrokeKind::Inside);
     let inner = rect.shrink2(vec2(14.0, 12.0));
-    painter.text(inner.left_top(), egui::Align2::LEFT_TOP, title, theme::font_semibold(15.0), theme::ink());
+    let ink = if enabled { theme::ink() } else { theme::muted() };
+    painter.text(inner.left_top(), egui::Align2::LEFT_TOP, title, theme::font_semibold(15.0), ink);
     let galley = painter.layout(caption.to_owned(), theme::font(11.5), theme::muted(), inner.width());
     painter.galley(inner.left_bottom() - vec2(0.0, galley.size().y), galley, theme::muted());
     response

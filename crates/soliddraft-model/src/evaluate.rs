@@ -98,6 +98,7 @@ impl Document {
             table_edits: self.table_edits,
             datum_names: self.datum_names.clone(),
             rollback: self.rollback,
+            held_rollback: self.held_rollback,
             next_id: self.next_id,
             next_body: self.next_body,
             materials: self.materials.clone(),
@@ -109,6 +110,7 @@ impl Document {
             cache: self.cache.clone(),
             undo: Vec::new(),
             redo: Vec::new(),
+            cleared_redo: None,
             log: Vec::new(),
             last_solve: None,
             journal: None,
@@ -979,7 +981,7 @@ impl Document {
 
     /// Resolves a feature's plane: a reference plane, or a planar face of `body` with
     /// its outward normal.
-    fn plane_of(&self, r: &PlaneRef, body: BodyId) -> Result<Plane, Box<RepairNeeded>> {
+    pub fn plane_of(&self, r: &PlaneRef, body: BodyId) -> Result<Plane, Box<RepairNeeded>> {
         match r {
             PlaneRef::Feature { feature } => self
                 .reference_plane(*feature)

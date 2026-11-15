@@ -25,9 +25,15 @@ impl SolidDraftApp {
     /// Closes the open editor, restoring the display the editor rolled back.
     pub(super) fn close_editor(&mut self) -> Option<FeatureEditor> {
         let e = self.state.editor.take()?;
-        if e.target.is_some() && self.state.doc.rollback != e.saved_rollback {
-            self.state.doc.rollback = e.saved_rollback;
-            let _ = self.state.doc.rebuild();
+        if e.target.is_some() {
+            if self.state.sketch.as_ref().is_none_or(|s| s.restore_rollback.is_none()) {
+                // The bar goes back where the user left it, a drag in the editor included.
+                self.state.doc.end_rollback_view();
+            } else if self.state.doc.rollback != e.saved_rollback {
+                // Inside an early sketch's view the bar goes back to that view.
+                self.state.doc.rollback = e.saved_rollback;
+                let _ = self.state.doc.rebuild();
+            }
         }
         Some(e)
     }
@@ -41,11 +47,40 @@ impl SolidDraftApp {
             && let Some(i) = self.state.doc.index_of(id)
             && self.state.doc.rollback.is_none_or(|r| r > i)
         {
+            // Saving while the editor is open keeps the bar where the user left it.
+            self.state.doc.hold_rollback();
             self.state.doc.rollback = Some(i);
             let _ = self.state.doc.rebuild();
         }
         self.state.editor = Some(FeatureEditor::new(target, params, saved));
         self.state.ribbon_tab = crate::state::RibbonTab::Solid;
+    }
+
+    /// Puts back the rollback an early sketch's session set when it opened.
+    fn restore_rollback(&mut self, session: &SketchSession) {
+        if let Some(rollback) = session.restore_rollback {
+            if self.state.editor.as_ref().is_none_or(|e| e.target.is_none()) {
+                self.state.doc.end_rollback_view();
+            } else {
+                self.state.doc.rollback = rollback.filter(|r| *r < self.state.doc.features.len());
+                let _ = self.state.doc.rebuild();
+            }
+        }
+    }
+
+    /// Opens the form OK closed again, with the values it had and why they were refused.
+    /// The reason shows in the form's message area, not the status bar, and is no
+    /// diagnostic: the shape is unsupported, nothing went wrong.
+    fn refuse(
+        &mut self,
+        (target, params, then): (Option<crate::document::FeatureId>, EditorParams, Option<ProfileFeature>),
+        why: String,
+    ) {
+        self.open_editor(target, params);
+        if let Some(editor) = self.state.editor.as_mut() {
+            editor.then_feature = then;
+            editor.refuse(why);
+        }
     }
 
     /// Opens the plane picker for a new sketch. `then` starts on the sketch when it closes.
@@ -79,14 +114,18 @@ impl SolidDraftApp {
 
     /// A new extrusion or cut grows along its sketch's normal. Seen straight down that
     /// normal, as the view is left when the sketch closes, its preview is a flat tint
-    /// with no depth to judge. The view turns to isometric, where the depth shows.
+    /// with no depth to judge. The view turns to isometric, where the depth shows, or,
+    /// for a sketch whose normal lies near the isometric line of sight, to a view tilted
+    /// off its own normal.
     fn show_depth_of(&mut self, sketch: crate::document::FeatureId) {
+        use crate::viewport::camera::{Camera, DepthView, StandardView};
         let Some(plane) = self.state.doc.feature(sketch).and_then(|f| f.plane) else { return };
-        let normal = glam::Vec3::new(plane.normal.x as f32, plane.normal.y as f32, plane.normal.z as f32);
+        let v = |p: soliddraft_kernel_api::Vec3| glam::Vec3::new(p.x as f32, p.y as f32, p.z as f32);
         let camera = &mut self.state.viewport.camera;
-        // Within about five degrees of the normal, from either side.
-        if camera.heading().dot(normal.normalize_or_zero()).abs() > 0.996 {
-            camera.set_view(crate::viewport::camera::StandardView::Isometric);
+        match Camera::depth_view(camera.heading(), v(plane.normal), v(plane.x_dir)) {
+            Some(DepthView::Isometric) => camera.set_view(StandardView::Isometric),
+            Some(DepthView::Oblique(from)) => camera.look_from("Oblique", from),
+            None => {}
         }
     }
 
@@ -98,7 +137,19 @@ impl SolidDraftApp {
             return;
         };
         let was_orthographic = self.state.viewport.camera.orthographic;
-        let session = SketchSession::new(id, plane, sk.sketch.clone(), was_orthographic);
+        let mut session = SketchSession::new(id, plane, sk.sketch.clone(), was_orthographic);
+        // An early sketch opens on the part as it was then, as a feature's editor does:
+        // later features are rolled back until the sketch closes.
+        if let Some(index) = self.state.doc.index_of(id)
+            && index + 1 < self.state.doc.features.len()
+            && self.state.doc.rollback.is_none_or(|r| r > index + 1)
+        {
+            session.restore_rollback = Some(self.state.doc.rollback);
+            // Saving while the sketch is open keeps the bar where the user left it.
+            self.state.doc.hold_rollback();
+            self.state.doc.rollback = Some(index + 1);
+            let _ = self.state.doc.rebuild();
+        }
         self.state.sketch = Some(session);
         self.state.doc.selection = Some(Selection::Feature(id));
         self.state.ribbon_tab = crate::state::RibbonTab::Sketch;
@@ -108,7 +159,7 @@ impl SolidDraftApp {
             plane.normal.y as f32,
             plane.normal.z as f32,
         ));
-        self.state.viewport.camera.fit(self.fit_bounds());
+        self.state.viewport.camera.fit_framed(self.fit_bounds());
     }
 
     /// What "zoom to fit" frames: the body, the open sketch, or with nothing
@@ -293,6 +344,7 @@ impl SolidDraftApp {
             }
             AppAction::ExitSketch => {
                 let Some(session) = self.state.sketch.take() else { return };
+                self.restore_rollback(&session);
                 self.state.viewport.camera.orthographic = session.was_orthographic;
                 self.state.ribbon_tab = crate::state::RibbonTab::Solid;
                 let id = session.feature;
@@ -653,6 +705,7 @@ impl SolidDraftApp {
                     return;
                 }
                 let Some(e) = self.close_editor() else { return };
+                let reopen = (e.target, e.params.clone(), e.then_feature);
                 let cmd = match (e.target, e.params) {
                     (target, EditorParams::Loft(l)) => match target {
                         Some(id) => Command::EditFeature { id, kind: FeatureKind::Loft(l) },
@@ -679,8 +732,8 @@ impl SolidDraftApp {
                             Some(id) => Command::EditFeature { id, kind: FeatureKind::Hole(h) },
                             None => Command::AddFeature(FeatureKind::Hole(h)),
                         },
-                        Err(e) => {
-                            self.state.note(e, NoteKind::Error);
+                        Err(why) => {
+                            self.refuse(reopen, why);
                             return;
                         }
                     },
@@ -747,10 +800,42 @@ impl SolidDraftApp {
                     }
                     (None, EditorParams::Repair { .. }) => return,
                 };
-                self.apply(ctx, AppAction::Command(cmd));
+                // Every OK builds before the form closes, a dimension edit too, so a refused
+                // one keeps its form, and the part and its history stay as they were.
+                if let Some(drag) = self.state.drag_preview.take() {
+                    drag.cancel(&mut self.state.doc);
+                }
+                match self.state.doc.apply_form(cmd) {
+                    Ok(Some(id)) => {
+                        self.state.doc.selection = Some(Selection::Feature(id));
+                        self.state.note("Feature added", NoteKind::Ok);
+                    }
+                    Ok(None) => self.state.note("Rebuilt", NoteKind::Ok),
+                    // The kernel refused: nothing was added, and the form stays open.
+                    Err(why) => self.refuse(reopen, why),
+                }
+                self.sync_sketch_session();
             }
             AppAction::CancelEditor => {
                 self.close_editor();
+            }
+            AppAction::GiveFeedback => {
+                #[cfg(target_arch = "wasm32")]
+                crate::web::open_feedback();
+            }
+            AppAction::EditorDepth(depth) => {
+                if let Some(e) = self.state.editor.as_mut() {
+                    match &mut e.params {
+                        EditorParams::Extrude(p) => p.depth = depth,
+                        EditorParams::Cut(p) if !p.through_all && p.up_to.is_none() => p.depth = depth,
+                        _ => {}
+                    }
+                }
+            }
+            AppAction::EditorFocusDepth => {
+                if let Some(e) = self.state.editor.as_mut() {
+                    e.focus_depth = true;
+                }
             }
             AppAction::DragDimension(step) => self.state.drag_dimension(step),
             AppAction::EditDimension(target) => match target {
@@ -780,6 +865,9 @@ impl SolidDraftApp {
             },
             AppAction::Dimension(action) => self.state.dimension(action),
             AppAction::Select(sel) => {
+                // A plain selection shows the dimensions it always did; only a double-click
+                // narrows them to one feature.
+                self.state.viewport.dimensions_of = None;
                 // Editors that collect picks take the click instead of selecting.
                 if let Some(e) = self.state.editor.as_mut() {
                     match (&mut e.params, sel) {
@@ -1066,6 +1154,15 @@ impl SolidDraftApp {
                     s.set_tool(tool);
                 }
             }
+            AppAction::SketchEscape => {
+                if let Some(s) = self.state.sketch.as_mut() {
+                    if s.tool != crate::state::Tool::Select {
+                        s.set_tool(crate::state::Tool::Select);
+                    } else {
+                        s.selection.clear();
+                    }
+                }
+            }
             AppAction::SketchRelations(open) => {
                 if let Some(s) = self.state.sketch.as_mut() {
                     s.relations_open = open;
@@ -1139,7 +1236,7 @@ impl SolidDraftApp {
                 if let Some((lo, hi)) =
                     bounds.filter(|(lo, hi)| (*lo + *hi).is_finite() && (*hi - *lo).length().is_finite())
                 {
-                    self.state.viewport.camera.fit(Some((lo, hi)));
+                    self.state.viewport.camera.fit_framed(Some((lo, hi)));
                 } else if let Some(s) = self.state.sketch.as_mut() {
                     s.say("Fault coordinates cannot be displayed at this scale");
                 }
@@ -1218,7 +1315,7 @@ impl SolidDraftApp {
             }
             AppAction::ZoomFit => {
                 let bounds = self.fit_bounds();
-                self.state.viewport.camera.fit(bounds);
+                self.state.viewport.camera.fit_framed(bounds);
             }
             AppAction::SetDisplay(d) => self.state.active_viewport_mut().display = d,
             AppAction::SetPreset(p) => {
@@ -1320,7 +1417,7 @@ impl SolidDraftApp {
                 self.state.import_dialog = None;
                 self.state.scan = Default::default();
                 self.state.doc = crate::new_document();
-                self.state.viewport.camera.fit(None);
+                self.state.viewport.camera.fit_framed(None);
                 self.state.note("New part", NoteKind::Info);
             }
             AppAction::ImportStep(path) => {
@@ -1524,7 +1621,15 @@ impl SolidDraftApp {
                     return;
                 }
                 let exported = self.state.export_part(format);
-                match exported.and_then(|out| out.write_with(&path, crate::platform::write_file).map(|()| out.report)) {
+                let written = exported.and_then(|out| {
+                    let mut files = Vec::new();
+                    out.write_with(&path, |file, bytes| {
+                        files.push((file.to_owned(), bytes.to_vec()));
+                        Ok(())
+                    })?;
+                    crate::platform::write_export(&path, files).map(|()| out.report)
+                });
+                match written {
                     Ok(report) => {
                         let kind = match &report {
                             soliddraft_exchange::Report::Step(r) if !r.within_tolerance => NoteKind::Error,
@@ -1591,6 +1696,7 @@ impl SolidDraftApp {
             AppAction::ShowRecovery => {
                 if let Some(r) = self.state.recovery.as_mut() {
                     r.show = true;
+                    r.asked = true;
                 }
                 #[cfg(target_arch = "wasm32")]
                 crate::journal_browser::show();
@@ -1656,7 +1762,9 @@ impl SolidDraftApp {
             }
             None => {
                 // The sketch is gone (undone past its creation).
-                self.state.sketch = None;
+                if let Some(session) = self.state.sketch.take() {
+                    self.restore_rollback(&session);
+                }
                 self.state.ribbon_tab = crate::state::RibbonTab::Solid;
             }
         }

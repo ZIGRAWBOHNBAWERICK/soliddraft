@@ -60,7 +60,10 @@ pub fn tangent_arc(sketch: &Sketch, from: PointRef, end: P2) -> Result<(EntityKi
     let normal = tangent.normalized().perp();
     let chord = end - start;
     let projection = chord.dot(normal);
-    if projection.abs() <= EPS {
+    // Picks pass through the camera's f32 projection: an endpoint that looks straight on
+    // along the tangent may sit a few millionths off it, which would make an arc
+    // kilometres wide. The relative tolerance matches the three-point arc slot's.
+    if projection.abs() <= EPS.max(1e-5 * chord.len()) {
         return refuse("tangent arc endpoint cannot lie on the starting tangent");
     }
     let distance = chord.dot(chord) / (2.0 * projection);

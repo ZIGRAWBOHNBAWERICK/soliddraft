@@ -33,6 +33,7 @@ fn block(depth: f64) -> Command {
             depth,
             flip: false,
             end: Default::default(),
+            draft: None,
         },
         via_assistant: false,
     }
@@ -258,6 +259,16 @@ fn an_app_killed_mid_edit_offers_its_work_at_the_next_start() {
         assert!(shown.iter().any(|t| t == "Never saved"), "where");
         assert!(shown.iter().any(|t| t.starts_with("Today ") && t.ends_with("(just now)")), "when: {shown:?}");
         case.frame(app, "offered-after-kill");
+        // The offer belongs to the start page: once a part is open it waits for File >
+        // Recover documents, and never pops up over the part to take its clicks.
+        app.state_mut().state.push(AppAction::NewPart);
+        app.run_steps(6);
+        assert!(app.state().state.start.is_none());
+        assert!(app.query_by_label("Recover documents").is_none(), "no window over the new part");
+        assert!(!app.state().state.recovery.as_ref().unwrap().show);
+        app.state_mut().state.push(AppAction::ShowRecovery);
+        app.run_steps(6);
+        assert!(app.query_by_label("Recover documents").is_some(), "File > Recover documents still opens it");
         click(app, "Discard");
         assert!(app.state().state.recovery.as_ref().unwrap().offers.is_empty());
         assert!(!app.state().state.recovery.as_ref().unwrap().show, "with nothing left, the window closes");

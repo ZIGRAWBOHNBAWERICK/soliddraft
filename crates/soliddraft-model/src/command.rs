@@ -39,7 +39,8 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         via_assistant: bool,
     },
-    /// Adds a feature to a named body, creating that body if it is empty.
+    /// Adds a feature to a named body, creating that body if it is empty. Without a
+    /// position it goes at the rollback bar, or at the end.
     AddFeatureInBody {
         /// Stable body identity.
         body: u32,
@@ -48,6 +49,9 @@ pub enum Command {
         via_assistant: bool,
         /// Feature definition.
         kind: FeatureKind,
+        /// Tree position.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<usize>,
     },
     /// Puts back a feature with a known id, as redo of an add and undo of a delete do.
     InsertFeature {
@@ -409,8 +413,11 @@ impl Document {
         journal.finish((|| {
             let applied = self.apply(command)?;
             self.log.push(applied.label.clone());
+            let depth = self.undo.len();
             self.undo.push(UndoEntry { label: applied.label.clone(), undo: applied.inverse, redo: applied.redo });
-            self.redo.clear();
+            if !self.redo.is_empty() {
+                self.cleared_redo = Some((depth, std::mem::take(&mut self.redo)));
+            }
             Ok(Executed { created: applied.created, label: applied.label })
         })())
     }
@@ -462,6 +469,7 @@ impl Document {
                 self.undo.push(entry);
                 return Err(e);
             }
+            self.cleared_redo = None;
             self.log.push(format!("undo {}", entry.label));
             let label = entry.label.clone();
             self.redo.push(entry);
@@ -488,6 +496,7 @@ impl Document {
                 self.redo.push(entry);
                 return Err(e);
             }
+            self.cleared_redo = None;
             self.log.push(format!("redo {}", entry.label));
             let label = entry.label.clone();
             self.undo.push(entry);
@@ -516,6 +525,7 @@ impl Document {
             if self.undo.len() <= depth {
                 return Ok::<_, String>(());
             }
+            self.cleared_redo = None;
             let entries = self.undo.split_off(depth);
             let undo = Command::Batch {
                 label: label.clone(),
@@ -531,15 +541,37 @@ impl Document {
     /// them, leaving nothing to redo: for a group of commands that failed partway.
     pub fn abandon(&mut self, depth: usize) -> Result<(), CommandError> {
         let journal = self.journal_command(|| serde_json::json!({"op":"abandon", "depth":depth}));
+        journal.finish({
+            self.cleared_redo = None;
+            self.revert_to(depth)
+        })
+    }
+
+    /// Reverts the commands recorded since the undo stack was `depth` deep, as
+    /// [`Self::abandon`] does, and puts back the redo stack the first of them cleared:
+    /// for a command refused after it ran, which leaves the history as it found it. A
+    /// redo stack cleared further down stays kept for a later withdraw to that depth.
+    pub fn withdraw(&mut self, depth: usize) -> Result<(), CommandError> {
+        let journal = self.journal_command(|| serde_json::json!({"op":"withdraw", "depth":depth}));
         journal.finish((|| {
-            while self.undo.len() > depth {
-                let entry = self.undo.pop().expect("the stack is deeper than depth");
-                self.apply(entry.undo)?;
-                self.log.push(format!("abandon {}", entry.label));
+            self.revert_to(depth)?;
+            match self.cleared_redo.take() {
+                Some((at, redo)) if at == depth && self.redo.is_empty() => self.redo = redo,
+                Some((at, redo)) if at < depth => self.cleared_redo = Some((at, redo)),
+                _ => {}
             }
-            self.rebuild();
             Ok(())
         })())
+    }
+
+    fn revert_to(&mut self, depth: usize) -> Result<(), CommandError> {
+        while self.undo.len() > depth {
+            let entry = self.undo.pop().expect("the stack is deeper than depth");
+            self.apply(entry.undo)?;
+            self.log.push(format!("abandon {}", entry.label));
+        }
+        self.rebuild();
+        Ok(())
     }
 
     /// Adds a line to the command log, such as who asked for the commands that follow.
@@ -959,10 +991,10 @@ impl Document {
                     label,
                 })
             }
-            Command::AddFeatureInBody { body, kind, via_assistant } => {
+            Command::AddFeatureInBody { body, kind, via_assistant, position } => {
                 Self::check_kind(&kind)?;
                 self.check_inputs(&kind)?;
-                let position = self.active_count();
+                let position = position.unwrap_or_else(|| self.active_count());
                 let feature = Feature {
                     body,
                     id: FeatureId(self.next_id),
@@ -1063,6 +1095,9 @@ impl Document {
                 let feature = self.features.remove(i);
                 let label = format!("delete {}", feature.name);
                 let mut inverse = Command::InsertFeature { feature, position: i };
+                if self.held_rollback == Some(Some(id)) {
+                    self.held_rollback = Some(self.features.get(i).map(|f| f.id));
+                }
                 if self.rollback == Some(id) {
                     // The bar stays where it was: above the feature that followed.
                     self.rollback = self.features.get(i).map(|f| f.id);
@@ -1116,6 +1151,10 @@ impl Document {
                 let (a, b) =
                     (self.active_count(), before.and_then(|id| self.index_of(id)).unwrap_or(self.features.len()));
                 self.rollback = before;
+                if self.held_rollback.is_some() {
+                    // Rolled for good during a view: the file records the new bar.
+                    self.held_rollback = Some(before);
+                }
                 self.touch(a.min(b));
                 let label = match before.and_then(|id| self.feature(id)) {
                     Some(f) => format!("roll back to before {}", f.name),
@@ -1283,6 +1322,17 @@ impl Document {
             "redo" => self.redo().map(|_| ()).map_err(|e| e.to_string()),
             "rollback" => {
                 self.set_rollback(serde_json::from_value(parse("before")?).map_err(|e| e.to_string())?);
+                Ok(())
+            }
+            "withdraw" => {
+                self.withdraw(input["depth"].as_u64().ok_or("missing depth")? as usize).map_err(|e| e.to_string())
+            }
+            "hold_rollback" => {
+                self.hold_rollback();
+                Ok(())
+            }
+            "release_rollback" => {
+                self.release_rollback();
                 Ok(())
             }
             "settings" => self.set_settings(serde_json::from_value(parse("settings")?).map_err(|e| e.to_string())?),

@@ -272,17 +272,22 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     let preview = (body.flags & 4u) != 0u;
     let removes = (body.flags & 8u) != 0u;
 
+    // One preview look for every form: material a feature adds or reshapes is amber with
+    // dark edges, material it removes red (theme.rs PREVIEW_EDGE and PREVIEW_REMOVE_EDGE).
     let shade = body.shades[min(in.appearance, 63u)];
     var base = shade.base.rgb;
     let metallic = shade.params.x;
     let roughness = shade.params.y;
     if (ghost && removes) {
-        base = mix(base, red, 0.5);
+        base = mix(base, red, 0.7);
     } else if (ghost) {
-        base = mix(base, accent, 0.35);
+        base = mix(base, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)), 0.85);
     }
     if (preview) {
-        base = mix(base, accent, 0.10);
+        // The faces the operation made (document.rs PREVIEW_MADE) turn amber, even when
+        // picked; the rest of the previewed body keeps main's faint tint.
+        let made_face = in.feature_id == 0xffffffffu;
+        base = mix(base, select(accent, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)), made_face), select(0.10, 0.85, made_face));
     }
     var ao = 1.0;
     if (!ghost) {
@@ -301,7 +306,7 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
         // Lighter than a selected face, so a colour chosen for the body still shows.
         color = mix(color, lit_accent, 0.25);
     } else if (made) {
-        color = mix(color, lit_accent, 0.5);
+        color = mix(color, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)) * (0.55 + 0.45 * max(dot(n, v), 0.0)), 0.3);
     } else if (feature_selected) {
         color = mix(color, lit_accent, 0.40);
     } else if (in.face_id != 0u && in.face_id == globals.hover_id) {
@@ -309,7 +314,8 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     }
     var alpha = shade.base.a;
     if (ghost) {
-        alpha = 0.42;
+        // A removal sits inside the part, so it shows through the faces in front of it.
+        alpha = select(0.92, 0.6, removes);
     }
     return vec4<f32>(color * alpha, alpha);
 }
@@ -560,11 +566,12 @@ fn fs_edge(in: LineOut) -> @location(0) vec4<f32> {
     var color = srgb_to_linear(vec3<f32>(0.16, 0.19, 0.25));
     var alpha = 0.9;
     if (ghost && removes) {
-        color = srgb_to_linear(vec3<f32>(0.80, 0.24, 0.24));
-        alpha = 0.7;
+        color = srgb_to_linear(vec3<f32>(0.62, 0.12, 0.10));
+        alpha = 0.95;
     } else if (ghost) {
-        color = srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82));
-        alpha = 0.6;
+        // Dark edges round the amber, as a built body's.
+        color = srgb_to_linear(vec3<f32>(0.24, 0.15, 0.02));
+        alpha = 0.95;
     }
     return vec4<f32>(color * alpha, alpha);
 }

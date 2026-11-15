@@ -133,6 +133,13 @@ impl SolidDraftApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(10.0);
+                // The browser's feedback form, in the title bar rather than over the viewport.
+                if let Some(feedback) = commands::get("give_feedback").filter(|c| (c.shown)(st)) {
+                    if ui.small_button("Feedback").on_hover_text(feedback.doc).clicked() {
+                        st.run_command(feedback);
+                    }
+                    ui.add_space(8.0);
+                }
                 if st.start.is_some() {
                     // The start page has no document to name.
                     return;
@@ -221,16 +228,17 @@ impl SolidDraftApp {
         let st = &mut self.state;
         if st.show_shortcuts {
             let shortcuts = st.shortcuts.clone();
-            egui::Window::new("Keyboard shortcuts")
-                .collapsible(false)
-                .resizable(false)
-                .open(&mut st.show_shortcuts)
-                .show(ctx, |ui| {
+            let mut open = true;
+            egui::Window::new("Keyboard shortcuts").collapsible(false).resizable(false).open(&mut open).show(
+                ctx,
+                |ui| {
                     egui::ScrollArea::vertical()
                         .min_scrolled_height(600.0)
                         .max_height(640.0)
-                        .show(ui, |ui| shortcuts_grid(ui, &shortcuts));
-                });
+                        .show(ui, |ui| shortcuts_grid(ui, &shortcuts, st));
+                },
+            );
+            st.show_shortcuts = open;
         }
         if st.show_about {
             egui::Window::new("About SolidDraft").collapsible(false).resizable(false).open(&mut st.show_about).show(
@@ -471,12 +479,14 @@ fn quick_access(ui: &mut egui::Ui, st: &mut AppState) {
 }
 
 /// Every shortcut in the registry, by where it works, then the mouse.
-fn shortcuts_grid(ui: &mut egui::Ui, shortcuts: &commands::Shortcuts) {
+/// The shortcuts of the commands this build offers: the browser's list has no Quit and
+/// no assistant.
+fn shortcuts_grid(ui: &mut egui::Ui, shortcuts: &commands::Shortcuts, st: &AppState) {
     egui::Grid::new("shortcuts").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
         for scope in commands::Scope::ALL {
             let rows: Vec<(String, &str)> = commands::all()
                 .iter()
-                .filter(|c| c.in_app())
+                .filter(|c| c.in_app() && (c.shown)(st))
                 .filter_map(|c| {
                     let keys: Vec<String> =
                         shortcuts.keys_of(c.id).into_iter().filter(|k| k.scope == scope).map(|k| k.text()).collect();
@@ -631,23 +641,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
             }
         }
         ui.separator();
-        for m in theme::Mode::ALL {
-            if ui.radio(theme::mode() == m, format!("{} theme", m.label())).clicked() {
-                st.push(AppAction::SetTheme(m));
-                ui.close();
-            }
-        }
-        ui.separator();
-
-        if ui.button("Tree").clicked() {
-            st.show_pane(crate::panels::Pane::Tree);
-            ui.close();
-        }
-        if ui.button("Values").clicked() {
-            st.push(AppAction::Values(crate::values_tab::ValuesAction::Show));
-            ui.close();
-        }
-
+        // One entry for the side area; its Tree and Values tabs are inside it.
         for side in Side::ALL {
             let shown = st.tree_shown();
             let key = st.shortcuts.shortcut_text(side.command()).unwrap_or_default();
@@ -658,11 +652,20 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
         }
     });
     ui.menu_button("Insert", |ui| {
-        menu_command(ui, st, "sketch", "Sketch");
-        menu_command(ui, st, "extrude", "Boss extrude");
-        menu_command(ui, st, "cut", "Cut extrude");
-        menu_command(ui, st, "fillet", "Fillet");
-        menu_command(ui, st, "chamfer", "Chamfer");
+        // The part's features, grouped as the palette groups them, from the registry.
+        let tab = commands::Tab::Part(crate::state::RibbonTab::Solid);
+        for (group, items) in commands::ribbon(tab) {
+            let items: Vec<_> = items.into_iter().filter(|(c, _)| c.is_working() && (c.shown)(st)).collect();
+            if items.is_empty() {
+                continue;
+            }
+            ui.menu_button(commands::palette_group(group, tab), |ui| {
+                for (command, _) in items {
+                    let label = if command.id == "sketch" { "Sketch".to_owned() } else { command.label_in(st) };
+                    menu_command(ui, st, command.id, &label);
+                }
+            });
+        }
     });
     ui.menu_button("Tools", |ui| {
         menu_command(ui, st, "measure", "Measure");
@@ -691,6 +694,7 @@ fn main_menus(ui: &mut egui::Ui, st: &mut AppState) {
     });
     ui.menu_button("Help", |ui| {
         menu_command(ui, st, "shortcuts", "Keyboard shortcuts");
+        menu_command(ui, st, "give_feedback", "Give feedback…");
         menu_command(ui, st, "about", "About SolidDraft");
     });
 }

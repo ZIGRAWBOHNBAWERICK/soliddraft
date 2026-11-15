@@ -676,10 +676,14 @@ fn fillet_edge_refusal_on_the_slot_names_the_kernel_reason_and_leaves_the_part_u
     ok(&mut app);
     {
         let state = &app.state().state;
-        let note = state.note.as_ref().expect("committing leaves a note");
-        assert_eq!(note.kind, NoteKind::Error, "{}", note.text);
-        assert_eq!(typed_reason(&note.text), expected_reason, "the note names the kernel's reason: {}", note.text);
+        // A refused OK keeps the form open and says why there, not on the status bar.
+        let editor = state.editor.as_ref().expect("a refused OK keeps the form open");
+        let said = editor.refusal().expect("the form says why OK was refused");
+        assert_eq!(typed_reason(said), expected_reason, "the form names the kernel's reason: {said}");
+        assert!(state.note.as_ref().is_none_or(|n| n.kind != NoteKind::Error), "a refusal is no error note");
     }
+    app.state_mut().state.push(soliddraft_app::state::AppAction::CancelEditor);
+    app.run_steps(4);
     let after = shape(&app.state().state.doc);
     assert!(same_shape(before, after), "a refusal does not change the shown shape: {before:?} -> {after:?}");
     assert_no_blocking_failure(&app.state().state.doc, "the refused fillet");
@@ -717,11 +721,14 @@ fn chamfer_face_refusal_on_the_slot_names_the_kernel_reason_and_leaves_the_part_
     ok(&mut app);
     {
         let state = &app.state().state;
-        let note = state.note.as_ref().expect("committing leaves a note");
-        assert_eq!(note.kind, NoteKind::Error, "{}", note.text);
-        assert_eq!(typed_reason(&note.text), expected_reason, "the note names the kernel's reason: {}", note.text);
-        assert!(note.text.contains("chamfer"), "the note names what was refused: {}", note.text);
+        // A refused OK keeps the form open and says why there, not on the status bar.
+        let editor = state.editor.as_ref().expect("a refused OK keeps the form open");
+        let said = editor.refusal().expect("the form says why OK was refused");
+        assert_eq!(typed_reason(said), expected_reason, "the form names the kernel's reason: {said}");
+        assert!(state.note.as_ref().is_none_or(|n| n.kind != NoteKind::Error), "a refusal is no error note");
     }
+    app.state_mut().state.push(soliddraft_app::state::AppAction::CancelEditor);
+    app.run_steps(4);
     let after = shape(&app.state().state.doc);
     assert!(same_shape(before, after), "a refusal does not change the shown shape: {before:?} -> {after:?}");
     assert_no_blocking_failure(&app.state().state.doc, "the refused chamfer");
@@ -759,10 +766,14 @@ fn fillet_refusal_then_retry_rounds_the_box_top() {
     ok(&mut app);
     {
         let state = &app.state().state;
-        let note = state.note.as_ref().expect("committing leaves a note");
-        assert_eq!(note.kind, NoteKind::Error, "{}", note.text);
-        assert_eq!(typed_reason(&note.text), expected_reason, "the note names the kernel's reason: {}", note.text);
+        // A refused OK keeps the form open and says why there, not on the status bar.
+        let editor = state.editor.as_ref().expect("a refused OK keeps the form open");
+        let said = editor.refusal().expect("the form says why OK was refused");
+        assert_eq!(typed_reason(said), expected_reason, "the form names the kernel's reason: {said}");
+        assert!(state.note.as_ref().is_none_or(|n| n.kind != NoteKind::Error), "a refusal is no error note");
     }
+    app.state_mut().state.push(soliddraft_app::state::AppAction::CancelEditor);
+    app.run_steps(4);
     assert!(close(volume(&app.state().state.doc), before), "a refusal does not change the volume");
     assert_no_blocking_failure(&app.state().state.doc, "the refused fillet");
 

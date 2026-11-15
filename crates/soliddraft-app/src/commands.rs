@@ -2393,6 +2393,8 @@ fn registry() -> Vec<CommandSpec> {
         .key_anytime(Scope::App, Modifiers::SHIFT, Key::F9)
         .run(|_| AppAction::ToggleSession)
         .lit(|s| s.command_line.session_open)
+        // The public browser build has no assistant service.
+        .shown(|_| !cfg!(target_arch = "wasm32"))
             .app_only(PANELS),
         cmd("reset_layout", "Reset layout", Icon::Config, "Restore the default panel layout")
             .both()
@@ -2517,10 +2519,17 @@ fn registry() -> Vec<CommandSpec> {
                  proven moments lie inside the field's. The result carries the moment report.",
                 app::step_path_params,
             ),
+        cmd("give_feedback", "Give feedback", Icon::Chat, "Tell the SolidDraft team what works and what does not")
+            .both()
+            .run(|_| AppAction::GiveFeedback)
+            .shown(|_| cfg!(target_arch = "wasm32"))
+            .app_only("It opens the page's feedback form"),
         cmd("quit", "Quit", Icon::Close, "Quit SolidDraft")
             .both()
             .key(Scope::App, ctrl, Key::Q)
             .run(|_| AppAction::Quit)
+            // A browser tab closes itself.
+            .shown(|_| !cfg!(target_arch = "wasm32"))
             .app_only("It closes the window"),
         // Context commands share the registry and existing document actions.
         cmd("edit_sketch", "Edit sketch", Icon::Sketch, "Edit the sketch used by the selected feature")
@@ -2740,7 +2749,7 @@ fn registry() -> Vec<CommandSpec> {
             "cancel",
             "Cancel",
             Icon::Close,
-            "Cancel a typed value, a drag, the open feature or the sketch tool, leave the sketch, or clear the selection",
+            "Cancel a typed value, a drag, the open feature or the sketch tool, or clear the selection",
         )
         .key(Scope::Part, none, Key::Escape)
         .run(|s| {
@@ -2756,12 +2765,13 @@ fn registry() -> Vec<CommandSpec> {
             } else if s.editor.is_some() {
                 AppAction::CancelEditor
             } else if s.sketch.as_ref().is_some_and(|k| k.tool_in_progress()) {
-                // The first Escape drops the tool and what it started; the next leaves the sketch.
+                // Escape drops the tool and what it started, then the selection. It never
+                // leaves the sketch: Close sketch does, or Enter.
                 AppAction::SketchTool(Tool::Select)
             } else if s.sketch.as_ref().is_some_and(|s| s.diagnostics.is_some()) {
                 AppAction::SketchDiagnostics(false)
             } else if s.in_sketch() {
-                AppAction::ExitSketch
+                AppAction::SketchEscape
             } else if s.drag_preview.is_some() {
                 AppAction::DragDimension(DragStep::Cancel)
             } else {

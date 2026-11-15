@@ -9,9 +9,12 @@
 // check window draws its outcome, read through the read-only `shown_part_check` export
 // since the canvas has no text. Every solid step of the sample part must be confirmed by
 // both models, and the page must report no crash. The page must then still take input:
-// the window closes, and a feature tree row selected afterwards draws in Details.
+// the window closes, and a feature tree row selected afterwards draws in Details. A changed
+// selection draws its Details button only in a later frame, so the check waits until the
+// read-only `shown_options` export reports the row selected and Details drawn, and clicks
+// Details once where that frame drew it.
 function check(value, message) { if (!value) throw new Error(message); }
-const INSPECT = [19, 241], CHECK = [87, 185], CLOSE_REPORT = [536, 35], DETAILS = [317, 52], BOSS = [380, 255];
+const INSPECT = [19, 241], CHECK = [87, 185], CLOSE_REPORT = [536, 35], BOSS = [380, 255];
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
 const size = await page.eval(() => [innerWidth, innerHeight]);
@@ -70,9 +73,31 @@ async function until(read, done, what) {
 await click(CLOSE_REPORT);
 await until(() => page.eval(() => window.wasmBindings.shown_part_check()), drawn => drawn === '',
   'the Part check window did not close');
+// A frame without a click: the pointer moves over the viewport. The page draws a frame
+// for each input, and a changed selection shows Details only in a later frame.
+const nudge = () => page.eval(() => {
+  document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove',
+    { clientX: 900, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  return true;
+});
+// Waits for a frame whose options bar shows `title` selected and draws Details, logs
+// both, and clicks Details once where that frame drew it. A click sent before then lands
+// where Details is not drawn yet.
+async function openDetails(title, what) {
+  let drawn = null;
+  for (let i = 0; i < 100; i++) {
+    await nudge();
+    const options = await page.eval(() => window.wasmBindings.shown_options());
+    drawn = options ? JSON.parse(options) : null;
+    if (drawn && drawn.selected === title && drawn.details) break;
+    await page.wait(100);
+  }
+  console.log(`${what}: options bar shows ${JSON.stringify(drawn)}`);
+  check(drawn && drawn.selected === title && drawn.details, `${what}: ${title} is not selected with Details drawn`);
+  await click([Math.round(drawn.details.x), Math.round(drawn.details.y)]);
+}
 await click(BOSS);
-await page.wait(300);
-await click(DETAILS);
+await openDetails('Boss-Extrude3', 'After Check');
 await until(() => page.eval(() => window.wasmBindings.shown_details()),
   drawn => drawn !== '' && JSON.parse(drawn).title === 'Boss-Extrude3', 'Details does not show the selected Boss-Extrude3');
 console.log(`Part check passed: ${shown.confirmed} of ${shown.solid} solid steps confirmed`);

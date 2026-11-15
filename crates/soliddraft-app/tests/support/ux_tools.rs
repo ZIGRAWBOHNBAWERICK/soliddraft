@@ -261,6 +261,8 @@ pub fn changed_along(
 }
 
 /// The selection the viewport's dimensions hang on.
-pub fn body_selected(app: &App) -> bool {
-    app.state().state.doc.selection == Some(Selection::Body)
+/// A double-click on the part selected the feature that made the face, whose own
+/// dimensions it shows.
+pub fn feature_selected(app: &App) -> bool {
+    matches!(app.state().state.doc.selection, Some(Selection::Feature(_)))
 }

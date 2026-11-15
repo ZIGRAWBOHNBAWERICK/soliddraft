@@ -1652,6 +1652,7 @@ impl Line {
                     through_all: *through_all && end.is_none(),
                     flip: *flip,
                     up_to: end,
+                    draft: None,
                 };
                 run.apply(doc, Command::AddCut { params })?;
             }
@@ -1871,6 +1872,7 @@ impl Line {
                     neutral: plane_ref(doc, neutral)?,
                     angle: *angle,
                     reverse: *reverse,
+                    of: None,
                 };
                 run.apply(doc, Command::AddFeature(FeatureKind::Draft(draft)))?;
             }
@@ -2397,7 +2399,7 @@ fn dry_run(doc: &Document, lines: &[Line], preview: bool) -> Result<DryRun, Stri
             "volume_before_mm3": volume_before.map(round),
             "volume_after_mm3": volume_after.map(round),
         }),
-        preview: Preview { result, tool: None, removes: false },
+        preview: Preview { result, tool: None, removes: false, guides: Default::default() },
         builds: PreparedBuilds(std::sync::Arc::new(scratch.into_model())),
     })
 }

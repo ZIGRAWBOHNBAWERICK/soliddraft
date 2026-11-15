@@ -9,6 +9,7 @@
 //! this case holds the volume to a millimetre cubed.
 
 use egui::{Key, Modifiers, PointerButton, Pos2, Shape};
+use egui_kittest::kittest::Queryable;
 use soliddraft_app::document::{Command, Document, PlaneKind, SketchPlane};
 use soliddraft_app::sketch::tools::{End, Operation};
 use soliddraft_app::sketch::{Entity, EntityId, EntityKind, P2, profile};
@@ -311,5 +312,99 @@ fn polygon_extend_and_trim_by_pointer_make_a_profile_that_extrudes() {
         case.note(format!("volume {} mm^3, expected {expected}", found.volume));
         settle(app);
         case.frame(app, "09-extruded");
+    });
+}
+
+fn options_bar(app: &App) -> egui::Rect {
+    egui::PanelState::load(&app.ctx, egui::Id::new("options_bar")).unwrap().outer_rect
+}
+
+/// The sketch walk-over's fixes, as a user meets them. The Polygon tool shows its sides
+/// and circle in the options bar while it is active, and the next polygon takes them.
+/// The sketch switches sit in that bar, never over the sketch. Escape drops the tool,
+/// then clears the selection, and never leaves the sketch; Close sketch does. Smart
+/// Dimension marks its pick and draws the dimension at the pointer before the placing
+/// click. The options panel lists no icon grid of the tools the palette already names.
+#[test]
+fn sketch_options_escape_and_smart_dimension_preview() {
+    let mut case = Case::new("sketch-modify/walkover");
+    let mut app = launch(empty_sketch(), STANDARD);
+    case.run(&mut app, |case, app| {
+        open_sketch(app);
+        let bar = options_bar(app);
+        let view = app.state().state.viewport.rect;
+        for switch in ["Auto relations", "Draw construction", "Snap to grid"] {
+            let nodes: Vec<_> = app.query_all_by_label(switch).filter(|n| bar.contains_rect(n.rect())).collect();
+            assert_eq!(nodes.len(), 1, "{switch} is in the options bar");
+            assert!(
+                app.query_all_by_label(switch).all(|n| !view.contains(n.rect().center())),
+                "{switch} no longer covers the sketch"
+            );
+        }
+
+        // Polygon: five sides from the options bar.
+        ribbon::run_command(app, "sketch_polygon");
+        settle(app);
+        let sides = app.get_by_label("Polygon sides");
+        assert!(bar.contains_rect(sides.rect()), "the sides are in the options bar while Polygon is active");
+        assert!(app.query_all_by_label("Circumscribed").any(|n| bar.contains_rect(n.rect())));
+        app.get_by_label("Polygon sides").focus();
+        app.run_steps(2);
+        app.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        app.get_by_label("Polygon sides").type_text("5");
+        app.key_press(Key::Enter);
+        app.run_steps(4);
+        assert_eq!(session(app).modify.sides, 5);
+        case.frame(app, "01-polygon-sides-in-the-bar");
+        sketch_click(app, P2::ZERO);
+        sketch_click(app, P2::new(R, 0.0));
+        assert_eq!(drawn(app), 6, "five sides and their construction circle");
+
+        // Escape: the tool goes, then the selection; the sketch stays open.
+        escape(app);
+        assert_eq!(session(app).tool, Tool::Select);
+        assert!(app.state().state.sketch.is_some(), "the first Escape keeps the sketch");
+        sketch_click(app, P2::new(R * 0.9, R * 0.3));
+        assert!(!session(app).selection.is_empty(), "a side is selected");
+        escape(app);
+        assert!(session(app).selection.is_empty(), "the second Escape clears the selection");
+        escape(app);
+        assert!(app.state().state.sketch.is_some(), "Escape never closes the sketch");
+        case.frame(app, "02-escape-keeps-the-sketch");
+
+        // Smart Dimension: the pick is marked and the value follows the pointer.
+        ribbon::run_command(app, "smart_dimension");
+        settle(app);
+        let side = session(app).sketch.entities.iter().find(|e| e.is_line() && !e.construction).unwrap().clone();
+        let (a, b) = line_ends(side.kind.clone());
+        let middle = P2::new((a.u + b.u) / 2.0, (a.v + b.v) / 2.0);
+        sketch_click(app, middle);
+        assert!(session(app).dim_first.is_some(), "the side is picked");
+        let away = P2::new(middle.u * 1.6, middle.v * 1.6);
+        hover_sketch(app, away);
+        let at = sketch_screen(app, away);
+        // A value pill at the pointer: the dimension the placing click would make.
+        let pill = ribbon::painted(app)
+            .into_iter()
+            .find(|p| p.text.parse::<f64>().is_ok_and(|v| v > 0.0) && p.rect.center().distance(at) < 40.0)
+            .unwrap_or_else(|| panic!("a dimension follows the pointer to {at:?}: {:?}", ribbon::painted(app)));
+        case.frame(app, "03-smart-dimension-follows-the-pointer");
+        let length = ((b.u - a.u).powi(2) + (b.v - a.v).powi(2)).sqrt();
+        assert!(pill.text.parse::<f64>().unwrap() <= length + 0.01, "{} for a side of {length}", pill.text);
+        escape(app);
+        escape(app);
+
+        // The options panel: the palette names the tools, so the panel has no icon grid.
+        ribbon::open_options(app);
+        assert!(app.query_all_by_label("Line (L)").next().is_none(), "no unlabelled tool grid in the options panel");
+        assert!(app.query_by_label("Sketch diagnostics").is_some());
+        case.frame(app, "04-options-panel");
+        ribbon::close_options(app);
+
+        // Close sketch leaves.
+        let close = ribbon::control(app, "Close sketch", options_bar(app)).rect.center();
+        ribbon::click_at(app, close);
+        settle(app);
+        assert!(app.state().state.sketch.is_none(), "Close sketch leaves the sketch");
     });
 }

@@ -42,6 +42,7 @@ scrolling at shorter window heights. Keep the name visible beside its icon. Smar
 Dimension, Move entities, Copy entities, Rotate entities and Scale entities are
 visible tools. Do not hide sketch tools inside Modify or Transform dropdowns.
 Unavailable commands say "Coming soon" in the public UI, including their tooltips.
+Context menus leave them out until they work.
 Do not show implementation details or ticket numbers there.
 
 ## Options and forms
@@ -54,6 +55,15 @@ A feature form puts model picks and its main size on the bar. OK and Cancel stay
 the right. Enter accepts and Escape cancels. A More button with a count opens a
 sheet below the bar for the remaining fields. The sheet never contains the only
 way to finish the operation. Short forms such as Extrude and Fillet need no sheet.
+Extrude and Cut carry Draft as a tick box with its angle and Outward, as SOLIDWORKS
+does; it builds as a draft linked to the extrusion, shown as one tree row. A form
+whose OK the kernel refuses stays open, adds nothing to the tree and says why in its
+message area under the bar, right of the palette.
+
+Every form previews its result before OK in one look: material added or reshaped is
+amber with dark edges, material removed is red. Extrude and Cut add a depth arrow on
+the profile, which drags, and the depth at its tip. Pattern and Mirror number their
+copies; Draft outlines its neutral plane and draws its pull.
 Fillet asks for edges and radius; corner treatment belongs to the kernel.
 
 Use the same bar and sheet pattern for Mate, drawing sheet properties, Repair and
@@ -187,20 +197,24 @@ and two lines give an angle or parallel distance. A new driving dimension opens
 its value editor. Reference dimensions show measured values without driving the
 solver. Solver results determine definition and conflict colours.
 
-Tools preview their result before committing. Escape cancels the unfinished step
-before leaving a tool or sketch. Line and Centreline retain their existing chain
+Tools preview their result before committing. Escape cancels the unfinished step,
+then puts the tool down, then clears the selection. It never closes the sketch:
+Close sketch or Enter does. Line and Centreline retain their existing chain
 rules. Relations, dimensions, construction flags and undo remain document behavior;
 changing the frame must not change them. See [modelling.md](modelling.md) for the
 model and persistent-reference rules.
 
 ## Right-click and history
 
-Right-click opens eight commands around the cursor and the full grouped list below.
-A face offers Face, Feature and Body columns; an edge offers Edge, Feature and Body.
+Right-click opens the full grouped list at the cursor. Shift and a right-click open
+the ring of eight commands around the cursor instead, a marking menu for those who
+know it. A face offers Face, Feature and Body columns; an edge offers Edge, Feature and Body.
 The menu follows the picked context and stays inside the window near an edge.
 It uses the same charcoal, amber, text and popup tokens as the rest of the frame.
 
-The feature tree is history. Clicking a row selects; double-clicking edits;
+The feature tree is history. Clicking a row selects; double-clicking shows the
+feature's own dimensions on the part, as a double-click on one of its faces does, or
+edits a feature that has none;
 F2 or a slow second click on the selected row renames it, and a double-click never does;
 right-clicking opens its context menu, which includes Roll back to here. Dragging a
 row reorders it. Dragging the rollback bar between rows displays that history

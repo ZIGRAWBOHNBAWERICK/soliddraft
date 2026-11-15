@@ -27,6 +27,13 @@ fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(11.0).color(theme::muted()));
 }
 
+/// The Polygon tool's sides and circle, for the options bar while the tool is active.
+pub fn polygon_options(ui: &mut egui::Ui, s: &mut SketchSession) {
+    let sides = ui.add(egui::DragValue::new(&mut s.modify.sides).range(3..=1000).prefix("Sides "));
+    sides.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Polygon sides"));
+    polygon_mode(ui, &mut s.modify.polygon_mode);
+}
+
 fn polygon_mode(ui: &mut egui::Ui, mode: &mut PolygonMode) {
     ui.horizontal(|ui| {
         ui.selectable_value(mode, PolygonMode::Inscribed, "Inscribed");
@@ -341,9 +348,10 @@ pub fn panel(ui: &mut egui::Ui, s: &mut SketchSession, actions: &mut Vec<AppActi
     theme::section_label(ui, tool.label());
     match tool {
         Tool::Polygon => {
-            hint(ui, "Click the centre, then a vertex (inscribed) or side midpoint (circumscribed).");
-            ui.add(egui::DragValue::new(&mut s.modify.sides).range(3..=1000).prefix("Sides "));
-            polygon_mode(ui, &mut s.modify.polygon_mode);
+            hint(
+                ui,
+                "Click the centre, then a vertex (inscribed) or side midpoint (circumscribed). Sides are in the options bar.",
+            );
         }
         Tool::Trim => {
             hint(

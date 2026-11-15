@@ -27,6 +27,7 @@ use std::ops::{Add, Sub};
 mod circular;
 mod ellipse;
 mod rectangle;
+pub mod relations;
 pub mod select_box;
 mod slot;
 mod spline;
@@ -106,8 +107,12 @@ fn entity_distance(frame: &Frame<'_>, e: &Entity, pos: Pos2) -> f32 {
         .fold(f32::INFINITY, f32::min)
 }
 
-/// What the pointer is over, in the sketch.
+/// What the pointer is over, in the sketch. A relation glyph is drawn over the points
+/// and curves, so it comes first.
 fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(ConstraintId, Rect)]) -> Option<SketchSel> {
+    if let Some((id, _)) = glyphs.iter().rev().find(|(_, r)| r.contains(pos)) {
+        return Some(SketchSel::Constraint(*id));
+    }
     let mut best_point: Option<(f32, PointRef)> = None;
     for e in &sketch.entities {
         for i in 0..e.point_count() {
@@ -121,11 +126,6 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
     if let Some((_, r)) = best_point {
         return Some(SketchSel::Point(r));
     }
-    for (id, r) in glyphs {
-        if r.contains(pos) {
-            return Some(SketchSel::Constraint(*id));
-        }
-    }
     let mut best: Option<(f32, EntityId)> = None;
     for e in sketch.drawn() {
         let d = entity_distance(frame, e, pos);
@@ -136,8 +136,9 @@ fn hit_test(frame: &Frame<'_>, sketch: &Sketch, pos: Pos2, glyphs: &[(Constraint
     best.map(|(_, id)| SketchSel::Entity(id))
 }
 
-/// What a click at `pos` selects. A dimension's value pill is drawn over the geometry,
-/// so the label under the pointer comes first, as what the user sees on top.
+/// What a click at `pos` selects. A dimension's value pill is drawn over the geometry
+/// and the relation glyphs, so the label under the pointer comes first, as what the user
+/// sees on top.
 fn pick(
     frame: &Frame<'_>,
     sketch: &Sketch,
@@ -283,7 +284,17 @@ pub fn run(
             s.preview = curve_preview(s, &frame, pos);
         } else if s.selection_box.is_none() {
             s.hover = pick(&frame, &s.sketch, pos, &glyphs, &shown_labels(ui, &frame, s));
+            // A glyph says what it is: the relation's name and what it holds together.
+            if s.drag.is_none()
+                && let Some(SketchSel::Constraint(id)) = s.hover
+                && let Some(c) = s.sketch.constraint(id).filter(|c| !c.is_dimension())
+            {
+                resp.clone().on_hover_ui_at_pointer(|ui| relations::tooltip(ui, &s.sketch, c));
+            }
         }
+    } else if let Some(id) = s.relations_menu.as_ref().and_then(|m| m.hovered) {
+        // The row under the pointer in the relations menu lights its relation up.
+        s.hover = Some(SketchSel::Constraint(id));
     }
     if s.tool.selects() && s.tool != Tool::Select {
         if copy_places && let Some(p) = snapped {
@@ -1473,6 +1484,14 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
     if let Some(issue) = crate::sketch_diagnostics::selected(s) {
         relation_entities.extend(issue.entities.iter().copied());
     }
+    // A hovered relation or dimension shows what it holds.
+    let (hover_entities, hover_points) = match s.hover.and_then(|h| match h {
+        SketchSel::Constraint(id) => s.sketch.constraint(id),
+        _ => None,
+    }) {
+        Some(c) => (c.entities(), c.points()),
+        None => (Vec::new(), Vec::new()),
+    };
     for snap in &s.snaps {
         match snap {
             Snap::Intersection(a, b) => relation_entities.extend([*a, *b]),
@@ -1503,6 +1522,7 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
         let is_sel = selected(SketchSel::Entity(e.id));
         let is_related = relation_entities.contains(&e.id);
         let is_hover = s.hover == Some(SketchSel::Entity(e.id))
+            || hover_entities.contains(&e.id)
             || s.selection_box.as_ref().is_some_and(|b| b.picks.contains(&SketchSel::Entity(e.id)));
         for path in e.polylines(96) {
             let pts: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
@@ -1559,7 +1579,9 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
             ) && i == 0;
             let is_sel = selected(SketchSel::Point(r));
             let is_related = relation_points.contains(&r) || (e.is_point() && relation_entities.contains(&e.id));
-            let is_hover = s.hover == Some(SketchSel::Point(r));
+            let is_hover = s.hover == Some(SketchSel::Point(r))
+                || hover_points.contains(&r)
+                || (e.is_point() && hover_entities.contains(&e.id));
             let joined = joined_points.contains(&r);
             if is_sel || is_related || is_hover {
                 painter.circle_filled(sp, 7.0, theme::selection_bg());
@@ -1591,7 +1613,7 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
 }
 
 /// Where each relation's glyph sits on screen.
-fn glyph_rects(frame: &Frame<'_>, sketch: &Sketch) -> Vec<(ConstraintId, Rect)> {
+pub fn glyph_rects(frame: &Frame<'_>, sketch: &Sketch) -> Vec<(ConstraintId, Rect)> {
     let mut out = Vec::new();
     let mut per_anchor: std::collections::HashMap<(i32, i32), usize> = std::collections::HashMap::new();
     for c in &sketch.constraints {
@@ -1652,100 +1674,122 @@ fn paint_glyphs(painter: &egui::Painter, s: &SketchSession, glyphs: &[(Constrain
         if s.preview.as_ref().is_some_and(|p| c.entities().iter().any(|id| p.replaced.contains(id))) {
             continue;
         }
-
-        let sel = s.selection.contains(&SketchSel::Constraint(*id));
-        let hover = s.hover == Some(SketchSel::Constraint(*id));
-        let bad = conflicting.contains(id);
-        let (bg, fg) = if sel {
-            (theme::accent(), theme::on_accent())
-        } else if bad {
-            (theme::error(), theme::on_accent())
-        } else if hover {
-            (theme::selection_bg(), theme::selection_ink())
+        let look = if s.selection.contains(&SketchSel::Constraint(*id)) {
+            GlyphLook::Selected
+        } else if conflicting.contains(id) {
+            GlyphLook::Broken
+        } else if s.hover == Some(SketchSel::Constraint(*id)) {
+            GlyphLook::Hovered
         } else {
-            (theme::hud_bg(), theme::muted())
+            GlyphLook::Plain
         };
-        painter.rect(
-            *r,
-            CornerRadius::same(3),
-            bg,
-            Stroke::new(1.0, if sel || bad { bg } else { theme::line() }),
-            StrokeKind::Inside,
-        );
-        let g = r.shrink(3.0);
-        let st = Stroke::new(1.3, fg);
-        let (l, t, rr, b) = (g.left(), g.top(), g.right(), g.bottom());
-        let (cx, cy) = (g.center().x, g.center().y);
-        match c.kind {
-            ConstraintKind::Coincident { .. } => {
-                painter.circle_stroke(pos2(cx - 2.0, cy), 2.5, st);
-                painter.circle_stroke(pos2(cx + 2.0, cy), 2.5, st);
-            }
-            ConstraintKind::Horizontal { .. } => {
-                painter.text(g.center(), Align2::CENTER_CENTER, "H", theme::font_semibold(9.5), fg);
-            }
-            ConstraintKind::Vertical { .. } => {
-                painter.text(g.center(), Align2::CENTER_CENTER, "V", theme::font_semibold(9.5), fg);
-            }
-            ConstraintKind::Parallel { .. } => {
-                painter.line_segment([pos2(l + 1.0, b), pos2(cx - 0.5, t)], st);
-                painter.line_segment([pos2(cx + 1.5, b), pos2(rr, t)], st);
-            }
-            ConstraintKind::Perpendicular { .. } => {
-                painter.line_segment([pos2(l, b), pos2(rr, b)], st);
-                painter.line_segment([pos2(cx, b), pos2(cx, t)], st);
-            }
-            ConstraintKind::Equal { .. } => {
-                painter.line_segment([pos2(l, cy - 2.0), pos2(rr, cy - 2.0)], st);
-                painter.line_segment([pos2(l, cy + 2.0), pos2(rr, cy + 2.0)], st);
-            }
-            ConstraintKind::Tangent { .. } => {
-                painter.circle_stroke(pos2(cx, cy + 1.0), 3.0, st);
-                painter.line_segment([pos2(l, cy - 2.0), pos2(rr, cy - 2.0)], st);
-            }
-            ConstraintKind::Concentric { .. } => {
-                painter.circle_stroke(g.center(), 3.5, st);
-                painter.circle_stroke(g.center(), 1.2, st);
-            }
-            ConstraintKind::Midpoint { .. } => {
-                painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
-                painter.circle_filled(g.center(), 1.8, fg);
-            }
-            ConstraintKind::PointOn { .. } => {
-                painter.line_segment([pos2(l, b - 1.0), pos2(rr, t + 1.0)], st);
-                painter.circle_filled(g.center(), 1.8, fg);
-            }
-            ConstraintKind::Offset { .. } => {
-                painter.line_segment([pos2(l, cy - 3.0), pos2(rr, cy - 3.0)], st);
-                painter.line_segment([pos2(l, cy + 3.0), pos2(rr, cy + 3.0)], st);
-                painter.line_segment([pos2(cx, cy - 3.0), pos2(cx, cy + 3.0)], st);
-            }
-            ConstraintKind::OffsetCap { .. } => {
-                painter.text(g.center(), Align2::CENTER_CENTER, "C", theme::font_semibold(9.5), fg);
-            }
-            ConstraintKind::Symmetric { .. } => {
-                painter.line_segment([pos2(cx, t), pos2(cx, b)], st);
-                painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
-                painter.circle_filled(pos2(l, cy), 1.5, fg);
-                painter.circle_filled(pos2(rr, cy), 1.5, fg);
-            }
-            ConstraintKind::PatternTransform { .. } => {
-                for x in [l + 1.0, rr - 1.0] {
-                    for y in [t + 1.0, b - 1.0] {
-                        painter.circle_filled(pos2(x, y), 1.3, fg);
-                    }
+        paint_glyph(painter, &c.kind, *r, look);
+    }
+}
+
+/// How a relation glyph is drawn: its state on the sketch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GlyphLook {
+    Plain,
+    Hovered,
+    Selected,
+    Broken,
+}
+
+/// Paints the glyph of a relation in the box `r`, as the sketch shows it.
+pub(crate) fn paint_glyph(painter: &egui::Painter, kind: &ConstraintKind, r: Rect, look: GlyphLook) {
+    let (bg, fg) = match look {
+        GlyphLook::Selected => (theme::accent(), theme::on_accent()),
+        GlyphLook::Broken => (theme::error(), theme::on_accent()),
+        GlyphLook::Hovered => (theme::selection_bg(), theme::selection_ink()),
+        GlyphLook::Plain => (theme::hud_bg(), theme::muted()),
+    };
+    let filled = matches!(look, GlyphLook::Selected | GlyphLook::Broken);
+    painter.rect(
+        r,
+        CornerRadius::same(3),
+        bg,
+        Stroke::new(1.0, if filled { bg } else { theme::line() }),
+        StrokeKind::Inside,
+    );
+    let g = r.shrink(3.0);
+    let st = Stroke::new(1.3, fg);
+    let (l, t, rr, b) = (g.left(), g.top(), g.right(), g.bottom());
+    let (cx, cy) = (g.center().x, g.center().y);
+    match kind {
+        ConstraintKind::Coincident { .. } => {
+            painter.circle_stroke(pos2(cx - 2.0, cy), 2.5, st);
+            painter.circle_stroke(pos2(cx + 2.0, cy), 2.5, st);
+        }
+        ConstraintKind::Horizontal { .. } => {
+            painter.text(g.center(), Align2::CENTER_CENTER, "H", theme::font_semibold(9.5), fg);
+        }
+        ConstraintKind::Vertical { .. } => {
+            painter.text(g.center(), Align2::CENTER_CENTER, "V", theme::font_semibold(9.5), fg);
+        }
+        ConstraintKind::Parallel { .. } => {
+            painter.line_segment([pos2(l + 1.0, b), pos2(cx - 0.5, t)], st);
+            painter.line_segment([pos2(cx + 1.5, b), pos2(rr, t)], st);
+        }
+        ConstraintKind::Perpendicular { .. } => {
+            painter.line_segment([pos2(l, b), pos2(rr, b)], st);
+            painter.line_segment([pos2(cx, b), pos2(cx, t)], st);
+        }
+        ConstraintKind::Equal { .. } => {
+            painter.line_segment([pos2(l, cy - 2.0), pos2(rr, cy - 2.0)], st);
+            painter.line_segment([pos2(l, cy + 2.0), pos2(rr, cy + 2.0)], st);
+        }
+        ConstraintKind::Tangent { .. } => {
+            painter.circle_stroke(pos2(cx, cy + 1.0), 3.0, st);
+            painter.line_segment([pos2(l, cy - 2.0), pos2(rr, cy - 2.0)], st);
+        }
+        ConstraintKind::Concentric { .. } => {
+            painter.circle_stroke(g.center(), 3.5, st);
+            painter.circle_stroke(g.center(), 1.2, st);
+        }
+        ConstraintKind::Midpoint { .. } => {
+            painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
+            painter.circle_filled(g.center(), 1.8, fg);
+        }
+        ConstraintKind::PointOn { .. } => {
+            painter.line_segment([pos2(l, b - 1.0), pos2(rr, t + 1.0)], st);
+            painter.circle_filled(g.center(), 1.8, fg);
+        }
+        ConstraintKind::Offset { .. } => {
+            painter.line_segment([pos2(l, cy - 3.0), pos2(rr, cy - 3.0)], st);
+            painter.line_segment([pos2(l, cy + 3.0), pos2(rr, cy + 3.0)], st);
+            painter.line_segment([pos2(cx, cy - 3.0), pos2(cx, cy + 3.0)], st);
+        }
+        ConstraintKind::OffsetCap { .. } => {
+            painter.text(g.center(), Align2::CENTER_CENTER, "C", theme::font_semibold(9.5), fg);
+        }
+        ConstraintKind::Symmetric { .. } => {
+            painter.line_segment([pos2(cx, t), pos2(cx, b)], st);
+            painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
+            painter.circle_filled(pos2(l, cy), 1.5, fg);
+            painter.circle_filled(pos2(rr, cy), 1.5, fg);
+        }
+        ConstraintKind::PatternTransform { .. } => {
+            for x in [l + 1.0, rr - 1.0] {
+                for y in [t + 1.0, b - 1.0] {
+                    painter.circle_filled(pos2(x, y), 1.3, fg);
                 }
             }
-            ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => {
-                painter.rect_stroke(
-                    Rect::from_min_max(pos2(l + 1.0, cy - 0.5), pos2(rr - 1.0, b)),
-                    CornerRadius::same(1),
-                    st,
-                    StrokeKind::Middle,
-                );
-                painter.line_segment([pos2(cx, t), pos2(cx, cy)], st);
-            }
-            _ => {}
+        }
+        ConstraintKind::Fix { .. } | ConstraintKind::FixEntity { .. } => {
+            painter.rect_stroke(
+                Rect::from_min_max(pos2(l + 1.0, cy - 0.5), pos2(rr - 1.0, b)),
+                CornerRadius::same(1),
+                st,
+                StrokeKind::Middle,
+            );
+            painter.line_segment([pos2(cx, t), pos2(cx, cy)], st);
+        }
+        // A dimension in a list: a measured span between two ticks.
+        _ => {
+            painter.line_segment([pos2(l, cy), pos2(rr, cy)], st);
+            painter.line_segment([pos2(l, t + 1.0), pos2(l, b - 1.0)], st);
+            painter.line_segment([pos2(rr, t + 1.0), pos2(rr, b - 1.0)], st);
         }
     }
 }

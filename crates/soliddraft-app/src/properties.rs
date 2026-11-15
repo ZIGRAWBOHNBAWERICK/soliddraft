@@ -860,7 +860,6 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             if previous_filter != s.relations_filter {
                 ui.scroll_to_rect(Rect::from_min_size(relation_top, vec2(ui.available_width(), 90.0)), None);
             }
-            let by_id: std::collections::HashMap<_, _> = s.sketch.entities.iter().map(|e| (e.id, e)).collect();
             let conflicts: std::collections::HashSet<_> = match &s.sketch.status {
                 crate::sketch::SolveStatus::OverDefined { conflicting } => conflicting.iter().copied().collect(),
                 _ => Default::default(),
@@ -897,30 +896,11 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
             for (c, conflict, broken) in rels {
                 ui.push_id(c.id, |ui| {
                     ui.horizontal(|ui| {
-                        let text = if c.is_reference() {
-                            let value = c.display_value(&s.sketch).map(fmt_value).unwrap_or_else(|| "?".into());
-                            format!("{} ({value})", c.name())
-                        } else {
-                            match c.value() {
-                                Some(v) => format!("{} {}", c.name(), fmt_value(v)),
-                                None => c.name().to_owned(),
-                            }
-                        };
-                        let mut text = egui::RichText::new(text);
+                        let mut text = egui::RichText::new(sketcher::relations::title(&s.sketch, &c));
                         if conflict || broken {
                             text = text.color(theme::error());
                         }
-                        let owners = c
-                            .entities()
-                            .iter()
-                            .map(|id| {
-                                by_id
-                                    .get(id)
-                                    .map(|e| format!("{} {}", e.kind_name(), e.id))
-                                    .unwrap_or_else(|| format!("missing entity {id}"))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                        let owners = sketcher::relations::owners(&s.sketch, &c);
                         let status = if broken {
                             "Missing reference. "
                         } else if conflict {
@@ -930,7 +910,11 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                         };
                         if ui
                             .selectable_label(s.selection.contains(&SketchSel::Constraint(c.id)), text)
-                            .on_hover_text(format!("{status}Relation {} on {owners}", c.id))
+                            .on_hover_text(format!(
+                                "{status}{} Relation {} on {owners}",
+                                sketcher::relations::sentence(&s.sketch, &c),
+                                c.id
+                            ))
                             .clicked()
                         {
                             s.selection = vec![SketchSel::Constraint(c.id)];

@@ -303,10 +303,17 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
     let screen = ui.ctx().input(|input| input.content_rect());
     let width = 380.0_f32.min(screen.width() - 16.0);
     let left = anchor.left().clamp(screen.left() + 8.0, (screen.right() - width - 8.0).max(screen.left() + 8.0));
-    egui::Area::new(egui::Id::new("document_options_details"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(egui::pos2(left, anchor.bottom() + 8.0))
-        .show(ui.ctx(), |ui| {
+    let id = egui::Id::new("document_options_details");
+    // The sheet's first pass only measures it: egui draws it invisible and takes no click
+    // in it. Run the pass again at once, so the first frame that shows the sheet also
+    // takes the click on Close options. On a slow software renderer the next frame can
+    // otherwise come after that click, which the sheet then never sees.
+    if egui::AreaState::load(ui.ctx(), id).is_none() {
+        ui.ctx().request_discard("the options sheet's first pass only measures it");
+    }
+    egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(egui::pos2(left, anchor.bottom() + 8.0)).show(
+        ui.ctx(),
+        |ui| {
             egui::Frame::new()
                 .fill(theme::panel())
                 .stroke(egui::Stroke::new(1.0, theme::line()))
@@ -328,5 +335,6 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                         crate::properties::show(ui, state);
                     }
                 });
-        });
+        },
+    );
 }

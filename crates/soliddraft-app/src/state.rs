@@ -1528,6 +1528,13 @@ impl AppState {
         }
     }
 
+    /// Remembers the open part's revision as `saved`, the bytes it was just opened from,
+    /// instead of saving the part again to get them.
+    pub fn remember_opened_revision(&self, saved: &[u8]) {
+        let model = self.doc.model();
+        self.revisions.record(model.id(), &model.semantic_hash(), saved);
+    }
+
     /// Saves new navigation settings and uses them. They are the user's, not the
     /// document's: the part, its undo steps and its selection are untouched. Settings
     /// from a newer SolidDraft are refused: nothing changes and the note says why. When

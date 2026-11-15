@@ -124,6 +124,11 @@ pub(crate) struct Offer {
 }
 
 impl Offer {
+    /// Whether the offered build has been read from its bytes yet.
+    pub(crate) fn is_read(&self) -> bool {
+        self.built.get().is_some()
+    }
+
     /// The offered build, read from its bytes the first time it is asked for.
     pub(crate) fn built(&self) -> KernelResult<Arc<Built>> {
         self.built

@@ -700,6 +700,9 @@ pub(crate) struct Worker {
     /// The kernel worker's answers: its builds were offered to the part's kernel first.
     #[cfg(target_arch = "wasm32")]
     built_answers: mpsc::Receiver<(u64, Result<(), String>)>,
+    /// Answered requests whose offered builds are still being read, a few a frame.
+    #[cfg(target_arch = "wasm32")]
+    reading: Vec<Queued>,
     #[cfg(target_arch = "wasm32")]
     previous: Option<Arc<model::Document>>,
 }
@@ -828,6 +831,7 @@ impl Worker {
                 waiting: std::collections::HashMap::new(),
                 built,
                 built_answers,
+                reading: Vec::new(),
                 previous: None,
             })
         }
@@ -870,6 +874,25 @@ impl Worker {
         }
     }
 
+    /// Proves an answered request on the page's kernel, from the builds and topologies the
+    /// kernel worker handed over, and sends its answer.
+    #[cfg(target_arch = "wasm32")]
+    fn prove_answered(&mut self, queued: Queued) {
+        let request = queued.request;
+        match prepare(queued) {
+            Ok((proof, _)) => {
+                let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref());
+                if built.failure.is_none() && !built.model.is_dirty() {
+                    self.previous = Some(built.model.clone());
+                }
+                let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Ok(built)) });
+            }
+            Err(answer) => {
+                let _ = self.answered.send(answer);
+            }
+        }
+    }
+
     pub(crate) fn answers(&mut self) -> Vec<Answer> {
         #[cfg(target_arch = "wasm32")]
         {
@@ -883,20 +906,22 @@ impl Worker {
                     let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Err(error)) });
                     continue;
                 }
-                // The worker's builds and topologies are offered, so this rebuild and display
-                // take them instead of evaluating them here.
-                match prepare(queued) {
-                    Ok((proof, _)) => {
-                        let built = prove(proof, &self.newest, &self.protected, self.previous.as_deref());
-                        if built.failure.is_none() && !built.model.is_dirty() {
-                            self.previous = Some(built.model.clone());
-                        }
-                        let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Ok(built)) });
-                    }
-                    Err(answer) => {
-                        let _ = self.answered.send(answer);
+                self.reading.push(queued);
+            }
+            // The offered builds are read one a frame; the proof waits until none is unread,
+            // so no frame holds the page for all of them.
+            let unread = self.reading.first().map(|queued| queued.job.source.kernel().read_offers(1).unwrap_or(0));
+            if unread == Some(0) {
+                for queued in std::mem::take(&mut self.reading) {
+                    let request = queued.request;
+                    if wanted(request, &self.newest, &self.protected) {
+                        self.prove_answered(queued);
                     }
                 }
+            } else if unread.is_some()
+                && let Some(ctx) = &self.answered.repaint
+            {
+                ctx.request_repaint();
             }
             // A request replaced before its answer came is not waited for.
             let (newest, protected) = (self.newest.clone(), self.protected.clone());

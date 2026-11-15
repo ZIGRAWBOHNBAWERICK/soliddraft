@@ -64,6 +64,11 @@ pub fn feedback_document(state: &crate::state::AppState) {
     });
 }
 
+/// The interface's context, set when the app starts, for work that wakes it later.
+pub(crate) fn context() -> Option<egui::Context> {
+    CONTEXT.with(|c| c.borrow().clone())
+}
+
 /// Lets background work (an upload, an assistant reply) wake the interface.
 pub fn set_context(ctx: &egui::Context) {
     CONTEXT.with(|c| *c.borrow_mut() = Some(ctx.clone()));

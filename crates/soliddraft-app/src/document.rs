@@ -26,11 +26,11 @@ pub use soliddraft_model::{EdgeRef, FaceRef};
 
 pub type FeatureId = u64;
 
-fn model_id(id: FeatureId) -> model::FeatureId {
+pub(crate) fn model_id(id: FeatureId) -> model::FeatureId {
     model::FeatureId(id as u32)
 }
 
-fn app_id(id: model::FeatureId) -> FeatureId {
+pub(crate) fn app_id(id: model::FeatureId) -> FeatureId {
     id.0 as FeatureId
 }
 
@@ -1208,6 +1208,9 @@ pub enum Command {
     /// Adds a hole, pattern, mirror or draft.
     AddFeature(FeatureKind),
     ImportBodies(Vec<model::ImportStepFeature>),
+    /// Moves every import of one file to a replacement file and every reference into
+    /// those imports to the new file's faces, as one step.
+    ReplaceImportFile(Vec<(FeatureId, model::FeatureKind)>),
     /// Replaces a hole's, pattern's, mirror's or draft's definition.
     EditFeature {
         id: FeatureId,
@@ -1269,6 +1272,7 @@ impl Command {
             Command::EditChamfer { .. } => "Edit chamfer".into(),
             Command::AddFeature(kind) => format!("Add {}", kind.noun()),
             Command::ImportBodies(_) => "Import bodies".into(),
+            Command::ReplaceImportFile(_) => "Replace imported file".into(),
             Command::EditFeature { kind, .. } => format!("Edit {}", kind.noun()),
             Command::DeleteFeature(_) => "Delete feature".into(),
             Command::Rename { .. } => "Rename".into(),
@@ -2859,6 +2863,9 @@ impl Document {
                         position: None,
                     })
                     .collect()
+            }
+            Command::ReplaceImportFile(edits) => {
+                edits.into_iter().map(|(id, kind)| model::Command::EditFeature { id: model_id(id), kind }).collect()
             }
             Command::EditFeature { id, kind } => {
                 if let FeatureKind::ReferencePlane(source) = &kind {

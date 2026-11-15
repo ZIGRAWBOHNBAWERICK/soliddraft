@@ -316,6 +316,52 @@ pub struct ImportStepResult {
     pub record: RepairRecord,
 }
 
+/// A request to move every import of one STEP file to new bytes in one transaction.
+#[derive(Clone, Copy, Debug)]
+pub struct FileReplacementRequest<'a> {
+    /// The file every listed import reads now.
+    pub old_source: &'a [u8],
+    /// The sha256 of `old_source`, in lowercase hex.
+    pub old_sha256: &'a str,
+    /// The replacement file.
+    pub new_source: &'a [u8],
+    /// The sha256 of `new_source`, in lowercase hex.
+    pub new_sha256: &'a str,
+    /// The replacement's file name.
+    pub new_name: &'a str,
+    /// The source solid each import of the old file selects, in import order.
+    pub source_solids: &'a [Option<String>],
+}
+
+/// What one import of the old file becomes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct ReplacedImport {
+    /// The new file's solid with the same complete faces, when the import selects one.
+    pub source_solid: Option<String>,
+    /// Old face key to new face key, for each face whose complete definition matches
+    /// exactly one face of the new file.
+    pub faces: std::collections::BTreeMap<String, String>,
+    /// Old face keys without one verified partner, with the reason.
+    pub unresolved_faces: std::collections::BTreeMap<String, String>,
+}
+
+/// The outcome of a [`FileReplacementRequest`]. Nothing is built into the part.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileReplacement {
+    /// Each import's solid was verified and the whole file rebuilt.
+    Verified {
+        /// The digest of the old imports' canonical recipe the correspondence was made on.
+        old_recipe_sha256: String,
+        /// One entry for each request import, in order.
+        imports: Vec<ReplacedImport>,
+    },
+    /// A selected solid has no verified partner; the part must not change.
+    Unresolved {
+        /// Why, in words the interface can show.
+        reasons: Vec<String>,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

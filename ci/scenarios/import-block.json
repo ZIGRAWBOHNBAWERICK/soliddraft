@@ -60,7 +60,7 @@
         "path": "ci/fixtures/import/block-seam-4um.step",
         "feature": "Import1"
       },
-      "refused": "This body selects a solid from the original file. Import a changed file as new bodies instead of replacing it.",
+      "refused": "The new file cannot replace this one without choosing its solids again.",
       "checks": [
         {
           "pointer": "/revision",

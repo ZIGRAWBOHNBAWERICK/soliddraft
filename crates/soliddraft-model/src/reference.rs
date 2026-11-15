@@ -711,10 +711,83 @@ pub(crate) fn origin_label(face: FaceId, view: &View, names: &NameMap) -> Option
     origin_name(face, view, names).ok().map(|r| (r.feature, r.generator, r.ordinal))
 }
 
+/// Rewrites every face reference in a feature's definition through `rewrite`: plane,
+/// limit and draft faces, both faces of each edge reference and the faces of each vertex
+/// reference. It works on the definition's saved form, so a feature kind added later is
+/// covered without a list here to keep up to date.
+pub fn rewrite_face_refs(
+    kind: &crate::FeatureKind,
+    mut rewrite: impl FnMut(&mut FaceRef),
+) -> Result<crate::FeatureKind, String> {
+    fn walk(value: &mut serde_json::Value, rewrite: &mut dyn FnMut(&mut FaceRef)) -> Result<(), String> {
+        match value {
+            serde_json::Value::Object(object) => {
+                let shaped = ["feature", "generator", "fingerprint"].iter().all(|key| object.contains_key(*key));
+                if shaped
+                    && let Ok(mut face) = serde_json::from_value::<FaceRef>(serde_json::Value::Object(object.clone()))
+                {
+                    rewrite(&mut face);
+                    *value = serde_json::to_value(face).map_err(|error| error.to_string())?;
+                    return Ok(());
+                }
+                object.values_mut().try_for_each(|item| walk(item, rewrite))
+            }
+            serde_json::Value::Array(items) => items.iter_mut().try_for_each(|item| walk(item, rewrite)),
+            _ => Ok(()),
+        }
+    }
+    let mut value = serde_json::to_value(kind).map_err(|error| error.to_string())?;
+    walk(&mut value, &mut rewrite)?;
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use soliddraft_kernel_api::{Aabb, FaceRole, OpTag};
+
+    #[test]
+    fn every_face_reference_in_a_definition_is_rewritten_and_nothing_else() {
+        let imported = |ordinal| FaceRef {
+            feature: FeatureId(1),
+            generator: Generator::Imported { sha256: "old".into() },
+            ordinal,
+            fingerprint: FaceFingerprint {
+                surface: SurfaceKind::Plane,
+                normal: Some(Vec3::Z),
+                centroid: Vec3::ZERO,
+                area: 1.0,
+            },
+            label: "Import1 · Face 3".into(),
+        };
+        let other = FaceRef { feature: FeatureId(2), generator: Generator::EndCap, ..imported(0) };
+        let edge = |a: FaceRef, b: FaceRef| EdgeRef {
+            faces: [a, b],
+            fingerprint: EdgeFingerprint { curve: CurveKind::Line, midpoint: Vec3::ZERO, length: 1.0 },
+            disambiguate: false,
+            label: String::new(),
+        };
+        let kind = crate::FeatureKind::Fillet(crate::BlendFeature {
+            edges: vec![edge(imported(2), other.clone()), edge(other.clone(), imported(7))],
+            size: 1.0,
+            other_distance: None,
+        });
+        let rewritten = rewrite_face_refs(&kind, |face| {
+            if face.feature == FeatureId(1) {
+                face.generator = Generator::Imported { sha256: "new".into() };
+                face.ordinal += 10;
+            }
+        })
+        .unwrap();
+        let crate::FeatureKind::Fillet(blend) = rewritten else { panic!("still a fillet") };
+        assert_eq!(blend.size, 1.0);
+        assert_eq!(blend.edges[0].faces[0].ordinal, 12);
+        assert_eq!(blend.edges[0].faces[0].generator, Generator::Imported { sha256: "new".into() });
+        assert_eq!(blend.edges[0].faces[1], other);
+        assert_eq!(blend.edges[1].faces[0], other);
+        assert_eq!(blend.edges[1].faces[1].ordinal, 17);
+        assert_eq!(blend.edges[1].faces[1].label, "Import1 · Face 3", "labels are kept for repair prompts");
+    }
 
     fn origin(tag: &str, role: FaceRole) -> Origin {
         Origin { tag: OpTag::new(tag), role }

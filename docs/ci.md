@@ -77,9 +77,12 @@ page folds the menu bar into one Menu button, so the check refuses any other siz
 Software rendering can make one frame take longer than any fixed pause, so the check
 waits on what the page drew. `shown_details` is empty once a frame draws no Details
 panel: the check clicks a feature tree row only after the options panel, which covers
-the rows, has closed, and confirms the row by the feature name Details draws. Each
-kernel job the page sends, and the worker's receipt, start and reply, go to a trace the
-check sets up; a missing answer prints it.
+the rows, has closed, and confirms the row by the feature name Details draws. A
+changed selection draws its Details button only in a later frame, so after a row click
+the check moves the pointer until the read-only `shown_options` export reports the
+selection and the Details button drawn, logs both, and clicks Details once where it was
+drawn. Each kernel job the page sends, and the worker's receipt, start and reply, go to
+a trace the check sets up; a missing answer prints it.
 
 `ci/browser-part-check.js` runs the same way on the sample part, in its own session and
 on its own origin. It clicks Inspect > Check, which builds each solid step again in the

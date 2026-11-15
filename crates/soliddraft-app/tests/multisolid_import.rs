@@ -48,6 +48,23 @@ fn geometry(doc: &Document) -> BTreeMap<String, (f64, [f64; 3])> {
     membership(doc).into_iter().map(|(key, (_, _, volume, centre))| (key, (volume, centre))).collect()
 }
 
+/// The same STEP file with every point moved 1 mm along x.
+fn moved(source: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8(source.to_vec()).unwrap();
+    let mut out = String::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("CARTESIAN_POINT('',(") {
+        let start = at + "CARTESIAN_POINT('',(".len();
+        let end = start + rest[start..].find(',').unwrap();
+        let x: f64 = rest[start..end].parse().unwrap();
+        out.push_str(&rest[..start]);
+        out.push_str(&format!("{:?}", x + 1.0));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out.into_bytes()
+}
+
 fn flow(format: ImportFormat, source: &[u8]) {
     let case = ribbon::case(&format!("multisolid-{}", format.label()));
     let path = case.path("original.source");
@@ -137,8 +154,10 @@ fn flow(format: ImportFormat, source: &[u8]) {
         let revision = app.state().state.doc.revision();
         let depth = app.state().state.doc.undo_depth();
         let replacement = case.path("replacement.source");
+        // A STEP file whose points all moved keeps no face of either solid; the verified
+        // file transaction refuses it. IGES replacement of a selected solid is refused.
         let different = if format == ImportFormat::Step {
-            String::from_utf8(source.to_vec()).unwrap().replace("(#150,#300,#309)", "(#300,#150,#309)").into_bytes()
+            moved(source)
         } else {
             include_bytes!("../../../ci/fixtures/import/occt-box.igs").to_vec()
         };
@@ -148,7 +167,9 @@ fn flow(format: ImportFormat, source: &[u8]) {
         app.run_steps(4);
         let state = &app.state().state;
         assert!(state.import_dialog.is_none());
-        assert!(state.note.as_ref().unwrap().text.contains("Import a changed file as new bodies"));
+        let refusal =
+            if format == ImportFormat::Step { "Nothing was changed" } else { "Import a changed file as new bodies" };
+        assert!(state.note.as_ref().unwrap().text.contains(refusal), "{:?}", state.note.as_ref().map(|n| &n.text));
         assert_eq!(state.doc.model().to_bytes().unwrap(), original);
         assert_eq!(state.doc.revision(), revision);
         assert_eq!(state.doc.undo_depth(), depth);

@@ -117,6 +117,18 @@ reference names, so existing face and edge references ask for repair. A source
 entity number or face order cannot silently redirect an old reference. Exports
 remain unavailable while a feature needs repair.
 
+A STEP file whose bodies select solids of one source file is replaced as a whole file.
+Catallax matches the new file to the old one by complete face definitions, never by
+entity numbers or order. When every solid and every referenced face has exactly one
+verified partner, all imports of the old file move to the new file together, and
+every face and edge reference into them moves to the matching new face, as one undo
+step. A file whose numbers alone changed therefore keeps every reference. If a solid
+or a referenced face has no verified partner, because its geometry changed or occurs
+twice, the replacement is refused and nothing changes. The match is made when the
+replacement is previewed; if the part changes before Accept, Accept refuses and the
+replacement must be previewed again. Repair answers given for the old file are not
+carried to the new one.
+
 MCP clients preview with `feature` naming the import, then call `replace_import`
 with the same `feature`, `path`, `format`, preview token and reviewed answers.
 

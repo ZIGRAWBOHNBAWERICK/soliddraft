@@ -258,3 +258,24 @@ fn a_suppressed_feature_keeps_its_state_through_a_replacement() {
     doc.apply(Command::Suppress { id: fillet, suppressed: false }).unwrap();
     all_built(&doc);
 }
+
+/// A whole-file replacement carries no repair answers yet, so imports whose file was
+/// answered are refused with nothing changed. The two-block file asks no question, so
+/// the test gives one import an answer in the tree it is matched from.
+#[test]
+fn imports_with_repair_answers_refuse_a_file_replacement_and_change_nothing() {
+    let mut doc = imported();
+    let first = doc.features[0].id;
+    let FeatureKind::ImportStep(import) = &mut doc.features[0].kind else { panic!("the first feature is an import") };
+    import.decisions.insert("repair:example:g0".into(), "decline".into());
+    let saved = doc.model().to_bytes().unwrap();
+    let (old_sources, old_faces, depth) = (sources(&doc), fillet_faces(&doc), doc.undo_depth());
+    let error = Preview::from_bytes(&doc, "renumbered.step", renumbered(STEP))
+        .and_then(|preview| preview.replacing(&doc, first))
+        .unwrap_err();
+    assert!(error.contains("repair answers") && error.contains("Nothing was changed"), "{error}");
+    assert_eq!(doc.model().to_bytes().unwrap(), saved);
+    assert_eq!(sources(&doc), old_sources);
+    assert_eq!(fillet_faces(&doc), old_faces);
+    assert_eq!(doc.undo_depth(), depth);
+}

@@ -337,6 +337,7 @@ thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_BUILD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 /// Notes the selection the options bar drew and where it drew Details, for [`shown_options`].
@@ -350,6 +351,19 @@ pub(crate) fn show_options(shown: serde_json::Value) {
 #[wasm_bindgen]
 pub fn shown_options() -> String {
     SHOWN_OPTIONS.with_borrow(|options| options.clone())
+}
+
+/// Notes whether a build is owed and where its Cancel button is, for [`shown_build`].
+pub(crate) fn show_build(shown: serde_json::Value) {
+    SHOWN_BUILD.with_borrow_mut(|build| *build = shown.to_string());
+}
+
+/// Whether the last frame drawn owed a build, and the centre of the Cancel button it drew,
+/// as JSON: `{"pending": bool, "cancel": {"x", "y"} or null}`. Read only, for browser
+/// checks.
+#[wasm_bindgen]
+pub fn shown_build() -> String {
+    SHOWN_BUILD.with_borrow(|build| build.clone())
 }
 
 /// Starts a frame with no Details panel drawn, until [`show_details`] notes one.

@@ -456,6 +456,35 @@ impl SolidDraftApp {
         }
     }
 
+    /// The browser builds the part away from the page's thread. While a build is owed the
+    /// page says so above the status bar and offers Cancel, which returns the part to its
+    /// last accepted revision.
+    #[cfg(target_arch = "wasm32")]
+    fn building(&mut self, ctx: &egui::Context) {
+        let pending = self.state.doc.proof_pending();
+        let mut cancel = None;
+        if pending {
+            egui::Area::new(egui::Id::new("browser-build"))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Building the part");
+                            let button = ui.button("Cancel");
+                            if button.clicked() {
+                                self.state.push(AppAction::CancelBuild);
+                            }
+                            cancel = Some(button.rect.center());
+                        });
+                    });
+                });
+        }
+        let cancel = cancel.map(|centre| serde_json::json!({ "x": centre.x, "y": centre.y }));
+        crate::web::show_build(serde_json::json!({ "pending": pending, "cancel": cancel }));
+    }
+
     fn edit_suite_frame(&mut self, root: &mut egui::Ui) {
         let chrome_frame = egui::Frame::new().fill(theme::chrome()).inner_margin(egui::Margin::ZERO);
         egui::Panel::top("menu")
@@ -589,6 +618,8 @@ impl eframe::App for SolidDraftApp {
         crate::web::begin_frame();
         self.edit_suite_frame(root);
         self.dialogs(ctx);
+        #[cfg(target_arch = "wasm32")]
+        self.building(ctx);
         crate::preferences::window(ctx, &mut self.preferences, &mut self.state);
         self.apply_actions(ctx);
         self.leave_start_page();

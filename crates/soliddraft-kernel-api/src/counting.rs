@@ -142,6 +142,17 @@ impl Kernel for Counting {
         self.inner.extrude(tag, profile, params)
     }
 
+    fn extrude_on_face(
+        &self,
+        tag: &OpTag,
+        profile: &Profile,
+        support: crate::FaceSupport,
+        distance: f64,
+    ) -> KernelResult<OpResult> {
+        self.op(tag);
+        self.inner.extrude_on_face(tag, profile, support, distance)
+    }
+
     fn create_profile_from_face(&self, tag: &OpTag, body: BodyId, face: FaceId) -> KernelResult<OpResult> {
         self.op(tag);
         self.inner.create_profile_from_face(tag, body, face)

@@ -58,6 +58,8 @@ pub struct BuiltSketch {
     pub plane: Plane,
     /// True when the plane is a face of the part.
     pub on_face: bool,
+    /// Exact face attachment, separate from the display frame.
+    pub support: Option<soliddraft_kernel_api::FaceSupport>,
     /// The closed regions, or why the sketch has none.
     pub regions: Result<Vec<Region>, String>,
 }

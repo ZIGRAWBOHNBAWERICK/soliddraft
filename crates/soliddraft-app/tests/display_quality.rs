@@ -247,10 +247,7 @@ fn a_late_answer_for_another_quality_does_not_replace_the_cached_levels() {
     assert_eq!(triangles(&doc), fine, "the fine level shows another quality's mesh");
 }
 
-/// Removing the snap relations makes the saved tilt deliberate geometry. It still
-/// needs the certified mesh when the early display refuses the nearly coplanar faces.
-#[test]
-fn a_refused_preview_shows_the_certified_mesh() {
+fn unsnapped_flange(via_reference_plane: bool) -> soliddraft_model::Document {
     let bytes = include_bytes!("data/near-coincident-flange.dwprt");
     let part = soliddraft_model::Document::from_bytes(bytes, soliddraft_app::kernel()).unwrap();
     let mut source = part.truth();
@@ -260,11 +257,38 @@ fn a_refused_preview_shows_the_certified_mesh() {
             kind["sketch"]["constraints"] = serde_json::json!([]);
         }
     }
-    let part = soliddraft_model::Document::from_part_json(&source.to_string(), soliddraft_app::kernel()).unwrap();
+    if via_reference_plane {
+        let id = source["next_feature"].as_u64().unwrap();
+        source["next_feature"] = serde_json::json!(id + 1);
+        let features = source["features"].as_array_mut().unwrap();
+        let index = features.iter().position(|f| f["kind"]["plane"]["on"] == "face").unwrap();
+        let mut plane = features[index]["kind"]["plane"].clone();
+        plane["type"] = serde_json::json!("reference_plane");
+        features[index]["kind"]["plane"] = serde_json::json!({"on":"feature", "feature":id});
+        features.insert(index, serde_json::json!({"id":id, "name":"ReferencePlane1", "kind":plane}));
+    }
+    soliddraft_model::Document::from_part_json(&source.to_string(), soliddraft_app::kernel()).unwrap()
+}
+
+#[test]
+fn an_exact_face_attachment_previews_the_unsnapped_flange() {
+    let part = unsnapped_flange(false);
     let (kernel, body) = (part.kernel(), part.body().unwrap());
     let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
     let shown = kernel.preview(body, &params).unwrap();
-    assert!(!shown.unproved, "the unconstrained tilt must exercise the certified fallback");
+    assert!(shown.unproved, "exact attachment no longer needs the certified fallback");
+    assert!(!shown.indices.is_empty());
+    assert!(!kernel.preview_edges(body, &params).unwrap().is_empty());
+}
+
+#[test]
+fn a_refused_preview_shows_the_certified_mesh() {
+    // A separate reference plane still uses the rounded sketch frame.
+    let part = unsnapped_flange(true);
+    let (kernel, body) = (part.kernel(), part.body().unwrap());
+    let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
+    let shown = kernel.preview(body, &params).unwrap();
+    assert!(!shown.unproved, "the reference-plane tilt must exercise the certified fallback");
     assert_eq!(shown, kernel.tessellate(body, &params).unwrap());
     assert_eq!(kernel.preview_edges(body, &params).unwrap(), kernel.tessellate_edges(body, &params).unwrap());
 }

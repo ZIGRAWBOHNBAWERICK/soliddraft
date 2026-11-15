@@ -35,6 +35,28 @@ pub struct Rules {
 }
 
 impl Gated {
+    fn check_extrude(&self, distance: f64) -> KernelResult<()> {
+        let mut rules = self.rules.lock().unwrap();
+        if rules.hold_next {
+            rules.hold_next = false;
+            rules.hold = Some(distance);
+        }
+        if rules.hold == Some(distance) {
+            rules.holding = Some(distance);
+            self.changed.notify_all();
+            rules = self.changed.wait_while(rules, |r| r.hold == Some(distance)).unwrap();
+            rules.holding = None;
+        }
+        if rules.refuse.contains(&distance) {
+            return Err(KernelError::Failed {
+                op: OpKind::Extrude,
+                code: 0,
+                message: format!("the scenario refuses a depth of {distance}"),
+            });
+        }
+        Ok(())
+    }
+
     fn display(&self, body: BodyId) -> KernelResult<()> {
         let (all, above) = {
             let rules = self.rules.lock().unwrap();
@@ -66,27 +88,18 @@ impl Kernel for Gated {
         self.inner.create_body_from_profile(tag, profile)
     }
     fn extrude(&self, tag: &OpTag, profile: BodyId, params: &Extrude) -> KernelResult<OpResult> {
-        {
-            let mut rules = self.rules.lock().unwrap();
-            if rules.hold_next {
-                rules.hold_next = false;
-                rules.hold = Some(params.distance);
-            }
-            if rules.hold == Some(params.distance) {
-                rules.holding = Some(params.distance);
-                self.changed.notify_all();
-                rules = self.changed.wait_while(rules, |r| r.hold == Some(params.distance)).unwrap();
-                rules.holding = None;
-            }
-            if rules.refuse.contains(&params.distance) {
-                return Err(KernelError::Failed {
-                    op: OpKind::Extrude,
-                    code: 0,
-                    message: format!("the scenario refuses a depth of {}", params.distance),
-                });
-            }
-        }
+        self.check_extrude(params.distance)?;
         self.inner.extrude(tag, profile, params)
+    }
+    fn extrude_on_face(
+        &self,
+        tag: &OpTag,
+        profile: &Profile,
+        support: FaceSupport,
+        distance: f64,
+    ) -> KernelResult<OpResult> {
+        self.check_extrude(distance.abs())?;
+        self.inner.extrude_on_face(tag, profile, support, distance)
     }
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult> {
         self.inner.revolve(tag, profile, params)

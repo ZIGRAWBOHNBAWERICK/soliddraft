@@ -102,6 +102,17 @@ pub struct Extrude {
     pub direction: Option<Vec3>,
 }
 
+/// A sketch's exact supporting face and signed normal offset.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceSupport {
+    /// Body carrying the face.
+    pub body: BodyId,
+    /// Planar face whose outward normal defines the sketch normal.
+    pub face: FaceId,
+    /// Signed offset in millimetres.
+    pub offset: f64,
+}
+
 /// Parameters of a revolution of a profile body about an axis.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Revolve {
@@ -944,6 +955,18 @@ pub trait Kernel: Send + Sync {
 
     /// Sweeps a profile body along a straight line into a solid.
     fn extrude(&self, tag: &OpTag, profile: BodyId, params: &Extrude) -> KernelResult<OpResult>;
+
+    /// Sweeps profile-local coordinates from the exact supporting face, preserving its plane.
+    /// The profile's X direction sets the in-plane orientation. Distance is signed along the outward normal.
+    fn extrude_on_face(
+        &self,
+        _tag: &OpTag,
+        _profile: &Profile,
+        _support: FaceSupport,
+        _distance: f64,
+    ) -> KernelResult<OpResult> {
+        Err(KernelError::Unsupported("Exact face-mounted extrusion is unavailable".into()))
+    }
 
     /// Turns a profile body about an axis into a solid.
     fn revolve(&self, tag: &OpTag, profile: BodyId, params: &Revolve) -> KernelResult<OpResult>;

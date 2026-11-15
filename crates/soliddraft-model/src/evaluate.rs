@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use soliddraft_kernel_api::{
-    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, Gyroid,
-    HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError, KernelResult,
-    Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
+    BodyId, BooleanOp, CurveKind, Draft, EdgeId, Extrude, ExtrudeLimit, FaceId, FacePoint, FaceRole, FaceSupport,
+    Gyroid, HistoryRecord, Hole, HolePlacement, ImportOptions, ImportStepRequest, ImportStepResult, KernelError,
+    KernelResult, Lattice, Mirror, OpResult, OpTag, Origin, PatternLayout, Plane, SurfaceKind, Vec3,
 };
 
 use crate::feature::{
@@ -449,7 +449,11 @@ impl Document {
         }
     }
 
-    fn sketch_plane_of(&self, source: &SketchPlane, current: Option<BodyId>) -> Result<(Plane, bool), Box<Built>> {
+    fn sketch_plane_of(
+        &self,
+        source: &SketchPlane,
+        current: Option<BodyId>,
+    ) -> Result<(Plane, Option<FaceSupport>), Box<Built>> {
         if !source.offset().is_finite() {
             return Err(Box::new(Built::failed(current, "plane offset must be finite")));
         }
@@ -461,11 +465,11 @@ impl Document {
                         current,
                     ))
                 })?;
-                (plane.with_origin(plane.origin + plane.normal * *offset), false)
+                (plane.with_origin(plane.origin + plane.normal * *offset), None)
             }
             SketchPlane::Datum { datum, offset } => {
                 let p = datum.plane();
-                (p.with_origin(p.origin + p.normal * *offset), false)
+                (p.with_origin(p.origin + p.normal * *offset), None)
             }
             SketchPlane::Face { face } | SketchPlane::FaceOffset { face, .. } => {
                 let offset = source.offset();
@@ -482,10 +486,10 @@ impl Document {
                 };
                 // A sketch plane needs no mesh of the body before it unless this cannot answer.
                 if let Ok(carriers) = self.kernel.face_carriers(body)
-                    && let Some((normal, point)) = reference::carrier_plane(face, &carriers, &self.name_map())
+                    && let Some((face, normal, point)) = reference::carrier_plane(face, &carriers, &self.name_map())
                 {
                     let p = plane_on_face(normal, point);
-                    return Ok((p.with_origin(p.origin + p.normal * offset), offset == 0.0));
+                    return Ok((p.with_origin(p.origin + p.normal * offset), Some(FaceSupport { body, face, offset })));
                 }
                 let t = match self.view_of(body) {
                     Ok(v) => v,
@@ -506,7 +510,7 @@ impl Document {
                     return repair(RepairReason::Mismatch { detail: detail.clone() }, detail, vec![]);
                 };
                 let p = plane_on_face(normal, info.centroid);
-                (p.with_origin(p.origin + p.normal * offset), offset == 0.0)
+                (p.with_origin(p.origin + p.normal * offset), Some(FaceSupport { body, face: id, offset }))
             }
         };
         Ok(plane)
@@ -523,7 +527,7 @@ impl Document {
     }
 
     fn build_sketch(&self, s: &SketchFeature, current: Option<BodyId>) -> Built {
-        let (plane, on_face) = match self.sketch_plane_of(&s.plane, current) {
+        let (plane, support) = match self.sketch_plane_of(&s.plane, current) {
             Ok(plane) => plane,
             Err(built) => return *built,
         };
@@ -535,7 +539,7 @@ impl Document {
             output: current,
             owned: None,
             names: Vec::new(),
-            sketch: Some(BuiltSketch { plane, on_face, regions }),
+            sketch: Some(BuiltSketch { plane, on_face: support.is_some_and(|s| s.offset == 0.0), support, regions }),
             plane: None,
             version: 0,
             work_used: None,
@@ -743,7 +747,7 @@ impl Document {
             },
             ProfileSource::Shape { datum, shape } => {
                 let regions = shape.sketch().and_then(|s| s.regions().map_err(|e| e.to_string()));
-                shape_sketch = BuiltSketch { plane: datum.plane(), on_face: false, regions };
+                shape_sketch = BuiltSketch { plane: datum.plane(), on_face: false, support: None, regions };
                 &shape_sketch
             }
         };
@@ -820,13 +824,21 @@ impl Document {
             let mut body = current;
             for (i, region) in regions.iter().enumerate() {
                 let tag = |step: &str| OpTag::new(format!("{}.r{i}.{step}", f.id));
-                let sheet = k.create_body_from_profile(&tag("profile"), &region.to_profile(start))?;
-                let tool = match (&limit, current) {
-                    (Some(limit), Some(target)) => k.extrude_to(&tag("sweep"), sheet.body, target, Some(dir), limit),
-                    _ => k.extrude(&tag("sweep"), sheet.body, &Extrude { distance, direction: Some(dir) }),
+                let profile = region.to_profile(start);
+                let tool = if let Some(support) = sk.support.filter(|_| limit.is_none()) {
+                    let signed = if e.reverse { -distance } else { distance };
+                    k.extrude_on_face(&tag("sweep"), &profile, support, signed)?
+                } else {
+                    let sheet = k.create_body_from_profile(&tag("profile"), &profile)?;
+                    let tool = match (&limit, current) {
+                        (Some(limit), Some(target)) => {
+                            k.extrude_to(&tag("sweep"), sheet.body, target, Some(dir), limit)
+                        }
+                        _ => k.extrude(&tag("sweep"), sheet.body, &Extrude { distance, direction: Some(dir) }),
+                    };
+                    let _ = k.release(sheet.body);
+                    tool?
                 };
-                let _ = k.release(sheet.body);
-                let tool = tool?;
                 for o in &tool.record.face_roles {
                     let generator = match o.role {
                         FaceRole::StartCap => Some(Generator::StartCap),

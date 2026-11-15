@@ -351,6 +351,57 @@ fn right_click_on_a_glyph_lists_the_constraints_on_its_geometry() {
     });
 }
 
+/// A primary press or release at `at`, without moving the pointer.
+fn primary(app: &mut App, at: Pos2, pressed: bool) {
+    app.event(egui::Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    });
+    app.run_steps(3);
+}
+
+#[test]
+fn an_undo_while_delete_is_held_does_not_delete_the_row_that_moved_under_it() {
+    let mut case = Case::new("sketch-relation-held-delete");
+    let (source, picks) = every_glyph();
+    let (doc, id) = part(source);
+    let mut app = open(doc, id);
+    case.run(&mut app, |case, app| {
+        let [c1, c2] = picks.corner;
+        let level = format!("Horizontal on Line {c1}");
+        let length = format!("Distance 20 on Line {c1}");
+        let plumb = format!("Vertical on Line {c2}");
+        right_click(app, glyph(app, picks.meet));
+        click(app, button(app, &format!("Delete {level}")).center());
+        assert!(sketch(app).constraint(picks.level).is_none(), "the first row is deleted");
+
+        // Hold Delete on the last row, Vertical, and undo the first deletion meanwhile:
+        // Horizontal comes back at the top and Distance moves under the pointer.
+        let at = button(app, &format!("Delete {plumb}")).center();
+        ribbon::render_steps::rendered(app, |app| {
+            app.hover_at(at);
+            app.run_steps(3);
+            primary(app, at, true);
+            app.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+            app.run_steps(6);
+            assert!(sketch(app).constraint(picks.level).is_some(), "undo restored Horizontal");
+            assert!(button(app, &format!("Delete {length}")).contains(at), "Distance's Delete is under the pointer");
+            primary(app, at, false);
+            settle(app);
+        });
+        case.frame(app, "01-released-after-undo");
+        assert!(
+            sketch(app).constraint(picks.length).is_some(),
+            "the release does not delete Distance, which moved under it"
+        );
+        for kept in [picks.level, picks.meet] {
+            assert!(sketch(app).constraint(kept).is_some(), "constraint {kept} stays");
+        }
+    });
+}
+
 #[test]
 fn a_dimension_label_over_a_glyph_comes_first() {
     let mut case = Case::new("sketch-relation-label-first");

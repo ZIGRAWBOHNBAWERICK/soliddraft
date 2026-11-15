@@ -254,7 +254,10 @@ fn body(ui: &mut egui::Ui, s: &SketchSession, menu: &RelationsMenu, rows: &[Cons
     egui::ScrollArea::vertical().id_salt("sketch_relations_rows").max_height(MAX_LIST).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for c in rows {
-            let (rect, row) = ui.allocate_exact_size(vec2(width, ROW), Sense::click());
+            // Rows are keyed by their constraint, not their place: an undo while a button is
+            // held moves the rows, and a positional id would hand the release to another row.
+            let (rect, _) = ui.allocate_exact_size(vec2(width, ROW), Sense::hover());
+            let row = ui.interact(rect, ui.id().with(("relation_row", c.id)), Sense::click());
             let label = format!("{} on {}", title(&s.sketch, c), owners(&s.sketch, c));
             let explanation = sentence(&s.sketch, c);
             row.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
@@ -262,7 +265,7 @@ fn body(ui: &mut egui::Ui, s: &SketchSession, menu: &RelationsMenu, rows: &[Cons
                 pos2(rect.right() - DELETE_WIDTH - 4.0, rect.top() + 3.0),
                 rect.right_bottom() - vec2(4.0, 3.0),
             );
-            let delete = ui.interact(delete_rect, row.id.with("delete"), Sense::click());
+            let delete = ui.interact(delete_rect, ui.id().with(("relation_delete", c.id)), Sense::click());
             delete.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Delete {label}")));
             let over = row.contains_pointer() || delete.contains_pointer();
             if over {

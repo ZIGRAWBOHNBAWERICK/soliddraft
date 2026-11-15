@@ -12,11 +12,12 @@
 // block in another new part, whose kernel gives it the same body id.
 //
 // The clicks go to fixed points of a 1400 x 813 page: the strip's Part and Inspect
-// buttons, the feature tree's rows, Mass props, Details, Close options and Extrude's
-// Rectangle button.
+// buttons, the feature tree's rows, Mass props, Details, Close options, File > New part
+// and Extrude's Rectangle button. New part is clicked, not typed: Chrome on Linux keeps
+// Ctrl+N for a new window.
 function check(value, message) { if (!value) throw new Error(message); }
 const PART = [19, 132], INSPECT = [19, 241], MASS = [220, 112], DETAILS = [317, 52], CLOSE = [347, 92];
-const RECTANGLE = [630, 52];
+const RECTANGLE = [630, 52], FILE = [122, 15], NEW_PART = [138, 42];
 const ROW = { first: 203, second: 229, third: 255 };
 
 check(await page.eval(() => location.search === '?demo'), 'Open the application at /?demo first');
@@ -119,7 +120,9 @@ check(flanged > plate, `The plate and flange (${flanged}) are not larger than th
 await click([380, ROW.third]);
 await page.wait(300);
 await click(MASS);
-await page.press('Control+n');
+await click(FILE);
+await page.wait(300);
+await click(NEW_PART);
 const replaced = await page.eval(() => performance.now());
 const late = await answered(4, 'the replaced part');
 check(late.at > replaced, 'The whole part\'s answer came before the new part replaced it');
@@ -149,7 +152,9 @@ async function block(what) {
 await block('The part that replaced the sample');
 const first = await measure(ROW.first, 5, 'The first new part\'s block');
 check(first === 48000, `The 60 x 40 x 20 mm block measured ${first} mm³`);
-await page.press('Control+n');
+await click(FILE);
+await page.wait(300);
+await click(NEW_PART);
 await page.wait(1500);
 await block('A second new part with the same body ids');
 console.log('Kernel worker check passed');

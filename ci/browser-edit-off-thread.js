@@ -105,8 +105,9 @@ await depthShown(10, 'The opened bracket');
 let sawBusy = false;
 await window_('Changing the base depth to 12 mm', async () => {
   await typeDepth(12);
-  const state = await until(building, state => state !== null, 'No build state was drawn', 50);
-  sawBusy = state.pending && state.cancel !== undefined;
+  // The opened part already reports a finished build, so wait for the edit's own.
+  const state = await until(building, state => state && state.pending, 'The edit drew no busy state', 50);
+  sawBusy = Boolean(state.cancel);
   await idle('The depth edit');
   await depthShown(12, 'The depth edit');
 });

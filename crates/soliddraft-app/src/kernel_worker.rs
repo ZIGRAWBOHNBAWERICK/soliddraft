@@ -26,6 +26,14 @@ use std::sync::Arc;
 pub enum Job {
     /// Volume, area, centroid and inertia of the body after `feature`.
     MassProperties { feature: model::FeatureId },
+    /// The part after an optional dimension edit, rebuilt, proved and meshed as the
+    /// desktop's proof worker does it.
+    Build {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edit: Option<crate::drag::ScalarDraft>,
+        #[serde(default)]
+        level: soliddraft_tessellation::Level,
+    },
 }
 
 impl Job {
@@ -33,6 +41,7 @@ impl Job {
     pub fn slot(&self) -> &'static str {
         match self {
             Job::MassProperties { .. } => "mass_properties",
+            Job::Build { .. } => "build",
         }
     }
 }
@@ -67,6 +76,22 @@ impl Host {
                 }
                 let properties = result.map_err(|error| error.to_string())?;
                 serde_json::to_value(properties).map_err(|error| error.to_string())
+            }
+            Job::Build { edit, level } => {
+                let proved = crate::drag::prove_now(std::sync::Arc::new(doc.fork()), *edit, *level)?;
+                let model = &proved.model;
+                let statuses: Vec<_> = model
+                    .features()
+                    .iter()
+                    .map(|feature| serde_json::json!({ "feature": feature.id, "status": built(model, feature.id).err() }))
+                    .collect();
+                let triangles = proved.display.as_ref().map(|display| display.mesh.indices.len() / 3);
+                Ok(serde_json::json!({
+                    "failure": proved.failure,
+                    "display_error": proved.display_error,
+                    "statuses": statuses,
+                    "triangles": triangles,
+                }))
             }
         }
     }
@@ -374,6 +399,33 @@ mod tests {
         let error = host.run(&part, &Job::MassProperties { feature: model::FeatureId(9999) }).unwrap_err();
         assert!(error.contains("no such feature"), "{error}");
         assert!(host.run(b"not a part", &Job::MassProperties { feature: model::FeatureId(1) }).is_err());
+    }
+
+    #[test]
+    fn the_worker_builds_proves_and_meshes_an_edited_part() {
+        let doc = demo();
+        let base = doc.features[0].id;
+        let (_, part) = doc.model().snapshot().encode().unwrap();
+        let edit = crate::drag::ScalarDraft {
+            feature: model::FeatureId(u32::try_from(base).unwrap()),
+            dimension: crate::drag::Dimension::Depth,
+            value: 12.0,
+        };
+        let mut host = Host::new(crate::kernel());
+        for job in [
+            Job::Build { edit: Some(edit), level: Default::default() },
+            Job::Build { edit: None, level: Default::default() },
+        ] {
+            let answer = host.run(&part, &job).unwrap();
+            assert_eq!(answer["failure"], serde_json::Value::Null, "{answer}");
+            assert!(answer["triangles"].as_u64().unwrap() > 0, "{answer}");
+            let statuses = answer["statuses"].as_array().unwrap();
+            assert_eq!(statuses.len(), doc.features.len());
+            assert!(statuses.iter().all(|status| status["status"].is_null()), "{answer}");
+        }
+        let too_deep = crate::drag::ScalarDraft { value: -5.0, ..edit };
+        let refused = host.run(&part, &Job::Build { edit: Some(too_deep), level: Default::default() });
+        assert!(refused.is_err() || !refused.as_ref().unwrap()["failure"].is_null(), "{refused:?}");
     }
 
     #[test]

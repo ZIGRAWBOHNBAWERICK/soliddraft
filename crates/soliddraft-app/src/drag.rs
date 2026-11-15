@@ -34,7 +34,8 @@ use std::sync::{
 };
 
 /// A feature dimension a drag can change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Dimension {
     /// A boss's depth, or a blind cut's.
     Depth,
@@ -481,8 +482,8 @@ pub(crate) struct PreparedBuild {
     pub candidate: Option<CandidateDisplay>,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct ScalarDraft {
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ScalarDraft {
     pub feature: model::FeatureId,
     pub dimension: Dimension,
     pub value: f64,
@@ -583,6 +584,22 @@ fn construct(task: ConstructionTask, answered: &Answered) -> Result<(), ()> {
         .and_then(|display| construction_view(display, &model))
         .map(|view| CandidateDisplay::Construction(Arc::new(view)));
     answered.send(Answer { request, kind: AnswerKind::Construction(candidate) })
+}
+
+/// Applies `edit` to `source`, then rebuilds, proves and meshes it on the calling thread,
+/// through the same steps as the desktop's proof worker. The browser's kernel worker runs
+/// it, so the page's thread never does.
+pub(crate) fn prove_now(
+    source: Arc<model::Document>,
+    edit: Option<ScalarDraft>,
+    level: soliddraft_tessellation::Level,
+) -> Result<ProvedBuild, String> {
+    let job = Job { source, edit, baseline: None, params: TessellationParams::default(), level };
+    let (task, _) = prepare(Queued { request: 1, job }).map_err(|answer| match answer.kind {
+        AnswerKind::Proved(Err(error)) => error,
+        _ => "The edit could not be prepared.".into(),
+    })?;
+    Ok(prove(task, &AtomicU64::new(1), &AtomicU64::new(0), None))
 }
 
 /// A feature that shapes the body did not build. A sketch that did not build blocks

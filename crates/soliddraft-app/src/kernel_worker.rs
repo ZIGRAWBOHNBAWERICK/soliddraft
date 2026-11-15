@@ -97,6 +97,7 @@ impl Host {
                     .map(|feature| serde_json::json!({ "feature": feature.id, "status": built(model, feature.id).err() }))
                     .collect();
                 let triangles = proved.display.as_ref().map(|display| display.mesh.indices.len() / 3);
+                sample_display_levels(model);
                 Ok(serde_json::json!({
                     "failure": proved.failure,
                     "display_error": proved.display_error,
@@ -117,6 +118,22 @@ impl Host {
             self.part = Some((part.to_vec(), doc));
         }
         Ok(&self.part.as_ref().expect("the part was just opened").1)
+    }
+}
+
+/// Samples the early display of the part's shown body at every display level, as the
+/// page's display quality asks for them, so the hand-over carries each and the page
+/// samples none.
+fn sample_display_levels(model: &model::Document) {
+    use soliddraft_tessellation::{Level, Levels};
+    let Some((_, body)) = model.live_bodies().last().copied() else { return };
+    let kernel = model.kernel();
+    let Ok(topology) = kernel.topology(body) else { return };
+    let levels = Levels::new(&model.settings().viewport, topology.bbox.diagonal());
+    for level in [Level::Coarse, Level::Standard, Level::Fine] {
+        let params = *levels.params(level);
+        let _ = kernel.preview(body, &params);
+        let _ = kernel.preview_edges(body, &params);
     }
 }
 

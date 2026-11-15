@@ -154,6 +154,7 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         open(app, AppAction::StartChamfer);
         case.frame(app, "chamfer");
         assert!(app.query_by_label("Distance value").is_some());
+        assert_asks_for_edges(app, "chamfer");
         open(app, AppAction::CancelEditor);
 
         open(app, AppAction::StartHole);
@@ -169,7 +170,33 @@ fn cut_shell_draft_and_pattern_forms_expose_their_fields() {
         open(app, AppAction::StartDraft);
         case.frame(app, "draft");
         assert_fields(app, "Draft", &["Angle value"]);
-        open(app, AppAction::CancelEditor);
+        assert!(shows(app, "Click faces to draft"), "an empty draft asks for faces, not \"0 faces\"");
+        // One picked face reads "1 face": the count used to read "1 faces".
+        // A point of the top face, clear of the circle sketched on it.
+        ribbon::click_world(app, Vec3::new(22.0, 12.0, TOP));
+        settle(app);
+        pointer_to_chrome(app);
+        let Some(EditorParams::Draft(draft)) = app.state().state.editor.as_ref().map(|e| &e.params) else {
+            panic!("the draft form is open")
+        };
+        assert_eq!(draft.faces.len(), 1, "the click picked one face");
+        assert!(shows(app, "1 face"), "one face is counted in the singular");
+        assert!(!shows(app, "1 faces"));
+        case.frame(app, "draft-one-face");
+        // A draft in the tree names its value Angle. It read "Layout", the word for a
+        // pattern's copies. The draft may be refused; its row and its value stay.
+        open(app, AppAction::CommitEditor);
+        rebuilt(app);
+        let doc = &app.state().state.doc;
+        let draft = doc.features.iter().find(|f| f.kind.noun() == "draft").expect("the draft is in the tree").id;
+        let details = doc.describe(Selection::Feature(draft)).expect("the draft describes itself").details;
+        assert!(details.iter().any(|(label, value)| label == "Angle" && value == "3°"), "{details:?}");
+        assert!(!details.iter().any(|(label, _)| label == "Layout"), "{details:?}");
+        if app.state().state.editor.is_some() {
+            open(app, AppAction::CancelEditor);
+        }
+        app.state_mut().state.push(AppAction::Select(None));
+        settle(app);
 
         open(app, AppAction::StartPattern { circular: false });
         case.frame(app, "pattern");
@@ -293,6 +320,15 @@ fn fillet_panel_in_dark_at_double_scale() {
     });
 }
 
+/// A fillet or chamfer form that has no edges yet asks for them and refuses nothing: the
+/// form used to open with a red "select at least one edge" before the first click.
+fn assert_asks_for_edges(app: &App, what: &str) {
+    let editor = app.state().state.editor.as_ref().expect("a feature form is open");
+    assert_eq!(editor.error, None, "{what}: no refusal before the first pick");
+    assert!(shows(app, "Click edges or faces"), "{what}: the field asks for edges");
+    assert!(!shows(app, "select at least one edge"), "{what}: no error text is shown");
+}
+
 /// How many tree nodes have `text` as their label or value.
 fn nodes_reading(app: &App, text: &str) -> usize {
     app.query_all(By::new().predicate(|n| n.label().as_deref() == Some(text) || n.value().as_deref() == Some(text)))
@@ -309,16 +345,18 @@ fn the_fillet_form_asks_only_for_edges_and_radius() {
     case.run(&mut app, |case, app| {
         let soon_before = nodes_reading(app, "Coming soon");
         open(app, AppAction::StartFillet);
+        case.frame(app, "fillet-nothing-picked");
+        assert_asks_for_edges(app, "fillet");
         let (long, _) = near_edges(app);
         ribbon::click_world(app, long);
         settle(app);
         pointer_to_chrome(app);
         case.frame(app, "fillet-options");
 
-        app.get_by_label("1 edges").click();
+        app.get_by_label("1 edge").click();
         app.run_steps(8);
         assert!(app.query_by_label_contains("Remove ").is_some(), "the picked edge can be removed");
-        app.get_by_label("1 edges").click();
+        app.get_by_label("1 edge").click();
         app.run_steps(8);
         for gone in ["Setback parameters", "Fillet options"] {
             assert!(!shows(app, gone), "the form has no {gone} card");

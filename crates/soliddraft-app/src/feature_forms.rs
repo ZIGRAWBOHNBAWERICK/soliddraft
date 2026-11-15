@@ -484,9 +484,14 @@ fn end(ui: &mut egui::Ui, value: &mut crate::document::EndKind, cut: bool, linke
     });
 }
 
+/// A count with its noun: "1 face", "3 faces".
+fn counted(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
 fn picked_edges(ui: &mut egui::Ui, editor: &mut crate::state::FeatureEditor) {
     let edges = editor.edges().to_vec();
-    let text = if edges.is_empty() { "Click edges or faces".into() } else { format!("{} edges", edges.len()) };
+    let text = if edges.is_empty() { "Click edges or faces".into() } else { counted(edges.len(), "edge") };
     ui.menu_button(text, |ui| {
         ui.set_min_width(240.0);
         if let Some(i) = crate::properties::pick_list(
@@ -563,11 +568,7 @@ fn render(
         (EditorParams::Thicken(p), Key::ThickenSide) => properties::thicken_side(ui, &mut p.side),
         (EditorParams::Thicken(p), Key::ThickenFaces) => {
             let count = p.faces.len();
-            let text = if count == 0 {
-                "Click faces to thicken".into()
-            } else {
-                format!("{count} {}", if count == 1 { "face" } else { "faces" })
-            };
+            let text = if count == 0 { "Click faces to thicken".into() } else { counted(count, "face") };
             ui.menu_button(text, |ui| {
                 ui.set_min_width(240.0);
                 if let Some(index) = properties::pick_list(
@@ -889,7 +890,8 @@ fn render(
             ui.checkbox(&mut p.keep_original, "Keep original");
         }
         (EditorParams::Draft(p), Key::DraftFaces) => {
-            ui.menu_button(format!("{} faces", p.faces.len()), |ui| {
+            let text = if p.faces.is_empty() { "Click faces to draft".into() } else { counted(p.faces.len(), "face") };
+            ui.menu_button(text, |ui| {
                 ui.set_min_width(240.0);
                 if let Some(i) = properties::pick_list(
                     ui,
@@ -921,7 +923,7 @@ fn render(
             let label = if p.open_faces.is_all() {
                 "Every face".into()
             } else if let soliddraft_model::ShellOpenings::Faces(faces) = &p.open_faces {
-                format!("{} faces", faces.len())
+                counted(faces.len(), "face")
             } else {
                 "Faces".into()
             };

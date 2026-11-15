@@ -4198,8 +4198,12 @@ impl Document {
                         details.push(("Open faces".to_owned(), open));
                         details.push(("Wall thickness".to_owned(), f.summary()));
                     }
-                    FeatureKind::Pattern(_) | FeatureKind::Mirror(_) | FeatureKind::Draft(_) => {
+                    FeatureKind::Pattern(_) | FeatureKind::Mirror(_) => {
                         details.push(("Layout".to_owned(), f.summary()));
+                    }
+                    // A draft has an angle, not a layout of copies.
+                    FeatureKind::Draft(_) => {
+                        details.push(("Angle".to_owned(), f.summary()));
                     }
                     FeatureKind::Lattice(l) => {
                         // A constant lattice keeps the rows it always had; a grade is shown.

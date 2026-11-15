@@ -429,6 +429,13 @@ impl FeatureEditor {
             return;
         }
         self.last = Some(self.params.clone());
+        // A fillet or chamfer starts with no edges. The form's field asks for them; a
+        // red refusal before the first click would blame the user for nothing.
+        if self.edges().is_empty() && matches!(self.params, EditorParams::Fillet(_) | EditorParams::Chamfer(_)) {
+            self.preview = Preview::default();
+            self.error = None;
+            return;
+        }
         let result = match &self.params {
             EditorParams::Extrude(p) => doc.preview_extrude(p),
             EditorParams::Revolve(r) => doc.preview_revolve(r),
@@ -1166,6 +1173,9 @@ pub struct AppState {
     /// Bumped when File locations are saved, so cached lookups refresh.
     pub locations_epoch: u64,
     pub rename: Option<Rename>,
+    /// A click on the selected tree row, and when it landed. It becomes a rename once the
+    /// double-click time passes with no second click, so a double-click never renames.
+    pub rename_armed: Option<(FeatureId, f64)>,
     /// The tree row being dragged for reordering.
     pub drag_feature: Option<FeatureId>,
     /// The feature dimension being dragged, with its previews.
@@ -1354,6 +1364,7 @@ impl AppState {
             locations_dialog: None,
             locations_epoch: 0,
             rename: None,
+            rename_armed: None,
             drag_feature: None,
             drag_preview: None,
             dimension_edit: None,

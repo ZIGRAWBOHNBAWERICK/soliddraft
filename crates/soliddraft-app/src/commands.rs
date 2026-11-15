@@ -764,6 +764,11 @@ pub fn all() -> &'static [CommandSpec] {
     &REGISTRY
 }
 
+/// Why a file import is off in the browser build, which opens files by upload only.
+fn import_on_desktop(_: &AppState) -> Option<String> {
+    cfg!(target_arch = "wasm32").then(|| "Importing files works in the desktop app for now".to_owned())
+}
+
 /// The command with this id.
 pub fn get(id: &str) -> Option<&'static CommandSpec> {
     all().iter().find(|c| c.id == id)
@@ -2421,18 +2426,21 @@ fn registry() -> Vec<CommandSpec> {
         cmd("import_step", "Import STEP", Icon::Import, "Import one STEP body after reviewing its repairs")
             .run(|_| AppAction::ImportStep(None))
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
+            .hint(import_on_desktop)
             .agents(Agents::Mcp, "Automatic repairs take no answer. Declined gap ids, and each approved repair with its limit and approver, are saved with the source.", crate::import::params)
             .undo(Undo::Step),
         cmd("import_iges", "Import IGES", Icon::Import, "Import one IGES body after reviewing its repairs")
             .run(|_| AppAction::ImportIges(None))
             .outside_sketch()
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
+            .hint(import_on_desktop)
             .agents(Agents::Mcp, "Review with preview_import using format iges first. Repairs and the unchanged source are saved with the part.", crate::import::params)
             .undo(Undo::Step),
         cmd("import_mesh", "Import mesh solid", Icon::Import, "Import a closed STL or OBJ mesh as a solid in millimetres")
             .run(|_| AppAction::ImportMesh(None))
             .outside_sketch()
             .when(|s| !s.doc.proof_pending() && !cfg!(target_arch = "wasm32"))
+            .hint(import_on_desktop)
             .agents(Agents::Mcp, "Review with preview_import using format mesh first. One closed solid, up to 200,000 triangles, coordinates in millimetres.", crate::import::params)
             .undo(Undo::Step),
         cmd("import_scan", "Import scan reference", Icon::Import, "Import an STL or OBJ scan as reference data in millimetres")

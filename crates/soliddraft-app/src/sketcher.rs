@@ -162,7 +162,7 @@ fn shown_labels(ui: &egui::Ui, frame: &Frame<'_>, s: &SketchSession) -> Vec<(Con
 /// Picks the right-click target without drawing or committing a tool preview.
 pub fn context_pick(ui: &egui::Ui, s: &SketchSession, camera: &Camera, rect: Rect, pos: Pos2) -> Option<SketchSel> {
     let frame = Frame { plane: s.plane, camera, rect };
-    let glyphs = if s.show_relations { glyph_rects(&frame, &s.sketch) } else { Vec::new() };
+    let glyphs = if s.show_relations { session_glyphs(&frame, s) } else { Vec::new() };
     pick(&frame, &s.sketch, pos, &glyphs, &shown_labels(ui, &frame, s))
 }
 
@@ -205,7 +205,7 @@ pub fn run(
     let mut actions = Vec::new();
     let frame = Frame { plane: s.plane, camera, rect };
     let painter = ui.painter().with_clip_rect(rect);
-    let glyphs = if s.show_relations { glyph_rects(&frame, &s.sketch) } else { Vec::new() };
+    let glyphs = if s.show_relations { session_glyphs(&frame, s) } else { Vec::new() };
     let hover_pos = resp.hover_pos().filter(|_| !resp.dragged());
     s.cursor = hover_pos.and_then(|p| frame.plane_at(p));
 
@@ -1612,20 +1612,68 @@ fn paint_entities(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession)
     }
 }
 
+/// The session's glyphs: a selected relation keeps its glyph at any zoom, so one picked
+/// from the relations list is still seen.
+fn session_glyphs(frame: &Frame<'_>, s: &SketchSession) -> Vec<(ConstraintId, Rect)> {
+    glyph_rects_keeping(frame, &s.sketch, |id| s.selection.contains(&SketchSel::Constraint(id)))
+}
+
+/// Where a relation's glyph goes: a sketch point, a screen offset from it, and the entity
+/// the glyph sits on.
+type GlyphAnchor = (P2, egui::Vec2, EntityId);
+
+/// The room one relation glyph takes beside its neighbours, in points.
+const GLYPH_PITCH: f32 = 16.0;
+
 /// Where each relation's glyph sits on screen.
 pub fn glyph_rects(frame: &Frame<'_>, sketch: &Sketch) -> Vec<(ConstraintId, Rect)> {
+    glyph_rects_keeping(frame, sketch, |_| false)
+}
+
+/// [`glyph_rects`], with the glyphs of the relations `keep` names shown however small
+/// their geometry is drawn.
+///
+/// The glyphs of a curve sit in a row beside it. A curve drawn shorter than that row has
+/// no room for them: a small polygon used to vanish under the badges of its own
+/// relations. Such a curve shows none until the view zooms in. A relation the solver
+/// could not hold always shows.
+pub fn glyph_rects_keeping(
+    frame: &Frame<'_>,
+    sketch: &Sketch,
+    keep: impl Fn(ConstraintId) -> bool,
+) -> Vec<(ConstraintId, Rect)> {
+    let relations: Vec<(&Constraint, Vec<GlyphAnchor>)> =
+        sketch.constraints.iter().filter(|c| !c.is_dimension()).map(|c| (c, glyph_anchors(sketch, c))).collect();
+    let mut carried: std::collections::HashMap<EntityId, f32> = std::collections::HashMap::new();
+    for (_, anchors) in &relations {
+        for anchor in anchors {
+            *carried.entry(anchor.2).or_insert(0.0) += 1.0;
+        }
+    }
+    let has_room: std::collections::HashMap<EntityId, bool> = carried
+        .into_iter()
+        .map(|(id, count)| {
+            let room = sketch.entity(id).is_none_or(|e| screen_extent(frame, e) >= count * GLYPH_PITCH);
+            (id, room)
+        })
+        .collect();
+    let conflicting: &[ConstraintId] = match &sketch.status {
+        SolveStatus::OverDefined { conflicting } => conflicting,
+        _ => &[],
+    };
     let mut out = Vec::new();
     let mut per_anchor: std::collections::HashMap<(i32, i32), usize> = std::collections::HashMap::new();
-    for c in &sketch.constraints {
-        if c.is_dimension() {
-            continue;
-        }
-        for anchor in glyph_anchors(sketch, c) {
+    for (c, anchors) in relations {
+        let kept = keep(c.id) || conflicting.contains(&c.id);
+        for anchor in anchors {
+            if !kept && !has_room[&anchor.2] {
+                continue;
+            }
             let Some(sp) = frame.screen(anchor.0) else { continue };
             let base = sp + anchor.1;
             let key = ((base.x / 4.0) as i32, (base.y / 4.0) as i32);
             let n = per_anchor.entry(key).or_insert(0);
-            let pos = base + vec2(16.0 * *n as f32, 0.0);
+            let pos = base + vec2(GLYPH_PITCH * *n as f32, 0.0);
             *n += 1;
             out.push((c.id, Rect::from_center_size(pos, vec2(14.0, 14.0))));
         }
@@ -1633,14 +1681,31 @@ pub fn glyph_rects(frame: &Frame<'_>, sketch: &Sketch) -> Vec<(ConstraintId, Rec
     out
 }
 
-/// Sketch point and screen offset where a relation's glyph goes, one per
+/// How long an entity is drawn, as the diagonal of its box on screen. A point has no
+/// curve for a glyph to cover, so it always has room.
+fn screen_extent(frame: &Frame<'_>, e: &Entity) -> f32 {
+    if e.is_point() {
+        return f32::INFINITY;
+    }
+    let mut bounds = Rect::NOTHING;
+    for p in e.polylines(16).into_iter().flatten() {
+        match frame.screen(p) {
+            Some(sp) => bounds.extend_with(sp),
+            // Partly behind the camera: it is not small.
+            None => return f32::INFINITY,
+        }
+    }
+    if bounds.is_negative() { f32::INFINITY } else { bounds.size().length() }
+}
+
+/// Sketch point, screen offset and owning entity where a relation's glyph goes, one per
 /// entity it relates.
-fn glyph_anchors(sketch: &Sketch, c: &Constraint) -> Vec<(P2, egui::Vec2)> {
-    let beside = |id: EntityId| -> Option<(P2, egui::Vec2)> {
+fn glyph_anchors(sketch: &Sketch, c: &Constraint) -> Vec<GlyphAnchor> {
+    let beside = |id: EntityId| -> Option<GlyphAnchor> {
         let e = sketch.entity(id)?;
-        Some((e.midpoint(), vec2(0.0, -14.0)))
+        Some((e.midpoint(), vec2(0.0, -14.0), id))
     };
-    let at_point = |r: PointRef| sketch.point(r).map(|p| (p, vec2(10.0, -10.0)));
+    let at_point = |r: PointRef| sketch.point(r).map(|p| (p, vec2(10.0, -10.0), r.entity));
     match c.kind {
         ConstraintKind::Coincident { a, .. } => at_point(a).into_iter().collect(),
         ConstraintKind::Symmetric { a, b, .. } => at_point(a).into_iter().chain(at_point(b)).collect(),
@@ -2043,6 +2108,7 @@ pub fn paint_closed_dimensions(
     taken: impl IntoIterator<Item = Rect>,
     authored_pass: Option<bool>,
     pointer: Option<Pos2>,
+    dark: bool,
 ) -> Vec<(ConstraintId, Rect, Vec3, String)> {
     let frame = Frame { plane, camera, rect };
     let gv = |v: soliddraft_kernel_api::Vec3| Vec3::new(v.x as f32, v.y as f32, v.z as f32);
@@ -2077,7 +2143,7 @@ pub fn paint_closed_dimensions(
             let label = P2::new(relative.dot(gv(plane.x_dir)) as f64, relative.dot(gv(plane.y_dir())) as f64);
             let Some(lp) = frame.screen(label) else { continue };
             let hover = pointer.is_some_and(|p| Rect::from_center_size(at, size).contains(p));
-            let color = if hover { theme::accent() } else { theme::ink().gamma_multiply(0.7) };
+            let color = if hover { theme::accent() } else { theme::dimension_line(dark) };
             paint_dimension_lines(painter, &frame, sketch, c, label, lp, color);
             if at.distance_sq(lp) > 0.01 {
                 painter.line_segment([lp, at], Stroke::new(1.0, color));
@@ -2421,14 +2487,22 @@ fn dim_editor(ui: &mut egui::Ui, s: &mut SketchSession, frame: &Frame<'_>, actio
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(c.name()).size(11.0).color(theme::muted()));
                         let mut text = edit.text.clone();
-                        let resp = ui.add(
-                            egui::TextEdit::singleline(&mut text).desired_width(64.0).font(theme::font_medium(12.5)),
-                        );
+                        let field = egui::TextEdit::singleline(&mut text)
+                            .desired_width(64.0)
+                            .font(theme::font_medium(12.5))
+                            .show(ui);
+                        let resp = field.response.response;
                         resp.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Dimension value")
                         });
                         if edit.focus {
                             resp.request_focus();
+                            // The old value is selected, so typing replaces it instead of
+                            // adding digits to its end.
+                            let mut state = field.state;
+                            let all = egui::text::CCursorRange::select_all(&field.galley);
+                            state.cursor.set_char_range(Some(all));
+                            state.store(ui.ctx(), resp.id);
                         }
                         ui.label(
                             egui::RichText::new(if is_angle { "°" } else { "mm" })

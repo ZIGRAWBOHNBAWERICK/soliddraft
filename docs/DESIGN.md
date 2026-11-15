@@ -201,6 +201,7 @@ The menu follows the picked context and stays inside the window near an edge.
 It uses the same charcoal, amber, text and popup tokens as the rest of the frame.
 
 The feature tree is history. Clicking a row selects; double-clicking edits;
+F2 or a slow second click on the selected row renames it, and a double-click never does;
 right-clicking opens its context menu, which includes Roll back to here. Dragging a
 row reorders it. Dragging the rollback bar between rows displays that history
 position, and double-clicking the bar restores every feature. An under-defined

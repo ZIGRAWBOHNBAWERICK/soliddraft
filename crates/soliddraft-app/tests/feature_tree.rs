@@ -485,3 +485,47 @@ fn long_trees_scroll_to_the_selection_and_an_empty_tree_has_a_hint() {
         case.frame(app, "1280-scrolled");
     });
 }
+
+/// A second click on the selected row renames it, like a file manager, but only a slow
+/// one. A double-click on a row that was already selected used to start the rename on its
+/// first click and put the second click into the text field, so the dimensions never
+/// showed.
+#[test]
+fn a_double_click_on_the_selected_row_shows_its_dimensions_and_never_renames() {
+    let case = ribbon::case("tree-double-click-selected");
+    let mut app = ribbon::app(ribbon::plate());
+    ribbon::until(&mut app, "the plate proof", |app| !app.state().state.doc.proof_pending());
+    app.run_steps(8);
+    case.run(&mut app, |app| {
+        let id = id_of(app, "Boss-Extrude1");
+        let at = row(app, "Boss-Extrude1").center();
+        ribbon::click_at(app, at);
+        // Half a second: the next click is no double-click.
+        app.run_steps(30);
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(id)));
+
+        ribbon::click_at(app, at);
+        assert!(app.state().state.rename.is_none(), "the rename waits out the double-click time");
+        app.run_steps(30);
+        assert!(app.state().state.rename.is_some(), "a slow second click renames the row");
+        case.frame(app, "slow-second-click-renames");
+        app.key_press(Key::Escape);
+        app.run_steps(30);
+        assert!(app.state().state.rename.is_none());
+
+        // Escape also cleared the selection. Select the row again without the pointer.
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(id))));
+        app.run_steps(30);
+        assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(id)));
+        ribbon::double_click_at(app, at);
+        app.run_steps(30);
+        assert!(app.state().state.rename.is_none(), "a double-click on the selected row does not rename it");
+        assert!(app.query_all_by_label("Feature name").next().is_none(), "no rename field is open");
+        assert_eq!(
+            app.state().state.doc.selection,
+            Some(Selection::Body),
+            "the double-click shows the dimensions that build the body"
+        );
+        case.frame(app, "double-click-shows-dimensions");
+    });
+}

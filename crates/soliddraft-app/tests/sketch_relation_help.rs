@@ -11,7 +11,7 @@ use soliddraft_app::sketch::tools::{OffsetCap, OffsetOptions, Operation, Pattern
 use soliddraft_app::sketch::{
     Align, ConstraintId, ConstraintKind, DistanceKind, EntityKind, P2, PointRef, Sketch, SolveStatus, solve,
 };
-use soliddraft_app::sketcher::{Frame, glyph_rects, relations};
+use soliddraft_app::sketcher::{Frame, glyph_rects, glyph_rects_keeping, relations};
 use soliddraft_app::state::{AppAction, SketchSel, SketchSession};
 
 #[path = "support/ui.rs"]
@@ -424,5 +424,68 @@ fn a_dimension_label_over_a_glyph_comes_first() {
         assert!(session(app).relations_menu.is_none(), "the label's own menu opens, not the relation list");
         assert_eq!(session(app).selection, vec![SketchSel::Constraint(picks.length)]);
         case.frame(app, "02-label-menu");
+    });
+}
+
+/// A curve drawn shorter than the row of glyphs it carries shows none of them. A small
+/// polygon at fit zoom used to vanish under the badges of its own relations. A curve of
+/// the same size with one relation keeps its glyph, the glyphs come back as the view zooms
+/// in, and a relation the user selected shows at any size.
+#[test]
+fn glyphs_leave_a_curve_too_short_for_them() {
+    let mut case = Case::new("sketch-relation-glyphs-declutter");
+    let mut source = Sketch::new();
+    let long = line(&mut source, (0.0, 0.0), (200.0, 0.0));
+    let lone = line(&mut source, (20.0, 30.0), (26.0, 30.0));
+    let crowded = line(&mut source, (90.0, 30.0), (96.0, 30.0));
+    let long_level = source.constrain(ConstraintKind::Horizontal { target: Align::Line(long) });
+    let lone_level = source.constrain(ConstraintKind::Horizontal { target: Align::Line(lone) });
+    let crowded_level = source.constrain(ConstraintKind::Horizontal { target: Align::Line(crowded) });
+    let crowded_parallel = source.constrain(ConstraintKind::Parallel { a: long, b: crowded });
+    let at = source.entity(crowded).unwrap().kind.clone();
+    let crowded_fixed = source.constrain(ConstraintKind::FixEntity { entity: crowded, at });
+    let on_crowded = [crowded_level, crowded_parallel, crowded_fixed];
+    solve::solve(&mut source, None, true);
+    let (doc, id) = part(source);
+    let mut app = open(doc, id);
+    case.run(&mut app, |case, app| {
+        let shown = |app: &App| glyph_rects(&frame(app), sketch(app)).into_iter().map(|(c, _)| c).collect::<Vec<_>>();
+        let drawn = |app: &App, a: (f64, f64), b: (f64, f64)| {
+            let at = |p: (f64, f64)| frame(app).screen(P2::new(p.0, p.1)).expect("on screen");
+            at(a).distance(at(b))
+        };
+        // Both short lines are drawn the same length: room for one glyph, not for three.
+        let short = drawn(app, (90.0, 30.0), (96.0, 30.0));
+        assert!((16.0..48.0).contains(&short), "the short lines are {short} points long at fit zoom");
+        let fit = shown(app);
+        assert!(fit.contains(&long_level) && fit.contains(&crowded_parallel), "the long line carries its glyphs");
+        assert!(fit.contains(&lone_level), "a short line with one relation keeps its glyph");
+        assert!(!fit.contains(&crowded_level) && !fit.contains(&crowded_fixed), "three glyphs leave the short line");
+        assert_eq!(fit.iter().filter(|c| **c == crowded_parallel).count(), 1, "Parallel shows on the long line only");
+        case.frame(app, "01-crowded-line-without-its-glyphs");
+
+        // A selected relation keeps its glyph, so one picked from a list is still seen.
+        app.state_mut().state.sketch.as_mut().unwrap().selection = vec![SketchSel::Constraint(crowded_fixed)];
+        settle(app);
+        let selected = |c| session(app).selection.contains(&SketchSel::Constraint(c));
+        let kept = glyph_rects_keeping(&frame(app), sketch(app), selected);
+        assert!(kept.iter().any(|(c, _)| *c == crowded_fixed), "the selected relation shows on the short line");
+        case.frame(app, "02-selected-relation-shown");
+        app.state_mut().state.sketch.as_mut().unwrap().selection.clear();
+
+        // Zoomed in on the crowded line, it has room and its glyphs are back.
+        let view = app.state().state.viewport.rect;
+        let middle = session(app).plane.to_world(soliddraft_kernel_api::Point2::new(93.0, 30.0));
+        let state = &mut app.state_mut().state;
+        state.viewport.camera.target = glam::Vec3::new(middle.x as f32, middle.y as f32, middle.z as f32);
+        state.viewport.camera.zoom(12.0, None, view.width() / view.height());
+        settle(app);
+        let short = drawn(app, (90.0, 30.0), (96.0, 30.0));
+        assert!(short >= 48.0, "zoomed in, the crowded line is {short} points long");
+        let near = shown(app);
+        for relation in on_crowded {
+            assert!(near.contains(&relation), "relation {relation} is back once the line has room");
+        }
+        case.frame(app, "03-zoomed-in-glyphs-back");
     });
 }

@@ -182,3 +182,25 @@ fn midpoint_guide_toggle_commits_the_seen_relation() {
     assert_eq!(sketch(&h, id), before);
     assert!(h.state().state.sketch.as_ref().is_none_or(|s| s.pending.is_empty()), "the started line is dropped");
 }
+
+/// The three switches line up, their tick boxes in one column at the left of their box.
+/// Each used to be centred on its own row, so a longer label pushed its box further left.
+#[test]
+fn the_sketch_switches_line_up_at_the_left() {
+    let (doc, id) = part();
+    let Some(mut h) = window::window(doc, "measure-guides-switches") else { return };
+    open_line_tool(&mut h, id);
+    // The palette has a Snap to grid tool of its own; these are the switches in the viewport.
+    let view = h.state().state.viewport.rect;
+    let left = |label: &str| {
+        let mut found = h.query_all_by_label(label).filter(|n| view.contains(n.rect().center()));
+        let node = found.next().unwrap_or_else(|| panic!("no {label} switch in the viewport"));
+        assert!(found.next().is_none(), "one {label} switch in the viewport");
+        node.rect().left()
+    };
+    let (auto, construction, grid) = (left("Auto relations"), left("Draw construction"), left("Snap to grid"));
+    assert!(
+        (auto - construction).abs() < 0.5 && (auto - grid).abs() < 0.5,
+        "the switches start at {auto}, {construction} and {grid}"
+    );
+}

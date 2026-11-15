@@ -153,10 +153,13 @@ async function block(what) {
   await click(PART);
   await page.wait(500);
   // E opens Extrude while the pointer is over the viewport, as browser-documents.mjs does.
+  // Synthetic clicks move no keyboard focus, so the canvas takes it before the keys.
   await page.eval(() => {
+    const canvas = document.getElementById('soliddraft');
+    canvas.focus();
     const at = { clientX: 900, clientY: 450, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
-    document.getElementById('soliddraft').dispatchEvent(new PointerEvent('pointermove', at));
-    return true;
+    canvas.dispatchEvent(new PointerEvent('pointermove', at));
+    return document.activeElement === canvas;
   });
   await page.press('e');
   await page.wait(1500);

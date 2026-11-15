@@ -765,7 +765,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Exercise full-storage journal recovery and the kernel worker in Chromium
+      - name: Exercise full-storage journal recovery in Chromium
         env:
           CHROME_DEVTOOLS_AXI_SESSION: journal-recovery
           CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
@@ -793,18 +793,33 @@ jobs:
           server=$!
           python3 -m http.server 8768 --bind 127.0.0.1 --directory . > "$RUNNER_TEMP/recovery-storage-server.log" 2>&1 &
           storage_server=$!
-          # The kernel worker check gets an origin with no journals from the check before it.
-          python3 -m http.server 8769 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/kernel-worker-server.log" 2>&1 &
-          worker_server=$!
-          trap 'chrome-devtools-axi stop; kill "$server" "$storage_server" "$worker_server"' EXIT
+          trap 'chrome-devtools-axi stop; kill "$server" "$storage_server"' EXIT
           open_browser http://127.0.0.1:8766/
           chrome-devtools-axi run < ci/browser-journal.js
-          # Its clicks need the full menu bar: narrower pages fold it into one Menu button.
-          chrome-devtools-axi emulate --viewport 1400x813x1
-          open_browser 'http://127.0.0.1:8769/?demo'
-          chrome-devtools-axi run < ci/browser-kernel-worker.js
           open_browser http://127.0.0.1:8768/
           chrome-devtools-axi run < ci/browser-recovery-storage.js
+      - name: Measure mass properties in the kernel worker in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: kernel-worker
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          # WebGL, as the preferences and documents checks use. Under SwiftShader's WebGPU
+          # this check's Extrude step adds no feature on Linux Chrome; under WebGL it passes.
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          # An origin of its own, with no journals from another check.
+          python3 -m http.server 8769 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/kernel-worker-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          # Its clicks need the full menu bar: narrower pages fold it into one Menu button.
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open 'http://127.0.0.1:8769/?demo'
+          chrome-devtools-axi run < ci/browser-kernel-worker.js
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

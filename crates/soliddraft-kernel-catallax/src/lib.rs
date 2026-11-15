@@ -73,6 +73,8 @@ struct State {
     fresh: u64,
     /// Topologies computed here rather than taken from an offer.
     fresh_topologies: u64,
+    /// Recipe keys whose topology has been handed over already.
+    sent_topologies: std::collections::BTreeSet<String>,
 }
 
 struct Stored {
@@ -1120,39 +1122,65 @@ impl Kernel for CatallaxKernel {
     fn hand_over(&self) -> KernelResult<Vec<u8>> {
         let mut state = self.state()?;
         let kept = state.kept.take().unwrap_or_default();
-        // Each kept build travels with the topology computed for it here, if any.
-        let topologies: BTreeMap<&str, &Solid> = state
-            .bodies
-            .values()
-            .filter_map(|stored| stored.solid.as_deref())
-            .filter(|solid| matches!(solid.topology.get(), Some(Ok(_))))
-            .map(|solid| (solid.key.as_str(), solid))
-            .collect();
-        let handed: Vec<handover::Handed> = kept
+        // Topologies computed here and not handed over yet, by recipe key: a kept build's,
+        // or one of a build handed over before its topology was computed.
+        let mut topologies: BTreeMap<String, handover::HandedTopology> = BTreeMap::new();
+        for solid in state.bodies.values().filter_map(|stored| stored.solid.as_deref()) {
+            let Some(Ok(topology)) = solid.topology.get() else { continue };
+            if solid.key.is_empty() || state.sent_topologies.contains(&solid.key) || topologies.contains_key(&solid.key)
+            {
+                continue;
+            }
+            let (faces, edges, vertices) = solid.ids.by_index();
+            let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
+            topologies.insert(
+                solid.key.clone(),
+                handover::HandedTopology {
+                    topology: topology.clone(),
+                    faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                    edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                    vertices: pairs(vertices.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                },
+            );
+        }
+        let mut handed: Vec<handover::Handed> = kept
             .into_iter()
             .map(|(key, body)| {
-                let topology = topologies.get(key.as_str()).and_then(|solid| {
-                    let Some(Ok(topology)) = solid.topology.get() else { return None };
-                    let (faces, edges, vertices) = solid.ids.by_index();
-                    let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
-                    Some(handover::HandedTopology {
-                        topology: topology.clone(),
-                        faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
-                        edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
-                        vertices: pairs(vertices.into_iter().map(|(index, id)| (index, id.raw())).collect()),
-                    })
-                });
-                handover::Handed { key, body, topology }
+                let topology = topologies.remove(&key);
+                handover::Handed { key, body: Some(body), topology }
             })
             .collect();
+        handed.extend(topologies.into_iter().map(|(key, topology)| handover::Handed {
+            key,
+            body: None,
+            topology: Some(topology),
+        }));
+        for entry in &handed {
+            if entry.topology.is_some() {
+                state.sent_topologies.insert(entry.key.clone());
+            }
+        }
         drop(state);
         handover::encode(&handed)
     }
 
     fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
-        let builds = handover::decode(bytes)?;
-        let count = builds.len();
-        self.state()?.offered.extend(builds);
+        let received = handover::decode(bytes)?;
+        let count = received.len();
+        let mut state = self.state()?;
+        for (key, received) in received {
+            match received {
+                handover::Received::Build(offer) => {
+                    state.offered.insert(key, offer);
+                }
+                // A topology for a build offered before: the body built from it next takes it.
+                handover::Received::Topology(topology) => {
+                    if let Some(offer) = state.offered.get_mut(&key) {
+                        offer.topology = Some(topology);
+                    }
+                }
+            }
+        }
         Ok(count)
     }
 

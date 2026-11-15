@@ -227,7 +227,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
                 Ok(Some(id)) => {
                     state.doc.selection = Some(Selection::Feature(id));
                     state.scan.show_reference = true;
-                    state.viewport.camera.fit(bounds(&review.reference.points));
+                    state.viewport.camera.fit_framed(bounds(&review.reference.points));
                     state.scan.cached = Some((
                         state
                             .doc
@@ -262,7 +262,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
             match commit_fit(&mut state.doc, fitted.feature, scan) {
                 Ok(_) => {
                     state.scan.show_reference = false;
-                    state.viewport.camera.fit(state.doc.bounds());
+                    state.viewport.camera.fit_framed(state.doc.bounds());
                     state.note("Accepted fitted part", NoteKind::Ok);
                 }
                 Err(e) => state.scan.error = Some(e),

@@ -425,7 +425,7 @@ pub fn run(state: &mut AppState, action: Action) {
         Action::FitSelected => match state.doc.selection {
             Some(_) => {
                 let bounds = state.doc.bounds();
-                state.viewport.camera.fit(bounds);
+                state.viewport.camera.fit_framed(bounds);
             }
             None => state.note("Fit selected: select something to fit", NoteKind::Info),
         },

@@ -145,7 +145,7 @@ impl SolidDraftApp {
             plane.normal.y as f32,
             plane.normal.z as f32,
         ));
-        self.state.viewport.camera.fit(self.fit_bounds());
+        self.state.viewport.camera.fit_framed(self.fit_bounds());
     }
 
     /// What "zoom to fit" frames: the body, the open sketch, or with nothing
@@ -1225,7 +1225,7 @@ impl SolidDraftApp {
                 if let Some((lo, hi)) =
                     bounds.filter(|(lo, hi)| (*lo + *hi).is_finite() && (*hi - *lo).length().is_finite())
                 {
-                    self.state.viewport.camera.fit(Some((lo, hi)));
+                    self.state.viewport.camera.fit_framed(Some((lo, hi)));
                 } else if let Some(s) = self.state.sketch.as_mut() {
                     s.say("Fault coordinates cannot be displayed at this scale");
                 }
@@ -1304,7 +1304,7 @@ impl SolidDraftApp {
             }
             AppAction::ZoomFit => {
                 let bounds = self.fit_bounds();
-                self.state.viewport.camera.fit(bounds);
+                self.state.viewport.camera.fit_framed(bounds);
             }
             AppAction::SetDisplay(d) => self.state.active_viewport_mut().display = d,
             AppAction::SetPreset(p) => {
@@ -1406,7 +1406,7 @@ impl SolidDraftApp {
                 self.state.import_dialog = None;
                 self.state.scan = Default::default();
                 self.state.doc = crate::new_document();
-                self.state.viewport.camera.fit(None);
+                self.state.viewport.camera.fit_framed(None);
                 self.state.note("New part", NoteKind::Info);
             }
             AppAction::ImportStep(path) => {

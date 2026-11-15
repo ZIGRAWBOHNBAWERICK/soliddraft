@@ -267,24 +267,27 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     }
     let accent = srgb_to_linear(vec3<f32>(0.12, 0.37, 0.82));
     let red = srgb_to_linear(vec3<f32>(0.80, 0.24, 0.24));
-    // One preview look for every form: material a feature adds or reshapes is amber with
-    // dark edges, material it removes red (theme.rs PREVIEW_EDGE and PREVIEW_REMOVE_EDGE).
-    let amber = srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16));
     let selected_body = (body.flags & 1u) != 0u;
     let ghost = (body.flags & 2u) != 0u;
     let preview = (body.flags & 4u) != 0u;
     let removes = (body.flags & 8u) != 0u;
 
+    // One preview look for every form: material a feature adds or reshapes is amber with
+    // dark edges, material it removes red (theme.rs PREVIEW_EDGE and PREVIEW_REMOVE_EDGE).
     let shade = body.shades[min(in.appearance, 63u)];
     var base = shade.base.rgb;
     let metallic = shade.params.x;
     let roughness = shade.params.y;
-    // A preview marks the faces its operation made (document.rs PREVIEW_MADE).
-    let made = preview && in.feature_id == 0xffffffffu;
     if (ghost && removes) {
         base = mix(base, red, 0.7);
-    } else if (ghost || made) {
-        base = mix(base, amber, 0.85);
+    } else if (ghost) {
+        base = mix(base, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)), 0.85);
+    }
+    if (preview) {
+        // The faces the operation made (document.rs PREVIEW_MADE) turn amber, even when
+        // picked; the rest of the previewed body keeps main's faint tint.
+        let made_face = in.feature_id == 0xffffffffu;
+        base = mix(base, select(accent, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)), made_face), select(0.10, 0.85, made_face));
     }
     var ao = 1.0;
     if (!ghost) {
@@ -295,22 +298,24 @@ fn face_colour(in: FaceOut) -> vec4<f32> {
     // Selection and hover sit on top of the tone-mapped colour.
     let feature_selected = globals.selected_feature != 0u && in.feature_id == globals.selected_feature && !ghost && !preview;
     let lit_accent = accent * (0.55 + 0.45 * max(dot(n, v), 0.0));
+    // A preview marks the faces its operation made (document.rs PREVIEW_MADE).
+    let made = preview && in.feature_id == 0xffffffffu;
     if (in.face_id != 0u && in.face_id == globals.selected_id) {
         color = mix(color, lit_accent, 0.55);
     } else if (selected_body) {
         // Lighter than a selected face, so a colour chosen for the body still shows.
         color = mix(color, lit_accent, 0.25);
+    } else if (made) {
+        color = mix(color, srgb_to_linear(vec3<f32>(0.96, 0.66, 0.16)) * (0.55 + 0.45 * max(dot(n, v), 0.0)), 0.3);
     } else if (feature_selected) {
         color = mix(color, lit_accent, 0.40);
     } else if (in.face_id != 0u && in.face_id == globals.hover_id) {
         color = mix(color, lit_accent, 0.22);
     }
     var alpha = shade.base.a;
-    if (ghost && removes) {
-        // Inside the part, so it shows through the faces in front of it.
-        alpha = 0.6;
-    } else if (ghost) {
-        alpha = 0.92;
+    if (ghost) {
+        // A removal sits inside the part, so it shows through the faces in front of it.
+        alpha = select(0.92, 0.6, removes);
     }
     return vec4<f32>(color * alpha, alpha);
 }

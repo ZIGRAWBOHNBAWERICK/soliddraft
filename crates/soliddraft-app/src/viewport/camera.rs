@@ -265,7 +265,22 @@ impl Camera {
         self.turn_to(name, yaw.to_degrees(), pitch.to_degrees());
     }
 
+    /// Frames `bounds` in the whole viewport, as an offscreen picture wants it. Kept as main
+    /// had it: the edit speed job compares a picture through this path with main's pixel
+    /// for pixel, and a release build folds this arithmetic differently once it changes.
     pub fn fit(&mut self, bounds: Option<(Vec3, Vec3)>) {
+        let (center, radius) = match bounds {
+            Some((lo, hi)) => ((lo + hi) / 2.0, ((hi - lo).length() / 2.0).max(1.0)),
+            None => (Vec3::ZERO, 60.0),
+        };
+        let distance = radius / (self.fov_y / 2.0).sin() * 1.12;
+        let (yaw, pitch) = self.goal.map(|g| (g.yaw, g.pitch)).unwrap_or((self.yaw, self.pitch));
+        self.goal = Some(Goal { yaw, pitch, target: center, distance });
+    }
+
+    /// Frames `bounds` in the band of the viewport that the overlays leave clear (see
+    /// [`Camera::set_framing`]), for the app's own viewport.
+    pub fn fit_framed(&mut self, bounds: Option<(Vec3, Vec3)>) {
         let (center, radius) = match bounds {
             Some((lo, hi)) => ((lo + hi) / 2.0, ((hi - lo).length() / 2.0).max(1.0)),
             None => (Vec3::ZERO, 60.0),
@@ -316,7 +331,7 @@ impl Camera {
         if let Some((bounds, goal)) = self.fitted
             && self.goal == Some(goal)
         {
-            self.fit(bounds);
+            self.fit_framed(bounds);
         }
     }
 
@@ -455,7 +470,7 @@ mod tests {
             if framed {
                 c.set_framing(framing);
             }
-            c.fit(Some(bounds));
+            c.fit_framed(Some(bounds));
             while c.tick(1.0 / 60.0) {}
             c
         };
@@ -483,17 +498,17 @@ mod tests {
         let bounds = Some((Vec3::splat(-20.0), Vec3::splat(20.0)));
         let framing = Framing { top: 8.0, bottom: 84.0, height: 600.0 };
         let mut early = Camera::default();
-        early.fit(bounds);
+        early.fit_framed(bounds);
         early.tick(1.0 / 60.0);
         early.set_framing(framing);
         while early.tick(1.0 / 60.0) {}
         let mut late = Camera::default();
         late.set_framing(framing);
-        late.fit(bounds);
+        late.fit_framed(bounds);
         while late.tick(1.0 / 60.0) {}
         assert!((early.target - late.target).length() < 1e-3 && (early.distance - late.distance).abs() < 1e-3);
         let landed = (early.target, early.distance);
-        early.fit(bounds);
+        early.fit_framed(bounds);
         assert!(!early.tick(1.0 / 60.0) || (early.target - landed.0).length() < 1e-3, "a second fit stays put");
         // Once a fit has landed a new framing leaves the view where the user sees it.
         early.set_framing(Framing { top: 60.0, ..framing });

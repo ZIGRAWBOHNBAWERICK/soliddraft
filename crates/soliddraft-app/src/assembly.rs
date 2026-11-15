@@ -194,7 +194,7 @@ impl AssemblySession {
     fn new(mut doc: AssemblyDocument, scene: Scene) -> AssemblySession {
         let fit_pending = true;
         let mut viewport = ViewportState::default();
-        viewport.camera.fit(None);
+        viewport.camera.fit_framed(None);
         let scene = Arc::new(Mutex::new(scene));
         doc.poll(POLL_BUDGET);
         AssemblySession {
@@ -268,7 +268,7 @@ impl AssemblySession {
         }
         drop(scene);
         if self.fit_pending && self.bounds().is_some() && !self.doc.is_loading() {
-            self.viewport.camera.fit(self.bounds());
+            self.viewport.camera.fit_framed(self.bounds());
             self.fit_pending = false;
         }
         // The fields follow the selection, and its placement after an undo or a move.
@@ -633,7 +633,7 @@ pub fn apply(state: &mut AppState, dock: &mut DockState<Tab>, action: AssemblyAc
         AssemblyAction::ZoomFit => {
             if let Some(s) = state.assembly.session.as_mut() {
                 let bounds = s.bounds();
-                s.viewport.camera.fit(bounds);
+                s.viewport.camera.fit_framed(bounds);
             }
         }
     }

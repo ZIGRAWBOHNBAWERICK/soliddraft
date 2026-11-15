@@ -188,7 +188,7 @@ fn loft_registry_command_opens_the_real_editor_builds_and_shows_a_plain_refusal(
             .state
             .viewport
             .camera
-            .fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+            .fit_framed(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
         ux_tools::settle(&mut app);
         ribbon::run_command(&mut app, "loft");
         ux_tools::settle(&mut app);
@@ -245,7 +245,7 @@ fn existing_loft_can_preview_and_commit_profile_and_mode_edits() {
             .state
             .viewport
             .camera
-            .fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+            .fit_framed(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
         ux_tools::settle(&mut app);
         assert_eq!(app.state().state.doc.rollback, None);
         ribbon::run_command(&mut app, "edit_feature");
@@ -295,7 +295,11 @@ fn three_section_smooth_loft_previews_and_commits_without_changing_the_allowance
     let mut doc = profiles();
     doc.selection = Some(Selection::Feature(doc.features[0].id));
     let mut app = ux_tools::launch(doc, ux_tools::STANDARD);
-    app.state_mut().state.viewport.camera.fit(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
+    app.state_mut()
+        .state
+        .viewport
+        .camera
+        .fit_framed(Some((glam::Vec3::new(-2.0, -2.0, 0.0), glam::Vec3::new(2.0, 2.0, 6.0))));
     ux_tools::settle(&mut app);
     case.run(&mut app, |case, app| {
         ribbon::run_command(app, "loft");

@@ -93,7 +93,7 @@ impl SolidDraftApp {
         #[cfg(target_arch = "wasm32")]
         crate::web::set_context(&cc.egui_ctx);
         let mut state = AppState::new(doc);
-        state.viewport.camera.fit(state.doc.bounds());
+        state.viewport.camera.fit_framed(state.doc.bounds());
         let view = crate::settings::view();
         let preset = automation.preset.unwrap_or(view.preset);
         state.viewport.preset = preset;
@@ -285,7 +285,7 @@ impl SolidDraftApp {
                 self.state.scan = Default::default();
                 self.state.doc = doc;
                 self.state.remember_revision();
-                self.state.viewport.camera.fit(crate::scan::document_bounds(&self.state.doc));
+                self.state.viewport.camera.fit_framed(crate::scan::document_bounds(&self.state.doc));
                 self.state.recent = file::recent();
                 let problems = self.state.doc.error_count() + self.state.doc.repair_count();
                 if std::mem::take(&mut self.state.drawing_after_open) {

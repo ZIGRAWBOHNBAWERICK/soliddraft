@@ -336,12 +336,27 @@ pub fn take_upload() -> Option<(String, Vec<u8>)> {
 thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_OPTIONS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Notes the selection the options bar drew and where it drew Details, for [`shown_options`].
+pub(crate) fn show_options(shown: serde_json::Value) {
+    SHOWN_OPTIONS.with_borrow_mut(|options| *options = shown.to_string());
+}
+
+/// What the options bar drew in the last frame, as JSON: the selected entity's title, or
+/// null, and the centre of the Details button, or null when it drew none. Empty when that
+/// frame drew no options bar. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_options() -> String {
+    SHOWN_OPTIONS.with_borrow(|options| options.clone())
 }
 
 /// Starts a frame with no Details panel drawn, until [`show_details`] notes one.
 pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
     SHOWN_PART_CHECK.with_borrow_mut(String::clear);
+    SHOWN_OPTIONS.with_borrow_mut(String::clear);
 }
 
 /// Notes the outcome the Part check window is drawing, for [`shown_part_check`].

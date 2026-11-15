@@ -179,13 +179,24 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("Active tool: {label}")));
         response.on_hover_text(&label);
 
+        let mut details_at = None;
         if state.doc.selection.is_some() || state.measure.open {
             let response = ui.button("Details");
             sheet_anchor = response.rect;
+            details_at = Some(response.rect.center());
             if response.clicked() {
                 state.options_details = !state.options_details;
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let selected =
+                state.doc.selection.and_then(|selection| state.doc.describe(selection)).map(|info| info.title);
+            let details = details_at.map(|at| serde_json::json!({ "x": at.x, "y": at.y }));
+            crate::web::show_options(serde_json::json!({ "selected": selected, "details": details }));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = details_at;
         egui::ScrollArea::horizontal()
             .id_salt(("options_contents", label, format!("{:?}", state.doc.selection)))
             .auto_shrink([false, true])

@@ -331,19 +331,21 @@ impl Values {
         Ok(())
     }
 
-    /// Lets go of the driving dimensions that sketch `feature` no longer has, as `features`
-    /// stand: a deleted dimension, or one turned into a reference, takes its drive and its
-    /// pinned name with it. Refuses while another value still reads one. Returns the
+    /// Lets go of the dimensions that sketch `feature` no longer has, as `features` stand:
+    /// a deleted dimension takes its drive and its pinned name with it. A dimension turned
+    /// into a reference keeps them, so that edit is still refused rather than dropping an
+    /// expression. Refuses while another value still reads a deleted one. Returns the
     /// dimensions let go of, with their pinned names.
     pub(crate) fn forget_dimensions(
         &mut self,
         feature: FeatureId,
         features: &[Feature],
     ) -> Result<Vec<(Input, Option<String>)>, String> {
-        let gone = |input: &Input| {
-            matches!(input, Input::Dimension { feature: f, .. } if *f == feature)
-                && params::read(features, input).is_none()
+        let sketch = match features.iter().find(|f| f.id == feature).map(|f| &f.kind) {
+            Some(FeatureKind::Sketch(sketch)) => &sketch.sketch,
+            _ => return Ok(Vec::new()),
         };
+        let gone = |input: &Input| matches!(input, Input::Dimension { feature: f, constraint } if *f == feature && sketch.constraint(*constraint).is_none());
         let mut lost: Vec<Input> = Vec::new();
         for input in self.bindings.iter().map(|b| &b.input).chain(self.names.iter().map(|p| &p.input)) {
             if gone(input) && !lost.contains(input) {

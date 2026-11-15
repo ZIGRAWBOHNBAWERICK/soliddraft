@@ -262,17 +262,6 @@ fn deleting_a_linked_dimension_takes_its_link_in_one_undo_step() {
 }
 
 #[test]
-fn a_linked_dimension_turned_reference_lets_go_of_its_link() {
-    let (mut doc, id, ids) = fixture();
-    doc.apply(link(id, ids.to_vec(), "Span", None)).unwrap();
-    let mut sketch = doc.feature(id).unwrap().sketch().unwrap().sketch.clone();
-    sketch.set_dimension_reference(ids[1], true).unwrap();
-    doc.apply(Command::EditSketch { id, sketch }).unwrap();
-    let links = soliddraft_app::sketch_values::links(doc.model(), id);
-    assert_eq!(links.keys().copied().collect::<Vec<_>>(), vec![ids[0]]);
-}
-
-#[test]
 fn a_dimension_another_value_reads_is_kept_with_the_reason() {
     let (mut doc, id, ids) = fixture();
     let table = doc.model().values_table();

@@ -14,10 +14,6 @@ use sha2::{Digest, Sha256};
 
 use crate::*;
 
-/// The deterministic work an explicit field moment, stand-in or export request may use
-/// when its caller has set no allowance: just under the application's 20,000,000-unit limit.
-pub(crate) const FIELD_ACTION_WORK: u64 = 19_999_999;
-
 /// The label format Catallax writes into a certified field STL's header.
 const STL_LABEL: &str = "catallax-print-stl/1";
 
@@ -64,14 +60,10 @@ fn run<T>(operation: &str, action: impl FnOnce(&mut Decider) -> Result<T, Refusa
     result.map_err(|e| query_error(operation, e))
 }
 
-/// Runs one action on its caller's allowance, or on `limit` when the caller has none,
-/// and returns the work it used. A nested action never gets a fresh allowance, and a
-/// value computed after the allowance ran out is discarded.
-pub(crate) fn allowance<T>(
-    operation: &str,
-    limit: u64,
-    action: impl FnOnce() -> KernelResult<T>,
-) -> KernelResult<(T, u64)> {
+/// Runs one action on its caller's allowance, or on the application's [`APP_REQUEST_WORK`]
+/// when the caller has none, and returns the work it used. A nested action never gets a
+/// fresh allowance, and a value computed after the allowance ran out is discarded.
+pub(crate) fn allowance<T>(operation: &str, action: impl FnOnce() -> KernelResult<T>) -> KernelResult<(T, u64)> {
     let exhausted =
         || query_error(operation, Refusal::new("numbers.operation-budget", "operation work allowance exhausted"));
     if operation_budget_active() {
@@ -83,7 +75,7 @@ pub(crate) fn allowance<T>(
         }
         return result.map(|value| (value, after.used - before));
     }
-    let (result, work) = with_operation_budget(limit, action);
+    let (result, work) = with_operation_budget(APP_REQUEST_WORK, action);
     if work.exhausted {
         return Err(exhausted());
     }
@@ -93,12 +85,8 @@ pub(crate) fn allowance<T>(
 /// Runs one application export like [`allowance`]. A caller's allowance above the
 /// application's limit does not lift it: once the whole request has used more, the output
 /// is refused and the work stays spent.
-pub(crate) fn export_allowance<T>(
-    operation: &str,
-    limit: u64,
-    action: impl FnOnce() -> KernelResult<T>,
-) -> KernelResult<(T, u64)> {
-    let answer = allowance(operation, limit, action)?;
+pub(crate) fn export_allowance<T>(operation: &str, action: impl FnOnce() -> KernelResult<T>) -> KernelResult<(T, u64)> {
+    let answer = allowance(operation, action)?;
     if current_operation_work().used > APP_REQUEST_WORK {
         return Err(query_error(
             operation,
@@ -340,7 +328,7 @@ impl Field {
         let accuracy =
             accuracy.map(|mm| native::number(mm, "print accuracy").map(|n| n.value().clone())).transpose()?;
         let operation = "export_field_stl";
-        let ((bytes, output), work) = export_allowance(operation, FIELD_ACTION_WORK, || {
+        let ((bytes, output), work) = export_allowance(operation, || {
             run(operation, |dec| self.stage.export(accuracy.clone(), dec)?.labelled_stl())
         })?;
         // Read the encoded bound so the JSON report describes the file exactly.
@@ -373,7 +361,7 @@ impl Field {
     pub(super) fn mass(&self, accuracy: &FieldMassAccuracy) -> KernelResult<FieldMass> {
         let requested = requested(accuracy)?;
         let operation = "field_mass";
-        let (measured, work) = allowance(operation, FIELD_ACTION_WORK, || {
+        let (measured, work) = allowance(operation, || {
             run(operation, |dec| mass::properties(self.stage.plan(), &requested, &mass::Options::default(), dec))
         })?;
         Ok(report_mass(&measured, &requested, work))
@@ -386,7 +374,7 @@ impl Field {
         let requested = requested(accuracy)?;
         let operation = "export_field_stand_in";
         let recipe = self.stage.recipe();
-        let (proof, work) = export_allowance(operation, FIELD_ACTION_WORK, || {
+        let (proof, work) = export_allowance(operation, || {
             run(operation, |dec| {
                 let mut built = catallax_features::evaluate(recipe, dec).map_err(|e| match e {
                     catallax_features::BuildError::Geometry { refusal, .. } => refusal,
@@ -487,5 +475,27 @@ fn preview_mesh(mesh: &printing::Mesh, face: FaceId) -> Mesh {
         unavailable_controls: vec![],
         unproved: true,
         bounded: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use catallax_numbers::OperationAllowance;
+
+    fn spend(units: u64) -> impl FnOnce() -> KernelResult<()> {
+        move || OperationAllowance::reserve(units).map(|_| ()).map_err(|e| KernelError::Unavailable(e.to_string()))
+    }
+
+    #[test]
+    fn a_direct_field_action_runs_on_the_application_allowance() {
+        // Manual export and the field tools call in with no allowance of their own.
+        assert!(!operation_budget_active());
+        let over_target = APP_WORK_TARGET + 1;
+        assert_eq!(allowance("field_mass", spend(over_target)).unwrap().1, over_target);
+        assert_eq!(export_allowance("export_field_stl", spend(over_target)).unwrap().1, over_target);
+        assert_eq!(export_allowance("export_field_stl", spend(APP_REQUEST_WORK)).unwrap().1, APP_REQUEST_WORK);
+        let refused = export_allowance("export_field_stand_in", spend(APP_REQUEST_WORK + 1)).unwrap_err();
+        assert!(refused.to_string().contains("numbers.operation-budget"), "{refused}");
     }
 }

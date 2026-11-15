@@ -8,7 +8,7 @@ use serde_json::json;
 use soliddraft_document::DocKind;
 use soliddraft_exchange::{Export, Format, Report};
 use soliddraft_kernel_api::Kernel;
-use soliddraft_kernel_catallax::{APP_REQUEST_WORK, CatallaxKernel, RequestWork};
+use soliddraft_kernel_catallax::{APP_REQUEST_WORK, APP_WORK_TARGET, CatallaxKernel, RequestWork};
 use soliddraft_model::Document;
 use soliddraft_tessellation::ExportTolerance;
 
@@ -42,9 +42,10 @@ whose proven moments lie inside the field's, never the field's boundary.
               settings and exact-geometry exports keep their own tolerances
   --stand-in  a .step file for a field part's mass stand-in
   --max-work  lower the request's deterministic work allowance from the
-              application's 20000000 units. The whole request, opening and
+              application's 100000000 units. The whole request, opening and
               rebuilding the part included, runs on that one allowance and
               writes nothing when it runs out. --json reports the work used
+              and whether it passed the 20000000-unit target
   --json      print one JSON export report per file
 ";
 
@@ -75,9 +76,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 let value = it.next().ok_or("--max-work needs a number of units")?;
                 max_work = value.parse().map_err(|_| format!("--max-work {value}: give a whole number of units"))?;
                 if max_work > APP_REQUEST_WORK {
-                    return Err(format!(
-                        "--max-work {value}: above the 20M application limit of {APP_REQUEST_WORK} units"
-                    ));
+                    return Err(format!("--max-work {value}: above the application limit of {APP_REQUEST_WORK} units"));
                 }
             }
             "--out" => {
@@ -220,7 +219,10 @@ fn write(path: &Path, out: &Export) -> Result<(), String> {
 
 fn report(path: &Path, format: Format, out: &Export, json: bool, work: RequestWork) {
     if json {
-        let request_work = json!({"used": work.used, "limit": work.limit, "exhausted": work.exhausted});
+        let request_work = json!({
+            "used": work.used, "limit": work.limit, "exhausted": work.exhausted,
+            "target": APP_WORK_TARGET, "over_target": work.used > APP_WORK_TARGET,
+        });
         println!(
             "{}",
             json!({
@@ -254,12 +256,12 @@ mod tests {
         let a = parse(&args("part.dwprt --stand-in mass.stp --out part.stl")).unwrap();
         assert_eq!(a.outputs.iter().map(|(_, f)| *f).collect::<Vec<_>>(), [Format::StandIn, Format::Stl]);
         assert!(parse(&args("part.dwprt --stand-in mass.stl")).unwrap_err().contains(".step or .stp"));
-        assert_eq!(parse(&args("part.dwprt --out p.stl")).unwrap().max_work, 20_000_000);
-        assert_eq!(parse(&args("part.dwprt --out p.stl --max-work 19999999")).unwrap().max_work, 19_999_999);
+        assert_eq!(parse(&args("part.dwprt --out p.stl")).unwrap().max_work, 100_000_000);
         assert_eq!(parse(&args("part.dwprt --out p.stl --max-work 20000000")).unwrap().max_work, 20_000_000);
+        assert_eq!(parse(&args("part.dwprt --out p.stl --max-work 100000000")).unwrap().max_work, 100_000_000);
         assert!(parse(&args("part.dwprt --out p.stl --max-work lots")).unwrap_err().contains("whole number"));
-        let above = parse(&args("part.dwprt --out p.stl --max-work 20000001")).unwrap_err();
-        assert!(above.contains("20M application limit"));
+        let above = parse(&args("part.dwprt --out p.stl --max-work 100000001")).unwrap_err();
+        assert!(above.contains("above the application limit of 100000000 units"), "{above}");
     }
 
     #[test]

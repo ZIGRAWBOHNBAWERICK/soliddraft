@@ -608,7 +608,7 @@
       ],
       "catallax_revision": "76cdf97f3e85d22ea74868b77d849498ebdfcf1c",
       "route": "MCP document commands -> terminal Catallax field stage -> certified labelled STL",
-      "supported_limits": "One terminal cubic lattice in the part frame; S1 uses cell size 5 mm, radius 1 to 1.5 mm, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Drawings remain deferred; graded radii and field mass are in the graded-fields scenario. Each export is one whole request within the 20M application limit, with fixed output hashes; a zero allowance or one above the limit refuses and leaves the destination unchanged.",
+      "supported_limits": "One terminal cubic lattice in the part frame; S1 uses cell size 5 mm, radius 1 to 1.5 mm, accuracy 0.1 mm, minimum detail 0.5 mm and the default caps. Drawings remain deferred; graded radii and field mass are in the graded-fields scenario. Each export is one whole request within the application limit, with fixed output hashes; a zero allowance or one above the limit refuses and leaves the destination unchanged.",
       "evidence": "result.json and commands/NNNN/{command.json,kernel.json,viewport.png,part.stl,export-stl-oracle.stdout}"
     },
     {

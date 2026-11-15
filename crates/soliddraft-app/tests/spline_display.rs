@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use soliddraft_app::{app_tools::AppTools, state::AppState};
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+use soliddraft_kernel_catallax::{APP_WORK_TARGET, with_request_allowance};
 
 fn edge_at(state: &AppState, wanted: soliddraft_kernel_api::Vec3) -> String {
     let body = state.doc.model().body().unwrap();
@@ -55,7 +55,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
     let caller = Caller::Mcp { client: "spline-display-test".into() };
     for step in scenario["steps"].as_array().unwrap().iter().take(3) {
         let name = step["tool"].as_str().unwrap();
-        let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
+        let (out, work) = with_request_allowance(APP_WORK_TARGET, || {
             call_checked(&mut AppTools { state: &mut state }, name, step["arguments"].clone(), &caller)
         });
         assert!(!out.is_error && !work.exhausted, "{name}: {}; {work:?}", out.content);
@@ -76,7 +76,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
     assert_eq!(arguments["edges"], json!([selected]), "the scenario names the exact intended rail");
     arguments["edges"] = json!([selected]);
     kernel.take_diagnostics().unwrap();
-    let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
+    let (out, work) = with_request_allowance(APP_WORK_TARGET, || {
         call_checked(&mut AppTools { state: &mut state }, "fillet", arguments, &caller)
     });
     eprintln!("F04 display: {work:?}; {}", out.content);
@@ -95,7 +95,7 @@ fn check_fillet_display(source: &str, rail: soliddraft_kernel_api::Vec3, bounded
         assert!(!state.doc.features.iter().any(|feature| feature.name == "Fillet1"));
         assert!(!state.doc.proof_state().answered_within_bound);
     } else {
-        assert!(!out.is_error && !work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
+        assert!(!out.is_error && !work.exhausted && work.used <= APP_WORK_TARGET, "{}; {work:?}", out.content);
         assert_ne!(state.doc.model().to_bytes().unwrap(), before);
         assert_eq!(state.doc.undo_depth(), undo + 1);
         let feature = state.doc.features.last().unwrap().id;

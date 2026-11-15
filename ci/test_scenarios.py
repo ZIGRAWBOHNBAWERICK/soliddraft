@@ -448,7 +448,7 @@ class SavedGeometry(unittest.TestCase):
                     "measurement": {"volume_mm3": 1000, "area_mm2": 600}}
         report = {"kind": "step", "solids": 1, "faces": 6, "within_tolerance": True}
         for request, passed in (({"used": 7, "limit": scenarios.APP_REQUEST_WORK, "exhausted": False}, True),
-                                ({"used": 7, "limit": 100_000_000, "exhausted": False}, False), (None, False)):
+                                ({"used": 7, "limit": 20_000_000, "exhausted": False}, False), (None, False)):
             with tempfile.TemporaryDirectory() as temp:
                 directory = pathlib.Path(temp)
                 (directory / "part.step").write_bytes(b"STEP bytes")

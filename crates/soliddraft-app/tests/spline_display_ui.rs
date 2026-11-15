@@ -7,7 +7,7 @@ use egui_kittest::kittest::Queryable;
 use serde_json::Value;
 use soliddraft_app::app_tools::AppTools;
 use soliddraft_assistant::{Caller, tools::call_checked};
-use soliddraft_kernel_catallax::{APP_REQUEST_WORK, with_request_allowance};
+use soliddraft_kernel_catallax::{APP_WORK_TARGET, with_request_allowance};
 
 #[test]
 fn native_scaled_spline_fillet_shows_its_numbered_refusal_and_work_in_edit_suite() {
@@ -42,7 +42,7 @@ fn check_display(name: &str, source: &str, bounded: bool) {
             app.run_steps(8);
             let before = app.state().state.doc.model().to_bytes().unwrap();
             let undo = app.state().state.doc.undo_depth();
-            let (out, work) = with_request_allowance(APP_REQUEST_WORK, || {
+            let (out, work) = with_request_allowance(APP_WORK_TARGET, || {
                 call_checked(
                     &mut AppTools { state: &mut app.state_mut().state },
                     "fillet",
@@ -53,7 +53,7 @@ fn check_display(name: &str, source: &str, bounded: bool) {
             eprintln!("{layout:?}: {work:?}; {}", out.content);
             app.run_steps(8);
             if bounded {
-                assert!(!out.is_error && !work.exhausted && work.used <= APP_REQUEST_WORK, "{}; {work:?}", out.content);
+                assert!(!out.is_error && !work.exhausted && work.used <= APP_WORK_TARGET, "{}; {work:?}", out.content);
                 assert_ne!(app.state().state.doc.model().to_bytes().unwrap(), before);
                 assert_eq!(app.state().state.doc.undo_depth(), undo + 1);
                 let doc = &app.state().state.doc;

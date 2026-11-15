@@ -161,12 +161,12 @@ fn an_allowance_above_the_application_limit_is_refused_before_the_part_opens() {
     let part = dir.join("never-opened.dwprt");
     let output = dir.join("part.stl");
     let out = Process::new(env!("CARGO_BIN_EXE_soliddraft"))
-        .args(["export", part.to_str().unwrap(), "--out", output.to_str().unwrap(), "--max-work", "20000001"])
+        .args(["export", part.to_str().unwrap(), "--out", output.to_str().unwrap(), "--max-work", "100000001"])
         .output()
         .unwrap();
     assert!(!out.status.success());
     let error = String::from_utf8_lossy(&out.stderr);
-    assert!(error.contains("20M application limit"), "{error}");
+    assert!(error.contains("above the application limit of 100000000 units"), "{error}");
     assert!(!error.contains("never-opened"), "{error}");
     assert!(!output.exists());
     std::fs::remove_dir_all(dir).unwrap();
@@ -216,9 +216,11 @@ fn bracket_step_and_print_batch_fits_the_shared_request_allowance() {
         String::from_utf8(output.stdout).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
     assert_eq!(reports.len(), 4);
     for report in reports {
-        assert_eq!(report["request_work"]["limit"], 20_000_000);
+        assert_eq!(report["request_work"]["limit"], 100_000_000);
         assert_eq!(report["request_work"]["exhausted"], false);
         assert!(report["request_work"]["used"].as_u64().unwrap() <= 20_000_000);
+        assert_eq!(report["request_work"]["target"], 20_000_000);
+        assert_eq!(report["request_work"]["over_target"], false);
         assert!(std::path::Path::new(report["file"].as_str().unwrap()).is_file());
         if report["format"] == "step" {
             assert_eq!(report["report"]["within_tolerance"], true);

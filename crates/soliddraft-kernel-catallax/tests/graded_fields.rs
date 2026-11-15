@@ -561,22 +561,23 @@ fn a_zero_allowance_refuses_each_field_action_with_the_operation_budget() {
 #[test]
 fn field_exports_hold_the_application_limit_inside_a_larger_allowance() {
     use catallax_numbers::OperationAllowance;
+    use soliddraft_kernel_catallax::APP_REQUEST_WORK;
 
     let k = CatallaxKernel::new();
     let body = build(&k, &d("D0", 10.0, 1.0, 2.0), Cycle(0), 0.1).unwrap().body;
     let accuracy = FieldMassAccuracy::default();
-    let spent = || OperationAllowance::reserve(APP_LIMIT + 1).unwrap();
-    let (export, work) = with_operation_budget(5 * APP_LIMIT, || {
+    let spent = || OperationAllowance::reserve(APP_REQUEST_WORK + 1).unwrap();
+    let (export, work) = with_operation_budget(5 * APP_REQUEST_WORK, || {
         spent();
         k.export_field_stl(body).map(|_| ())
     });
     assert!(export.unwrap_err().to_string().contains("numbers.operation-budget") && !work.exhausted);
-    let (stand_in, work) = with_operation_budget(5 * APP_LIMIT, || {
+    let (stand_in, work) = with_operation_budget(5 * APP_REQUEST_WORK, || {
         spent();
         k.export_field_stand_in(body, &accuracy).map(|_| ())
     });
     assert!(stand_in.unwrap_err().to_string().contains("numbers.operation-budget") && !work.exhausted);
-    let (mass, _) = with_operation_budget(5 * APP_LIMIT, || {
+    let (mass, _) = with_operation_budget(5 * APP_REQUEST_WORK, || {
         spent();
         k.field_mass(body, &accuracy)
     });

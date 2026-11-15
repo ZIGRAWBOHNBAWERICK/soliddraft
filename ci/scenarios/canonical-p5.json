@@ -190,6 +190,7 @@
         {
           "format": "stl",
           "attempt": "requested",
+          "max_work": 20000000,
           "refused": "numbers.operation-budget",
           "sentinel": "previous requested STL"
         },

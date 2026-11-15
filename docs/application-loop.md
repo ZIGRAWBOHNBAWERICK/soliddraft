@@ -313,8 +313,10 @@ To collect the same evidence from another agent, start
 `soliddraft mcp --bundle /tmp/new-agent-run`. A command's files appear after its
 reply: the bundle writes them on `scenario_evidence`, before the next request other
 than `scenario_display`, or when the session ends. `--max-work N` sets its per-call
-kernel allowance, 20,000,000 units by default. A STEP, field STL or stand-in export
-stops at 20,000,000 whatever `N` is. View, drawing and screenshot logging
+kernel allowance, 100,000,000 units by default. A STEP, field STL or stand-in export
+stops at 100,000,000 whatever `N` is. Until the speed phase that limit is five times
+the 20,000,000-unit target: the bundle marks each call's work `over_target` when it
+uses more. View, drawing and screenshot logging
 impose no work allowance. Normal MCP sessions without `--bundle` keep their existing
 kernel behavior and do not collect kernel diagnostic data, though a STEP or field
 export still stops at the application limit.

@@ -66,7 +66,7 @@ impl CatallaxKernel {
         } else {
             0
         }));
-        lattice::export_allowance("print_mesh", lattice::FIELD_ACTION_WORK, || {
+        lattice::export_allowance("print_mesh", || {
             solid
                 .print
                 .get(key, || self.qualified_print_within_allowance(solid.clone(), params, tolerance))

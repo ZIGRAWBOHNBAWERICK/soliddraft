@@ -270,21 +270,32 @@ fn unsnapped_flange(via_reference_plane: bool) -> soliddraft_model::Document {
     soliddraft_model::Document::from_part_json(&source.to_string(), soliddraft_app::kernel()).unwrap()
 }
 
+/// Every feature built, so the body shown includes the flange. Under the former 20M cap
+/// the flange's union ran out of work and the plate alone was shown.
+fn assert_built(part: &soliddraft_model::Document) {
+    for feature in part.features() {
+        assert_eq!(part.status(feature.id), Some(&soliddraft_model::FeatureStatus::Ok), "{}", feature.name);
+    }
+}
+
 #[test]
 fn an_exact_face_attachment_previews_the_unsnapped_flange() {
     let part = unsnapped_flange(false);
+    assert_built(&part);
     let (kernel, body) = (part.kernel(), part.body().unwrap());
     let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
     let shown = kernel.preview(body, &params).unwrap();
-    assert!(shown.unproved, "exact attachment no longer needs the certified fallback");
+    // The flange shows either way; the early display is what an exact attachment adds.
     assert!(!shown.indices.is_empty());
     assert!(!kernel.preview_edges(body, &params).unwrap().is_empty());
+    assert!(shown.unproved, "exact attachment no longer needs the certified fallback");
 }
 
 #[test]
 fn a_refused_preview_shows_the_certified_mesh() {
     // A separate reference plane still uses the rounded sketch frame.
     let part = unsnapped_flange(true);
+    assert_built(&part);
     let (kernel, body) = (part.kernel(), part.body().unwrap());
     let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
     let shown = kernel.preview(body, &params).unwrap();

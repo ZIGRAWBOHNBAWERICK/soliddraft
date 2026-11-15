@@ -57,7 +57,7 @@ pub use materials::{
 };
 pub use reference::{
     Candidate, EdgeFingerprint, EdgeRef, FaceFingerprint, FaceRef, Generator, NamedFace, NamingError, ReferenceSlot,
-    RepairNeeded, RepairReason, VertexRef,
+    RepairNeeded, RepairReason, VertexRef, rewrite_face_refs,
 };
 pub use value_expr::{Expression, ValueTable};
 

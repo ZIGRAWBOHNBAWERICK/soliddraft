@@ -329,20 +329,9 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                 .show(ui, |ui| {
                     ui.set_width(width - 16.0);
                     ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
-                    // One close control: an X at the sheet's corner.
-                    let corner = ui.max_rect().right_top();
-                    let close = ui.put(
-                        egui::Rect::from_min_size(corner + vec2(-24.0, 0.0), vec2(24.0, 24.0)),
-                        egui::Button::new("").frame(false),
-                    );
-                    close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close options"));
-                    icons::paint(
-                        ui.painter(),
-                        Icon::Close,
-                        close.rect.shrink(5.0),
-                        if close.hovered() { theme::ink() } else { theme::muted() },
-                    );
-                    if close.on_hover_text("Close options (Esc)").clicked() {
+                    // The sheet's one close control. The selection's own Clear X hides
+                    // in here (properties_in_sheet).
+                    if ui.button("Close options").clicked() {
                         state.options_details = false;
                     }
                     state.properties_in_sheet = true;

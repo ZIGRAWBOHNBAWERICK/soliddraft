@@ -281,6 +281,12 @@ impl Camera {
     /// Frames `bounds` in the band of the viewport that the overlays leave clear (see
     /// [`Camera::set_framing`]), for the app's own viewport.
     pub fn fit_framed(&mut self, bounds: Option<(Vec3, Vec3)>) {
+        // With nothing to show there is nothing to keep clear of the bands: an empty
+        // document keeps the view a plain fit gives it.
+        if bounds.is_none() {
+            self.fitted = None;
+            return self.fit(None);
+        }
         let (center, radius) = match bounds {
             Some((lo, hi)) => ((lo + hi) / 2.0, ((hi - lo).length() / 2.0).max(1.0)),
             None => (Vec3::ZERO, 60.0),

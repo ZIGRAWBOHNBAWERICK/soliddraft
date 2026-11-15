@@ -909,8 +909,11 @@ fn build(
         questions.push(json!({"format":"catallax-question/1", "source":"recipe", "problem":problem}));
     }
     let key = handover::key(&converted.recipe);
-    if let Some(offer) = offered.get(&key) {
-        return Ok((AppBody::adopted(offer.built.clone()), converted.steps, key, offer.topology.clone()));
+    // An offer whose bytes cannot be read is passed over; the build is evaluated instead.
+    if let Some(offer) = offered.get(&key)
+        && let Ok(built) = offer.built()
+    {
+        return Ok((AppBody::adopted(built), converted.steps, key, offer.topology.clone()));
     }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.

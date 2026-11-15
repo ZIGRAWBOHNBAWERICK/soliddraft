@@ -12,6 +12,11 @@ let queue = [];
 let draining = false;
 let dead = false;
 
+// A browser check that follows its jobs asks for these notes with { trace: true }.
+function trace(job, stage) {
+  if (job.trace) self.postMessage({ trace: { stage, id: job.id, at: Date.now() } });
+}
+
 self.onmessage = async (event) => {
   const message = event.data;
   if (message.init) {
@@ -28,6 +33,7 @@ self.onmessage = async (event) => {
     schedule();
     return;
   }
+  trace(message, `worker received; ${glue ? 'ready' : 'starting'}, ${draining ? 'busy' : 'idle'}, ${dead ? 'dead' : 'alive'}, ${queue.length} queued`);
   queue.push(message);
   schedule();
 };
@@ -51,6 +57,7 @@ function drain() {
   }
   const job = kept.shift();
   queue = kept;
+  trace(job, 'worker started');
   let answer;
   try {
     answer = glue.kernel_worker_run(job.header, job.part);
@@ -61,6 +68,7 @@ function drain() {
     self.close();
     return;
   }
+  trace(job, 'worker replied');
   self.postMessage({ id: job.id, answer });
   draining = false;
   schedule();

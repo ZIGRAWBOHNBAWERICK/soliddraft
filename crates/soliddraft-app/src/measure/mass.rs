@@ -64,6 +64,11 @@ impl Request {
     fn current(self, doc: &Document) -> bool {
         Self::of(doc, self.feature) == Some(self)
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn describe(self) -> String {
+        format!("doc {:?} rev {} feature {} body {:?}", self.document, self.revision, self.feature, self.body)
+    }
 }
 
 /// Properties for the cache to keep, or `None` when the kernel keeps them itself.
@@ -72,6 +77,24 @@ type Measured = Result<Option<MassProperties>, String>;
 struct Pending {
     request: Request,
     answer: mpsc::Receiver<Measured>,
+    /// The kernel worker's job number, for its trace.
+    #[cfg(target_arch = "wasm32")]
+    id: u64,
+}
+
+impl Pending {
+    /// Notes this request's step in the browser check's trace.
+    fn trace(&self, stage: &str, doc: &Document) {
+        #[cfg(target_arch = "wasm32")]
+        crate::kernel_worker::trace(stage, self.id, format!("asked {} now {}", self.request.describe(), describe(doc)));
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = (stage, doc);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn describe(doc: &Document) -> String {
+    format!("doc {:?} rev {} proved {}", doc.instance(), doc.revision(), doc.proof_state().current_proved_display())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -128,9 +151,15 @@ pub(crate) struct State {
 impl State {
     /// Starts a measurement without waiting for it on the interface thread.
     pub(crate) fn request(&mut self, doc: &Document, feature: FeatureId, ctx: &egui::Context) -> Result<(), String> {
+        #[cfg(target_arch = "wasm32")]
+        if Request::of(doc, feature).is_none() {
+            crate::kernel_worker::trace("not sent: no request", 0, format!("feature {feature} {}", describe(doc)));
+        }
         let request = Request::of(doc, feature).ok_or("Select a solid feature with measurable properties")?;
         self.failure = None;
         if cached(doc, request.body).is_some() {
+            #[cfg(target_arch = "wasm32")]
+            crate::kernel_worker::trace("not sent: cached", 0, request.describe());
             self.pending = None;
             #[cfg(not(target_arch = "wasm32"))]
             if let Some(worker) = &self.worker {
@@ -138,7 +167,8 @@ impl State {
             }
             return Ok(());
         }
-        if self.pending.as_ref().is_some_and(|pending| pending.request == request) {
+        if let Some(pending) = self.pending.as_ref().filter(|pending| pending.request == request) {
+            pending.trace("not sent: already pending", doc);
             return Ok(());
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -178,13 +208,15 @@ impl State {
                 feature: soliddraft_model::FeatureId(u32::try_from(feature).map_err(|_| "No such feature")?),
             };
             let (sender, answer) = mpsc::channel();
-            crate::kernel_worker::submit(part, &job, ctx, move |result| {
+            let id = crate::kernel_worker::submit(part, &job, ctx, move |result| {
                 // Kept only once `poll` finds the request still current.
                 let _ = sender.send(result.and_then(|value| {
                     serde_json::from_value::<MassProperties>(value).map(Some).map_err(|error| error.to_string())
                 }));
             })?;
-            self.pending = Some(Pending { request, answer });
+            let pending = Pending { request, answer, id };
+            pending.trace("enqueued", doc);
+            self.pending = Some(pending);
             Ok(())
         }
     }
@@ -193,6 +225,7 @@ impl State {
     pub(crate) fn poll(&mut self, doc: &Document) -> Option<String> {
         let pending = self.pending.as_ref()?;
         if !pending.request.current(doc) {
+            pending.trace("dropped: part changed before the answer", doc);
             self.pending = None;
             self.failure = None;
             #[cfg(not(target_arch = "wasm32"))]
@@ -207,6 +240,7 @@ impl State {
             Err(mpsc::TryRecvError::Disconnected) => Err("The measurement stopped. Try again.".into()),
         };
         let request = pending.request;
+        pending.trace(if result.is_ok() { "accepted" } else { "accepted failure" }, doc);
         self.pending = None;
         if !request.current(doc) {
             return None;

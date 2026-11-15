@@ -95,7 +95,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::submit;
+pub use browser::{submit, trace};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -187,6 +187,10 @@ mod browser {
     }
 
     fn received(shared: &mut Shared, data: &JsValue) {
+        if let Some(id) = get(data, "id").as_f64() {
+            let kind = ["answer", "fatal", "superseded"].into_iter().find(|key| !get(data, key).is_undefined());
+            trace("page received", id as u64, kind.unwrap_or("other").into());
+        }
         if let Some(panic) = get(data, "panic").as_string() {
             shared.panic = Some(panic);
             return;
@@ -226,7 +230,7 @@ mod browser {
         job: &Job,
         ctx: &egui::Context,
         answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         CLIENT.with_borrow_mut(|client| {
             if client.as_ref().is_none_or(|client| client.shared.borrow().stopped) {
                 // Dropping the stopped client here, outside its own handlers, ends it.
@@ -241,13 +245,37 @@ mod browser {
             set(&message, "slot", &job.slot().into());
             set(&message, "header", &header.into());
             set(&message, "part", &bytes);
+            if tracing() {
+                set(&message, "trace", &true.into());
+            }
             client
                 .worker
                 .post_message_with_transfer(&message, &js_sys::Array::of1(&bytes.buffer()))
                 .map_err(|error| format!("The kernel worker did not take the job: {error:?}"))?;
             client.shared.borrow_mut().waiting.insert(id, (Box::new(answered), ctx.clone()));
-            Ok(())
+            Ok(id)
         })
+    }
+
+    /// The array a browser check sets as `sdKernelTrace` to follow each job, if any.
+    fn trace_list() -> Option<js_sys::Array> {
+        get(&js_sys::global(), "sdKernelTrace").dyn_into::<js_sys::Array>().ok()
+    }
+
+    fn tracing() -> bool {
+        trace_list().is_some()
+    }
+
+    /// Notes one step of job `id` in the page's `sdKernelTrace`, when a check set one.
+    pub fn trace(stage: &str, id: u64, detail: String) {
+        if let Some(list) = trace_list() {
+            let entry = js_sys::Object::new();
+            set(&entry, "stage", &stage.into());
+            set(&entry, "id", &(id as f64).into());
+            set(&entry, "detail", &detail.into());
+            set(&entry, "at", &js_sys::Date::now().into());
+            list.push(&entry);
+        }
     }
 
     /// The worker's entry: runs one job on this worker's kernel and answers as JSON.

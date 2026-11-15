@@ -50,6 +50,8 @@ await page.eval(() => {
       });
     }
   };
+  // Each kernel job's steps on the page; the worker's arrive among kernelAnswers.
+  window.sdKernelTrace = [];
   // The open document's feature count, from the page's own feedback events.
   window.featureCount = null;
   document.addEventListener('soliddraft-feedback', event => {
@@ -70,7 +72,11 @@ async function answered(count, what) {
     if (answers.length >= count) return answers[count - 1];
     await page.wait(100);
   }
-  throw new Error(`No kernel worker answer for ${what}`);
+  const trace = await page.eval(() => [
+    ...window.sdKernelTrace,
+    ...window.kernelAnswers.map(message => message.trace || { ...message, at: Math.round(performance.timeOrigin + message.at) }),
+  ]);
+  throw new Error(`No kernel worker answer for ${what}. Trace: ${JSON.stringify(trace)}`);
 }
 async function features(count, what) {
   let now = null;

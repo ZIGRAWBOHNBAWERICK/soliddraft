@@ -173,8 +173,26 @@ pub struct RequestWork {
 /// Runs a whole request on one deterministic allowance that every kernel call in it
 /// shares on this thread, with no fresh allowance for a nested call.
 pub fn with_request_allowance<T>(limit: u64, run: impl FnOnce() -> T) -> (T, RequestWork) {
+    struct Restore(Option<u64>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            REQUEST_LIMIT.set(self.0);
+        }
+    }
+    let _restore = Restore(REQUEST_LIMIT.replace(Some(limit)));
     let (value, work) = with_operation_budget(limit, run);
     (value, RequestWork { used: work.used, limit, exhausted: work.exhausted })
+}
+
+thread_local! {
+    static REQUEST_LIMIT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// The allowance of the request running on this thread, for a refusal to name: the
+/// caller's when it set one through [`with_request_allowance`], otherwise the
+/// application's.
+pub(crate) fn request_limit() -> u64 {
+    REQUEST_LIMIT.get().unwrap_or(APP_REQUEST_WORK)
 }
 
 #[cfg(test)]
@@ -235,6 +253,16 @@ mod tests {
         assert_eq!(calls[1]["status"], "answered");
         assert_eq!(calls[1]["work"]["used"], APP_WORK_TARGET + 1);
         assert_eq!(calls[1]["work"]["over_target"], true);
+    }
+
+    #[test]
+    fn a_request_names_its_own_allowance_until_it_ends() {
+        assert_eq!(request_limit(), APP_REQUEST_WORK);
+        assert_eq!(with_request_allowance(APP_WORK_TARGET, request_limit).0, APP_WORK_TARGET);
+        assert_eq!(request_limit(), APP_REQUEST_WORK);
+        let ended = std::panic::catch_unwind(|| with_request_allowance(7, || panic!("refused")));
+        assert!(ended.is_err());
+        assert_eq!(request_limit(), APP_REQUEST_WORK, "a request that panics leaves no limit behind");
     }
 
     #[test]

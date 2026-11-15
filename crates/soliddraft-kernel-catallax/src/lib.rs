@@ -167,16 +167,16 @@ impl Solid {
                 Err(Error::Display(refusal)) => Err(refusal),
                 Err(error) => Err(Refusal::new(error.code(), error.to_string())),
             });
-            let (result, used) = if catallax_numbers::operation_budget_active() {
+            let (result, used, limit) = if catallax_numbers::operation_budget_active() {
                 let result = run();
-                (result, catallax_numbers::current_operation_work().used)
+                (result, catallax_numbers::current_operation_work().used, diagnostics::request_limit())
             } else {
                 let (result, work) = catallax_numbers::with_operation_budget(APP_REQUEST_WORK, run);
-                (result, work.used)
+                (result, work.used, APP_REQUEST_WORK)
             };
             result.map(|answer| answer.value).map_err(|error| {
                 if matches!(error.code, "mesh.spline-display-budget" | "numbers.operation-budget" | "numbers.budget-exhausted" | "application.work-limit") {
-                    KernelError::DisplayLimit { used, limit: APP_REQUEST_WORK }
+                    KernelError::DisplayLimit { used, limit }
                 } else {
                     KernelError::Unsupported("Spline display bound (SD-DISPLAY-02): A measured deviation within 0.01 mm could not be established over the entire boundary. The existing part is retained".into())
                 }

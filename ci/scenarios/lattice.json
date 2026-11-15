@@ -269,7 +269,7 @@
           "checks": [
             {
               "pointer": "/request_work/limit",
-              "equals": 20000000
+              "equals": 100000000
             },
             {
               "pointer": "/report/sha256",

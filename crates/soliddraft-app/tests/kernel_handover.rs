@@ -56,8 +56,12 @@ fn a_part_handed_over_rebuilds_on_another_kernel_without_evaluating_any_feature(
     worker.keep_builds().unwrap();
     let built = soliddraft_model::Document::from_bytes(BRACKET, worker.clone()).unwrap();
     assert!(worker.fresh_builds() > 0);
-    // The worker's proof meshes the part for display, which computes its topology.
+    // The worker's proof meshes the part for display, which computes its topology and
+    // samples its early display.
     let worker_topology = worker.topology(built.body().unwrap()).unwrap();
+    let params = soliddraft_kernel_api::TessellationParams::default();
+    let worker_preview = worker.preview(built.body().unwrap(), &params).unwrap();
+    let worker_edges = worker.preview_edges(built.body().unwrap(), &params).unwrap();
     let bytes = worker.hand_over().unwrap();
 
     let page = Arc::new(CatallaxKernel::new());
@@ -74,6 +78,13 @@ fn a_part_handed_over_rebuilds_on_another_kernel_without_evaluating_any_feature(
     assert_eq!(mass(&page, b), mass(&worker, a));
     let topology = page.topology(b).unwrap();
     assert_eq!(page.fresh_topologies(), 0, "the page took the worker's topology");
+    let preview = page.preview(b, &params).unwrap();
+    let edges = page.preview_edges(b, &params).unwrap();
+    assert_eq!(page.fresh_previews(), 0, "the page took the worker's early display");
+    assert_eq!((&preview.positions, &preview.indices), (&worker_preview.positions, &worker_preview.indices));
+    assert_eq!(edges.len(), worker_edges.len());
+    let face_ids: std::collections::BTreeSet<_> = topology.faces.iter().map(|f| f.id).collect();
+    assert!(preview.triangle_faces.iter().all(|id| face_ids.contains(id)), "triangles name the page's faces");
     assert_eq!(topology.faces.len(), worker_topology.faces.len());
     // Renamed into the page's ids, it is the topology the page would have computed itself,
     // up to the numbering of kernel-local ids; names carry identity, and they match.

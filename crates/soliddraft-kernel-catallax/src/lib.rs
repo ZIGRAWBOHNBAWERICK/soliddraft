@@ -75,6 +75,8 @@ struct State {
     fresh_topologies: u64,
     /// Recipe keys whose topology has been handed over already.
     sent_topologies: std::collections::BTreeSet<String>,
+    /// Early display requests answered by sampling here rather than from an offer.
+    fresh_previews: u64,
 }
 
 struct Stored {
@@ -88,6 +90,8 @@ struct Solid {
     app: AppBody,
     /// The recipe key of this build, for a hand-over of its topology.
     key: String,
+    /// Early display meshes another kernel sampled for this build, by display key.
+    handed_previews: handover::Previews,
     ids: convert::Ids,
     display: MeshCache<catallax_mesh::Mesh>,
     print: MeshCache<PrintMesh>,
@@ -97,6 +101,22 @@ struct Solid {
     topology: OnceLock<KernelResult<Topology>>,
     measured: OnceLock<KernelResult<Topology>>,
     mass: OnceLock<KernelResult<MassProperties>>,
+}
+
+/// A display key as text, which a hand-over carries between kernels.
+fn preview_key(key: &DisplayKey) -> String {
+    format!("{key:?}")
+}
+
+/// The edges of an early display mesh, named in this kernel's ids.
+fn preview_edges(mesh: &PreviewMesh, ids: &convert::Ids) -> Vec<EdgePolyline> {
+    mesh.edges
+        .iter()
+        .map(|edge| EdgePolyline {
+            edge: ids.edges[&edge.edge],
+            points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
+        })
+        .collect()
 }
 
 /// Every display control of a mesh request.
@@ -122,6 +142,12 @@ struct CachedMesh<T> {
 impl<T> MeshCache<T> {
     fn new() -> Self {
         Self(Mutex::new(VecDeque::new()))
+    }
+
+    /// The values computed so far, with their keys.
+    fn computed(&self) -> Vec<(DisplayKey, Arc<T>)> {
+        let entries: Vec<_> = self.0.lock().map(|cached| cached.iter().cloned().collect()).unwrap_or_default();
+        entries.into_iter().filter_map(|entry| Some((entry.key.clone(), entry.value.lock().ok()?.clone()?))).collect()
     }
 
     fn get(&self, key: DisplayKey, make: impl FnOnce() -> KernelResult<T>) -> KernelResult<Arc<T>> {
@@ -374,6 +400,11 @@ impl CatallaxKernel {
         self.state().map(|state| state.fresh_topologies).unwrap_or_default()
     }
 
+    /// How many early display requests this kernel answered without a handed-over mesh.
+    pub fn fresh_previews(&self) -> u64 {
+        self.state().map(|state| state.fresh_previews).unwrap_or_default()
+    }
+
     /// Enables synchronous per-call evidence and deterministic work accounting.
     pub fn with_diagnostics(max_work: u64) -> Self {
         Self::capture(Some(max_work))
@@ -526,12 +557,15 @@ impl CatallaxKernel {
         let body = BodyId::from_raw(state.id());
         let display = MeshCache::new();
         let topology = OnceLock::new();
-        // A handed-over topology is renamed into this kernel's ids, so it is not computed again.
+        let mut handed_previews = handover::Previews::new();
+        // A handed-over topology and early display are renamed into this kernel's ids, so
+        // neither is computed again.
         if let Some(handed) = handed {
             let (faces, edges, vertices) = ids.by_index();
             if let Some(renamed) = handed.renamed(&faces, &edges, &vertices) {
                 let _ = topology.set(Ok(renamed));
             }
+            handed_previews = handed.renamed_previews(&faces, &edges).unwrap_or_default();
         }
         state.bodies.insert(
             body,
@@ -542,6 +576,7 @@ impl CatallaxKernel {
                 solid: Some(Arc::new(Solid {
                     app,
                     key,
+                    handed_previews,
                     ids,
                     display,
                     print: MeshCache::new(),
@@ -1141,9 +1176,24 @@ impl Kernel for CatallaxKernel {
             }
             let (faces, edges, vertices) = solid.ids.by_index();
             let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
+            // The early display meshes sampled so far travel with the topology.
+            let previews = solid
+                .previews
+                .computed()
+                .into_iter()
+                .filter_map(|(key, preview)| {
+                    let mesh = preview.as_ref().as_ref()?;
+                    Some(handover::HandedPreview {
+                        key: preview_key(&key),
+                        mesh: convert::preview(mesh, &solid.ids),
+                        edges: preview_edges(mesh, &solid.ids),
+                    })
+                })
+                .collect();
             topologies.insert(
                 solid.key.clone(),
                 handover::HandedTopology {
+                    previews,
                     topology: topology.clone(),
                     faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
                     edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
@@ -1822,8 +1872,13 @@ impl Kernel for CatallaxKernel {
                 return Ok(field.preview());
             }
             let solid = self.solid(body)?;
+            let options = options(params)?;
+            if let Some((mesh, _)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+                return Ok(mesh.clone());
+            }
+            self.state()?.fresh_previews += 1;
             // Where Catallax cannot sample a preview, the screen shows the certified mesh.
-            let preview = solid.preview(&options(params)?, "preview")?;
+            let preview = solid.preview(&options, "preview")?;
             let Some(mesh) = preview.as_ref() else {
                 return self.tessellate(body, params);
             };
@@ -1843,18 +1898,15 @@ impl Kernel for CatallaxKernel {
                 return Ok(vec![]);
             }
             let solid = self.solid(body)?;
-            let preview = solid.preview(&options(params)?, "preview_edges")?;
+            let options = options(params)?;
+            if let Some((_, edges)) = solid.handed_previews.get(&preview_key(&display_key(&options))) {
+                return Ok(edges.clone());
+            }
+            let preview = solid.preview(&options, "preview_edges")?;
             let Some(mesh) = preview.as_ref() else {
                 return self.tessellate_edges(body, params);
             };
-            Ok(mesh
-                .edges
-                .iter()
-                .map(|edge| EdgePolyline {
-                    edge: solid.ids.edges[&edge.edge],
-                    points: edge.vertices.iter().map(|v| mesh.positions[*v].into()).collect(),
-                })
-                .collect())
+            Ok(preview_edges(mesh, &solid.ids))
         })
     }
 

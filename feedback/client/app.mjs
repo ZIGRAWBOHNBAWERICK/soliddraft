@@ -3,10 +3,8 @@ import { mountFeedback } from "./form.mjs";
 import { support } from "./config.mjs";
 
 const recorder = createRecorder();
-const launcher = document.createElement("button");
-launcher.id = "feedback-launcher";
-launcher.type = "button";
-launcher.textContent = "Give feedback";
+// The app offers the form from its Help menu and title bar, which send
+// "soliddraft-feedback-open"; nothing floats over the viewport.
 const offer = document.createElement("aside");
 offer.id = "feedback-offer";
 offer.hidden = true;
@@ -17,7 +15,7 @@ const dialog = document.createElement("dialog");
 dialog.id = "feedback-dialog";
 dialog.setAttribute("aria-labelledby", "feedback-heading");
 dialog.innerHTML = `<div class="feedback-heading"><h1 id="feedback-heading">Give feedback</h1><button type="button" data-close aria-label="Close feedback">Close</button></div><p>You can also email <a href="mailto:${support}">${support}</a>.</p><div data-feedback-form></div>`;
-document.body.append(launcher, offer, dialog);
+document.body.append(offer, dialog);
 let unmount;
 let offered = false;
 function open() {
@@ -45,7 +43,7 @@ function diagnostic(code, level = "error") {
     offer.hidden = false;
   }
 }
-launcher.addEventListener("click", open);
+document.addEventListener("soliddraft-feedback-open", open);
 offer.querySelector("[data-open]").addEventListener("click", open);
 offer.querySelector("[data-dismiss]").addEventListener("click", () => {
   offer.hidden = true;
@@ -55,7 +53,8 @@ dialog
   .addEventListener("click", () => dialog.close());
 dialog.addEventListener("close", () => {
   unmount?.();
-  launcher.focus();
+  // The keyboard goes back to the app.
+  document.getElementById("soliddraft")?.focus();
 });
 window.addEventListener("error", () => diagnostic("browser-error"));
 window.addEventListener("unhandledrejection", () =>

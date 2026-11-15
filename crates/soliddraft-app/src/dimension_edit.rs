@@ -93,6 +93,8 @@ impl DimensionEdit {
 pub enum DimensionAction {
     /// Shows the dimensions that build the body.
     Show,
+    /// Selects a feature and shows its own dimensions and its sketch's.
+    ShowFeature(FeatureId),
     /// Opens a value for typing at its dimension.
     Open { feature: FeatureId, field: FeatureField },
     /// Applies a typed value, as one undo step.
@@ -103,21 +105,22 @@ pub enum DimensionAction {
     Move { key: soliddraft_model::view::AnnotationKey, position: glam::Vec3 },
 }
 
-/// What a double-click on a feature's tree row does.
+/// What a double-click on a feature's tree row does: a sketch opens, a feature with
+/// dimensions shows them on the part, and any other feature opens its editor.
 pub fn row_double_click(state: &AppState, id: FeatureId) -> AppAction {
     let Some(f) = state.doc.feature(id) else { return AppAction::EditFeature(id) };
     if f.is_sketch() {
         AppAction::EditSketch(id)
-    } else if edits_in_place(state, id) {
-        AppAction::Dimension(DimensionAction::Show)
+    } else if shows_in_place(state, id) {
+        AppAction::Dimension(DimensionAction::ShowFeature(id))
     } else {
         AppAction::EditFeature(id)
     }
 }
 
-/// Whether the viewport can show the feature's dimensions and take a value for it: the
-/// feature is built, and no sketch or feature editor holds the viewport.
-fn edits_in_place(state: &AppState, id: FeatureId) -> bool {
+/// Whether the viewport can show the feature's dimensions: the feature is built and has
+/// some, and no sketch or feature editor holds the viewport.
+fn shows_in_place(state: &AppState, id: FeatureId) -> bool {
     let end = state.doc.rollback.unwrap_or(state.doc.features.len());
     let built = state.doc.index_of(id).is_some_and(|i| i < end);
     built
@@ -125,7 +128,9 @@ fn edits_in_place(state: &AppState, id: FeatureId) -> bool {
         && state.sketch.is_none()
         && state.doc.display_body().is_some()
         && state.doc.feature(id).is_some_and(|f| {
-            !f.suppressed && f.status != FeatureStatus::Inactive && FeatureField::Depth.get(&f.kind).is_some()
+            !f.suppressed
+                && f.status != FeatureStatus::Inactive
+                && (FeatureField::Depth.get(&f.kind).is_some() || crate::viewport::dimensions::has_values(&f.kind))
         })
 }
 
@@ -148,6 +153,11 @@ impl AppState {
             DimensionAction::Show => {
                 self.rename = None;
                 self.doc.selection = Some(Selection::Body);
+            }
+            DimensionAction::ShowFeature(id) => {
+                self.rename = None;
+                self.doc.selection = Some(Selection::Feature(id));
+                self.viewport.dimensions_of = Some(id);
             }
             DimensionAction::Open { feature, field } => {
                 let Some(value) = self.doc.feature(feature).and_then(|f| field.get(&f.kind)) else { return };
@@ -173,8 +183,8 @@ impl AppState {
     }
 
     /// Applies the value through the same command the side editor uses. A refusal stays
-    /// at the field, which keeps its text. The body stays selected, so the rebuilt
-    /// dimensions stay on screen.
+    /// at the field, which keeps its text. The body, or the one feature whose dimensions
+    /// were shown, stays selected, so the rebuilt dimensions stay on screen.
     fn commit_dimension(&mut self, value: f64) {
         let Some(edit) = &self.dimension_edit else { return };
         let (id, field) = (edit.feature, edit.field);
@@ -190,10 +200,12 @@ impl AppState {
         if let Some(drag) = self.drag_preview.take() {
             drag.cancel(&mut self.doc);
         }
+        // A value opened from one feature's dimensions keeps that feature's set on screen.
+        let one_feature = self.doc.selection == Some(Selection::Feature(id)) && self.viewport.dimensions_of == Some(id);
         match self.doc.apply_interactive(command) {
             Ok(_) => {
                 self.dimension_edit = None;
-                self.doc.selection = Some(Selection::Body);
+                self.doc.selection = Some(if one_feature { Selection::Feature(id) } else { Selection::Body });
                 let (kind, ending) =
                     if self.doc.proof_pending() { (NoteKind::Info, " requested") } else { (NoteKind::Ok, "") };
                 self.note(format!("{} {} mm{ending}", field.label(), fmt_mm(value)), kind);

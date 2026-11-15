@@ -400,6 +400,13 @@ paths = ["crates/soliddraft-app/src/web.rs"]
 module = ["web"]
 
 [[areas]]
+name = "app.zip"
+owner = "core"
+crate = "soliddraft-app"
+paths = ["crates/soliddraft-app/src/zip.rs"]
+module = ["zip"]
+
+[[areas]]
 name = "model.commands"
 owner = "core"
 crate = "soliddraft-model"

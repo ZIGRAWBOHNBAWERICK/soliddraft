@@ -584,6 +584,10 @@ pub struct DraftFeature {
     /// Pull against the neutral plane's normal instead of along it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub reverse: bool,
+    /// The extrusion or cut whose Draft option this draft is. The interface shows the
+    /// two as one feature, and edits, suppresses and deletes them together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub of: Option<FeatureId>,
 }
 
 /// Which faces a shell opens. Saved as a list: `[]` opens nothing, a list of references

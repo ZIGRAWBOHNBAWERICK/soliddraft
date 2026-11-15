@@ -91,7 +91,7 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         egui::Button::new(egui::RichText::new("Close sketch").color(theme::edit_suite::ON_DANGER))
                             .fill(theme::edit_suite::DANGER),
                     )
-                    .on_hover_text("Close sketch (Enter or Esc)")
+                    .on_hover_text("Close sketch (Enter)")
                     .clicked()
                 {
                     state.push(AppAction::ExitSketch);
@@ -134,6 +134,13 @@ fn show(ui: &mut egui::Ui, state: &mut AppState) {
                             )
                             .truncate(),
                         );
+                    }
+                    if let Some(session) = state.sketch.as_mut() {
+                        ui.separator();
+                        egui::ScrollArea::horizontal()
+                            .id_salt("sketch_switches")
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| ui.horizontal_centered(|ui| crate::measure::guides::bar(ui, session)));
                     }
                 });
             },
@@ -322,9 +329,23 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                 .show(ui, |ui| {
                     ui.set_width(width - 16.0);
                     ui.set_height((screen.bottom() - anchor.bottom() - 32.0).clamp(120.0, 650.0));
-                    if ui.button("Close options").clicked() {
+                    // One close control: an X at the sheet's corner.
+                    let corner = ui.max_rect().right_top();
+                    let close = ui.put(
+                        egui::Rect::from_min_size(corner + vec2(-24.0, 0.0), vec2(24.0, 24.0)),
+                        egui::Button::new("").frame(false),
+                    );
+                    close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close options"));
+                    icons::paint(
+                        ui.painter(),
+                        Icon::Close,
+                        close.rect.shrink(5.0),
+                        if close.hovered() { theme::ink() } else { theme::muted() },
+                    );
+                    if close.on_hover_text("Close options (Esc)").clicked() {
                         state.options_details = false;
                     }
+                    state.properties_in_sheet = true;
                     if state.assembly.is_active() {
                         crate::assembly::properties(ui, state);
                     } else if state.drawing.new.is_some() && !state.drawing.is_active() {
@@ -334,6 +355,7 @@ fn details_sheet(ui: &mut egui::Ui, state: &mut AppState, anchor: egui::Rect) {
                     } else {
                         crate::properties::show(ui, state);
                     }
+                    state.properties_in_sheet = false;
                 });
         },
     );

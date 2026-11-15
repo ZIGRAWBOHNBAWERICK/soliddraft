@@ -72,6 +72,7 @@ pub mod values_tab;
 pub mod viewport;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
+mod zip;
 
 /// The sketch model, solver and profiles: the plumbing crate the sketcher draws on.
 pub use soliddraft_sketch as sketch;
@@ -122,6 +123,7 @@ pub fn populate_demo(doc: &mut Document) {
             depth: 10.0,
             flip: false,
             end: Default::default(),
+            draft: None,
         },
         ExtrudeParams {
             sketch: None,
@@ -130,6 +132,7 @@ pub fn populate_demo(doc: &mut Document) {
             depth: 10.0,
             flip: true,
             end: Default::default(),
+            draft: None,
         },
         ExtrudeParams {
             sketch: None,
@@ -138,6 +141,7 @@ pub fn populate_demo(doc: &mut Document) {
             depth: 24.0,
             flip: false,
             end: Default::default(),
+            draft: None,
         },
     ] {
         doc.apply(Command::AddExtrude { params, via_assistant: false }).ok();
@@ -159,6 +163,7 @@ pub fn bench_document() -> Document {
             depth: 40.0,
             flip: false,
             end: Default::default(),
+            draft: None,
         },
         via_assistant: false,
     })

@@ -74,6 +74,9 @@ pub enum AppAction {
     StartRepair(FeatureId),
     EditFeature(FeatureId),
     SketchTool(Tool),
+    /// Escape in a sketch: drops the tool, or clears the selection. It never closes the
+    /// sketch.
+    SketchEscape,
     /// Completes the spline currently being placed.
     FinishSpline,
     /// Opens or closes the sketch relation list.
@@ -117,8 +120,14 @@ pub enum AppAction {
     /// Switches the interface between light and dark, and saves the choice.
     SetTheme(crate::theme::Mode),
     ToggleProjection,
+    /// Opens the browser page's feedback form.
+    GiveFeedback,
     CancelEditor,
     CommitEditor,
+    /// The open Extrude's or Cut's depth, from its arrow on the preview.
+    EditorDepth(f64),
+    /// Opens the open form's Depth for typing.
+    EditorFocusDepth,
     PreviewProposal(String),
     ApplyProposal(String),
     DiscardProposal(String),
@@ -271,6 +280,11 @@ pub struct FeatureEditor {
     /// The picks and the body `marks` were sampled for.
     marked: (Vec<EdgeRef>, Option<soliddraft_kernel_api::BodyId>),
     last: Option<EditorParams>,
+    /// Why OK was refused, with the values it was refused for. It shows until a value
+    /// changes.
+    refused: Option<(EditorParams, String)>,
+    /// The form's Depth takes the keyboard on the next frame.
+    pub focus_depth: bool,
 }
 
 /// A feature built from one sketch. Starting one with no sketch selected asks for it.
@@ -351,7 +365,19 @@ impl FeatureEditor {
             marks: Vec::new(),
             marked: (Vec::new(), None),
             last: None,
+            refused: None,
+            focus_depth: false,
         }
+    }
+
+    /// Keeps the form open after OK was refused, saying why.
+    pub fn refuse(&mut self, why: String) {
+        self.refused = Some((self.params.clone(), why));
+    }
+
+    /// Why OK was refused for the values in the form now.
+    pub fn refusal(&self) -> Option<&str> {
+        self.refused.as_ref().filter(|(params, _)| *params == self.params).map(|(_, why)| why.as_str())
     }
 
     pub fn title(&self) -> String {
@@ -436,7 +462,43 @@ impl FeatureEditor {
             self.error = None;
             return;
         }
+        use crate::document::{Command, FeatureKind};
+        let target = self.target;
+        let built = |kind: FeatureKind| {
+            let command = match target {
+                Some(id) => Command::EditFeature { id, kind },
+                None => Command::AddFeature(kind),
+            };
+            doc.preview_built(command, target)
+        };
+        // The depth arrow of the extrusion before its draft, which a tapered preview keeps.
+        let arrow = |plain: Result<crate::document::Preview, String>| plain.ok().and_then(|p| p.guides.arrow);
         let result = match &self.params {
+            // With its Draft option an extrusion previews as built, tapered.
+            EditorParams::Extrude(p) if p.draft.is_some() => doc
+                .preview_built(
+                    match target {
+                        Some(id) => Command::EditExtrude { id, params: p.clone() },
+                        None => Command::AddExtrude { params: p.clone(), via_assistant: false },
+                    },
+                    target,
+                )
+                .map(|mut built| {
+                    built.guides.arrow = arrow(doc.preview_extrude(p));
+                    built
+                }),
+            EditorParams::Cut(p) if p.draft.is_some() => doc
+                .preview_built(
+                    match target {
+                        Some(id) => Command::EditCut { id, params: p.clone() },
+                        None => Command::AddCut { params: p.clone() },
+                    },
+                    target,
+                )
+                .map(|mut built| {
+                    built.guides.arrow = arrow(doc.preview_cut(p, before));
+                    built
+                }),
             EditorParams::Extrude(p) => doc.preview_extrude(p),
             EditorParams::Revolve(r) => doc.preview_revolve(r),
             EditorParams::Sweep(s) => doc.preview_sweep(s),
@@ -447,13 +509,17 @@ impl FeatureEditor {
             EditorParams::Shell(s) => doc.preview_shell(s, before),
             EditorParams::Offset(s) => doc.preview_offset(s, before),
             EditorParams::Thicken(s) => doc.preview_thicken(s, before),
-            // These preview once applied; the interface half adds ghosts for them.
+            // These preview as built, in a fork of the part.
+            EditorParams::Draft(d) if !d.faces.is_empty() => built(FeatureKind::Draft(d.to_model())),
+            EditorParams::Pattern(p) => built(FeatureKind::Pattern(p.clone())),
+            EditorParams::Mirror(m) => built(FeatureKind::Mirror(m.clone())),
+            EditorParams::Hole(h) if h.face.is_some() => h.to_model().and_then(|h| built(FeatureKind::Hole(h))),
+            // These preview once applied. A hole without its face shows a ghost at the
+            // pointer instead.
             EditorParams::Lattice(_)
             | EditorParams::Gyroid(_)
             | EditorParams::Hole(_)
-            | EditorParams::Pattern(_)
             | EditorParams::ReferencePlane(_)
-            | EditorParams::Mirror(_)
             | EditorParams::Draft(_)
             | EditorParams::PickPlane
             | EditorParams::PickSketch(_)
@@ -898,6 +964,9 @@ pub struct SketchSession {
     pub dim_first: Option<SketchSel>,
     pub dim_second: Option<SketchSel>,
     pub was_orthographic: bool,
+    /// The part's rollback before this sketch opened, when opening it rolled the part
+    /// back to the sketch: closing the sketch puts it back.
+    pub restore_rollback: Option<Option<usize>>,
     pub message: Option<(String, Instant)>,
     /// Whether the pointer infers relations; see [`crate::measure::guides`].
     pub auto_relations: bool,
@@ -976,6 +1045,7 @@ pub enum SketchDrag {
 impl SketchSession {
     pub fn new(feature: FeatureId, plane: Plane, sketch: Sketch, was_orthographic: bool) -> Self {
         Self {
+            restore_rollback: None,
             feature,
             plane,
             sketch,
@@ -1151,6 +1221,9 @@ pub struct AppState {
     pub pick_filter: crate::viewport::PickFilter,
     pub form_bar: crate::form_bar::State,
     pub options_details: bool,
+    /// The selection's properties are drawing inside the options sheet, whose own X
+    /// closes it: their Clear selection X would be a second close button.
+    pub properties_in_sheet: bool,
     pub editor: Option<FeatureEditor>,
     pub sketch: Option<SketchSession>,
     pub ribbon_tab: RibbonTab,
@@ -1346,6 +1419,7 @@ impl AppState {
             pick_filter: Default::default(),
             form_bar: Default::default(),
             options_details: false,
+            properties_in_sheet: false,
             editor: None,
             sketch: None,
             ribbon_tab: RibbonTab::Solid,
@@ -1515,11 +1589,14 @@ impl AppState {
         std::mem::take(&mut self.actions)
     }
 
+    /// Shows `text` on the status bar. An error note is something the user can act on,
+    /// such as a refused shape or a file that would not save; the page records it for a
+    /// later report but offers feedback only for crashes and internal errors.
     pub fn note(&mut self, text: impl Into<String>, kind: NoteKind) {
         #[cfg(target_arch = "wasm32")]
         if matches!(kind, NoteKind::Error) {
             crate::web::feedback_event(
-                serde_json::json!({"type": "diagnostic", "code": "app-error", "level": "error"}),
+                serde_json::json!({"type": "diagnostic", "code": "app-warning", "level": "warning"}),
             );
         }
         self.note = Some(Note { text: text.into(), kind, at: Instant::now() });
@@ -1713,5 +1790,29 @@ impl AppState {
 
     pub fn in_sketch(&self) -> bool {
         self.sketch.is_some()
+    }
+}
+
+/// The time a frame holding a pointer press or release runs at, in seconds: when the
+/// browser saw the event, kept after the frame before (`previous`) and no later than the
+/// frame's own time.
+pub fn pointer_time(frame: f64, previous: f64, event: f64) -> f64 {
+    event.max(previous + 1e-4).min(frame.max(previous + 1e-4))
+}
+
+#[cfg(test)]
+mod pointer_time_tests {
+    use super::pointer_time;
+
+    /// Two clicks 0.1 s apart that the page could only run 0.5 s apart still read as a
+    /// double-click: their frames take the browser's times.
+    #[test]
+    fn a_busy_frame_keeps_the_time_the_browser_saw_the_click() {
+        let first = pointer_time(10.0, 9.9, 10.0);
+        let second = pointer_time(10.5, first, 10.1);
+        assert!((second - first - 0.1).abs() < 1e-9, "{first} {second}");
+        // Never before the last frame, never after this one.
+        assert!(pointer_time(11.0, 10.8, 10.2) > 10.8);
+        assert!(pointer_time(11.0, 10.8, 12.0) <= 11.0);
     }
 }

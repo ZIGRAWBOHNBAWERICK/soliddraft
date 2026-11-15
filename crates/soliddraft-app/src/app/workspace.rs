@@ -434,7 +434,10 @@ impl SolidDraftApp {
         let (Some(image), Some(key)) = (shot, self.web_thumbnail.clone()) else { return };
         self.web_thumbnail = None;
         let ppp = ctx.pixels_per_point();
+        // The part alone: the heads-up pills and the navigation bar along the bottom stay
+        // out of the picture.
         let rect = self.state.viewport.rect;
+        let rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - crate::viewport::HUD_BAND));
         let pixels: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
         let Some(whole) = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, pixels) else {
             return;
@@ -516,6 +519,12 @@ impl SolidDraftApp {
 }
 
 impl eframe::App for SolidDraftApp {
+    /// In the browser a frame with a click takes the time the browser saw the click.
+    #[cfg(target_arch = "wasm32")]
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        crate::web::stamp_pointer_time(raw_input);
+    }
+
     /// A clean exit: autosave finishes and deletes this session's recovery copies.
     fn on_exit(&mut self) {
         if let Some(recovery) = self.state.recovery.take() {

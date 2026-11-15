@@ -30,6 +30,12 @@ fn plain_message(message: &str) -> &str {
         "This selection does not define a supported sharp edge. Choose a different edge."
     } else if message.contains("recipe.ambiguous-reference") {
         "This selection matches more than one edge or face. Pick the intended edge or face again."
+    } else if message.contains("draft.parallel-face-normal") {
+        "Draft cannot tilt a face that lies across the pull. Pick side faces."
+    } else if message.contains("draft.") && ["bore", "annul", "opening", "hole"].iter().any(|w| message.contains(w)) {
+        "Draft cannot tilt this body yet: it has more than one opening along the pull."
+    } else if message.contains("draft.") {
+        "Draft cannot tilt this body yet. Try other faces, or draft before the cuts."
     } else if message.contains("mesh.precision-or-budget") {
         "This shape could not be displayed. Try suppressing a feature."
     } else if has_code(message, "measure") || has_code(message, "iges") {

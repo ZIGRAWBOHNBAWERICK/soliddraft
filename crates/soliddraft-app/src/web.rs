@@ -13,6 +13,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 thread_local! {
+    /// The browser's time stamp of the last pointer press or release, and the frame time
+    /// the app last ran at.
+    static POINTER_CLOCK: RefCell<(Option<f64>, f64, bool)> = const { RefCell::new((None, 0.0, false)) };
     static CONTEXT: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
     static UPLOAD: RefCell<Option<(String, Vec<u8>)>> = const { RefCell::new(None) };
     static FEEDBACK_DOCUMENT: RefCell<Option<(&'static str, usize)>> = const { RefCell::new(None) };
@@ -23,6 +26,15 @@ pub fn feedback_event(value: serde_json::Value) {
     let init = web_sys::CustomEventInit::new();
     init.set_detail(&JsValue::from_str(&value.to_string()));
     if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("soliddraft-feedback", &init)
+        && let Some(document) = window().document()
+    {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// Opens the page's feedback form, which the Help menu and the title bar offer.
+pub fn open_feedback() {
+    if let Ok(event) = web_sys::CustomEvent::new("soliddraft-feedback-open")
         && let Some(document) = window().document()
     {
         let _ = document.dispatch_event(&event);
@@ -55,6 +67,42 @@ pub fn feedback_document(state: &crate::state::AppState) {
 /// Lets background work (an upload, an assistant reply) wake the interface.
 pub fn set_context(ctx: &egui::Context) {
     CONTEXT.with(|c| *c.borrow_mut() = Some(ctx.clone()));
+    watch_pointer_times();
+}
+
+/// Records when the browser saw each pointer press and release. The app reads a click's
+/// time from its frame, which on a busy machine runs well after the press: the two clicks
+/// of a double-click then read as two single clicks.
+fn watch_pointer_times() {
+    let watching = POINTER_CLOCK.with(|c| std::mem::replace(&mut c.borrow_mut().2, true));
+    if watching {
+        return;
+    }
+    for kind in ["pointerdown", "pointerup"] {
+        let listener = Closure::<dyn FnMut(web_sys::Event)>::new(|event: web_sys::Event| {
+            let at = event.time_stamp() / 1000.0;
+            POINTER_CLOCK.with(|c| c.borrow_mut().0 = Some(at));
+        });
+        // Capturing on the window, so the stamp is kept before the app's own handler runs.
+        let _ = window().add_event_listener_with_callback_and_bool(kind, listener.as_ref().unchecked_ref(), true);
+        listener.forget();
+    }
+}
+
+/// Gives a frame that holds a pointer press or release the time the browser saw it, so
+/// clicks and double-clicks are timed as they happened rather than as frames ran.
+pub fn stamp_pointer_time(raw: &mut egui::RawInput) {
+    let pressed = raw.events.iter().any(|e| matches!(e, egui::Event::PointerButton { .. }));
+    POINTER_CLOCK.with(|c| {
+        let mut clock = c.borrow_mut();
+        let seen = clock.0.take();
+        if let (true, Some(at), Some(frame)) = (pressed, seen, raw.time) {
+            raw.time = Some(crate::state::pointer_time(frame, clock.1, at));
+        }
+        if let Some(time) = raw.time {
+            clock.1 = time;
+        }
+    });
 }
 
 /// Draws a frame soon, for work that finished in the background.

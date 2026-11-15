@@ -979,7 +979,7 @@ impl Document {
 
     /// Resolves a feature's plane: a reference plane, or a planar face of `body` with
     /// its outward normal.
-    fn plane_of(&self, r: &PlaneRef, body: BodyId) -> Result<Plane, Box<RepairNeeded>> {
+    pub fn plane_of(&self, r: &PlaneRef, body: BodyId) -> Result<Plane, Box<RepairNeeded>> {
         match r {
             PlaneRef::Feature { feature } => self
                 .reference_plane(*feature)

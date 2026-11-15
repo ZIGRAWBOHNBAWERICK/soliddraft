@@ -42,6 +42,14 @@ impl StandardView {
     }
 }
 
+/// See [`Camera::depth_view`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DepthView {
+    Isometric,
+    /// Looks from this direction, named "Oblique".
+    Oblique(Vec3),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Goal {
     yaw: f32,
@@ -64,6 +72,22 @@ pub struct Camera {
     pub view_name: &'static str,
     /// How long a move to a standard view takes, near enough: it is 99 % there by then.
     pub transition_seconds: f32,
+    /// The bands of the viewport that overlays cover, top and bottom, in points, with
+    /// the viewport's height: a fit frames the part between them. Set by
+    /// [`Camera::set_framing`].
+    framing: Framing,
+    /// The bounds the last fit framed and the goal it set, so that a framing first known,
+    /// or changed, while the fit is still under way can reframe them.
+    fitted: Option<(Option<(Vec3, Vec3)>, Goal)>,
+}
+
+/// What a fit leaves clear: the bands at the viewport's top and bottom that the heads-up
+/// pills, the navigation bar and a sketch's status cover.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Framing {
+    pub top: f32,
+    pub bottom: f32,
+    pub height: f32,
 }
 
 /// The natural log of how far from its goal a transition may be when its time is up.
@@ -82,6 +106,8 @@ impl Default for Camera {
             goal: None,
             view_name: "Isometric",
             transition_seconds: 0.33,
+            framing: Framing::default(),
+            fitted: None,
         }
     }
 }
@@ -200,14 +226,102 @@ impl Camera {
         self.goal = Some(Goal { yaw, pitch: pitch.clamp(-1.553, 1.553), target: self.target, distance: self.distance });
     }
 
+    /// Where a standard view looks from, as [`Camera::heading`] gives it.
+    pub fn direction_of(view: StandardView) -> Vec3 {
+        let (yaw, pitch) = view.angles();
+        let (yaw, pitch) = (yaw.to_radians(), pitch.to_radians());
+        Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin())
+    }
+
+    /// The view that shows the depth of a feature growing along `normal`, a sketch plane's
+    /// unit normal with `u` its U axis, when the view looks from `heading` within about
+    /// five degrees of that normal: isometric, or, when the normal lies near the
+    /// isometric line of sight itself, a view tilted off the normal towards both sketch
+    /// axes. `None` when the view already shows depth.
+    pub fn depth_view(heading: Vec3, normal: Vec3, u: Vec3) -> Option<DepthView> {
+        /// The largest cosine to the normal at which depth shows well: about 26 degrees.
+        const OBLIQUE: f32 = 0.9;
+        let normal = normal.normalize_or_zero();
+        let along = heading.normalize_or_zero().dot(normal);
+        if along.abs() <= 0.996 {
+            return None;
+        }
+        if Self::direction_of(StandardView::Isometric).dot(normal).abs() < OBLIQUE {
+            return Some(DepthView::Isometric);
+        }
+        let u = u.normalize_or_zero();
+        let side = if along < 0.0 { -1.0 } else { 1.0 };
+        Some(DepthView::Oblique(side * normal + 0.7 * u + 0.5 * normal.cross(u)))
+    }
+
+    /// Turns, animated, to look from `from`, and names the view `name`.
+    pub fn look_from(&mut self, name: &'static str, from: Vec3) {
+        let n = from.normalize_or_zero();
+        if n == Vec3::ZERO {
+            return;
+        }
+        let pitch = n.z.clamp(-1.0, 1.0).asin().clamp(-1.553, 1.553);
+        let yaw = if n.x.abs() < 1e-6 && n.y.abs() < 1e-6 { -std::f32::consts::FRAC_PI_2 } else { n.y.atan2(n.x) };
+        self.turn_to(name, yaw.to_degrees(), pitch.to_degrees());
+    }
+
     pub fn fit(&mut self, bounds: Option<(Vec3, Vec3)>) {
         let (center, radius) = match bounds {
             Some((lo, hi)) => ((lo + hi) / 2.0, ((hi - lo).length() / 2.0).max(1.0)),
             None => (Vec3::ZERO, 60.0),
         };
-        let distance = radius / (self.fov_y / 2.0).sin() * 1.12;
+        let mut distance = radius / (self.fov_y / 2.0).sin() * 1.12;
         let (yaw, pitch) = self.goal.map(|g| (g.yaw, g.pitch)).unwrap_or((self.yaw, self.pitch));
-        self.goal = Some(Goal { yaw, pitch, target: center, distance });
+        // Frame the part in the band the overlays leave clear, centred in it.
+        let Framing { top, bottom, height } = self.framing;
+        let clear = height - top - bottom;
+        let mut target = center;
+        if height > 0.0 && clear > height * 0.3 {
+            let up = Vec3::new(-pitch.sin() * yaw.cos(), -pitch.sin() * yaw.sin(), pitch.cos()).normalize_or_zero();
+            // How far the part reaches up and down the screen from its middle. The fit
+            // above holds the part's whole sphere; it zooms out further only when that
+            // reach would not fit the clear band, as with a tall sketch.
+            let reach = match bounds {
+                Some((lo, hi)) => (0..8)
+                    .map(|i| {
+                        let corner = Vec3::new(
+                            if i & 1 == 0 { lo.x } else { hi.x },
+                            if i & 2 == 0 { lo.y } else { hi.y },
+                            if i & 4 == 0 { lo.z } else { hi.z },
+                        );
+                        (corner - center).dot(up).abs()
+                    })
+                    .fold(0.0, f32::max),
+                None => radius,
+            };
+            let tan = (self.fov_y / 2.0).tan();
+            distance = distance.max(reach * 1.1 * height / clear / tan);
+            let mm_per_point = 2.0 * distance * tan / height;
+            // The band's centre is (top - bottom) / 2 points below the viewport's.
+            target += up * (top - bottom) / 2.0 * mm_per_point;
+        }
+        let goal = Goal { yaw, pitch, target, distance };
+        self.goal = Some(goal);
+        self.fitted = Some((bounds, goal));
+    }
+
+    /// What a fit leaves clear, from the frame just laid out. A fit made before the
+    /// viewport's first frame, or before a sketch's status showed, reframes while its move
+    /// is still under way; once it has landed, or the view has moved since, it stands.
+    pub fn set_framing(&mut self, framing: Framing) {
+        if framing == self.framing {
+            return;
+        }
+        self.framing = framing;
+        if let Some((bounds, goal)) = self.fitted
+            && self.goal == Some(goal)
+        {
+            self.fit(bounds);
+        }
+    }
+
+    pub fn framing(&self) -> Framing {
+        self.framing
     }
 
     /// Advances any view transition. Returns true while still animating.
@@ -325,5 +439,105 @@ mod tests {
         let (o, d) = c.ray(Pos2::new(400.0, 300.0), rect);
         let closest = o + d * (c.target - o).dot(d);
         assert!((closest - c.target).length() < 1e-3);
+    }
+
+    /// Looking straight down at a flat part: a wide one keeps the zoom a fit gave it before
+    /// the bands, only moved up into the clear band; a tall one zooms out until its top and
+    /// bottom sit inside that band.
+    #[test]
+    fn a_fit_zooms_out_only_as_far_as_the_bands_need() {
+        let framing = Framing { top: 60.0, bottom: 84.0, height: 600.0 };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, framing.height));
+        let fitted = |bounds: (Vec3, Vec3), framed: bool| {
+            let mut c = Camera { orthographic: true, ..Camera::default() };
+            c.look_along(Vec3::Z);
+            while c.tick(1.0 / 60.0) {}
+            if framed {
+                c.set_framing(framing);
+            }
+            c.fit(Some(bounds));
+            while c.tick(1.0 / 60.0) {}
+            c
+        };
+        let wide = (Vec3::new(-100.0, -20.0, 0.0), Vec3::new(100.0, 20.0, 0.0));
+        let (plain, framed) = (fitted(wide, false), fitted(wide, true));
+        assert!((plain.distance - framed.distance).abs() < 1e-3, "a wide part keeps its zoom");
+        let tall = (Vec3::new(-20.0, -100.0, 0.0), Vec3::new(20.0, 100.0, 0.0));
+        let framed = fitted(tall, true);
+        assert!(framed.distance > fitted(tall, false).distance, "a tall part zooms out");
+        for y in [-100.0, 100.0] {
+            let at = framed.project(Vec3::new(0.0, y, 0.0), rect).unwrap();
+            assert!(
+                at.y > framing.top && at.y < framing.height - framing.bottom,
+                "{y} lands at {} outside the clear band",
+                at.y
+            );
+        }
+    }
+
+    /// The app fits the part before its first frame, when the viewport's bands are not
+    /// known yet: the framing that arrives during the move still applies, and a later
+    /// fit of the same part has nowhere to go.
+    #[test]
+    fn a_fit_made_before_the_first_frame_takes_the_framing_that_follows() {
+        let bounds = Some((Vec3::splat(-20.0), Vec3::splat(20.0)));
+        let framing = Framing { top: 8.0, bottom: 84.0, height: 600.0 };
+        let mut early = Camera::default();
+        early.fit(bounds);
+        early.tick(1.0 / 60.0);
+        early.set_framing(framing);
+        while early.tick(1.0 / 60.0) {}
+        let mut late = Camera::default();
+        late.set_framing(framing);
+        late.fit(bounds);
+        while late.tick(1.0 / 60.0) {}
+        assert!((early.target - late.target).length() < 1e-3 && (early.distance - late.distance).abs() < 1e-3);
+        let landed = (early.target, early.distance);
+        early.fit(bounds);
+        assert!(!early.tick(1.0 / 60.0) || (early.target - landed.0).length() < 1e-3, "a second fit stays put");
+        // Once a fit has landed a new framing leaves the view where the user sees it.
+        early.set_framing(Framing { top: 60.0, ..framing });
+        assert!(!early.tick(1.0 / 60.0), "a landed fit does not move again");
+    }
+
+    /// A sketch normal on the isometric line of sight must not turn the view to
+    /// isometric, which would still look straight down it.
+    #[test]
+    fn a_feature_on_any_plane_gets_a_view_oblique_to_its_normal() {
+        let iso = Camera::direction_of(StandardView::Isometric);
+        let tilted = (Vec3::new(1.0, -1.0, 1.0) + Vec3::new(0.03, 0.02, -0.01)).normalize();
+        let planes = [
+            (Vec3::Z, Vec3::X),
+            (-Vec3::Y, Vec3::X),
+            (Vec3::new(1.0, -1.0, 1.0).normalize(), Vec3::new(1.0, 1.0, 0.0).normalize()),
+            (tilted, tilted.any_orthonormal_vector()),
+            (Vec3::new(0.0, -1.0, 1.0).normalize(), Vec3::X),
+        ];
+        for (normal, u) in planes {
+            for side in [1.0, -1.0] {
+                let view = Camera::depth_view(side * normal, normal, u).expect("the view on the normal turns");
+                let from = match view {
+                    DepthView::Isometric => iso,
+                    DepthView::Oblique(from) => from.normalize(),
+                };
+                let mut camera = Camera::default();
+                camera.look_from("Oblique", from);
+                let cos = camera.heading().dot(normal).abs();
+                assert!(
+                    cos < 0.9,
+                    "{normal} from side {side}: the view stays within {:.1} degrees",
+                    cos.acos().to_degrees()
+                );
+                if let DepthView::Oblique(from) = view {
+                    assert!(from.dot(side * normal) > 0.0, "the view stays on the side the sketch was seen from");
+                }
+            }
+            assert_eq!(Camera::depth_view(iso.cross(normal).normalize_or(Vec3::X), normal, u), None);
+        }
+        assert_eq!(Camera::depth_view(Vec3::Z, Vec3::Z, Vec3::X), Some(DepthView::Isometric));
+        assert!(matches!(
+            Camera::depth_view(iso, Vec3::new(1.0, -1.0, 1.0).normalize(), Vec3::X.cross(iso).normalize()),
+            Some(DepthView::Oblique(_))
+        ));
     }
 }

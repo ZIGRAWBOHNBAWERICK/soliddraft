@@ -176,6 +176,9 @@ pub struct Recovery {
     pub failures: Vec<String>,
     /// The Recover documents window is open.
     pub show: bool,
+    /// The user opened the window from a menu or the start page, rather than the app
+    /// offering it when it found copies.
+    pub asked: bool,
 }
 
 impl Recovery {
@@ -287,6 +290,7 @@ impl Recovery {
             problems: Vec::new(),
             failures: Vec::new(),
             show: false,
+            asked: false,
         };
         recovery.adopt_ended_sessions();
         recovery.show = !recovery.offers.is_empty() || !recovery.journals.is_empty() || !recovery.problems.is_empty();
@@ -544,6 +548,7 @@ impl Recovery {
             problems: Vec::new(),
             failures: Vec::new(),
             show: false,
+            asked: false,
         }
     }
 
@@ -671,6 +676,13 @@ fn watch(
 /// where its file lives and when the copy was made, Restore and Discard; then the damaged
 /// copies that were skipped.
 pub fn window(ctx: &egui::Context, state: &mut AppState) {
+    // The app offers recovery on the start page only. Copies found after a document is
+    // open wait for the start page's banner or File > Recover documents, so the window
+    // never appears over a part and takes its clicks.
+    let start = state.start.is_some();
+    if let Some(r) = state.recovery.as_mut().filter(|r| r.show && !r.asked && !start) {
+        r.show = false;
+    }
     let Some(r) = state.recovery.as_mut().filter(|r| r.show) else { return };
     let mut open = true;
     let mut later = false;
@@ -737,6 +749,7 @@ pub fn window(ctx: &egui::Context, state: &mut AppState) {
     });
     if !open || later {
         r.show = false;
+        r.asked = false;
         // Damaged copies are reported once; they stay in the damaged folder.
         r.problems.clear();
     }

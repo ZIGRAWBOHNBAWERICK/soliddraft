@@ -192,6 +192,7 @@ fn drafts_build_edit_and_keep_later_references() {
             neutral: PlaneRef::Datum { datum: DatumPlane::Top, offset: 0.0 },
             angle: 3.0,
             reverse: false,
+            of: None,
         }),
     );
     all_ok(&d);

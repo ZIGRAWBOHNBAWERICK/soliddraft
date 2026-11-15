@@ -1,4 +1,5 @@
-//! The approved ring through the real Edit Suite frame and renderer.
+//! The approved ring through the real Edit Suite frame and renderer. The ring opens
+//! when Shift is held at the right-click; a plain right-click opens the columns alone.
 
 #[path = "support/ui.rs"]
 mod ribbon;
@@ -18,22 +19,31 @@ fn edit_suite(case: &ribbon::Case) {
     std::fs::write(case.path("config/settings.json"), r#"{"frame_layout":"edit_suite"}"#).unwrap();
 }
 
-fn secondary(app: &mut App, at: Pos2, model: bool) {
+/// A right-click at `at`, with Shift held for the ring unless `plain`.
+fn right_click(app: &mut App, at: Pos2, model: bool, plain: bool) {
     if model {
         render_steps::await_pick(app, at);
     }
     app.hover_at(at);
     app.run_steps(3);
+    let modifiers = if plain { Modifiers::NONE } else { Modifiers::SHIFT };
+    app.event(egui::Event::ModifiersChanged(modifiers));
     for pressed in [true, false] {
-        app.event(egui::Event::PointerButton {
-            pos: at,
-            button: PointerButton::Secondary,
-            pressed,
-            modifiers: Modifiers::NONE,
-        });
+        app.event(egui::Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed, modifiers });
         app.step();
     }
     app.run_steps(4);
+    app.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    app.step();
+}
+
+fn secondary(app: &mut App, at: Pos2, model: bool) {
+    right_click(app, at, model, false);
+}
+
+/// Whether a column heading such as "Face" is painted.
+fn column(app: &App, label: &str) -> bool {
+    app.query_all(By::new().role(egui::accesskit::Role::Label).label(label)).next().is_some()
 }
 
 fn quick_rect(app: &App) -> Rect {
@@ -61,18 +71,29 @@ fn sketch_point(app: &App, point: P2) -> Pos2 {
 }
 
 #[test]
-fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choice() {
+fn face_ring_opens_alone_with_working_commands_and_body_visibility_uses_the_existing_view_choice() {
     let case = ribbon::case("ring-face");
     edit_suite(&case);
     let mut app = ribbon::app(ribbon::plate());
     case.run(&mut app, |app| {
         let revision = app.state().state.doc.revision();
         let at = world(app, Vec3::new(0.0, 0.0, 20.0));
+        right_click(app, at, true, true);
+        assert!(app.query_all_by_label("Quick commands").next().is_none(), "a plain right-click has no ring");
+        assert!(column(app, "Face"), "a plain right-click opens the columns");
+        case.frame(app, "plain");
+        app.key_press(Key::Escape);
+        app.run_steps(4);
         secondary(app, at, true);
-        assert_eq!(quick_count(app), 8);
+        // Isolate and Select other are not built yet, so six of the eight slots hold a
+        // command.
+        assert_eq!(quick_count(app), 6);
+        for soon in ["Isolate", "Select other"] {
+            assert!(app.query_all_by_label(soon).next().is_none(), "{soon} is hidden until it works");
+        }
         assert!(quick_rect(app).center().distance(at) <= ribbon::TOLERANCE);
         for group in ["Face", "Feature", "Body"] {
-            assert!(app.query_all_by_label(group).next().is_some());
+            assert!(!column(app, group), "the ring opens without the {group} column");
         }
         case.frame(app, "open");
         click_quick(app, "Hide");
@@ -93,7 +114,7 @@ fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choic
             .rect()
             .center();
         secondary(app, at, false);
-        assert_eq!(quick_count(app), 8);
+        assert_eq!(quick_count(app), 7);
         click_quick(app, "Show");
         assert!(soliddraft_app::tree_visibility::visible(&app.state().state).body);
         assert_eq!(app.state().state.doc.revision(), revision);
@@ -101,7 +122,7 @@ fn face_ring_has_eight_commands_and_body_visibility_uses_the_existing_view_choic
 }
 
 #[test]
-fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
+fn empty_ring_and_columns_clamp_at_viewport_corners_in_regular_and_compact_windows() {
     let case = ribbon::case("ring-corners");
     edit_suite(&case);
     for size in [ribbon::WINDOW, vec2(1280.0, 720.0)] {
@@ -125,6 +146,11 @@ fn empty_ring_clamps_at_viewport_corners_in_regular_and_compact_windows() {
                 {
                     assert!(window.contains_rect(node.rect()), "{name}: quick command stays inside");
                 }
+                case.frame(app, &format!("{}-{name}-ring", size.x));
+                app.key_press(Key::Escape);
+                app.run_steps(4);
+                right_click(app, at, true, true);
+                assert!(app.query_all_by_label("Quick commands").next().is_none());
                 for group in ["View", "Scene", "Display", "Show"] {
                     let headings: Vec<_> =
                         app.query_all(By::new().role(egui::accesskit::Role::Label).label(group)).collect();

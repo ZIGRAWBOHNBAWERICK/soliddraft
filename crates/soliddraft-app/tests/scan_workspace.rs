@@ -259,6 +259,7 @@ fn fit_scan_reviews_both_numbers_and_maps_then_reopens_an_editable_solid() {
                 depth: 1.0,
                 flip: false,
                 end: Default::default(),
+                draft: None,
             },
             via_assistant: false,
         })

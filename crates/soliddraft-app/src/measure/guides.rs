@@ -9,63 +9,55 @@
 
 use crate::sketch::P2;
 use crate::state::{SketchSession, Snap, SnapFilter, Tool};
-use egui::{Rect, pos2, vec2};
 
 /// What the sketcher offers at the cursor, given what it inferred there.
 pub fn offered(auto_relations: bool, raw: P2, inferred: (P2, Vec<Snap>)) -> (P2, Vec<Snap>) {
     if auto_relations { inferred } else { (raw, Vec::new()) }
 }
 
-/// A widget at the left of `row`. `Ui::put` centres what it places, which left the three
-/// tick boxes of the switches out of line with each other.
-fn left_in<R>(ui: &mut egui::Ui, row: Rect, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let layout = egui::Layout::left_to_right(egui::Align::Center);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(layout), add).inner
-}
-
-/// Snap and construction controls, under the sketch status in the viewport's corner.
-pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
-    let at = Rect::from_min_size(pos2(rect.left() + 12.0, rect.top() + 58.0), vec2(150.0, 22.0));
-
-    let height = if s.tool.places_points() { 94.0 } else { 70.0 };
-    let controls = Rect::from_min_size(at.min, vec2(at.width(), height)).expand(4.0);
-    ui.painter().rect_filled(controls, 6, crate::theme::hud_bg());
-
-    left_in(ui, at, |ui| ui.checkbox(&mut s.auto_relations, "Auto relations"));
+/// Snap and construction controls, in the options bar beside the sketch's name, so they
+/// never cover the sketch. With the Polygon tool active its sides and its inscribed or
+/// circumscribed circle come first: they shape the next polygon.
+pub fn bar(ui: &mut egui::Ui, s: &mut SketchSession) {
+    if s.tool == Tool::Polygon {
+        crate::sketch_tools::polygon_options(ui, s);
+        ui.separator();
+    }
+    ui.checkbox(&mut s.auto_relations, "Auto relations");
     let centreline = s.tool == Tool::Centreline;
     let mut construction = s.draws_construction();
-    ui.add_enabled_ui(!centreline, |ui| {
-        left_in(ui, at.translate(vec2(0.0, 24.0)), |ui| ui.checkbox(&mut construction, "Draw construction"))
-    })
-    .inner
-    .on_disabled_hover_text("Centrelines always use construction geometry. Other tools keep their drawing setting.");
+    ui.add_enabled(!centreline, egui::Checkbox::new(&mut construction, "Draw construction")).on_disabled_hover_text(
+        "Centrelines always use construction geometry. Other tools keep their drawing setting.",
+    );
     if !centreline {
         s.construction = construction;
     }
-    left_in(ui, at.translate(vec2(0.0, 48.0)), |ui| ui.checkbox(&mut s.grid_snap, "Snap to grid")).on_hover_text(
+    ui.checkbox(&mut s.grid_snap, "Snap to grid").on_hover_text(
         "Use the current minor grid spacing. Geometry snaps and explicit Quick snap choices take priority.",
     );
     if s.tool.places_points() {
-        ui.scope_builder(egui::UiBuilder::new().max_rect(at.translate(vec2(0.0, 72.0))), |ui| {
-            egui::ComboBox::from_id_salt("quick-snap")
-                .height(280.0)
-                .selected_text(s.quick_snap.map_or("Quick snap", SnapFilter::label))
-                .show_ui(ui, |ui| {
-                    for filter in SnapFilter::ALL {
-                        let enabled = match filter {
-                            SnapFilter::Axes => !s.pending.is_empty(),
-                            SnapFilter::Parallel | SnapFilter::Perpendicular | SnapFilter::Tangent => {
-                                s.tool.draws_line() && !s.pending.is_empty()
-                            }
-                            _ => true,
-                        };
-                        ui.add_enabled_ui(enabled, |ui| {
-                            ui.selectable_value(&mut s.quick_snap, Some(filter), filter.label())
-                        }).inner.on_disabled_hover_text("Place a start point first. Parallel, perpendicular and tangent snaps require a line endpoint.");
-                    }
-                })
-                .response
-                .on_hover_text("Use this snap class for the next click. Escape or a tool change clears it.");
-        });
+        egui::ComboBox::from_id_salt("quick-snap")
+            .height(280.0)
+            .selected_text(s.quick_snap.map_or("Quick snap", SnapFilter::label))
+            .show_ui(ui, |ui| {
+                for filter in SnapFilter::ALL {
+                    let enabled = match filter {
+                        SnapFilter::Axes => !s.pending.is_empty(),
+                        SnapFilter::Parallel | SnapFilter::Perpendicular | SnapFilter::Tangent => {
+                            s.tool.draws_line() && !s.pending.is_empty()
+                        }
+                        _ => true,
+                    };
+                    ui.add_enabled_ui(enabled, |ui| {
+                        ui.selectable_value(&mut s.quick_snap, Some(filter), filter.label())
+                    })
+                    .inner
+                    .on_disabled_hover_text(
+                        "Place a start point first. Parallel, perpendicular and tangent snaps require a line endpoint.",
+                    );
+                }
+            })
+            .response
+            .on_hover_text("Use this snap class for the next click. Escape or a tool change clears it.");
     }
 }

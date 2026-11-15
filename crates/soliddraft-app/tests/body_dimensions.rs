@@ -172,12 +172,31 @@ fn the_selected_body_shows_its_feature_dimensions() {
     assert!(shown(&harness).is_empty());
     save(&mut harness, "demo-cleared");
 
-    // A double-click on the part selects the body again.
+    // A double-click on the part selects the feature that made the face and shows its
+    // own dimensions only, as Instant3D does. The Solid body row keeps the whole set.
     let state = &harness.state().state;
     let plate_top = state.viewport.camera.project(glam::Vec3::new(40.0, -30.0, 10.0), state.viewport.rect).unwrap();
     double_click(&mut harness, plate_top);
+    let Some(Selection::Feature(plate)) = harness.state().state.doc.selection else {
+        panic!("the double-click selects a feature, not {:?}", harness.state().state.doc.selection)
+    };
+    let dims = shown(&harness);
+    assert_eq!(dims.len(), 3, "the plate's width, height and depth: {dims:?}");
+    assert!(dims.iter().all(|(t, _)| *t == DimensionTarget::Feature(plate)), "{dims:?}");
+    save(&mut harness, "demo-feature-dimensions");
+    harness.get_by_label("Solid body").click();
+    harness.run_steps(6);
     assert_eq!(harness.state().state.doc.selection, Some(Selection::Body));
     assert_eq!(shown(&harness).len(), 8);
+
+    // A double-click on a tree row does the same for its feature.
+    let name = harness.state().state.doc.feature(boss).unwrap().name.clone();
+    let row = harness.get_by_label(&name).rect().center();
+    double_click(&mut harness, row);
+    assert_eq!(harness.state().state.doc.selection, Some(Selection::Feature(boss)));
+    let dims = shown(&harness);
+    assert!(!dims.is_empty() && dims.iter().all(|(t, _)| *t == DimensionTarget::Feature(boss)), "{dims:?}");
+    assert!(harness.state().state.rename.is_none(), "a double-click shows dimensions, it does not rename");
 }
 
 #[test]

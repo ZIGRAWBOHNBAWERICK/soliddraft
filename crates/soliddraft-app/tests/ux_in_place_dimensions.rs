@@ -235,7 +235,9 @@ fn edit_in_place(case: &mut Case, look: Look) {
         assert!(app.state().state.doc.selection.is_none(), "the fixture starts with no selection");
 
         ux_tools::double_click_part(app, top_face(b20_part.depth));
-        until(app, "the dimensions", |a| ux_tools::body_selected(a) && !a.state().state.viewport.dimensions.is_empty());
+        until(app, "the dimensions", |a| {
+            ux_tools::feature_selected(a) && !a.state().state.viewport.dimensions.is_empty()
+        });
         settle(app);
         assert_annotations(app, &b20_part, "after the face double-click");
         assert_eq!(facts(app), before, "showing dimensions changes no geometry");
@@ -270,7 +272,7 @@ fn edit_in_place(case: &mut Case, look: Look) {
         assert_part(app, &b30_part, "after Redo");
         assert_eq!(facts(app).undo, before.undo + 1, "Redo gives the step back");
         ux_tools::double_click_part(app, top_face(b30_part.depth));
-        until(app, "the dimensions", ux_tools::body_selected);
+        until(app, "the dimensions", ux_tools::feature_selected);
         settle(app);
         assert_annotations(app, &b30_part, "after Redo");
 
@@ -290,7 +292,7 @@ fn edit_in_place(case: &mut Case, look: Look) {
         rebuilt(app);
         assert_part(app, &b30_part, "after reopening");
         ux_tools::double_click_part(app, top_face(b30_part.depth));
-        until(app, "the dimensions", ux_tools::body_selected);
+        until(app, "the dimensions", ux_tools::feature_selected);
         settle(app);
         assert_annotations(app, &b30_part, "after reopening");
         case.frame(app, "05-reopened");
@@ -353,7 +355,7 @@ fn refusal(app: &App, input: Rect, before: &[String], typed: &str) -> String {
 
 fn show_dimensions(app: &mut App, depth: f64) {
     ux_tools::double_click_part(app, top_face(depth));
-    until(app, "the dimensions", |a| ux_tools::body_selected(a) && !a.state().state.viewport.dimensions.is_empty());
+    until(app, "the dimensions", |a| ux_tools::feature_selected(a) && !a.state().state.viewport.dimensions.is_empty());
     settle(app);
 }
 
@@ -378,7 +380,7 @@ fn escape_and_invalid_text_preserve_the_accepted_part() {
         type_over(app, "Depth", &gesture_text("cancelled_depth"));
         press(app, Key::Escape);
         assert_closed(app, &before, "after Escape");
-        assert!(ux_tools::body_selected(app), "Escape closes the value, then the dimensions stay");
+        assert!(ux_tools::feature_selected(app), "Escape closes the value, then the dimensions stay");
         assert_annotations(app, &b20_part, "after Escape");
 
         for typed in manifest()["gestures"]["refused"].as_array().expect("refused values") {

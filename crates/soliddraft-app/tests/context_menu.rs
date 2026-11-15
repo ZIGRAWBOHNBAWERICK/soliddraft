@@ -65,6 +65,17 @@ fn groups(app: &App, expected: &[&str]) {
     }
 }
 
+/// A right-click opens one menu, the columns, and leaves out commands that do not work yet.
+fn one_menu(app: &App) {
+    assert!(app.query_all_by_label("Quick commands").next().is_none(), "no ring beside the columns");
+    let painted = ribbon::painted(app);
+    assert!(!painted.iter().any(|text| text.text == "Coming soon"), "no Coming soon entries");
+    for soon in ["Isolate", "Select loop"] {
+        assert!(app.query_all_by_label(soon).next().is_none(), "{soon} is hidden until it works");
+    }
+    assert!(app.query_all_by_label("STEP").next().is_none(), "the export says what it does");
+}
+
 fn dismiss(app: &mut App) {
     app.key_press(Key::Escape);
     app.run_steps(4);
@@ -89,6 +100,8 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         right_click(app, face, true);
         assert!(matches!(app.state().state.doc.selection, Some(Selection::Face(_))));
         groups(app, &["Face", "Feature", "Body"]);
+        one_menu(app);
+        assert!(app.query_all_by_label("Export STEP...").next().is_some(), "the body column names the export");
         case.frame(app, "face");
         menu_command(app, "suppress");
         app.run_steps(6);
@@ -98,6 +111,8 @@ fn secondary_pick_targets_the_face_edge_feature_body_and_empty_space() {
         right_click(app, row, false);
         assert_eq!(app.state().state.doc.selection, Some(Selection::Feature(feature)));
         groups(app, &["Feature", "Body"]);
+        one_menu(app);
+        case.frame(app, "row");
         menu_command(app, "suppress");
         app.run_steps(6);
         assert!(!app.state().state.doc.feature(feature).unwrap().suppressed);

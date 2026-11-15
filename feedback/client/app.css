@@ -1,4 +1,3 @@
-#feedback-launcher,
 #feedback-offer,
 #feedback-dialog {
   --bg: #f7f8fa;
@@ -12,18 +11,6 @@
   font:
     15px/1.5 system-ui,
     sans-serif;
-}
-#feedback-launcher {
-  position: fixed;
-  right: 12px;
-  /* Clear the 76px timeline and 32px command/status row, with a 12px gap. */
-  bottom: 120px;
-  z-index: 10;
-  border: 1px solid var(--mute);
-  border-radius: 4px;
-  min-height: 44px;
-  padding: 8px 14px;
-  cursor: pointer;
 }
 #feedback-offer {
   position: fixed;
@@ -74,7 +61,6 @@
   overflow-wrap: anywhere;
 }
 #feedback-dialog :focus-visible,
-#feedback-launcher:focus-visible,
 #feedback-offer :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;

@@ -186,6 +186,17 @@ impl TabViewer for Panels<'_> {
                     dimension_edit: st.dimension_edit.as_mut(),
                     visible,
                     rounding: st.editor.as_ref().and_then(crate::viewport::RoundingOverlay::of),
+                    guides: st.editor.as_ref().map(|e| e.preview.guides.clone()).filter(|g| *g != Default::default()),
+                    hole_ghost: match st.editor.as_ref().map(|e| &e.params) {
+                        Some(crate::state::EditorParams::Hole(h)) if h.face.is_none() => Some((
+                            h.diameter,
+                            match h.depth {
+                                soliddraft_kernel_api::HoleDepth::Blind { depth } => Some(depth),
+                                _ => None,
+                            },
+                        )),
+                        _ => None,
+                    },
                 };
                 let events = st.viewport.show(ui, &st.doc, overlay, selection, hover_label.as_deref(), &st.navigation);
                 crate::scan::paint(ui, st);

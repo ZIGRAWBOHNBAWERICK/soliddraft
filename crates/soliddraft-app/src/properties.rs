@@ -588,77 +588,9 @@ fn sketch_panel(ui: &mut egui::Ui, state: &mut AppState) {
                 section_gap(ui);
             }
 
-            // Tools.
-            theme::section_label(ui, "Tools");
-            let tools = [
-                (Tool::Select, Icon::Views, "Select"),
-                (Tool::Line, Icon::Line, "Line (L)"),
-                (Tool::Centreline, Icon::Cad("construction"), "Centreline"),
-                (Tool::Rectangle, Icon::Rectangle, "Rectangle (R)"),
-                (Tool::CentreRectangle, Icon::Rectangle, "Centre rectangle"),
-                (Tool::ThreePointCornerRectangle, Icon::Rectangle, "3-point corner rectangle"),
-                (Tool::ThreePointCentreRectangle, Icon::Rectangle, "3-point centre rectangle"),
-                (Tool::Parallelogram, Icon::Rectangle, "Parallelogram"),
-                (Tool::Circle, Icon::Circle, "Circle (C)"),
-                (Tool::PerimeterCircle, Icon::Circle, "Perimeter circle"),
-                (Tool::Ellipse, Icon::Circle, "Ellipse"),
-                (Tool::PartialEllipse, Icon::Arc, "Partial ellipse"),
-                (Tool::FitSpline,Icon::Arc,"Fit-point spline"),
-                (Tool::ControlSpline,Icon::Arc,"Control-point spline"),
-                (Tool::Text,Icon::Text,"Sketch text"),
-                (Tool::Arc, Icon::Arc, "Arc (A)"),
-                (Tool::ThreePointArc, Icon::Arc, "Three-point arc"),
-                (Tool::TangentArc, Icon::Arc, "Tangent arc"),
-                (Tool::Slot, Icon::Slot, "Slot (S)"),
-                (Tool::CentrepointSlot, Icon::Slot, "Centrepoint slot"),
-                (Tool::ThreePointArcSlot, Icon::Slot, "Three-point arc slot"),
-                (Tool::CentrepointArcSlot, Icon::Slot, "Centrepoint arc slot"),
-                (Tool::Point, Icon::Point, "Point (P)"),
-                (Tool::Dimension, Icon::SmartDim, "Smart dimension (D)"),
-                (Tool::Polygon, Icon::Polygon, "Polygon"),
-                (Tool::Trim, Icon::Trim, "Trim"),
-                (Tool::Fillet, Icon::Fillet, "Sketch fillet"),
-                (Tool::Chamfer, Icon::Chamfer, "Sketch chamfer"),
-                (Tool::Split, Icon::Trim, "Split entities"),
-                (Tool::Extend, Icon::Extend, "Extend"),
-                (Tool::Offset, Icon::Offset, "Offset"),
-                (Tool::Mirror, Icon::Mirror, "Mirror entities"),
-                (Tool::LinearPattern, Icon::LinearPattern, "Linear pattern"),
-                (Tool::CircularPattern, Icon::CircularPattern, "Circular pattern"),
-                (Tool::Move, Icon::Views, "Move entities"),
-                (Tool::Copy, Icon::LinearPattern, "Copy entities"),
-                (Tool::Rotate, Icon::CircularPattern, "Rotate entities"),
-                (Tool::Scale, Icon::Rectangle, "Scale entities"),
-            ];
+            // The tools themselves are in the palette, with their names; the panel keeps
+            // what acts on the sketch as a whole.
             ui.horizontal_wrapped(|ui| {
-                // Keep Modify controls above the command bar as the palette gains tools.
-                ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
-                for (tool, icon, tip) in tools {
-                    let (r, resp) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
-                    resp.widget_info(|| {
-                        egui::WidgetInfo::selected(
-                            egui::WidgetType::Button,
-                            true,
-                            s.tool == tool || (tool == Tool::Trim && s.tool.trims()),
-                            tip,
-                        )
-                    });
-                    let on = s.tool == tool || (tool == Tool::Trim && s.tool.trims());
-                    if on {
-                        ui.painter().rect_filled(r, CornerRadius::same(6), theme::selection_bg());
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(r, CornerRadius::same(6), theme::hover());
-                    }
-                    icons::paint(
-                        ui.painter(),
-                        icon,
-                        r.shrink(6.0),
-                        if on { theme::selection_ink() } else { theme::ink() },
-                    );
-                    if resp.on_hover_text(tip).clicked() {
-                        s.set_tool(tool);
-                    }
-                }
                 if ui
                     .add(egui::Button::new("Sketch diagnostics").min_size(vec2(0.0, 26.0)))
                     .on_hover_text("Locate profile faults and invalid relation references")
@@ -1047,15 +979,17 @@ fn selection(ui: &mut egui::Ui, state: &mut AppState) {
         (Selection::Reference(Reference::Axis(_)), _) => Icon::Axis,
     };
     let head = header(ui, icon, &info.title);
-    let clear = small_button(
-        ui,
-        Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), vec2(22.0, 22.0)),
-        Icon::Close,
-        "Clear selection (Esc)",
-        false,
-    );
-    if clear.clicked() {
-        state.push(AppAction::Select(None));
+    if !state.properties_in_sheet {
+        let clear = small_button(
+            ui,
+            Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), vec2(22.0, 22.0)),
+            Icon::Close,
+            "Clear selection (Esc)",
+            false,
+        );
+        if clear.clicked() {
+            state.push(AppAction::Select(None));
+        }
     }
     let status = feature.map(|f| f.status.clone());
     let suppressed = feature.is_some_and(|f| f.suppressed);

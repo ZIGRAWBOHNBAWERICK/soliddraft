@@ -395,6 +395,7 @@ pub fn run(
     paint_entities(&painter, &frame, s);
     paint_glyphs(&painter, s, &glyphs);
     paint_dimensions(&painter, &frame, s);
+    paint_dimension_placing(&painter, &frame, s, hover_pos.and_then(|p| frame.plane_at(p)));
     if let Some(b) = &s.selection_box {
         select_box::paint(&painter, b);
     }
@@ -439,7 +440,6 @@ pub fn run(
     paint_snaps(&painter, &frame, s, hover_pos, snapped);
     dim_editor(ui, s, &frame, &mut actions);
     paint_status(ui, s, rect);
-    crate::measure::guides::switches(ui, s, rect);
     actions
 }
 
@@ -1400,15 +1400,45 @@ fn entity_color(s: &SketchSession, e: &Entity) -> Color32 {
     }
 }
 
+/// Where the sheet under an open sketch is centred, in the sketch's coordinates: the
+/// part's middle seen on the plane, so it stays put while the sketch grows, or the
+/// middle of what the sketch draws, or its origin.
+pub fn sheet_centre(doc: &Document, sketch: &Sketch, plane: Plane) -> P2 {
+    let on_plane = |p: glam::Vec3| {
+        let d = soliddraft_kernel_api::Vec3::new(p.x as f64, p.y as f64, p.z as f64) - plane.origin;
+        P2::new(d.dot(plane.x_dir), d.dot(plane.normal.cross(plane.x_dir)))
+    };
+    match (doc.bounds(), sketch.bounds()) {
+        (Some((lo, hi)), _) => on_plane((lo + hi) / 2.0),
+        (None, Some((lo, hi))) => P2::new((lo.u + hi.u) / 2.0, (lo.v + hi.v) / 2.0),
+        (None, None) => P2::ZERO,
+    }
+}
+
+/// The sheet under an open sketch: centred on the part's middle seen on the plane, or
+/// on what the sketch draws, so a sketch on a face has its sheet on that face rather than
+/// round the world origin.
 fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketch: &Sketch, light_sheet: bool) {
+    let part = doc.bounds();
+    let centre = sheet_centre(doc, sketch, frame.plane);
     let mut half = 100.0_f64;
-    if let Some((lo, hi)) = doc.bounds() {
+    if let Some((lo, hi)) = part {
         half = half.max(((hi - lo).length() as f64) * 0.65);
     }
     if let Some((lo, hi)) = sketch.bounds() {
-        half = half.max(lo.u.abs().max(lo.v.abs()).max(hi.u.abs()).max(hi.v.abs()) * 1.3);
+        let reach = (lo.u - centre.u)
+            .abs()
+            .max((lo.v - centre.v).abs())
+            .max((hi.u - centre.u).abs())
+            .max((hi.v - centre.v).abs());
+        half = half.max(reach * 1.3);
     }
-    let corners = [P2::new(-half, -half), P2::new(half, -half), P2::new(half, half), P2::new(-half, half)];
+    let corners = [
+        P2::new(centre.u - half, centre.v - half),
+        P2::new(centre.u + half, centre.v - half),
+        P2::new(centre.u + half, centre.v + half),
+        P2::new(centre.u - half, centre.v + half),
+    ];
     let pts: Vec<Pos2> = corners.iter().filter_map(|p| frame.screen(*p)).collect();
     if pts.len() == 4 {
         painter.add(egui::Shape::convex_polygon(
@@ -1423,8 +1453,8 @@ fn paint_plane(painter: &egui::Painter, frame: &Frame<'_>, doc: &Document, sketc
             painter.line_segment([p, q], Stroke::new(1.0, color));
         }
     };
-    axis(P2::new(-half, 0.0), P2::new(half, 0.0), theme::line().gamma_multiply(1.3));
-    axis(P2::new(0.0, -half), P2::new(0.0, half), theme::line().gamma_multiply(1.3));
+    axis(P2::new(centre.u - half, 0.0), P2::new(centre.u + half, 0.0), theme::line().gamma_multiply(1.3));
+    axis(P2::new(0.0, centre.v - half), P2::new(0.0, centre.v + half), theme::line().gamma_multiply(1.3));
 }
 
 fn paint_regions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession) {
@@ -1937,6 +1967,51 @@ fn paint_dimensions(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSessio
         };
         value_pill(painter, lp, dim_text(c, &s.sketch), ink, bg, Stroke::new(1.0, edge));
     }
+}
+
+/// Smart Dimension between its picks and its placing click: the picked items stand out,
+/// and the dimension they make follows the pointer with its value.
+fn paint_dimension_placing(painter: &egui::Painter, frame: &Frame<'_>, s: &SketchSession, pointer: Option<P2>) {
+    if s.tool != Tool::Dimension {
+        return;
+    }
+    let Some(first) = s.dim_first else { return };
+    let picked = Stroke::new(3.0, theme::accent());
+    for sel in std::iter::once(first).chain(s.dim_second) {
+        match sel {
+            SketchSel::Entity(id) => {
+                let Some(entity) = s.sketch.entity(id) else { continue };
+                for path in entity.polylines(64) {
+                    let points: Vec<Pos2> = path.into_iter().filter_map(|p| frame.screen(p)).collect();
+                    if points.len() == 1 {
+                        painter.circle(points[0], 4.5, theme::accent(), Stroke::new(1.5, theme::hud_bg()));
+                    } else if points.len() > 1 {
+                        painter.add(egui::Shape::line(points, picked));
+                    }
+                }
+            }
+            SketchSel::Point(point) => {
+                if let Some(at) = s.sketch.point(point).and_then(|p| frame.screen(p)) {
+                    painter.circle(at, 4.5, theme::accent(), Stroke::new(1.5, theme::hud_bg()));
+                }
+            }
+            SketchSel::Constraint(_) => {}
+        }
+    }
+    let Some(at) = pointer else { return };
+    let Some(kind) = dimension_kind(&s.sketch, first, s.dim_second, at) else { return };
+    let c = Constraint { id: 0, kind };
+    let Some(label) = c.label() else { return };
+    let Some(lp) = frame.screen(label) else { return };
+    paint_dimension_lines(painter, frame, &s.sketch, &c, label, lp, theme::accent());
+    value_pill(
+        painter,
+        lp,
+        dim_text(&c, &s.sketch),
+        theme::ink(),
+        theme::selection_bg(),
+        Stroke::new(1.0, theme::accent()),
+    );
 }
 
 /// Draws a dimension's extension and dimension lines, arrows and leader in `color`.

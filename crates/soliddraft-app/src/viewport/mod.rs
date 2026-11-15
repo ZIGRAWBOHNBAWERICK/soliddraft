@@ -118,6 +118,12 @@ pub struct Overlay<'a> {
     pub visible: Visible,
     /// An open Fillet or Chamfer, whose preview the viewport names and marks.
     pub rounding: Option<RoundingOverlay<'a>>,
+    /// What explains the open form's preview: copy numbers, a draft's neutral plane and
+    /// pull, an extrusion's depth arrow.
+    pub guides: Option<crate::document::PreviewGuides>,
+    /// An open Hole form without its face: the hole's diameter and blind depth, drawn at
+    /// the pointer over a planar face.
+    pub hole_ghost: Option<(f64, Option<f64>)>,
 }
 
 /// What an open Fillet or Chamfer adds to the viewport: a label naming its size and
@@ -191,6 +197,11 @@ pub struct ViewportState {
     navigation_bar: navigation_bar::NavigationBar,
     /// Shows feature dimensions without selecting the body.
     pub all_dimensions: bool,
+    /// The feature a double-click chose: while it stays selected, the viewport shows its
+    /// own dimensions and its sketch's, and no others.
+    pub dimensions_of: Option<FeatureId>,
+    /// A depth arrow drag: where the pointer pressed and the depth then.
+    arrow_drag: Option<(Pos2, f32)>,
 }
 
 impl Default for ViewportState {
@@ -217,9 +228,16 @@ impl Default for ViewportState {
             cube_hover: None,
             navigation_bar: navigation_bar::NavigationBar::default(),
             all_dimensions: false,
+            dimensions_of: None,
+            arrow_drag: None,
         }
     }
 }
+
+/// The band at the viewport's bottom that the heads-up pills and the navigation bar take.
+pub(crate) const HUD_BAND: f32 = 84.0;
+/// The band at the viewport's top that an open sketch's status takes.
+const SKETCH_STATUS_BAND: f32 = 60.0;
 
 /// The zoom of one point of a drag-zoom: the natural log of its factor.
 const DRAG_ZOOM: f32 = 0.005;
@@ -320,6 +338,8 @@ impl ViewportState {
             dimension_edit,
             visible,
             rounding,
+            guides,
+            hole_ghost,
         } = overlay;
         let pick_revision = Some((doc.model().id(), doc.mesh_version, doc.display_body()));
         let provisional = doc.provisional_mesh();
@@ -334,6 +354,13 @@ impl ViewportState {
         let mut events = ViewportEvents::default();
         let rect = ui.available_rect_before_wrap();
         self.rect = rect;
+        // A fit frames the part clear of the heads-up pills and the navigation bar at the
+        // bottom, and of an open sketch's status at the top.
+        self.camera.set_framing(camera::Framing {
+            top: if sketching { SKETCH_STATUS_BAND } else { 8.0 },
+            bottom: HUD_BAND,
+            height: rect.height(),
+        });
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "3D viewport"));
         let ppp = ui.ctx().pixels_per_point();
@@ -400,8 +427,12 @@ impl ViewportState {
             }
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         }
-        // A shown sketch's curves are drawn over the model, so they take the pick first.
-        if let Some(pos) = hover_pos {
+        // A shown sketch's curves are drawn over the model, so they take the pick first,
+        // except where a body edge is under the pointer: a sketch outline on the body's
+        // own edges would otherwise leave those edges unpickable.
+        let on_edge =
+            matches!(self.hover.and_then(|p| pick::selection(doc, p)), Some(Selection::Edge(_) | Selection::Vertex(_)));
+        if let Some(pos) = hover_pos.filter(|_| !on_edge) {
             self.hover_sketch = passive_sketches
                 .iter()
                 .rev()
@@ -522,8 +553,15 @@ impl ViewportState {
         if let Some(rounding) = &rounding {
             self.paint_rounding(ui, &painter, rect, rounding);
         }
+        if let Some(guides) = &guides {
+            self.paint_guides(ui, &painter, rect, guides, &mut events);
+        }
+        if let Some((diameter, depth)) = hole_ghost {
+            self.paint_hole_ghost(&painter, doc, rect, diameter, depth);
+        }
         // Label gestures take precedence over body picking and camera navigation.
         let pointer = ui.input(|i| i.pointer.interact_pos()).filter(|p| rect.contains(*p));
+        let only = self.dimensions_of.filter(|id| selection == Some(Selection::Feature(*id)));
         let dims = if !sketching && !self.section_active {
             dimensions::paint(
                 &painter,
@@ -532,9 +570,11 @@ impl ViewportState {
                 doc,
                 pointer,
                 (self.all_dimensions
+                    || only.is_some()
                     || selection == Some(Selection::Body)
                     || dimensions_on_geometry && matches!(selection, Some(Selection::Face(_) | Selection::Edge(_))))
                     && visible.body,
+                only.filter(|_| !self.all_dimensions),
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
                 self.scene.is_some_and(scenes::Scene::is_dark),
@@ -563,11 +603,19 @@ impl ViewportState {
             && self.hover.is_some()
             && doc.display_body().is_some()
         {
+            // The feature that made the face or edge, with its own dimensions only, as
+            // Instant3D shows them. The body's whole set is on the Solid body row.
             events.clicked = None;
-            if let Some(selection) = self.hover.and_then(|picked| pick::selection(doc, picked)) {
-                events.actions.push(AppAction::Select(Some(selection)));
+            let picked = self.hover.and_then(|picked| pick::selection(doc, picked));
+            match picked.and_then(|selection| doc.selection_feature(selection)) {
+                Some(feature) => events.actions.push(AppAction::Dimension(DimensionAction::ShowFeature(feature))),
+                None => {
+                    if let Some(selection) = picked {
+                        events.actions.push(AppAction::Select(Some(selection)));
+                    }
+                    events.actions.push(AppAction::Select(Some(Selection::Body)));
+                }
             }
-            events.actions.push(AppAction::Select(Some(Selection::Body)));
         }
         for (i, d) in dims.iter().enumerate() {
             d.expose(ui, i);
@@ -789,6 +837,149 @@ impl ViewportState {
             info.current_text_value = Some(rounding.text.clone());
             info
         });
+    }
+
+    /// Paints a form's preview guides. The depth arrow takes a drag along itself, which
+    /// sets the depth, and a double-click on its value, which opens the form's Depth.
+    fn paint_guides(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        rect: Rect,
+        guides: &crate::document::PreviewGuides,
+        events: &mut ViewportEvents,
+    ) {
+        let ink = theme::edit_suite::PREVIEW_EDGE;
+        let outline: Vec<Pos2> = guides.outline.iter().filter_map(|p| self.camera.project(*p, rect)).collect();
+        if outline.len() == guides.outline.len() && outline.len() > 2 {
+            let mut closed = outline.clone();
+            closed.push(outline[0]);
+            painter.add(egui::Shape::dashed_line(&closed, Stroke::new(1.5, ink), 6.0, 4.0));
+        }
+        for (at, text) in &guides.labels {
+            if let Some(p) = self.camera.project(*at, rect) {
+                crate::sketcher::value_pill(
+                    painter,
+                    p,
+                    text.clone(),
+                    theme::ink(),
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.0, ink),
+                );
+            }
+        }
+        let Some(arrow) = &guides.arrow else {
+            self.arrow_drag = None;
+            return;
+        };
+        let (Some(from), Some(to)) = (self.camera.project(arrow.from, rect), self.camera.project(arrow.to, rect))
+        else {
+            return;
+        };
+        let along = to - from;
+        let length = (arrow.to - arrow.from).length();
+        painter.line_segment([from, to], Stroke::new(4.0, theme::hud_bg()));
+        painter.line_segment([from, to], Stroke::new(2.0, ink));
+        if along.length() > 4.0 {
+            crate::sketcher::arrow(painter, to, along, ink);
+        }
+        if !arrow.drags {
+            if !arrow.text.is_empty() {
+                let at = to + along.normalized() * 16.0;
+                crate::sketcher::value_pill(
+                    painter,
+                    at,
+                    arrow.text.clone(),
+                    theme::ink(),
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.0, ink),
+                );
+            }
+            return;
+        }
+        // The handle sits on the profile, where the extrusion starts.
+        let handle = Rect::from_center_size(from, vec2(22.0, 22.0));
+        let response = ui.interact(handle, ui.id().with("depth arrow"), Sense::drag());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Depth arrow"));
+        let hot = response.hovered() || response.dragged();
+        painter.circle(from, if hot { 7.5 } else { 6.0 }, theme::accent(), Stroke::new(2.0, theme::hud_bg()));
+        if hot {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if response.drag_started() {
+            self.arrow_drag = response.interact_pointer_pos().map(|p| (p, length));
+        }
+        if response.dragged()
+            && let (Some((start, depth)), Some(pointer)) = (self.arrow_drag, response.interact_pointer_pos())
+            && along.length() > 1.0
+            && length > 0.0
+        {
+            let per_mm = along.length() / length;
+            let moved = (pointer - start).dot(along.normalized()) / per_mm;
+            let value = ((depth + moved).max(0.1) * 10.0).round() / 10.0;
+            if (value - length).abs() > 1e-3 {
+                events.actions.push(AppAction::EditorDepth(f64::from(value)));
+            }
+        }
+        if response.drag_stopped() {
+            self.arrow_drag = None;
+        }
+        let label_at = to + along.normalized() * 18.0;
+        let label = crate::sketcher::value_pill(
+            painter,
+            label_at,
+            arrow.text.clone(),
+            theme::ink(),
+            Color32::TRANSPARENT,
+            Stroke::new(1.0, ink),
+        );
+        let value = ui.interact(label, ui.id().with("depth value"), Sense::click());
+        value.widget_info(|| {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Depth on the preview");
+            info.current_text_value = Some(arrow.text.clone());
+            info
+        });
+        if value.double_clicked() {
+            events.actions.push(AppAction::EditorFocusDepth);
+        }
+        value.on_hover_text("Drag the arrow, or double-click to type the depth");
+    }
+
+    /// A hole at the pointer over a planar face, before its first click: its mouth on the
+    /// face and its floor at its depth, or a short way in for a hole through the part.
+    fn paint_hole_ghost(&self, painter: &egui::Painter, doc: &Document, rect: Rect, diameter: f64, depth: Option<f64>) {
+        let (Some(at), Some(Selection::Face(face))) =
+            (self.hover_point, self.hover.and_then(|picked| pick::selection(doc, picked)))
+        else {
+            return;
+        };
+        let Some(plane) = doc.face_plane(face) else { return };
+        let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+        let (normal, u) = (v(plane.normal).normalize_or_zero(), v(plane.x_dir).normalize_or_zero());
+        let w = normal.cross(u);
+        let radius = diameter as f32 / 2.0;
+        let down = depth.map_or(radius * 2.0, |d| d as f32);
+        let ring = |centre: Vec3| -> Vec<Pos2> {
+            (0..=48)
+                .filter_map(|i| {
+                    let a = i as f32 / 48.0 * std::f32::consts::TAU;
+                    self.camera.project(centre + (u * a.cos() + w * a.sin()) * radius, rect)
+                })
+                .collect()
+        };
+        let red = theme::edit_suite::PREVIEW_REMOVE_EDGE;
+        let mouth = ring(at);
+        let floor = ring(at - normal * down);
+        painter.add(egui::Shape::line(mouth.clone(), Stroke::new(2.0, red)));
+        painter.add(egui::Shape::dashed_line(&floor, Stroke::new(1.5, red), 5.0, 4.0));
+        for i in [0, 12, 24, 36] {
+            if let (Some(a), Some(b)) = (mouth.get(i), floor.get(i)) {
+                painter.line_segment([*a, *b], Stroke::new(1.0, red));
+            }
+        }
+        if let Some(centre) = self.camera.project(at, rect) {
+            painter.circle_filled(centre, 2.5, red);
+        }
     }
 
     fn paint_highlights(

@@ -298,6 +298,9 @@ pub struct ExtrudeParams {
     /// Where it stops; [`EndKind::ThroughAll`] is for cuts.
     #[serde(default)]
     pub end: EndKind,
+    /// The Draft option: side faces tapered from the sketch plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<ExtrudeDraft>,
 }
 
 impl Default for ExtrudeParams {
@@ -309,6 +312,7 @@ impl Default for ExtrudeParams {
             depth: 20.0,
             flip: false,
             end: EndKind::Blind,
+            draft: None,
         }
     }
 }
@@ -323,11 +327,14 @@ pub struct CutParams {
     /// Up to next or up to face; overrides `through_all` and `depth` when set.
     #[serde(default)]
     pub up_to: Option<EndKind>,
+    /// The Draft option: the cut's walls tapered from the sketch plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<ExtrudeDraft>,
 }
 
 impl CutParams {
     pub fn new(sketch: FeatureId) -> Self {
-        CutParams { sketch, depth: 10.0, through_all: true, flip: false, up_to: None }
+        CutParams { sketch, depth: 10.0, through_all: true, flip: false, up_to: None, draft: None }
     }
 
     /// Where the cut stops.
@@ -442,7 +449,28 @@ impl DraftParams {
             neutral: self.neutral.clone(),
             angle: self.angle,
             reverse: self.reverse,
+            of: None,
         }
+    }
+}
+
+/// Whether a draft angle below zero tapers an extrusion's sides inward, towards its
+/// profile's inside, as it grows. Pinned by `the_draft_option_tapers_inward_or_outward`.
+const DRAFT_INWARD_NEGATIVE: bool = false;
+
+/// The Draft option of an extrusion or cut, as SOLIDWORKS offers it in the extrude form:
+/// the side faces taper by `angle` degrees from the sketch plane, inward unless
+/// `outward`. It is built as a draft feature linked to the extrusion.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExtrudeDraft {
+    pub angle: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outward: bool,
+}
+
+impl Default for ExtrudeDraft {
+    fn default() -> Self {
+        ExtrudeDraft { angle: 3.0, outward: false }
     }
 }
 
@@ -640,6 +668,7 @@ impl FeatureKind {
                             through_all: false,
                             flip: !e.reverse,
                             up_to: None,
+                            draft: None,
                         };
                         cut.set_end(end);
                         FeatureKind::Cut(cut)
@@ -661,6 +690,7 @@ impl FeatureKind {
                             depth,
                             flip: e.reverse,
                             end,
+                            draft: None,
                         })
                     }
                 }
@@ -901,6 +931,14 @@ pub struct Feature {
     pub via_assistant: bool,
 }
 
+/// A feature's summary with its Draft option, such as "25 mm · 3° draft".
+fn with_draft(summary: String, draft: Option<ExtrudeDraft>) -> String {
+    match draft {
+        Some(d) => format!("{summary} · {}° draft{}", fmt_mm(d.angle), if d.outward { " out" } else { "" }),
+        None => summary,
+    }
+}
+
 impl Feature {
     pub fn summary(&self) -> String {
         if let FeatureStatus::AnsweredWithinBound(bound) = &self.status {
@@ -918,14 +956,20 @@ impl Feature {
                     _ => format!("{n} entit{}", if n == 1 { "y" } else { "ies" }),
                 }
             }
-            FeatureKind::Extrude(p) => match p.end {
-                EndKind::Blind => format!("{} mm", fmt_mm(p.depth)),
-                ref end => end.label().to_lowercase(),
-            },
-            FeatureKind::Cut(p) => match p.end() {
-                EndKind::Blind => format!("{} mm", fmt_mm(p.depth)),
-                end => end.label().to_lowercase(),
-            },
+            FeatureKind::Extrude(p) => with_draft(
+                match p.end {
+                    EndKind::Blind => format!("{} mm", fmt_mm(p.depth)),
+                    ref end => end.label().to_lowercase(),
+                },
+                p.draft,
+            ),
+            FeatureKind::Cut(p) => with_draft(
+                match p.end() {
+                    EndKind::Blind => format!("{} mm", fmt_mm(p.depth)),
+                    end => end.label().to_lowercase(),
+                },
+                p.draft,
+            ),
             FeatureKind::Revolve(r) => format!("{}°", fmt_mm(r.angle_deg)),
             FeatureKind::Sweep(s) => format!("{} mm", fmt_mm(s.path.length())),
             FeatureKind::Loft(l) => format!(
@@ -1465,6 +1509,32 @@ pub struct Preview {
     /// Material the feature adds (extrude) or removes (cut), drawn as a ghost.
     pub tool: Option<Arc<DisplayMesh>>,
     pub removes: bool,
+    /// What the viewport draws over the preview to explain it.
+    pub guides: PreviewGuides,
+}
+
+/// Marks a form's preview carries: numbers on a pattern's or mirror's copies, a draft's
+/// neutral plane and pull, and an extrusion's depth arrow.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PreviewGuides {
+    /// Text at a point, such as a copy's number.
+    pub labels: Vec<(Vec3, String)>,
+    /// A closed outline, such as a draft's neutral plane.
+    pub outline: Vec<Vec3>,
+    /// An arrow from its first point to its second, with the value it shows.
+    pub arrow: Option<PreviewArrow>,
+}
+
+/// An arrow on a preview: an extrusion's depth, which the pointer can drag, or a
+/// draft's pull, which it cannot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewArrow {
+    pub from: Vec3,
+    pub to: Vec3,
+    /// The value at the tip, such as "25"; empty for none.
+    pub text: String,
+    /// Dragging the arrow changes the depth.
+    pub drags: bool,
 }
 
 /// Keeps the previous proved bodies alive through the model's existing shared
@@ -2176,7 +2246,7 @@ impl Document {
     ) -> Result<bool, String> {
         let crate::drag::PreparedBuild { worker, request, completed, candidate } = prepared;
         self.worker = Some(worker);
-        if let Err(message) = self.execute_command(command, true) {
+        if let Err(message) = self.execute_command(command, true, None) {
             let worker = self.worker.take().expect("prepared worker");
             self.return_worker(worker);
             return Err(message);
@@ -2197,19 +2267,24 @@ impl Document {
         Ok(false)
     }
 
-    pub fn apply_interactive(&mut self, command: Command) -> Result<Option<FeatureId>, String> {
-        let scalar = match &command {
-            Command::EditExtrude { .. }
-            | Command::EditCut { .. }
-            | Command::EditFillet { .. }
-            | Command::EditChamfer { .. } => true,
+    /// Whether `command` edits a feature dimension, which rebuilds through the deferred
+    /// proof the drag and the typed value use.
+    pub fn edits_scalar(&self, command: &Command) -> bool {
+        match command {
+            // A Draft option rebuilds as a second feature, so it takes the plain path.
+            Command::EditExtrude { id, params } => params.draft.is_none() && self.linked_draft(*id).is_none(),
+            Command::EditCut { id, params } => params.draft.is_none() && self.linked_draft(*id).is_none(),
+            Command::EditFillet { .. } | Command::EditChamfer { .. } => true,
             Command::EditFeature { kind, .. } => crate::drag::Dimension::of(kind).is_some(),
             _ => false,
-        };
-        if !scalar {
+        }
+    }
+
+    pub fn apply_interactive(&mut self, command: Command) -> Result<Option<FeatureId>, String> {
+        if !self.edits_scalar(&command) {
             return self.apply(command);
         }
-        let created = self.execute_command(command, true)?;
+        let created = self.execute_command(command, true, None)?;
         if let Err(message) = self.schedule_proof() {
             self.fail_proof(message);
         }
@@ -2539,10 +2614,31 @@ impl Document {
     /// feature the command created. A created feature that fails to build stays
     /// in the tree with its error, and the error comes back here too.
     pub fn apply(&mut self, command: Command) -> Result<Option<FeatureId>, String> {
-        self.execute_command(command, false)
+        self.execute_command(command, false, None)
     }
 
-    fn execute_command(&mut self, command: Command, deferred: bool) -> Result<Option<FeatureId>, String> {
+    /// Applies a feature form's OK. A feature the kernel refuses is withdrawn, new or
+    /// edited, so the form can stay open with the reason and the tree gains no failed row.
+    pub fn apply_form(&mut self, command: Command) -> Result<Option<FeatureId>, String> {
+        let edited = match &command {
+            Command::EditFeature { id, .. }
+            | Command::EditExtrude { id, .. }
+            | Command::EditCut { id, .. }
+            | Command::EditFillet { id, .. }
+            | Command::EditChamfer { id, .. } => Some(*id),
+            _ => None,
+        };
+        self.execute_command(command, false, Some(edited))
+    }
+
+    /// `form` is `Some` for a form's OK, holding the feature it edits, if any: a refused
+    /// feature is then withdrawn.
+    fn execute_command(
+        &mut self,
+        command: Command,
+        deferred: bool,
+        form: Option<Option<FeatureId>>,
+    ) -> Result<Option<FeatureId>, String> {
         let journal = self.model.journal_command(|| {
             serde_json::json!({
                 "op":"app_command", "command":command, "assistant_mark":self.assistant_mark
@@ -2573,13 +2669,22 @@ impl Document {
             if let Some(feature) = created.and_then(|id| self.feature(id)) {
                 self.active_body = feature.body_key;
             }
-            if !deferred
-                && let Some(id) = created
-                && let Some(FeatureStatus::Error(msg)) = self.feature(id).map(|f| f.status.clone())
-            {
+            // A form's feature fails when it or its Draft option does.
+            let edited = form.flatten();
+            let refused =
+                created.into_iter().chain(edited).chain(edited.and_then(|id| self.linked_draft(id))).find_map(|id| {
+                    match self.feature(id).map(|f| f.status.clone()) {
+                        Some(FeatureStatus::Error(msg)) => Some(msg),
+                        _ => None,
+                    }
+                });
+            // A new extrusion's Draft option is created last; the extrusion stands for both.
+            let created = created.map(|id| self.draft_owner(id).unwrap_or(id));
+            if !deferred && let Some(msg) = refused {
                 // A refused fillet or chamfer is rolled back, as the command tools do: left
-                // red, it would block every later edge and face reference.
-                if rounding {
+                // red, it would block every later edge and face reference. A form's refused
+                // feature is too: the form stays open with the reason instead.
+                if rounding || form.is_some() {
                     self.withdraw(depth, drawn, retained).map_err(|e| format!("{msg}; {e}"))?;
                 }
                 return Err(msg);
@@ -2599,6 +2704,45 @@ impl Document {
     }
 
     /// The model commands for one panel command.
+    /// `base` followed by the commands for its Draft option, when it has or had one.
+    fn with_draft_option(
+        &self,
+        mut base: Vec<model::Command>,
+        target: Option<FeatureId>,
+        draft: Option<ExtrudeDraft>,
+    ) -> Result<Vec<model::Command>, String> {
+        if draft.is_none() && target.and_then(|id| self.linked_draft(id)).is_none() {
+            return Ok(base);
+        }
+        let linked = self.linked_draft_commands(&base, target, draft)?;
+        if let Some(model::Command::DeleteFeature { .. }) = linked.first() {
+            // The old draft goes before the edit that could leave its faces behind.
+            let mut commands = linked;
+            commands.append(&mut base);
+            return Ok(commands);
+        }
+        if let Some(owner) = target
+            && let Some(existing) = self.linked_draft(owner)
+            && let Some(model::Command::EditFeature { kind, .. }) = linked.first()
+        {
+            // Rebuilding the extrusion under its old draft could fail on the old faces, so
+            // the old draft goes and the new one follows the extrusion.
+            let mut commands = vec![model::Command::DeleteFeature { id: model_id(existing) }];
+            commands.append(&mut base);
+            let owner = model_id(owner);
+            let after = self.model.features().iter().position(|f| f.id == owner).map(|i| i + 1);
+            commands.push(model::Command::AddFeature {
+                kind: kind.clone(),
+                name: None,
+                position: after,
+                via_assistant: false,
+            });
+            return Ok(commands);
+        }
+        base.extend(linked);
+        Ok(base)
+    }
+
     fn to_model(&self, command: Command) -> Result<Vec<model::Command>, String> {
         let add = |kind: model::FeatureKind, via_assistant: bool| {
             let sketch = match &kind {
@@ -2658,11 +2802,22 @@ impl Document {
                 vec![edit(id, &FeatureKind::Sketch(SketchFeature { plane: s.plane.clone(), sketch }))]
             }
             Command::AddExtrude { params, via_assistant } => {
-                vec![add(FeatureKind::Extrude(params).to_model(), via_assistant)]
+                let draft = params.draft;
+                let base = vec![add(FeatureKind::Extrude(params).to_model(), via_assistant)];
+                self.with_draft_option(base, None, draft)?
             }
-            Command::EditExtrude { id, params } => vec![edit(id, &FeatureKind::Extrude(params))],
-            Command::AddCut { params } => vec![add(FeatureKind::Cut(params).to_model(), false)],
-            Command::EditCut { id, params } => vec![edit(id, &FeatureKind::Cut(params))],
+            Command::EditExtrude { id, params } => {
+                let draft = params.draft;
+                self.with_draft_option(vec![edit(id, &FeatureKind::Extrude(params))], Some(id), draft)?
+            }
+            Command::AddCut { params } => {
+                let draft = params.draft;
+                self.with_draft_option(vec![add(FeatureKind::Cut(params).to_model(), false)], None, draft)?
+            }
+            Command::EditCut { id, params } => {
+                let draft = params.draft;
+                self.with_draft_option(vec![edit(id, &FeatureKind::Cut(params))], Some(id), draft)?
+            }
             Command::AddFillet { params } => vec![add(FeatureKind::Fillet(params).to_model(), false)],
             Command::EditFillet { id, params } => vec![edit(id, &FeatureKind::Fillet(params))],
             Command::AddChamfer { params } => vec![add(FeatureKind::Chamfer(params).to_model(), false)],
@@ -2714,7 +2869,9 @@ impl Document {
                 if self.features[index].is_sketch() {
                     doomed.extend(self.features.iter().filter(|f| f.kind.sketch() == Some(id)).map(|f| f.id));
                 }
-                doomed.into_iter().map(|id| model::Command::DeleteFeature { id: model_id(id) }).collect()
+                // A Draft option goes first, before the feature its faces belong to.
+                let drafts: Vec<FeatureId> = doomed.iter().filter_map(|id| self.linked_draft(*id)).collect();
+                drafts.into_iter().chain(doomed).map(|id| model::Command::DeleteFeature { id: model_id(id) }).collect()
             }
             Command::Rename { id, name } => {
                 let name = name.trim().to_owned();
@@ -2733,6 +2890,8 @@ impl Document {
                 if f.is_sketch() {
                     ids.extend(self.features.iter().filter(|g| g.kind.sketch() == Some(id)).map(|g| g.id));
                 }
+                let drafts: Vec<FeatureId> = ids.iter().filter_map(|id| self.linked_draft(*id)).collect();
+                ids.extend(drafts);
                 ids.into_iter().map(|id| model::Command::SetSuppressed { id: model_id(id), suppressed }).collect()
             }
             Command::Reorder { id, index } => {
@@ -3011,6 +3170,121 @@ impl Document {
                 }
             })
             .collect();
+        // An extrusion or cut reads its Draft option back from its linked draft.
+        for f in m.features() {
+            let model::FeatureKind::Draft(d) = &f.kind else { continue };
+            let Some(owner) = d.of.and_then(|of| self.features.iter_mut().find(|g| g.id == app_id(of))) else {
+                continue;
+            };
+            let option = Some(ExtrudeDraft { angle: d.angle.abs(), outward: (d.angle < 0.0) != DRAFT_INWARD_NEGATIVE });
+            match &mut owner.kind {
+                FeatureKind::Extrude(p) => p.draft = option,
+                FeatureKind::Cut(p) => p.draft = option,
+                _ => {}
+            }
+        }
+    }
+
+    /// The draft that is feature `id`'s Draft option, if it has one.
+    pub fn linked_draft(&self, id: FeatureId) -> Option<FeatureId> {
+        let owner = model_id(id);
+        self.model
+            .features()
+            .iter()
+            .find(|f| matches!(&f.kind, model::FeatureKind::Draft(d) if d.of == Some(owner)))
+            .map(|f| app_id(f.id))
+    }
+
+    /// The extrusion or cut whose Draft option draft `id` is.
+    pub fn draft_owner(&self, id: FeatureId) -> Option<FeatureId> {
+        match &self.model.feature(model_id(id))?.kind {
+            model::FeatureKind::Draft(d) => d.of.map(app_id).filter(|owner| self.feature(*owner).is_some()),
+            _ => None,
+        }
+    }
+
+    /// The model commands that give an extrusion or cut its Draft option once `base`, the
+    /// commands that add or edit it, has run: its linked draft added, edited or removed.
+    /// The draft's faces are the feature's sides as `base` leaves them, its neutral plane
+    /// is the sketch plane, and it pulls the way the feature grows.
+    fn linked_draft_commands(
+        &self,
+        base: &[model::Command],
+        target: Option<FeatureId>,
+        draft: Option<ExtrudeDraft>,
+    ) -> Result<Vec<model::Command>, String> {
+        let existing = target.and_then(|id| self.linked_draft(id));
+        let Some(option) = draft else {
+            return Ok(existing.map(|id| model::Command::DeleteFeature { id: model_id(id) }).into_iter().collect());
+        };
+        let mut fork = self.model.fork();
+        fork.execute_deferred(model::Command::RollTo { before: None }).map_err(|e| e.to_string())?;
+        if let Some(id) = existing {
+            // The old draft goes first, so the sides are named as the extrusion makes them.
+            fork.execute(model::Command::DeleteFeature { id: model_id(id) }).map_err(|e| e.to_string())?;
+        }
+        let executed = fork
+            .execute(model::Command::Batch { label: "draft option".into(), commands: base.to_vec() })
+            .map_err(|e| e.to_string())?;
+        let owner = target.map(model_id).or(executed.created).ok_or("The extrusion could not be drafted")?;
+        match fork.status(owner) {
+            Some(model::FeatureStatus::Ok) => {}
+            Some(model::FeatureStatus::Failed(message)) => return Err(message.clone()),
+            _ => return Err("The extrusion did not build, so it cannot be drafted".into()),
+        }
+        let feature = fork.feature(owner).ok_or("The extrusion could not be drafted")?.clone();
+        let model::FeatureKind::Extrude(extrude) = &feature.kind else {
+            return Err("Only an extrusion or a cut takes the Draft option".into());
+        };
+        let neutral = match &extrude.profile {
+            model::ProfileSource::Shape { datum, .. } => model::PlaneRef::Datum { datum: *datum, offset: 0.0 },
+            model::ProfileSource::Sketch { feature: sketch } => {
+                let Some(model::FeatureKind::Sketch(s)) = fork.feature(*sketch).map(|f| &f.kind) else {
+                    return Err("The extrusion's sketch is missing".into());
+                };
+                match &s.plane {
+                    model::SketchPlane::Datum { datum, offset } => {
+                        model::PlaneRef::Datum { datum: *datum, offset: *offset }
+                    }
+                    model::SketchPlane::Feature { feature, offset } if *offset == 0.0 => {
+                        model::PlaneRef::Feature { feature: *feature }
+                    }
+                    model::SketchPlane::Face { face } => model::PlaneRef::Face { face: face.clone() },
+                    _ => return Err("Draft needs the sketch on a reference plane or a face, without an offset".into()),
+                }
+            }
+        };
+        let body = fork.body_after(owner).ok_or("The extrusion did not build, so it cannot be drafted")?;
+        let topology = fork.kernel().topology(body).map_err(|e| e.to_string())?;
+        let faces: Vec<model::FaceRef> = topology
+            .faces
+            .iter()
+            .filter_map(|face| fork.face_ref(face.id).ok())
+            .filter(|r| r.feature == owner && matches!(r.generator, model::Generator::Side { .. }))
+            .collect();
+        if faces.is_empty() {
+            return Err("This extrusion has no side faces to draft".into());
+        }
+        let angle = if option.outward != DRAFT_INWARD_NEGATIVE { -option.angle } else { option.angle };
+        let kind = model::FeatureKind::Draft(model::DraftFeature {
+            faces,
+            neutral,
+            angle,
+            reverse: extrude.reverse,
+            of: Some(owner),
+        });
+        Ok(vec![match existing {
+            Some(id) => model::Command::EditFeature { id: model_id(id), kind },
+            None if feature.body != 0 => {
+                model::Command::AddFeatureInBody { body: feature.body, kind, via_assistant: self.assistant_mark }
+            }
+            None => {
+                let after = fork.features().iter().position(|f| f.id == owner).map(|i| i + 1);
+                // A new extrusion's draft follows it; an edited one's goes right below it.
+                let position = target.and(after);
+                model::Command::AddFeature { kind, name: None, position, via_assistant: self.assistant_mark }
+            }
+        }])
     }
 
     /// Shows a new body at the requested level. Unchanged bodies keep their display
@@ -3678,7 +3952,7 @@ impl Document {
             self.mesh_of(body.ok_or("revolve needs a closed sketch region")?)
         })();
         self.release_all(&made);
-        Ok(Preview { result: None, tool: Some(result?), removes: false })
+        Ok(Preview { result: None, tool: Some(result?), removes: false, guides: Default::default() })
     }
 
     /// Where a new path starts on a sketch's profiles, and a distance that clears them:
@@ -3728,7 +4002,83 @@ impl Document {
             log::warn!("Loft preview: {error}");
             "Loft could not be displayed. Try simpler profiles"
         })?;
-        Ok(Preview { result: Some(mesh), tool: None, removes: false })
+        Ok(Preview { result: Some(mesh), tool: None, removes: false, guides: Default::default() })
+    }
+
+    /// Builds `command`, a form's OK, in a fork of the part and returns the body it would
+    /// leave, with the faces it makes or tilts marked, and the guides that explain it.
+    /// This is how a form previews a feature the kernel only shows once built: a draft, a
+    /// pattern, a mirror, a hole, and an extrusion or cut with its Draft option. An edited
+    /// feature `target` is built again past the rollback its editor set.
+    pub fn preview_built(&self, command: Command, target: Option<FeatureId>) -> Result<Preview, String> {
+        let commands = self.to_model(command)?;
+        let mut fork = self.model.fork();
+        if let Some(id) = target {
+            let last = self.linked_draft(id).unwrap_or(id);
+            let index = fork.index_of(model_id(last)).ok_or("Select an existing feature to edit")?;
+            let after = fork.features().get(index + 1).map(|feature| feature.id);
+            fork.execute_deferred(model::Command::RollTo { before: after }).map_err(|e| e.to_string())?;
+        }
+        let before: std::collections::HashSet<model::FeatureId> = fork.features().iter().map(|f| f.id).collect();
+        fork.execute(model::Command::Batch { label: "preview".into(), commands }).map_err(|e| e.to_string())?;
+        let mut built: Vec<model::FeatureId> =
+            fork.features().iter().map(|f| f.id).filter(|id| !before.contains(id)).collect();
+        if let Some(id) = target {
+            built.push(model_id(id));
+        }
+        let drafts: Vec<model::FeatureId> = fork
+            .features()
+            .iter()
+            .filter(|f| matches!(&f.kind, model::FeatureKind::Draft(d) if d.of.is_some_and(|of| built.contains(&of))))
+            .map(|f| f.id)
+            .collect();
+        built.extend(drafts.into_iter().filter(|id| !built.contains(id)).collect::<Vec<_>>());
+        for id in &built {
+            match fork.status(*id) {
+                Some(model::FeatureStatus::Ok) => {}
+                Some(model::FeatureStatus::Failed(message)) => return Err(message.clone()),
+                _ => return Err("This feature cannot be previewed yet".into()),
+            }
+        }
+        let last = built.iter().copied().max_by_key(|id| fork.index_of(*id)).ok_or("Nothing to preview")?;
+        let body = fork.body_after(last).ok_or("This feature leaves no solid to preview")?;
+        let topology = fork.kernel().topology(body).map_err(|e| e.to_string())?;
+        let mut made: HashMap<FaceId, FeatureId> = HashMap::new();
+        let mut copies: std::collections::BTreeMap<u32, (Vec3, f64)> = Default::default();
+        for face in &topology.faces {
+            let Ok(r) = fork.face_ref(face.id) else { continue };
+            if built.contains(&r.feature) {
+                made.insert(face.id, PREVIEW_MADE as FeatureId);
+                if let model::Generator::Copy { instance } = r.generator {
+                    let c = Vec3::new(face.centroid.x as f32, face.centroid.y as f32, face.centroid.z as f32);
+                    let sum = copies.entry(instance).or_insert((Vec3::ZERO, 0.0));
+                    sum.0 += c * face.area as f32;
+                    sum.1 += face.area;
+                }
+            }
+        }
+        let mut guides = PreviewGuides::default();
+        for (instance, (sum, area)) in copies {
+            if area > 0.0 {
+                guides.labels.push((sum / area as f32, instance.to_string()));
+            }
+        }
+        for id in &built {
+            let Some(model::FeatureKind::Draft(d)) = fork.feature(*id).map(|f| &f.kind) else { continue };
+            // A draft tilts faces it names, so they carry the mark too.
+            for r in &d.faces {
+                if let Ok(face) = fork.resolve_face(r, body) {
+                    made.insert(face, PREVIEW_MADE as FeatureId);
+                }
+            }
+            if d.of.is_none()
+                && let Ok(plane) = fork.plane_of(&d.neutral, body)
+            {
+                guides = draft_guides(guides, &plane, &topology, d.reverse);
+            }
+        }
+        let mesh = preview_mesh_marked(fork.kernel().as_ref(), body, &self.tess_params, &made)?;
+        Ok(Preview { result: Some(mesh), tool: None, removes: false, guides })
     }
 
     /// Builds the sweep tool for the editor without changing the document.
@@ -3767,7 +4117,7 @@ impl Document {
                 .map_err(|_| "This sweep could not be displayed. Try a simpler polygon profile".into())
         })();
         self.release_all(&made);
-        Ok(Preview { result: None, tool: Some(result?), removes: false })
+        Ok(Preview { result: None, tool: Some(result?), removes: false, guides: Default::default() })
     }
 
     /// Builds the extrusion tool without changing the document.
@@ -3790,7 +4140,14 @@ impl Document {
         let (tool, made) = self.extrude_profiles(&profiles, dir, params.depth).map_err(|e| e.to_string())?;
         let mesh = self.mesh_of(tool);
         self.release_all(&made);
-        Ok(Preview { result: None, tool: Some(mesh?), removes: false })
+        let mesh = mesh?;
+        let arrow = depth_arrow(&mesh, &plane, dir, params.depth, true);
+        Ok(Preview {
+            result: None,
+            tool: Some(mesh),
+            removes: false,
+            guides: PreviewGuides { arrow, ..Default::default() },
+        })
     }
 
     /// The body after a cut and the material it removes.
@@ -3816,7 +4173,17 @@ impl Document {
         };
         self.release_all(&made);
         let err = result.err().map(|e| e.to_string());
-        let preview = Preview { result: result_mesh, tool: tool_mesh.ok(), removes: true };
+        let tool_mesh = tool_mesh.ok();
+        let arrow = tool_mesh.as_ref().and_then(|m| {
+            depth_arrow(m, &plane, dir, depth, !params.through_all).map(|mut arrow| {
+                if params.through_all {
+                    arrow.text = "Through all".into();
+                }
+                arrow
+            })
+        });
+        let guides = PreviewGuides { arrow, ..Default::default() };
+        let preview = Preview { result: result_mesh, tool: tool_mesh, removes: true, guides };
         match err {
             Some(e) => Err(e),
             None => Ok(preview),
@@ -3846,7 +4213,7 @@ impl Document {
             r.record.faces.created.iter().map(|face| (*face, PREVIEW_MADE as FeatureId)).collect();
         let mesh = preview_mesh_marked(k.as_ref(), r.body, &self.tess_params, &made);
         let _ = k.release(r.body);
-        Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+        Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
     }
 
     /// The picked edges of a fillet or chamfer on `body`, sampled along their curves for
@@ -3869,7 +4236,12 @@ impl Document {
         let body = before.ok_or("nothing to shell yet")?;
         if shell.open_faces.is_all() {
             self.kernel().shell_all_faces(body, shell.thickness).map_err(|error| error.to_string())?;
-            return Ok(Preview { result: Some(Arc::default()), tool: None, removes: false });
+            return Ok(Preview {
+                result: Some(Arc::default()),
+                tool: None,
+                removes: false,
+                guides: Default::default(),
+            });
         }
         let faces = shell
             .open_faces
@@ -3891,7 +4263,7 @@ impl Document {
         }
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
-        Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+        Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
     }
 
     pub fn preview_offset(&self, offset: &model::OffsetFeature, before: Option<BodyId>) -> Result<Preview, String> {
@@ -3899,7 +4271,7 @@ impl Document {
         let result = self.kernel().offset(&OpTag::new("preview"), body, offset.distance).map_err(plain_kernel_error)?;
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
-        Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+        Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
     }
 
     pub fn preview_thicken(&self, thicken: &model::ThickenFeature, before: Option<BodyId>) -> Result<Preview, String> {
@@ -3913,7 +4285,7 @@ impl Document {
         let result = self.kernel().thicken(&OpTag::new("preview"), body, &params).map_err(plain_kernel_error)?;
         let mesh = self.mesh_of(result.body);
         let _ = self.kernel().release(result.body);
-        Ok(Preview { result: Some(mesh?), tool: None, removes: false })
+        Ok(Preview { result: Some(mesh?), tool: None, removes: false, guides: Default::default() })
     }
 
     fn mesh_of(&self, body: BodyId) -> Result<Arc<DisplayMesh>, String> {
@@ -4660,6 +5032,60 @@ pub(crate) fn preview_mesh(
     preview_mesh_marked(kernel, body, params, &HashMap::new())
 }
 
+/// An extrusion's depth arrow: from the middle of its profile on the sketch plane, along
+/// `dir` for `depth`, labelled with the depth.
+fn depth_arrow(
+    tool: &DisplayMesh,
+    plane: &soliddraft_kernel_api::Plane,
+    dir: soliddraft_kernel_api::Vec3,
+    depth: f64,
+    drags: bool,
+) -> Option<PreviewArrow> {
+    let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+    let (lo, hi) = tool.bounds()?;
+    let centre = (lo + hi) / 2.0;
+    let normal = v(plane.normal).normalize_or_zero();
+    let from = centre - normal * (centre - v(plane.origin)).dot(normal);
+    let to = from + v(dir).normalize_or_zero() * depth as f32;
+    Some(PreviewArrow { from, to, text: fmt_mm(depth), drags })
+}
+
+/// A draft's neutral plane, outlined round the part's footprint on it, and its pull: an
+/// arrow from the plane's middle along the pull.
+fn draft_guides(
+    mut guides: PreviewGuides,
+    plane: &soliddraft_kernel_api::Plane,
+    topology: &soliddraft_kernel_api::Topology,
+    reverse: bool,
+) -> PreviewGuides {
+    let v = |p: soliddraft_kernel_api::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+    let (origin, normal, u) =
+        (v(plane.origin), v(plane.normal).normalize_or_zero(), v(plane.x_dir).normalize_or_zero());
+    let w = normal.cross(u);
+    let points: Vec<Vec3> = topology.faces.iter().map(|f| v(f.centroid)).collect();
+    if points.is_empty() || normal == Vec3::ZERO {
+        return guides;
+    }
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    let mut reach = 0.0_f32;
+    for p in &points {
+        let d = *p - origin;
+        let (a, b) = (d.dot(u), d.dot(w));
+        lo = [lo[0].min(a), lo[1].min(b)];
+        hi = [hi[0].max(a), hi[1].max(b)];
+        reach = reach.max(d.dot(normal).abs());
+    }
+    let margin = 0.15 * (hi[0] - lo[0]).max(hi[1] - lo[1]).max(10.0);
+    let (lo, hi) = ([lo[0] - margin, lo[1] - margin], [hi[0] + margin, hi[1] + margin]);
+    let at = |a: f32, b: f32| origin + u * a + w * b;
+    guides.outline = vec![at(lo[0], lo[1]), at(hi[0], lo[1]), at(hi[0], hi[1]), at(lo[0], hi[1])];
+    let centre = at((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0);
+    let pull = if reverse { -normal } else { normal };
+    let length = reach.max(margin * 2.0);
+    guides.arrow = Some(PreviewArrow { from: centre, to: centre + pull * length, text: "Pull".into(), drags: false });
+    guides
+}
+
 /// The mark a preview mesh carries in [`DisplayMesh::face_features`] on the faces the
 /// previewed operation made. No feature has this id.
 pub const PREVIEW_MADE: u32 = u32::MAX;
@@ -4801,6 +5227,56 @@ mod tests {
             });
         }
         s
+    }
+
+    fn volume(d: &Document) -> f64 {
+        d.kernel().mass_properties(d.display_body().unwrap()).unwrap().volume
+    }
+
+    /// Draft is an option of Extrude and Cut: one undo step adds the extrusion and a draft
+    /// linked to it, whose faces are the extrusion's sides. Inward narrows the block as it
+    /// grows, outward widens it. Editing, undoing and deleting keep the two together.
+    #[test]
+    fn the_draft_option_tapers_inward_or_outward() {
+        let block = 60.0 * 40.0 * 20.0;
+        for (outward, sign) in [(false, -1.0), (true, 1.0)] {
+            let mut d = doc();
+            let params =
+                ExtrudeParams { draft: Some(ExtrudeDraft { angle: 5.0, outward }), ..ExtrudeParams::default() };
+            let id = d.apply_form(Command::AddExtrude { params, via_assistant: false }).unwrap().unwrap();
+            assert!(matches!(d.feature(id).unwrap().kind, FeatureKind::Extrude(_)), "the extrusion stands for both");
+            let draft = d.linked_draft(id).expect("the extrusion has its draft");
+            assert_eq!(d.draft_owner(draft), Some(id));
+            assert_eq!(d.features.len(), 2);
+            let FeatureKind::Extrude(p) = d.feature(id).unwrap().kind.clone() else { panic!() };
+            assert_eq!(p.draft, Some(ExtrudeDraft { angle: 5.0, outward }), "the option reads back");
+            let tapered = volume(&d);
+            assert!((tapered - block) * sign > 1.0, "outward {outward}: {tapered} against {block}");
+
+            d.undo().unwrap();
+            assert!(d.features.is_empty(), "one undo takes the extrusion and its draft");
+            d.redo().unwrap();
+            assert_eq!(d.features.len(), 2);
+
+            // Editing the depth keeps the draft on the new sides.
+            let mut edit = p.clone();
+            edit.depth = 30.0;
+            d.apply_form(Command::EditExtrude { id, params: edit.clone() }).unwrap();
+            assert!(d.features.iter().all(|f| f.status == FeatureStatus::Ok), "{:?}", d.features);
+            assert!((volume(&d) - 60.0 * 40.0 * 30.0) * sign > 1.0);
+            // Turning the option off removes the draft.
+            edit.draft = None;
+            d.apply_form(Command::EditExtrude { id, params: edit }).unwrap();
+            assert_eq!(d.linked_draft(id), None);
+            assert!((volume(&d) - 60.0 * 40.0 * 30.0).abs() < 1e-6);
+        }
+
+        // Deleting the extrusion deletes its draft.
+        let mut d = doc();
+        let params = ExtrudeParams { draft: Some(ExtrudeDraft::default()), ..ExtrudeParams::default() };
+        let id = d.apply_form(Command::AddExtrude { params, via_assistant: false }).unwrap().unwrap();
+        d.apply(Command::DeleteFeature(id)).unwrap();
+        assert!(d.features.is_empty());
     }
 
     #[test]

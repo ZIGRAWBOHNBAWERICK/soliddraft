@@ -1,4 +1,6 @@
-//! Edit Suite right-click targets, their shared commands, and the ring's registry adapter.
+//! Edit Suite right-click targets, their shared commands, and the menu's registry adapter.
+//! A right-click opens the command columns; Shift and a right-click open the ring.
+//! Commands that do not work yet are left out of both.
 
 use crate::commands::{self, Context};
 use crate::document::{Document, Selection};
@@ -305,6 +307,8 @@ fn item(
     let command = commands::get(id).expect("context commands are registered");
     let label = if id == "hide_body" && !short.is_empty() {
         if crate::tree_visibility::visible(state).body { "Hide".into() } else { "Show".into() }
+    } else if id == "export_step" && short.is_empty() {
+        "Export STEP...".into()
     } else if short.is_empty() {
         command.label_in(state)
     } else {
@@ -314,7 +318,6 @@ fn item(
         command,
         label,
         enabled: command.available(Context::of(state)) && command.is_enabled(state),
-        soon: !command.is_working(),
         selected: (command.active)(state),
         selection: state.doc.selection,
         shortcut: state.shortcuts.shortcut_text(id).unwrap_or_default(),
@@ -322,10 +325,20 @@ fn item(
     }
 }
 
-fn snapshot(state: &mut AppState, target: Target, clicked: Option<Selection>) -> ring_menu::Menu {
+fn working(id: &str) -> bool {
+    commands::get(id).expect("context commands are registered").is_working()
+}
+
+fn snapshot(state: &mut AppState, target: Target, clicked: Option<Selection>, ring: bool) -> ring_menu::Menu {
     let original = state.doc.selection;
     let title = caption(state, target, clicked);
-    let quick = spec(target).quick.map(|q| item(state, q.command, q.target, clicked, q.label));
+    let quick = spec(target)
+        .quick
+        .iter()
+        .enumerate()
+        .filter(|(_, q)| working(q.command))
+        .map(|(slot, q)| (slot, item(state, q.command, q.target, clicked, q.label)))
+        .collect();
     let columns = groups(target)
         .iter()
         .filter_map(|group| {
@@ -342,7 +355,7 @@ fn snapshot(state: &mut AppState, target: Target, clicked: Option<Selection>) ->
                 .copied()
                 .filter(|id| {
                     let command = commands::get(id).expect("context commands are registered");
-                    command.available(context) && (command.shown)(state)
+                    command.is_working() && command.available(context) && (command.shown)(state)
                 })
                 .collect::<Vec<_>>();
             let items = ids.into_iter().map(|id| item(state, id, group.target, clicked, "")).collect::<Vec<_>>();
@@ -350,7 +363,7 @@ fn snapshot(state: &mut AppState, target: Target, clicked: Option<Selection>) ->
         })
         .collect();
     state.doc.selection = original;
-    ring_menu::Menu { title, quick, columns }
+    ring_menu::Menu { title, quick, columns, ring }
 }
 
 #[derive(Clone, Copy)]
@@ -360,6 +373,8 @@ struct OpenMenu {
     at: egui::Pos2,
     document: soliddraft_document::DocumentId,
     sketch: Option<crate::document::FeatureId>,
+    /// Shift was held: the ring of quick commands rather than the columns.
+    ring: bool,
 }
 
 pub fn show(state: &mut AppState, response: &egui::Response, target: Target, selection: Option<Selection>) {
@@ -385,8 +400,9 @@ pub fn show_at(
     let opening = at.is_some();
     let document = state.doc.model().id();
     let sketch = state.sketch.as_ref().map(|s| s.feature);
+    let ring = response.ctx.input(|input| input.modifiers.shift);
     let menu = at
-        .map(|at| OpenMenu { target, selection, at, document, sketch })
+        .map(|at| OpenMenu { target, selection, at, document, sketch, ring })
         .or_else(|| response.ctx.data(|data| data.get_temp::<OpenMenu>(key)));
     let Some(menu) = menu else { return };
     if menu.document != document || menu.sketch != sketch {
@@ -403,7 +419,7 @@ pub fn show_at(
     if !egui::Popup::is_id_open(&response.ctx, popup_id) {
         return;
     }
-    let model = snapshot(state, menu.target, menu.selection);
+    let model = snapshot(state, menu.target, menu.selection, menu.ring);
     let layout = ring_menu::Layout::measure(&response.ctx, &model, menu.at);
     let chosen = egui::Popup::new(
         popup_id,

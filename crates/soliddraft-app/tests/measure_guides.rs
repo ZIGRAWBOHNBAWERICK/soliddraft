@@ -186,21 +186,24 @@ fn midpoint_guide_toggle_commits_the_seen_relation() {
 /// The three switches line up, their tick boxes in one column at the left of their box.
 /// Each used to be centred on its own row, so a longer label pushed its box further left.
 #[test]
-fn the_sketch_switches_line_up_at_the_left() {
+fn the_sketch_switches_sit_in_the_options_bar_in_one_row() {
     let (doc, id) = part();
     let Some(mut h) = window::window(doc, "measure-guides-switches") else { return };
     open_line_tool(&mut h, id);
-    // The palette has a Snap to grid tool of its own; these are the switches in the viewport.
+    // They covered the top of a fitted sketch in the viewport's corner; the bar holds
+    // them now, beside the sketch's name. The palette has a Snap to grid tool of its own.
+    let bar = egui::PanelState::load(&h.ctx, egui::Id::new("options_bar")).unwrap().outer_rect;
     let view = h.state().state.viewport.rect;
-    let left = |label: &str| {
-        let mut found = h.query_all_by_label(label).filter(|n| view.contains(n.rect().center()));
-        let node = found.next().unwrap_or_else(|| panic!("no {label} switch in the viewport"));
-        assert!(found.next().is_none(), "one {label} switch in the viewport");
-        node.rect().left()
+    let row = |label: &str| {
+        assert!(h.query_all_by_label(label).all(|n| !view.contains(n.rect().center())), "no {label} over the sketch");
+        let mut found = h.query_all_by_label(label).filter(|n| bar.contains(n.rect().center()));
+        let node = found.next().unwrap_or_else(|| panic!("no {label} switch in the options bar"));
+        assert!(found.next().is_none(), "one {label} switch in the options bar");
+        node.rect().center().y
     };
-    let (auto, construction, grid) = (left("Auto relations"), left("Draw construction"), left("Snap to grid"));
+    let (auto, construction, grid) = (row("Auto relations"), row("Draw construction"), row("Snap to grid"));
     assert!(
         (auto - construction).abs() < 0.5 && (auto - grid).abs() < 0.5,
-        "the switches start at {auto}, {construction} and {grid}"
+        "the switches sit in one row at {auto}, {construction} and {grid}"
     );
 }

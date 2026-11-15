@@ -45,6 +45,7 @@ fn block(depth: f64) -> Command {
             depth,
             flip: false,
             end: Default::default(),
+            draft: None,
         },
         via_assistant: false,
     }

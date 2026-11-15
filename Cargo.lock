@@ -5617,6 +5617,7 @@ name = "soliddraft-web"
 version = "0.5.0"
 dependencies = [
  "eframe",
+ "js-sys",
  "log",
  "serde_json",
  "soliddraft-app",

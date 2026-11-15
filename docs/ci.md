@@ -58,9 +58,11 @@ origin in an isolated `chrome-devtools-axi` session, then run
 session's origin storage when seeding each case; never use a profile with user
 documents.
 
-`ci/browser-kernel-worker.js` runs the same way, in its own browser session on WebGL, on
-the sample part opened at `/?demo`. Under SwiftShader's WebGPU, which the journal check
-uses, its Extrude step adds no feature on Linux Chrome.
+`ci/browser-kernel-worker.js` runs the same way, in its own browser session, on the
+sample part opened at `/?demo`. Its Chrome offers SwiftShader's WebGPU, as a browser
+with no usable GPU does. That adapter refuses a buffer the viewport maps at creation, so
+the page draws through WebGL when its WebGPU adapter is a software one; before that,
+the check's Extrude step stopped the page.
 Each measurement asks for mass properties from the Inspect strip and ends when the
 Details panel draws the kernel worker's volume, read through the module's read-only
 `shown_details` export. No task on the page's thread may run 250 ms or more meanwhile.

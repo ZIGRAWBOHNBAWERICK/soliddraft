@@ -802,9 +802,9 @@ jobs:
         env:
           CHROME_DEVTOOLS_AXI_SESSION: kernel-worker
           CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
-          # WebGL, as the preferences and documents checks use. Under SwiftShader's WebGPU
-          # this check's Extrude step adds no feature on Linux Chrome; under WebGL it passes.
-          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-swiftshader --use-angle=swiftshader
+          # SwiftShader's WebGPU, as a browser with no usable GPU offers it: the page must
+          # notice the software adapter and draw through WebGL, or Extrude stops it.
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
         run: |
           export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
           export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"

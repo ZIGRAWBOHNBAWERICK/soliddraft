@@ -16,7 +16,7 @@ impl CatallaxKernel {
             catallax_recipe::Recipe::parse(&field.recipe().to_string())
                 .map_err(|e| KernelError::InvalidInput(e.to_string()))?
         } else {
-            state.solid(body)?.app.checkpoint.built().recipe().clone()
+            state.solid(body)?.app.recipe().clone()
         };
         drop(state);
         let files = sources.iter().map(|(sha, bytes)| (sha.clone(), bytes.as_ref())).collect();

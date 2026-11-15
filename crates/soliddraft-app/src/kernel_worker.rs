@@ -488,6 +488,39 @@ mod tests {
         assert!(page.mass_properties(edited.body().unwrap()).unwrap().volume > 0.0);
     }
 
+    /// The browser's sequence on the bracket: open through the worker, adopt on the page,
+    /// then a depth edit through the worker. The page must name every face as its own
+    /// build would and take every build from the worker.
+    #[test]
+    fn an_edit_after_an_adopted_open_names_faces_as_a_fresh_build_does() {
+        let part = include_bytes!("../../../site/parts/bracket.dwprt").to_vec();
+        let worker = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let page = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let mut host = Host::new(worker.clone());
+        host.run(&part, &Job::Build { edit: None, level: Default::default() }).unwrap();
+        page.offer_builds(&host.take_hand_over().unwrap()).unwrap();
+        let opened = model::Document::from_bytes(&part, page.clone()).unwrap();
+        assert_eq!(page.fresh_builds(), 0);
+        let base = opened.features().iter().find(|f| matches!(f.kind, model::FeatureKind::Extrude(_))).unwrap().id;
+        let (_, saved) = opened.snapshot().encode().unwrap();
+        let edit = crate::drag::ScalarDraft { feature: base, dimension: crate::drag::Dimension::Depth, value: 12.0 };
+        host.run(&saved, &Job::Build { edit: Some(edit), level: Default::default() }).unwrap();
+        page.offer_builds(&host.take_hand_over().unwrap()).unwrap();
+        let mut edited = opened.fork();
+        edited.execute_deferred(crate::document::scalar_draft_command(&edited, edit).unwrap()).unwrap();
+        edited.reuse_builds_from(&opened);
+        edited.rebuild();
+
+        let mut fresh = model::Document::from_bytes(&part, crate::kernel()).unwrap();
+        fresh.execute_deferred(crate::document::scalar_draft_command(&fresh, edit).unwrap()).unwrap();
+        fresh.rebuild();
+        for feature in fresh.features() {
+            assert_eq!(edited.status(feature.id), fresh.status(feature.id), "{}", feature.name);
+            assert_eq!(edited.generated_faces(feature.id), fresh.generated_faces(feature.id), "{}", feature.name);
+        }
+        assert_eq!(page.fresh_builds(), 0, "every build was taken from the worker");
+    }
+
     #[test]
     fn jobs_round_trip_as_the_worker_reads_them() {
         let job = Job::MassProperties { feature: model::FeatureId(3) };

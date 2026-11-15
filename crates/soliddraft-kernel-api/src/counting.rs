@@ -114,6 +114,10 @@ impl Kernel for Counting {
         self.inner.source_solids(format, source)
     }
 
+    fn replace_import_file(&self, request: &crate::FileReplacementRequest<'_>) -> KernelResult<crate::FileReplacement> {
+        self.inner.replace_import_file(request)
+    }
+
     fn import_source(
         &self,
         format: crate::ImportFormat,

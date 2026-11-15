@@ -1042,6 +1042,10 @@ impl Kernel for CatallaxKernel {
         self.observe("propose_import", || import::propose(format, source, options))
     }
 
+    fn replace_import_file(&self, request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
+        import::replace_file(request)
+    }
+
     fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
         self.observe("source_solids", || import::source_solids(format, source))
     }

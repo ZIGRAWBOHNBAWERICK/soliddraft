@@ -139,6 +139,108 @@ fn require_repair_format(source: ImportFormat, format: &str) -> KernelResult<()>
     }
 }
 
+/// Matches every import of one STEP file to its replacement through Catallax's verified
+/// file transaction. The imports go in as one recipe of selected-solid import steps; the
+/// part's own references stay in the application, which rewrites them from the face
+/// correspondence returned here.
+pub(super) fn replace_file(request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
+    use catallax_features::import_replace::{FileReplacementOutcome, StepFileReplacement, replace_step_file};
+    use catallax_import::correspondence::{EntityKind, UnresolvedReason};
+    for (bytes, sha256) in [(request.old_source, request.old_sha256), (request.new_source, request.new_sha256)] {
+        if catallax_import::sha256_hex(bytes) != sha256 {
+            return Err(KernelError::InvalidInput("the imported file does not match its sha256".into()));
+        }
+    }
+    if request.source_solids.is_empty() {
+        return Err(KernelError::InvalidInput("No import reads this file.".into()));
+    }
+    let step = |index: usize, solid: &Option<String>| {
+        let mut step = json!({"id":format!("import_{index}"), "op":"import_step",
+            "file":{"name":"source.step","sha256":request.old_sha256},
+            "pose":{"rotation":["1","0","0","0"],"translation":["0","0","0"]}});
+        if let Some(solid) = solid {
+            step["source_solid"] = json!(solid);
+        }
+        step
+    };
+    let steps: Vec<_> = request.source_solids.iter().enumerate().map(|(index, solid)| step(index, solid)).collect();
+    let result = format!("import_{}", steps.len() - 1);
+    let recipe = catallax_recipe::Recipe::parse(
+        &json!({"format":catallax_recipe::FORMAT_V5, "name":"SolidDraft import file", "steps":steps, "result":result})
+            .to_string(),
+    )
+    .map_err(|e| KernelError::InvalidInput(e.to_string()))?;
+    let files = BTreeMap::from([
+        (request.old_sha256.to_owned(), request.old_source),
+        (request.new_sha256.to_owned(), request.new_source),
+    ]);
+    let edit = StepFileReplacement {
+        old_sha256: request.old_sha256.into(),
+        file: catallax_recipe::FileRef { name: request.new_name.into(), sha256: request.new_sha256.into() },
+        decisions: BTreeMap::new(),
+    };
+    let outcome = replace_step_file(&recipe, &edit, &files, &mut Decider::default()).map_err(|refusal| {
+        KernelError::InvalidInput(format!(
+            "The new file could not replace the old one ({}): {}",
+            refusal.code, refusal.detail
+        ))
+    })?;
+    let analysis = match outcome {
+        FileReplacementOutcome::Ready(verified) => verified.analysis,
+        FileReplacementOutcome::NeedsResolution(analysis) => {
+            let mut reasons: Vec<String> = analysis
+                .imports
+                .iter()
+                .filter(|import| import.old_source_solid.is_some() && import.new_source_solid.is_none())
+                .map(|import| {
+                    format!(
+                        "The new file has no solid with the same faces as solid {}.",
+                        import.old_source_solid.as_deref().unwrap_or_default()
+                    )
+                })
+                .collect();
+            if reasons.is_empty() {
+                reasons.push("The new file's faces could not be matched to the old file's.".into());
+            }
+            return Ok(FileReplacement::Unresolved { reasons });
+        }
+    };
+    let reason = |reason: UnresolvedReason| {
+        match reason {
+            UnresolvedReason::ChangedOrRemoved => "changed or removed",
+            UnresolvedReason::AmbiguousGeometry => "the same face occurs more than once",
+            UnresolvedReason::UnverifiedMultiplicity => "uniqueness could not be verified",
+            UnresolvedReason::UnverifiedGeometry => "its geometry could not be verified",
+        }
+        .to_owned()
+    };
+    let imports = analysis
+        .imports
+        .iter()
+        .zip(request.source_solids)
+        .map(|(import, old_solid)| {
+            let in_solid = |solid: &str| old_solid.as_deref().is_none_or(|old| old == solid);
+            let correspondence = &import.correspondence;
+            ReplacedImport {
+                source_solid: import.new_source_solid.clone(),
+                faces: correspondence
+                    .verified
+                    .iter()
+                    .filter(|pair| pair.old.kind == EntityKind::Face && in_solid(&pair.old.solid))
+                    .map(|pair| (pair.old.key.clone(), pair.new.key.clone()))
+                    .collect(),
+                unresolved_faces: correspondence
+                    .unresolved
+                    .iter()
+                    .filter(|entity| entity.old.kind == EntityKind::Face && in_solid(&entity.old.solid))
+                    .map(|entity| (entity.old.key.clone(), reason(entity.reason)))
+                    .collect(),
+            }
+        })
+        .collect();
+    Ok(FileReplacement::Verified { old_recipe_sha256: analysis.old_recipe_sha256, imports })
+}
+
 impl CatallaxKernel {
     pub(super) fn import_body(
         &self,

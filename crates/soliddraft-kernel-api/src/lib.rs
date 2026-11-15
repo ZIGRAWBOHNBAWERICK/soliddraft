@@ -59,10 +59,10 @@ pub use history::{EntityChanges, FaceOrigin, FaceRole, HistoryRecord, HolePart, 
 pub use ids::{BodyId, EdgeId, FaceId, OpTag, VertexId};
 pub use iges::{IgesExport, IgesOptions, IgesReport};
 pub use import::{
-    Approval, DecimalBounds, Decision, Disposition, FaceTolerance, ImportFormat, ImportOptions, ImportStepRequest,
-    ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT, PROPOSALS_FORMAT, PlanarRepairMethod, Proposal, ProposalSet,
-    REPAIR_FORMAT, RepairChange, RepairDerivative, RepairRecord, RepairSource, SourceIncidence, question_id,
-    question_index,
+    Approval, DecimalBounds, Decision, Disposition, FaceTolerance, FileReplacement, FileReplacementRequest,
+    ImportFormat, ImportOptions, ImportStepRequest, ImportStepResult, ImportedBody, LEGACY_REPAIR_FORMAT,
+    PROPOSALS_FORMAT, PlanarRepairMethod, Proposal, ProposalSet, REPAIR_FORMAT, RepairChange, RepairDerivative,
+    RepairRecord, RepairSource, ReplacedImport, SourceIncidence, question_id, question_index,
 };
 pub use profile::{BezierControls, Loop, PROFILE_JOIN_TOLERANCE, Profile, ProfileError, Segment};
 pub use sweep::{ArcTurn, PathSegment, Sweep, SweepOrientation};
@@ -1403,6 +1403,14 @@ pub trait Kernel: Send + Sync {
     fn source_solids(&self, format: ImportFormat, source: &[u8]) -> KernelResult<Vec<String>> {
         let _ = (format, source);
         Err(KernelError::Unsupported("source solid selection".into()))
+    }
+
+    /// Matches every import of one STEP file to a replacement file by complete face
+    /// definitions, so a changed file whose entity numbers alone moved keeps its solids and
+    /// faces. It builds nothing into the part.
+    fn replace_import_file(&self, request: &FileReplacementRequest<'_>) -> KernelResult<FileReplacement> {
+        let _ = request;
+        Err(KernelError::Unsupported("import file replacement".into()))
     }
 
     /// Builds or replays the explicitly selected source format and its repair decisions.

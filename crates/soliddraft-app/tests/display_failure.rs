@@ -307,3 +307,24 @@ fn a_rolled_back_feature_stays_on_the_status_bar() {
         app.render().expect("the last frame renders");
     });
 }
+
+/// A form's feature the viewport cannot draw is refused after it built. The refusal puts
+/// the history back as it was, the redo step included.
+#[test]
+fn a_form_refused_for_its_display_keeps_the_redo_step() {
+    let kernel = Arc::new(Gated::default());
+    let (mut doc, id) = part(kernel.clone());
+    doc.apply(edit(id, 20.0)).unwrap();
+    doc.undo().unwrap();
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (1, 1));
+
+    refuse_display(&kernel, true);
+    let refused = doc.apply_form(add(25.0)).unwrap_err();
+    assert!(refused.contains(REASON), "{refused}");
+    assert_eq!(doc.features.len(), 1, "the refused feature is withdrawn");
+    assert_eq!((doc.undo_depth(), doc.redo_depth()), (1, 1), "the refusal keeps the redo step");
+
+    refuse_display(&kernel, false);
+    doc.redo().unwrap();
+    assert_eq!(depth_of(&doc, id), 20.0);
+}

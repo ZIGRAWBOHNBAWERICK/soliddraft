@@ -455,6 +455,44 @@ fn an_early_sketch_opens_on_the_part_as_it_was_with_its_sheet_on_the_face() {
     });
 }
 
+/// An editor shows the part rolled back to before its feature. A rollback the user drags
+/// while it is open stands once it closes, and the saved part keeps it.
+#[test]
+fn a_rollback_dragged_in_an_open_editor_stands_after_it_closes() {
+    use soliddraft_app::document::{Command, ExtrudeParams};
+    let mut doc = ribbon::plate();
+    for depth in [5.0, 8.0] {
+        doc.apply(Command::AddExtrude { params: ExtrudeParams { depth, ..Default::default() }, via_assistant: false })
+            .unwrap();
+    }
+    assert_eq!(doc.features.len(), 3);
+    let second = doc.features[1].id;
+
+    let mut case = Case::new("feature-sketch-order/rollback-in-editor");
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        app.state_mut().state.push(AppAction::EditFeature(second));
+        settle(app);
+        assert!(app.state().state.editor.is_some());
+        assert_eq!(app.state().state.doc.rollback, Some(1), "the editor shows the part before its feature");
+        // The user drags the rollback bar to just above the last feature.
+        app.state_mut().state.push(AppAction::Command(soliddraft_app::document::Command::Rollback(Some(2))));
+        settle(app);
+        case.frame(app, "1-dragged-in-the-editor");
+        app.state_mut().state.push(AppAction::CancelEditor);
+        settle(app);
+        let state = &app.state().state;
+        assert!(state.editor.is_none());
+        assert_eq!(state.doc.rollback, Some(2), "the dragged rollback stands after the editor closes");
+        case.frame(app, "2-closed-the-drag-stands");
+
+        let bytes = app.state().state.doc.model().to_bytes().unwrap();
+        let kernel = std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new());
+        let reopened = soliddraft_app::file::open_bytes("dragged.dwprt", &bytes, kernel, None).unwrap();
+        assert_eq!(reopened.rollback, Some(2), "the saved part keeps the dragged rollback");
+    });
+}
+
 /// With a face selected its base sketch shows over the body. Where the sketch's outline
 /// lies on the body's own bottom edges, the edge under the pointer still takes the pick.
 #[test]

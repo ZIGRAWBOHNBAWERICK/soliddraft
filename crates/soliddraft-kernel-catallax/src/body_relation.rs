@@ -84,7 +84,7 @@ fn operands(k: &CatallaxKernel, a: BodyId, b: BodyId) -> KernelResult<(Model, [c
     let sources = state.sources(&steps)?;
     drop(state);
     let files = sources.iter().map(|(sha, bytes)| (sha.clone(), &bytes[..])).collect();
-    let (app, names, _) =
+    let (app, names, _, _) =
         build(&input, OpKind::Intersect, prefix.as_ref().map(|s| &s.app), &files, None, &Default::default())?;
     let built = app.checkpoint.built();
     let bodies = result_names.map(|name| built.bodies[&names[&name]]);

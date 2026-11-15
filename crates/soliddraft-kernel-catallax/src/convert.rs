@@ -48,6 +48,17 @@ fn assign<I: Copy + Ord, K>(
 }
 
 impl Ids {
+    /// Each interface id by its Catallax handle's index, which a hand-over keeps.
+    pub fn by_index(
+        &self,
+    ) -> (BTreeMap<u32, FaceId>, BTreeMap<u32, EdgeId>, BTreeMap<u32, soliddraft_kernel_api::VertexId>) {
+        (
+            self.faces.iter().map(|(cat, id)| (cat.index(), *id)).collect(),
+            self.edges.iter().map(|(cat, id)| (cat.index(), *id)).collect(),
+            self.vertices.iter().map(|(cat, id)| (cat.index(), *id)).collect(),
+        )
+    }
+
     pub fn new(
         app: &AppBody,
         parents: &[&Ids],

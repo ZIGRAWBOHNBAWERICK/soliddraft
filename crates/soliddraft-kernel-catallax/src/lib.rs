@@ -68,9 +68,11 @@ struct State {
     kept: Option<Vec<(String, Vec<u8>)>>,
     /// Builds another kernel handed over, by recipe key; a build of the same
     /// definition takes one instead of evaluating it.
-    offered: BTreeMap<String, Arc<catallax_features::Built>>,
+    offered: BTreeMap<String, handover::Offer>,
     /// Bodies Catallax evaluated here rather than took from an offer.
     fresh: u64,
+    /// Topologies computed here rather than taken from an offer.
+    fresh_topologies: u64,
 }
 
 struct Stored {
@@ -82,6 +84,8 @@ struct Stored {
 
 struct Solid {
     app: AppBody,
+    /// The recipe key of this build, for a hand-over of its topology.
+    key: String,
     ids: convert::Ids,
     display: MeshCache<catallax_mesh::Mesh>,
     print: MeshCache<PrintMesh>,
@@ -362,6 +366,12 @@ impl CatallaxKernel {
         self.state().map(|state| state.fresh).unwrap_or_default()
     }
 
+    /// How many body topologies this kernel computed, not counting ones taken from an
+    /// offered hand-over.
+    pub fn fresh_topologies(&self) -> u64 {
+        self.state().map(|state| state.fresh_topologies).unwrap_or_default()
+    }
+
     /// Enables synchronous per-call evidence and deterministic work accounting.
     pub fn with_diagnostics(max_work: u64) -> Self {
         Self::capture(Some(max_work))
@@ -467,7 +477,7 @@ impl CatallaxKernel {
         {
             return Err(refusal);
         }
-        let Evaluated { app, names, steps, mut history, parents, seq, result } = evaluated;
+        let Evaluated { app, key, handed, names, steps, mut history, parents, seq, result } = evaluated;
         // Catallax names faces by recipe step; the interface uses the caller's tag.
         let mut tags: BTreeMap<String, OpTag> = names
             .into_iter()
@@ -513,6 +523,14 @@ impl CatallaxKernel {
         history.insert(seq, record.clone());
         let body = BodyId::from_raw(state.id());
         let display = MeshCache::new();
+        let topology = OnceLock::new();
+        // A handed-over topology is renamed into this kernel's ids, so it is not computed again.
+        if let Some(handed) = handed {
+            let (faces, edges, vertices) = ids.by_index();
+            if let Some(renamed) = handed.renamed(&faces, &edges, &vertices) {
+                let _ = topology.set(Ok(renamed));
+            }
+        }
         state.bodies.insert(
             body,
             Stored {
@@ -521,12 +539,13 @@ impl CatallaxKernel {
                 history: history.into_values().collect(),
                 solid: Some(Arc::new(Solid {
                     app,
+                    key,
                     ids,
                     display,
                     print: MeshCache::new(),
                     previews: MeshCache::new(),
                     rendering: MeshCache::new(),
-                    topology: OnceLock::new(),
+                    topology,
                     measured: OnceLock::new(),
                     mass: OnceLock::new(),
                 })),
@@ -596,7 +615,7 @@ impl CatallaxKernel {
         );
         // A build made here is kept for hand-over outside the lock; an offered one is not.
         let kept = match &built {
-            Ok((app, _, key)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
+            Ok((app, _, key, _)) if keeping && matches!(app.checkpoint, Exact::Checkpoint(_)) => {
                 Some((key.clone(), handover::write(app.checkpoint.built())?))
             }
             _ => None,
@@ -607,11 +626,11 @@ impl CatallaxKernel {
         if let (Some(kept), Some(list)) = (kept, state.kept.as_mut()) {
             list.push(kept);
         }
-        if matches!(&built, Ok((app, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_))) {
+        if matches!(&built, Ok((app, _, _, _)) if matches!(app.checkpoint, Exact::Checkpoint(_))) {
             state.fresh += 1;
         }
-        let (app, names, _) = built?;
-        Ok((state, Evaluated { app, names, steps, history, parents, seq, result }))
+        let (app, names, key, handed) = built?;
+        Ok((state, Evaluated { app, key, handed, names, steps, history, parents, seq, result }))
     }
 
     /// Stores a Catallax-native step that reads the solid `base` and builds the chain.
@@ -654,6 +673,9 @@ fn terminal_field(body: BodyId) -> KernelError {
 /// The operation's result, before it becomes a stored body.
 struct Evaluated {
     app: AppBody,
+    key: String,
+    /// The topology another kernel computed for an offered build.
+    handed: Option<Arc<handover::HandedTopology>>,
     names: BTreeMap<String, catallax_recipe::StepId>,
     steps: BTreeMap<u64, Value>,
     history: BTreeMap<u64, HistoryRecord>,
@@ -867,22 +889,26 @@ fn converted_recipe(input: &Value, op: OpKind) -> KernelResult<catallax_app::sol
 }
 
 /// Builds a legacy recipe, returning the body and the legacy step names' Catallax step ids.
+/// A build: its exact result, the step ids of the caller's tags, its recipe key for a
+/// hand-over, and the topology another kernel computed when the build was offered.
+type BuildAnswer = (AppBody, BTreeMap<String, catallax_recipe::StepId>, String, Option<Arc<handover::HandedTopology>>);
+
 fn build(
     input: &Value,
     op: OpKind,
     prefix: Option<&AppBody>,
     files: &catallax_features::ImportFiles<'_>,
     questions: Option<&mut Vec<Value>>,
-    offered: &BTreeMap<String, Arc<catallax_features::Built>>,
-) -> KernelResult<(AppBody, BTreeMap<String, catallax_recipe::StepId>, String)> {
+    offered: &BTreeMap<String, handover::Offer>,
+) -> KernelResult<BuildAnswer> {
     let converted = converted_recipe(input, op)?;
     if let Some(questions) = questions {
         let problem = serde_json::to_value(&converted.recipe).expect("Catallax recipes serialize");
         questions.push(json!({"format":"catallax-question/1", "source":"recipe", "problem":problem}));
     }
     let key = handover::key(&converted.recipe);
-    if let Some(built) = offered.get(&key) {
-        return Ok((AppBody::adopted(built.clone()), converted.steps, key));
+    if let Some(offer) = offered.get(&key) {
+        return Ok((AppBody::adopted(offer.built.clone()), converted.steps, key, offer.topology.clone()));
     }
     // Earlier bodies remain immutable for undo, branches and concurrent queries.
     // Clone only the selected checkpoint, after releasing the body arena lock.
@@ -904,7 +930,7 @@ fn build(
             build_error(op, e)
         }
     })?;
-    Ok((app.into(), converted.steps, key))
+    Ok((app.into(), converted.steps, key, None))
 }
 
 /// [`catallax_app::build_incremental_without_display`] for a recipe that reads STEP
@@ -1092,8 +1118,35 @@ impl Kernel for CatallaxKernel {
     }
 
     fn hand_over(&self) -> KernelResult<Vec<u8>> {
-        let kept = self.state()?.kept.take().unwrap_or_default();
-        Ok(handover::encode(&kept))
+        let mut state = self.state()?;
+        let kept = state.kept.take().unwrap_or_default();
+        // Each kept build travels with the topology computed for it here, if any.
+        let topologies: BTreeMap<&str, &Solid> = state
+            .bodies
+            .values()
+            .filter_map(|stored| stored.solid.as_deref())
+            .filter(|solid| matches!(solid.topology.get(), Some(Ok(_))))
+            .map(|solid| (solid.key.as_str(), solid))
+            .collect();
+        let handed: Vec<handover::Handed> = kept
+            .into_iter()
+            .map(|(key, body)| {
+                let topology = topologies.get(key.as_str()).and_then(|solid| {
+                    let Some(Ok(topology)) = solid.topology.get() else { return None };
+                    let (faces, edges, vertices) = solid.ids.by_index();
+                    let pairs = |ids: Vec<(u32, u64)>| ids.into_iter().map(|(index, raw)| (raw, index)).collect();
+                    Some(handover::HandedTopology {
+                        topology: topology.clone(),
+                        faces: pairs(faces.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                        edges: pairs(edges.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                        vertices: pairs(vertices.into_iter().map(|(index, id)| (index, id.raw())).collect()),
+                    })
+                });
+                handover::Handed { key, body, topology }
+            })
+            .collect();
+        drop(state);
+        handover::encode(&handed)
     }
 
     fn offer_builds(&self, bytes: &[u8]) -> KernelResult<usize> {
@@ -1834,6 +1887,7 @@ impl Kernel for CatallaxKernel {
             if let Some(value) = solid.topology.get() {
                 return value.clone();
             }
+            self.state()?.fresh_topologies += 1;
             if solid.has_splines() {
                 let answer = solid.rendering()?;
                 let mesh = match answer.as_ref() {
@@ -2101,7 +2155,7 @@ mod tests {
             let cut = kernel.boolean(&OpTag::new("cut"), BooleanOp::Subtract, base, tool).unwrap().body;
             let evidence = kernel.take_diagnostics().unwrap();
             let recipe = kernel.body_recipe(cut).unwrap();
-            let (replayed, steps, _) =
+            let (replayed, steps, _, _) =
                 build(&recipe, OpKind::Subtract, None, &Default::default(), None, &Default::default()).unwrap();
             let operations = evidence["calls"][0]["operation_log"]["operations"].as_array().unwrap();
             let result = steps[recipe["result"].as_str().unwrap()].as_str();
@@ -2150,7 +2204,7 @@ mod tests {
                 assert!(!operations.iter().any(|op| &op["id"] == id), "rebuilt read-only target {id}: {evidence}");
             }
             let recipe = kernel.body_recipe(swept.body).unwrap();
-            let (fresh, _, _) =
+            let (fresh, _, _, _) =
                 build(&recipe, OpKind::ExtrudeTo, None, &Default::default(), None, &Default::default()).unwrap();
             assert_eq!(kernel.solid(swept.body).unwrap().app.names, fresh.names);
             assert_eq!(

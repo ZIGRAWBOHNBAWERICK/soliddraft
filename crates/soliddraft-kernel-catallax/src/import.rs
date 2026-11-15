@@ -314,6 +314,8 @@ impl CatallaxKernel {
                 result,
                 history: vec![history.clone()],
                 solid: Some(Arc::new(Solid {
+                    // Imports are rebuilt from their source, not handed over.
+                    key: String::new(),
                     app,
                     ids,
                     display,

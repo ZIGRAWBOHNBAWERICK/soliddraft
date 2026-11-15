@@ -1,5 +1,5 @@
 //! Optional panes keep their width and per-document visibility across runs.
-//! The session overlays history without resizing the viewport.
+//! The session overlays the viewport without resizing it.
 
 use egui::{Key, Modifiers, Rect, pos2, vec2};
 use egui_kittest::Harness;
@@ -106,27 +106,25 @@ fn side_areas_toggle_resize_and_come_back_next_run() {
     let mut harness = harness();
     settle(&mut harness);
     assert_eq!(layout(&harness), Layout::default());
-    assert!(!harness.state().state.tree_shown());
-    let wide = viewport_rect(&harness);
-    assert!((wide.left() - soliddraft_app::left_bar::WIDTH - theme::edit_suite::PALETTE_WIDTH).abs() < 2.0);
-    assert!(wide.right() >= 1439.0);
-    let history = egui::PanelState::load(&harness.ctx, egui::Id::new("feature_timeline")).unwrap().outer_rect;
+    assert!(harness.state().state.tree_shown(), "the part's tree starts shown");
+    let full = viewport_rect(&harness);
     let command = egui::PanelState::load(&harness.ctx, soliddraft_app::command_line::bar_id()).unwrap().outer_rect;
-    assert!(wide.bottom() <= history.top());
-    assert!(history.bottom() <= command.top() + 1.0);
+    assert!(
+        egui::PanelState::load(&harness.ctx, egui::Id::new("feature_timeline")).is_none(),
+        "no history strip is laid out"
+    );
+    assert!((full.bottom() - command.top()).abs() <= 1.0, "the viewport reaches down to the command line");
     save(&mut harness, "p01-default");
 
-    harness.key_press(Key::F9);
-    settle(&mut harness);
-    assert!(harness.state().state.tree_shown());
-    let full = viewport_rect(&harness);
-    assert!((full.left() - wide.left() - Side::Tree.default_width()).abs() < 2.0);
     let plate = harness.state().state.doc.features[0].id;
     harness.state_mut().state.doc.selection = Some(Selection::Feature(plate));
     harness.key_press(Key::F9);
     settle(&mut harness);
     assert!(!layout(&harness).suite.part);
-    assert_eq!(viewport_rect(&harness), wide);
+    let wide = viewport_rect(&harness);
+    assert!((wide.left() - soliddraft_app::left_bar::WIDTH - theme::edit_suite::PALETTE_WIDTH).abs() < 2.0);
+    assert!(wide.right() >= 1439.0);
+    assert!((full.left() - wide.left() - Side::Tree.default_width()).abs() < 2.0);
     save(&mut harness, "p02-tree-hidden");
     harness.key_press(Key::F9);
     settle(&mut harness);
@@ -137,7 +135,7 @@ fn side_areas_toggle_resize_and_come_back_next_run() {
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F9);
     settle(&mut harness);
     assert!(harness.state().state.command_line.session_open);
-    assert_eq!(viewport_rect(&harness), full, "the session overlays history");
+    assert_eq!(viewport_rect(&harness), full, "the session overlays the viewport");
     save(&mut harness, "p03-session-open");
     harness.key_press_modifiers(Modifiers::SHIFT, Key::F9);
     settle(&mut harness);
@@ -171,7 +169,7 @@ fn side_areas_toggle_resize_and_come_back_next_run() {
     again.state_mut().state.push(AppAction::ResetLayout);
     settle(&mut again);
     assert_eq!(layout(&again), Layout::default());
-    assert_eq!(viewport_rect(&again), wide);
+    assert_eq!(viewport_rect(&again), full, "the reset shows the tree at its default width");
     assert_eq!(soliddraft_app::settings::layout(), Layout::default());
     let _ = std::fs::remove_dir_all(dir);
 }

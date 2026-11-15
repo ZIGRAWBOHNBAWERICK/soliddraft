@@ -174,7 +174,7 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
     let mut app = launch(ribbon::blank(), Look { size: vec2(960.0, 600.0), pixels_per_point: 2.0, ..STANDARD });
     suite(&mut app);
     case.run(&mut app, |case, app| {
-        assert!(!app.state().state.tree_shown(), "part starts with the pane hidden");
+        assert!(app.state().state.tree_shown(), "part starts with its tree shown");
         assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
         ribbon::run_command(app, "configuration_grid");
         settle(app);
@@ -216,8 +216,9 @@ fn tree_and_values_are_one_optional_pane_and_sketch_closes_from_the_bar() {
         assert!(!app.state().state.in_sketch());
         assert!(app.state().state.editor.is_none());
         assert_eq!(app.state().state.doc.features.len(), 1, "closing saves the sketch without adding a feature");
-        let chip = app.get_by_label("Sketch1 in history").rect();
-        assert!(ribbon::painted_in(app, chip).iter().any(|p| p.text == "(-) Sketch1"));
+        ribbon::show_pane(app, soliddraft_app::panels::Pane::Tree);
+        let row = ribbon::control(app, "Sketch1", ribbon::window(app)).rect;
+        assert!(ribbon::painted_in(app, row).iter().any(|p| p.text == "(-) Sketch1"));
         assert_eq!(app.state().state.doc.features[0].name, "Sketch1", "the prefix is display only");
         case.frame(app, "closed-sketch");
         assert!(!ribbon::painted(app).iter().any(|p| p.text == "Properties"));
@@ -284,8 +285,11 @@ fn plane_picker_and_repair_use_the_same_bar_and_sheet() {
         settle(app);
         assert!(matches!(app.state().state.editor.as_ref().map(|e| &e.params), Some(EditorParams::PickPlane)));
         assert!(app.query_all_by_label("OK").next().is_none());
+        let options = bar(app);
         assert_eq!(
-            app.get_all_by_role_and_label(egui::accesskit::Role::Button, "Top plane").count(),
+            app.get_all_by_role_and_label(egui::accesskit::Role::Button, "Top plane")
+                .filter(|n| options.intersects(n.rect()))
+                .count(),
             1,
             "plane selection has one set of controls on the options bar"
         );
@@ -323,6 +327,9 @@ fn assembly_and_drawing_panes_start_open_and_keep_part_visibility_separate() {
     let mut app = launch(ribbon::plate(), STANDARD);
     suite(&mut app);
     case.run(&mut app, |case, app| {
+        assert!(app.state().state.tree_shown(), "part starts with its tree shown");
+        app.key_press(Key::F9);
+        settle(app);
         assert!(!app.state().state.tree_shown());
         app.state_mut().state.push(AppAction::Assembly(AssemblyAction::New));
         settle(app);

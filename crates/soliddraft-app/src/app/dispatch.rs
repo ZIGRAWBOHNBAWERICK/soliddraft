@@ -12,7 +12,7 @@ use crate::viewport::dimensions::DimensionTarget;
 use crate::viewport::render::{DisplayMode, Picked};
 
 use super::Tab;
-use super::presentation::docks::{center_dock, tree_dock};
+use super::presentation::docks::center_dock;
 use super::workspace::SolidDraftApp;
 
 impl SolidDraftApp {
@@ -1178,11 +1178,10 @@ impl SolidDraftApp {
                 if let Some(id) = self.state.selected_feature()
                     && let Some(f) = self.state.doc.feature(id)
                 {
-                    let rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
-                    if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
-                        self.state.timeline.rename = rename;
-                    } else {
-                        self.state.rename = rename;
+                    self.state.rename = Some(crate::state::Rename { feature: id, text: f.name.clone(), focus: true });
+                    // The name is typed in its tree row, so the tree comes forward.
+                    if !self.state.pane_shown(crate::panels::Pane::Tree) {
+                        self.state.show_pane(crate::panels::Pane::Tree);
                     }
                 }
             }
@@ -1541,7 +1540,6 @@ impl SolidDraftApp {
                 if assembly_open {
                     self.dock.push_to_focused_leaf(Tab::Assembly);
                 }
-                self.tree_dock = tree_dock();
                 self.state.layout = Layout::default();
                 self.state.assembly.tree_hidden = false;
                 self.state.drawing.tree_hidden = false;

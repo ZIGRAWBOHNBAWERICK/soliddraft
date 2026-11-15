@@ -1,5 +1,7 @@
-//! The side area: the feature tree on the left. The assistant has no side area; it
-//! opens as a session above the command line at the bottom (see `command_line.rs`).
+//! The side area: the feature tree or the Values table on the left, chosen by the first
+//! icons of the strip at the window's edge (see `left_bar.rs`). The assistant has no
+//! side area; it opens as a session above the command line at the bottom (see
+//! `command_line.rs`).
 //!
 //! The side area can be hidden and resized. What the user chose is kept in the app's
 //! settings file (see `settings.rs`) and restored at the next start.
@@ -59,6 +61,21 @@ impl Side {
     }
 }
 
+/// What the side area shows. Each has its own icon at the top of the left strip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pane {
+    /// The document's tree: the feature tree of a part, or the assembly or drawing tree.
+    #[default]
+    Tree,
+    /// Globals, the numbers typed into features and the configurations.
+    Values,
+}
+
+impl Pane {
+    pub const ALL: [Pane; 2] = [Pane::Tree, Pane::Values];
+}
+
 /// The widest a side area gets, whatever the window size.
 pub const MAX_WIDTH: f32 = 800.0;
 /// The viewport keeps at least this much beside the side area.
@@ -80,6 +97,8 @@ pub struct SidePanel {
 pub struct Layout {
     pub tree: SidePanel,
     pub suite: SuitePanes,
+    /// What the side area shows while it is shown.
+    pub pane: Pane,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -90,15 +109,20 @@ pub struct SuitePanes {
     pub drawing: bool,
 }
 
+/// Every document starts with its tree shown: the tree is the part's only history.
 impl Default for SuitePanes {
     fn default() -> Self {
-        Self { part: false, assembly: true, drawing: true }
+        Self { part: true, assembly: true, drawing: true }
     }
 }
 
 impl Default for Layout {
     fn default() -> Self {
-        Self { tree: SidePanel { shown: true, width: Side::Tree.default_width() }, suite: SuitePanes::default() }
+        Self {
+            tree: SidePanel { shown: true, width: Side::Tree.default_width() },
+            suite: SuitePanes::default(),
+            pane: Pane::default(),
+        }
     }
 }
 
@@ -173,9 +197,11 @@ mod tests {
         let mut layout = Layout::default();
         layout.toggle(Side::Tree);
         layout.tree.width = 455.5;
+        layout.pane = Pane::Values;
         save_layout_in(&file, &layout).unwrap();
         let back = layout_in(&file);
         assert_eq!(back, layout);
+        assert_eq!(back.pane, Pane::Values, "the side area remembers its pane");
         assert!(!back.tree.shown);
         assert_eq!(back.tree.width, 455.5);
         let all: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();

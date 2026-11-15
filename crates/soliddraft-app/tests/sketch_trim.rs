@@ -35,6 +35,7 @@ fn launch(sketch: Sketch) -> (App, FeatureId) {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app(doc);
+    ribbon::close_tree(&mut app);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     ribbon::run_command(&mut app, "sketch_trim");

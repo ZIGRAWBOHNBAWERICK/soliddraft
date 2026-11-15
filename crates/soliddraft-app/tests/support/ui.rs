@@ -297,7 +297,10 @@ pub fn switch_workspace(app: &mut App, id: &str) {
 
 /// The visible command palette at the left of the viewport.
 pub fn palette_region(app: &App) -> Rect {
-    egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the tool palette is open").outer_rect
+    let palette =
+        egui::PanelState::load(&app.ctx, egui::Id::new("tool_palette")).expect("the tool palette is open").outer_rect;
+    // The open side area starts on the palette's right edge; its rows are not the palette's.
+    palette.shrink2(vec2(0.5, 0.0))
 }
 
 /// Reveals a palette command by stable id without running it.
@@ -487,14 +490,44 @@ pub fn open_tree(app: &mut App) {
     }
 }
 
-/// Clicks a document tab.
+/// Closes the side area, for a check that clicks or measures the viewport at the width it
+/// has without the tree beside it.
+pub fn close_tree(app: &mut App) {
+    if app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        app.run_steps(8);
+    }
+}
+
+/// Clicks a document tab. "Tree" and "Values" are panes of the side area, chosen by
+/// their icons in the left strip (see [`show_pane`]).
 pub fn document_tab(app: &mut App, title: &str) {
-    if matches!(title, "Tree" | "Values") {
-        open_tree(app);
+    match title {
+        "Tree" => return show_pane(app, soliddraft_app::panels::Pane::Tree),
+        "Values" => return show_pane(app, soliddraft_app::panels::Pane::Values),
+        _ => {}
     }
     let rect = title_rect(app, title);
     click_at(app, rect.center());
     app.run_steps(4);
+}
+
+/// The icon strip at the window's left edge.
+pub fn left_bar(app: &App) -> Rect {
+    egui::PanelState::load(&app.ctx, egui::Id::new("left_bar")).expect("the left bar is laid out").outer_rect
+}
+
+/// Shows `pane` in the side area by clicking its icon in the left strip, unless it
+/// already shows there.
+pub fn show_pane(app: &mut App, pane: soliddraft_app::panels::Pane) {
+    if app.state().state.pane_shown(pane) {
+        return;
+    }
+    let label = soliddraft_app::left_bar::pane_label(&app.state().state, pane);
+    let rect = control(app, label, left_bar(app)).rect;
+    click_at(app, rect.center());
+    app.run_steps(8);
+    assert!(app.state().state.pane_shown(pane), "the {label} icon shows its pane");
 }
 
 /// A press and release that stops on the frame the click lands in: the next `render` is

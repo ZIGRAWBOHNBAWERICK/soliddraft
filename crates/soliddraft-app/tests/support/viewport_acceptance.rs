@@ -221,6 +221,16 @@ fn start(doc: Document, size: Vec2, pixels_per_point: f32, eager: bool) -> App {
     app
 }
 
+/// Closes the side area, for a case that measures the viewport at the full width it has
+/// without the tree beside it.
+pub fn full_width(mut app: App) -> App {
+    if app.state().state.tree_shown() {
+        app.key_press(Key::F9);
+        settle(&mut app);
+    }
+    app
+}
+
 fn frames_only() -> egui::Id {
     egui::Id::new("viewport_acceptance frames only")
 }

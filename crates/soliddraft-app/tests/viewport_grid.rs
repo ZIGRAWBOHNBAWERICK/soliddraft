@@ -14,6 +14,15 @@ use soliddraft_app::sketch::{Entity, EntityKind};
 use soliddraft_app::viewport::look::Preset;
 use support::*;
 
+// These cases measure the viewport at full width, so their launches close the side area.
+fn launch(doc: soliddraft_app::document::Document) -> App {
+    full_width(support::launch(doc))
+}
+
+fn launch_for_frames(doc: soliddraft_app::document::Document, size: egui::Vec2, pixels_per_point: f32) -> App {
+    full_width(support::launch_for_frames(doc, size, pixels_per_point))
+}
+
 const SIZE: egui::Vec2 = vec2(1440.0, 900.0);
 
 /// Up and across, which takes a view facing any of the planes here off its normal. From
@@ -494,6 +503,10 @@ fn the_grid_style_is_drawn_as_chosen_and_kept() {
     let rect = viewport(&app);
     let point = |y: f32| (line.round() as u32, (rect.top() + y) as u32);
     let (x, y) = point(rect.height() / 3.0);
+    // The line may straddle two pixel columns; read the one it covers most.
+    let x = (x - 1..=x + 1)
+        .max_by_key(|x| i32::from(off.get_pixel(*x, y).0[1]) - i32::from(on.get_pixel(*x, y).0[1]))
+        .unwrap();
     let on = on.get_pixel(x, y).0.map(i32::from);
     let off = off.get_pixel(x, y).0.map(i32::from);
     // Red ink darkens green and blue far more than red.

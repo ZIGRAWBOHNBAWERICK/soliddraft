@@ -404,7 +404,6 @@ pub fn frame(state: &mut AppState, dock: &mut DockState<Tab>, ctx: &egui::Contex
                 state.drawing.active = false;
             }
             Tab::Viewport | Tab::Drawing => state.assembly.active = false,
-            _ => {}
         }
     }
     if dock.find_tab(&Tab::Assembly).is_none() {

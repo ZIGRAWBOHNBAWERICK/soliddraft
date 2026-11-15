@@ -65,6 +65,7 @@ fn launch(sketch: Sketch, tool: Tool) -> App {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app(doc);
+    ribbon::close_tree(&mut app);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     app.state_mut().state.push(AppAction::SketchTool(tool));

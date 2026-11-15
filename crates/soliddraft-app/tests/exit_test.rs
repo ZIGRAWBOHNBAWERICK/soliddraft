@@ -396,8 +396,10 @@ fn open_extrude_orbit_click_face() {
     save(&mut harness, "05-face-selected");
 
     // The tree row selects the whole feature.
-    harness.key_press(Key::F9);
-    harness.run_steps(6);
+    if !harness.state().state.tree_shown() {
+        harness.key_press(Key::F9);
+        harness.run_steps(6);
+    }
     harness.get_by_role_and_label(egui::accesskit::Role::Button, "Boss-Extrude1").click();
     harness.run_steps(3);
     assert_eq!(harness.state().state.doc.selection, Some(Selection::Feature(1)));

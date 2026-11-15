@@ -163,7 +163,6 @@ pub mod edit_suite {
     pub const OPTIONS_HEIGHT: f32 = 46.0;
     pub const PALETTE_WIDTH: f32 = 250.0;
     pub const PANE_WIDTH: f32 = 236.0;
-    pub const TIMELINE_HEIGHT: f32 = 58.0;
     pub const COMMAND_LINE_HEIGHT: f32 = 30.0;
     pub const TOOL_HEIGHT: f32 = 23.0;
     pub const ROW_HEIGHT: f32 = 25.0;

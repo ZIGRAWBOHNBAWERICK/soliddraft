@@ -338,9 +338,9 @@ fn a_bounded_answer_is_distinct_from_proof_and_keeps_its_definition_and_limit() 
         assert!(!proof.current_proved_model());
         assert_eq!(state.edit_status().unwrap().0, soliddraft_app::document::WITHIN_BOUND_LABEL);
         let badge = app.get_by_label("Boss-Extrude1 proof: Answered within a stated bound").rect();
-        let chip = app.get_by_label("Boss-Extrude1 in history").rect();
-        assert!(chip.contains_rect(badge));
-        assert!(ribbon::painted_in(&app, chip).iter().any(|text| text.text.contains("0.008 mm")));
+        let row = ribbon::control(&app, "Boss-Extrude1", ribbon::window(&app)).rect;
+        assert!(row.contains_rect(badge), "the mark sits in the feature's tree row");
+        assert!(ribbon::painted_in(&app, row).iter().any(|text| text.text.contains("0.008 mm")));
         let palette = soliddraft_app::theme::palette();
         assert_ne!(palette.bounded, palette.ok);
         assert_ne!(palette.bounded, palette.warn);
@@ -388,14 +388,12 @@ fn bounded_fixtures_reject_answers_outside_the_declared_limit_or_without_a_defin
 
 fn suite(doc: Document) -> App {
     let mut app = ribbon::app(doc);
-
-    app.state_mut().state.layout.tree.shown = false;
     app.run_steps(8);
     app
 }
 
 #[test]
-fn ai_overlays_history_counts_turns_and_collapses_after_thirty_idle_seconds() {
+fn ai_overlays_the_viewport_counts_turns_and_collapses_after_thirty_idle_seconds() {
     let case = ribbon::case("edit-suite-ai");
     let mut app = suite(ribbon::plate());
     app.state_mut().state.chat = ChatState::connected(
@@ -404,12 +402,11 @@ fn ai_overlays_history_counts_turns_and_collapses_after_thirty_idle_seconds() {
     );
     case.run(&mut app, |app| {
         let viewport = app.state().state.viewport.rect;
-        let chip = app.get_by_label("Boss-Extrude1 in history").rect();
         ribbon::type_command(app, "ai");
         app.run_steps(8);
         let session = app.get_by_label("AI session").rect();
         assert_eq!(app.state().state.viewport.rect, viewport, "the session overlays the workspace");
-        assert!(session.contains_rect(chip), "the session opens over history");
+        assert!(viewport.intersects(session), "the session opens over the viewport");
         assert!(app.get_by_label("Command line").is_focused());
         app.get_by_label("Command line").type_text("Describe the plate");
         app.key_press(Key::Enter);
@@ -450,6 +447,10 @@ fn narrow_palette_keeps_tools_named_for_accessibility_and_the_ai_chip_visible() 
     let case = ribbon::case("edit-suite-compact");
     let mut app = suite(ribbon::blank());
     case.run(&mut app, |app| {
+        // The palette's own room is measured with the side area closed.
+        app.key_press(Key::F9);
+        app.run_steps(8);
+        assert!(!app.state().state.tree_shown());
         app.set_size(vec2(1280.0, 800.0));
         app.run_steps(8);
         let start = ribbon::control(app, "Start sketch", ribbon::window(app));

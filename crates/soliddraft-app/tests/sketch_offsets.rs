@@ -89,6 +89,7 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app(doc);
+    ribbon::close_tree(&mut app);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     let before = session(&app).sketch.clone();
@@ -182,6 +183,7 @@ fn chains_caps_guides_and_linked_distance_use_preview_one_undo_and_reopen() {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch: before.clone() }).unwrap();
     let mut app = ribbon::app(doc);
+    ribbon::close_tree(&mut app);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     pick(&mut app, p(-10.0, 0.0));
@@ -215,6 +217,7 @@ fn review_app(sketch: Sketch, name: &str) -> App {
         .unwrap();
     doc.apply(Command::EditSketch { id, sketch }).unwrap();
     let mut app = ribbon::app(doc);
+    ribbon::close_tree(&mut app);
     app.state_mut().state.push(AppAction::EditSketch(id));
     app.run_steps(30);
     app

@@ -2,21 +2,18 @@
 
 use crate::document::Selection;
 use crate::icons::{self, Icon};
-use crate::panels::Side;
+use crate::panels::{Pane, Side};
 use crate::state::{AppAction, AppState};
 use crate::theme;
 use crate::tree;
 use crate::viewport::Overlay;
-use egui::{CornerRadius, Rect, Sense, pos2, vec2};
+use egui::{Align2, CornerRadius, Rect, Sense, pos2, vec2};
 use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::dispatch::selection_of;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
-    Tree,
-    /// Globals, the numbers typed into features and the configurations, beside the tree.
-    Values,
     Viewport,
     /// The drawing document, opened beside the part by Make drawing.
     Drawing,
@@ -27,8 +24,6 @@ pub enum Tab {
 impl Tab {
     fn title(&self) -> &'static str {
         match self {
-            Tab::Tree => "Tree",
-            Tab::Values => "Values",
             Tab::Viewport => "Part",
             Tab::Drawing => "Drawing",
             Tab::Assembly => "Assembly",
@@ -41,9 +36,35 @@ pub(in crate::app) fn center_dock() -> DockState<Tab> {
     DockState::new(vec![Tab::Viewport])
 }
 
-/// The optional tree pane and its Values tab.
-pub(in crate::app) fn tree_dock() -> DockState<Tab> {
-    DockState::new(vec![Tab::Tree, Tab::Values])
+/// The side area's content: the active document's tree, or the part's Values. The strip
+/// at the window's edge chooses between them, so the area has no tabs of its own.
+pub(in crate::app) fn pane(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+    match state.layout.pane {
+        Pane::Values => {
+            title(ui, "Values");
+            egui::Frame::new()
+                .inner_margin(egui::Margin { left: 12, right: 6, top: 2, bottom: 0 })
+                .show(ui, |ui| crate::values_tab::show(ui, state));
+        }
+        Pane::Tree if state.assembly.is_active() => crate::assembly::tree(ui, state),
+        Pane::Tree if state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, state),
+        Pane::Tree => tree::show(ui, state),
+    }
+}
+
+/// A pane's title row, as the tree's header row draws its part's name.
+fn title(ui: &mut egui::Ui, text: &str) {
+    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+    let painter = ui.painter();
+    painter.text(
+        pos2(head.left() + 12.0, head.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        theme::font_semibold(12.5),
+        theme::ink(),
+    );
+    painter.hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, theme::line()));
 }
 
 /// A dock area in the app's style, without the buttons the shell does not use.
@@ -105,8 +126,6 @@ impl TabViewer for Panels<'_> {
     fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
         let text = match tab {
             Tab::Viewport => self.state.doc.name.clone(),
-            Tab::Tree if self.state.assembly.is_active() => "Assembly tree".to_owned(),
-            Tab::Tree if self.state.drawing.is_active() => "Drawing tree".to_owned(),
             Tab::Assembly => match self.state.assembly.session.as_ref() {
                 Some(s) => s.title(),
                 None => "Assembly".to_owned(),
@@ -117,7 +136,6 @@ impl TabViewer for Panels<'_> {
                 Some(s) => s.title(),
                 None => "Drawing".to_owned(),
             },
-            other => other.title().to_owned(),
         };
         egui::RichText::new(text).family(theme::medium()).size(12.0).into()
     }
@@ -125,11 +143,7 @@ impl TabViewer for Panels<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         match tab {
-            Tab::Tree if self.state.assembly.is_active() => crate::assembly::tree(ui, self.state),
             Tab::Assembly => crate::assembly::viewport(ui, self.state),
-            Tab::Tree if self.state.drawing.is_active() => crate::drawing::tree_drawing::show(ui, self.state),
-            Tab::Tree => tree::show(ui, self.state),
-            Tab::Values => crate::values_tab::show(ui, self.state),
             Tab::Drawing => crate::drawing::canvas::show(ui, self.state),
             Tab::Viewport => {
                 let st = &mut *self.state;

@@ -10,7 +10,7 @@ We support free markets and reject intellectual property. Copying a program does
 
 SolidDraft is alpha software. Keep backups of your documents. On main, targeting 0.5.0, these features work:
 
-- The Edit Suite frame, with workspaces in an icon strip at the left edge, tools beside it, an options bar, a 3D viewport and feature history above the command line.
+- The Edit Suite frame, with the feature tree, Values and the workspaces in an icon strip at the left edge, tools beside it, an options bar, a 3D viewport and a command line.
 - Sketches with relations and dimensions. Extrude, cut, revolve, combine several bodies, drill holes, pattern and mirror. Edit features later, undo and redo, save and reopen parts. Supported sweeps, shells and drafts also work. See [modelling](docs/modelling.md).
 - Ruled and smooth lofts through ordered closed sketches or supported planar faces. Offset grows or shrinks supported bodies by a signed distance; Thicken makes a solid from selected faces on the front or back side. Planar cases include shrinking a block and thickening its end face. Geometry and calculation limits still apply. See [lofts](docs/modelling.md#loft) and [operation acceptance tests](crates/soliddraft-app/tests/distance_pattern.rs).
 - Fillets and chamfers on supported edges, including plane and cylinder combinations. Some blends and later operations still refuse unsupported geometry or exceed the calculation limit. See [current kernel limits](docs/needs-catallax.md).

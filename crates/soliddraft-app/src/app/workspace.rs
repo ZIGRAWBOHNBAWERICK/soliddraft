@@ -13,7 +13,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use super::dispatch::selection_of;
-use super::presentation::docks::{Panels, Tab, center_dock, show_dock, tree_dock};
+use super::presentation::docks::{Panels, Tab, center_dock, show_dock};
 
 /// Options for automated runs (benchmarks and screenshots).
 #[derive(Clone, Debug, Default)]
@@ -45,7 +45,6 @@ pub struct SolidDraftApp {
     pub state: AppState,
     /// The middle dock: the part and the drawing.
     pub(super) dock: DockState<Tab>,
-    pub(super) tree_dock: DockState<Tab>,
     /// The panel layout as last written to disk.
     saved_layout: Layout,
     /// The command line's chips and session height as last written to disk.
@@ -133,7 +132,6 @@ impl SolidDraftApp {
             saved_commands: state.commands.clone(),
             state,
             dock: center_dock(),
-            tree_dock: tree_dock(),
             automation,
             frame: 0,
             bench,
@@ -476,9 +474,6 @@ impl SolidDraftApp {
         if !start {
             crate::tool_palette::panel(root, &mut self.state);
             crate::command_line::panel(root, &mut self.state, &status);
-            if !self.state.drawing.is_active() && !self.state.assembly.is_active() {
-                crate::timeline::panel(root, &mut self.state);
-            }
             if self.state.tree_shown() {
                 self.side_panel(root, Side::Tree, window_width);
             }

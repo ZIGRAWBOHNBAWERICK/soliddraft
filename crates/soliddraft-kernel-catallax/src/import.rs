@@ -398,7 +398,7 @@ impl CatallaxKernel {
         })?;
         let display = MeshCache::new();
         display.get(display_key(&catallax_mesh::MeshOptions::default()), || Ok(app.display.value))?;
-        let app = catallax_app::EvaluatedApplicationBody { checkpoint: app.checkpoint, names: app.names };
+        let app = crate::AppBody { checkpoint: crate::Exact::Checkpoint(app.checkpoint), names: app.names };
         let mut state = self.state()?;
         state.files.entry(request.sha256.to_owned()).or_insert_with(|| request.source.into());
         let tags = BTreeMap::from([(result.clone(), tag.clone())]);

@@ -360,3 +360,29 @@ fn serialized_classic_tree_choice_migrates_and_later_suite_choices_survive() {
         });
     }
 }
+
+/// A greyed-out menu entry says what it does, or why it is off, on hover. egui shows plain
+/// hover text on enabled widgets only, so a disabled command used to explain nothing.
+#[test]
+fn a_disabled_menu_entry_explains_itself_on_hover() {
+    let case = ribbon::case("frame-menu-disabled-tip");
+    let mut app = ribbon::app(ribbon::blank());
+    case.run(&mut app, |app| {
+        let command = soliddraft_app::commands::get("make_assembly").expect("the command");
+        assert!(!command.is_enabled(&app.state().state), "a part with no body makes no assembly");
+        let tip = command.tip(&app.state().state);
+        let area = ribbon::window(app);
+        ribbon::click_button(app, "File", area);
+        app.run_steps(8);
+        let entry = ribbon::menu_entry(app, "File", "Make assembly from part");
+        let enabled = ribbon::menu_entry(app, "File", "New part");
+        // egui holds tooltips back right after a click: rest elsewhere, then on the entry.
+        app.hover_at(enabled.center());
+        app.run_steps(30);
+        app.hover_at(entry.center());
+        app.run_steps(90);
+        let painted: Vec<String> = ribbon::painted(app).into_iter().map(|p| p.text).collect();
+        assert!(painted.iter().any(|text| text.contains(&tip)), "the disabled entry shows {tip:?}: {painted:?}");
+        case.frame(app, "disabled-entry-tip");
+    });
+}

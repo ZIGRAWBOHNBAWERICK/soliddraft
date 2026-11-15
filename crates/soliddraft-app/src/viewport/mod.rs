@@ -537,6 +537,7 @@ impl ViewportState {
                     && visible.body,
                 &visible.sketches,
                 self.annotation_drag.as_ref().map(|d| (d.key, d.position)),
+                self.scene.is_some_and(scenes::Scene::is_dark),
             )
         } else {
             Vec::new()
@@ -583,7 +584,8 @@ impl ViewportState {
         self.dimensions = dims;
         self.paint_hud(ui, rect, &mut events, sketch_dimensions, true);
         self.paint_view_cube(ui, rect, &mut events);
-        self.paint_pills(ui, rect, hover_label);
+        // An open sketch has its own status line; the model hint would be wrong there.
+        self.paint_pills(ui, rect, hover_label.or((!sketching).then_some(MODEL_HINT)));
         events
     }
 
@@ -1060,11 +1062,10 @@ impl ViewportState {
             response.on_hover_text(&description);
         }
 
+        let Some(label) = hover_label else { return };
         let painter = ui.painter();
-        let (label, color) = match hover_label {
-            Some(l) => (l.to_owned(), theme::ink()),
-            None => ("Hover a face, edge or vertex".to_owned(), theme::muted()),
-        };
+        let color = if label == MODEL_HINT { theme::muted() } else { theme::ink() };
+        let label = label.to_owned();
         let galley = painter.layout_no_wrap(label, theme::font(11.0), color);
         let size = galley.size() + vec2(18.0, 7.0);
         let r = Rect::from_min_size(pos2(rect.right() - 14.0 - size.x, rect.bottom() - 12.0 - size.y), size);
@@ -1072,6 +1073,9 @@ impl ViewportState {
         painter.galley(r.center() - galley.size() / 2.0, galley, color);
     }
 }
+
+/// What the right-hand pill says in a part with nothing under the pointer.
+const MODEL_HINT: &str = "Hover a face, edge or vertex";
 
 fn point_in_convex(p: Pos2, poly: &[Pos2]) -> bool {
     let mut sign = 0.0_f32;

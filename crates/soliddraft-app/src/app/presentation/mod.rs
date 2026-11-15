@@ -438,7 +438,10 @@ fn menu_command(ui: &mut egui::Ui, st: &mut AppState, id: &str, label: &str) {
     if let Some(shortcut) = st.shortcuts.shortcut_text(command.id) {
         button = button.shortcut_text(shortcut);
     }
-    if ui.add_enabled(command.is_enabled(st), button).on_hover_text(command.tip(st)).clicked() {
+    // A disabled entry says why on hover too: egui shows plain hover text on enabled
+    // widgets only, so a greyed-out command used to give no reason.
+    let tip = command.tip(st);
+    if ui.add_enabled(command.is_enabled(st), button).on_hover_text(&tip).on_disabled_hover_text(&tip).clicked() {
         st.run_command(command);
         ui.close();
     }

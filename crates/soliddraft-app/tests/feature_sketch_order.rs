@@ -267,3 +267,48 @@ fn a_sketch_tool_before_the_plane_then_an_empty_sketch_asks_again() {
         case.frame(app, "1-extrude-asks-again");
     });
 }
+
+/// Closing a sketch leaves the view looking straight at its plane. An extrusion grows
+/// along that line of sight, so its preview was a flat tint there and a typed depth
+/// changed nothing on screen. Opening the feature now turns the view to isometric. A view
+/// the user already turned stays as it is.
+#[test]
+fn a_feature_opened_from_the_sketch_view_turns_to_show_its_depth() {
+    let mut case = Case::new("feature-sketch-order/depth-shows");
+    let mut app = launch(ribbon::sketch(), STANDARD);
+    case.run(&mut app, |case, app| {
+        let sketch = sketch_id(app);
+        let normal = {
+            let plane = app.state().state.doc.feature(sketch).unwrap().plane.unwrap();
+            glam::Vec3::new(plane.normal.x as f32, plane.normal.y as f32, plane.normal.z as f32)
+        };
+        let along = |app: &App| app.state().state.viewport.camera.heading().dot(normal).abs();
+        app.state_mut().state.push(AppAction::EditSketch(sketch));
+        settle(app);
+        app.state_mut().state.push(AppAction::ExitSketch);
+        settle(app);
+        assert!(along(app) > 0.999, "the closed sketch leaves the view on its normal: {}", along(app));
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(sketch))));
+        settle(app);
+        case.frame(app, "1-view-on-the-sketch-normal");
+
+        ribbon::run_command(app, "extrude");
+        app.run_steps(90);
+        assert!(matches!(params(app), Some(EditorParams::Extrude(_))), "{:?}", params(app));
+        assert_eq!(app.state().state.viewport.camera.view_name, "Isometric");
+        assert!(along(app) < 0.9, "the view left the normal, so the depth shows: {}", along(app));
+        case.frame(app, "2-extrude-preview-in-isometric");
+        app.state_mut().state.push(AppAction::CancelEditor);
+        settle(app);
+
+        // A view the user chose is kept: the feature opens without turning it.
+        app.state_mut().state.viewport.camera.set_view(soliddraft_app::viewport::camera::StandardView::Front);
+        app.run_steps(90);
+        app.state_mut().state.push(AppAction::Select(Some(Selection::Feature(sketch))));
+        settle(app);
+        ribbon::run_command(app, "extrude");
+        app.run_steps(90);
+        assert!(matches!(params(app), Some(EditorParams::Extrude(_))), "{:?}", params(app));
+        assert_eq!(app.state().state.viewport.camera.view_name, "Front", "a turned view is left alone");
+    });
+}

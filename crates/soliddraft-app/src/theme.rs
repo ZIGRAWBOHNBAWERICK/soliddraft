@@ -315,6 +315,11 @@ pub fn axis_color(axis: crate::document::AxisKind) -> Color32 {
         crate::document::AxisKind::Z => axis_z(),
     }
 }
+/// Dimension and witness lines over the modelling space. A light scene takes the blue an
+/// open sketch draws its dimensions in; the light ink is legible on a dark scene only.
+pub fn dimension_line(dark_scene: bool) -> Color32 {
+    if dark_scene { ink().gamma_multiply(0.7) } else { edit_suite::DIMENSION }
+}
 /// The session's quiet text: notes, tool lines, the header.
 pub fn terminal_muted() -> Color32 {
     terminal_ink().gamma_multiply(0.6)

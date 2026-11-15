@@ -65,6 +65,35 @@ fn shown(harness: &App<'_>) -> Vec<(DimensionTarget, String)> {
     harness.state().state.viewport.dimensions.iter().map(|d| (d.target, d.tip.clone())).collect()
 }
 
+/// Every line segment the frame painted, with its stroke colour.
+fn painted_lines(harness: &App<'_>) -> Vec<([Pos2; 2], egui::Color32)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<([Pos2; 2], egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+            egui::Shape::LineSegment { points, stroke } => found.push((*points, stroke.color)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &harness.output().shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found
+}
+
+/// The WCAG contrast ratio of two opaque colours.
+fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
+    let luminance = |c: egui::Color32| {
+        let linear = |v: u8| {
+            let v = f32::from(v) / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+    };
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
 #[test]
 fn the_selected_body_shows_its_feature_dimensions() {
     if !gpu_available() {
@@ -87,6 +116,27 @@ fn the_selected_body_shows_its_feature_dimensions() {
     harness.run_steps(6);
     assert_eq!(harness.state().state.doc.selection, Some(Selection::Body));
     save(&mut harness, "demo-body-selected");
+    // The dimension lines show on the light scene. They were drawn in the interface's
+    // light ink, so on a white backdrop only the value boxes could be seen.
+    let lines = painted_lines(&harness);
+    let state = &harness.state().state;
+    let depths: Vec<[Pos2; 2]> = state
+        .viewport
+        .dimensions
+        .iter()
+        .filter_map(|d| d.witness)
+        .map(|ends| ends.map(|p| state.viewport.camera.project(p, state.viewport.rect).expect("on screen")))
+        .collect();
+    assert_eq!(depths.len(), 3, "each extrude's depth has a dimension line");
+    for [from, to] in depths {
+        let color = lines
+            .iter()
+            .find(|(points, _)| points[0].distance(from) < 1.0 && points[1].distance(to) < 1.0)
+            .map(|(_, color)| *color)
+            .unwrap_or_else(|| panic!("no dimension line from {from:?} to {to:?}"));
+        let ratio = contrast(color, egui::Color32::WHITE);
+        assert!(ratio >= 3.0, "the dimension line {color:?} has contrast {ratio:.2} on the light scene");
+    }
     let dims = shown(&harness);
     // Three extrudes: width, height and depth twice, then a circle's diameter and depth.
     assert_eq!(dims.len(), 8, "{dims:?}");

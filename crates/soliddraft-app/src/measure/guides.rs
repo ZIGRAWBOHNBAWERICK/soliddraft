@@ -16,6 +16,13 @@ pub fn offered(auto_relations: bool, raw: P2, inferred: (P2, Vec<Snap>)) -> (P2,
     if auto_relations { inferred } else { (raw, Vec::new()) }
 }
 
+/// A widget at the left of `row`. `Ui::put` centres what it places, which left the three
+/// tick boxes of the switches out of line with each other.
+fn left_in<R>(ui: &mut egui::Ui, row: Rect, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let layout = egui::Layout::left_to_right(egui::Align::Center);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(layout), add).inner
+}
+
 /// Snap and construction controls, under the sketch status in the viewport's corner.
 pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     let at = Rect::from_min_size(pos2(rect.left() + 12.0, rect.top() + 58.0), vec2(150.0, 22.0));
@@ -24,18 +31,18 @@ pub fn switches(ui: &mut egui::Ui, s: &mut SketchSession, rect: Rect) {
     let controls = Rect::from_min_size(at.min, vec2(at.width(), height)).expand(4.0);
     ui.painter().rect_filled(controls, 6, crate::theme::hud_bg());
 
-    ui.put(at, egui::Checkbox::new(&mut s.auto_relations, "Auto relations"));
+    left_in(ui, at, |ui| ui.checkbox(&mut s.auto_relations, "Auto relations"));
     let centreline = s.tool == Tool::Centreline;
     let mut construction = s.draws_construction();
     ui.add_enabled_ui(!centreline, |ui| {
-        ui.put(at.translate(vec2(0.0, 24.0)), egui::Checkbox::new(&mut construction, "Draw construction"))
+        left_in(ui, at.translate(vec2(0.0, 24.0)), |ui| ui.checkbox(&mut construction, "Draw construction"))
     })
     .inner
     .on_disabled_hover_text("Centrelines always use construction geometry. Other tools keep their drawing setting.");
     if !centreline {
         s.construction = construction;
     }
-    ui.put(at.translate(vec2(0.0, 48.0)), egui::Checkbox::new(&mut s.grid_snap, "Snap to grid")).on_hover_text(
+    left_in(ui, at.translate(vec2(0.0, 48.0)), |ui| ui.checkbox(&mut s.grid_snap, "Snap to grid")).on_hover_text(
         "Use the current minor grid spacing. Geometry snaps and explicit Quick snap choices take priority.",
     );
     if s.tool.places_points() {

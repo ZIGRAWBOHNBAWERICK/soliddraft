@@ -307,3 +307,63 @@ fn a_dimension_a_value_drives_deletes_with_its_drive() {
         case.frame(app, "03-circle-deleted");
     });
 }
+
+/// Double-clicking a dimension opens its value with the old number selected, so the
+/// digits typed next replace it. They used to land after it: 120 typed over 40 read
+/// "40120", and Enter kept 40.
+#[test]
+fn typing_over_an_opened_dimension_replaces_its_value() {
+    let mut case = Case::new("sketch-dimension-type-over");
+    let mut source = Sketch::new();
+    let line = source.add(EntityKind::Line { a: P2::ZERO, b: P2::new(40.0, 0.0) }, false);
+    source.constrain(ConstraintKind::Coincident { a: PointRef::new(line, 0), b: PointRef::ORIGIN });
+    source.constrain(ConstraintKind::Horizontal { target: Align::Line(line) });
+    let along = source.constrain(length(line, 40.0, P2::new(20.0, 12.0)));
+    solve::solve(&mut source, None, true);
+    let (doc, id) = part(source);
+    let mut app = open(doc, id);
+    case.run(&mut app, |case, app| {
+        let at = label(app, along);
+        ribbon::render_steps::rendered(app, |app| ribbon::double_click_at(app, at));
+        app.run_steps(4);
+        assert!(session(app).dim_edit.is_some(), "the double-click opens the value");
+        case.frame(app, "01-value-opened-selected");
+        // The keys go where a user's would: to whatever holds the keyboard.
+        app.event(egui::Event::Text("25".into()));
+        app.run_steps(2);
+        assert_eq!(session(app).dim_edit.as_ref().map(|e| e.text.as_str()), Some("25"), "the typed digits replace 40");
+        case.frame(app, "02-typed-over");
+        app.key_press(Key::Enter);
+        settle(app);
+        assert!(session(app).dim_edit.is_none(), "Enter applies and closes the value");
+        let ConstraintKind::Distance { value, .. } = sketch(app).constraint(along).unwrap().kind else {
+            panic!("a distance")
+        };
+        assert_eq!(value, 25.0, "the dimension takes the typed value");
+        let EntityKind::Line { a, b } = sketch(app).entity(line).unwrap().kind else { panic!("a line") };
+        assert!((a.dist(b) - 25.0).abs() < 1e-6, "the line is {} mm long", a.dist(b));
+        case.frame(app, "03-applied");
+    });
+}
+
+/// The pill in the viewport's corner tells a part's user to hover the model. In an open
+/// sketch nothing of the model can be hovered and the sketch has its own status line, so
+/// the pill used to give advice that did nothing there.
+#[test]
+fn the_model_hover_hint_is_not_shown_in_an_open_sketch() {
+    let mut case = Case::new("sketch-no-model-hint");
+    let mut source = Sketch::new();
+    source.add(EntityKind::Line { a: P2::ZERO, b: P2::new(40.0, 0.0) }, false);
+    let (doc, id) = part(source);
+    let mut app = launch(doc, STANDARD);
+    case.run(&mut app, |case, app| {
+        let hint = |app: &App| ribbon::painted(app).iter().any(|p| p.text == "Hover a face, edge or vertex");
+        ux_tools::pointer_to_chrome(app);
+        assert!(hint(app), "a part with nothing under the pointer shows the hint");
+        app.state_mut().state.push(AppAction::EditSketch(id));
+        settle(app);
+        ux_tools::pointer_to_chrome(app);
+        assert!(!hint(app), "an open sketch does not");
+        case.frame(app, "01-open-sketch-without-the-model-hint");
+    });
+}

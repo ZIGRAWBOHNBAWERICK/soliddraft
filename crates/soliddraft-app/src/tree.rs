@@ -287,6 +287,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         let mut bar_target: Option<usize> = None;
         let mut rename_commit: Option<(FeatureId, String)> = None;
         let mut rename_cancel = false;
+        armed_rename(ui, state);
         let mut last_bottom = ui.cursor().top();
         let mut row_centres: Vec<(usize, f32)> = Vec::new();
         let mut bar_drawn = false;
@@ -416,14 +417,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     && state.rename.is_none()
                     && !ui.input(|i| i.modifiers.any())
                 {
-                    // A second click on the selected row starts a rename, like a file manager.
-                    state.rename = Some(Rename { feature: item.id, text: item.name.clone(), focus: true });
+                    // A second click on the selected row starts a rename, like a file
+                    // manager, but only a slow one: it waits out the double-click time
+                    // below, so the first click of a double-click renames nothing.
+                    state.rename_armed = Some((item.id, ui.input(|i| i.time)));
                 } else {
                     actions.push(AppAction::Select(Some(Selection::Feature(item.id))));
                 }
             }
             if resp.double_clicked() {
                 state.rename = None;
+                state.rename_armed = None;
                 actions.push(crate::dimension_edit::row_double_click(state, item.id));
             }
             let id = item.id;
@@ -560,6 +564,41 @@ fn rollback_bar(
     }
     let _ = (released, &target);
 }
+
+/// Turns a click on the selected row into its rename once the double-click time has
+/// passed, unless the user did anything else first. Another press or key, an open
+/// editor or sketch, or a changed selection means the click was not a slow second click
+/// to rename: the field would open later and take the keyboard from whatever followed.
+fn armed_rename(ui: &egui::Ui, state: &mut AppState) {
+    let Some((armed, since)) = state.rename_armed else { return };
+    let now = ui.input(|i| i.time);
+    let wait = ui.ctx().options(|o| o.input_options.max_double_click_delay);
+    let acted = ui.input(|i| {
+        i.pointer.any_pressed()
+            || i.pointer.is_decidedly_dragging()
+            || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. } | egui::Event::Text(_)))
+    });
+    let name = state.doc.feature(armed).map(|f| f.name.clone());
+    if acted
+        || state.editor.is_some()
+        || state.in_sketch()
+        || state.rename.is_some()
+        || state.doc.selection != Some(Selection::Feature(armed))
+    {
+        state.rename_armed = None;
+    } else if now < since + wait {
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(since + wait - now));
+    } else {
+        state.rename_armed = None;
+        // A tree that was hidden meanwhile comes back with no rename it did not see asked.
+        if let Some(text) = name.filter(|_| now < since + wait + STALE_RENAME) {
+            state.rename = Some(Rename { feature: armed, text, focus: true });
+        }
+    }
+}
+
+/// How long after the double-click time an armed rename may still open, in seconds.
+const STALE_RENAME: f64 = 0.5;
 
 pub(crate) struct RowSpec<'a> {
     pub(crate) indent: u8,

@@ -89,8 +89,8 @@ fn gv(v: soliddraft_kernel_api::Vec3) -> Vec3 {
     Vec3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
-fn line_color(hover: bool) -> Color32 {
-    if hover { theme::accent() } else { theme::ink().gamma_multiply(0.7) }
+fn line_color(hover: bool, dark: bool) -> Color32 {
+    if hover { theme::accent() } else { theme::dimension_line(dark) }
 }
 
 /// Paints body dimensions and dimensions of every visible closed sketch.
@@ -104,6 +104,7 @@ pub fn paint(
     body: bool,
     visible_sketches: &[FeatureId],
     preview: Option<(AnnotationKey, Vec3)>,
+    dark: bool,
 ) -> Vec<ShownDimension> {
     let end = doc.rollback.unwrap_or(doc.features.len()).min(doc.features.len());
     let built: Vec<&Feature> =
@@ -140,6 +141,7 @@ pub fn paint(
             shown.iter().map(|d| d.rect),
             authored_pass,
             pointer,
+            dark,
         ) {
             let c = sketch.constraint(constraint);
             let target = if edit_sketch {
@@ -236,7 +238,9 @@ pub fn paint(
                 for (i, (name, text)) in values.into_iter().enumerate() {
                     let key = AnnotationKey { feature: model::FeatureId(f.id as u32), value: name };
                     let world = position(key, origin + step * i as f32);
-                    let Some(r) = paint_leader(painter, camera, rect, at, world, &text, pointer) else { continue };
+                    let Some(r) = paint_leader(painter, camera, rect, at, world, &text, pointer, dark) else {
+                        continue;
+                    };
                     shown.push(ShownDimension {
                         target: DimensionTarget::Feature(f.id),
                         key,
@@ -254,7 +258,7 @@ pub fn paint(
         let key = AnnotationKey { feature: model::FeatureId(f.id as u32), value: AnnotationValue::Depth };
         if let Some((plane, sk, value)) = depth
             && let Some((r, witness, world)) =
-                paint_depth(painter, camera, rect, plane, sk, value, |default| position(key, default), pointer)
+                paint_depth(painter, camera, rect, plane, sk, value, |default| position(key, default), pointer, dark)
         {
             shown.push(ShownDimension {
                 target: DimensionTarget::Feature(f.id),
@@ -369,13 +373,14 @@ fn paint_leader(
     label: Vec3,
     text: &str,
     pointer: Option<Pos2>,
+    dark: bool,
 ) -> Option<Rect> {
     let (a, p) = (camera.project(at, rect)?, camera.project(label, rect)?);
     let size = painter.layout_no_wrap(text.to_owned(), theme::font_medium(11.5), theme::ink()).size();
     let r = Rect::from_center_size(p, size + vec2(12.0, 6.0));
     let hover = pointer.is_some_and(|p| r.contains(p));
-    painter.line_segment([a, r.clamp(a)], Stroke::new(1.0, line_color(hover)));
-    painter.circle_filled(a, 2.5, line_color(hover));
+    painter.line_segment([a, r.clamp(a)], Stroke::new(1.0, line_color(hover, dark)));
+    painter.circle_filled(a, 2.5, line_color(hover, dark));
     Some(r)
 }
 
@@ -390,6 +395,7 @@ fn paint_depth(
     depth: f64,
     position: impl FnOnce(Vec3) -> Vec3,
     pointer: Option<Pos2>,
+    dark: bool,
 ) -> Option<(Rect, [Vec3; 2], Vec3)> {
     let dir = P2::new(-1.0, 1.0).normalized();
     let corner = sketch
@@ -410,7 +416,8 @@ fn paint_depth(
     let at = camera.project(world, rect)?;
     let text = fmt_mm(depth.abs());
     let size = painter.layout_no_wrap(text.clone(), theme::font_medium(11.5), theme::ink()).size();
-    let color = line_color(pointer.is_some_and(|p| Rect::from_center_size(at, size + vec2(12.0, 6.0)).contains(p)));
+    let color =
+        line_color(pointer.is_some_and(|p| Rect::from_center_size(at, size + vec2(12.0, 6.0)).contains(p)), dark);
     let ext = |from: Pos2, to: Pos2| {
         let d = (to - from).normalized();
         painter.line_segment([from + d * 4.0, to + d * 5.0], Stroke::new(0.8, color.gamma_multiply(0.8)));

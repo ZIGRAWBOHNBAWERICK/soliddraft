@@ -77,6 +77,19 @@ impl SolidDraftApp {
         None
     }
 
+    /// A new extrusion or cut grows along its sketch's normal. Seen straight down that
+    /// normal, as the view is left when the sketch closes, its preview is a flat tint
+    /// with no depth to judge. The view turns to isometric, where the depth shows.
+    fn show_depth_of(&mut self, sketch: crate::document::FeatureId) {
+        let Some(plane) = self.state.doc.feature(sketch).and_then(|f| f.plane) else { return };
+        let normal = glam::Vec3::new(plane.normal.x as f32, plane.normal.y as f32, plane.normal.z as f32);
+        let camera = &mut self.state.viewport.camera;
+        // Within about five degrees of the normal, from either side.
+        if camera.heading().dot(normal.normalize_or_zero()).abs() > 0.996 {
+            camera.set_view(crate::viewport::camera::StandardView::Isometric);
+        }
+    }
+
     pub(super) fn open_sketch(&mut self, id: crate::document::FeatureId) {
         self.close_editor();
         let Some(f) = self.state.doc.feature(id) else { return };
@@ -306,6 +319,7 @@ impl SolidDraftApp {
                 if let Some(id) = self.sketch_for(ProfileFeature::Extrude) {
                     let params = ExtrudeParams { sketch: Some(id), depth: 10.0, ..Default::default() };
                     self.open_editor(None, EditorParams::Extrude(params));
+                    self.show_depth_of(id);
                 }
             }
             AppAction::StartLoft => {
@@ -378,6 +392,7 @@ impl SolidDraftApp {
                 }
                 if let Some(id) = self.sketch_for(ProfileFeature::Cut) {
                     self.open_editor(None, EditorParams::Cut(CutParams::new(id)));
+                    self.show_depth_of(id);
                 }
             }
             AppAction::StartFillet | AppAction::StartChamfer => {

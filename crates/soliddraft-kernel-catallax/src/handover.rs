@@ -98,11 +98,20 @@ impl HandedTopology {
 }
 
 /// One build handed over: its recipe key, its Catallax bytes and, when the handing
-/// kernel computed it, its topology.
+/// kernel computed it, its topology. A build handed over earlier sends its topology
+/// alone once the handing kernel computes it, with no bytes.
 pub(crate) struct Handed {
     pub key: String,
-    pub body: Vec<u8>,
+    pub body: Option<Vec<u8>>,
     pub topology: Option<HandedTopology>,
+}
+
+/// What another kernel handed over for one recipe key.
+pub(crate) enum Received {
+    /// A build, with its topology if the other kernel had computed it.
+    Build(Offer),
+    /// The topology of a build handed over earlier.
+    Topology(Arc<HandedTopology>),
 }
 
 /// A build offered by another kernel.
@@ -118,7 +127,8 @@ pub(crate) fn encode(builds: &[Handed]) -> KernelResult<Vec<u8>> {
     out.extend((builds.len() as u32).to_le_bytes());
     for handed in builds {
         let topology = serde_json::to_vec(&handed.topology).map_err(|e| KernelError::InvalidInput(e.to_string()))?;
-        for part in [handed.key.as_bytes(), &handed.body, &topology] {
+        let body = handed.body.as_deref().unwrap_or_default();
+        for part in [handed.key.as_bytes(), body, &topology] {
             out.extend((part.len() as u64).to_le_bytes());
             out.extend(part);
         }
@@ -127,7 +137,7 @@ pub(crate) fn encode(builds: &[Handed]) -> KernelResult<Vec<u8>> {
 }
 
 /// Reads a hand-over back into builds, each restored into its own Catallax stores.
-pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Offer)>> {
+pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Received)>> {
     let broken = || KernelError::InvalidInput("The hand-over is damaged or from another version.".into());
     let mut rest = bytes.strip_prefix(MAGIC.as_slice()).ok_or_else(broken)?;
     let mut take = |len: usize| -> KernelResult<&[u8]> {
@@ -143,10 +153,16 @@ pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Offer)>> {
     };
     for _ in 0..count {
         let key = String::from_utf8(part()?.to_vec()).map_err(|_| broken())?;
-        let built = catallax_app::handover::read_body(part()?, &mut Decider::default())
-            .map_err(|refusal| KernelError::InvalidInput(format!("{}: {}", refusal.code, refusal.detail)))?;
+        let body = part()?;
         let topology: Option<HandedTopology> = serde_json::from_slice(part()?).map_err(|_| broken())?;
-        builds.push((key, Offer { built: Arc::new(built), topology: topology.map(Arc::new) }));
+        let received = if body.is_empty() {
+            Received::Topology(Arc::new(topology.ok_or_else(broken)?))
+        } else {
+            let built = catallax_app::handover::read_body(body, &mut Decider::default())
+                .map_err(|refusal| KernelError::InvalidInput(format!("{}: {}", refusal.code, refusal.detail)))?;
+            Received::Build(Offer { built: Arc::new(built), topology: topology.map(Arc::new) })
+        };
+        builds.push((key, received));
     }
     if !rest.is_empty() {
         return Err(broken());

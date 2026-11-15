@@ -90,3 +90,28 @@ fn a_part_handed_over_rebuilds_on_another_kernel_without_evaluating_any_feature(
     let step = |kernel: &CatallaxKernel, body| kernel.export_step(body, &StepOptions::default()).unwrap().report;
     assert_eq!(format!("{:?}", step(&page, b)), format!("{:?}", step(&worker, a)));
 }
+
+/// A worker can hand a build over before it computes the build's topology, as when a
+/// later job reuses that build and only then meshes it for display. The topology then
+/// follows on its own, and the page still computes neither.
+#[test]
+fn a_topology_computed_after_its_build_was_handed_over_follows_it() {
+    let worker = Arc::new(CatallaxKernel::new());
+    worker.keep_builds().unwrap();
+    let built = soliddraft_model::Document::from_bytes(BRACKET, worker.clone()).unwrap();
+    let builds = worker.hand_over().unwrap();
+    let topology = worker.topology(built.body().unwrap()).unwrap();
+    let late = worker.hand_over().unwrap();
+
+    let page = Arc::new(CatallaxKernel::new());
+    page.offer_builds(&builds).unwrap();
+    assert_eq!(page.offer_builds(&late).unwrap(), 1, "only the late topology travels");
+    let adopted = soliddraft_model::Document::from_bytes(BRACKET, page.clone()).unwrap();
+    assert_eq!(page.topology(adopted.body().unwrap()).unwrap().faces.len(), topology.faces.len());
+    assert_eq!((page.fresh_builds(), page.fresh_topologies()), (0, 0));
+    assert_eq!(
+        worker.hand_over().unwrap().len(),
+        CatallaxKernel::new().hand_over().unwrap().len(),
+        "nothing is sent twice"
+    );
+}

@@ -296,7 +296,7 @@ pub struct ImportStepRequest<'a> {
 }
 
 /// One solid of the file, built.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportedBody {
     /// The solid's name in the file.
     pub name: String,
@@ -305,7 +305,7 @@ pub struct ImportedBody {
 }
 
 /// What an import gives back.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportStepResult {
     /// The solids that were built. Separate solids stay separate bodies.
     pub bodies: Vec<ImportedBody>,

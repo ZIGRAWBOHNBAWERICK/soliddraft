@@ -14,7 +14,7 @@ pub struct ScanSource {
 }
 
 /// Display data and counts from an admitted reference. No repair is implied.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ScanReference {
     /// Placed vertices, including isolated samples.
     pub points: Vec<[f64; 3]>,

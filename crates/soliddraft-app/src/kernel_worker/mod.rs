@@ -3,9 +3,15 @@
 //! The page has one thread, and a long Catallax query on it freezes the camera and every
 //! control until it ends. The browser build therefore starts a dedicated Web Worker
 //! (`kernel_worker.js`) on the same compiled WebAssembly module. The worker has its own
-//! memory and its own Catallax kernel: it never sees the page's bodies. Each job carries
-//! the part's saved bytes, the worker rebuilds them, reusing what it built for the
-//! previous job, and answers with plain data.
+//! memory and owns the only Catallax kernel in the browser.
+//!
+//! The page's parts live on a [`calls::ReplayKernel`]. To build a definition, the page
+//! sends its saved bytes to the worker, which rebuilds them with a
+//! [`calls::RecordingKernel`] and answers with every kernel call it made. The page then
+//! runs its ordinary rebuild, which makes the same calls and gets the worker's answers
+//! back with the worker's body ids, so nothing is evaluated on the interface thread. A
+//! query the worker has not answered is refused as unavailable for now and sent to the
+//! worker as a [`Job::Calls`] job.
 //!
 //! The interface stays the owner of its part. A job's answer is accepted only for the
 //! document and revision that asked for it; the caller keeps that check. A newer job of
@@ -15,10 +21,17 @@
 //!
 //! [`Host`] is the worker's half. It is plain Rust, so native tests run it directly.
 
+pub mod calls;
+
+use calls::{Call, RecordingKernel};
 use serde::{Deserialize, Serialize};
 use soliddraft_kernel_api::Kernel;
 use soliddraft_model as model;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Answered when a newer job of the same kind replaced one before it started.
+pub const SUPERSEDED: &str = "A newer request replaced this one";
 
 /// One request to the kernel worker. The part travels beside it as saved bytes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -26,33 +39,48 @@ use std::sync::Arc;
 pub enum Job {
     /// Volume, area, centroid and inertia of the body after `feature`.
     MassProperties { feature: model::FeatureId },
+    /// Rebuilds the part and its display at `level`, as the page's proof will, and
+    /// answers with the calls made. `cold` builds without any earlier build.
+    Prove {
+        document: soliddraft_document::DocumentId,
+        level: soliddraft_tessellation::Level,
+        budget: u64,
+        cold: bool,
+    },
+    /// Runs calls the page could not replay and answers with them.
+    Calls { calls: Vec<Call> },
 }
 
-impl Job {
-    /// Jobs of one slot replace each other while they wait.
-    pub fn slot(&self) -> &'static str {
-        match self {
-            Job::MassProperties { .. } => "mass_properties",
-        }
-    }
-}
-
-/// The worker's kernel and the part it built last.
+/// The worker's kernel and the parts it built last.
 pub struct Host {
-    kernel: Arc<dyn Kernel>,
+    kernel: Arc<RecordingKernel>,
     part: Option<(Vec<u8>, model::Document)>,
+    /// The last part each document's proof built without a failure, to build the next on.
+    proved: HashMap<soliddraft_document::DocumentId, model::Document>,
 }
 
 impl Host {
     pub fn new(kernel: Arc<dyn Kernel>) -> Self {
-        Self { kernel, part: None }
+        Self { kernel: Arc::new(RecordingKernel::new(kernel)), part: None, proved: HashMap::new() }
     }
 
     /// Runs `job` against the part saved as `part` and answers with plain data.
     pub fn run(&mut self, part: &[u8], job: &Job) -> Result<serde_json::Value, String> {
-        let doc = self.open(part)?;
+        let answer = self.answer(part, job);
+        let calls = self.kernel.take();
+        match job {
+            Job::MassProperties { .. } => answer,
+            Job::Prove { .. } | Job::Calls { .. } => {
+                answer?;
+                serde_json::to_value(calls).map_err(|error| error.to_string())
+            }
+        }
+    }
+
+    fn answer(&mut self, part: &[u8], job: &Job) -> Result<serde_json::Value, String> {
         match job {
             Job::MassProperties { feature } => {
+                let doc = self.open(part)?;
                 built(doc, *feature)?;
                 let body = doc.body_after(*feature).ok_or("The feature has no body to measure")?;
                 let (result, work) =
@@ -67,6 +95,33 @@ impl Host {
                 }
                 let properties = result.map_err(|error| error.to_string())?;
                 serde_json::to_value(properties).map_err(|error| error.to_string())
+            }
+            Job::Prove { document, level, budget, cold } => {
+                let previous = if *cold { None } else { self.proved.get(document) };
+                let mut doc =
+                    model::Document::from_bytes_with_input(part, self.kernel.clone(), previous, |_| {})
+                        .map_err(|error| format!("The kernel worker could not read the part: {error}"))?;
+                doc.set_rebuild_budget(*budget);
+                if crate::drag::model_failure(&doc).is_none() {
+                    // The page asks for the same display once its own rebuild succeeds,
+                    // and adopting it reads these for every body it shows.
+                    let _ = crate::document::ready_display(&doc, *level);
+                    for (_, body) in doc.live_bodies() {
+                        let _ = self.kernel.display_bound(body);
+                        let _ = self.kernel.body_notice(body);
+                        let _ = self.kernel.topology(body);
+                    }
+                    if !doc.is_dirty() {
+                        self.proved.insert(*document, doc);
+                    }
+                }
+                Ok(serde_json::Value::Null)
+            }
+            Job::Calls { calls } => {
+                for call in calls {
+                    calls::dispatch(self.kernel.as_ref(), call)?;
+                }
+                Ok(serde_json::Value::Null)
             }
         }
     }
@@ -95,11 +150,13 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::submit;
+pub use browser::{fetch_missed, generation, replay, submit};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
-    use super::{Host, Job};
+    use super::calls::{Answered as Recorded, Call, ReplayKernel};
+    use super::{Host, Job, SUPERSEDED};
+    use soliddraft_kernel_api::Kernel;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -113,6 +170,53 @@ mod browser {
         static CLIENT: RefCell<Option<Client>> = const { RefCell::new(None) };
         static NEXT: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
         static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
+        static REPLAY: std::sync::Arc<ReplayKernel> =
+            std::sync::Arc::new(ReplayKernel::new(soliddraft_kernel_catallax::CatallaxKernel::new().backend()));
+        /// Workers started so far. Body ids from one worker mean nothing to the next.
+        static GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        /// Keys of missed calls sent to the worker and not answered yet.
+        static FETCHING: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
+    }
+
+    /// The page's kernel: every part in the browser is built on it.
+    pub fn replay() -> std::sync::Arc<ReplayKernel> {
+        REPLAY.with(|replay| replay.clone())
+    }
+
+    /// Changes when a new worker starts. A rebuild replayed from an older worker's
+    /// answers must not be adopted.
+    pub fn generation() -> u64 {
+        GENERATION.get()
+    }
+
+    /// Sends the calls the page could not replay to the worker, each once.
+    pub fn fetch_missed(ctx: &egui::Context) {
+        let missed = replay().take_missed();
+        let calls: Vec<Call> = FETCHING.with_borrow_mut(|fetching| {
+            missed
+                .into_iter()
+                .filter(|call| fetching.insert(super::calls::key(&call.method, &call.args)))
+                .collect()
+        });
+        if calls.is_empty() {
+            return;
+        }
+        let keys: Vec<String> = calls.iter().map(|call| super::calls::key(&call.method, &call.args)).collect();
+        let slot = format!("fetch:{}", keys[0]);
+        let started = generation();
+        let submitted = submit(Vec::new(), &Job::Calls { calls }, &slot, ctx, move |answer| {
+            FETCHING.with_borrow_mut(|fetching| keys.iter().for_each(|key| _ = fetching.remove(key)));
+            if generation() != started {
+                return;
+            }
+            match answer.and_then(|answer| serde_json::from_value::<Vec<Recorded>>(answer).map_err(|e| e.to_string())) {
+                Ok(recorded) => replay().learn(recorded),
+                Err(error) => log::warn!("The kernel worker could not answer a query: {error}"),
+            }
+        });
+        if let Err(error) = submitted {
+            log::warn!("{error}");
+        }
     }
 
     #[derive(Default)]
@@ -199,8 +303,7 @@ mod browser {
             return;
         };
         if get(data, "superseded").is_truthy() {
-            // The interface already asked again; nobody waits for this answer.
-            shared.waiting.remove(&id);
+            shared.answer(id, Err(SUPERSEDED.into()));
         } else if let Some(answer) = get(data, "answer").as_string() {
             shared.answer(id, decode(&answer));
         } else if let Some(fatal) = get(data, "fatal").as_string() {
@@ -224,13 +327,21 @@ mod browser {
     pub fn submit(
         part: Vec<u8>,
         job: &Job,
+        slot: &str,
         ctx: &egui::Context,
         answered: impl FnOnce(Result<serde_json::Value, String>) + 'static,
     ) -> Result<(), String> {
         CLIENT.with_borrow_mut(|client| {
             if client.as_ref().is_none_or(|client| client.shared.borrow().stopped) {
                 // Dropping the stopped client here, outside its own handlers, ends it.
+                let restarted = client.is_some();
                 *client = Some(Client::start()?);
+                GENERATION.set(GENERATION.get() + 1);
+                if restarted {
+                    // The new worker numbers its bodies from the start again.
+                    replay().forget();
+                    FETCHING.with_borrow_mut(|fetching| fetching.clear());
+                }
             }
             let client = client.as_ref().expect("the kernel worker started");
             let id = NEXT.with(|next| next.replace(next.get() + 1));
@@ -238,7 +349,7 @@ mod browser {
             let bytes = js_sys::Uint8Array::from(part.as_slice());
             let message = js_sys::Object::new();
             set(&message, "id", &(id as f64).into());
-            set(&message, "slot", &job.slot().into());
+            set(&message, "slot", &slot.into());
             set(&message, "header", &header.into());
             set(&message, "part", &bytes);
             client
@@ -257,7 +368,7 @@ mod browser {
             HOST.with_borrow_mut(|host| {
                 host.get_or_insert_with(|| {
                     report_panics();
-                    Host::new(crate::kernel())
+                    Host::new(std::sync::Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new()))
                 })
                 .run(part, &job)
             })

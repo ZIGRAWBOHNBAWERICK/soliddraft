@@ -115,6 +115,18 @@ impl Document {
         }
     }
 
+    /// A fork that shares no feature builds: its next rebuild evaluates every feature, in
+    /// order, as a part opened cold does. The cache keeps this part's budget.
+    pub fn fork_unbuilt(&self) -> Document {
+        let mut fork = self.fork();
+        let budget = fork.cache.budget();
+        fork.cache = BuildCache::default();
+        fork.cache.set_budget(budget);
+        fork.built = Vec::new();
+        fork.dirty = 0;
+        fork
+    }
+
     /// Reuses a fork's successful builds on this kernel without changing the document.
     /// Exact input keys decide reuse even if the document changed after the dry run.
     pub fn reuse_builds_from(&mut self, source: &Document) {
@@ -220,6 +232,12 @@ impl Document {
         cache.trim(&self.built);
         self.cache = cache;
         self.dirty = self.built.len();
+    }
+
+    /// Marks every feature as unbuilt, keeping the builds for reuse. The next rebuild
+    /// evaluates the tree again from its first feature.
+    pub fn mark_unbuilt(&mut self) {
+        self.touch(0);
     }
 
     /// Marks every feature from `index` down as stale.

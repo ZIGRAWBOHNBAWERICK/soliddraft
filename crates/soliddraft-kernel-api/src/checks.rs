@@ -1,24 +1,24 @@
 //! Independent construction coverage and qualified print evidence.
 
 use crate::Mesh;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Construction coverage, without a claim of geometric agreement.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IndependentCheck {
     /// Every authored recipe step, including reference definitions.
     pub steps: Vec<IndependentStep>,
 }
 
 /// One authored prefix built separately by both representations.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IndependentStep {
     /// Recipe step name.
     pub step: String,
     /// Operation name.
     pub operation: String,
     /// Application feature responsible for this step, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feature_tag: Option<crate::OpTag>,
     /// A sketch, path or other reference rather than a solid.
     pub reference: bool,
@@ -31,7 +31,7 @@ pub struct IndependentStep {
 }
 
 /// Evidence from the native print route for the actual encoded geometry.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrintReport {
     /// Selected representation. Refusals never switch it.
     pub route: String,
@@ -50,7 +50,7 @@ pub struct PrintReport {
 }
 
 /// Qualified geometry. All formats must preserve these positions and triangles.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrintMesh {
     /// Geometry with face labels and normals for OBJ.
     pub mesh: Mesh,

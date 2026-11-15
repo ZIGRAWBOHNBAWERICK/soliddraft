@@ -5336,6 +5336,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "soliddraft-assembly",
  "soliddraft-assistant",
  "soliddraft-document",

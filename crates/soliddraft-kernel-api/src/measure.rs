@@ -35,7 +35,7 @@ pub struct PointProof {
 }
 
 /// One end of a pair request on a single body. No cursor coordinate is a source.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PairEndpoint {
     /// The whole trimmed edge.
     Edge(EdgeId),

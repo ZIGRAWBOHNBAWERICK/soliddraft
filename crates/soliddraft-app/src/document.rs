@@ -2009,6 +2009,8 @@ impl Document {
     }
 
     pub fn poll_proof(&mut self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        self.settle_browser_build();
         let answers = self.worker.as_mut().map(crate::drag::Worker::answers).unwrap_or_default();
         for answer in answers {
             let Some(pending) = &self.pending else {
@@ -2034,6 +2036,32 @@ impl Document {
             }
         }
         self.pending.is_some()
+    }
+
+    /// The browser's part replays builds its kernel worker made. A rebuild that ran on
+    /// the page before the worker answered, such as one inside a model command, leaves
+    /// features waiting for those answers. They are marked unbuilt and proved through the
+    /// worker, and queries the page could not answer are sent to it.
+    #[cfg(target_arch = "wasm32")]
+    fn settle_browser_build(&mut self) {
+        crate::kernel_worker::fetch_missed(&self.repaint.clone().unwrap_or_default());
+        if self.pending.is_some() || self.proof_failure.is_some() {
+            return;
+        }
+        let waiting = self.model.features().iter().any(|feature| {
+            self.model.status(feature.id).is_some_and(|status| {
+                format!("{status:?}").contains(crate::kernel_worker::calls::WAITING)
+            })
+        });
+        if waiting {
+            self.model.mark_unbuilt();
+            self.sync();
+        }
+        if self.model.is_dirty()
+            && let Err(message) = self.schedule_proof()
+        {
+            self.fail_proof(message);
+        }
     }
 
     fn fail_proof(&mut self, message: String) {
@@ -2500,6 +2528,10 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<String, String> {
+        // The browser builds in its kernel worker; see `apply`.
+        if cfg!(target_arch = "wasm32") {
+            return self.undo_interactive();
+        }
         // Once history moves, the drag under way never applies, even if Redo brings
         // the part back to where it began.
         self.void_appearance_gesture();
@@ -2519,6 +2551,10 @@ impl Document {
     }
 
     pub fn redo(&mut self) -> Result<String, String> {
+        // The browser builds in its kernel worker; see `apply`.
+        if cfg!(target_arch = "wasm32") {
+            return self.redo_interactive();
+        }
         self.void_appearance_gesture();
         if self.model.annotation_history(true) {
             return self.model.redo_deferred().map_err(|error| error.to_string());
@@ -2539,6 +2575,17 @@ impl Document {
     /// feature the command created. A created feature that fails to build stays
     /// in the tree with its error, and the error comes back here too.
     pub fn apply(&mut self, command: Command) -> Result<Option<FeatureId>, String> {
+        // The browser builds in its kernel worker: the command changes the definition now
+        // and the part follows when the worker's build is replayed.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let created = self.execute_command(command, true)?;
+            if let Err(message) = self.schedule_proof() {
+                self.fail_proof(message);
+            }
+            Ok(created)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         self.execute_command(command, false)
     }
 

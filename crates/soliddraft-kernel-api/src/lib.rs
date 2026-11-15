@@ -103,7 +103,7 @@ pub struct Extrude {
 }
 
 /// A sketch's exact supporting face and signed normal offset.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FaceSupport {
     /// Body carrying the face.
     pub body: BodyId,

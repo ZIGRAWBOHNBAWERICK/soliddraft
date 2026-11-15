@@ -83,6 +83,10 @@ use std::sync::Arc;
 
 /// The Catallax backend used by both the desktop and browser application.
 pub fn kernel() -> Arc<dyn Kernel> {
+    // In the browser the kernel worker owns Catallax; parts replay its answers.
+    #[cfg(target_arch = "wasm32")]
+    return kernel_worker::replay();
+    #[cfg(not(target_arch = "wasm32"))]
     Arc::new(soliddraft_kernel_catallax::CatallaxKernel::new())
 }
 

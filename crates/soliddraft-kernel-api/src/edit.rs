@@ -2,9 +2,10 @@
 //! Revision authority and publication remain with the caller's existing lifecycle.
 
 use crate::{FaceId, KernelResult, Mesh, OpTag, Origin};
+use serde::{Deserialize, Serialize};
 
 /// A scalar parameter in an operation already present in a body's history.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalarParameter {
     /// Positive distance of a blind extrusion or cutting tool.
     ExtrudeDistance,
@@ -15,7 +16,7 @@ pub enum ScalarParameter {
 }
 
 /// A replacement value bound to an exact operation tag, not a numeric body handle.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScalarEdit {
     /// Exact caller tag of the operation being edited.
     pub tag: OpTag,
@@ -26,7 +27,7 @@ pub struct ScalarEdit {
 }
 
 /// A displayed construction face. Its id is provisional and never an exact handle.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConstructionFace {
     /// Picking id local to this construction display.
     pub id: FaceId,
@@ -35,7 +36,7 @@ pub struct ConstructionFace {
 }
 
 /// Complete unproved screen data, with no body or export certificate.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConstructionMesh {
     /// Screen triangles, explicitly marked unproved.
     pub mesh: Mesh,

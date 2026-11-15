@@ -587,7 +587,7 @@ fn construct(task: ConstructionTask, answered: &Answered) -> Result<(), ()> {
 
 /// A feature that shapes the body did not build. A sketch that did not build blocks
 /// each active feature that uses it, so it is not a failure of the body itself.
-fn model_failure(model: &model::Document) -> Option<String> {
+pub(crate) fn model_failure(model: &model::Document) -> Option<String> {
     let mut shaping = model.features().iter().filter(|feature| !matches!(feature.kind, model::FeatureKind::Sketch(_)));
     shaping.find_map(|feature| match model.status(feature.id) {
         Some(model::FeatureStatus::Failed(message)) => Some(format!("{}: {message}", feature.name)),
@@ -634,6 +634,7 @@ fn wanted(request: u64, newest: &AtomicU64, protected: &AtomicU64) -> bool {
     newest.load(Ordering::Acquire) == request || protected.load(Ordering::Acquire) == request
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn next_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl Fn(&T) -> u64) -> Option<T> {
     pending.retain(|work| {
         let request = key(work);
@@ -645,6 +646,7 @@ fn next_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl Fn(
 
 /// The oldest wanted work. Early displays keep request order, so a committed
 /// request's display is ready before a newer transient request replaces it.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn oldest_work<T>(pending: &mut Vec<T>, newest: u64, protected: u64, key: impl Fn(&T) -> u64) -> Option<T> {
     pending.retain(|work| {
         let request = key(work);
@@ -666,13 +668,7 @@ pub(crate) struct Worker {
     #[cfg(target_arch = "wasm32")]
     answered: Answered,
     #[cfg(target_arch = "wasm32")]
-    queued: Vec<Queued>,
-    #[cfg(target_arch = "wasm32")]
-    proof: Vec<ProofTask>,
-    #[cfg(target_arch = "wasm32")]
-    construction: Vec<ConstructionTask>,
-    #[cfg(target_arch = "wasm32")]
-    previous: Option<Arc<model::Document>>,
+    remote: remote::Remote,
 }
 
 impl Worker {
@@ -788,17 +784,7 @@ impl Worker {
             Ok(Self { answers, newest, protected, request: 0, jobs })
         }
         #[cfg(target_arch = "wasm32")]
-        Ok(Self {
-            answers,
-            newest,
-            protected,
-            request: 0,
-            answered,
-            queued: Vec::new(),
-            proof: Vec::new(),
-            construction: Vec::new(),
-            previous: None,
-        })
+        Ok(Self { answers, newest, protected, request: 0, answered, remote: remote::Remote::default() })
     }
 
     pub(crate) fn protect(&mut self, request: Option<u64>) {
@@ -823,53 +809,203 @@ impl Worker {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.queued.push(Queued { request, job });
-            Ok(())
+            self.remote.enqueue(Queued { request, job }, &self.answered)
         }
     }
 
     pub(crate) fn answers(&mut self) -> Vec<Answer> {
         #[cfg(target_arch = "wasm32")]
-        {
-            if let Some(queued) = next_work(
-                &mut self.queued,
-                self.newest.load(Ordering::Acquire),
-                self.protected.load(Ordering::Acquire),
-                |job| job.request,
-            ) {
-                match prepare(queued) {
-                    Ok((proof, construction)) => {
-                        self.proof.push(proof);
-                        self.construction.extend(construction);
-                    }
-                    Err(answer) => {
-                        let _ = self.answered.send(answer);
-                    }
+        self.remote.replay(&self.newest, &self.protected, &self.answered);
+        self.answers.try_iter().collect()
+    }
+}
+
+/// The browser's half of the scheduler. Each request's definition goes to the kernel
+/// worker, which builds it and answers with its kernel calls. The page then runs the same
+/// construction and proof as the desktop's worker threads do, on the replay kernel, so
+/// revision tokens and adoption are unchanged. A rebuild that asks for something the
+/// worker did not answer is never adopted: it is built once more from nothing on both
+/// sides, and refused if that misses too.
+#[cfg(target_arch = "wasm32")]
+mod remote {
+    use super::*;
+    use crate::kernel_worker::{self, Job, SUPERSEDED, calls::Answered as Recorded};
+    use soliddraft_kernel_api::Kernel;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    enum Reply {
+        Constructed(Result<Vec<Recorded>, String>),
+        Proved(Result<Vec<Recorded>, String>),
+    }
+
+    struct Waiting {
+        part: Vec<u8>,
+        /// The request's definition, unbuilt, sharing the page's feature builds.
+        model: model::Document,
+        level: soliddraft_tessellation::Level,
+        construction: Option<ConstructionTask>,
+        cold: bool,
+        generation: u64,
+    }
+
+    #[derive(Default)]
+    pub(super) struct Remote {
+        replies: Arc<Mutex<Vec<(u64, Reply)>>>,
+        waiting: HashMap<u64, Waiting>,
+        previous: Option<Arc<model::Document>>,
+    }
+
+    fn decode(answer: Result<serde_json::Value, String>) -> Result<Vec<Recorded>, String> {
+        answer.and_then(|answer| serde_json::from_value(answer).map_err(|error| error.to_string()))
+    }
+
+    impl Remote {
+        pub(super) fn enqueue(&mut self, queued: Queued, answered: &Answered) -> Result<(), String> {
+            let request = queued.request;
+            let (proof, construction) = match prepare(queued) {
+                Ok(tasks) => tasks,
+                Err(answer) => {
+                    let _ = answered.send(answer);
+                    return Ok(());
                 }
-            } else if let Some(task) = oldest_work(
-                &mut self.construction,
-                self.newest.load(Ordering::Acquire),
-                self.protected.load(Ordering::Acquire),
-                |task| task.request,
-            ) {
-                let _ = construct(task, &self.answered);
-            } else if let Some(task) = next_work(
-                &mut self.proof,
-                self.newest.load(Ordering::Acquire),
-                self.protected.load(Ordering::Acquire),
-                |task| task.request,
-            ) {
-                let request = task.request;
-                let result = prove(task, &self.newest, &self.protected, self.previous.as_deref());
-                if result.failure.is_none() && !result.model.is_dirty() {
-                    self.previous = Some(result.model.clone());
+            };
+            let (_, part) = proof.model.snapshot().encode().map_err(|error| error.to_string())?;
+            let waiting = Waiting {
+                part,
+                model: proof.model,
+                level: proof.level,
+                construction,
+                cold: false,
+                generation: 0,
+            };
+            let ctx = answered.repaint.clone().unwrap_or_default();
+            if let Some(task) = &waiting.construction
+                && let Some(body) = task.baseline.body()
+            {
+                // Exactly the call `construct` makes, so its answer replays.
+                let call = kernel_worker::calls::Call {
+                    method: "construction_edit".into(),
+                    args: serde_json::json!([body, task.edits, task.params]),
+                };
+                let replies = self.replies.clone();
+                kernel_worker::submit(Vec::new(), &Job::Calls { calls: vec![call] }, "construction", &ctx, move |answer| {
+                    replies.lock().expect("worker replies").push((request, Reply::Constructed(decode(answer))));
+                })?;
+            }
+            let mut waiting = waiting;
+            self.prove(request, &waiting, &ctx)?;
+            // Read after sending: the first job starts the first worker.
+            waiting.generation = kernel_worker::generation();
+            self.waiting.insert(request, waiting);
+            Ok(())
+        }
+
+        fn prove(&self, request: u64, waiting: &Waiting, ctx: &egui::Context) -> Result<(), String> {
+            let job = Job::Prove {
+                document: waiting.model.id(),
+                level: waiting.level,
+                budget: waiting.model.rebuild_cache_usage().1,
+                cold: waiting.cold,
+            };
+            let slot = format!("prove:{:?}", waiting.model.id());
+            let replies = self.replies.clone();
+            kernel_worker::submit(waiting.part.clone(), &job, &slot, ctx, move |answer| {
+                replies.lock().expect("worker replies").push((request, Reply::Proved(decode(answer))));
+            })
+        }
+
+        /// Replays every answer that arrived, in arrival order.
+        pub(super) fn replay(&mut self, newest: &AtomicU64, protected: &AtomicU64, answered: &Answered) {
+            let replies = std::mem::take(&mut *self.replies.lock().expect("worker replies"));
+            let ctx = answered.repaint.clone().unwrap_or_default();
+            let kernel = kernel_worker::replay();
+            for (request, reply) in replies {
+                if !wanted(request, newest, protected) {
+                    self.waiting.remove(&request);
+                    continue;
                 }
-                if wanted(request, &self.newest, &self.protected) {
-                    let _ = self.answered.send(Answer { request, kind: AnswerKind::Proved(Ok(result)) });
+                let Some(mut waiting) = self.waiting.remove(&request) else {
+                    continue;
+                };
+                match reply {
+                    Reply::Constructed(result) => {
+                        if let Some(task) = waiting.construction.take() {
+                            match result {
+                                Ok(recorded) => {
+                                    kernel.learn(recorded);
+                                    let _ = construct(task, answered);
+                                }
+                                Err(error) if error == SUPERSEDED => {}
+                                Err(error) => {
+                                    let _ = answered
+                                        .send(Answer { request, kind: AnswerKind::Construction(Err(error)) });
+                                }
+                            }
+                        }
+                        self.waiting.insert(request, waiting);
+                    }
+                    Reply::Proved(Err(error)) if error == SUPERSEDED => self.retry(request, waiting, false, &ctx, answered),
+                    Reply::Proved(Err(error)) => {
+                        let _ = answered.send(Answer { request, kind: AnswerKind::Proved(Err(error)) });
+                    }
+                    Reply::Proved(Ok(_)) if waiting.generation != kernel_worker::generation() => {
+                        // A new worker answered: the page's builds name another worker's bodies.
+                        self.retry(request, waiting, true, &ctx, answered);
+                    }
+                    Reply::Proved(Ok(recorded)) => {
+                        log::info!("DEBUG proof answer {request}: {} calls, cold {}", recorded.len(), waiting.cold);
+                        kernel.learn(recorded);
+                        let cold = waiting.cold;
+                        let model = if cold { waiting.model.fork_unbuilt() } else { waiting.model.fork() };
+                        let allowance = match kernel.reserve_proof_work() {
+                            Ok(allowance) => allowance,
+                            Err(error) => {
+                                let _ = answered
+                                    .send(Answer { request, kind: AnswerKind::Proved(Err(error.to_string())) });
+                                continue;
+                            }
+                        };
+                        let task = ProofTask { request, model, level: waiting.level, allowance };
+                        let misses = kernel.misses();
+                        let previous = if cold { None } else { self.previous.as_deref() };
+                        let result = prove(task, newest, protected, previous);
+                        if kernel.misses() != misses {
+                            // These were the page's own calls, not queries to fetch.
+                            kernel.take_missed();
+                            if !cold {
+                                self.retry(request, waiting, true, &ctx, answered);
+                                continue;
+                            }
+                            let error = "The page's rebuild asked for kernel answers the worker did not give".to_owned();
+                            let _ = answered.send(Answer { request, kind: AnswerKind::Proved(Err(error)) });
+                            continue;
+                        }
+                        log::info!("DEBUG proved {request}: failure {:?} display {} error {:?}", result.failure, result.display.is_some(), result.display_error);
+                        if result.failure.is_none() && !result.model.is_dirty() {
+                            self.previous = Some(result.model.clone());
+                        }
+                        let _ = answered.send(Answer { request, kind: AnswerKind::Proved(Ok(result)) });
+                    }
                 }
             }
         }
-        self.answers.try_iter().collect()
+
+        fn retry(&mut self, request: u64, mut waiting: Waiting, cold: bool, ctx: &egui::Context, answered: &Answered) {
+            waiting.cold |= cold;
+            if waiting.cold {
+                self.previous = None;
+            }
+            match self.prove(request, &waiting, ctx) {
+                Ok(()) => {
+                    waiting.generation = kernel_worker::generation();
+                    self.waiting.insert(request, waiting);
+                }
+                Err(error) => {
+                    let _ = answered.send(Answer { request, kind: AnswerKind::Proved(Err(error)) });
+                }
+            }
+        }
     }
 }
 

@@ -178,7 +178,7 @@ impl State {
                 feature: soliddraft_model::FeatureId(u32::try_from(feature).map_err(|_| "No such feature")?),
             };
             let (sender, answer) = mpsc::channel();
-            crate::kernel_worker::submit(part, &job, ctx, move |result| {
+            crate::kernel_worker::submit(part, &job, "mass_properties", ctx, move |result| {
                 // Kept only once `poll` finds the request still current.
                 let _ = sender.send(result.and_then(|value| {
                     serde_json::from_value::<MassProperties>(value).map(Some).map_err(|error| error.to_string())

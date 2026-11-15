@@ -29,6 +29,9 @@ use web_time::Instant;
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppAction {
     Command(Command),
+    /// Stops the browser's kernel worker mid-build. The edit it was proving fails and the
+    /// part keeps its last built state.
+    StopBuild,
     /// A step of the Values tab.
     Values(crate::values_tab::ValuesAction),
     /// Link or edit shared sketch dimensions.
@@ -1551,7 +1554,11 @@ impl AppState {
             });
         }
         if self.doc.proof_pending() {
-            return Some(("Proof pending", NoteKind::Info));
+            return Some(if cfg!(target_arch = "wasm32") {
+                ("Building in the kernel worker · Esc stops", NoteKind::Info)
+            } else {
+                ("Proof pending", NoteKind::Info)
+            });
         }
         self.doc.proof_state().answered_within_bound.then_some((crate::document::WITHIN_BOUND_LABEL, NoteKind::Info))
     }

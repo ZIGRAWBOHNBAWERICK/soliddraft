@@ -954,7 +954,6 @@ mod remote {
                         self.retry(request, waiting, true, &ctx, answered);
                     }
                     Reply::Proved(Ok(recorded)) => {
-                        log::info!("DEBUG proof answer {request}: {} calls, cold {}", recorded.len(), waiting.cold);
                         kernel.learn(recorded);
                         let cold = waiting.cold;
                         let model = if cold { waiting.model.fork_unbuilt() } else { waiting.model.fork() };
@@ -981,7 +980,6 @@ mod remote {
                             let _ = answered.send(Answer { request, kind: AnswerKind::Proved(Err(error)) });
                             continue;
                         }
-                        log::info!("DEBUG proved {request}: failure {:?} display {} error {:?}", result.failure, result.display.is_some(), result.display_error);
                         if result.failure.is_none() && !result.model.is_dirty() {
                             self.previous = Some(result.model.clone());
                         }

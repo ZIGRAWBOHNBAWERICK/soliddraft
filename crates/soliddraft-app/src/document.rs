@@ -1536,6 +1536,9 @@ pub struct Document {
     bounded_answers: HashMap<ContentHash, HashMap<FeatureId, FeatureBounds>>,
     last_proved: Option<ProvedRevision>,
     worker: Option<crate::drag::Worker>,
+    /// The browser kernel worker whose bodies this part's builds name. A new worker
+    /// numbers bodies from the start, so the part is built again on it.
+    worker_generation: u64,
     /// Woken when a background answer arrives; see [`Document::set_repaint`].
     repaint: Option<egui::Context>,
     pending: Option<PendingBuild>,
@@ -1601,6 +1604,7 @@ impl Document {
             bounded_answers: HashMap::new(),
             last_proved: None,
             worker: None,
+            worker_generation: 0,
             repaint: None,
             pending: None,
             provisional: None,
@@ -1659,6 +1663,7 @@ impl Document {
                 model: proved.model.clone(),
             }),
             worker: None,
+            worker_generation: self.worker_generation,
             repaint: self.repaint.clone(),
             pending: None,
             provisional: None,
@@ -2053,7 +2058,8 @@ impl Document {
                 format!("{status:?}").contains(crate::kernel_worker::calls::WAITING)
             })
         });
-        if waiting {
+        let restarted = crate::kernel_worker::generation() != self.worker_generation && !self.features.is_empty();
+        if waiting || restarted {
             self.model.mark_unbuilt();
             self.sync();
         }
@@ -2128,6 +2134,10 @@ impl Document {
 
     fn adopt_proof(&mut self, result: Result<crate::drag::ProvedBuild, String>) -> Result<(), String> {
         let proof = result?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.worker_generation = crate::kernel_worker::generation();
+        }
         self.model.rebuild_reusing(&proof.model)?;
         let selected = self.provisional_selection();
         let resolved = selected.as_ref().map(|(feature, origins)| {

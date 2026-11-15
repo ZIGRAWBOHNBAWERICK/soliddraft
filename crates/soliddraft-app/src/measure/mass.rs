@@ -14,6 +14,9 @@ pub(crate) fn cached(doc: &Document, body: BodyId) -> Option<MassProperties> {
     doc.kernel().cached_mass_properties(body).or_else(|| measured(doc.instance(), body))
 }
 
+/// The open document and the kernel generation that numbered its bodies.
+type Owner = (DocumentId, u64);
+
 /// Enough for every feature row of a long tree and a few earlier revisions.
 const KEPT: usize = 256;
 
@@ -21,18 +24,29 @@ thread_local! {
     /// Answers the kernel does not keep itself: the browser's kernel worker measures its
     /// own rebuild of the part. Each document has its own kernel, whose body ids another
     /// document's kernel reuses, so an answer is kept under the document instance, a
-    /// fresh id for every open part, as well as the body. A body never changes, so an
+    /// fresh id for every open part, and the kernel worker that numbered the body, as
+    /// well as the body. A body never changes, so an
     /// answer never goes stale.
-    static MEASURED: RefCell<VecDeque<(DocumentId, BodyId, MassProperties)>> = const { RefCell::new(VecDeque::new()) };
+    static MEASURED: RefCell<VecDeque<(Owner, BodyId, MassProperties)>> = const { RefCell::new(VecDeque::new()) };
+}
+
+/// Which kernel numbered the bodies: in the browser, a new kernel worker starts again.
+fn kernel_generation() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    return crate::kernel_worker::generation();
+    #[cfg(not(target_arch = "wasm32"))]
+    0
 }
 
 fn measured(document: DocumentId, body: BodyId) -> Option<MassProperties> {
+    let document = (document, kernel_generation());
     MEASURED.with_borrow(|measured| {
         measured.iter().find(|(d, b, _)| (*d, *b) == (document, body)).map(|(_, _, properties)| *properties)
     })
 }
 
 fn keep(document: DocumentId, body: BodyId, properties: MassProperties) {
+    let document = (document, kernel_generation());
     MEASURED.with_borrow_mut(|measured| {
         measured.retain(|(d, b, _)| (*d, *b) != (document, body));
         if measured.len() == KEPT {

@@ -1029,6 +1029,11 @@ impl SolidDraftApp {
                     self.state.note("Select a solid feature with measurable properties", NoteKind::Error);
                 }
             }
+            AppAction::StopBuild => {
+                #[cfg(target_arch = "wasm32")]
+                crate::kernel_worker::stop("you stopped the build");
+                self.state.note("Build stopped. The part keeps its last built state", NoteKind::Info);
+            }
             AppAction::FinishSpline => {
                 let mut actions = Vec::new();
                 if let Some(s) = self.state.sketch.as_mut() {

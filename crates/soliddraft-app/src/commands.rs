@@ -2732,7 +2732,7 @@ fn registry() -> Vec<CommandSpec> {
             "cancel",
             "Cancel",
             Icon::Close,
-            "Cancel a typed value, a drag, the open feature or the sketch tool, leave the sketch, or clear the selection",
+            "Cancel a typed value, a drag, the open feature or the sketch tool, leave the sketch, stop a browser build, or clear the selection",
         )
         .key(Scope::Part, none, Key::Escape)
         .run(|s| {
@@ -2756,6 +2756,8 @@ fn registry() -> Vec<CommandSpec> {
                 AppAction::ExitSketch
             } else if s.drag_preview.is_some() {
                 AppAction::DragDimension(DragStep::Cancel)
+            } else if cfg!(target_arch = "wasm32") && s.doc.proof_pending() {
+                AppAction::StopBuild
             } else {
                 AppAction::Select(None)
             }

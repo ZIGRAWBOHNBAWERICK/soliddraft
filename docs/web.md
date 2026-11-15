@@ -22,7 +22,7 @@ Feedback is saved privately in our Cloudflare inbox and GitHub issue tracker; op
 | `soliddraft-web` | The WebAssembly entry point and `index.html`, built with trunk. `?demo` opens the sample part instead of the start page. |
 | `soliddraft-app/src/web.rs` | Assistant relay client, upload and download. |
 | `soliddraft-app/src/documents_browser.rs` | Recovery copies and the recent list in the browser's IndexedDB. |
-| `soliddraft-app/src/kernel_worker.rs` | The kernel worker: its jobs, the page's client and the worker's half. |
+| `soliddraft-app/src/kernel_worker/` | The kernel worker: its jobs, the page's client and the worker's half. |
 | `soliddraft-assistant/src/relay.rs` | Provider-neutral stream events, followed by the response or error. |
 | `soliddraft-server` | Static files and the assistant relay. |
 | `deploy/web/` | Docker image, compose configuration and release deployment timer. |

@@ -150,7 +150,7 @@ fn built(doc: &model::Document, feature: model::FeatureId) -> Result<(), String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::{fetch_missed, generation, replay, submit};
+pub use browser::{fetch_missed, generation, replay, stop, submit};
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
@@ -187,6 +187,15 @@ mod browser {
     /// answers must not be adopted.
     pub fn generation() -> u64 {
         GENERATION.get()
+    }
+
+    /// Ends the worker in the middle of whatever it runs. Every job waiting on it fails with
+    /// `reason`, and the next job starts a new worker.
+    pub fn stop(reason: &str) {
+        let stopped = CLIENT.with_borrow_mut(Option::take);
+        if let Some(client) = stopped {
+            client.shared.borrow_mut().stop(reason);
+        }
     }
 
     /// Sends the calls the page could not replay to the worker, each once.
@@ -334,7 +343,7 @@ mod browser {
         CLIENT.with_borrow_mut(|client| {
             if client.as_ref().is_none_or(|client| client.shared.borrow().stopped) {
                 // Dropping the stopped client here, outside its own handlers, ends it.
-                let restarted = client.is_some();
+                let restarted = GENERATION.get() > 0;
                 *client = Some(Client::start()?);
                 GENERATION.set(GENERATION.get() + 1);
                 if restarted {

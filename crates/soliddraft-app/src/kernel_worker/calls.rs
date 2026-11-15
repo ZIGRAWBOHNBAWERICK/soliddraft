@@ -476,7 +476,6 @@ impl ReplayKernel {
         self.measuring.saw(&key);
         let answer = self.answers.lock().expect("replay answers").get(&key).cloned();
         if answer.is_none() {
-            log::info!("DEBUG replay miss {method} {}", args.to_string().chars().take(160).collect::<String>());
             self.misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.missed.lock().expect("replay misses").push(Call { method: method.to_owned(), args });
         }

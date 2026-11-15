@@ -81,6 +81,15 @@ the rows, has closed, and confirms the row by the feature name Details draws. Ea
 kernel job the page sends, and the worker's receipt, start and reply, go to a trace the
 check sets up; a missing answer prints it.
 
+`ci/browser-part-check.js` runs the same way on the sample part, in its own session and
+on its own origin. It clicks Inspect > Check, which builds each solid step again in the
+boundary model and the distance field on the page's thread, and waits until the Part
+check window draws the outcome, read through the read-only `shown_part_check` export.
+Every solid step must be confirmed by both models and the page must report no crash:
+Catallax's kernel observations once read a clock the browser does not have, and the page
+stopped. The page must then still take input: the window closes, and a feature tree row
+selected afterwards draws in Details.
+
 `ci/browser-preferences.mjs` runs the same application as two visitors, each in a
 browser context with its own storage. It starts Chrome itself and sends keys and clicks
 through the DevTools protocol, because the canvas takes only trusted input. Visitor A
@@ -145,6 +154,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
 | `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
+| `ci/browser-part-check.js` | `web` | Browser Inspect > Check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |
 | `ci/check-gate.py` | all | Merge gate, and the gate tests in lint; it controls mandatory checks |

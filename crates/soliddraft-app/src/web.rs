@@ -287,11 +287,26 @@ pub fn take_upload() -> Option<(String, Vec<u8>)> {
 
 thread_local! {
     static SHOWN_DETAILS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN_PART_CHECK: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 /// Starts a frame with no Details panel drawn, until [`show_details`] notes one.
 pub(crate) fn begin_frame() {
     SHOWN_DETAILS.with_borrow_mut(String::clear);
+    SHOWN_PART_CHECK.with_borrow_mut(String::clear);
+}
+
+/// Notes the outcome the Part check window is drawing, for [`shown_part_check`].
+pub(crate) fn show_part_check(shown: serde_json::Value) {
+    SHOWN_PART_CHECK.with_borrow_mut(|check| *check = shown.to_string());
+}
+
+/// The outcome the Part check window drew in the last frame, as JSON: `checking`, the
+/// error, or the confirmed and solid step counts. Empty when that frame drew no Part
+/// check window. Read only, for browser checks.
+#[wasm_bindgen]
+pub fn shown_part_check() -> String {
+    SHOWN_PART_CHECK.with_borrow(|check| check.clone())
 }
 
 /// Notes the rows the Details panel is drawing, for [`shown_details`].

@@ -820,6 +820,27 @@ jobs:
           chrome-devtools-axi emulate --viewport 1400x813x1
           chrome-devtools-axi open 'http://127.0.0.1:8769/?demo'
           chrome-devtools-axi run < ci/browser-kernel-worker.js
+      - name: Check the sample part with Inspect > Check in Chromium
+        env:
+          CHROME_DEVTOOLS_AXI_SESSION: part-check
+          CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: /usr/bin/google-chrome
+          # The same software renderer as the kernel worker check.
+          CHROME_DEVTOOLS_AXI_CHROME_ARGS: --no-sandbox --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader
+        run: |
+          export PATH="$RUNNER_TEMP/browser-tools/node_modules/.bin:$PATH"
+          export CHROME_DEVTOOLS_AXI_MCP_PATH="$RUNNER_TEMP/browser-tools/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+          # An origin of its own, with no journals from another check.
+          python3 -m http.server 8770 --bind 127.0.0.1 --directory target/web-dist > "$RUNNER_TEMP/part-check-server.log" 2>&1 &
+          server=$!
+          trap 'chrome-devtools-axi stop; kill "$server"' EXIT
+          if ! chrome-devtools-axi open about:blank; then
+            chrome-devtools-axi stop || true
+            chrome-devtools-axi open about:blank
+          fi
+          # Its clicks go to fixed points of a 1400 x 813 page.
+          chrome-devtools-axi emulate --viewport 1400x813x1
+          chrome-devtools-axi open 'http://127.0.0.1:8770/?demo'
+          chrome-devtools-axi run < ci/browser-part-check.js
       - name: Keep preferences per browser in Chromium
         env:
           # WebGL: a headless screenshot cannot read a WebGPU canvas.

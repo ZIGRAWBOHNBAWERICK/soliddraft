@@ -70,6 +70,16 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
     }
     let mut open = true;
     egui::Window::new("Part check").open(&mut open).default_width(540.0).show(ctx, |ui| {
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_part_check(match &inspection.result {
+            _ if stale => serde_json::json!({ "stale": true }),
+            None => serde_json::json!({ "checking": true }),
+            Some(Err(error)) => serde_json::json!({ "error": error }),
+            Some(Ok(report)) => serde_json::json!({
+                "solid": report.steps.iter().filter(|step| !step.reference).count(),
+                "confirmed": report.steps.iter().filter(|step| step.boundary_built && step.field_built).count(),
+            }),
+        });
         if stale {
             ui.label("The part changed. This report belongs to an earlier revision.");
             return;

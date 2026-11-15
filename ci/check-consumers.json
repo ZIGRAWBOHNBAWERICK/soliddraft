@@ -39,6 +39,9 @@
     "ci/browser-kernel-worker.js": [
       "web"
     ],
+    "ci/browser-part-check.js": [
+      "web"
+    ],
     "ci/browser-preferences.mjs": [
       "web"
     ],

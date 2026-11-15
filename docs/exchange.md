@@ -59,7 +59,7 @@ request suggests the flag and writes none of the requested files.
 Inspect > Check independently builds every solid-valued recipe prefix in the boundary
 model and distance field. Its report counts confirmed solid steps, identifies reference
 definitions separately, and lists each representation's refusals. Each prefix receives a
-20,000,000-unit work allowance. This is construction coverage. It does not certify sampled
+100,000,000-unit work allowance. This is construction coverage. It does not certify sampled
 surface agreement, whole-boundary agreement or print accuracy. Reports belong to one open
 revision and become stale after edits or undo. Qualified print geometry is cached per immutable body and export controls, separately
 from display meshes. Repeated formats reuse that certificate. Changed geometry or
@@ -69,7 +69,7 @@ synchronously with the same construction and per-prefix work limits.
 CLI recipe export builds the result without collecting unused replay mass or display
 summaries. It retains step build counters for STEP proof sidecars. Recipe validation
 and expected-error input checks still run. Opening the
-input, rebuilding it and preparing every output share the same 20,000,000-unit allowance.
+input, rebuilding it and preparing every output share the same 100,000,000-unit allowance.
 
 ## Refusals
 

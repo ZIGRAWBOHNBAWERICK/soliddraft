@@ -1936,14 +1936,14 @@ impl Kernel for CatallaxKernel {
     fn export_iges(&self, body: BodyId, options: &IgesOptions) -> KernelResult<IgesExport> {
         self.observe_export("export_iges", || {
             let write = || iges::export(&self.solid(body)?.app, options);
-            lattice::export_allowance("export_iges", APP_REQUEST_WORK, write).map(|(export, _)| export)
+            lattice::export_allowance("export_iges", write).map(|(export, _)| export)
         })
     }
 
     fn export_step(&self, body: BodyId, options: &StepOptions) -> KernelResult<StepExport> {
         self.observe_export("export_step", || {
             let write = || step::export(&self.solid(body)?.app, options);
-            lattice::export_allowance("export_step", APP_REQUEST_WORK, write).map(|(export, _)| export)
+            lattice::export_allowance("export_step", write).map(|(export, _)| export)
         })
     }
 }

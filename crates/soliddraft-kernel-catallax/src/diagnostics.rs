@@ -90,8 +90,9 @@ impl Diagnostics {
                 (result, Some(OperationWork { used: after.used - before.used, exhausted: after.exhausted }))
             }
             (Some(limit), false) => {
-                let (result, work) = with_operation_budget(limit, run);
-                (result, Some(work))
+                // A request allowance, so a refusal inside names this limit, not the default.
+                let (result, work) = with_request_allowance(limit, run);
+                (result, Some(OperationWork { used: work.used, exhausted: work.exhausted }))
             }
             (None, false) => (run(), None),
         });
@@ -277,6 +278,18 @@ mod tests {
         let calls = diagnostics.take();
         assert_eq!(calls[0]["work"]["exhausted"], true);
         assert!(calls[0]["error"].as_str().unwrap().contains("SD-DISPLAY-01"));
+    }
+
+    #[test]
+    fn an_explicit_lower_allowance_is_the_limit_a_refusal_names() {
+        let diagnostics = Diagnostics::new(Some(APP_WORK_TARGET));
+        let named = diagnostics.observe("display_bound", || Ok(request_limit())).unwrap();
+        assert_eq!(named, APP_WORK_TARGET);
+        let named = diagnostics.observe_export("export_step", || Ok(request_limit())).unwrap();
+        assert_eq!(named, APP_WORK_TARGET);
+        assert_eq!(request_limit(), APP_REQUEST_WORK, "the allowance ends with the call");
+        let higher = Diagnostics::new(Some(5 * APP_REQUEST_WORK));
+        assert_eq!(higher.observe_export("export_step", || Ok(request_limit())).unwrap(), APP_REQUEST_WORK);
     }
 
     #[test]

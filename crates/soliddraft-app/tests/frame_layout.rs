@@ -386,3 +386,35 @@ fn a_disabled_menu_entry_explains_itself_on_hover() {
         case.frame(app, "disabled-entry-tip");
     });
 }
+
+/// The options sheet takes a click on Close options in the first frame after it opens.
+/// Its first pass only measures it, invisible and deaf to clicks; a slow software
+/// renderer can run no other frame before the next click, which the sheet then lost.
+#[test]
+fn the_options_sheet_takes_a_click_in_the_frame_after_it_opens() {
+    let mut app = ribbon::app(ribbon::plate());
+    let feature = app.state().state.doc.features.iter().find(|f| f.kind.noun() == "extrude").expect("the plate").id;
+    app.state_mut()
+        .state
+        .push(soliddraft_app::state::AppAction::Select(Some(soliddraft_app::document::Selection::Feature(feature))));
+    app.run_steps(6);
+    // One frame for the press and one for the release, as the browser runs the app on
+    // each pointer event. A page's own synthetic events bring no pointer move.
+    let click_in_one_frame = |app: &mut ribbon::App, at: egui::Pos2| {
+        for pressed in [true, false] {
+            app.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            app.step();
+        }
+    };
+    let details = app.get_by_label("Details").rect().center();
+    click_in_one_frame(&mut app, details);
+    assert!(app.state().state.options_details, "Details opens the sheet");
+    let close = app.get_by_label("Close options").rect().center();
+    click_in_one_frame(&mut app, close);
+    assert!(!app.state().state.options_details, "Close options closes the sheet on the frame after it opened");
+}

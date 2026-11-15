@@ -3,6 +3,8 @@
 //! quality change swaps the mesh when its replacement is ready without a rebuild or a
 //! new revision.
 
+use soliddraft_kernel_api::Kernel;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use soliddraft_app::document::{Command, Document, ExtrudeParams, PlaneKind, ProfileKind};
@@ -179,7 +181,6 @@ fn an_unchanged_body_keeps_its_mesh_and_undo_shows_the_earlier_one_again() {
 #[test]
 fn datum_sketch_edits_keep_the_solid_mesh_picks_and_gpu_upload() {
     use soliddraft_app::document::{Selection, SketchPlane};
-    use std::sync::Arc;
 
     let mut doc = disc();
     settle(&mut doc, &Projection::Orthographic { pixels_per_mm: 1.0 });
@@ -247,7 +248,8 @@ fn a_late_answer_for_another_quality_does_not_replace_the_cached_levels() {
     assert_eq!(triangles(&doc), fine, "the fine level shows another quality's mesh");
 }
 
-fn unsnapped_flange(via_reference_plane: bool) -> soliddraft_model::Document {
+/// The near-coincident flange with its sketch constraints removed, built on `kernel`.
+fn unsnapped_flange(via_reference_plane: bool, kernel: Arc<dyn Kernel>) -> soliddraft_model::Document {
     let bytes = include_bytes!("data/near-coincident-flange.dwprt");
     let part = soliddraft_model::Document::from_bytes(bytes, soliddraft_app::kernel()).unwrap();
     let mut source = part.truth();
@@ -267,30 +269,62 @@ fn unsnapped_flange(via_reference_plane: bool) -> soliddraft_model::Document {
         features[index]["kind"]["plane"] = serde_json::json!({"on":"feature", "feature":id});
         features.insert(index, serde_json::json!({"id":id, "name":"ReferencePlane1", "kind":plane}));
     }
-    soliddraft_model::Document::from_part_json(&source.to_string(), soliddraft_app::kernel()).unwrap()
+    soliddraft_model::Document::from_part_json(&source.to_string(), kernel).unwrap()
+}
+
+/// The refusal Catallax's preview mesher returns for the built flange, recorded in the
+/// preview's operation span. Catallax task cx-preview-mesher-split-boundary.
+const SPLIT_BOUNDARY: (&str, &str) = ("mesh.precision-or-budget", "a boundary constraint was split or overlapped");
+
+/// Builds the unsnapped flange and shows it the way the viewport asks first, through the
+/// early preview. The flange's union must build: it needs about 55M work units, so under
+/// the former 20M default it ran out of work and only the plate was shown. Catallax's
+/// mesher refuses an early preview of the flanged body with [`SPLIT_BOUNDARY`], and the
+/// screen shows the certified mesh and edges instead, which must not be empty.
+fn shows_the_certified_flange(via_reference_plane: bool) {
+    let catallax = Arc::new(soliddraft_kernel_catallax::CatallaxKernel::with_operation_log());
+    let part = unsnapped_flange(via_reference_plane, catallax.clone());
+    for feature in part.features() {
+        assert_eq!(part.status(feature.id), Some(&soliddraft_model::FeatureStatus::Ok), "{}", feature.name);
+    }
+    let (kernel, body) = (part.kernel(), part.body().unwrap());
+    let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
+    catallax.take_diagnostics().unwrap();
+    let shown = kernel.preview(body, &params).unwrap();
+    let calls = catallax.take_diagnostics().unwrap();
+    let refusals: Vec<_> = calls["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|call| call["operation"] == "preview")
+        .flat_map(|call| call["operation_log"]["operations"].as_array().cloned().unwrap_or_default())
+        .filter_map(|operation| {
+            let refusal = operation.get("refusal")?.as_object()?;
+            Some((refusal["code"].as_str()?.to_owned(), refusal["detail"].as_str()?.to_owned()))
+        })
+        .collect();
+    assert_eq!(
+        refusals,
+        [(SPLIT_BOUNDARY.0.to_owned(), SPLIT_BOUNDARY.1.to_owned())],
+        "the preview fell back for another reason"
+    );
+    assert!(!shown.unproved, "a refused preview must show the certified mesh");
+    assert!(!shown.indices.is_empty());
+    assert_eq!(shown, kernel.tessellate(body, &params).unwrap());
+    let edges = kernel.preview_edges(body, &params).unwrap();
+    assert!(!edges.is_empty());
+    assert_eq!(edges, kernel.tessellate_edges(body, &params).unwrap());
 }
 
 #[test]
-fn an_exact_face_attachment_previews_the_unsnapped_flange() {
-    let part = unsnapped_flange(false);
-    let (kernel, body) = (part.kernel(), part.body().unwrap());
-    let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
-    let shown = kernel.preview(body, &params).unwrap();
-    assert!(shown.unproved, "exact attachment no longer needs the certified fallback");
-    assert!(!shown.indices.is_empty());
-    assert!(!kernel.preview_edges(body, &params).unwrap().is_empty());
+fn an_exact_face_attachment_shows_the_certified_flange_when_its_preview_is_refused() {
+    shows_the_certified_flange(false);
 }
 
 #[test]
 fn a_refused_preview_shows_the_certified_mesh() {
     // A separate reference plane still uses the rounded sketch frame.
-    let part = unsnapped_flange(true);
-    let (kernel, body) = (part.kernel(), part.body().unwrap());
-    let params = soliddraft_kernel_api::TessellationParams { chord_height: 0.1, ..Default::default() };
-    let shown = kernel.preview(body, &params).unwrap();
-    assert!(!shown.unproved, "the reference-plane tilt must exercise the certified fallback");
-    assert_eq!(shown, kernel.tessellate(body, &params).unwrap());
-    assert_eq!(kernel.preview_edges(body, &params).unwrap(), kernel.tessellate_edges(body, &params).unwrap());
+    shows_the_certified_flange(true);
 }
 
 #[test]

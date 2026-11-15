@@ -388,6 +388,47 @@ fn narrower_uprights_roll_over_an_equal_round_top_mitre() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// The R2 uprights and R1 top loop, the block that once exceeded the 20M work cap,
+/// through the app's own STEP export on one application allowance. The export either
+/// answers within tolerance or refuses with the typed operation-budget reason. Its work
+/// and whether it went over the 20M target are printed for the record; see
+/// docs/needs-catallax.md.
+#[test]
+fn upright_and_top_loop_rounds_export_or_refuse_on_one_application_allowance() {
+    use soliddraft_kernel_catallax::{APP_REQUEST_WORK, APP_WORK_TARGET, with_request_allowance};
+    let mut state = block();
+    let uprights = edges(&state, |e| e.curve == CurveKind::Line && e.bbox.max.z - e.bbox.min.z > 5.0);
+    assert_eq!(uprights.len(), 4);
+    round(&mut state, uprights, 2.0);
+    let top = edges(&state, |e| (e.midpoint.z - 12.0).abs() < 1e-6);
+    assert_eq!(top.len(), 8, "four lines and four arcs: {top:?}");
+    round(&mut state, top, 1.0);
+    let started = std::time::Instant::now();
+    let (output, work) = with_request_allowance(APP_REQUEST_WORK, || state.export_part(Format::Step));
+    let outcome = match &output {
+        Ok(output) => {
+            let Report::Step(report) = &output.report else { panic!("STEP report") };
+            format!("exported {} solid(s), within tolerance {}", report.solids, report.within_tolerance)
+        }
+        Err(error) => format!("refused: {error}"),
+    };
+    eprintln!(
+        "R2/R1 block STEP export: {outcome}; work {} of {} (target {APP_WORK_TARGET}, over_target {}); {} ms",
+        work.used,
+        work.limit,
+        work.used > APP_WORK_TARGET,
+        started.elapsed().as_millis()
+    );
+    match output {
+        Ok(output) => {
+            let Report::Step(report) = output.report else { panic!("STEP report") };
+            assert!(report.within_tolerance && report.solids == 1, "{report:?}");
+            assert!(!work.exhausted && work.used <= APP_REQUEST_WORK, "{work:?}");
+        }
+        Err(error) => assert!(error.contains("numbers.operation-budget") || error.contains("work"), "{error}"),
+    }
+}
+
 #[path = "support/ui.rs"]
 mod ribbon;
 

@@ -114,11 +114,27 @@ pub(crate) enum Received {
     Topology(Arc<HandedTopology>),
 }
 
-/// A build offered by another kernel.
+/// A build offered by another kernel. Its bytes are read only when a build takes it:
+/// most offers repeat bodies the receiving kernel already holds.
 #[derive(Clone)]
 pub(crate) struct Offer {
-    pub built: Arc<Built>,
+    bytes: Arc<[u8]>,
+    built: Arc<std::sync::OnceLock<Result<Arc<Built>, String>>>,
     pub topology: Option<Arc<HandedTopology>>,
+}
+
+impl Offer {
+    /// The offered build, read from its bytes the first time it is asked for.
+    pub(crate) fn built(&self) -> KernelResult<Arc<Built>> {
+        self.built
+            .get_or_init(|| {
+                catallax_app::handover::read_body(&self.bytes, &mut Decider::default())
+                    .map(Arc::new)
+                    .map_err(|refusal| format!("{}: {}", refusal.code, refusal.detail))
+            })
+            .clone()
+            .map_err(KernelError::InvalidInput)
+    }
 }
 
 /// Builds by key, as bytes another kernel can be offered.
@@ -158,9 +174,7 @@ pub(crate) fn decode(bytes: &[u8]) -> KernelResult<Vec<(String, Received)>> {
         let received = if body.is_empty() {
             Received::Topology(Arc::new(topology.ok_or_else(broken)?))
         } else {
-            let built = catallax_app::handover::read_body(body, &mut Decider::default())
-                .map_err(|refusal| KernelError::InvalidInput(format!("{}: {}", refusal.code, refusal.detail)))?;
-            Received::Build(Offer { built: Arc::new(built), topology: topology.map(Arc::new) })
+            Received::Build(Offer { bytes: body.into(), built: Arc::default(), topology: topology.map(Arc::new) })
         };
         builds.push((key, received));
     }

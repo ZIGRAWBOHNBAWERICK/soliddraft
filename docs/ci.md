@@ -156,6 +156,7 @@ The running selector and its map are the candidate policy; `--head` names the tr
 |---|---|---|
 | `ci/browser-journal.js` | `web` | Browser journal check in the web job |
 | `ci/browser-kernel-worker.js` | `web` | Browser kernel worker check in the web job |
+| `ci/browser-edit-off-thread.js` | `web` | Browser edits built off the page's thread; not in the web job yet |
 | `ci/browser-part-check.js` | `web` | Browser Inspect > Check in the web job |
 | `ci/browser-preferences.mjs` | `web` | Browser preferences check in the web job |
 | `ci/check-consumers.json` | all | The selector; it controls its own obligations |
